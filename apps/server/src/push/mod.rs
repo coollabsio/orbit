@@ -22,7 +22,7 @@ use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
 use orbit_platform::{Database, Id, TimestampMillis};
 use p256::SecretKey;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use sqlx::Row;
 use tokio::sync::OnceCell;
 use tokio_util::sync::CancellationToken;
@@ -58,7 +58,8 @@ const CONCURRENT_MEMBERS: usize = 8;
 /// The channel tokens of one message that are looked up; the others show as `#channel`.
 const CHANNEL_LOOKUPS: usize = 10;
 
-/// An event a user can turn off; the name of its column in `notification_prefs`.
+/// A category of events that a user can turn off; `name` is its key in
+/// `notification_pref_overrides` and in the preferences API.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PushKind {
     DirectMessages,
@@ -67,20 +68,28 @@ pub enum PushKind {
     ChannelMessages,
     TaskAssigned,
     Mentions,
+    TaskComments,
+    TaskStatus,
+    TaskBlocked,
+    TaskUnblocked,
 }
 
 impl PushKind {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 10] = [
         Self::DirectMessages,
         Self::ChatMentions,
         Self::ThreadReplies,
         Self::ChannelMessages,
         Self::TaskAssigned,
         Self::Mentions,
+        Self::TaskComments,
+        Self::TaskStatus,
+        Self::TaskBlocked,
+        Self::TaskUnblocked,
     ];
 
     #[must_use]
-    pub const fn column(self) -> &'static str {
+    pub const fn name(self) -> &'static str {
         match self {
             Self::DirectMessages => "direct_messages",
             Self::ChatMentions => "chat_mentions",
@@ -88,15 +97,145 @@ impl PushKind {
             Self::ChannelMessages => "channel_messages",
             Self::TaskAssigned => "task_assigned",
             Self::Mentions => "mentions",
+            Self::TaskComments => "task_comments",
+            Self::TaskStatus => "task_status",
+            Self::TaskBlocked => "task_blocked",
+            Self::TaskUnblocked => "task_unblocked",
         }
+    }
+
+    /// What the settings page shows beside the toggle.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::DirectMessages => "Direct messages",
+            Self::ChatMentions => "Mentions in chat",
+            Self::ThreadReplies => "Replies in threads I follow",
+            Self::ChannelMessages => "All messages in channels set to \"All messages\"",
+            Self::TaskAssigned => "Tasks assigned to me",
+            Self::Mentions => "Mentions in comments and pages",
+            Self::TaskComments => "Comments on tasks I follow",
+            Self::TaskStatus => "Status changes of tasks I follow",
+            Self::TaskBlocked => "A task I follow becomes blocked",
+            Self::TaskUnblocked => "A task I follow is no longer blocked",
+        }
+    }
+
+    #[must_use]
+    pub fn parse(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|kind| kind.name() == name)
     }
 
     /// The sound an open tab plays: `mention` for what is addressed to the user.
     const fn sound(self) -> &'static str {
         match self {
-            Self::ThreadReplies | Self::ChannelMessages => "message",
-            _ => "mention",
+            Self::DirectMessages | Self::ChatMentions | Self::TaskAssigned | Self::Mentions => {
+                "mention"
+            }
+            Self::ThreadReplies
+            | Self::ChannelMessages
+            | Self::TaskComments
+            | Self::TaskStatus
+            | Self::TaskBlocked
+            | Self::TaskUnblocked => "message",
         }
+    }
+}
+
+/// The kinds of inbox notification (`notifications.kind`). This enum is the list: the table
+/// takes any text, so a new kind needs a variant here and no migration.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NotificationKind {
+    TaskAssigned,
+    CommentMentioned,
+    PageCommentMentioned,
+    PageMentioned,
+    ChatMentioned,
+    TaskCommented,
+    TaskStatusChanged,
+    TaskBlocked,
+    TaskUnblocked,
+    /// A mention in a task description.
+    TaskMentioned,
+}
+
+impl NotificationKind {
+    pub const ALL: [Self; 10] = [
+        Self::TaskAssigned,
+        Self::CommentMentioned,
+        Self::PageCommentMentioned,
+        Self::PageMentioned,
+        Self::ChatMentioned,
+        Self::TaskCommented,
+        Self::TaskStatusChanged,
+        Self::TaskBlocked,
+        Self::TaskUnblocked,
+        Self::TaskMentioned,
+    ];
+
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::TaskAssigned => "task_assigned",
+            Self::CommentMentioned => "comment_mentioned",
+            Self::PageCommentMentioned => "page_comment_mentioned",
+            Self::PageMentioned => "page_mentioned",
+            Self::ChatMentioned => "chat_mentioned",
+            Self::TaskCommented => "task_commented",
+            Self::TaskStatusChanged => "task_status_changed",
+            Self::TaskBlocked => "task_blocked",
+            Self::TaskUnblocked => "task_unblocked",
+            Self::TaskMentioned => "task_mentioned",
+        }
+    }
+
+    #[must_use]
+    pub fn parse(kind: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|known| known.as_str() == kind)
+    }
+
+    /// The toggle that turns the kind off.
+    #[must_use]
+    pub const fn category(self) -> PushKind {
+        match self {
+            Self::TaskAssigned => PushKind::TaskAssigned,
+            Self::CommentMentioned
+            | Self::PageCommentMentioned
+            | Self::PageMentioned
+            | Self::TaskMentioned => PushKind::Mentions,
+            Self::ChatMentioned => PushKind::ChatMentions,
+            Self::TaskCommented => PushKind::TaskComments,
+            Self::TaskStatusChanged => PushKind::TaskStatus,
+            Self::TaskBlocked => PushKind::TaskBlocked,
+            Self::TaskUnblocked => PushKind::TaskUnblocked,
+        }
+    }
+
+    /// Addressed to the recipient by name (an assignment or a mention). While such a task row
+    /// is unread, an event for subscribers does not replace it.
+    #[must_use]
+    pub const fn is_direct(self) -> bool {
+        matches!(
+            self,
+            Self::TaskAssigned | Self::CommentMentioned | Self::TaskMentioned
+        )
+    }
+
+    /// The title of the push, and whether its body is the task's title (else the page's).
+    /// `None`: the inbox service does not push the kind (chat pushes its own messages).
+    fn push_title(self, actor: &str) -> Option<(String, bool)> {
+        Some(match self {
+            Self::TaskAssigned => (format!("{actor} assigned you a task"), true),
+            Self::CommentMentioned => (format!("{actor} mentioned you in a comment"), true),
+            Self::PageCommentMentioned => (format!("{actor} mentioned you in a comment"), false),
+            Self::PageMentioned => (format!("{actor} mentioned you in a page"), false),
+            Self::TaskCommented => (format!("{actor} commented on a task"), true),
+            Self::TaskStatusChanged => (format!("{actor} changed the status of a task"), true),
+            Self::TaskBlocked => ("A task is now blocked".to_owned(), true),
+            Self::TaskUnblocked => ("A task is no longer blocked".to_owned(), true),
+            Self::TaskMentioned => (format!("{actor} mentioned you in a task"), true),
+            Self::ChatMentioned => return None,
+        })
     }
 }
 
@@ -157,18 +296,13 @@ pub struct PushSubscriptionRecord {
     pub created_at: TimestampMillis,
 }
 
-/// Which events notify the user. They are all on until the user turns one off.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
-#[serde(deny_unknown_fields)]
-pub struct NotificationPrefs {
-    pub direct_messages: bool,
-    pub chat_mentions: bool,
-    pub thread_replies: bool,
-    /// Every message of a channel whose notify level is "all".
-    pub channel_messages: bool,
-    pub task_assigned: bool,
-    /// Mentions in task comments, pages and page comments.
-    pub mentions: bool,
+/// One category of events and whether it notifies the user. They are all on until the user
+/// turns one off.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, ToSchema)]
+pub struct NotificationPreference {
+    pub category: &'static str,
+    pub label: &'static str,
+    pub enabled: bool,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -455,65 +589,68 @@ impl PushService {
         Ok(())
     }
 
-    pub async fn prefs(&self, user_id: Id) -> Result<NotificationPrefs, sqlx::Error> {
-        let row = sqlx::query(
-            "SELECT direct_messages, chat_mentions, thread_replies, channel_messages, task_assigned, \
-             mentions FROM notification_prefs WHERE user_id = ?",
+    pub async fn prefs(&self, user_id: Id) -> Result<Vec<NotificationPreference>, sqlx::Error> {
+        let off: Vec<String> = sqlx::query_scalar(
+            "SELECT category FROM notification_pref_overrides WHERE user_id = ? AND enabled = 0",
         )
         .bind(user_id.to_string())
-        .fetch_optional(self.database.pool())
+        .fetch_all(self.database.pool())
         .await?;
-        let on = |column: &str| {
-            row.as_ref()
-                .is_none_or(|row| row.get::<i64, _>(column) == 1)
-        };
-        Ok(NotificationPrefs {
-            direct_messages: on("direct_messages"),
-            chat_mentions: on("chat_mentions"),
-            thread_replies: on("thread_replies"),
-            channel_messages: on("channel_messages"),
-            task_assigned: on("task_assigned"),
-            mentions: on("mentions"),
-        })
+        Ok(PushKind::ALL
+            .into_iter()
+            .map(|kind| NotificationPreference {
+                category: kind.name(),
+                label: kind.label(),
+                enabled: !off.iter().any(|category| category == kind.name()),
+            })
+            .collect())
     }
 
+    /// Turns categories on or off; the ones that `prefs` does not name stay as they are.
     pub async fn set_prefs(
         &self,
         user_id: Id,
-        prefs: &NotificationPrefs,
+        prefs: &[(PushKind, bool)],
         now: TimestampMillis,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            "INSERT INTO notification_prefs (user_id, direct_messages, chat_mentions, thread_replies, \
-             channel_messages, task_assigned, mentions, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) \
-             ON CONFLICT (user_id) DO UPDATE SET direct_messages = excluded.direct_messages, \
-             chat_mentions = excluded.chat_mentions, thread_replies = excluded.thread_replies, \
-             channel_messages = excluded.channel_messages, task_assigned = excluded.task_assigned, \
-             mentions = excluded.mentions, updated_at = excluded.updated_at",
-        )
-        .bind(user_id.to_string())
-        .bind(prefs.direct_messages)
-        .bind(prefs.chat_mentions)
-        .bind(prefs.thread_replies)
-        .bind(prefs.channel_messages)
-        .bind(prefs.task_assigned)
-        .bind(prefs.mentions)
-        .bind(now.as_millis())
-        .execute(self.database.pool())
-        .await?;
-        Ok(())
+        let mut tx = self.database.immediate_transaction().await?;
+        for (kind, enabled) in prefs {
+            // Only what is off is stored.
+            if *enabled {
+                sqlx::query(
+                    "DELETE FROM notification_pref_overrides WHERE user_id = ? AND category = ?",
+                )
+                .bind(user_id.to_string())
+                .bind(kind.name())
+                .execute(&mut *tx)
+                .await?;
+            } else {
+                sqlx::query(
+                    "INSERT INTO notification_pref_overrides (user_id, category, enabled, updated_at) \
+                     VALUES (?, ?, 0, ?) ON CONFLICT (user_id, category) DO UPDATE SET \
+                     enabled = 0, updated_at = excluded.updated_at",
+                )
+                .bind(user_id.to_string())
+                .bind(kind.name())
+                .bind(now.as_millis())
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
+        tx.commit().await
     }
 
     /// Whether the user wants to be notified of this kind of event now: it is on in their
     /// preferences and they did not set "do not disturb".
     async fn wanted(&self, user_id: Id, kind: PushKind) -> Result<bool, sqlx::Error> {
-        let row = sqlx::query(&format!(
-            "SELECT COALESCE(prefs.{}, 1) AS wanted, COALESCE(status.presence, 'online') AS presence \
-             FROM users LEFT JOIN notification_prefs AS prefs ON prefs.user_id = users.id \
+        let row = sqlx::query(
+            "SELECT COALESCE(prefs.enabled, 1) AS wanted, COALESCE(status.presence, 'online') AS presence \
+             FROM users LEFT JOIN notification_pref_overrides AS prefs \
+             ON prefs.user_id = users.id AND prefs.category = ? \
              LEFT JOIN user_status AS status ON status.user_id = users.id \
              WHERE users.id = ? AND users.suspended_at IS NULL",
-            kind.column()
-        ))
+        )
+        .bind(kind.name())
         .bind(user_id.to_string())
         .fetch_optional(self.database.pool())
         .await?;
@@ -833,7 +970,7 @@ impl PushService {
             "SELECT notifications.id, notifications.recipient_user_id, notifications.kind, \
              notifications.actor_user_id, user_avatars.updated_at AS avatar_updated_at, \
              users.display_name AS actor, tasks.title AS task_title, pages.title AS page_title \
-             FROM notifications JOIN users ON users.id = notifications.actor_user_id \
+             FROM notifications LEFT JOIN users ON users.id = notifications.actor_user_id \
              LEFT JOIN user_avatars ON user_avatars.user_id = users.id \
              LEFT JOIN tasks ON tasks.id = notifications.task_id \
              LEFT JOIN pages ON pages.id = notifications.page_id \
@@ -849,35 +986,22 @@ impl PushService {
                 .bind(&id)
                 .execute(self.database.pool())
                 .await?;
-            let actor: String = row.get("actor");
-            let subject = |column: &str| {
-                row.get::<Option<String>, _>(column)
-                    .filter(|title| !title.is_empty())
-                    .unwrap_or_else(|| "Untitled".to_owned())
+            // A change that GitHub made has no user.
+            let actor = row
+                .get::<Option<String>, _>("actor")
+                .unwrap_or_else(|| "GitHub".to_owned());
+            // A kind of a newer server (after a downgrade) is marked and not pushed.
+            let Some(notification) = NotificationKind::parse(&row.get::<String, _>("kind")) else {
+                continue;
             };
-            let (kind, title, body) = match row.get::<String, _>("kind").as_str() {
-                "task_assigned" => (
-                    PushKind::TaskAssigned,
-                    format!("{actor} assigned you a task"),
-                    subject("task_title"),
-                ),
-                "comment_mentioned" => (
-                    PushKind::Mentions,
-                    format!("{actor} mentioned you in a comment"),
-                    subject("task_title"),
-                ),
-                "page_comment_mentioned" => (
-                    PushKind::Mentions,
-                    format!("{actor} mentioned you in a comment"),
-                    subject("page_title"),
-                ),
-                "page_mentioned" => (
-                    PushKind::Mentions,
-                    format!("{actor} mentioned you in a page"),
-                    subject("page_title"),
-                ),
-                _ => continue,
+            let Some((title, of_task)) = notification.push_title(&actor) else {
+                continue;
             };
+            let kind = notification.category();
+            let body = row
+                .get::<Option<String>, _>(if of_task { "task_title" } else { "page_title" })
+                .filter(|title| !title.is_empty())
+                .unwrap_or_else(|| "Untitled".to_owned());
             let Ok(user_id) = row.get::<String, _>("recipient_user_id").parse::<Id>() else {
                 continue;
             };
@@ -888,9 +1012,8 @@ impl PushService {
                 tag: format!("inbox:{id}"),
                 sound: kind.sound(),
                 icon: row
-                    .get::<String, _>("actor_user_id")
-                    .parse()
-                    .ok()
+                    .get::<Option<String>, _>("actor_user_id")
+                    .and_then(|actor_id| actor_id.parse().ok())
                     .and_then(|actor_id| avatar_url(actor_id, row.get("avatar_updated_at"))),
             };
             self.notify(user_id, kind, &notice).await?;

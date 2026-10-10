@@ -688,8 +688,26 @@ export type ChatWriteThreadStateRecord = {
 
 export type CommentBody = {
     body: string;
-    mentioned_user_ids?: Array<string>;
     parent_id?: string | null;
+};
+
+/**
+ * One emoji on a comment.
+ */
+export type CommentReaction = {
+    count: number;
+    /**
+     * A Unicode emoji, or `:name:` for a custom emoji of the workspace.
+     */
+    emoji: string;
+    /**
+     * The caller is one of them.
+     */
+    reacted: boolean;
+    /**
+     * Who reacted, the first person first.
+     */
+    user_ids: Array<string>;
 };
 
 export type CommentRecord = {
@@ -706,6 +724,10 @@ export type CommentRecord = {
     created_at: string;
     id: string;
     parent_id?: string | null;
+    /**
+     * The emoji reactions, in the order the emoji were first used.
+     */
+    reactions: Array<CommentReaction>;
     task_id: string;
     updated_at: string;
     version: number;
@@ -1031,10 +1053,24 @@ export type ForwardedRecord = {
 };
 
 export type GithubLink = {
+    /**
+     * The rest is set for a linked pull request (`source` is false): its branch, whether it
+     * closes the task, and whether its author can change the task status.
+     */
+    branch?: string | null;
+    closes?: boolean | null;
     kind: string;
+    number: number;
+    repository: string;
     source: boolean;
+    /**
+     * A source link (the task is the issue or pull request): `active`, `paused`, or for a pull
+     * request `open`, `closed`, `merged`. A linked pull request: `draft`, `open`,
+     * `in_review`, `merged`, `closed`.
+     */
     state: string;
     title: string;
+    trusted?: boolean | null;
     url: string;
 };
 
@@ -1373,40 +1409,51 @@ export type MoveTeamspaceBody = {
  */
 export type NewTaskRelationType = 'blocks' | 'blocked_by' | 'related';
 
+export type NotificationPatchBody = {
+    archived?: boolean | null;
+    read?: boolean | null;
+    /**
+     * A time in the future hides the notification from the inbox until then; `null` ends
+     * the snooze.
+     */
+    snoozed_until?: string | null;
+};
+
 /**
- * Which events notify the user. They are all on until the user turns one off.
+ * One category of events and whether it notifies the user. They are all on until the user
+ * turns one off.
  */
-export type NotificationPrefs = {
-    /**
-     * Every message of a channel whose notify level is "all".
-     */
-    channel_messages: boolean;
-    chat_mentions: boolean;
-    direct_messages: boolean;
-    /**
-     * Mentions in task comments, pages and page comments.
-     */
-    mentions: boolean;
-    task_assigned: boolean;
-    thread_replies: boolean;
+export type NotificationPreference = {
+    category: string;
+    enabled: boolean;
+    label: string;
 };
 
 export type NotificationRecord = {
-    actor_user_id: string;
+    /**
+     * Who caused the latest event; absent when GitHub did.
+     */
+    actor_user_id?: string | null;
+    archived_at?: string | null;
     /**
      * Conversation and message of a `chat_mentioned` notification.
      */
     chat_conversation_id?: string | null;
     chat_message_id?: string | null;
     /**
-     * The task comment of a `comment_mentioned` notification.
+     * The task comment of a `comment_mentioned` or `task_commented` notification.
      */
     comment_id?: string | null;
+    /**
+     * The time of the latest event.
+     */
     created_at: string;
     id: string;
     /**
-     * `task_assigned`, `comment_mentioned` (task comment), `page_comment_mentioned`,
+     * `task_assigned`, `comment_mentioned` (task comment), `task_commented`,
+     * `task_status_changed`, `task_blocked`, `task_unblocked`, `page_comment_mentioned`,
      * `page_mentioned` (an @mention in a page body) or `chat_mentioned` (a chat message).
+     * A task has one notification for each recipient: this is its latest event.
      */
     kind: string;
     /**
@@ -1423,9 +1470,18 @@ export type NotificationRecord = {
     read_at?: string | null;
     recipient_user_id: string;
     /**
+     * Hidden from the inbox until this time.
+     */
+    snoozed_until?: string | null;
+    /**
      * Set for task notifications.
      */
     task_id?: string | null;
+    /**
+     * The identifier (`ENG-12`) and the title of the task.
+     */
+    task_identifier?: string | null;
+    task_title?: string | null;
     workspace_id: string;
 };
 
@@ -2013,6 +2069,10 @@ export type PageCommentRecord = {
         created_at: string;
         id: string;
         parent_id?: string | null;
+        /**
+         * The emoji reactions, in the order the emoji were first used.
+         */
+        reactions: Array<CommentReaction>;
         task_id: string;
         updated_at: string;
         version: number;
@@ -2081,21 +2141,30 @@ export type PageMemberRecord = {
 
 export type PageNotificationRecord = {
     items: Array<{
-        actor_user_id: string;
+        /**
+         * Who caused the latest event; absent when GitHub did.
+         */
+        actor_user_id?: string | null;
+        archived_at?: string | null;
         /**
          * Conversation and message of a `chat_mentioned` notification.
          */
         chat_conversation_id?: string | null;
         chat_message_id?: string | null;
         /**
-         * The task comment of a `comment_mentioned` notification.
+         * The task comment of a `comment_mentioned` or `task_commented` notification.
          */
         comment_id?: string | null;
+        /**
+         * The time of the latest event.
+         */
         created_at: string;
         id: string;
         /**
-         * `task_assigned`, `comment_mentioned` (task comment), `page_comment_mentioned`,
+         * `task_assigned`, `comment_mentioned` (task comment), `task_commented`,
+         * `task_status_changed`, `task_blocked`, `task_unblocked`, `page_comment_mentioned`,
          * `page_mentioned` (an @mention in a page body) or `chat_mentioned` (a chat message).
+         * A task has one notification for each recipient: this is its latest event.
          */
         kind: string;
         /**
@@ -2112,9 +2181,18 @@ export type PageNotificationRecord = {
         read_at?: string | null;
         recipient_user_id: string;
         /**
+         * Hidden from the inbox until this time.
+         */
+        snoozed_until?: string | null;
+        /**
          * Set for task notifications.
          */
         task_id?: string | null;
+        /**
+         * The identifier (`ENG-12`) and the title of the task.
+         */
+        task_identifier?: string | null;
+        task_title?: string | null;
         workspace_id: string;
     }>;
     next_cursor?: string | null;
@@ -2256,6 +2334,23 @@ export type PasswordConfirmationBody = {
  * every member (tasks, projects, attachments, docs) are not listed here.
  */
 export type Permission = 'workspace.update' | 'workspace.delete' | 'workspace.transfer' | 'members.manage' | 'audit.view' | 'api_tokens.manage' | 'integrations.manage' | 'teamspaces.delete' | 'pages.purge' | 'views.manage_shared' | 'comments.moderate' | 'chat.manage';
+
+/**
+ * How a project answers one pull request event.
+ */
+export type PrAutomationMode = 'default' | 'none' | 'status';
+
+/**
+ * The rule of a project for one pull request event (`draft`, `open`, `review`, `merged`).
+ */
+export type PrAutomationRule = {
+    event: string;
+    mode: PrAutomationMode;
+    /**
+     * Set when `mode` is `status`: a status of the project.
+     */
+    status_id?: string | null;
+};
 
 /**
  * The presence a user sets for themselves. A user without a connection is offline whatever
@@ -2962,6 +3057,17 @@ export type TaskRelationRecord = {
 };
 
 export type TaskRelationType = 'blocks' | 'related' | 'duplicate';
+
+export type TaskSubscribers = {
+    /**
+     * The persons who get the later events of the task.
+     */
+    user_ids: Array<string>;
+};
+
+export type TaskSubscriptionBody = {
+    subscribed: boolean;
+};
 
 export type TaskUpdateBody = {
     assignee_ids?: Array<string> | null;
@@ -6172,13 +6278,15 @@ export type GetNotificationPreferencesErrors = {
 export type GetNotificationPreferencesError = GetNotificationPreferencesErrors[keyof GetNotificationPreferencesErrors];
 
 export type GetNotificationPreferencesResponses = {
-    200: NotificationPrefs;
+    200: Array<NotificationPreference>;
 };
 
 export type GetNotificationPreferencesResponse = GetNotificationPreferencesResponses[keyof GetNotificationPreferencesResponses];
 
 export type PutNotificationPreferencesData = {
-    body: NotificationPrefs;
+    body: {
+        [key: string]: boolean;
+    };
     headers?: {
         /**
          * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
@@ -6212,6 +6320,10 @@ export type PutNotificationPreferencesErrors = {
      */
     413: WorkspaceProblem;
     /**
+     * invalid_category
+     */
+    422: AuthProblem;
+    /**
      * internal_error
      */
     500: WorkspaceProblem;
@@ -6224,7 +6336,7 @@ export type PutNotificationPreferencesErrors = {
 export type PutNotificationPreferencesError = PutNotificationPreferencesErrors[keyof PutNotificationPreferencesErrors];
 
 export type PutNotificationPreferencesResponses = {
-    200: NotificationPrefs;
+    200: Array<NotificationPreference>;
 };
 
 export type PutNotificationPreferencesResponse = PutNotificationPreferencesResponses[keyof PutNotificationPreferencesResponses];
@@ -11325,6 +11437,10 @@ export type ListNotificationsData = {
         workspace_id: string;
     };
     query?: {
+        /**
+         * Which notifications a list shows.
+         */
+        state?: 'inbox' | 'snoozed' | 'archived';
         unread?: boolean;
         cursor?: string;
         limit?: number;
@@ -11420,6 +11536,61 @@ export type ReadAllNotificationsResponses = {
 };
 
 export type ReadAllNotificationsResponse = ReadAllNotificationsResponses[keyof ReadAllNotificationsResponses];
+
+export type PatchNotificationData = {
+    body: NotificationPatchBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        notification_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/notifications/{notification_id}';
+};
+
+export type PatchNotificationErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type PatchNotificationError = PatchNotificationErrors[keyof PatchNotificationErrors];
+
+export type PatchNotificationResponses = {
+    200: NotificationRecord;
+};
+
+export type PatchNotificationResponse = PatchNotificationResponses[keyof PatchNotificationResponses];
 
 export type ReadNotificationData = {
     body?: never;
@@ -14077,6 +14248,112 @@ export type SaveGithubProjectConnectionResponses = {
 
 export type SaveGithubProjectConnectionResponse = SaveGithubProjectConnectionResponses[keyof SaveGithubProjectConnectionResponses];
 
+export type GetPrAutomationData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/pr-automation';
+};
+
+export type GetPrAutomationErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetPrAutomationError = GetPrAutomationErrors[keyof GetPrAutomationErrors];
+
+export type GetPrAutomationResponses = {
+    200: Array<PrAutomationRule>;
+};
+
+export type GetPrAutomationResponse = GetPrAutomationResponses[keyof GetPrAutomationResponses];
+
+export type PutPrAutomationData = {
+    body: Array<PrAutomationRule>;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/pr-automation';
+};
+
+export type PutPrAutomationErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type PutPrAutomationError = PutPrAutomationErrors[keyof PutPrAutomationErrors];
+
+export type PutPrAutomationResponses = {
+    200: Array<PrAutomationRule>;
+};
+
+export type PutPrAutomationResponse = PutPrAutomationResponses[keyof PutPrAutomationResponses];
+
 export type RestoreProjectData = {
     body: RestoreBody;
     headers?: {
@@ -15909,6 +16186,120 @@ export type DownloadCommentAttachmentResponses = {
 
 export type DownloadCommentAttachmentResponse = DownloadCommentAttachmentResponses[keyof DownloadCommentAttachmentResponses];
 
+export type DeleteCommentReactionData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        task_id: string;
+        comment_id: string;
+        emoji: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/tasks/{task_id}/comments/{comment_id}/reactions/{emoji}';
+};
+
+export type DeleteCommentReactionErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type DeleteCommentReactionError = DeleteCommentReactionErrors[keyof DeleteCommentReactionErrors];
+
+export type DeleteCommentReactionResponses = {
+    200: CommentRecord;
+};
+
+export type DeleteCommentReactionResponse = DeleteCommentReactionResponses[keyof DeleteCommentReactionResponses];
+
+export type PutCommentReactionData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        task_id: string;
+        comment_id: string;
+        emoji: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/tasks/{task_id}/comments/{comment_id}/reactions/{emoji}';
+};
+
+export type PutCommentReactionErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type PutCommentReactionError = PutCommentReactionErrors[keyof PutCommentReactionErrors];
+
+export type PutCommentReactionResponses = {
+    200: CommentRecord;
+};
+
+export type PutCommentReactionResponse = PutCommentReactionResponses[keyof PutCommentReactionResponses];
+
 export type ListGithubLinksData = {
     body?: never;
     headers?: {
@@ -16200,6 +16591,112 @@ export type RestoreTaskResponses = {
 };
 
 export type RestoreTaskResponse = RestoreTaskResponses[keyof RestoreTaskResponses];
+
+export type ListTaskSubscribersData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        task_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/tasks/{task_id}/subscribers';
+};
+
+export type ListTaskSubscribersErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListTaskSubscribersError = ListTaskSubscribersErrors[keyof ListTaskSubscribersErrors];
+
+export type ListTaskSubscribersResponses = {
+    200: TaskSubscribers;
+};
+
+export type ListTaskSubscribersResponse = ListTaskSubscribersResponses[keyof ListTaskSubscribersResponses];
+
+export type PutTaskSubscriptionData = {
+    body: TaskSubscriptionBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        task_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/tasks/{task_id}/subscription';
+};
+
+export type PutTaskSubscriptionErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type PutTaskSubscriptionError = PutTaskSubscriptionErrors[keyof PutTaskSubscriptionErrors];
+
+export type PutTaskSubscriptionResponses = {
+    200: TaskSubscribers;
+};
+
+export type PutTaskSubscriptionResponse = PutTaskSubscriptionResponses[keyof PutTaskSubscriptionResponses];
 
 export type ListTeamspacesData = {
     body?: never;

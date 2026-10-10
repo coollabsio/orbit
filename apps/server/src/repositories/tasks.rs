@@ -10,8 +10,12 @@ use utoipa::ToSchema;
 use super::membership;
 use super::sub_issues::{self, AutoClosed};
 use super::task_filter::{self, FilterError, FilterGroup, ShowCompleted, SubIssuesDisplay};
+use super::task_mentions;
+use super::task_notifications::{self, NotificationPatch, TaskEvent};
+use super::task_reactions::{self, CommentReaction};
 use super::task_relations::{self, RelationActor};
 use crate::audit::{self, AuditOutcome};
+use crate::push::NotificationKind;
 
 const TRASH_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
 
@@ -160,6 +164,8 @@ pub struct CommentRecord {
     /// Whether the caller may delete this comment.
     pub can_delete: bool,
     pub version: u64,
+    /// The emoji reactions, in the order the emoji were first used.
+    pub reactions: Vec<CommentReaction>,
     #[schema(value_type = String, format = DateTime)]
     pub created_at: TimestampMillis,
     #[schema(value_type = String, format = DateTime)]
@@ -174,15 +180,21 @@ pub struct NotificationRecord {
     pub workspace_id: Id,
     #[schema(value_type = String)]
     pub recipient_user_id: Id,
-    #[schema(value_type = String)]
-    pub actor_user_id: Id,
-    /// `task_assigned`, `comment_mentioned` (task comment), `page_comment_mentioned`,
+    /// Who caused the latest event; absent when GitHub did.
+    #[schema(value_type = Option<String>)]
+    pub actor_user_id: Option<Id>,
+    /// `task_assigned`, `comment_mentioned` (task comment), `task_commented`,
+    /// `task_status_changed`, `task_blocked`, `task_unblocked`, `page_comment_mentioned`,
     /// `page_mentioned` (an @mention in a page body) or `chat_mentioned` (a chat message).
+    /// A task has one notification for each recipient: this is its latest event.
     pub kind: String,
     /// Set for task notifications.
     #[schema(value_type = Option<String>)]
     pub task_id: Option<Id>,
-    /// The task comment of a `comment_mentioned` notification.
+    /// The identifier (`ENG-12`) and the title of the task.
+    pub task_identifier: Option<String>,
+    pub task_title: Option<String>,
+    /// The task comment of a `comment_mentioned` or `task_commented` notification.
     #[schema(value_type = Option<String>)]
     pub comment_id: Option<Id>,
     /// Page, thread and comment of a `page_comment_mentioned` notification; the page of a
@@ -202,9 +214,56 @@ pub struct NotificationRecord {
     pub chat_message_id: Option<Id>,
     #[schema(value_type = Option<String>, format = DateTime)]
     pub read_at: Option<TimestampMillis>,
+    /// Hidden from the inbox until this time.
+    #[schema(value_type = Option<String>, format = DateTime)]
+    pub snoozed_until: Option<TimestampMillis>,
+    #[schema(value_type = Option<String>, format = DateTime)]
+    pub archived_at: Option<TimestampMillis>,
+    /// The time of the latest event.
     #[schema(value_type = String, format = DateTime)]
     pub created_at: TimestampMillis,
 }
+
+/// Which notifications a list shows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum NotificationState {
+    /// Not archived and not snoozed now.
+    #[default]
+    Inbox,
+    Snoozed,
+    Archived,
+}
+
+impl NotificationState {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Inbox => "inbox",
+            Self::Snoozed => "snoozed",
+            Self::Archived => "archived",
+        }
+    }
+
+    /// The SQL condition of the state at the time `?`.
+    const fn condition(self) -> &'static str {
+        match self {
+            Self::Inbox => {
+                " AND archived_at IS NULL AND (snoozed_until IS NULL OR snoozed_until <= "
+            }
+            Self::Snoozed => {
+                " AND archived_at IS NULL AND (snoozed_until IS NOT NULL AND snoozed_until > "
+            }
+            Self::Archived => " AND (archived_at IS NOT NULL OR 0 > ",
+        }
+    }
+}
+
+const NOTIFICATION_COLUMNS: &str = "id, workspace_id, recipient_user_id, actor_user_id, kind, task_id, \
+     (SELECT projects.project_key || '-' || tasks.number FROM tasks \
+      JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = notifications.task_id) AS task_identifier, \
+     (SELECT title FROM tasks WHERE tasks.id = notifications.task_id) AS task_title, \
+     comment_id, page_id, page_thread_id, page_comment_id, page_block_id, chat_conversation_id, \
+     chat_message_id, read_at, snoozed_until, archived_at, created_at";
 
 /// Project PATCH switches; `None` keeps the stored value.
 #[derive(Clone, Copy, Debug, Default)]
@@ -1406,16 +1465,34 @@ impl TaskRepository {
         .await?;
         replace_assignees(&mut tx, id, &input.assignee_ids).await?;
         replace_labels(&mut tx, id, &input.label_ids).await?;
+        task_notifications::subscribe_in_tx(&mut tx, id, &[actor_id], false, now).await?;
         notify_users(
             &mut tx,
             workspace_id,
             actor_id,
             NotificationRequest {
-                kind: "task_assigned",
+                kind: NotificationKind::TaskAssigned,
                 task_id: id,
                 comment_id: None,
                 recipients: &input.assignee_ids,
             },
+            now,
+        )
+        .await?;
+        let mentioned: Vec<Id> =
+            task_mentions::mentioned_in_tx(&mut tx, workspace_id, &input.description)
+                .await?
+                .into_iter()
+                .filter(|user| !input.assignee_ids.contains(user))
+                .collect();
+        notify_mentioned(
+            &mut tx,
+            workspace_id,
+            actor_id,
+            NotificationKind::TaskMentioned,
+            id,
+            None,
+            &mentioned,
             now,
         )
         .await?;
@@ -1461,11 +1538,6 @@ impl TaskRepository {
         let (service_account_id, service_account_name) =
             github_service_account_in_tx(&mut tx, workspace_id, actor_id, now).await?;
         project_in_tx(&mut tx, workspace_id, issue.project_id, false).await?;
-        if issue.kind == "pull_request" {
-            sqlx::query("DELETE FROM github_pull_links WHERE workspace_id = ? AND repository = ? AND pull_number = ?")
-                .bind(workspace_id.to_string()).bind(&issue.repository).bind(issue.number)
-                .execute(&mut *tx).await?;
-        }
         let path = if issue.kind == "pull_request" {
             "pull"
         } else {
@@ -1505,7 +1577,7 @@ impl TaskRepository {
                 && task_relations::status_category_in_tx(
                     &mut tx,
                     workspace_id,
-                    parse_id(current_status_id)?,
+                    parse_id(current_status_id.clone())?,
                 )
                 .await?
                     == task_relations::DUPLICATE;
@@ -1526,6 +1598,22 @@ impl TaskRepository {
                 ).bind(&issue.title).bind(&issue.description).bind(&issue_url).bind(&status_id).bind(now.as_millis())
                     .bind(task_id.to_string()).bind(workspace_id.to_string())
                     .bind(&issue.title).bind(&issue.description).bind(&issue_url).bind(&status_id).execute(&mut *tx).await?;
+            // A task that comes back from the trash is not a status change for its subscribers.
+            if !was_deleted {
+                task_notifications::status_changed_in_tx(
+                    &mut tx,
+                    TaskEvent {
+                        workspace_id,
+                        actor: None,
+                        task_id,
+                        now,
+                    },
+                    parse_id(current_status_id.clone())?,
+                    parse_id(status_id.clone())?,
+                    &[],
+                )
+                .await?;
+            }
             if let Some(parent_id) = orphaned_from {
                 // The UPDATE above always ran (the task was in the trash) and bumped the version.
                 sqlx::query("UPDATE tasks SET parent_task_id = NULL WHERE id = ?")
@@ -2206,6 +2294,15 @@ impl TaskRepository {
             .into_iter()
             .map(|row| comment_from_row(row, actor))
             .collect::<Result<Vec<_>, _>>()?;
+        let mut reactions =
+            task_reactions::reactions_of_task(self.database.pool(), task_id, actor_id).await?;
+        let items = items
+            .into_iter()
+            .map(|comment| CommentRecord {
+                reactions: reactions.remove(&comment.id).unwrap_or_default(),
+                ..comment
+            })
+            .collect();
         finish_page(items, limit, &fingerprint, |comment| {
             vec![
                 comment.created_at.as_millis().to_string(),
@@ -2222,7 +2319,6 @@ impl TaskRepository {
         actor_id: Id,
         parent_id: Option<Id>,
         body: String,
-        mentioned_user_ids: Vec<Id>,
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<CommentRecord, TaskError> {
@@ -2237,17 +2333,31 @@ impl TaskRepository {
         }
         sqlx::query("INSERT INTO task_comments (id, workspace_id, task_id, author_id, parent_id, body, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)")
             .bind(id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).bind(actor_id.to_string()).bind(parent_id.map(|id| id.to_string())).bind(&body).bind(now.as_millis()).bind(now.as_millis()).execute(&mut *tx).await?;
-        notify_users(
+        task_notifications::subscribe_in_tx(&mut tx, task_id, &[actor_id], false, now).await?;
+        let mentioned_user_ids =
+            task_mentions::mentioned_in_tx(&mut tx, workspace_id, &body).await?;
+        notify_mentioned(
             &mut tx,
             workspace_id,
             actor_id,
-            NotificationRequest {
-                kind: "comment_mentioned",
-                task_id,
-                comment_id: Some(id),
-                recipients: &mentioned_user_ids,
-            },
+            NotificationKind::CommentMentioned,
+            task_id,
+            Some(id),
+            &mentioned_user_ids,
             now,
+        )
+        .await?;
+        task_notifications::notify_subscribers_in_tx(
+            &mut tx,
+            TaskEvent {
+                workspace_id,
+                actor: Some(actor_id),
+                task_id,
+                now,
+            },
+            NotificationKind::TaskCommented,
+            Some(id),
+            &mentioned_user_ids,
         )
         .await?;
         record_mutation(
@@ -2272,6 +2382,7 @@ impl TaskRepository {
             can_edit: true,
             can_delete: true,
             version: 0,
+            reactions: Vec::new(),
             created_at: now,
             updated_at: now,
         })
@@ -2298,6 +2409,25 @@ impl TaskRepository {
         check_version(expected_version, current.version, &current)?;
         sqlx::query("UPDATE task_comments SET body = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND task_id = ? AND version = ?")
             .bind(&body).bind(now.as_millis()).bind(comment_id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).bind(expected_version as i64).execute(&mut *tx).await?;
+        // Only a person who is mentioned now and was not before hears of the edit.
+        let mentioned =
+            task_mentions::newly_mentioned_in_tx(&mut tx, workspace_id, &current.body, &body)
+                .await?;
+        notify_mentioned(
+            &mut tx,
+            workspace_id,
+            actor_id,
+            NotificationKind::CommentMentioned,
+            task_id,
+            Some(comment_id),
+            &mentioned,
+            now,
+        )
+        .await?;
+        let reactions = task_reactions::reactions_of_task(&mut *tx, task_id, actor_id)
+            .await?
+            .remove(&comment_id)
+            .unwrap_or_default();
         record_mutation(
             &mut tx,
             workspace_id,
@@ -2313,6 +2443,7 @@ impl TaskRepository {
         Ok(CommentRecord {
             body,
             version: current.version + 1,
+            reactions,
             updated_at: now,
             ..current
         })
@@ -2352,25 +2483,34 @@ impl TaskRepository {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn notifications(
         &self,
         workspace_id: Id,
         actor_id: Id,
+        state: NotificationState,
         unread_only: bool,
         cursor: Option<&str>,
         limit: usize,
+        now: TimestampMillis,
     ) -> Result<Page<NotificationRecord>, TaskError> {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
-        let fingerprint = format!("notifications:{actor_id}:{}", unread_only);
-        let after = cursor_i64_pair(cursor, &fingerprint)?;
-        let mut query = QueryBuilder::<Sqlite>::new(
-            "SELECT id, workspace_id, recipient_user_id, actor_user_id, kind, task_id, comment_id, page_id, \
-             page_thread_id, page_comment_id, page_block_id, chat_conversation_id, chat_message_id, read_at, created_at FROM notifications WHERE workspace_id = ",
+        let fingerprint = format!(
+            "notifications:{actor_id}:{}:{}",
+            state.as_str(),
+            unread_only
         );
+        let after = cursor_i64_pair(cursor, &fingerprint)?;
+        let mut query = QueryBuilder::<Sqlite>::new(format!(
+            "SELECT {NOTIFICATION_COLUMNS} FROM notifications WHERE workspace_id = "
+        ));
         query
             .push_bind(workspace_id.to_string())
             .push(" AND recipient_user_id = ")
             .push_bind(actor_id.to_string())
+            .push(state.condition())
+            .push_bind(now.as_millis())
+            .push(")")
             // Page-comment mentions stay hidden while the page is trashed or out of the
             // recipient's reach (moved into someone else's private space).
             .push(
@@ -2425,22 +2565,72 @@ impl TaskRepository {
         notification_id: Id,
         now: TimestampMillis,
     ) -> Result<NotificationRecord, TaskError> {
+        let patch = NotificationPatch {
+            read: Some(true),
+            ..NotificationPatch::default()
+        };
+        self.patch_notification(workspace_id, actor_id, notification_id, patch, now)
+            .await
+    }
+
+    /// Changes the recipient's own notification: read or unread, snoozed, archived.
+    pub async fn patch_notification(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        notification_id: Id,
+        patch: NotificationPatch,
+        now: TimestampMillis,
+    ) -> Result<NotificationRecord, TaskError> {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
+        if matches!(patch.snoozed_until, Some(Some(until)) if until <= now) {
+            return Err(TaskError::Invalid {
+                field: "snoozed_until",
+            });
+        }
         let mut tx = self.database.immediate_transaction().await?;
-        sqlx::query(
-            "UPDATE notifications SET read_at = COALESCE(read_at, ?) \
-             WHERE id = ? AND workspace_id = ? AND recipient_user_id = ?",
-        )
-        .bind(now.as_millis())
-        .bind(notification_id.to_string())
-        .bind(workspace_id.to_string())
-        .bind(actor_id.to_string())
-        .execute(&mut *tx)
-        .await?;
-        let row = sqlx::query(
-            "SELECT id, workspace_id, recipient_user_id, actor_user_id, kind, task_id, comment_id, page_id, \
-             page_thread_id, page_comment_id, page_block_id, chat_conversation_id, chat_message_id, read_at, created_at FROM notifications WHERE id = ? AND workspace_id = ? AND recipient_user_id = ?",
-        )
+        let mut query = QueryBuilder::<Sqlite>::new("UPDATE notifications SET id = id");
+        match patch.read {
+            // The time of the first read stays.
+            Some(true) => {
+                query
+                    .push(", read_at = COALESCE(read_at, ")
+                    .push_bind(now.as_millis())
+                    .push(")");
+            }
+            Some(false) => {
+                query.push(", read_at = NULL");
+            }
+            None => {}
+        }
+        if let Some(until) = patch.snoozed_until {
+            query
+                .push(", snoozed_until = ")
+                .push_bind(until.map(TimestampMillis::as_millis));
+        }
+        match patch.archived {
+            Some(true) => {
+                query
+                    .push(", archived_at = COALESCE(archived_at, ")
+                    .push_bind(now.as_millis())
+                    .push(")");
+            }
+            Some(false) => {
+                query.push(", archived_at = NULL");
+            }
+            None => {}
+        }
+        query
+            .push(" WHERE id = ")
+            .push_bind(notification_id.to_string())
+            .push(" AND workspace_id = ")
+            .push_bind(workspace_id.to_string())
+            .push(" AND recipient_user_id = ")
+            .push_bind(actor_id.to_string());
+        query.build().execute(&mut *tx).await?;
+        let row = sqlx::query(&format!(
+            "SELECT {NOTIFICATION_COLUMNS} FROM notifications WHERE id = ? AND workspace_id = ? AND recipient_user_id = ?"
+        ))
         .bind(notification_id.to_string())
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
@@ -2451,6 +2641,7 @@ impl TaskRepository {
         notification_from_row(row)
     }
 
+    /// Marks what the inbox shows as read; snoozed and archived notifications stay.
     pub async fn mark_notifications_read(
         &self,
         workspace_id: Id,
@@ -2459,11 +2650,14 @@ impl TaskRepository {
     ) -> Result<u64, TaskError> {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
         let changed = sqlx::query(
-            "UPDATE notifications SET read_at = ? WHERE workspace_id = ? AND recipient_user_id = ? AND read_at IS NULL",
+            "UPDATE notifications SET read_at = ? WHERE workspace_id = ? AND recipient_user_id = ? \
+             AND read_at IS NULL AND archived_at IS NULL \
+             AND (snoozed_until IS NULL OR snoozed_until <= ?)",
         )
         .bind(now.as_millis())
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
+        .bind(now.as_millis())
         .execute(self.database.pool())
         .await?
         .rows_affected();
@@ -2685,6 +2879,7 @@ pub(super) async fn update_task_in_tx(
         }
         None => {}
     }
+    let mut newly_assigned = Vec::new();
     if let Some(assignees) = &update.changes.assignee_ids {
         let added: Vec<Id> = assignees
             .iter()
@@ -2697,12 +2892,55 @@ pub(super) async fn update_task_in_tx(
             workspace_id,
             actor_id,
             NotificationRequest {
-                kind: "task_assigned",
+                kind: NotificationKind::TaskAssigned,
                 task_id: update.id,
                 comment_id: None,
                 recipients: &added,
             },
             now,
+        )
+        .await?;
+        newly_assigned = added;
+    }
+    if update.changes.description.is_some() && description != current.description {
+        let mentioned: Vec<Id> = task_mentions::newly_mentioned_in_tx(
+            tx,
+            workspace_id,
+            &current.description,
+            &description,
+        )
+        .await?
+        .into_iter()
+        .filter(|user| !newly_assigned.contains(user))
+        .collect();
+        notify_mentioned(
+            tx,
+            workspace_id,
+            actor_id,
+            NotificationKind::TaskMentioned,
+            update.id,
+            None,
+            &mentioned,
+            now,
+        )
+        .await?;
+        // One row for each person: the mention is their event, not the status change.
+        newly_assigned.extend(mentioned);
+    }
+    // A project move maps the status to the one that matches in the target project: the
+    // person did not change it.
+    if !moves_project {
+        task_notifications::status_changed_in_tx(
+            tx,
+            TaskEvent {
+                workspace_id,
+                actor: Some(actor_id),
+                task_id: update.id,
+                now,
+            },
+            current.status_id,
+            status_id,
+            &newly_assigned,
         )
         .await?;
     }
@@ -2928,7 +3166,7 @@ async fn require_project(
     }
 }
 
-async fn require_project_tx(
+pub(super) async fn require_project_tx(
     tx: &mut Transaction<'_, Sqlite>,
     workspace_id: Id,
     project_id: Id,
@@ -2949,7 +3187,7 @@ async fn require_project_tx(
     }
 }
 
-async fn require_task_tx(
+pub(super) async fn require_task_tx(
     tx: &mut Transaction<'_, Sqlite>,
     workspace_id: Id,
     task_id: Id,
@@ -3037,12 +3275,14 @@ async fn validate_assignees(
 }
 
 struct NotificationRequest<'a> {
-    kind: &'a str,
+    kind: NotificationKind,
     task_id: Id,
     comment_id: Option<Id>,
     recipients: &'a [Id],
 }
 
+/// Notifies the persons that the actor assigned and subscribes them to the task, also when
+/// they unsubscribed before. Each must be an active member of the workspace.
 async fn notify_users(
     tx: &mut Transaction<'_, Sqlite>,
     workspace_id: Id,
@@ -3050,23 +3290,14 @@ async fn notify_users(
     request: NotificationRequest<'_>,
     now: TimestampMillis,
 ) -> Result<(), TaskError> {
-    let field = if request.kind == "comment_mentioned" {
-        "mentioned_user_ids"
-    } else {
-        "assignee_ids"
-    };
+    let field = "assignee_ids";
     let mut unique = request.recipients.to_vec();
     unique.sort_unstable();
     unique.dedup();
     if unique.len() != request.recipients.len() {
         return Err(TaskError::Invalid { field });
     }
-    for recipient in request
-        .recipients
-        .iter()
-        .copied()
-        .filter(|id| *id != actor_id)
-    {
+    for recipient in request.recipients {
         let exists: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM memberships JOIN users ON users.id = memberships.user_id \
              WHERE memberships.workspace_id = ? AND memberships.user_id = ? AND users.suspended_at IS NULL",
@@ -3078,28 +3309,47 @@ async fn notify_users(
         if exists != 1 {
             return Err(TaskError::Invalid { field });
         }
-        let dedupe_key = format!(
-            "{workspace_id}:{recipient}:{}:{}",
-            request.kind,
-            request.comment_id.unwrap_or(request.task_id)
-        );
-        sqlx::query(
-            "INSERT OR IGNORE INTO notifications \
-             (id, workspace_id, recipient_user_id, actor_user_id, kind, task_id, comment_id, dedupe_key, created_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(Id::new_v7().to_string())
-        .bind(workspace_id.to_string())
-        .bind(recipient.to_string())
-        .bind(actor_id.to_string())
-        .bind(request.kind)
-        .bind(request.task_id.to_string())
-        .bind(request.comment_id.map(|id| id.to_string()))
-        .bind(dedupe_key)
-        .bind(now.as_millis())
-        .execute(&mut **tx)
-        .await?;
     }
+    notify_mentioned(
+        tx,
+        workspace_id,
+        actor_id,
+        request.kind,
+        request.task_id,
+        request.comment_id,
+        request.recipients,
+        now,
+    )
+    .await
+}
+
+/// Notifies active members that the actor named (in the text, or as assignees) and subscribes
+/// them to the task, also when they unsubscribed before.
+#[allow(clippy::too_many_arguments)]
+async fn notify_mentioned(
+    tx: &mut Transaction<'_, Sqlite>,
+    workspace_id: Id,
+    actor_id: Id,
+    kind: NotificationKind,
+    task_id: Id,
+    comment_id: Option<Id>,
+    recipients: &[Id],
+    now: TimestampMillis,
+) -> Result<(), TaskError> {
+    task_notifications::subscribe_in_tx(tx, task_id, recipients, true, now).await?;
+    task_notifications::notify_in_tx(
+        tx,
+        TaskEvent {
+            workspace_id,
+            actor: Some(actor_id),
+            task_id,
+            now,
+        },
+        kind,
+        comment_id,
+        recipients,
+    )
+    .await?;
     Ok(())
 }
 
@@ -3274,7 +3524,7 @@ pub(super) async fn record_mutation(
     Ok(())
 }
 
-async fn github_service_account_in_tx(
+pub(super) async fn github_service_account_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     workspace_id: Id,
     actor_id: Id,
@@ -3410,7 +3660,7 @@ pub(super) async fn task_in_tx(
     task_from_row_tx(tx, row).await
 }
 
-async fn comment_in_tx(
+pub(super) async fn comment_in_tx(
     tx: &mut Transaction<'_, Sqlite>,
     workspace_id: Id,
     task_id: Id,
@@ -3668,9 +3918,11 @@ fn notification_from_row(row: sqlx::sqlite::SqliteRow) -> Result<NotificationRec
         id: parse_id(row.get("id"))?,
         workspace_id: parse_id(row.get("workspace_id"))?,
         recipient_user_id: parse_id(row.get("recipient_user_id"))?,
-        actor_user_id: parse_id(row.get("actor_user_id"))?,
+        actor_user_id: optional_id(row.get("actor_user_id"))?,
         kind: row.get("kind"),
         task_id: optional_id(row.get("task_id"))?,
+        task_identifier: row.get("task_identifier"),
+        task_title: row.get("task_title"),
         comment_id: optional_id(row.get("comment_id"))?,
         page_id: optional_id(row.get("page_id"))?,
         page_thread_id: optional_id(row.get("page_thread_id"))?,
@@ -3680,6 +3932,12 @@ fn notification_from_row(row: sqlx::sqlite::SqliteRow) -> Result<NotificationRec
         chat_message_id: optional_id(row.get("chat_message_id"))?,
         read_at: row
             .get::<Option<i64>, _>("read_at")
+            .map(TimestampMillis::from_millis),
+        snoozed_until: row
+            .get::<Option<i64>, _>("snoozed_until")
+            .map(TimestampMillis::from_millis),
+        archived_at: row
+            .get::<Option<i64>, _>("archived_at")
             .map(TimestampMillis::from_millis),
         created_at: TimestampMillis::from_millis(row.get("created_at")),
     })
@@ -3703,6 +3961,7 @@ fn comment_from_row(
             .transpose()?,
         body: row.get("body"),
         version: parse_version(row.get("version"))?,
+        reactions: Vec::new(),
         created_at: TimestampMillis::from_millis(row.get("created_at")),
         updated_at: TimestampMillis::from_millis(row.get("updated_at")),
     })

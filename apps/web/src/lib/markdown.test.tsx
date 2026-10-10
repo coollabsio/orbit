@@ -210,3 +210,32 @@ test('__text__ is underline with the option, also in a list, a quote and a table
   expect(other.querySelector('u')).toBeNull()
   expect(render(<div>{renderMarkdownBlocks('**x**', 'test', [], { chat: true })}</div>).container.querySelector('strong')?.textContent).toBe('x')
 })
+
+test('an image is shown for an absolute URL and for a task attachment of this server, and for nothing else', () => {
+  const id = '0190f5b4-7c1e-7a3b-8c4d-5e6f7a8b9c0d'
+  const attachment = `/api/v1/workspaces/${id}/tasks/${id}/attachments/${id}/download`
+  const commentAttachment = `/api/v1/workspaces/${id}/tasks/${id}/comments/${id}/attachments/${id}/download`
+  const sources = (text: string) => {
+    const view = render(<div>{renderMarkdownBlocks(text, 'k')}</div>)
+    const found = [...view.container.querySelectorAll('img')].map((image) => image.getAttribute('src'))
+    view.unmount()
+    return found
+  }
+  expect(sources(`![a](${attachment})`)).toEqual([attachment])
+  expect(sources(`![a](${commentAttachment})`)).toEqual([commentAttachment])
+  expect(sources('![a](https://example.com/a.png)')).toEqual(['https://example.com/a.png'])
+  // another path of the API, a path that leaves the pattern, a relative file, and script or data URLs stay text
+  for (const source of [
+    `/api/v1/workspaces/${id}/tasks/${id}`,
+    `/api/v1/workspaces/${id}/export`,
+    `${attachment}/../../../../auth/logout`,
+    `${attachment}?next=1`,
+    `/api/v1/workspaces/x/tasks/${id}/attachments/${id}/download`,
+    '/logo.svg',
+    'javascript:alert(1)',
+    'data:image/png;base64,AAAA',
+    `//evil.example${attachment}`,
+  ]) expect([source, sources(`![a](${source})`)]).toEqual([source, []])
+  // an <img> tag takes an absolute URL only
+  expect(sources(`<img src="${attachment}">`)).toEqual([])
+})

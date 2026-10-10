@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render } from '@testing-library/react'
+import { fireEvent, render, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
@@ -30,7 +30,7 @@ function wrapper() {
 }
 
 function comment(overrides: Partial<TaskComment> = {}): TaskComment {
-  return { id: 'c1', authorId: 'user-1', body: 'hello', canEdit: true, canDelete: true, createdAt: new Date().toISOString(), version: 1, ...overrides }
+  return { id: 'c1', authorId: 'user-1', body: 'hello', canEdit: true, canDelete: true, createdAt: new Date().toISOString(), reactions: [], version: 1, ...overrides }
 }
 
 function state(overrides: Partial<TaskViewState> = {}): TaskViewState {
@@ -74,11 +74,31 @@ test('a comment the caller may not change offers only Copy', () => {
   expect(view.queryByRole('button', { name: 'Delete comment' })).toBeNull()
 })
 
-test('edit mode replaces the body with a save/cancel textarea', () => {
-  const view = render(<CommentItem state={state()} taskId="task-1" comment={comment()} mentionTokens={[]} />, { wrapper: wrapper() })
+test('edit mode opens the rich editor, and closing it with no edit saves nothing', async () => {
+  let requests = 0
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async () => { requests += 1; return Response.json({}) }) as unknown as typeof fetch
+  try {
+    const view = render(<CommentItem state={state()} taskId="task-1" comment={comment({ body: '* one\n* two' })} mentionTokens={[]} />, { wrapper: wrapper() })
+    fireEvent.click(view.getByRole('button', { name: 'Edit comment' }))
+    const editors = () => view.container.querySelectorAll('[data-slot="markdown-editor"]').length
+    await waitFor(() => { if (editors() !== 1) throw new Error('the editor did not open') })
+    expect(view.queryAllByRole('button', { name: 'Copy text' })).toHaveLength(0)
+    // the editor would write `-` bullets: that is not an edit
+    fireEvent.blur(view.container.querySelector('[data-slot="markdown-editor"]')!)
+    await waitFor(() => { if (editors() !== 0) throw new Error('the editor is still open') })
+    expect(requests).toBe(0)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('a comment that the rich editor would change is edited in the plain field', async () => {
+  const view = render(<CommentItem state={state()} taskId="task-1" comment={comment({ body: 'Use Vec<String> here' })} mentionTokens={[]} />, { wrapper: wrapper() })
 
   fireEvent.click(view.getByRole('button', { name: 'Edit comment' }))
-  expect(view.getByLabelText('Edit comment')).toBeTruthy()
+  await waitFor(() => { if (view.queryAllByLabelText('Edit comment').length === 0) throw new Error('the field did not open') })
+  expect((view.getByLabelText('Edit comment') as HTMLTextAreaElement).value).toBe('Use Vec<String> here')
   expect(view.getByText('escape').tagName).toBe('KBD')
   expect(view.getByText('cancel')).toBeTruthy()
   expect(view.queryByRole('button', { name: 'Copy text' })).toBeNull()

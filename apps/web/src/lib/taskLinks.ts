@@ -50,3 +50,19 @@ export function normalizeTaskParam(param: string): string {
   const parsed = parseTaskIdentifier(param)
   return parsed ? formatTaskIdentifier(parsed.key, parsed.number) : param.toLowerCase()
 }
+
+/**
+ * A git branch name for a task: `eng-12-fix-login`. The title is lower case without accents, every run of other
+ * characters is one `-`, and it is cut at a word boundary to at most 50 characters. A pull request from such a
+ * branch links to the task.
+ */
+export function taskBranchName(identifier: string, title: string): string {
+  const words = title.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)
+  let slug = ''
+  for (const word of words) {
+    const next = slug ? `${slug}-${word}` : word.slice(0, 50)
+    if (next.length > 50) break
+    slug = next
+  }
+  return slug ? `${identifier.toLowerCase()}-${slug}` : identifier.toLowerCase()
+}

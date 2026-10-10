@@ -35,7 +35,7 @@ import { groupTasks, type GroupContext } from '@/features/views/grouping'
 import { buildTaskTree, descendantIds } from '@/features/views/taskTree'
 import type { User } from '@/features/workspaces/models'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
-import { taskPath } from '@/lib/taskLinks'
+import { taskBranchName, taskPath } from '@/lib/taskLinks'
 import { Shortcut } from '@/shortcuts/Shortcut'
 import { useTaskTarget } from '@/shortcuts/taskTarget'
 import { DueDateDialog } from './DueDateDialog'
@@ -271,6 +271,10 @@ export function TaskContextMenu({ tasks, users, labels, statuses, groupContext, 
                     <ContextMenuShortcut><Shortcut id="task.copyLink" /></ContextMenuShortcut>
                   </ContextMenuItem>
                   <ContextMenuItem onClick={() => copy(first.title, 'Copied task title')}>Title</ContextMenuItem>
+                  <ContextMenuItem onClick={() => copy(taskBranchName(first.identifier, first.title), 'Copied git branch name')}>
+                    Git branch name
+                    <ContextMenuShortcut><Shortcut id="task.copyBranch" /></ContextMenuShortcut>
+                  </ContextMenuItem>
                 </ContextMenuSubContent>
               </ContextMenuSub>
               <ContextMenuItem onClick={() => window.open(taskPath(first), '_blank', 'noopener')}>

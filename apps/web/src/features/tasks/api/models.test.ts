@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { AttachmentRecord, AuditEvent, CommentRecord, ProjectRecord, TaskRecord } from '@/api/generated/types.gen'
-import { refIdentifier, taskFromRecord, taskIdentifier } from './models'
+import { refIdentifier, taskFromRecord, taskIdentifier, toggleReaction } from './models'
 
 const project: ProjectRecord = {
   id: 'project-1', workspace_id: 'workspace-1', name: 'Launch', key: 'LCH', color: '#123456',
@@ -17,7 +17,7 @@ const record: TaskRecord = {
 }
 const comment: CommentRecord = {
   id: 'comment-1', workspace_id: 'workspace-1', task_id: record.id, author_id: 'user-1',
-  body: 'Looks good', can_edit: true, can_delete: true, created_at: '2026-09-04T12:00:00Z', updated_at: '2026-09-04T12:05:00Z', version: 3,
+  body: 'Looks good', can_edit: true, can_delete: true, created_at: '2026-09-04T12:00:00Z', updated_at: '2026-09-04T12:05:00Z', version: 3, reactions: [],
 }
 const attachment: AttachmentRecord = {
   id: 'attachment-1', workspace_id: 'workspace-1', task_id: record.id, owner_id: 'user-1',
@@ -194,4 +194,17 @@ test('an update event becomes one row per changed field; an event with nothing t
     { field: 'description' },
   ])
   expect(task.activity[0]!.statusId).toBe('done')
+})
+
+test('a reaction toggle gives what the server will answer', () => {
+  const thumbs = { emoji: '👍', count: 1, reacted: false, user_ids: ['ada'] }
+  // a second person on a known emoji, then a new emoji at the end
+  const added = toggleReaction([thumbs], '👍', 'me', true)
+  expect(added).toEqual([{ emoji: '👍', count: 2, reacted: true, user_ids: ['ada', 'me'] }])
+  expect(toggleReaction(added, '🎉', 'me', true)[1]).toEqual({ emoji: '🎉', count: 1, reacted: true, user_ids: ['me'] })
+  // a repeat changes nothing; a removal of the last person removes the chip
+  expect(toggleReaction(added, '👍', 'me', true)).toEqual(added)
+  expect(toggleReaction(added, '👍', 'me', false)).toEqual([thumbs])
+  expect(toggleReaction([thumbs], '👍', 'ada', false)).toEqual([])
+  expect(toggleReaction([thumbs], '🎉', 'me', false)).toEqual([thumbs])
 })

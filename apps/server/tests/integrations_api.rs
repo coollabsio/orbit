@@ -11,8 +11,9 @@ use orbit_platform::{
 use orbit_server::auth_routes::CookieMode;
 use orbit_server::integration_routes::{IntegrationState, integration_router};
 use orbit_server::repositories::api_tokens::ApiTokenRepository;
+use orbit_server::repositories::github_pulls::{PrAutomationMode, PrAutomationRule};
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
-use orbit_server::repositories::tasks::TaskRepository;
+use orbit_server::repositories::tasks::{CreateTask, TaskError, TaskRepository};
 use serde_json::{Value, json};
 use sha2::Sha256;
 use tower::ServiceExt;
@@ -1587,4 +1588,534 @@ fn request(token: Option<&str>, body: Value) -> Request<Body> {
 
 async fn response_json(response: axum::response::Response) -> Value {
     serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()
+}
+
+/// A workspace with a GitHub App and one installation, and no project connection.
+struct Pulls {
+    fixture: Fixture,
+    app: axum::Router,
+    tasks: TaskRepository,
+    key: String,
+}
+
+impl Pulls {
+    async fn new() -> Self {
+        let fixture = fixture().await;
+        let key = [7u8; 32];
+        let tasks = TaskRepository::new((*fixture.database).clone());
+        let state =
+            IntegrationState::new(Arc::new(fixture.tokens.clone()), Arc::new(tasks.clone()))
+                .with_github_settings(
+                    Arc::new(IdentityRepository::new((*fixture.database).clone())),
+                    CookieMode::secure(),
+                    "https://orbit.test".to_owned(),
+                    false,
+                    Some(key),
+                );
+        let app = integration_router(state).layer(HttpPlatformLayer::new(OriginPolicy::new(
+            "https://orbit.test",
+        )));
+        sqlx::query(
+            "INSERT INTO github_apps (workspace_id, app_id, slug, private_key_encrypted, \
+             webhook_secret_encrypted, created_at) VALUES (?, 1, 'orbit', ?, ?, 1)",
+        )
+        .bind(fixture.workspace_id.to_string())
+        .bind(encrypt_for_test(&key, "private"))
+        .bind(encrypt_for_test(&key, "hook-secret"))
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO github_installations (installation_id, workspace_id, account_login) \
+             VALUES (1234, ?, 'acme')",
+        )
+        .bind(fixture.workspace_id.to_string())
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+        let key: String = sqlx::query_scalar("SELECT project_key FROM projects WHERE id = ?")
+            .bind(fixture.project_id.to_string())
+            .fetch_one(fixture.database.pool())
+            .await
+            .unwrap();
+        Self {
+            fixture,
+            app,
+            tasks,
+            key,
+        }
+    }
+
+    async fn status(&self, category: &str) -> orbit_platform::Id {
+        sqlx::query_scalar::<_, String>(
+            "SELECT id FROM task_statuses WHERE project_id = ? AND category = ? ORDER BY position, id LIMIT 1",
+        )
+        .bind(self.fixture.project_id.to_string())
+        .bind(category)
+        .fetch_one(self.fixture.database.pool())
+        .await
+        .unwrap()
+        .parse()
+        .unwrap()
+    }
+
+    /// A new task in the first unstarted status: its id and its identifier.
+    async fn task(&self) -> (orbit_platform::Id, String) {
+        let outcome = self
+            .tasks
+            .create_task(
+                self.fixture.workspace_id,
+                self.fixture.user_id,
+                CreateTask {
+                    project_id: self.fixture.project_id,
+                    status_id: self.status("unstarted").await,
+                    title: "Work".to_owned(),
+                    description: String::new(),
+                    source_url: None,
+                    priority: "none".to_owned(),
+                    position: None,
+                    assignee_ids: Vec::new(),
+                    label_ids: Vec::new(),
+                    due_start_at: None,
+                    due_at: None,
+                    parent_task_id: None,
+                },
+                "test",
+                TimestampMillis::now(),
+            )
+            .await
+            .unwrap();
+        (
+            outcome.task.id,
+            format!("{}-{}", self.key, outcome.task.number),
+        )
+    }
+
+    /// Delivers a `pull_request` event for pull request `number` with `fields` over an open,
+    /// trusted pull request that names no task.
+    async fn deliver(&self, action: &str, number: i64, fields: Value) -> StatusCode {
+        let mut pull = json!({
+            "number": number, "title": "Work", "body": "", "state": "open", "merged": false,
+            "draft": false, "labels": [], "head": { "ref": "work" },
+            "author_association": "MEMBER", "requested_reviewers": [], "requested_teams": []
+        });
+        pull.as_object_mut()
+            .unwrap()
+            .extend(fields.as_object().unwrap().clone());
+        let installation = pull
+            .as_object_mut()
+            .unwrap()
+            .remove("installation")
+            .unwrap_or(json!(1234));
+        let payload = json!({
+            "action": action, "number": number, "installation": { "id": installation },
+            "repository": { "full_name": "acme/repo" }, "pull_request": pull
+        });
+        self.app
+            .clone()
+            .oneshot(github_request("pull_request", payload, true))
+            .await
+            .unwrap()
+            .status()
+    }
+
+    /// The links of the task as `number:state:closes:trusted`.
+    async fn links(&self, task: orbit_platform::Id) -> String {
+        sqlx::query_scalar(
+            "SELECT COALESCE(GROUP_CONCAT(line, ' '), '') FROM (SELECT pull_number || ':' || state \
+             || ':' || closes || ':' || trusted AS line FROM github_pull_links \
+             WHERE task_id = ? AND repository = 'acme/repo' ORDER BY pull_number)",
+        )
+        .bind(task.to_string())
+        .fetch_one(self.fixture.database.pool())
+        .await
+        .unwrap()
+    }
+
+    async fn category(&self, task: orbit_platform::Id) -> String {
+        sqlx::query_scalar(
+            "SELECT category FROM task_statuses JOIN tasks ON tasks.status_id = task_statuses.id WHERE tasks.id = ?",
+        )
+        .bind(task.to_string())
+        .fetch_one(self.fixture.database.pool())
+        .await
+        .unwrap()
+    }
+
+    async fn count(&self, sql: &str, task: orbit_platform::Id) -> i64 {
+        sqlx::query_scalar(sql)
+            .bind(task.to_string())
+            .fetch_one(self.fixture.database.pool())
+            .await
+            .unwrap()
+    }
+}
+
+#[tokio::test]
+async fn a_pull_request_links_to_the_tasks_it_names() {
+    let pulls = Pulls::new().await;
+    let (task, identifier) = pulls.task().await;
+    let branch = format!("feature/{}-fix-login", identifier.to_lowercase());
+
+    // A branch name links, with no project connection for the repository.
+    pulls
+        .deliver("opened", 1, json!({ "head": { "ref": branch } }))
+        .await;
+    assert_eq!(pulls.links(task).await, "1:open:1:1");
+    let audits = "SELECT COUNT(*) FROM audit_events WHERE resource_id = ? AND action = ";
+    let linked = format!("{audits}'task.pull_request_linked'");
+    let unlinked = format!("{audits}'task.pull_request_unlinked'");
+    assert_eq!(pulls.count(&linked, task).await, 1);
+    // A second pull request names it in the body without a closing keyword.
+    pulls
+        .deliver("opened", 2, json!({ "body": format!("Refs {identifier}") }))
+        .await;
+    assert_eq!(pulls.links(task).await, "1:open:1:1 2:open:0:1");
+    // Named as closing and as not closing: closing wins.
+    pulls
+        .deliver(
+            "edited",
+            2,
+            json!({ "body": format!("Refs {identifier}"), "title": format!("{identifier} again") }),
+        )
+        .await;
+    assert_eq!(pulls.links(task).await, "1:open:1:1 2:open:1:1");
+    // The body alone names no task: the reference was removed in an edit.
+    pulls
+        .deliver("edited", 2, json!({ "body": format!("See {identifier}") }))
+        .await;
+    assert_eq!(pulls.links(task).await, "1:open:1:1");
+    assert_eq!(pulls.count(&linked, task).await, 2);
+    assert_eq!(pulls.count(&unlinked, task).await, 1);
+
+    // The actor of the audit rows is the GitHub service account.
+    let metadata: String = sqlx::query_scalar(
+        "SELECT metadata_json FROM audit_events WHERE resource_id = ? AND action = 'task.pull_request_unlinked'",
+    )
+    .bind(task.to_string())
+    .fetch_one(pulls.fixture.database.pool())
+    .await
+    .unwrap();
+    let metadata: Value = serde_json::from_str(&metadata).unwrap();
+    assert_eq!(metadata["repository"], "acme/repo");
+    assert_eq!(metadata["number"], 2);
+    assert_eq!(metadata["actor_service_account_name"], "GitHub");
+
+    // An unknown key, a task in the trash and an installation of nobody link nothing.
+    let (trashed, trashed_identifier) = pulls.task().await;
+    sqlx::query("UPDATE tasks SET deleted_at = 1 WHERE id = ?")
+        .bind(trashed.to_string())
+        .execute(pulls.fixture.database.pool())
+        .await
+        .unwrap();
+    pulls
+        .deliver(
+            "opened",
+            3,
+            json!({ "title": format!("NOPE-1 x{identifier} {trashed_identifier}") }),
+        )
+        .await;
+    pulls
+        .deliver(
+            "opened",
+            4,
+            json!({ "title": identifier.clone(), "installation": 999 }),
+        )
+        .await;
+    assert_eq!(pulls.links(task).await, "1:open:1:1");
+    assert_eq!(pulls.links(trashed).await, "");
+
+    // Not more than 20 tasks for one pull request.
+    let mut identifiers = Vec::new();
+    for _ in 0..22 {
+        identifiers.push(pulls.task().await.1);
+    }
+    pulls
+        .deliver(
+            "opened",
+            5,
+            json!({ "body": format!("Fixes {}", identifiers.join(", ")) }),
+        )
+        .await;
+    let linked_tasks: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM github_pull_links WHERE pull_number = 5")
+            .fetch_one(pulls.fixture.database.pool())
+            .await
+            .unwrap();
+    assert_eq!(linked_tasks, 20);
+}
+
+#[tokio::test]
+async fn a_trusted_pull_request_moves_its_tasks_by_the_rules_of_their_project() {
+    let pulls = Pulls::new().await;
+    let pool = pulls.fixture.database.pool();
+    let title = |identifier: &str| json!({ "title": identifier });
+    let with = |identifier: &str, fields: Value| {
+        let mut all = json!({ "title": identifier });
+        all.as_object_mut()
+            .unwrap()
+            .extend(fields.as_object().unwrap().clone());
+        all
+    };
+
+    // An untrusted pull request links and changes no status.
+    let (external, identifier) = pulls.task().await;
+    pulls
+        .deliver(
+            "opened",
+            1,
+            with(&identifier, json!({ "author_association": "CONTRIBUTOR" })),
+        )
+        .await;
+    assert_eq!(pulls.links(external).await, "1:open:1:0");
+    assert_eq!(pulls.category(external).await, "unstarted");
+
+    // The state comes from the payload fields; each default rule.
+    let (task, identifier) = pulls.task().await;
+    pulls
+        .deliver("opened", 2, with(&identifier, json!({ "draft": true })))
+        .await;
+    assert_eq!(pulls.links(task).await, "2:draft:1:1");
+    assert_eq!(pulls.category(task).await, "unstarted");
+    pulls
+        .deliver("ready_for_review", 2, title(&identifier))
+        .await;
+    assert_eq!(pulls.links(task).await, "2:open:1:1");
+    assert_eq!(pulls.category(task).await, "started");
+    // The subscribers hear of it; no user is the actor.
+    assert_eq!(
+        pulls
+            .count(
+                "SELECT COUNT(*) FROM notifications WHERE task_id = ? \
+                 AND kind = 'task_status_changed' AND actor_user_id IS NULL",
+                task
+            )
+            .await,
+        1
+    );
+    let started = pulls.status("started").await;
+    let changes: String = sqlx::query_scalar(
+        "SELECT metadata_json FROM audit_events WHERE resource_id = ? AND action = 'task.updated'",
+    )
+    .bind(task.to_string())
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let changes: Value = serde_json::from_str(&changes).unwrap();
+    assert_eq!(changes["changes"]["status"]["to"], started.to_string());
+    assert_eq!(changes["actor_service_account_name"], "GitHub");
+
+    // A person moves the task back; a push to the branch (same state) leaves it there.
+    let todo = pulls.status("unstarted").await;
+    sqlx::query("UPDATE tasks SET status_id = ? WHERE id = ?")
+        .bind(todo.to_string())
+        .bind(task.to_string())
+        .execute(pool)
+        .await
+        .unwrap();
+    pulls.deliver("synchronize", 2, title(&identifier)).await;
+    assert_eq!(pulls.category(task).await, "unstarted");
+    pulls
+        .deliver(
+            "review_requested",
+            2,
+            with(
+                &identifier,
+                json!({ "requested_teams": [{ "slug": "core" }] }),
+            ),
+        )
+        .await;
+    assert_eq!(pulls.links(task).await, "2:in_review:1:1");
+    assert_eq!(pulls.category(task).await, "unstarted");
+    // A second closing pull request: the task is done when the last one merges.
+    pulls.deliver("opened", 3, title(&identifier)).await;
+    assert_eq!(pulls.category(task).await, "started");
+    let merged = json!({ "state": "closed", "merged": true });
+    pulls
+        .deliver("closed", 2, with(&identifier, merged.clone()))
+        .await;
+    assert_eq!(pulls.links(task).await, "2:merged:1:1 3:open:1:1");
+    assert_eq!(pulls.category(task).await, "started");
+    pulls
+        .deliver("closed", 3, with(&identifier, merged.clone()))
+        .await;
+    assert_eq!(pulls.category(task).await, "completed");
+    // A finished task stays where it is.
+    pulls.deliver("opened", 4, title(&identifier)).await;
+    assert_eq!(
+        pulls.links(task).await,
+        "2:merged:1:1 3:merged:1:1 4:open:1:1"
+    );
+    assert_eq!(pulls.category(task).await, "completed");
+
+    // A pull request closed without a merge changes nothing; a reference that does not close
+    // does not complete the task.
+    let (task, identifier) = pulls.task().await;
+    pulls.deliver("opened", 5, title(&identifier)).await;
+    pulls
+        .deliver("closed", 5, with(&identifier, json!({ "state": "closed" })))
+        .await;
+    assert_eq!(pulls.links(task).await, "5:closed:1:1");
+    assert_eq!(pulls.category(task).await, "started");
+    let refs = json!({ "body": format!("Part of {identifier}") });
+    pulls.deliver("opened", 6, refs.clone()).await;
+    let mut refs_merged = refs;
+    refs_merged
+        .as_object_mut()
+        .unwrap()
+        .extend(merged.as_object().unwrap().clone());
+    pulls.deliver("closed", 6, refs_merged).await;
+    assert_eq!(pulls.links(task).await, "5:closed:1:1 6:merged:0:1");
+    assert_eq!(pulls.category(task).await, "started");
+
+    // The rules of the project: "no change", and a selected status.
+    let rule = |event: &str, mode, status_id| PrAutomationRule {
+        event: event.to_owned(),
+        mode,
+        status_id,
+    };
+    let set = |rules: Vec<PrAutomationRule>| {
+        let pulls = &pulls;
+        async move {
+            pulls
+                .tasks
+                .set_pr_automation(
+                    pulls.fixture.workspace_id,
+                    pulls.fixture.project_id,
+                    pulls.fixture.user_id,
+                    &rules,
+                    "test",
+                    TimestampMillis::now(),
+                )
+                .await
+        }
+    };
+    let completed = pulls.status("completed").await;
+    let rules = set(vec![
+        rule("open", PrAutomationMode::None, None),
+        rule("draft", PrAutomationMode::Status, Some(started)),
+        rule("review", PrAutomationMode::Status, Some(completed)),
+    ])
+    .await
+    .unwrap();
+    assert_eq!(
+        rules,
+        vec![
+            rule("draft", PrAutomationMode::Status, Some(started)),
+            rule("open", PrAutomationMode::None, None),
+            rule("review", PrAutomationMode::Status, Some(completed)),
+            rule("merged", PrAutomationMode::Default, None),
+        ]
+    );
+    let (task, identifier) = pulls.task().await;
+    pulls.deliver("opened", 7, title(&identifier)).await;
+    assert_eq!(pulls.category(task).await, "unstarted");
+    pulls
+        .deliver(
+            "converted_to_draft",
+            7,
+            with(&identifier, json!({ "draft": true })),
+        )
+        .await;
+    assert_eq!(pulls.category(task).await, "started");
+    pulls
+        .deliver(
+            "review_requested",
+            7,
+            with(
+                &identifier,
+                json!({ "requested_reviewers": [{ "login": "ada" }] }),
+            ),
+        )
+        .await;
+    assert_eq!(pulls.category(task).await, "completed");
+    // Back to the default; a deleted status also puts its event back.
+    set(vec![rule("open", PrAutomationMode::Default, None)])
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM project_pr_automation WHERE status_id = ?")
+        .bind(started.to_string())
+        .execute(pool)
+        .await
+        .unwrap();
+    let (task, identifier) = pulls.task().await;
+    pulls
+        .deliver("opened", 8, with(&identifier, json!({ "draft": true })))
+        .await;
+    assert_eq!(pulls.category(task).await, "unstarted");
+    pulls
+        .deliver("ready_for_review", 8, title(&identifier))
+        .await;
+    assert_eq!(pulls.category(task).await, "started");
+
+    // What a rule cannot be.
+    let duplicate = pulls.status("duplicate").await;
+    for invalid in [
+        rule("approved", PrAutomationMode::None, None),
+        rule("open", PrAutomationMode::Status, None),
+        rule("open", PrAutomationMode::None, Some(started)),
+        rule("open", PrAutomationMode::Status, Some(duplicate)),
+        rule(
+            "open",
+            PrAutomationMode::Status,
+            Some(orbit_platform::Id::new_v7()),
+        ),
+    ] {
+        let error = set(vec![invalid.clone()]).await.unwrap_err();
+        assert!(matches!(error, TaskError::Invalid { .. }), "{invalid:?}");
+    }
+}
+
+#[tokio::test]
+async fn a_labelled_pull_request_keeps_its_own_task_and_its_links() {
+    let pulls = Pulls::new().await;
+    let pool = pulls.fixture.database.pool();
+    sqlx::query(
+        "INSERT INTO github_installation_repositories (installation_id, repository) VALUES (1234, 'acme/repo')",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO github_project_connections (project_id, workspace_id, installation_id, repository, label) \
+         VALUES (?, ?, 1234, 'acme/repo', 'Orbit')",
+    )
+    .bind(pulls.fixture.project_id.to_string())
+    .bind(pulls.fixture.workspace_id.to_string())
+    .execute(pool)
+    .await
+    .unwrap();
+    let (task, identifier) = pulls.task().await;
+    let fields = json!({ "title": format!("Fix {identifier}"), "labels": [{ "name": "Orbit" }] });
+    assert_eq!(
+        pulls.deliver("opened", 9, fields.clone()).await,
+        StatusCode::OK
+    );
+    let own: String = sqlx::query_scalar(
+        "SELECT task_id FROM github_issue_links WHERE repository = 'acme/repo' AND issue_number = 9",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_ne!(own, task.to_string());
+    assert_eq!(pulls.links(task).await, "9:open:1:1");
+
+    // The pull request names its own task now: it does not link to it, and the other link stays.
+    let own_identifier: String = sqlx::query_scalar(
+        "SELECT projects.project_key || '-' || tasks.number FROM tasks \
+         JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = ?",
+    )
+    .bind(&own)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    let mut fields = fields;
+    fields["body"] = json!(format!("Fixes {own_identifier}"));
+    assert_eq!(pulls.deliver("edited", 9, fields).await, StatusCode::OK);
+    assert_eq!(pulls.links(task).await, "9:open:1:1");
+    let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM github_pull_links")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert_eq!(total, 1);
 }

@@ -1,11 +1,16 @@
-import { useState, type ReactNode } from 'react'
+import { lazy, Suspense, useRef, useState, type ReactNode } from 'react'
 import { cva } from 'class-variance-authority'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { clipboardFiles } from '@/lib/attachmentLib'
 import { renderMarkdownBlocks } from '@/lib/markdown'
+import type { MentionPerson } from '@/lib/mentions'
+import { normalizeMarkdown, toggleChecklistLine } from '@/components/common/markdownEditor/convert'
 import type { Task } from '@/features/tasks/api/models'
 import { LinkifiedText } from './LinkifiedText'
+
+// BlockNote is large: it loads when a description is first edited
+const MarkdownEditor = lazy(() => import('@/components/common/markdownEditor/MarkdownEditor'))
 
 /**
  * The title and description share one look whether read-only, previewed or edited, so switching to the field
@@ -33,24 +38,81 @@ export function TaskTextFields({
   onUpdate,
   onAttachFiles,
   readOnly = false,
+  members,
+  onUploadImage,
   children,
 }: {
   task: Task
   onUpdate: (update: { title?: string; description?: string }) => void
   onAttachFiles?: (files: File[]) => void
   readOnly?: boolean
+  /**
+   * With the members, the description opens in the rich editor (they are who "@" offers). Text that the rich editor
+   * would change, and a description without this prop, is edited as plain markdown.
+   */
+  members?: MentionPerson[]
+  /** Uploads an image that was pasted or dropped into the rich editor; it goes into the text. */
+  onUploadImage?: (file: File) => Promise<string>
   children?: ReactNode
 }) {
-  return <TaskTextDraft key={`${task.id}:${task.version}:${task.title}:${task.description}:${readOnly}`} task={task} onUpdate={onUpdate} onAttachFiles={onAttachFiles} readOnly={readOnly}>{children}</TaskTextDraft>
+  return <TaskTextDraft key={`${task.id}:${task.version}:${task.title}:${task.description}:${readOnly}`} task={task} onUpdate={onUpdate} onAttachFiles={onAttachFiles} readOnly={readOnly} members={members} onUploadImage={onUploadImage}>{children}</TaskTextDraft>
 }
 
-function TaskTextDraft({ task, onUpdate, onAttachFiles, readOnly = false, children }: Parameters<typeof TaskTextFields>[0]) {
+function TaskTextDraft({ task, onUpdate, onAttachFiles, readOnly = false, members, onUploadImage, children }: Parameters<typeof TaskTextFields>[0]) {
   const isUntitled = task.title === 'Untitled'
   const [title, setTitle] = useState(isUntitled ? '' : task.title)
   const [description, setDescription] = useState(task.description)
   const [editingTitle, setEditingTitle] = useState(isUntitled && !readOnly)
   const [editingDescription, setEditingDescription] = useState(false)
   const [dropOver, setDropOver] = useState(false)
+  // The markdown of the rich editor after the person changed the document; `null` until then. Orbit never saves a
+  // description that the person did not edit: the editor's own spelling of unchanged text is not a change.
+  const richDraft = useRef<string | null>(null)
+  const closeRichEditor = (save: boolean) => {
+    const draft = richDraft.current
+    richDraft.current = null
+    if (save && draft !== null && normalizeMarkdown(draft) !== normalizeMarkdown(task.description)) onUpdate({ description: draft })
+    setEditingDescription(false)
+  }
+  const preview = (
+    <EditablePreview
+      className={taskTextVariants({ field: 'description', mode: 'preview' })}
+      muted={!description}
+      ariaLabel="Description"
+      onEdit={() => setEditingDescription(true)}
+    >
+      {description
+        ? renderMarkdownBlocks(description, 'task-description', [], {
+          // a tick changes that one item and saves; the editor does not open
+          onToggleChecklist: (line, checked) => {
+            const next = toggleChecklistLine(task.description, line, checked)
+            if (next !== null) onUpdate({ description: next })
+          },
+        })
+        : 'Add description… (paste or drop images and files)'}
+    </EditablePreview>
+  )
+  const textarea = (
+    <Textarea
+      className={taskTextVariants({ field: 'description', mode: 'edit' })}
+      data-keep-font-size=""
+      value={description}
+      placeholder="Add description… (paste or drop images and files)"
+      aria-label="Description"
+      autoFocus
+      onChange={(event) => setDescription(event.target.value)}
+      onBlur={() => {
+        if (description !== task.description) onUpdate({ description })
+        setEditingDescription(false)
+      }}
+      onPaste={(event) => {
+        const files = clipboardFiles(event)
+        if (files.length === 0) return
+        event.preventDefault()
+        onAttachFiles?.(files)
+      }}
+    />
+  )
   return (
     <>
       {readOnly ? (
@@ -102,34 +164,25 @@ function TaskTextDraft({ task, onUpdate, onAttachFiles, readOnly = false, childr
       >
         {readOnly ? (
           <div className={taskTextVariants({ field: 'description', mode: 'read' })} aria-label="Description">{description ? renderMarkdownBlocks(description, 'task-description') : 'No description'}</div>
-        ) : editingDescription ? (
-          <Textarea
-            className={taskTextVariants({ field: 'description', mode: 'edit' })}
-            data-keep-font-size=""
-            value={description}
-            placeholder="Add description… (paste or drop images and files)"
-            aria-label="Description"
-            autoFocus
-            onChange={(event) => setDescription(event.target.value)}
-            onBlur={() => {
-              if (description !== task.description) onUpdate({ description })
-              setEditingDescription(false)
-            }}
-            onPaste={(event) => {
-              const files = clipboardFiles(event)
-              if (files.length === 0) return
-              event.preventDefault()
-              onAttachFiles?.(files)
-            }}
-          />
-        ) : (
-          <EditablePreview
-            className={taskTextVariants({ field: 'description', mode: 'preview' })}
-            muted={!description}
-            ariaLabel="Description"
-            onEdit={() => setEditingDescription(true)}
-          >{description ? renderMarkdownBlocks(description, 'task-description') : 'Add description… (paste or drop images and files)'}</EditablePreview>
-        )}
+        ) : editingDescription && members ? (
+          // the read view stays until the editor's chunk is here
+          <Suspense fallback={preview}>
+            <MarkdownEditor
+              value={task.description}
+              members={members}
+              ariaLabel="Description"
+              className={taskTextVariants({ field: 'description', mode: 'read' })}
+              autoFocus
+              fallback={textarea}
+              onChange={(markdown) => { richDraft.current = markdown }}
+              onBlur={() => closeRichEditor(true)}
+              onSubmit={() => closeRichEditor(true)}
+              onCancel={() => closeRichEditor(false)}
+              onFiles={onAttachFiles}
+              uploadImage={onUploadImage}
+            />
+          </Suspense>
+        ) : editingDescription ? textarea : preview}
         {children}
       </div>
     </>
@@ -152,7 +205,7 @@ export function EditablePreview({ className, children, muted, ariaLabel, onEdit 
       aria-readonly="true"
       tabIndex={0}
       onClick={(event) => {
-        if (event.target instanceof Element && event.target.closest('a, button')) return
+        if (event.target instanceof Element && event.target.closest('a, button, [role=checkbox]')) return
         onEdit()
       }}
       onKeyDown={(event) => {

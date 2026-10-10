@@ -1,5 +1,5 @@
 export function isMockBackedPath(pathname: string) {
   return pathname === '/'
-    || ['/mail', '/activity']
+    || ['/mail']
       .some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))
 }

@@ -58,7 +58,7 @@ async fn github_schema_is_in_one_draft_migration() {
         db.scalar::<i64>("SELECT MAX(version) FROM schema_migrations")
             .await
             .unwrap(),
-        46
+        49
     );
     assert_eq!(
         db.scalar::<i64>("SELECT COUNT(*) FROM pragma_table_info('github_issue_links') WHERE name IN ('kind', 'pull_state', 'sync_paused')")
@@ -188,7 +188,7 @@ async fn rejects_a_schema_newer_than_the_binary() {
         error,
         MigrationError::SchemaNewer {
             database_version: 999,
-            binary_version: 46
+            binary_version: 49
         }
     ));
 }
@@ -1558,10 +1558,6 @@ async fn page_mentions_migration_keeps_notifications_and_adds_the_kind() {
             "notification must belong to the workspace task, a page the recipient can see",
         ),
         (
-            insert("thread", user, page, &format!("'{thread}'"), "NULL"),
-            "CHECK constraint failed",
-        ),
-        (
             insert("long", user, page, "NULL", &format!("'{}'", "x".repeat(65))),
             "CHECK constraint failed",
         ),
@@ -2038,6 +2034,175 @@ async fn task_numbers_migration_backfills_allocates_and_never_reuses() {
             .await
             .unwrap(),
         0
+    );
+    assert_eq!(
+        db.scalar::<String>("PRAGMA integrity_check").await.unwrap(),
+        "ok"
+    );
+}
+
+#[tokio::test]
+async fn task_subscribers_migration_merges_task_rows_moves_prefs_and_backfills() {
+    let directory = tempfile::tempdir().unwrap();
+    let db = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
+        .await
+        .unwrap();
+    MigrationRunner::embedded_through("test", 44)
+        .run(&db)
+        .await
+        .unwrap();
+    let [
+        owner,
+        member,
+        author,
+        workspace,
+        owner_m,
+        member_m,
+        author_m,
+    ]: [Id; 7] = std::array::from_fn(|_| Id::new_v7());
+    let [project, status, task, other, trashed, comment, page]: [Id; 7] =
+        std::array::from_fn(|_| Id::new_v7());
+    db.execute(&format!(
+        "BEGIN;
+         INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at)
+         VALUES ('{owner}', 'owner@example.com', 'owner@example.com', 'Owner', 'x', 1, 1),
+                ('{member}', 'member@example.com', 'member@example.com', 'Member', 'x', 1, 1),
+                ('{author}', 'author@example.com', 'author@example.com', 'Author', 'x', 1, 1);
+         INSERT INTO workspaces (id, name, version, owner_membership_id, created_at, updated_at)
+         VALUES ('{workspace}', 'Orbit', 0, '{owner_m}', 1, 1);
+         INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at)
+         VALUES ('{owner_m}', '{workspace}', '{owner}', 'owner', 0, 1, 1),
+                ('{member_m}', '{workspace}', '{member}', 'member', 0, 1, 1),
+                ('{author_m}', '{workspace}', '{author}', 'member', 0, 1, 1);
+         INSERT INTO projects (id, workspace_id, name, project_key, color, version, deleted_at, created_at, updated_at)
+         VALUES ('{project}', '{workspace}', 'Engineering', 'ENG', '#000000', 0, NULL, 1, 1);
+         INSERT INTO task_statuses (id, workspace_id, project_id, name, description, color, category, position, version, created_at, updated_at)
+         VALUES ('{status}', '{workspace}', '{project}', 'Todo', '', '#ffffff', 'unstarted', 0, 0, 1, 1);
+         INSERT INTO tasks (id, workspace_id, project_id, status_id, title, creator_id, deleted_at, created_at, updated_at)
+         VALUES ('{task}', '{workspace}', '{project}', '{status}', 'Task', '{owner}', NULL, 10, 10),
+                ('{other}', '{workspace}', '{project}', '{status}', 'Other', '{owner}', NULL, 11, 11),
+                ('{trashed}', '{workspace}', '{project}', '{status}', 'Trashed', '{owner}', 12, 12, 12);
+         INSERT INTO task_assignees (task_id, membership_id, user_id)
+         VALUES ('{task}', '{member_m}', '{member}'), ('{trashed}', '{member_m}', '{member}');
+         INSERT INTO task_comments (id, workspace_id, task_id, author_id, parent_id, body, version, created_at, updated_at)
+         VALUES ('{comment}', '{workspace}', '{task}', '{author}', NULL, 'hi', 0, 20, 20);
+         INSERT INTO pages (id, workspace_id, parent_id, owner_id, creator_id, updated_by, created_at, updated_at)
+         VALUES ('{page}', '{workspace}', NULL, '{member}', '{owner}', '{owner}', 1, 1);
+         INSERT INTO notifications (id, workspace_id, recipient_user_id, actor_user_id, kind, task_id,
+                                    comment_id, page_id, dedupe_key, read_at, created_at, pushed_at)
+         VALUES ('n1', '{workspace}', '{member}', '{owner}', 'task_assigned', '{task}', NULL, NULL, 'k1', NULL, 30, 30),
+                ('n2', '{workspace}', '{member}', '{author}', 'comment_mentioned', '{task}', '{comment}', NULL, 'k2', 45, 40, 41),
+                ('n3', '{workspace}', '{member}', '{owner}', 'task_assigned', '{other}', NULL, NULL, 'k3', 50, 35, 35),
+                ('n4', '{workspace}', '{owner}', '{author}', 'comment_mentioned', '{task}', '{comment}', NULL, 'k4', 60, 40, 40),
+                ('n5', '{workspace}', '{member}', '{owner}', 'page_mentioned', NULL, NULL, '{page}', 'k5', NULL, 33, 33);
+         INSERT INTO notification_prefs (user_id, direct_messages, chat_mentions, thread_replies,
+                                         channel_messages, task_assigned, mentions, updated_at)
+         VALUES ('{member}', 1, 0, 1, 1, 1, 0, 70), ('{owner}', 1, 1, 1, 1, 1, 1, 71);
+         COMMIT;"
+    ))
+    .await
+    .unwrap();
+
+    MigrationRunner::embedded("test").run(&db).await.unwrap();
+
+    // One row for each (recipient, task): the latest one, unread because `n1` was.
+    let rows = "SELECT COALESCE(GROUP_CONCAT(line, ' '), '') FROM (SELECT id || '|' || kind || '|' \
+                || COALESCE(comment_id, '-') || '|' || COALESCE(read_at, '-') || '|' || created_at \
+                || '|' || COALESCE(pushed_at, '-') AS line FROM notifications ORDER BY id)";
+    assert_eq!(
+        db.scalar::<String>(rows).await.unwrap(),
+        format!(
+            "n2|comment_mentioned|{comment}|-|40|41 n3|task_assigned|-|50|35|35 \
+             n4|comment_mentioned|{comment}|60|40|40 n5|page_mentioned|-|-|33|33"
+        )
+    );
+    assert_eq!(
+        db.scalar::<String>("SELECT dedupe_key FROM notifications WHERE id = 'n2'")
+            .await
+            .unwrap(),
+        format!("{workspace}:{member}:task:{task}")
+    );
+    assert_eq!(
+        db.scalar::<String>("SELECT dedupe_key FROM notifications WHERE id = 'n5'")
+            .await
+            .unwrap(),
+        "k5"
+    );
+
+    // A kind that this migration does not know, without an actor.
+    db.execute(&format!(
+        "INSERT INTO notifications (id, workspace_id, recipient_user_id, actor_user_id, kind, task_id, \
+         dedupe_key, created_at) VALUES ('n6', '{workspace}', '{author}', NULL, 'a_later_kind', \
+         '{task}', 'k6', 80)"
+    ))
+    .await
+    .unwrap();
+    // Not more than one target family.
+    let error = db
+        .execute(&format!(
+            "INSERT INTO notifications (id, workspace_id, recipient_user_id, kind, task_id, page_id, \
+             dedupe_key, created_at) VALUES ('n7', '{workspace}', '{member}', 'x', '{task}', \
+             '{page}', 'k7', 80)"
+        ))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("CHECK constraint failed"), "{error}");
+    // A deleted comment leaves the task's row.
+    db.execute(&format!("DELETE FROM task_comments WHERE id = '{comment}'"))
+        .await
+        .unwrap();
+    assert_eq!(
+        db.scalar::<i64>(
+            "SELECT COUNT(*) FROM notifications WHERE id IN ('n2', 'n4') AND comment_id IS NULL"
+        )
+        .await
+        .unwrap(),
+        2
+    );
+
+    // Only what was off is kept.
+    assert_eq!(
+        db.scalar::<String>(&format!(
+            "SELECT GROUP_CONCAT(category || '=' || enabled || '@' || updated_at, ',') FROM ( \
+             SELECT * FROM notification_pref_overrides WHERE user_id = '{member}' ORDER BY category)"
+        ))
+        .await
+        .unwrap(),
+        "chat_mentions=0@70,mentions=0@70"
+    );
+    assert_eq!(
+        db.scalar::<i64>("SELECT COUNT(*) FROM notification_pref_overrides")
+            .await
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        db.scalar::<i64>("SELECT COUNT(*) FROM sqlite_master WHERE name = 'notification_prefs'")
+            .await
+            .unwrap(),
+        0
+    );
+
+    // Creator, assignee and comment author of the live tasks.
+    let subscribers = |task: Id| {
+        format!(
+            "SELECT COALESCE(GROUP_CONCAT(display_name, ','), '') FROM (SELECT users.display_name \
+             FROM task_subscribers JOIN users ON users.id = task_subscribers.user_id \
+             WHERE task_id = '{task}' AND subscribed = 1 ORDER BY users.display_name)"
+        )
+    };
+    assert_eq!(
+        db.scalar::<String>(&subscribers(task)).await.unwrap(),
+        "Author,Member,Owner"
+    );
+    assert_eq!(
+        db.scalar::<String>(&subscribers(other)).await.unwrap(),
+        "Owner"
+    );
+    assert_eq!(
+        db.scalar::<String>(&subscribers(trashed)).await.unwrap(),
+        ""
     );
     assert_eq!(
         db.scalar::<String>("PRAGMA integrity_check").await.unwrap(),

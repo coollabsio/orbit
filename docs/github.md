@@ -22,7 +22,40 @@ If GitHub rejects the App manifest, fix the problem and select **Register GitHub
 
 The task title and description are read-only in Orbit. Other task fields remain editable. Comments do not sync. Orbit does not send task edits to GitHub.
 
-A labeled pull request creates its own Orbit task, with its GitHub title, body, and pull-request link. Orbit does not search the pull request title, body, or branch for an Orbit task URL. An unlabeled pull request does not create a task. Removing its project label pauses sync, and adding the label again resumes the same task.
+A labeled pull request creates its own Orbit task, with its GitHub title, body, and pull-request link. An unlabeled pull request does not create a task. Removing its project label pauses sync, and adding the label again resumes the same task.
+
+## Link a pull request to a task
+
+A pull request links to an Orbit task when it names the task identifier (for example `ENG-12`; upper or lower case). The repository needs no project connection and no label; the App must be installed on it.
+
+| Where the identifier is | Result |
+|---|---|
+| Branch name, for example `feature/eng-12-fix-login` | Link; the pull request closes the task |
+| Pull request title | Link; the pull request closes the task |
+| Body, after `Fixes`, `Closes` or `Resolves` (also `Fix`, `Fixed`, `Close`, `Closed`, `Resolve`, `Resolved`) | Link; the pull request closes the task |
+| Body, after `Ref`, `Refs`, `References`, `Part of` or `Related to` | Link; the pull request does not close the task |
+| Body, with no keyword | No link |
+
+A keyword can be followed by more than one identifier (`Fixes ENG-12, ENG-13`). One pull request links to at most 20 tasks. A link shows on the task with the state of the pull request: Draft, Open, In review, Merged, or Closed. In Orbit, **Copy → Git branch name** in the task menu gives a branch name that links.
+
+A link appears on the next event of the pull request. Orbit does not read pull requests that exist before the feature; edit or push to such a pull request to link it.
+
+### Status automation
+
+Each project sets, in **Project settings → Pull request automation**, the status that a linked task takes on each event:
+
+| Event | Default |
+|---|---|
+| A draft pull request is opened, or a pull request is converted to draft | No change |
+| A pull request is opened, reopened, or made ready for review | The first started status |
+| A reviewer is requested | No change |
+| A pull request is merged | The first completed status |
+
+- Only a pull request whose author is an owner, member, or collaborator of the repository changes a status. A pull request from another person links and shows an **External** mark.
+- A task that is completed, cancelled, or a duplicate does not move.
+- A merge completes a task only when the pull request closes the task, and no other closing pull request of the task is open.
+- A pull request closed without a merge changes no status.
+- The rules of the project of the task apply, not those of the repository.
 
 If you delete a linked task in Orbit, the next GitHub event with the project label restores that same task and applies the current GitHub title, body, and status. An event without the label keeps the task deleted and pauses sync.
 

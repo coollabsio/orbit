@@ -1,5 +1,7 @@
 //! Push subscriptions and notification preferences of the signed-in user.
 
+use std::collections::BTreeMap;
+
 use axum::Json;
 use axum::extract::{Extension, Path, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -9,7 +11,8 @@ use utoipa::ToSchema;
 
 use super::{ApiError, ApiJson, AuthState, ProblemBody, authenticate};
 use crate::push::{
-    Notice, NotificationPrefs, PushService, PushSubscriptionRecord, allowed_endpoint, webpush,
+    Notice, NotificationPreference, PushKind, PushService, PushSubscriptionRecord,
+    allowed_endpoint, webpush,
 };
 
 #[derive(Serialize, ToSchema)]
@@ -143,12 +146,12 @@ pub(super) async fn send_test_push(
     Ok(Json(TestPushResult { sent }))
 }
 
-#[utoipa::path(get, path = "/api/v1/notification-preferences", responses((status = 200, body = NotificationPrefs), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json")))]
+#[utoipa::path(get, path = "/api/v1/notification-preferences", responses((status = 200, body = Vec<NotificationPreference>), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json")))]
 pub(super) async fn get_notification_preferences(
     State(state): State<AuthState>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
-) -> Result<Json<NotificationPrefs>, ApiError> {
+) -> Result<Json<Vec<NotificationPreference>>, ApiError> {
     let instance = "/api/v1/notification-preferences";
     let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
     PushService::of(state.repository.database())
@@ -158,18 +161,36 @@ pub(super) async fn get_notification_preferences(
         .map_err(|_| ApiError::internal(instance, request_id.as_ref()))
 }
 
-#[utoipa::path(put, path = "/api/v1/notification-preferences", request_body = NotificationPrefs, responses((status = 200, body = NotificationPrefs), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json")))]
+/// `{category: enabled}` pairs; a category that is not in the body stays as it is.
+#[utoipa::path(put, path = "/api/v1/notification-preferences", request_body = BTreeMap<String, bool>, responses((status = 200, body = Vec<NotificationPreference>), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json"), (status = 422, description = "invalid_category", body = ProblemBody, content_type = "application/problem+json")))]
 pub(super) async fn put_notification_preferences(
     State(state): State<AuthState>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
-    ApiJson(body): ApiJson<NotificationPrefs>,
-) -> Result<Json<NotificationPrefs>, ApiError> {
+    ApiJson(body): ApiJson<BTreeMap<String, bool>>,
+) -> Result<Json<Vec<NotificationPreference>>, ApiError> {
     let instance = "/api/v1/notification-preferences";
     let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
-    PushService::of(state.repository.database())
-        .set_prefs(session.user.id, &body, TimestampMillis::now())
+    let Some(prefs) = body
+        .iter()
+        .map(|(category, enabled)| PushKind::parse(category).map(|kind| (kind, *enabled)))
+        .collect::<Option<Vec<_>>>()
+    else {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_category",
+            "Invalid category",
+            "The body names a notification category that does not exist.",
+            instance,
+            request_id.as_ref(),
+        ));
+    };
+    let push = PushService::of(state.repository.database());
+    push.set_prefs(session.user.id, &prefs, TimestampMillis::now())
         .await
         .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
-    Ok(Json(body))
+    push.prefs(session.user.id)
+        .await
+        .map(Json)
+        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))
 }

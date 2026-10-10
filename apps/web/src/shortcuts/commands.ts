@@ -1,8 +1,8 @@
 import { chatEnabled } from '@/lib/chatEnabled'
 
 /** Where a command can run. A page mounts the handlers of its contexts; `task-target` needs a target task. */
-export type Context = 'global' | 'task-list' | 'task-board' | 'timeline' | 'task-detail' | 'task-target' | 'new-task' | 'docs' | 'views' | 'chat'
-export type Group = 'General' | 'Navigation' | 'List' | 'Task' | 'Docs' | 'Chat'
+export type Context = 'global' | 'task-list' | 'task-board' | 'timeline' | 'task-detail' | 'task-target' | 'new-task' | 'docs' | 'views' | 'chat' | 'inbox'
+export type Group = 'General' | 'Navigation' | 'List' | 'Task' | 'Inbox' | 'Docs' | 'Chat'
 
 export interface Command {
   id: string
@@ -45,6 +45,7 @@ const REGISTRY = [
   { id: 'list.upArrow', title: 'Move focus up', group: 'List', keys: 'ArrowUp', context: 'task-list', fixed: true, repeat: true },
   { id: 'list.open', title: 'Open the focused task', group: 'List', keys: 'O', context: 'task-list' },
   { id: 'list.openEnter', title: 'Open the focused task', group: 'List', keys: 'Enter', context: 'task-list', fixed: true },
+  { id: 'list.peek', title: 'Peek at the focused task', group: 'List', keys: 'Space', context: 'task-list' },
   { id: 'list.select', title: 'Select the focused task', group: 'List', keys: 'X', context: 'task-list' },
   { id: 'list.extendDown', title: 'Extend the selection down', group: 'List', keys: 'Shift+J', context: 'task-list', repeat: true },
   { id: 'list.extendUp', title: 'Extend the selection up', group: 'List', keys: 'Shift+K', context: 'task-list', repeat: true },
@@ -67,6 +68,7 @@ const REGISTRY = [
   { id: 'task.addRelation', title: 'Add relation', group: 'Task', keys: 'Mod+Shift+M', context: 'task-target' },
   { id: 'task.copyId', title: 'Copy task ID', group: 'Task', keys: 'Mod+.', context: 'task-target' },
   { id: 'task.copyLink', title: 'Copy task link', group: 'Task', keys: 'Mod+Shift+,', context: 'task-target' },
+  { id: 'task.copyBranch', title: 'Copy git branch name', group: 'Task', keys: 'Mod+Shift+.', context: 'task-target' },
   { id: 'task.trash', title: 'Move to trash', group: 'Task', keys: 'Mod+Backspace', context: 'task-target' },
 
   { id: 'detail.next', title: 'Go to next task', group: 'Task', keys: 'J', context: 'task-detail', repeat: true },
@@ -75,6 +77,11 @@ const REGISTRY = [
   { id: 'detail.sendComment', title: 'Send comment', group: 'Task', keys: 'Mod+Enter', context: 'task-detail', fixed: true },
   { id: 'newTask.submit', title: 'Create the task', group: 'Task', keys: 'Mod+Enter', context: 'new-task', fixed: true },
   { id: 'newTask.submitMore', title: 'Create and add another', group: 'Task', keys: 'Mod+Shift+Enter', context: 'new-task', inInputs: true },
+
+  // for the notification under the pointer or with the focus
+  { id: 'inbox.archive', title: 'Archive notification', group: 'Inbox', keys: 'E', context: 'inbox' },
+  { id: 'inbox.snooze', title: 'Snooze notification', group: 'Inbox', keys: 'H', context: 'inbox' },
+  { id: 'inbox.toggleRead', title: 'Mark notification read or unread', group: 'Inbox', keys: 'U', context: 'inbox' },
 
   { id: 'docs.createPage', title: 'Create page', group: 'Docs', keys: null, context: 'docs' },
   { id: 'docs.history', title: 'Show page history', group: 'Docs', keys: 'Mod+Shift+H', context: 'docs', inInputs: true },

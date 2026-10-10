@@ -333,6 +333,25 @@ impl MigrationRunner {
                     ),
                     false,
                 ),
+                Migration::new(
+                    47,
+                    include_str!(
+                        "../../../../apps/server/migrations/0047_task_subscribers_inbox.sql"
+                    ),
+                    false,
+                ),
+                Migration::new(
+                    48,
+                    include_str!("../../../../apps/server/migrations/0048_github_pr_links.sql"),
+                    false,
+                ),
+                Migration::new(
+                    49,
+                    include_str!(
+                        "../../../../apps/server/migrations/0049_task_comment_reactions.sql"
+                    ),
+                    false,
+                ),
             ],
         )
     }

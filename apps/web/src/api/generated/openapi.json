@@ -6166,7 +6166,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NotificationPrefs"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/NotificationPreference"
+                  }
                 }
               }
             }
@@ -6242,6 +6245,7 @@
         "tags": [
           "crate::auth_routes::push"
         ],
+        "summary": "`{category: enabled}` pairs; a category that is not in the body stays as it is.",
         "operationId": "put_notification_preferences",
         "parameters": [
           {
@@ -6258,7 +6262,13 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/NotificationPrefs"
+                "type": "object",
+                "additionalProperties": {
+                  "type": "boolean"
+                },
+                "propertyNames": {
+                  "type": "string"
+                }
               }
             }
           },
@@ -6270,7 +6280,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NotificationPrefs"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/NotificationPreference"
+                  }
                 }
               }
             }
@@ -6321,6 +6334,16 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_category",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
                 }
               }
             }
@@ -17864,6 +17887,21 @@
         "operationId": "list_notifications",
         "parameters": [
           {
+            "name": "state",
+            "in": "query",
+            "description": "`inbox` (the default), `snoozed` or `archived`.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Which notifications a list shows.",
+              "enum": [
+                "inbox",
+                "snoozed",
+                "archived"
+              ]
+            }
+          },
+          {
             "name": "unread",
             "in": "query",
             "required": false,
@@ -18017,6 +18055,138 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ReadAllResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/notifications/{notification_id}": {
+      "patch": {
+        "tags": [
+          "crate::task_routes"
+        ],
+        "operationId": "patch_notification",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "notification_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationPatchBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationRecord"
                 }
               }
             }
@@ -24205,6 +24375,258 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/projects/{project_id}/pr-automation": {
+      "get": {
+        "tags": [
+          "crate::task_routes"
+        ],
+        "operationId": "get_pr_automation",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PrAutomationRule"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "crate::task_routes"
+        ],
+        "summary": "Sets the rule of each event in the body; an event that is not in the body stays as it is.",
+        "operationId": "put_pr_automation",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/PrAutomationRule"
+                }
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PrAutomationRule"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/projects/{project_id}/restore": {
       "post": {
         "tags": [
@@ -28654,6 +29076,282 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/comments/{comment_id}/reactions/{emoji}": {
+      "put": {
+        "tags": [
+          "crate::task_routes"
+        ],
+        "summary": "Adds the caller's reaction to a comment. `emoji` is a Unicode emoji, or `:name:` for a\ncustom emoji of the workspace. A repeat changes nothing.",
+        "operationId": "put_comment_reaction",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "comment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "emoji",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommentRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "crate::task_routes"
+        ],
+        "summary": "Removes the caller's reaction from a comment. A repeat changes nothing.",
+        "operationId": "delete_comment_reaction",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "comment_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "emoji",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommentRecord"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/github-links": {
       "get": {
         "tags": [
@@ -29283,6 +29981,251 @@
           },
           "409": {
             "description": "contract_mismatch, task_conflict, conflict, restore_conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/subscribers": {
+      "get": {
+        "tags": [
+          "crate::task_routes"
+        ],
+        "operationId": "list_task_subscribers",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskSubscribers"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/subscription": {
+      "put": {
+        "tags": [
+          "crate::task_routes"
+        ],
+        "summary": "Subscribes the caller to the task, or unsubscribes them.",
+        "operationId": "put_task_subscription",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskSubscriptionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskSubscribers"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -33446,12 +34389,6 @@
           "body": {
             "type": "string"
           },
-          "mentioned_user_ids": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
           "parent_id": {
             "type": [
               "string",
@@ -33460,6 +34397,37 @@
           }
         },
         "additionalProperties": false
+      },
+      "CommentReaction": {
+        "type": "object",
+        "description": "One emoji on a comment.",
+        "required": [
+          "emoji",
+          "count",
+          "reacted",
+          "user_ids"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "emoji": {
+            "type": "string",
+            "description": "A Unicode emoji, or `:name:` for a custom emoji of the workspace."
+          },
+          "reacted": {
+            "type": "boolean",
+            "description": "The caller is one of them."
+          },
+          "user_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Who reacted, the first person first."
+          }
+        }
       },
       "CommentRecord": {
         "type": "object",
@@ -33472,6 +34440,7 @@
           "can_edit",
           "can_delete",
           "version",
+          "reactions",
           "created_at",
           "updated_at"
         ],
@@ -33502,6 +34471,13 @@
               "string",
               "null"
             ]
+          },
+          "reactions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CommentReaction"
+            },
+            "description": "The emoji reactions, in the order the emoji were first used."
           },
           "task_id": {
             "type": "string"
@@ -34333,20 +35309,49 @@
           "title",
           "url",
           "state",
+          "repository",
+          "number",
           "source"
         ],
         "properties": {
+          "branch": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The rest is set for a linked pull request (`source` is false): its branch, whether it\ncloses the task, and whether its author can change the task status."
+          },
+          "closes": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
           "kind": {
+            "type": "string"
+          },
+          "number": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "repository": {
             "type": "string"
           },
           "source": {
             "type": "boolean"
           },
           "state": {
-            "type": "string"
+            "type": "string",
+            "description": "A source link (the task is the issue or pull request): `active`, `paused`, or for a pull\nrequest `open`, `closed`, `merged`. A linked pull request: `draft`, `open`,\n`in_review`, `merged`, `closed`."
           },
           "title": {
             "type": "string"
+          },
+          "trusted": {
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
           "url": {
             "type": "string"
@@ -35361,40 +36366,51 @@
           "related"
         ]
       },
-      "NotificationPrefs": {
+      "NotificationPatchBody": {
         "type": "object",
-        "description": "Which events notify the user. They are all on until the user turns one off.",
-        "required": [
-          "direct_messages",
-          "chat_mentions",
-          "thread_replies",
-          "channel_messages",
-          "task_assigned",
-          "mentions"
-        ],
         "properties": {
-          "channel_messages": {
-            "type": "boolean",
-            "description": "Every message of a channel whose notify level is \"all\"."
+          "archived": {
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
-          "chat_mentions": {
-            "type": "boolean"
+          "read": {
+            "type": [
+              "boolean",
+              "null"
+            ]
           },
-          "direct_messages": {
-            "type": "boolean"
-          },
-          "mentions": {
-            "type": "boolean",
-            "description": "Mentions in task comments, pages and page comments."
-          },
-          "task_assigned": {
-            "type": "boolean"
-          },
-          "thread_replies": {
-            "type": "boolean"
+          "snoozed_until": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "A time in the future hides the notification from the inbox until then; `null` ends\nthe snooze."
           }
         },
         "additionalProperties": false
+      },
+      "NotificationPreference": {
+        "type": "object",
+        "description": "One category of events and whether it notifies the user. They are all on until the user\nturns one off.",
+        "required": [
+          "category",
+          "label",
+          "enabled"
+        ],
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
       },
       "NotificationRecord": {
         "type": "object",
@@ -35402,13 +36418,23 @@
           "id",
           "workspace_id",
           "recipient_user_id",
-          "actor_user_id",
           "kind",
           "created_at"
         ],
         "properties": {
           "actor_user_id": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who caused the latest event; absent when GitHub did."
+          },
+          "archived_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
           },
           "chat_conversation_id": {
             "type": [
@@ -35428,18 +36454,19 @@
               "string",
               "null"
             ],
-            "description": "The task comment of a `comment_mentioned` notification."
+            "description": "The task comment of a `comment_mentioned` or `task_commented` notification."
           },
           "created_at": {
             "type": "string",
-            "format": "date-time"
+            "format": "date-time",
+            "description": "The time of the latest event."
           },
           "id": {
             "type": "string"
           },
           "kind": {
             "type": "string",
-            "description": "`task_assigned`, `comment_mentioned` (task comment), `page_comment_mentioned`,\n`page_mentioned` (an @mention in a page body) or `chat_mentioned` (a chat message)."
+            "description": "`task_assigned`, `comment_mentioned` (task comment), `task_commented`,\n`task_status_changed`, `task_blocked`, `task_unblocked`, `page_comment_mentioned`,\n`page_mentioned` (an @mention in a page body) or `chat_mentioned` (a chat message).\nA task has one notification for each recipient: this is its latest event."
           },
           "page_block_id": {
             "type": [
@@ -35477,12 +36504,33 @@
           "recipient_user_id": {
             "type": "string"
           },
+          "snoozed_until": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Hidden from the inbox until this time."
+          },
           "task_id": {
             "type": [
               "string",
               "null"
             ],
             "description": "Set for task notifications."
+          },
+          "task_identifier": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The identifier (`ENG-12`) and the title of the task."
+          },
+          "task_title": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "workspace_id": {
             "type": "string"
@@ -36896,6 +37944,7 @@
                 "can_edit",
                 "can_delete",
                 "version",
+                "reactions",
                 "created_at",
                 "updated_at"
               ],
@@ -36926,6 +37975,13 @@
                     "string",
                     "null"
                   ]
+                },
+                "reactions": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CommentReaction"
+                  },
+                  "description": "The emoji reactions, in the order the emoji were first used."
                 },
                 "task_id": {
                   "type": "string"
@@ -37156,13 +38212,23 @@
                 "id",
                 "workspace_id",
                 "recipient_user_id",
-                "actor_user_id",
                 "kind",
                 "created_at"
               ],
               "properties": {
                 "actor_user_id": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Who caused the latest event; absent when GitHub did."
+                },
+                "archived_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time"
                 },
                 "chat_conversation_id": {
                   "type": [
@@ -37182,18 +38248,19 @@
                     "string",
                     "null"
                   ],
-                  "description": "The task comment of a `comment_mentioned` notification."
+                  "description": "The task comment of a `comment_mentioned` or `task_commented` notification."
                 },
                 "created_at": {
                   "type": "string",
-                  "format": "date-time"
+                  "format": "date-time",
+                  "description": "The time of the latest event."
                 },
                 "id": {
                   "type": "string"
                 },
                 "kind": {
                   "type": "string",
-                  "description": "`task_assigned`, `comment_mentioned` (task comment), `page_comment_mentioned`,\n`page_mentioned` (an @mention in a page body) or `chat_mentioned` (a chat message)."
+                  "description": "`task_assigned`, `comment_mentioned` (task comment), `task_commented`,\n`task_status_changed`, `task_blocked`, `task_unblocked`, `page_comment_mentioned`,\n`page_mentioned` (an @mention in a page body) or `chat_mentioned` (a chat message).\nA task has one notification for each recipient: this is its latest event."
                 },
                 "page_block_id": {
                   "type": [
@@ -37231,12 +38298,33 @@
                 "recipient_user_id": {
                   "type": "string"
                 },
+                "snoozed_until": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "format": "date-time",
+                  "description": "Hidden from the inbox until this time."
+                },
                 "task_id": {
                   "type": [
                     "string",
                     "null"
                   ],
                   "description": "Set for task notifications."
+                },
+                "task_identifier": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "The identifier (`ENG-12`) and the title of the task."
+                },
+                "task_title": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "workspace_id": {
                   "type": "string"
@@ -37674,6 +38762,39 @@
           "comments.moderate",
           "chat.manage"
         ]
+      },
+      "PrAutomationMode": {
+        "type": "string",
+        "description": "How a project answers one pull request event.",
+        "enum": [
+          "default",
+          "none",
+          "status"
+        ]
+      },
+      "PrAutomationRule": {
+        "type": "object",
+        "description": "The rule of a project for one pull request event (`draft`, `open`, `review`, `merged`).",
+        "required": [
+          "event",
+          "mode"
+        ],
+        "properties": {
+          "event": {
+            "type": "string"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/PrAutomationMode"
+          },
+          "status_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Set when `mode` is `status`: a status of the project."
+          }
+        },
+        "additionalProperties": false
       },
       "Presence": {
         "type": "string",
@@ -39579,6 +40700,33 @@
           "related",
           "duplicate"
         ]
+      },
+      "TaskSubscribers": {
+        "type": "object",
+        "required": [
+          "user_ids"
+        ],
+        "properties": {
+          "user_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The persons who get the later events of the task."
+          }
+        }
+      },
+      "TaskSubscriptionBody": {
+        "type": "object",
+        "required": [
+          "subscribed"
+        ],
+        "properties": {
+          "subscribed": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
       },
       "TaskUpdateBody": {
         "type": "object",

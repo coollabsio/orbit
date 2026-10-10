@@ -38,7 +38,7 @@ import { useAvailableCommands, useBindings, useRunCommand } from '@/shortcuts/us
 import { chatEnabled, docsHidden } from './productNavigation'
 import { taskPath } from '@/lib/taskLinks'
 
-const COMMAND_ICON: Record<Group, LucideIcon> = { General: Settings, Navigation: Home, List: SquareCheck, Task: SquareCheck, Docs: FileText, Chat: MessageSquare }
+const COMMAND_ICON: Record<Group, LucideIcon> = { General: Settings, Navigation: Home, List: SquareCheck, Task: SquareCheck, Inbox: Bell, Docs: FileText, Chat: MessageSquare }
 
 interface CommandEntry {
   id: string

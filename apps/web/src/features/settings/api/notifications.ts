@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
 import { deletePushSubscription, getNotificationPreferences, listPushSubscriptions, putNotificationPreferences, sendTestPush } from '@/api/generated/sdk.gen'
-import type { NotificationPrefs, PushSubscriptionRecord } from '@/api/generated/types.gen'
+import type { NotificationPreference, PushSubscriptionRecord } from '@/api/generated/types.gen'
 import { currentSubscription, disablePush, enablePush } from '@/features/realtime/push'
 
 /** The browsers the user gets notifications on. */
@@ -64,16 +64,18 @@ export function useNotificationPreferences() {
   })
 }
 
-/** Saves the whole set. The switch moves at once and goes back if the server refuses. */
-export function useSaveNotificationPreferences() {
+/** Turns one category on or off. The switch moves at once and goes back if the server refuses. */
+export function useSaveNotificationPreference() {
   const queryClient = useQueryClient()
   const key = queryKeys.notificationPreferences
   return useMutation({
-    mutationFn: async (body: NotificationPrefs) => (await putNotificationPreferences({ client: apiClient, body, throwOnError: true })).data,
-    onMutate: async (body) => {
+    mutationFn: async ({ category, enabled }: { category: string; enabled: boolean }) =>
+      (await putNotificationPreferences({ client: apiClient, body: { [category]: enabled }, throwOnError: true })).data,
+    onMutate: async ({ category, enabled }) => {
       await queryClient.cancelQueries({ queryKey: key })
-      const previous = queryClient.getQueryData<NotificationPrefs>(key)
-      queryClient.setQueryData(key, body)
+      const previous = queryClient.getQueryData<NotificationPreference[]>(key)
+      queryClient.setQueryData<NotificationPreference[]>(key, (current) =>
+        current?.map((preference) => (preference.category === category ? { ...preference, enabled } : preference)))
       return { previous }
     },
     onError: (_error, _body, context) => {

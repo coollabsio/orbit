@@ -133,6 +133,8 @@ async function createTaskWithAttachment(page: Page) {
   await page.getByRole('button', { name: 'In Progress' }).click()
   await expect(status).toContainText('In Progress')
 
+  // the composer opens as the rich editor; the plain field has the placeholder
+  await page.getByRole('button', { name: 'Markdown' }).first().click()
   const composer = page.getByPlaceholder('Leave a comment…').locator('..')
   await page.getByPlaceholder('Leave a comment…').fill('Persisted comment')
   await composer.getByRole('button', { name: 'Send' }).click()
