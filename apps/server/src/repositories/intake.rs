@@ -845,7 +845,10 @@ impl TaskRepository {
             match self.run_one_recurring_task(parse_id(id)?, now).await {
                 Ok(true) => run.created += 1,
                 Ok(false) => {}
-                Err(_) => run.failed += 1,
+                Err(error) => {
+                    tracing::warn!(?error, "a recurring task was not created");
+                    run.failed += 1;
+                }
             }
         }
         Ok(run)
@@ -898,6 +901,28 @@ impl TaskRepository {
         let Some(row) = row else { return Ok(false) };
         let created_by: Option<String> = row.get("created_by");
         let routine = recurring_from_row(row)?;
+        // After completion: the last task was opened again since the run time was set, so the
+        // routine waits for it to close again.
+        if matches!(
+            RecurringMode::parse(&routine.mode)?,
+            RecurringMode::AfterCompletion
+        ) {
+            let reopened: bool = sqlx::query_scalar(
+                "SELECT EXISTS (SELECT 1 FROM recurring_tasks JOIN tasks ON tasks.id = recurring_tasks.last_task_id \
+                 WHERE recurring_tasks.id = ? AND tasks.deleted_at IS NULL AND tasks.completed_at IS NULL)",
+            )
+            .bind(recurring_id.to_string())
+            .fetch_one(&mut *tx)
+            .await?;
+            if reopened {
+                sqlx::query("UPDATE recurring_tasks SET next_run_at = NULL WHERE id = ?")
+                    .bind(recurring_id.to_string())
+                    .execute(&mut *tx)
+                    .await?;
+                tx.commit().await?;
+                return Ok(false);
+            }
+        }
         // The task is attributed to the member who made the routine while that person is still an
         // active member, else to the workspace owner; the creator shown is the service account.
         let actor: Option<String> = sqlx::query_scalar(

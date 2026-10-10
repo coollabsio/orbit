@@ -132,6 +132,10 @@ const TASK_EVENTS: Record<string, string> = {
 export function notificationCopy(notification: NotificationRecord, pageTitle?: string, actorName?: string): { title: string; body: string } {
   if (notification.task_id) {
     const title = notification.task_title?.trim() || 'Untitled'
+    // a task from an integration (GitHub, Discord) has no person as actor
+    if (notification.kind === 'task_triage_new' && !actorName && !notification.actor_user_id) {
+      return { title: notification.task_identifier ? `${notification.task_identifier} ${title}` : title, body: 'New in triage' }
+    }
     return {
       title: notification.task_identifier ? `${notification.task_identifier} ${title}` : title,
       // a kind of a newer server

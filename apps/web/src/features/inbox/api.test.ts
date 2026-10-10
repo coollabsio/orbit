@@ -70,5 +70,5 @@ test('a milestone update opens the milestone page, and a new triage task opens t
   expect(notificationTarget({ ...base, kind: 'milestone_update_posted' })).toBeNull()
   const triage = { ...base, kind: 'task_triage_new', actor_user_id: null, task_id: 't1', task_identifier: 'ORB-7', task_title: 'Crash' }
   expect(notificationTarget(triage)).toBe('/tasks/triage')
-  expect(notificationCopy(triage)).toEqual({ title: 'ORB-7 Crash', body: 'GitHub · new in triage' })
+  expect(notificationCopy(triage)).toEqual({ title: 'ORB-7 Crash', body: 'New in triage' })
 })

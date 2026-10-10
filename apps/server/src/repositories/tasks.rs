@@ -3488,6 +3488,8 @@ async fn matching_status_in_tx(
         "SELECT target.id FROM task_statuses AS target \
          LEFT JOIN task_statuses AS source ON source.id = ? AND source.workspace_id = target.workspace_id \
          WHERE target.workspace_id = ? AND target.project_id = ? AND target.category <> 'duplicate' \
+         AND (target.category <> 'triage' OR EXISTS (SELECT 1 FROM projects \
+              WHERE projects.id = target.project_id AND projects.triage_enabled = 1)) \
          ORDER BY (target.category = source.category AND LOWER(target.name) = LOWER(source.name)) DESC, \
          (target.category = source.category) DESC, (target.category = 'unstarted') DESC, \
          (target.category <> 'triage') DESC, \

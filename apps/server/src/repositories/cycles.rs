@@ -198,7 +198,7 @@ const SETTINGS_COLUMNS: &str = "project_id, enabled, weeks, start_weekday, coold
      cycles_ahead, timezone, auto_add_started, auto_add_completed, active_without_cycle, version";
 
 /// The totals of every cycle, joined as `totals`. Scope: live tasks with no live sub-issue,
-/// without cancelled and duplicate ones.
+/// without cancelled and duplicate ones and tasks that wait in triage.
 const TOTALS: &str = "SELECT tasks.cycle_id AS cycle_id, COUNT(*) AS scope_count, \
      COALESCE(SUM(tasks.estimate), 0) AS scope_points, \
      COALESCE(SUM(task_statuses.category = 'started'), 0) AS started_count, \
@@ -208,7 +208,7 @@ const TOTALS: &str = "SELECT tasks.cycle_id AS cycle_id, COUNT(*) AS scope_count
      COALESCE(SUM(tasks.estimate IS NULL), 0) AS unestimated_count \
      FROM tasks JOIN task_statuses ON task_statuses.id = tasks.status_id \
      WHERE tasks.cycle_id IS NOT NULL AND tasks.deleted_at IS NULL \
-     AND task_statuses.category NOT IN ('cancelled', 'duplicate') \
+     AND task_statuses.category NOT IN ('cancelled', 'duplicate', 'triage') \
      AND NOT EXISTS (SELECT 1 FROM tasks AS child \
                      WHERE child.parent_task_id = tasks.id AND child.deleted_at IS NULL) \
      GROUP BY tasks.cycle_id";
@@ -680,7 +680,10 @@ impl TaskRepository {
                     run.created += step.created;
                     run.closed += step.closed;
                 }
-                Err(_) => run.failed += 1,
+                Err(error) => {
+                    tracing::warn!(?error, "the cycle job failed for a project");
+                    run.failed += 1;
+                }
             }
         }
         Ok(run)
@@ -850,31 +853,71 @@ async fn advance_in_tx(
         "cycle" => {
             if let Some(cycle_id) = current_or(tx, settings.project_id, now, Fallback::Next).await?
             {
-                sqlx::query(
-                    "UPDATE tasks SET cycle_id = ?1 WHERE project_id = ?2 AND cycle_id IS NULL \
+                let moved = sqlx::query(
+                    "UPDATE tasks SET cycle_id = ?1, version = version + 1, updated_at = ?3 \
+                     WHERE project_id = ?2 AND cycle_id IS NULL \
                      AND deleted_at IS NULL AND status_id IN \
                      (SELECT id FROM task_statuses WHERE project_id = ?2 AND category = 'unstarted')",
                 )
                 .bind(cycle_id)
                 .bind(&project)
+                .bind(now.as_millis())
                 .execute(&mut **tx)
-                .await?;
+                .await?
+                .rows_affected();
+                record_sweep(tx, workspace_id, settings.project_id, moved, now).await?;
             }
         }
         "backlog" => {
-            sqlx::query(
+            let moved = sqlx::query(
                 "UPDATE tasks SET status_id = (SELECT id FROM task_statuses WHERE project_id = ?1 \
-                 AND category = 'backlog' ORDER BY position, id LIMIT 1) \
+                 AND category = 'backlog' ORDER BY position, id LIMIT 1), \
+                 version = version + 1, updated_at = ?2 \
                  WHERE project_id = ?1 AND cycle_id IS NULL AND deleted_at IS NULL AND status_id IN \
                  (SELECT id FROM task_statuses WHERE project_id = ?1 AND category = 'unstarted') \
                  AND EXISTS (SELECT 1 FROM task_statuses WHERE project_id = ?1 AND category = 'backlog')",
             )
             .bind(&project)
+            .bind(now.as_millis())
             .execute(&mut **tx)
-            .await?;
+            .await?
+            .rows_affected();
+            record_sweep(tx, workspace_id, settings.project_id, moved, now).await?;
         }
         _ => {}
     }
+    Ok(())
+}
+
+/// One audit row for a sweep that changed tasks, so open clients read them again.
+async fn record_sweep(
+    tx: &mut Transaction<'_, Sqlite>,
+    workspace_id: Id,
+    project_id: Id,
+    tasks: u64,
+    now: TimestampMillis,
+) -> Result<(), TaskError> {
+    if tasks == 0 {
+        return Ok(());
+    }
+    let account = service_account_in_tx(tx, workspace_id, now).await?;
+    audit::record(
+        tx,
+        workspace_id,
+        None,
+        "cycle.tasks_without_cycle_moved",
+        AuditOutcome::Success,
+        "project",
+        Some(project_id),
+        &format!("cycles:{project_id}"),
+        json!({
+            "tasks": tasks,
+            "actor_service_account_id": account,
+            "actor_service_account_name": CYCLES_ACCOUNT,
+        }),
+        now,
+    )
+    .await?;
     Ok(())
 }
 
@@ -890,15 +933,16 @@ async fn ensure_ahead_in_tx(
 ) -> Result<(), TaskError> {
     let project = settings.project_id.to_string();
     for _ in 0..MAX_STEPS {
-        let last: Option<(i64, i64)> = sqlx::query_as(
-            "SELECT ends_at, number FROM cycles WHERE project_id = ? ORDER BY starts_at DESC LIMIT 1",
+        let last: Option<(i64, Option<i64>)> = sqlx::query_as(
+            "SELECT ends_at, completed_at FROM cycles WHERE project_id = ? ORDER BY starts_at DESC LIMIT 1",
         )
         .bind(&project)
         .fetch_optional(&mut **tx)
         .await?;
-        let start = match last {
-            None => latest_weekday(local_date(zone, now)?, settings.start_weekday)?,
-            Some((ends_at, _)) => {
+        let recent = || latest_weekday(local_date(zone, now)?, settings.start_weekday);
+        let (start, not_before) = match last {
+            None => (recent()?, None),
+            Some((ends_at, completed_at)) => {
                 let future: i64 = sqlx::query_scalar(
                     "SELECT COUNT(*) FROM cycles WHERE project_id = ? AND starts_at > ?",
                 )
@@ -909,13 +953,25 @@ async fn ensure_ahead_in_tx(
                 if future >= settings.cycles_ahead {
                     return Ok(());
                 }
-                add_days(
+                let start = add_days(
                     local_date(zone, TimestampMillis::from_millis(ends_at))?,
                     settings.cooldown_weeks * 7,
-                )?
+                )?;
+                // Cycles were off for longer than a cycle: do not fill the time between with
+                // cycles that are over before they exist.
+                if completed_at.is_some() && bounds(zone, start, settings.weeks)?.1 <= now {
+                    (recent()?, Some(ends_at))
+                } else {
+                    (start, Some(ends_at))
+                }
             }
         };
         let (starts_at, ends_at) = bounds(zone, start, settings.weeks)?;
+        // A cycle that was started or ended by hand ends in the middle of a day: the next one
+        // starts at that moment, not before it, so two cycles are never current together.
+        let starts_at = not_before.map_or(starts_at, |end| {
+            TimestampMillis::from_millis(starts_at.as_millis().max(end))
+        });
         let number: i64 = sqlx::query_scalar(
             "SELECT COALESCE(MAX(number), 0) + 1 FROM cycles WHERE project_id = ?",
         )
@@ -971,10 +1027,11 @@ async fn close_in_tx(
     .await?;
     let next: Option<String> = if roll {
         sqlx::query_scalar(
-            "SELECT id FROM cycles WHERE project_id = ? AND completed_at IS NULL AND starts_at >= ? \
-             ORDER BY starts_at LIMIT 1",
+            "SELECT id FROM cycles WHERE project_id = ? AND completed_at IS NULL AND id <> ? \
+             AND ends_at > ? ORDER BY starts_at LIMIT 1",
         )
         .bind(&project_id)
+        .bind(cycle_id)
         .bind(ends_at)
         .fetch_optional(&mut **tx)
         .await?

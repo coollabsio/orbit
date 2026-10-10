@@ -885,6 +885,13 @@ async fn manual_cycle_actions_and_turning_cycles_off() {
         ids[1].as_str()
     );
     assert_eq!(after[2]["starts_at"], started["ends_at"]);
+    // A cycle that is created after the moved ones does not start before they end.
+    for pair in after.windows(2) {
+        assert!(
+            millis(&pair[1]["starts_at"]) >= millis(&pair[0]["ends_at"]),
+            "{after:?}"
+        );
+    }
     // A completed cycle does not change.
     let version = after[0]["version"].as_u64().unwrap();
     let (status, _) = fixture

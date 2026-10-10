@@ -574,10 +574,11 @@ async fn apply_pull_state_in_tx(
     let Some(task) = task else {
         return Ok(());
     };
-    // A late pull request must not reopen finished work.
+    // A late pull request must not reopen finished work, and a task that waits in triage is
+    // accepted by a person, not by a pull request.
     if matches!(
         task.get::<String, _>("category").as_str(),
-        "completed" | "cancelled" | "duplicate"
+        "completed" | "cancelled" | "duplicate" | "triage"
     ) {
         return Ok(());
     }
@@ -650,6 +651,7 @@ async fn apply_pull_state_in_tx(
         github.now,
     )
     .await?;
+    let target_id = parse_id(target)?;
     task_notifications::status_changed_in_tx(
         tx,
         TaskEvent {
@@ -659,10 +661,12 @@ async fn apply_pull_state_in_tx(
             now: github.now,
         },
         parse_id(current)?,
-        parse_id(target)?,
+        target_id,
         &[],
     )
     .await?;
+    super::cycles::apply_options_in_tx(tx, task_id, parse_id(project_id)?, target_id, github.now)
+        .await?;
     let after = sub_issues::snapshot_in_tx(tx, task_id).await?;
     if let (Some(before), Some(after)) = (before, after) {
         let actor = sub_issues::AutomationActor {

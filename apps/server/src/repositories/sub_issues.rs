@@ -503,6 +503,11 @@ async fn close_in_tx(
     .bind(task_id.to_string())
     .execute(&mut **tx)
     .await?;
+    let project_id: String = sqlx::query_scalar("SELECT project_id FROM tasks WHERE id = ?")
+        .bind(task_id.to_string())
+        .fetch_one(&mut **tx)
+        .await?;
+    super::cycles::apply_options_in_tx(tx, task_id, parse_id(project_id)?, to, actor.now).await?;
     // The source's project lets the activity feed build its identifier (ORB-91C0).
     let source_project_id: String = sqlx::query_scalar("SELECT project_id FROM tasks WHERE id = ?")
         .bind(source_id.to_string())
