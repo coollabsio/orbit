@@ -1051,9 +1051,11 @@ async fn favorites_are_per_user_and_limited_to_visible_views() {
         set_favorite(&fixture, &member, &private, true).await,
         StatusCode::NOT_FOUND
     );
+    // Removal needs no visible item (a favorite of a trashed task must be removable); it finds
+    // no row here and tells nothing about the view.
     assert_eq!(
         set_favorite(&fixture, &member, &private, false).await,
-        StatusCode::NOT_FOUND
+        StatusCode::NO_CONTENT
     );
     assert_eq!(
         set_favorite(&fixture, &member, &Id::new_v7().to_string(), true).await,

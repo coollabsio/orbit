@@ -148,7 +148,8 @@ impl FavoriteRepository {
             .bind(actor_id.to_string())
             .fetch_one(&mut *tx)
             .await?;
-        if found != 1 {
+        // A favorite of an item that is gone or hidden can still be removed.
+        if favorite && found != 1 {
             return Err(TaskError::NotFound);
         }
         let changed = if favorite {

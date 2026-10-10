@@ -7381,6 +7381,27 @@ async fn closed_trees_are_archived_together_hidden_by_default_and_restored() {
         queried_titles(&fixture, json!({})).await,
         ["Child", "Closed child", "Open parent", "Parent"]
     );
+
+    // An open task that gets an archived parent restores the tree of that parent.
+    let (_, read) = call(
+        &fixture,
+        "GET",
+        &format!("{base}/tasks/{open_parent}"),
+        None,
+    )
+    .await;
+    let (status, moved) = call(
+        &fixture,
+        "PATCH",
+        &format!("{base}/tasks/{open_parent}"),
+        Some(json!({"expected_version": read["version"], "parent_task_id": lone})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{moved}");
+    assert_eq!(
+        queried_titles(&fixture, json!({"archived": "only"})).await,
+        Vec::<String>::new()
+    );
 }
 
 #[tokio::test]

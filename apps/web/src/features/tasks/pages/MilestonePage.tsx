@@ -310,6 +310,8 @@ function MilestoneTasks({ milestone, project, members }: { milestone: Milestone;
     order_by: 'created',
     order_direction: 'desc',
     show_completed: 'all',
+    // the progress above counts archived tasks, so the list shows them
+    archived: 'include',
   }
   const tasks = useQuery(taskQueryOptions(workspace.id, body)).data?.items ?? []
 

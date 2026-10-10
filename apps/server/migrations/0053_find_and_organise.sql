@@ -58,9 +58,10 @@ BEGIN
     WHERE rowid = (SELECT id FROM task_search_rows WHERE task_id = NEW.id);
 END;
 
--- Fires for direct deletes (trash purge) and for the project/workspace cascades alike.
+-- Fires for direct deletes (trash purge) and for the project/workspace cascades alike. BEFORE the
+-- delete, so the cascade that deletes the comments of the task finds no row to rebuild.
 CREATE TRIGGER task_search_delete
-AFTER DELETE ON tasks
+BEFORE DELETE ON tasks
 BEGIN
     DELETE FROM task_search
     WHERE rowid = (SELECT id FROM task_search_rows WHERE task_id = OLD.id);
@@ -214,4 +215,44 @@ BEGIN
     UPDATE tasks
     SET archived_at = NULL, archived_root_id = NULL, version = version + 1
     WHERE archived_root_id = NEW.archived_root_id OR id = NEW.id;
+END;
+
+-- The tree rule holds after the archive too: an open task that joins an archived tree (a new
+-- sub-issue, or a task that gets an archived parent) restores that tree, and an archived task that
+-- gets a different parent restores the tree it was archived with.
+CREATE TRIGGER tasks_unarchive_on_open_child_insert
+AFTER INSERT ON tasks
+WHEN NEW.parent_task_id IS NOT NULL
+ AND EXISTS (SELECT 1 FROM tasks AS parent WHERE parent.id = NEW.parent_task_id AND parent.archived_at IS NOT NULL)
+ AND EXISTS (
+    SELECT 1 FROM task_statuses
+    WHERE task_statuses.id = NEW.status_id
+      AND task_statuses.category NOT IN ('completed', 'cancelled', 'duplicate')
+)
+BEGIN
+    UPDATE tasks
+    SET archived_at = NULL, archived_root_id = NULL, version = version + 1
+    WHERE id = NEW.parent_task_id
+       OR archived_root_id = (SELECT archived_root_id FROM tasks WHERE id = NEW.parent_task_id);
+END;
+
+CREATE TRIGGER tasks_unarchive_on_parent_change
+AFTER UPDATE OF parent_task_id ON tasks
+WHEN NEW.parent_task_id IS NOT OLD.parent_task_id AND (
+    NEW.archived_at IS NOT NULL
+    OR (
+        EXISTS (SELECT 1 FROM tasks AS parent WHERE parent.id = NEW.parent_task_id AND parent.archived_at IS NOT NULL)
+        AND EXISTS (
+            SELECT 1 FROM task_statuses
+            WHERE task_statuses.id = NEW.status_id
+              AND task_statuses.category NOT IN ('completed', 'cancelled', 'duplicate')
+        )
+    )
+)
+BEGIN
+    UPDATE tasks
+    SET archived_at = NULL, archived_root_id = NULL, version = version + 1
+    WHERE (NEW.archived_at IS NOT NULL AND (archived_root_id = NEW.archived_root_id OR id = NEW.id))
+       OR id = NEW.parent_task_id
+       OR archived_root_id = (SELECT archived_root_id FROM tasks WHERE id = NEW.parent_task_id AND archived_at IS NOT NULL);
 END;

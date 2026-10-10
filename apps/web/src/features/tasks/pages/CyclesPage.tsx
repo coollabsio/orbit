@@ -235,6 +235,8 @@ function CycleTasks({ cycle, project }: { cycle: Cycle; project: Project }) {
     order_by: 'manual',
     order_direction: 'asc',
     show_completed: 'all',
+    // the totals above count archived tasks, so the list shows them
+    archived: 'include',
   }
   const records = useQuery(taskQueryOptions(workspace.id, body)).data?.items ?? []
   if (records.length === 0) return <p className="text-[13px] text-muted-foreground">No task is in this cycle.</p>

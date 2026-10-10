@@ -1210,6 +1210,21 @@ impl TaskRepository {
             .execute(&mut *tx)
             .await?;
         }
+        // The archive trigger sees status_id changes only too: a status that turns open shows its
+        // archived tasks again, with their trees.
+        let closed = |category: &str| matches!(category, "completed" | "cancelled" | "duplicate");
+        if closed(&current.category) && !closed(&category) {
+            sqlx::query(
+                "UPDATE tasks SET archived_at = NULL, archived_root_id = NULL, version = version + 1 \
+                 WHERE workspace_id = ?1 AND archived_at IS NOT NULL AND (status_id = ?2 \
+                 OR archived_root_id IN (SELECT archived_root_id FROM tasks \
+                    WHERE status_id = ?2 AND archived_at IS NOT NULL))",
+            )
+            .bind(workspace_id.to_string())
+            .bind(status_id.to_string())
+            .execute(&mut *tx)
+            .await?;
+        }
         record_mutation(
             &mut tx,
             workspace_id,

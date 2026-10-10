@@ -968,8 +968,9 @@ const SEARCH_MAX_TERMS: usize = 16;
 pub fn fts_match(input: &str) -> Option<String> {
     let terms = input
         .split_whitespace()
-        // `"` separates tokens anyway; inside the quoted string it would end it.
-        .map(|term| term.replace('"', " "))
+        // `"` separates tokens anyway; inside the quoted string it would end it. A control
+        // character (NUL) would cut the expression short.
+        .map(|term| term.replace(|c: char| c == '"' || c.is_control(), " "))
         .filter(|term| term.chars().any(char::is_alphanumeric))
         .take(SEARCH_MAX_TERMS)
         .map(|term| format!("\"{term}\"*"))
