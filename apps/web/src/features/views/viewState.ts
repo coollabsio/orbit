@@ -10,13 +10,13 @@ export type DateValue = { absolute: string } | { relative: 'today' | 'start_of_w
 export type Condition = { field: FilterField; operator: FilterOperator; value?: unknown }
 export type FilterGroup = { op: GroupOp; children: FilterNode[] }
 export type FilterNode = FilterGroup | Condition
-export type Layout = 'list' | 'board' | 'timeline'
-export type GroupBy = 'status' | 'assignee' | 'priority' | 'project' | 'label' | 'milestone' | 'cycle' | 'none'
+export type Layout = 'list' | 'board' | 'timeline' | 'calendar'
+export type GroupBy = 'status' | 'assignee' | 'priority' | 'project' | 'label' | 'label_group' | 'milestone' | 'cycle' | 'none'
 export type OrderBy = 'manual' | 'priority' | 'created' | 'updated' | 'title' | 'due_date' | 'estimate'
 export type TaskProperty = 'id' | 'status' | 'assignee' | 'priority' | 'project' | 'due_date' | 'labels' | 'created' | 'updated' | 'sub_issue_progress' | 'milestone' | 'cycle' | 'estimate'
 export type ShowCompleted = 'all' | 'past_week' | 'past_month' | 'none'
 export type SubIssuesMode = 'nested' | 'flat' | 'hidden'
-export type DisplayOptions = { layout: Layout; group_by: GroupBy; sub_group_by: GroupBy; order_by: OrderBy; order_direction: 'asc' | 'desc'; properties: TaskProperty[]; show_completed: ShowCompleted; show_empty_groups: boolean; sub_issues: SubIssuesMode }
+export type DisplayOptions = { layout: Layout; group_by: GroupBy; sub_group_by: GroupBy; order_by: OrderBy; order_direction: 'asc' | 'desc'; properties: TaskProperty[]; show_completed: ShowCompleted; show_empty_groups: boolean; sub_issues: SubIssuesMode; /** The label group of `group_by` / `sub_group_by` `label_group`. */ label_group_id?: string; /** The grid of the calendar layout (default month). */ calendar_mode?: 'month' | 'week'; /** The timeline draws an arrow for each "blocks" relation (default on). */ timeline_arrows?: boolean; /** Archived tasks show with the others (default off). */ show_archived?: boolean }
 export type ViewState = { filter: FilterGroup; display: DisplayOptions }
 export type TaskPreset = 'mine' | 'overdue' | 'due_soon' | 'current_week' | 'my_week'
 export type PageKey = 'all' | `project:${string}` | `preset:${TaskPreset}`
@@ -79,7 +79,13 @@ export function normalizeDisplay(display: DisplayOptions): DisplayOptions {
   const group_by: GroupBy = display.layout === 'board' && display.group_by === 'none' ? 'status' : display.group_by
   const sub_group_by: GroupBy = group_by === 'none' || display.sub_group_by === group_by ? 'none' : display.sub_group_by
   const properties = TASK_PROPERTIES.filter((property) => display.properties.includes(property))
-  return { ...display, group_by, sub_group_by, properties }
+  // the group id goes with the grouping that uses it: the server refuses one without the other
+  const { label_group_id, ...rest } = display
+  const byLabelGroup = group_by === 'label_group' || sub_group_by === 'label_group'
+  if (byLabelGroup && !label_group_id) {
+    return { ...rest, group_by: group_by === 'label_group' ? 'label' : group_by, sub_group_by: sub_group_by === 'label_group' ? 'none' : sub_group_by, properties }
+  }
+  return { ...rest, group_by, sub_group_by, properties, ...(byLabelGroup ? { label_group_id } : {}) }
 }
 
 /** Server or migrated state → a complete, normalized state (missing display keys take defaults). */
@@ -205,7 +211,7 @@ export function legacyPreferencesToViewState(prefs: unknown, layout: string | nu
   if (label) children.push({ field: 'label', operator: 'includes_any', value: [label] })
   const priority = saved?.priorityFilter
   if (typeof priority === 'string' && PRIORITIES.includes(priority)) children.push({ field: 'priority', operator: 'is', value: [priority] })
-  const nextLayout: Layout = layout === 'board' || layout === 'timeline' ? layout : 'list'
+  const nextLayout: Layout = layout === 'board' || layout === 'timeline' || layout === 'calendar' ? layout : 'list'
   const display = normalizeDisplay({ ...defaultViewState().display, layout: nextLayout, ...legacySortDisplay(saved?.sort) })
   return { filter: { op: 'and', children }, display }
 }

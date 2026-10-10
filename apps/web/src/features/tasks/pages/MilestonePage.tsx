@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Add as Plus, ArrowLeft, MoreH as Ellipsis, Signpost } from 'reicon-react'
 import type { TaskQueryBody } from '@/api/generated/types.gen'
 import { confirmAction } from '@/components/common/confirmAction'
+import { FavoriteStar } from '@/features/favorites/FavoriteStar'
 import { EmptyState } from '@/components/common/EmptyState'
 import { Pane, PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { Tip } from '@/components/common/Tip'
@@ -54,6 +55,7 @@ export function MilestonePage() {
           {project ? <Link to={back} className="truncate text-[13px] text-muted-foreground outline-none hover:underline focus-visible:underline">{project.name}</Link> : null}
           <span aria-hidden className="text-muted-foreground/50">/</span>
           <PaneTitle render={<h1 />}>{milestone?.name ?? 'Milestone'}</PaneTitle>
+          {milestone ? <FavoriteStar workspaceId={workspace.id} kind="milestone" targetId={milestone.id} /> : null}
         </PaneHeader>
         <div className="min-h-0 flex-1 overflow-y-auto">
           {milestonesQuery.isPending ? null : !milestone || !project ? (
@@ -308,6 +310,8 @@ function MilestoneTasks({ milestone, project, members }: { milestone: Milestone;
     order_by: 'created',
     order_direction: 'desc',
     show_completed: 'all',
+    // the progress above counts archived tasks, so the list shows them
+    archived: 'include',
   }
   const tasks = useQuery(taskQueryOptions(workspace.id, body)).data?.items ?? []
 

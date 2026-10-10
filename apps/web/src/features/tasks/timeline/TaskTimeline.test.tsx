@@ -46,12 +46,12 @@ const labels = [
 ]
 const context: GroupContext = { statuses, members: [], labels, projects, currentUserId: 'u1', showEmpty: false }
 
-type Extra = { onOpen?: (id: string) => void; groupBy?: GroupBy; pxPerDay?: number; properties?: TaskProperty[] }
+type Extra = { onOpen?: (id: string) => void; groupBy?: GroupBy; pxPerDay?: number; properties?: TaskProperty[]; arrows?: boolean }
 
 function timelineElement(tasks: Task[], extra: Extra = {}) {
   return (
     <TaskTimeline tasks={tasks} projects={projects} statuses={statuses} users={[]} groupBy={extra.groupBy ?? 'project'} properties={extra.properties ?? DEFAULT_DISPLAY.properties} groupContext={context}
-      pxPerDay={extra.pxPerDay ?? 10} onZoomChange={() => {}} onOpen={extra.onOpen ?? (() => {})} today={today} />
+      arrows={extra.arrows} pxPerDay={extra.pxPerDay ?? 10} onZoomChange={() => {}} onOpen={extra.onOpen ?? (() => {})} today={today} />
   )
 }
 
@@ -468,4 +468,22 @@ test('rows and bars show only the chosen display properties', () => {
   expect(none.queryByText('WEB-a')).toBeNull()
   expect(icons(none, 'Unstarted')).toBe(0)
   expect(icons(none, 'Urgent')).toBe(0)
+})
+
+test('a "blocks" relation between two bars draws one arrow, red when the plan cannot hold, and the display option turns it off', () => {
+  const tasks = [
+    task('a', { dueStartAt: local(2026, 9, 21).toISOString(), dueAt: local(2026, 9, 24, 9).toISOString(), blockingIds: ['b', 'undated', 'missing'] }),
+    // starts before the blocker ends
+    task('b', { dueStartAt: local(2026, 9, 23).toISOString(), dueAt: local(2026, 9, 25, 9).toISOString(), blockingIds: ['c'] }),
+    task('c', { dueStartAt: local(2026, 9, 28).toISOString(), dueAt: local(2026, 9, 29, 9).toISOString() }),
+    task('undated'),
+  ]
+  const view = renderTimeline(tasks)
+  const arrowKeys = () => [...view.container.querySelectorAll('[data-arrow]')].map((arrow) => [arrow.getAttribute('data-arrow'), arrow.getAttribute('data-conflict')])
+  // no arrow to a task with no bar or to a task that is not in the view
+  expect(arrowKeys()).toEqual([['a>b', 'true'], ['b>c', null]])
+  expect(view.container.querySelector('[data-timeline-arrows]')?.getAttribute('aria-hidden')).toBe('true')
+
+  view.rerender(timelineElement(tasks, { arrows: false }))
+  expect(arrowKeys()).toEqual([])
 })

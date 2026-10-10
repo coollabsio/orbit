@@ -10,6 +10,7 @@ use orbit_server::page_routes::{PageState, page_router};
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
 use orbit_server::repositories::workspaces::WorkspaceRepository;
 use orbit_server::task_routes::{TaskState, task_router};
+use orbit_server::view_routes::view_router;
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -53,9 +54,15 @@ impl Fixture {
             )
             .await
             .unwrap();
-        let app = task_router(TaskState::new(Arc::clone(&identity), CookieMode::secure())).merge(
-            page_router(PageState::new(Arc::clone(&identity), CookieMode::secure())),
-        );
+        let app = task_router(TaskState::new(Arc::clone(&identity), CookieMode::secure()))
+            .merge(page_router(PageState::new(
+                Arc::clone(&identity),
+                CookieMode::secure(),
+            )))
+            .merge(view_router(TaskState::new(
+                Arc::clone(&identity),
+                CookieMode::secure(),
+            )));
         Self {
             database,
             identity,
@@ -824,4 +831,110 @@ async fn owned_pages_are_hidden_from_docs_and_deleted_with_their_owner() {
         .unwrap();
     assert_eq!(page_exists(overview_id).await, 0);
     assert_eq!(page_exists(second_page_id).await, 0);
+}
+
+#[tokio::test]
+async fn archived_tasks_stay_in_the_project_counts_and_the_milestone_progress() {
+    let fixture = Fixture::new().await;
+    let milestone = fixture.create_milestone("v1").await;
+    let with = json!({"milestone_id": id_of(&milestone)});
+    fixture.create_task("open", "unstarted", with.clone()).await;
+    let done = fixture.create_task("done", "completed", with).await;
+
+    let (status, body) = fixture
+        .call(
+            "POST",
+            &fixture.uri("/tasks/archive"),
+            Some(json!({"task_ids": [id_of(&done)]})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["count"], 1);
+    // The archived task is out of the lists.
+    let (_, list) = fixture.call("GET", &fixture.uri("/tasks"), None).await;
+    assert_eq!(list["items"].as_array().unwrap().len(), 1);
+
+    // An archived task is finished work: the numbers do not fall.
+    let project = fixture.project().await;
+    assert_eq!(
+        project["task_counts"],
+        json!({"unstarted": 1, "completed": 1})
+    );
+    let (_, milestones) = fixture.call("GET", &fixture.uri("/milestones"), None).await;
+    assert_eq!(milestones["items"][0]["task_count"], 2);
+    assert_eq!(milestones["items"][0]["task_done_count"], 1);
+}
+
+#[tokio::test]
+async fn projects_and_milestones_are_favorites_with_title_colour_and_path() {
+    let fixture = Fixture::new().await;
+    let milestone = fixture.create_milestone("v1").await;
+    let milestone_id = id_of(&milestone).to_owned();
+    let project = fixture.project().await;
+    let set = async |method: &str, kind: &str, id: &str| {
+        fixture
+            .call(
+                method,
+                &fixture.uri(&format!("/favorites/{kind}/{id}")),
+                None,
+            )
+            .await
+            .0
+    };
+    assert_eq!(
+        set("PUT", "milestone", &milestone_id).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        set("PUT", "project", &fixture.project_id).await,
+        StatusCode::NO_CONTENT
+    );
+    // An id of a different kind is not found.
+    assert_eq!(
+        set("PUT", "project", &milestone_id).await,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(
+        set("PUT", "milestone", &fixture.project_id).await,
+        StatusCode::NOT_FOUND
+    );
+
+    let (status, list) = fixture.call("GET", &fixture.uri("/favorites"), None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(
+        list["items"],
+        json!([
+            {"kind": "milestone", "target_id": milestone_id, "title": "v1", "identifier": project["key"],
+             "color": project["color"], "icon": null, "position": 0,
+             "path": format!("/tasks/projects/{}/milestones/{milestone_id}", fixture.project_id)},
+            {"kind": "project", "target_id": fixture.project_id, "title": project["name"],
+             "identifier": project["key"], "color": project["color"], "icon": null, "position": 1,
+             "path": format!("/tasks/projects/{}", fixture.project_id)},
+        ])
+    );
+
+    // A deleted milestone takes its favorite with it; a project in the trash is not listed.
+    let (status, _) = fixture
+        .call(
+            "DELETE",
+            &fixture.project_uri(&format!(
+                "/milestones/{milestone_id}?expected_version={}",
+                milestone["version"]
+            )),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM favorites WHERE kind = 'milestone'")
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(rows, 0);
+    sqlx::query("UPDATE projects SET deleted_at = 5 WHERE id = ?")
+        .bind(&fixture.project_id)
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let (_, list) = fixture.call("GET", &fixture.uri("/favorites"), None).await;
+    assert_eq!(list["items"], json!([]));
 }

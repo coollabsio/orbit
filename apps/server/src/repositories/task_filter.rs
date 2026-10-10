@@ -37,7 +37,7 @@ const STATUS_CATEGORIES: [&str; 7] = [
 ];
 const DONE_CATEGORIES: [&str; 3] = ["completed", "cancelled", "duplicate"];
 const PRIORITIES: [&str; 5] = ["none", "low", "medium", "high", "urgent"];
-const DISPLAY_KEYS: [&str; 9] = [
+const DISPLAY_KEYS: [&str; 13] = [
     "layout",
     "group_by",
     "sub_group_by",
@@ -47,6 +47,10 @@ const DISPLAY_KEYS: [&str; 9] = [
     "show_completed",
     "show_empty_groups",
     "sub_issues",
+    "label_group_id",
+    "calendar_mode",
+    "timeline_arrows",
+    "show_archived",
 ];
 
 /// Filter and display options shared by saved views and per-page preferences.
@@ -144,6 +148,23 @@ pub struct DisplayOptions {
     /// Optional in stored and received states (default `nested`).
     #[serde(default)]
     pub sub_issues: SubIssuesDisplay,
+    /// The label group of `group_by` or `sub_group_by` `label_group`; required with it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(required = false)]
+    pub label_group_id: Option<String>,
+    /// The grid of the calendar layout (default `month`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(required = false)]
+    pub calendar_mode: Option<CalendarMode>,
+    /// Whether the timeline draws an arrow for each "blocks" relation (default on).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(required = false)]
+    pub timeline_arrows: Option<bool>,
+    /// Whether the view lists archived tasks with the others (default off). The client sends
+    /// `archived: include` with the task query.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(required = false)]
+    pub show_archived: Option<bool>,
 }
 
 impl Default for DisplayOptions {
@@ -167,6 +188,10 @@ impl Default for DisplayOptions {
             show_completed: ShowCompleted::All,
             show_empty_groups: false,
             sub_issues: SubIssuesDisplay::Nested,
+            label_group_id: None,
+            calendar_mode: None,
+            timeline_arrows: None,
+            show_archived: None,
         }
     }
 }
@@ -177,6 +202,15 @@ pub enum Layout {
     List,
     Board,
     Timeline,
+    /// Month and week grids by due date.
+    Calendar,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CalendarMode {
+    Month,
+    Week,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
@@ -187,6 +221,8 @@ pub enum GroupBy {
     Priority,
     Project,
     Label,
+    /// One column for each label of the group `label_group_id`, and one for no label of it.
+    LabelGroup,
     Milestone,
     Cycle,
     None,
@@ -424,6 +460,10 @@ fn parse_display(value: &Value) -> Result<DisplayOptions, FilterError> {
             "sub_issues",
             "must be nested, flat or hidden",
         )?,
+        label_group_id: optional(object, "display", "label_group_id", "must be a group id")?,
+        calendar_mode: optional(object, "display", "calendar_mode", "must be month or week")?,
+        timeline_arrows: optional(object, "display", "timeline_arrows", "must be a boolean")?,
+        show_archived: optional(object, "display", "show_archived", "must be a boolean")?,
     })
 }
 
@@ -627,6 +667,13 @@ fn valid_status_value(value: &str) -> bool {
 fn validate_display(display: &DisplayOptions) -> Result<(), FilterError> {
     if display.sub_group_by != GroupBy::None && display.sub_group_by == display.group_by {
         return Err(invalid("display.sub_group_by", "must differ from group_by"));
+    }
+    let by_label_group =
+        display.group_by == GroupBy::LabelGroup || display.sub_group_by == GroupBy::LabelGroup;
+    match &display.label_group_id {
+        Some(id) if is_id(id) => {}
+        None if !by_label_group => {}
+        _ => return Err(invalid("display.label_group_id", "must be a group id")),
     }
     for (index, property) in display.properties.iter().enumerate() {
         if display.properties[..index].contains(property) {
@@ -865,22 +912,79 @@ const LIVE_CHILD: &str = "SELECT 1 FROM tasks AS child \
      WHERE child.parent_task_id = tasks.id AND child.deleted_at IS NULL \
      AND child_project.deleted_at IS NULL";
 
+/// The default visibility rule of every task list and search, in one place: no task in the
+/// trash, no task of a project in the trash, no archived task, and no task in triage. The query
+/// must join `projects`. Each rule that hides tasks by default belongs here; a list that takes
+/// options uses [`push_visibility`].
+pub const DEFAULT_VISIBILITY: &str = " AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL \
+     AND tasks.archived_at IS NULL \
+     AND NOT EXISTS (SELECT 1 FROM task_statuses AS triage_status \
+     WHERE triage_status.id = tasks.status_id AND triage_status.category = 'triage')";
+/// The part of the rule that no request can turn off.
+const NOT_IN_TRASH: &str = " AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL";
+const NOT_ARCHIVED: &str = " AND tasks.archived_at IS NULL";
+/// Tasks in triage are not part of the team's work yet.
+const NOT_IN_TRIAGE: &str = " AND NOT EXISTS (SELECT 1 FROM task_statuses AS triage_status \
+     WHERE triage_status.id = tasks.status_id AND triage_status.category = 'triage')";
+
+/// Whether a list shows archived tasks. The default hides them.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ArchivedScope {
+    #[default]
+    Exclude,
+    Include,
+    Only,
+}
+
+/// Appends the visibility rule of a task list: [`DEFAULT_VISIBILITY`], except for the two
+/// explicit options. `archived` asks for archived tasks. A filter that names the triage
+/// category (`status type is triage`, or a status key of it) shows the triage queue. This one
+/// rule makes lists, boards, the timeline, the calendar and saved views agree.
+pub fn push_visibility(
+    query: &mut QueryBuilder<'_, Sqlite>,
+    archived: ArchivedScope,
+    filter: &FilterGroup,
+) {
+    query.push(NOT_IN_TRASH);
+    match archived {
+        ArchivedScope::Exclude => query.push(NOT_ARCHIVED),
+        ArchivedScope::Include => query,
+        ArchivedScope::Only => query.push(" AND tasks.archived_at IS NOT NULL"),
+    };
+    if !names_triage(filter) {
+        query.push(NOT_IN_TRIAGE);
+    }
+}
+
+/// A text term shorter than this many characters matches as a title substring, not in the index.
+pub const MIN_INDEX_CHARS: usize = 3;
+/// Words of a search beyond this many are ignored.
+const SEARCH_MAX_TERMS: usize = 16;
+
+/// The FTS5 expression for `task_search`: every word must match, each one as a prefix. Words are
+/// quoted, so FTS5 syntax in the input has no effect. `None` when no word has a letter or digit.
+#[must_use]
+pub fn fts_match(input: &str) -> Option<String> {
+    let terms = input
+        .split_whitespace()
+        // `"` separates tokens anyway; inside the quoted string it would end it. A control
+        // character (NUL) would cut the expression short.
+        .map(|term| term.replace(|c: char| c == '"' || c.is_control(), " "))
+        .filter(|term| term.chars().any(char::is_alphanumeric))
+        .take(SEARCH_MAX_TERMS)
+        .map(|term| format!("\"{term}\"*"))
+        .collect::<Vec<_>>();
+    (!terms.is_empty()).then(|| terms.join(" "))
+}
+
 /// Appends ` AND (<compiled tree>)` to `query`. Every value is bound. The tree must already be
-/// validated; an unexpected node fails closed (`0 = 1`).
-///
-/// Tasks in triage are not part of the team's work yet: they match only when the filter names the
-/// triage category (`status type is triage`, or a status key of it). This one rule makes lists,
-/// boards, the timeline and saved views agree.
+/// validated; an unexpected node fails closed (`0 = 1`). The visibility rule (trash, archive,
+/// triage) is not here: see [`push_visibility`].
 pub fn push_filter(query: &mut QueryBuilder<'_, Sqlite>, group: &FilterGroup, ctx: &FilterContext) {
     query.push(" AND (");
     push_group(query, group, ctx);
     query.push(")");
-    if !names_triage(group) {
-        query.push(
-            " AND NOT EXISTS (SELECT 1 FROM task_statuses AS triage_status \
-             WHERE triage_status.id = tasks.status_id AND triage_status.category = 'triage')",
-        );
-    }
 }
 
 fn names_triage(group: &FilterGroup) -> bool {
@@ -1357,15 +1461,28 @@ fn push_text(query: &mut QueryBuilder<'_, Sqlite>, value: &Value) {
         query.push("0 = 1");
         return;
     };
-    let pattern = format!("%{}%", escape_like(&text.to_lowercase()));
-    query
-        .push("LOWER(tasks.title) LIKE ")
-        .push_bind(pattern.clone())
-        .push(" ESCAPE '\\' OR LOWER(tasks.description) LIKE ")
-        .push_bind(pattern)
-        .push(" ESCAPE '\\'");
-    // An identifier (`ENG-12`, any case) finds that task; a bare number every task with it.
     let trimmed = text.trim();
+    // The index (title, description, comments) answers a term of 3 or more characters; a
+    // shorter term, or one with no letter or digit, is a substring of the title.
+    match fts_match(trimmed).filter(|_| trimmed.chars().count() >= MIN_INDEX_CHARS) {
+        Some(expression) => {
+            query
+                .push(
+                    "tasks.id IN (SELECT task_search_rows.task_id FROM task_search \
+                     JOIN task_search_rows ON task_search_rows.id = task_search.rowid \
+                     WHERE task_search MATCH ",
+                )
+                .push_bind(expression)
+                .push(")");
+        }
+        None => {
+            query
+                .push("LOWER(tasks.title) LIKE ")
+                .push_bind(format!("%{}%", escape_like(&text.to_lowercase())))
+                .push(" ESCAPE '\\'");
+        }
+    }
+    // An identifier (`ENG-12`, any case) finds that task; a bare number every task with it.
     if let Some((key, number)) = super::tasks::parse_task_identifier(trimmed) {
         query
             .push(" OR (tasks.number = ")
@@ -2020,22 +2137,102 @@ mod sql_tests {
         ] }));
         assert!(!sql.contains("1=1"), "{sql}");
         assert!(!sql.contains("it's"), "{sql}");
-        assert_eq!(sql.matches('?').count(), 3, "{sql}");
+        assert_eq!(sql.matches('?').count(), 2, "{sql}");
+    }
+
+    #[test]
+    fn text_uses_the_index_from_three_characters() {
+        let text = |value: &str| {
+            compile(json!({ "op": "and", "children": [
+                { "field": "text", "operator": "contains", "value": value }
+            ] }))
+        };
+        assert!(
+            text("abc").contains("task_search MATCH ?"),
+            "{}",
+            text("abc")
+        );
+        for short in ["ab", "%%%"] {
+            let sql = text(short);
+            assert!(!sql.contains("MATCH"), "{sql}");
+            assert!(sql.contains("LOWER(tasks.title) LIKE ?"), "{sql}");
+            assert!(!sql.contains("description"), "{sql}");
+        }
+        assert_eq!(
+            fts_match("  launch  pla "),
+            Some("\"launch\"* \"pla\"*".to_owned())
+        );
+        assert_eq!(
+            fts_match("a\"b NEAR(x title:foo -bar *"),
+            Some("\"a b\"* \"NEAR(x\"* \"title:foo\"* \"-bar\"*".to_owned())
+        );
+        assert_eq!(fts_match("* - : \" ( ) %"), None);
     }
 
     #[test]
     fn empty_groups_match_everything_and_children_are_parenthesised() {
         assert_eq!(
             compile(json!({ "op": "and", "children": [] })),
-            // a filter that does not name triage leaves the triage queue out
-            "SELECT tasks.id FROM tasks WHERE 1 = 1 AND (1 = 1) AND NOT EXISTS (SELECT 1 FROM task_statuses AS triage_status WHERE triage_status.id = tasks.status_id AND triage_status.category = 'triage')"
+            "SELECT tasks.id FROM tasks WHERE 1 = 1 AND (1 = 1)"
         );
         assert_eq!(
             compile(json!({ "op": "or", "children": [
                 { "field": "priority", "operator": "is", "value": ["high"] },
                 { "op": "and", "children": [] }
             ] })),
-            "SELECT tasks.id FROM tasks WHERE 1 = 1 AND ((tasks.priority IN (?)) OR (1 = 1)) AND NOT EXISTS (SELECT 1 FROM task_statuses AS triage_status WHERE triage_status.id = tasks.status_id AND triage_status.category = 'triage')"
+            "SELECT tasks.id FROM tasks WHERE 1 = 1 AND ((tasks.priority IN (?)) OR (1 = 1))"
+        );
+    }
+
+    #[test]
+    fn one_visibility_rule_hides_trash_archive_and_triage_with_two_explicit_options() {
+        let rule = |scope, tree: Value| {
+            let mut query = QueryBuilder::<Sqlite>::new("");
+            push_visibility(&mut query, scope, &parse_filter(&tree).unwrap());
+            query.sql().to_owned()
+        };
+        let any = || json!({ "op": "and", "children": [] });
+        let trash = " AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL";
+        let triage = " AND NOT EXISTS (SELECT 1 FROM task_statuses AS triage_status \
+             WHERE triage_status.id = tasks.status_id AND triage_status.category = 'triage')";
+        // The default of a list is the rule of the search.
+        assert_eq!(rule(ArchivedScope::Exclude, any()), DEFAULT_VISIBILITY);
+        assert_eq!(
+            DEFAULT_VISIBILITY,
+            format!("{trash} AND tasks.archived_at IS NULL{triage}")
+        );
+        // Trash is never optional.
+        assert_eq!(
+            rule(ArchivedScope::Include, any()),
+            format!("{trash}{triage}")
+        );
+        assert_eq!(
+            rule(ArchivedScope::Only, any()),
+            format!("{trash} AND tasks.archived_at IS NOT NULL{triage}")
+        );
+        // A filter that names triage shows the queue, also inside a nested group.
+        for tree in [
+            json!({ "op": "and", "children": [
+                { "field": "status_category", "operator": "is", "value": ["triage"] }
+            ] }),
+            json!({ "op": "and", "children": [{ "op": "or", "children": [
+                { "field": "status", "operator": "is", "value": ["triage:triage"] }
+            ] }] }),
+        ] {
+            assert_eq!(
+                rule(ArchivedScope::Exclude, tree),
+                format!("{trash} AND tasks.archived_at IS NULL")
+            );
+        }
+        // A filter that only excludes a category does not name triage.
+        assert_eq!(
+            rule(
+                ArchivedScope::Exclude,
+                json!({ "op": "and", "children": [
+                    { "field": "status_category", "operator": "is_not", "value": ["triage"] }
+                ] })
+            ),
+            DEFAULT_VISIBILITY
         );
     }
 

@@ -36,7 +36,8 @@ export function GroupIcon({ group, context }: { group: Pick<TaskGroup, 'field' |
       const color = context.projects.find((project) => project.id === group.value)?.color
       return <ColorDot color={color} className={cn('size-2', !color && 'bg-muted-foreground')} />
     }
-    case 'label': {
+    case 'label':
+    case 'label_group': {
       const color = context.labels.find((label) => label.id === group.value)?.color
       return color
         ? <ColorDot color={color} className="size-2" />

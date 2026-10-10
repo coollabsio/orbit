@@ -9,8 +9,11 @@ import { TaskSearchBox } from '@/features/tasks/components/TaskSearchBox'
 import type { User } from '@/features/workspaces/models'
 import { useMembers } from '@/features/workspaces/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
-import { useReorderFavorites, useSavedViews, type SavedView } from './api/views'
-import { FavoriteStar } from './components/FavoriteStar'
+import { useSavedViews, type SavedView } from './api/views'
+import { FavoriteStar } from '@/features/favorites/FavoriteStar'
+import { useQueryClient } from '@tanstack/react-query'
+import { queryKeys } from '@/api/queryKeys'
+import { useReorderFavorites, withViewOrder, type Favorite } from '@/features/favorites/api/favorites'
 import { SaveViewDialog } from './components/SaveViewDialog'
 import { ViewActionsMenu } from './components/ViewActionsMenu'
 import { ViewIcon } from './components/ViewIcon'
@@ -141,6 +144,7 @@ interface RowActions {
 /** A sticky header and its rows. Favorites reorder by drag, or Alt+Arrow on a focused row. */
 function ViewSection({ section, ...actions }: RowActions & { section: Section }) {
   const reorder = useReorderFavorites(actions.workspaceId)
+  const queryClient = useQueryClient()
   const [order, setOrder] = useState<string[] | null>(null)
   const [dragId, setDragId] = useState<string | null>(null)
   const [overId, setOverId] = useState<string | null>(null)
@@ -154,7 +158,9 @@ function ViewSection({ section, ...actions }: RowActions & { section: Section })
     ids.splice(from, 1)
     ids.splice(to, 0, id)
     setOrder(ids)
-    reorder.mutate(ids, { onSettled: () => setOrder(null) })
+    // the order is one list for tasks and views (the sidebar keeps it loaded): the tasks among the favorites keep their slots
+    const favorites = queryClient.getQueryData<Favorite[]>(queryKeys.favorites(actions.workspaceId)) ?? []
+    reorder.mutate(withViewOrder(favorites, ids), { onSettled: () => setOrder(null) })
   }
   const endDrag = () => {
     setDragId(null)
@@ -300,8 +306,10 @@ function ViewRow({ view, members, workspaceId, onEdit, onDuplicate, drag }: RowA
             a favorite keeps its star lit */}
         <FavoriteStar
           workspaceId={workspaceId}
-          view={view}
-          named
+          kind="view"
+          targetId={view.id}
+          on={view.is_favorite}
+          name={view.name}
           className={cn(!view.is_favorite && 'transition-opacity duration-150 hover-fine:opacity-0 hover-fine:group-hover/row:opacity-100 hover-fine:group-focus-within/row:opacity-100')}
         />
         <ViewActionsMenu

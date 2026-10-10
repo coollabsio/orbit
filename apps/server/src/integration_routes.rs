@@ -1543,6 +1543,8 @@ fn task_problem(error: TaskError, request_id: Option<&RequestId>) -> ApiError {
         | TaskError::Forbidden
         | TaskError::ParentCycle
         | TaskError::ParentInvalid
+        | TaskError::LabelGroupConflict { .. }
+        | TaskError::ArchiveOpenTree
         | TaskError::TriageNotEmpty { .. }
         | TaskError::Unavailable(_) => ApiError::internal(request_id),
     }

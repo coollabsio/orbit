@@ -50,7 +50,7 @@ test('the header shows the name and favorite star; unsaved edits are never handl
   expect(view.getByRole('heading', { name: 'Launch' })).toBeTruthy()
   expect(view.queryByRole('group', { name: 'Unsaved view changes' })).toBeNull()
   await userEvent.click(view.getByRole('button', { name: 'Add to favorites' }))
-  await waitFor(() => expect(requests.some((request) => request.method === 'PUT' && request.path.endsWith('/views/view-1/favorite'))).toBe(true))
+  await waitFor(() => expect(requests.some((request) => request.method === 'PUT' && request.path.endsWith('/favorites/view/view-1'))).toBe(true))
 })
 
 test('deleting from the view menu asks first, then leaves the page', async () => {

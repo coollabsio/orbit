@@ -87,7 +87,7 @@ async function mockApi(page: Page, tasks: TaskMock[], writes: Write[]) {
       await route.fulfill({ json: view(tasks, task) })
       return
     }
-    if (/\/views\/[^/]+\/favorite$|\/view-favorites\/order$/.test(path)) { await route.fulfill({ status: 204 }); return }
+    if (/(?<!pages)\/favorites$/.test(path)) { await route.fulfill({ json: { items: [] } }); return }
     let body: unknown = { items: [], next_cursor: null }
     if (path.endsWith('/views')) body = []
     if (path.endsWith('/setup/status')) body = { complete: true }

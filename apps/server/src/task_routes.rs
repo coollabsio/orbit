@@ -15,19 +15,21 @@ use sqlx::Row;
 use utoipa::{IntoParams, ToSchema};
 
 use crate::auth_routes::{CookieMode, request_session};
+use crate::repositories::favorites::FavoriteRepository;
 use crate::repositories::github_pulls::PrAutomationRule;
 use crate::repositories::identity::{AuthenticatedSession, IdentityRepository};
+use crate::repositories::label_groups::{LabelGroupList, LabelGroupRecord};
 use crate::repositories::sub_issues::AutoClosed;
 use crate::repositories::task_filter::{
-    self, Condition, FilterField, FilterGroup, FilterNode, FilterOperator, GroupOp, OrderBy,
-    OrderDirection, ShowCompleted, SubIssuesDisplay,
+    self, ArchivedScope, Condition, FilterField, FilterGroup, FilterNode, FilterOperator, GroupOp,
+    OrderBy, OrderDirection, ShowCompleted, SubIssuesDisplay,
 };
 use crate::repositories::task_notifications::NotificationPatch;
 use crate::repositories::task_relations::{NewTaskRelationType, TaskRelationRecord};
 use crate::repositories::tasks::{
     CommentRecord, CreateTask, NotificationRecord, NotificationState, Page, ProjectAutomationPatch,
     ProjectPeoplePatch, SortOrder, TaskChanges, TaskError, TaskFilter, TaskRecord, TaskRepository,
-    TaskSort, TaskUpdate, normalize_project_key,
+    TaskSearchResults, TaskSort, TaskUpdate, normalize_project_key,
 };
 use crate::repositories::views::ViewRepository;
 
@@ -36,6 +38,7 @@ pub struct TaskState {
     pub(crate) identity: Arc<IdentityRepository>,
     pub(crate) tasks: Arc<TaskRepository>,
     pub(crate) views: Arc<ViewRepository>,
+    pub(crate) favorites: Arc<FavoriteRepository>,
     pub(crate) cookie_mode: CookieMode,
 }
 
@@ -45,7 +48,8 @@ impl TaskState {
         let database = identity.database().clone();
         Self {
             tasks: Arc::new(TaskRepository::new(database.clone())),
-            views: Arc::new(ViewRepository::new(database)),
+            views: Arc::new(ViewRepository::new(database.clone())),
+            favorites: Arc::new(FavoriteRepository::new(database)),
             identity,
             cookie_mode,
         }
@@ -59,6 +63,7 @@ impl TaskState {
     ) -> Self {
         Self {
             views: Arc::new(ViewRepository::new(tasks.database().clone())),
+            favorites: Arc::new(FavoriteRepository::new(tasks.database().clone())),
             identity,
             tasks,
             cookie_mode,
@@ -107,6 +112,14 @@ pub fn task_router(state: TaskState) -> Router {
             get(list_labels).post(create_label),
         )
         .route(
+            "/api/v1/workspaces/{workspace_id}/label-groups",
+            get(list_label_groups).post(create_label_group),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/label-groups/{group_id}",
+            patch(update_label_group).delete(delete_label_group),
+        )
+        .route(
             "/api/v1/workspaces/{workspace_id}/labels/{label_id}",
             patch(update_label).delete(delete_label),
         )
@@ -117,6 +130,18 @@ pub fn task_router(state: TaskState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/tasks/query",
             post(query_tasks),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/tasks/archive",
+            post(archive_tasks),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/tasks/unarchive",
+            post(unarchive_tasks),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/tasks/search",
+            get(search_tasks),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/tasks/trash",
@@ -300,6 +325,10 @@ struct ProjectUpdateBody {
     auto_close_parent: Option<bool>,
     /// Absent: unchanged.
     auto_close_sub_issues: Option<bool>,
+    /// Closed tasks are archived this many months after they close: 3, 6 or 12. Absent:
+    /// unchanged. `null`: off.
+    #[serde(default, deserialize_with = "deserialize_months_patch")]
+    auto_archive_months: Option<Option<i64>>,
     /// Absent: unchanged. Cannot go off while tasks wait in triage (409 `triage_not_empty`).
     triage_enabled: Option<bool>,
     /// Absent: unchanged. `null`: no lead.
@@ -424,6 +453,7 @@ async fn update_project(
             ProjectAutomationPatch {
                 auto_close_parent: body.auto_close_parent,
                 auto_close_sub_issues: body.auto_close_sub_issues,
+                auto_archive_months: body.auto_archive_months,
                 triage_enabled: body.triage_enabled,
             },
             people,
@@ -808,6 +838,8 @@ async fn reorder_statuses(
 struct LabelBody {
     name: String,
     color: String,
+    /// The label group of the new label.
+    group_id: Option<String>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -815,7 +847,131 @@ struct LabelBody {
 struct LabelUpdateBody {
     name: String,
     color: String,
+    /// Absent: unchanged. A group id: put the label in that group (409 `label_group_conflict`
+    /// while a task has this label and a different label of the group). `null`: no group.
+    #[serde(default, deserialize_with = "deserialize_source_patch")]
+    group_id: Option<Option<String>>,
     expected_version: u64,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct LabelGroupBody {
+    name: String,
+    color: String,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct LabelGroupUpdateBody {
+    name: String,
+    color: String,
+    expected_version: u64,
+}
+
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/label-groups", params(("workspace_id" = String, Path)), responses((status = 200, body = LabelGroupList)))]
+async fn list_label_groups(
+    State(state): State<TaskState>,
+    Path(workspace): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<LabelGroupList>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/label-groups");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    state
+        .tasks
+        .label_groups(workspace_id, actor_id)
+        .await
+        .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/label-groups", params(("workspace_id" = String, Path)), request_body = LabelGroupBody, responses((status = 201, body = LabelGroupRecord)))]
+async fn create_label_group(
+    State(state): State<TaskState>,
+    Path(workspace): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<LabelGroupBody>,
+) -> Result<Response, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/label-groups");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let name = text(body.name, 100, 100, "name", &instance, request_id.as_ref())?;
+    let color = color(body.color, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .create_label_group(
+            workspace_id,
+            actor_id,
+            name,
+            color,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(|record| (StatusCode::CREATED, Json(record)).into_response())
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+#[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}/label-groups/{group_id}", params(("workspace_id" = String, Path), ("group_id" = String, Path)), request_body = LabelGroupUpdateBody, responses((status = 200, body = LabelGroupRecord)))]
+async fn update_label_group(
+    State(state): State<TaskState>,
+    Path((workspace, group)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<LabelGroupUpdateBody>,
+) -> Result<Json<LabelGroupRecord>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/label-groups/{group}");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let group_id = parse_id(&group, &instance, request_id.as_ref())?;
+    let name = text(body.name, 100, 100, "name", &instance, request_id.as_ref())?;
+    let color = color(body.color, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .update_label_group(
+            workspace_id,
+            group_id,
+            actor_id,
+            name,
+            color,
+            body.expected_version,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+/// Deletes the group. Its labels stay, with no group.
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/label-groups/{group_id}", params(MutationQuery, ("workspace_id" = String, Path), ("group_id" = String, Path)), responses((status = 204)))]
+async fn delete_label_group(
+    State(state): State<TaskState>,
+    Path((workspace, group)): Path<(String, String)>,
+    ApiQuery(query): ApiQuery<MutationQuery>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<StatusCode, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/label-groups/{group}");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let group_id = parse_id(&group, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .delete_label_group(
+            workspace_id,
+            group_id,
+            actor_id,
+            query.expected_version,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(|()| StatusCode::NO_CONTENT)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
 #[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/labels", params(PageQuery, ("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::tasks::LabelRecord>)))]
@@ -850,6 +1006,7 @@ async fn create_label(
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
     let name = text(body.name, 100, 100, "name", &instance, request_id.as_ref())?;
     let color = color(body.color, &instance, request_id.as_ref())?;
+    let group_id = optional_id(body.group_id, &instance, request_id.as_ref())?;
     state
         .tasks
         .create_label(
@@ -857,6 +1014,7 @@ async fn create_label(
             actor_id,
             name,
             color,
+            group_id,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )
@@ -879,6 +1037,10 @@ async fn update_label(
     let label_id = parse_id(&label, &instance, request_id.as_ref())?;
     let name = text(body.name, 100, 100, "name", &instance, request_id.as_ref())?;
     let color = color(body.color, &instance, request_id.as_ref())?;
+    let group_id = match body.group_id {
+        None => None,
+        Some(group) => Some(optional_id(group, &instance, request_id.as_ref())?),
+    };
     state
         .tasks
         .update_label(
@@ -887,6 +1049,7 @@ async fn update_label(
             actor_id,
             name,
             color,
+            group_id,
             body.expected_version,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
@@ -967,6 +1130,95 @@ struct TaskQueryBody {
     /// The view's sub-issue display; `hidden` returns top-level tasks only (default `nested`).
     #[serde(default)]
     sub_issues: SubIssuesDisplay,
+    /// Archived tasks: `exclude` (default), `include`, or `only` (the archive page).
+    #[serde(default)]
+    archived: ArchivedScope,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct TaskIdsBody {
+    /// 1 to 100 task ids.
+    task_ids: Vec<String>,
+}
+
+#[derive(Serialize, ToSchema)]
+struct TaskCountResponse {
+    /// The number of tasks that changed: the trees of the given tasks.
+    count: u64,
+}
+
+/// Archives closed tasks with their trees (the top-level task and all its sub-issues). Each
+/// task of a tree must be closed; if one is open, nothing is archived (409 `archive_open_tree`).
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks/archive", params(("workspace_id" = String, Path)), request_body = TaskIdsBody, responses((status = 200, body = TaskCountResponse)))]
+async fn archive_tasks(
+    State(state): State<TaskState>,
+    Path(workspace): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<TaskIdsBody>,
+) -> Result<Json<TaskCountResponse>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/tasks/archive");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let task_ids = task_ids(&body.task_ids, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .archive_tasks(
+            workspace_id,
+            actor_id,
+            &task_ids,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(|count| Json(TaskCountResponse { count }))
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+/// Restores archived tasks with their trees. A task that is not archived stays as it is.
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks/unarchive", params(("workspace_id" = String, Path)), request_body = TaskIdsBody, responses((status = 200, body = TaskCountResponse)))]
+async fn unarchive_tasks(
+    State(state): State<TaskState>,
+    Path(workspace): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<TaskIdsBody>,
+) -> Result<Json<TaskCountResponse>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/tasks/unarchive");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let task_ids = task_ids(&body.task_ids, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .unarchive_tasks(
+            workspace_id,
+            actor_id,
+            &task_ids,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(|count| Json(TaskCountResponse { count }))
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+fn task_ids(
+    values: &[String],
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> Result<Vec<Id>, ApiError> {
+    if values.is_empty() || values.len() > 100 {
+        return Err(validation("task_ids", instance, request_id));
+    }
+    values
+        .iter()
+        .map(|value| {
+            value
+                .parse::<Id>()
+                .map_err(|_| validation("task_ids", instance, request_id))
+        })
+        .collect()
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -1192,6 +1444,7 @@ async fn list_tasks(
         order,
         parent_task_id,
         sub_issues: SubIssuesDisplay::Nested,
+        archived: ArchivedScope::Exclude,
     };
     state
         .tasks
@@ -1238,6 +1491,7 @@ async fn query_tasks(
         order,
         parent_task_id,
         sub_issues: body.sub_issues,
+        archived: body.archived,
     };
     state
         .tasks
@@ -1247,6 +1501,48 @@ async fn query_tasks(
             &filter,
             body.cursor.as_deref(),
             body.limit.unwrap_or_else(default_limit),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+#[serde(deny_unknown_fields)]
+struct TaskSearchQuery {
+    /// The search text, at most 200 characters.
+    q: String,
+    #[serde(default = "default_search_limit")]
+    #[param(required = false)]
+    limit: usize,
+}
+
+fn default_search_limit() -> usize {
+    25
+}
+
+/// Ranked full-text search over the title, description and comments of tasks.
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks/search", params(TaskSearchQuery, ("workspace_id" = String, Path)), responses((status = 200, body = TaskSearchResults)))]
+async fn search_tasks(
+    State(state): State<TaskState>,
+    Path(workspace): Path<String>,
+    ApiQuery(query): ApiQuery<TaskSearchQuery>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<TaskSearchResults>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/tasks/search");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let text = bounded(query.q, 200, 800, "q", &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .search_tasks(
+            workspace_id,
+            actor_id,
+            &text,
+            query.limit,
             TimestampMillis::now(),
         )
         .await
@@ -2248,6 +2544,13 @@ where
     Option::<String>::deserialize(deserializer).map(Some)
 }
 
+fn deserialize_months_patch<'de, D>(deserializer: D) -> Result<Option<Option<i64>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<i64>::deserialize(deserializer).map(Some)
+}
+
 fn deserialize_estimate_patch<'de, D>(deserializer: D) -> Result<Option<Option<i64>>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -2574,6 +2877,32 @@ pub(crate) fn task_problem(
             instance,
             request_id,
         ),
+        TaskError::LabelGroupConflict { count } => {
+            let mut error = ApiError::new(
+                StatusCode::CONFLICT,
+                "label_group_conflict",
+                "Label group conflict",
+                "Some tasks have this label and a different label of the group. A task can have only one label of a group.",
+                instance,
+                request_id,
+            );
+            error.body.conflict = Some(ConflictBody {
+                current_version: None,
+                current: None,
+                refresh: None,
+                field: None,
+                count: Some(count),
+            });
+            error
+        }
+        TaskError::ArchiveOpenTree => ApiError::new(
+            StatusCode::CONFLICT,
+            "archive_open_tree",
+            "Task is not closed",
+            "A task can be archived only when it, its parent and all its sub-issues are closed.",
+            instance,
+            request_id,
+        ),
         TaskError::ParentCycle => ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "parent_cycle",
@@ -2647,7 +2976,8 @@ pub(crate) struct ConflictBody {
     refresh: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     field: Option<&'static str>,
-    /// `triage_not_empty`: the number of tasks in the queue.
+    /// The number of tasks that block the change (`label_group_conflict`), or the number of
+    /// tasks in the queue (`triage_not_empty`).
     #[serde(skip_serializing_if = "Option::is_none")]
     count: Option<i64>,
 }

@@ -1,4 +1,4 @@
-//! Saved task views (`/views`). Session-authenticated like the task routes; errors use
+//! Saved task views (`/views`) and the caller's favorites (`/favorites`). Session-authenticated like the task routes; errors use
 //! `task_problem`, so they share the `TaskProblem` schema.
 
 use axum::extract::{Extension, Path, State};
@@ -10,6 +10,7 @@ use orbit_platform::{Id, RequestId};
 use serde::Deserialize;
 use utoipa::ToSchema;
 
+use crate::repositories::favorites::{FavoriteKey, FavoriteList};
 use crate::repositories::task_filter::ViewState;
 use crate::repositories::tasks::TaskError;
 use crate::repositories::views::{
@@ -34,12 +35,16 @@ pub fn view_router(state: TaskState) -> Router {
             get(get_view).patch(update_view).delete(delete_view),
         )
         .route(
-            "/api/v1/workspaces/{workspace_id}/views/{view_id}/favorite",
-            put(favorite_view).delete(unfavorite_view),
+            "/api/v1/workspaces/{workspace_id}/favorites",
+            get(list_favorites),
         )
         .route(
-            "/api/v1/workspaces/{workspace_id}/view-favorites/order",
-            put(reorder_view_favorites),
+            "/api/v1/workspaces/{workspace_id}/favorites/order",
+            put(reorder_favorites),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/favorites/{kind}/{target_id}",
+            put(add_favorite).delete(remove_favorite),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/view-preferences/{page_key}",
@@ -212,49 +217,78 @@ async fn delete_view(
 
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-struct ViewFavoritesOrderBody {
-    /// Every view the caller has favorited in this workspace, in the new order.
-    view_ids: Vec<String>,
+struct FavoriteKeyBody {
+    /// `task`, `view`, `project` or `milestone`.
+    kind: String,
+    target_id: String,
 }
 
-#[utoipa::path(put, path = "/api/v1/workspaces/{workspace_id}/views/{view_id}/favorite", params(("workspace_id" = String, Path), ("view_id" = String, Path)), responses((status = 204)))]
-async fn favorite_view(
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct FavoritesOrderBody {
+    /// Every favorite of the caller in this workspace (as `GET /favorites` lists them), in the
+    /// new order.
+    items: Vec<FavoriteKeyBody>,
+}
+
+/// The caller's favorite tasks, views, projects and milestones, in sidebar order.
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/favorites", params(("workspace_id" = String, Path)), responses((status = 200, body = FavoriteList)))]
+async fn list_favorites(
     State(state): State<TaskState>,
-    Path((workspace, view)): Path<(String, String)>,
+    Path(workspace): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<FavoriteList>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/favorites");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    state
+        .favorites
+        .list(workspace_id, actor_id)
+        .await
+        .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+#[utoipa::path(put, path = "/api/v1/workspaces/{workspace_id}/favorites/{kind}/{target_id}", params(("workspace_id" = String, Path), ("kind" = String, Path, description = "`task`, `view`, `project` or `milestone`"), ("target_id" = String, Path)), responses((status = 204)))]
+async fn add_favorite(
+    State(state): State<TaskState>,
+    Path((workspace, kind, target)): Path<(String, String, String)>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
 ) -> Result<StatusCode, ApiError> {
-    change_favorite(state, workspace, view, headers, request_id, true).await
+    change_favorite(state, workspace, kind, target, headers, request_id, true).await
 }
 
-#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/views/{view_id}/favorite", params(("workspace_id" = String, Path), ("view_id" = String, Path)), responses((status = 204)))]
-async fn unfavorite_view(
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/favorites/{kind}/{target_id}", params(("workspace_id" = String, Path), ("kind" = String, Path, description = "`task`, `view`, `project` or `milestone`"), ("target_id" = String, Path)), responses((status = 204)))]
+async fn remove_favorite(
     State(state): State<TaskState>,
-    Path((workspace, view)): Path<(String, String)>,
+    Path((workspace, kind, target)): Path<(String, String, String)>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
 ) -> Result<StatusCode, ApiError> {
-    change_favorite(state, workspace, view, headers, request_id, false).await
+    change_favorite(state, workspace, kind, target, headers, request_id, false).await
 }
 
 async fn change_favorite(
     state: TaskState,
     workspace: String,
-    view: String,
+    kind: String,
+    target: String,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
     favorite: bool,
 ) -> Result<StatusCode, ApiError> {
-    let instance = format!("/api/v1/workspaces/{workspace}/views/{view}/favorite");
+    let instance = format!("/api/v1/workspaces/{workspace}/favorites/{kind}/{target}");
     let (workspace_id, actor_id) =
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
-    let view_id = parse_id(&view, &instance, request_id.as_ref())?;
+    let target_id = parse_id(&target, &instance, request_id.as_ref())?;
     state
-        .views
-        .set_favorite(
+        .favorites
+        .set(
             workspace_id,
             actor_id,
-            view_id,
+            &FavoriteKey { kind, target_id },
             favorite,
             request_id_value(request_id.as_ref()),
         )
@@ -263,25 +297,25 @@ async fn change_favorite(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
-#[utoipa::path(put, path = "/api/v1/workspaces/{workspace_id}/view-favorites/order", params(("workspace_id" = String, Path)), request_body = ViewFavoritesOrderBody, responses((status = 204)))]
-async fn reorder_view_favorites(
+#[utoipa::path(put, path = "/api/v1/workspaces/{workspace_id}/favorites/order", params(("workspace_id" = String, Path)), request_body = FavoritesOrderBody, responses((status = 204)))]
+async fn reorder_favorites(
     State(state): State<TaskState>,
     Path(workspace): Path<String>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
-    ApiJson(body): ApiJson<ViewFavoritesOrderBody>,
+    ApiJson(body): ApiJson<FavoritesOrderBody>,
 ) -> Result<StatusCode, ApiError> {
-    let instance = format!("/api/v1/workspaces/{workspace}/view-favorites/order");
+    let instance = format!("/api/v1/workspaces/{workspace}/favorites/order");
     let (workspace_id, actor_id) =
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
-    let view_ids = parse_view_ids(&body.view_ids)
+    let keys = parse_favorite_keys(body.items)
         .map_err(|error| task_problem(error, instance.clone(), request_id.as_ref()))?;
     state
-        .views
-        .reorder_favorites(
+        .favorites
+        .reorder(
             workspace_id,
             actor_id,
-            view_ids,
+            keys,
             request_id_value(request_id.as_ref()),
         )
         .await
@@ -289,16 +323,18 @@ async fn reorder_view_favorites(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
-fn parse_view_ids(values: &[String]) -> Result<Vec<Id>, TaskError> {
-    if values.len() > MAX_FAVORITE_IDS {
-        return Err(TaskError::Invalid { field: "view_ids" });
+fn parse_favorite_keys(items: Vec<FavoriteKeyBody>) -> Result<Vec<FavoriteKey>, TaskError> {
+    let invalid = || TaskError::Invalid { field: "items" };
+    if items.len() > MAX_FAVORITE_IDS {
+        return Err(invalid());
     }
-    values
-        .iter()
-        .map(|value| {
-            value
-                .parse::<Id>()
-                .map_err(|_| TaskError::Invalid { field: "view_ids" })
+    items
+        .into_iter()
+        .map(|item| {
+            Ok(FavoriteKey {
+                kind: item.kind,
+                target_id: item.target_id.parse::<Id>().map_err(|_| invalid())?,
+            })
         })
         .collect()
 }

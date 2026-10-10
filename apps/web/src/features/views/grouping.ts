@@ -13,7 +13,7 @@ export type TaskGroup = { key: string; field: GroupBy; value: string | null; lab
  * `statuses` and `projects` should already be scoped to the page (a project page passes only its project's
  * statuses), so empty groups never list another project's workflow.
  */
-export type GroupContext = { statuses: TaskStatusDef[]; members: User[]; labels: LabelRecord[]; projects: ProjectRecord[]; milestones?: Milestone[]; cycles?: Cycle[]; currentUserId: string; showEmpty: boolean }
+export type GroupContext = { statuses: TaskStatusDef[]; members: User[]; labels: LabelRecord[]; projects: ProjectRecord[]; milestones?: Milestone[]; cycles?: Cycle[]; currentUserId: string; showEmpty: boolean; /** The group of a `label_group` grouping (`display.label_group_id`). */ labelGroup?: { id: string; name: string } | null }
 export type TaskCreateDefaults = Partial<CreateTaskBody>
 export type DropUpdate = { taskId: string; patch: Partial<TaskUpdateBody> } | { error: string } | null
 
@@ -34,6 +34,12 @@ function bucketsFor(groupBy: GroupBy, ctx: GroupContext): Bucket[] {
     }
     case 'label':
       return [...[...ctx.labels].sort(byName).map((label): Bucket => ({ value: label.id, label: label.name })), { value: null, label: 'No label' }]
+    case 'label_group': {
+      // one group for each label of the label group; a task with none of them goes to "No {group}"
+      const group = ctx.labelGroup
+      const labels = group ? ctx.labels.filter((label) => label.group_id === group.id).sort(byName) : []
+      return [...labels.map((label): Bucket => ({ value: label.id, label: label.name })), { value: null, label: group ? `No ${group.name}` : 'No label group' }]
+    }
     case 'project':
       return [...ctx.projects].sort(byName).map((project): Bucket => ({ value: project.id, label: project.name }))
     case 'milestone':
@@ -61,6 +67,8 @@ function valuesOf(task: Task, groupBy: GroupBy, statusKeys: Map<string, string>,
     case 'assignee':
       return present(task.assigneeIds)
     case 'label':
+    // `known` holds only the labels of the group
+    case 'label_group':
       return present(task.labels)
     case 'project':
       return [task.projectId]
@@ -133,7 +141,9 @@ export function dropUpdate(task: Task, field: GroupBy, from: string | null, to: 
       const next = swapValue(task.assigneeIds, from, to)
       return next ? update({ assignee_ids: next }) : null
     }
-    case 'label': {
+    case 'label':
+    // a drag between the columns of a label group replaces the label
+    case 'label_group': {
       const next = swapValue(task.labels, from, to)
       return next ? update({ label_ids: next }) : null
     }

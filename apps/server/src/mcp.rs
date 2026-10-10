@@ -25,8 +25,8 @@ use crate::repositories::api_tokens::{
     ApiTokenError, ApiTokenPrincipal, ApiTokenRepository, ApiTokenScope,
 };
 use crate::repositories::task_filter::{
-    Condition, FilterField, FilterGroup, FilterNode, FilterOperator, GroupOp, ShowCompleted,
-    SubIssuesDisplay,
+    ArchivedScope, Condition, FilterField, FilterGroup, FilterNode, FilterOperator, GroupOp,
+    ShowCompleted, SubIssuesDisplay,
 };
 use crate::repositories::tasks::{
     SortOrder, TaskError, TaskFilter, TaskRecord, TaskRepository, TaskSort, parse_task_identifier,
@@ -374,6 +374,7 @@ impl TaskTools {
                     order: SortOrder::Desc,
                     parent_task_id: None,
                     sub_issues: SubIssuesDisplay::Flat,
+                    archived: ArchivedScope::Exclude,
                 };
                 match self
                     .tasks

@@ -371,6 +371,11 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0052_cycles_estimates.sql"),
                     false,
                 ),
+                Migration::new(
+                    53,
+                    include_str!("../../../../apps/server/migrations/0053_find_and_organise.sql"),
+                    false,
+                ),
             ],
         )
     }

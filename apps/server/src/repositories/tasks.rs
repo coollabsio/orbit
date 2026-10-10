@@ -11,10 +11,13 @@ use utoipa::ToSchema;
 
 use super::cycles;
 use super::intake;
+use super::label_groups;
 use super::membership;
 use super::milestones;
 use super::sub_issues::{self, AutoClosed};
-use super::task_filter::{self, FilterError, FilterGroup, ShowCompleted, SubIssuesDisplay};
+use super::task_filter::{
+    self, ArchivedScope, FilterError, FilterGroup, ShowCompleted, SubIssuesDisplay,
+};
 use super::task_mentions;
 use super::task_notifications::{self, NotificationPatch, TaskEvent};
 use super::task_reactions::{self, CommentReaction};
@@ -37,6 +40,8 @@ pub struct ProjectRecord {
     pub auto_close_parent: bool,
     /// Close open sub-issues when their parent closes (rule B).
     pub auto_close_sub_issues: bool,
+    /// Closed tasks are archived this many months after they close (3, 6 or 12); null = off.
+    pub auto_archive_months: Option<i64>,
     /// Tasks that an integration creates wait in the Triage status until a member accepts them.
     pub triage_enabled: bool,
     /// `fibonacci`, `linear` or `tshirt`; null while estimates are off.
@@ -84,7 +89,32 @@ pub struct LabelRecord {
     pub workspace_id: Id,
     pub name: String,
     pub color: String,
+    /// The label group of this label; a task has not more than one label of a group.
+    #[schema(value_type = Option<String>)]
+    pub group_id: Option<Id>,
+    /// The name of that group; a label chip shows `Group / Label`.
+    pub group_name: Option<String>,
     pub version: u64,
+}
+
+/// The most results of one task search.
+const SEARCH_LIMIT: usize = 25;
+/// The length of a search snippet, in tokens.
+const SNIPPET_TOKENS: i64 = 12;
+
+/// One result of `GET /tasks/search`.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct TaskSearchHit {
+    pub task: TaskRecord,
+    /// Plain text near the match in the description or the comments; absent when only the
+    /// title or the identifier matched.
+    pub snippet: Option<String>,
+}
+
+/// Search results, best match first.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct TaskSearchResults {
+    pub items: Vec<TaskSearchHit>,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -121,6 +151,10 @@ pub struct TaskRecord {
     pub version: u64,
     #[schema(value_type = Option<String>, format = DateTime)]
     pub deleted_at: Option<TimestampMillis>,
+    /// Set while the task is in the archive: it is out of the default lists and the search.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = DateTime)]
+    pub archived_at: Option<TimestampMillis>,
     #[schema(value_type = String, format = DateTime)]
     pub created_at: TimestampMillis,
     #[schema(value_type = String, format = DateTime)]
@@ -151,6 +185,10 @@ pub struct TaskRecord {
     pub sub_issue_count: i64,
     /// Direct live children in a completed, cancelled or duplicate status.
     pub sub_issue_closed_count: i64,
+    /// The live tasks that this task blocks ("blocks" relations), for the timeline arrows.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schema(value_type = Vec<String>, required = false)]
+    pub blocking_ids: Vec<Id>,
     /// `GET /tasks/{id}` only: visible ancestors, root first.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ancestors: Option<Vec<TaskRef>>,
@@ -310,6 +348,8 @@ const NOTIFICATION_COLUMNS: &str = "id, workspace_id, recipient_user_id, actor_u
 pub struct ProjectAutomationPatch {
     pub auto_close_parent: Option<bool>,
     pub auto_close_sub_issues: Option<bool>,
+    /// `None`: unchanged. `Some(None)`: off. `Some(Some(3 | 6 | 12))`: the period in months.
+    pub auto_archive_months: Option<Option<i64>>,
     pub triage_enabled: Option<bool>,
 }
 
@@ -443,6 +483,8 @@ pub struct TaskFilter {
     pub parent_task_id: Option<Id>,
     /// `hidden` lists top-level tasks only.
     pub sub_issues: SubIssuesDisplay,
+    /// Whether the list has archived tasks; the default hides them.
+    pub archived: ArchivedScope,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -479,6 +521,10 @@ pub enum TaskError {
     ParentCycle,
     #[error("the parent task is not available")]
     ParentInvalid,
+    #[error("{count} task(s) have this label and a different label of the group")]
+    LabelGroupConflict { count: i64 },
+    #[error("a task of the tree is not closed")]
+    ArchiveOpenTree,
     #[error("{count} tasks wait in triage")]
     TriageNotEmpty { count: i64 },
     #[error("task repository is unavailable")]
@@ -697,6 +743,7 @@ impl TaskRepository {
             color,
             auto_close_parent: true,
             auto_close_sub_issues: true,
+            auto_archive_months: None,
             triage_enabled: false,
             estimate_scale: None,
             lead_user_id: None,
@@ -729,6 +776,14 @@ impl TaskRepository {
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let current = project_in_tx(&mut tx, workspace_id, project_id, false).await?;
         check_version(expected_version, current.version, &current)?;
+        let auto_archive_months = automation
+            .auto_archive_months
+            .unwrap_or(current.auto_archive_months);
+        if auto_archive_months.is_some_and(|months| ![3, 6, 12].contains(&months)) {
+            return Err(TaskError::Invalid {
+                field: "auto_archive_months",
+            });
+        }
         if current.triage_enabled && automation.triage_enabled == Some(false) {
             // The queue must be empty first: its tasks would stay in a status nobody looks at.
             let count: i64 = sqlx::query_scalar(
@@ -747,6 +802,7 @@ impl TaskRepository {
             "UPDATE projects SET name = ?, project_key = ?, color = ?, \
              auto_close_parent = COALESCE(?, auto_close_parent), \
              auto_close_sub_issues = COALESCE(?, auto_close_sub_issues), \
+             auto_archive_months = ?, \
              triage_enabled = COALESCE(?, triage_enabled), \
              version = version + 1, updated_at = ? \
              WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND version = ?",
@@ -756,6 +812,7 @@ impl TaskRepository {
         .bind(&color)
         .bind(automation.auto_close_parent)
         .bind(automation.auto_close_sub_issues)
+        .bind(auto_archive_months)
         .bind(automation.triage_enabled)
         .bind(now.as_millis())
         .bind(project_id.to_string())
@@ -1153,6 +1210,21 @@ impl TaskRepository {
             .execute(&mut *tx)
             .await?;
         }
+        // The archive trigger sees status_id changes only too: a status that turns open shows its
+        // archived tasks again, with their trees.
+        let closed = |category: &str| matches!(category, "completed" | "cancelled" | "duplicate");
+        if closed(&current.category) && !closed(&category) {
+            sqlx::query(
+                "UPDATE tasks SET archived_at = NULL, archived_root_id = NULL, version = version + 1 \
+                 WHERE workspace_id = ?1 AND archived_at IS NOT NULL AND (status_id = ?2 \
+                 OR archived_root_id IN (SELECT archived_root_id FROM tasks \
+                    WHERE status_id = ?2 AND archived_at IS NOT NULL))",
+            )
+            .bind(workspace_id.to_string())
+            .bind(status_id.to_string())
+            .execute(&mut *tx)
+            .await?;
+        }
         record_mutation(
             &mut tx,
             workspace_id,
@@ -1268,7 +1340,7 @@ impl TaskRepository {
         let fingerprint = format!("labels:{workspace_id}");
         let after = cursor_pair(cursor, &fingerprint)?;
         let mut query = QueryBuilder::<Sqlite>::new(
-            "SELECT id, workspace_id, name, color, version FROM labels WHERE workspace_id = ",
+            "SELECT id, workspace_id, name, color, group_id, (SELECT name FROM label_groups WHERE label_groups.id = labels.group_id) AS group_name, version FROM labels WHERE workspace_id = ",
         );
         query.push_bind(workspace_id.to_string());
         if let Some((name, id)) = after {
@@ -1304,13 +1376,19 @@ impl TaskRepository {
         actor_id: Id,
         name: String,
         color: String,
+        group_id: Option<Id>,
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<LabelRecord, TaskError> {
         let id = Id::new_v7();
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
-        let inserted = sqlx::query("INSERT INTO labels (id, workspace_id, name, color, version, created_at, updated_at) VALUES (?, ?, ?, ?, 0, ?, ?)").bind(id.to_string()).bind(workspace_id.to_string()).bind(&name).bind(&color).bind(now.as_millis()).bind(now.as_millis()).execute(&mut *tx).await;
+        if let Some(group_id) = group_id {
+            label_groups::label_group_in_tx(&mut tx, workspace_id, group_id)
+                .await
+                .map_err(|_| TaskError::Invalid { field: "group_id" })?;
+        }
+        let inserted = sqlx::query("INSERT INTO labels (id, workspace_id, name, color, group_id, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?)").bind(id.to_string()).bind(workspace_id.to_string()).bind(&name).bind(&color).bind(group_id.map(|id| id.to_string())).bind(now.as_millis()).bind(now.as_millis()).execute(&mut *tx).await;
         if is_unique_violation(&inserted) {
             return Err(TaskError::Conflict);
         }
@@ -1326,16 +1404,15 @@ impl TaskRepository {
             now,
         )
         .await?;
+        let record = label_in_tx(&mut tx, workspace_id, id).await?;
         tx.commit().await?;
-        Ok(LabelRecord {
-            id,
-            workspace_id,
-            name,
-            color,
-            version: 0,
-        })
+        Ok(record)
     }
 
+    /// `group_id`: `None` leaves the group, `Some(None)` takes the label out of its group,
+    /// `Some(Some(id))` puts it in that group. A label cannot join a group while a task has it
+    /// together with a different label of the group (`LabelGroupConflict` with the task count);
+    /// nothing is removed from a task to make the move possible.
     #[allow(clippy::too_many_arguments)]
     pub async fn update_label(
         &self,
@@ -1344,6 +1421,7 @@ impl TaskRepository {
         actor_id: Id,
         name: String,
         color: String,
+        group_id: Option<Option<Id>>,
         expected_version: u64,
         request_id: &str,
         now: TimestampMillis,
@@ -1352,7 +1430,17 @@ impl TaskRepository {
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let current = label_in_tx(&mut tx, workspace_id, label_id).await?;
         check_version(expected_version, current.version, &current)?;
-        let updated = sqlx::query("UPDATE labels SET name = ?, color = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND version = ?").bind(&name).bind(&color).bind(now.as_millis()).bind(label_id.to_string()).bind(workspace_id.to_string()).bind(expected_version as i64).execute(&mut *tx).await;
+        let group_id = group_id.unwrap_or(current.group_id);
+        if let Some(group) = group_id.filter(|group| Some(*group) != current.group_id) {
+            label_groups::label_group_in_tx(&mut tx, workspace_id, group)
+                .await
+                .map_err(|_| TaskError::Invalid { field: "group_id" })?;
+            let count = label_groups::join_conflicts_in_tx(&mut tx, label_id, group).await?;
+            if count > 0 {
+                return Err(TaskError::LabelGroupConflict { count });
+            }
+        }
+        let updated = sqlx::query("UPDATE labels SET name = ?, color = ?, group_id = ?, version = version + 1, updated_at = ? WHERE id = ? AND workspace_id = ? AND version = ?").bind(&name).bind(&color).bind(group_id.map(|id| id.to_string())).bind(now.as_millis()).bind(label_id.to_string()).bind(workspace_id.to_string()).bind(expected_version as i64).execute(&mut *tx).await;
         if is_unique_violation(&updated) {
             return Err(TaskError::Conflict);
         }
@@ -1368,13 +1456,9 @@ impl TaskRepository {
             now,
         )
         .await?;
+        let record = label_in_tx(&mut tx, workspace_id, label_id).await?;
         tx.commit().await?;
-        Ok(LabelRecord {
-            name,
-            color,
-            version: current.version + 1,
-            ..current
-        })
+        Ok(record)
     }
 
     pub async fn delete_label(
@@ -1437,7 +1521,13 @@ impl TaskRepository {
             task_columns()
         ));
         query.push_bind(workspace_id.to_string());
-        query.push(" AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL");
+        // The sub-issues of one task: an archived parent (open by a direct link) shows its tree.
+        let archived = if filter.parent_task_id.is_some() {
+            ArchivedScope::Include
+        } else {
+            filter.archived
+        };
+        task_filter::push_visibility(&mut query, archived, &filter.tree);
         task_filter::push_filter(
             &mut query,
             &filter.tree,
@@ -1494,6 +1584,113 @@ impl TaskRepository {
         finish_page(tasks, limit, &fingerprint, |task| {
             task_cursor_key(task, filter)
         })
+    }
+
+    /// Ranked full-text search (FTS5, `task_search`) over the title, description and comments of
+    /// the tasks that the default lists show. Every word must match as a prefix; a title match
+    /// ranks above a description match, and that above a comment match. A task whose identifier
+    /// (`ENG-12`) is the query comes first. A query that the index cannot answer (fewer than 3
+    /// characters, or a bare number) uses the list text filter, newest first, with no snippet.
+    pub async fn search_tasks(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        query: &str,
+        limit: usize,
+        now: TimestampMillis,
+    ) -> Result<TaskSearchResults, TaskError> {
+        require_access(self.database.pool(), workspace_id, actor_id).await?;
+        let query = query.trim();
+        let limit = limit.clamp(1, SEARCH_LIMIT);
+        let mut items = Vec::new();
+        if query.is_empty() {
+            return Ok(TaskSearchResults { items });
+        }
+        if parse_task_identifier(query).is_some()
+            && let Ok(id) = self.resolve_task_id(workspace_id, query).await
+            && let Ok(task) = self.get_task(workspace_id, id, actor_id).await
+        {
+            items.push(TaskSearchHit {
+                task,
+                snippet: None,
+            });
+        }
+        let bare_number = query.trim_start_matches('#').parse::<i64>().is_ok();
+        let expression = task_filter::fts_match(query)
+            .filter(|_| !bare_number && query.chars().count() >= task_filter::MIN_INDEX_CHARS);
+        let Some(expression) = expression else {
+            let filter = TaskFilter {
+                tree: FilterGroup {
+                    op: task_filter::GroupOp::And,
+                    children: vec![task_filter::FilterNode::Condition(task_filter::Condition {
+                        field: task_filter::FilterField::Text,
+                        operator: task_filter::FilterOperator::Contains,
+                        value: serde_json::Value::String(query.to_owned()),
+                    })],
+                },
+                show_completed: ShowCompleted::All,
+                sort: TaskSort::UpdatedAt,
+                order: SortOrder::Desc,
+                parent_task_id: None,
+                sub_issues: SubIssuesDisplay::Nested,
+                archived: ArchivedScope::Exclude,
+            };
+            let page = self
+                .tasks(workspace_id, actor_id, &filter, None, limit, now)
+                .await?;
+            for task in page.items {
+                if items
+                    .iter()
+                    .all(|hit: &TaskSearchHit| hit.task.id != task.id)
+                {
+                    items.push(TaskSearchHit {
+                        task,
+                        snippet: None,
+                    });
+                }
+            }
+            items.truncate(limit);
+            return Ok(TaskSearchResults { items });
+        };
+        let rows = sqlx::query(&format!(
+            "SELECT {}, \
+             snippet(task_search, 1, char(2), char(3), '…', ?1) AS description_snippet, \
+             snippet(task_search, 2, char(2), char(3), '…', ?1) AS comments_snippet \
+             FROM task_search \
+             JOIN task_search_rows ON task_search_rows.id = task_search.rowid \
+             JOIN tasks ON tasks.id = task_search_rows.task_id \
+             JOIN projects ON projects.id = tasks.project_id \
+             WHERE task_search MATCH ?2 AND tasks.workspace_id = ?3{} \
+             ORDER BY bm25(task_search, 10.0, 3.0, 1.0), tasks.updated_at DESC, tasks.id DESC \
+             LIMIT ?4",
+            task_columns(),
+            task_filter::DEFAULT_VISIBILITY
+        ))
+        .bind(SNIPPET_TOKENS)
+        .bind(expression)
+        .bind(workspace_id.to_string())
+        .bind(limit as i64)
+        .fetch_all(self.database.pool())
+        .await?;
+        for row in rows {
+            // The first column with a match gives the snippet; a title-only match needs none.
+            let snippet = ["description_snippet", "comments_snippet"]
+                .into_iter()
+                .map(|column| row.get::<String, _>(column))
+                .find(|text| text.contains('\u{2}'))
+                .map(|text| {
+                    text.replace(['\u{2}', '\u{3}'], "")
+                        .split_whitespace()
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                });
+            let task = task_from_row(self.database.pool(), row).await?;
+            if items.iter().all(|hit| hit.task.id != task.id) {
+                items.push(TaskSearchHit { task, snippet });
+            }
+        }
+        items.truncate(limit);
+        Ok(TaskSearchResults { items })
     }
 
     /// Resolves a `{task_id}` path segment: a task UUID, or an identifier such as `ENG-12`
@@ -3170,12 +3367,13 @@ fn task_fingerprint(workspace_id: Id, filter: &TaskFilter) -> String {
         .map(|byte| format!("{byte:02x}"))
         .collect();
     format!(
-        "tasks:w={workspace_id}:f={digest}:c={:?}:sort={:?}:order={:?}:p={:?}:s={:?}",
+        "tasks:w={workspace_id}:f={digest}:c={:?}:sort={:?}:order={:?}:p={:?}:s={:?}:a={:?}",
         filter.show_completed,
         filter.sort,
         filter.order,
         filter.parent_task_id.map(|id| id.to_string()),
         filter.sub_issues,
+        filter.archived,
     )
 }
 
@@ -3711,16 +3909,26 @@ async fn replace_assignees(
     Ok(())
 }
 
+/// Replaces the labels of a task. The labels the task already had are written first and the
+/// added ones last, so that an added label of a group replaces the task's other label of that
+/// group (the `task_labels_one_per_group` trigger keeps the newest row of a group).
 async fn replace_labels(
     tx: &mut Transaction<'_, Sqlite>,
     task_id: Id,
     ids: &[Id],
 ) -> Result<(), TaskError> {
+    let before: Vec<String> =
+        sqlx::query_scalar("SELECT label_id FROM task_labels WHERE task_id = ?")
+            .bind(task_id.to_string())
+            .fetch_all(&mut **tx)
+            .await?;
     sqlx::query("DELETE FROM task_labels WHERE task_id = ?")
         .bind(task_id.to_string())
         .execute(&mut **tx)
         .await?;
-    for id in ids {
+    let (kept, added): (Vec<&Id>, Vec<&Id>) =
+        ids.iter().partition(|id| before.contains(&id.to_string()));
+    for id in kept.into_iter().chain(added) {
         sqlx::query("INSERT INTO task_labels (task_id, label_id) VALUES (?, ?)")
             .bind(task_id.to_string())
             .bind(id.to_string())
@@ -3961,7 +4169,7 @@ async fn label_in_tx(
     workspace_id: Id,
     label_id: Id,
 ) -> Result<LabelRecord, TaskError> {
-    let row = sqlx::query("SELECT id, workspace_id, name, color, version FROM labels WHERE id = ? AND workspace_id = ?")
+    let row = sqlx::query("SELECT id, workspace_id, name, color, group_id, (SELECT name FROM label_groups WHERE label_groups.id = labels.group_id) AS group_name, version FROM labels WHERE id = ? AND workspace_id = ?")
         .bind(label_id.to_string()).bind(workspace_id.to_string()).fetch_optional(&mut **tx).await?.ok_or(TaskError::NotFound)?;
     label_from_row(row)
 }
@@ -4030,7 +4238,7 @@ const RESTORE_KEY: &str = "COALESCE(restore_project_key, project_key)";
 fn project_columns(key_sql: &str) -> String {
     format!(
         "id, workspace_id, name, {key_sql} AS project_key, color, auto_close_parent, \
-         auto_close_sub_issues, triage_enabled, estimate_scale, lead_user_id, overview_page_id, version, deleted_at, created_at, \
+         auto_close_sub_issues, auto_archive_months, triage_enabled, estimate_scale, lead_user_id, overview_page_id, version, deleted_at, created_at, \
          updated_at, \
          (SELECT json_group_array(user_id) FROM (SELECT user_id FROM project_members \
           WHERE project_members.project_id = projects.id ORDER BY user_id)) AS member_ids, \
@@ -4062,6 +4270,7 @@ fn project_from_row(row: sqlx::sqlite::SqliteRow) -> Result<ProjectRecord, TaskE
         color: row.get("color"),
         auto_close_parent: row.get("auto_close_parent"),
         auto_close_sub_issues: row.get("auto_close_sub_issues"),
+        auto_archive_months: row.get("auto_archive_months"),
         triage_enabled: row.get("triage_enabled"),
         estimate_scale: row.get("estimate_scale"),
         version: parse_version(row.get("version"))?,
@@ -4093,6 +4302,11 @@ fn label_from_row(row: sqlx::sqlite::SqliteRow) -> Result<LabelRecord, TaskError
         workspace_id: parse_id(row.get("workspace_id"))?,
         name: row.get("name"),
         color: row.get("color"),
+        group_id: row
+            .get::<Option<String>, _>("group_id")
+            .map(parse_id)
+            .transpose()?,
+        group_name: row.get("group_name"),
         version: parse_version(row.get("version"))?,
     })
 }
@@ -4181,7 +4395,7 @@ fn task_columns() -> String {
          tasks.description, tasks.source_url, tasks.priority, tasks.position, tasks.creator_id, \
          tasks.creator_service_account_id, \
          (SELECT name FROM service_accounts WHERE id = tasks.creator_service_account_id) AS creator_service_account_name, \
-         tasks.due_start_at, tasks.due_at, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at, \
+         tasks.due_start_at, tasks.due_at, tasks.version, tasks.deleted_at, tasks.archived_at, tasks.created_at, tasks.updated_at, \
          {} AS duplicate_of_json, \
          EXISTS (SELECT 1 FROM task_relations AS blocker_relation \
                  JOIN tasks AS blocker ON blocker.id = blocker_relation.task_id \
@@ -4190,6 +4404,11 @@ fn task_columns() -> String {
                  WHERE blocker_relation.related_task_id = tasks.id AND blocker_relation.type = 'blocks' \
                  AND blocker.deleted_at IS NULL AND blocker_project.deleted_at IS NULL \
                  AND blocker_status.category NOT IN ('completed', 'cancelled', 'duplicate')) AS blocked, \
+         (SELECT json_group_array(blocking_relation.related_task_id) FROM task_relations AS blocking_relation \
+          JOIN tasks AS blocking_target ON blocking_target.id = blocking_relation.related_task_id \
+          JOIN projects AS blocking_project ON blocking_project.id = blocking_target.project_id \
+          WHERE blocking_relation.task_id = tasks.id AND blocking_relation.type = 'blocks' \
+          AND blocking_target.deleted_at IS NULL AND blocking_project.deleted_at IS NULL) AS blocking_json, \
          tasks.parent_task_id, {} AS parent_json, tasks.milestone_id, tasks.cycle_id, tasks.estimate, \
          (WITH RECURSIVE descendants(id) AS ( \
               SELECT child.id FROM tasks AS child \
@@ -4289,10 +4508,18 @@ fn task_record_from_row(
         deleted_at: row
             .get::<Option<i64>, _>("deleted_at")
             .map(TimestampMillis::from_millis),
+        archived_at: row
+            .get::<Option<i64>, _>("archived_at")
+            .map(TimestampMillis::from_millis),
         created_at: TimestampMillis::from_millis(row.get("created_at")),
         updated_at: TimestampMillis::from_millis(row.get("updated_at")),
         duplicate_of: parse_task_ref(row.get("duplicate_of_json"))?,
         blocked: row.get::<bool, _>("blocked"),
+        blocking_ids: serde_json::from_str::<Vec<String>>(&row.get::<String, _>("blocking_json"))
+            .map_err(|_| TaskError::Conflict)?
+            .into_iter()
+            .map(parse_id)
+            .collect::<Result<_, _>>()?,
         parent_task_id: optional_id(row.get("parent_task_id"))?,
         milestone_id: optional_id(row.get("milestone_id"))?,
         cycle_id: optional_id(row.get("cycle_id"))?,

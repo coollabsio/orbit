@@ -142,6 +142,7 @@ export function SidebarNav({
   currentCyclePaths,
   chatEnabled: chat = chatEnabled,
   isRoot = false,
+  favorites,
 }: {
   onNavigate?: () => void
   collapsed?: boolean
@@ -157,6 +158,8 @@ export function SidebarNav({
   chatEnabled?: boolean
   /** The root user (installation administrator) also gets the Admin link. */
   isRoot?: boolean
+  /** The Favorites section, below the Tasks links; not shown in the collapsed rail. */
+  favorites?: ReactNode
 }) {
   const location = useLocation()
   const currentParams = new URLSearchParams(location.search)
@@ -233,6 +236,7 @@ export function SidebarNav({
           ) : (
             <SidebarNavComingSoon key={link.to} icon={link.icon} label={link.label} />
           ))}
+          {collapsed ? null : favorites}
           <SidebarSection label="Personal" collapsed={collapsed} />
           <SidebarNavItem to={activityPath} icon={Bell} label="Activity" unread={inboxUnread} onClick={onNavigate} />
           <SidebarNavItem to={taskViewPath('mine')} active={taskViewActive('mine')} icon={SquareCheck} label="My tasks" onClick={onNavigate} />

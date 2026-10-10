@@ -15,6 +15,7 @@ import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { groupTasks, type GroupContext } from '@/features/views/grouping'
 import { groupAccent } from '@/features/views/layoutGroups'
 import type { GroupBy, TaskProperty } from '@/features/views/viewState'
+import { blockArrows } from './arrowLib'
 import { TimelineBar } from './TimelineBar'
 import { TimelineHeader } from './TimelineHeader'
 import { TimelineRowLabel } from './TimelineRowLabel'
@@ -43,6 +44,8 @@ export interface TaskTimelineProps {
   /** `display.properties`; rows show the ones in TIMELINE_PROPERTIES. */
   properties: TaskProperty[]
   groupContext: GroupContext
+  /** Draw an arrow for each "blocks" relation whose two tasks have a bar (display only). Default on. */
+  arrows?: boolean
   pxPerDay: number
   onZoomChange: (px: number) => void
   onOpen: (taskId: string) => void
@@ -51,7 +54,7 @@ export interface TaskTimelineProps {
 }
 
 /** Roadmap timeline: one row per task, bars span due_start_at → due_at. */
-export function TaskTimeline({ tasks, projects, statuses, users, groupBy, properties, groupContext, pxPerDay, onZoomChange, onOpen, today: todayProp, ref }: TaskTimelineProps & { ref?: Ref<TimelineHandle> }) {
+export function TaskTimeline({ tasks, projects, statuses, users, groupBy, properties, groupContext, arrows = true, pxPerDay, onZoomChange, onOpen, today: todayProp, ref }: TaskTimelineProps & { ref?: Ref<TimelineHandle> }) {
   const [today] = useState(() => todayProp ?? new Date())
   const [overrides, setOverrides] = useState<Record<string, boolean>>({})
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -156,6 +159,21 @@ export function TaskTimeline({ tasks, projects, statuses, users, groupBy, proper
       return outside.length > 0 ? [...new Set([...indexes, ...outside])].sort((a, b) => a - b) : indexes
     },
   })
+
+  // arrows only between rows that are in the DOM: with row virtualisation both ends must be mounted
+  const blockingById = new Map(tasks.map((task) => [task.id, task.blockingIds ?? []]))
+  const blockArrowList = arrows
+    ? blockArrows({
+        rows: virtualizer.getVirtualItems().flatMap((item) => {
+          const row = rows[item.index]
+          return row?.kind === 'task' && row.span ? [{ taskId: row.task.id, top: item.start - HEADER_HEIGHT, span: row.span }] : []
+        }),
+        blocking: (taskId) => blockingById.get(taskId) ?? [],
+        range,
+        pxPerDay,
+        rowHeight: ROW_HEIGHT,
+      })
+    : []
 
   // restore the last position (coming back from a task), else centre on today; again when
   // the scroller remounts after an empty result
@@ -268,6 +286,17 @@ export function TaskTimeline({ tasks, projects, statuses, users, groupBy, proper
         </div>
 
         <div className="relative shrink-0" style={{ height: virtualizer.getTotalSize() }}>
+        {/* one layer for the "blocks" arrows, over the rows and below the sticky row labels; display only */}
+        {blockArrowList.length > 0 ? (
+          <svg data-timeline-arrows aria-hidden="true" className="pointer-events-none absolute top-0 left-[var(--timeline-left)] z-[4] overflow-visible" width={trackWidth} height={virtualizer.getTotalSize()}>
+            {blockArrowList.map((arrow) => (
+              <g key={arrow.key} data-arrow={arrow.key} data-conflict={arrow.conflict || undefined} className="text-muted-foreground/70 data-[conflict]:text-destructive">
+                <path d={arrow.path} fill="none" stroke="currentColor" strokeWidth={1.25} strokeLinejoin="round" />
+                <path d={arrow.head} fill="currentColor" />
+              </g>
+            ))}
+          </svg>
+        ) : null}
         {virtualizer.getVirtualItems().map((item) => {
           const row = rows[item.index]
           const status = row.kind === 'task' ? statusById.get(row.task.statusId) : undefined

@@ -9,9 +9,7 @@ import { defaultViewState, type ViewState } from '@/features/views/viewState'
 import {
   savePreference,
   savedViewsQueryOptions,
-  useReorderFavorites,
   useSavedView,
-  useSetFavorite,
   useUpdateView,
   useViewPreference,
   viewPreferenceQueryOptions,
@@ -115,76 +113,6 @@ test('updating a view sends the expected version and refreshes the cached view',
 
   expect(requests).toEqual([{ method: 'PATCH', path: '/api/v1/workspaces/workspace-1/views/view-1', body: { expected_version: 3, state } }])
   expect(client.getQueryData<SavedView>(queryKeys.view('workspace-1', 'view-1'))?.version).toBe(4)
-})
-
-test('favoriting flips the star at once and uses PUT or DELETE', async () => {
-  let release: (() => void) | undefined
-  const requests = serve(() => new Promise<Response>((resolve) => { release = () => resolve(new Response(null, { status: 204 })) }))
-  const client = testClient()
-  client.setQueryData(queryKeys.views('workspace-1'), [savedView()])
-  client.setQueryData(queryKeys.view('workspace-1', 'view-1'), savedView())
-  const view = renderHook(() => useSetFavorite('workspace-1'), { wrapper: withClient(client) })
-
-  act(() => view.result.current.mutate({ viewId: 'view-1', favorite: true }))
-  await waitFor(() => expect(client.getQueryData<SavedView[]>(queryKeys.views('workspace-1'))?.[0]?.is_favorite).toBeTrue())
-  // the open view's header star too
-  expect(client.getQueryData<SavedView>(queryKeys.view('workspace-1', 'view-1'))?.is_favorite).toBeTrue()
-  await waitFor(() => expect(requests).toHaveLength(1))
-  release?.()
-  await waitFor(() => expect(view.result.current.isSuccess).toBeTrue())
-
-  act(() => view.result.current.mutate({ viewId: 'view-1', favorite: false }))
-  await waitFor(() => expect(requests).toHaveLength(2))
-  release?.()
-  expect(requests.map(({ method, path }) => [method, path])).toEqual([
-    ['PUT', '/api/v1/workspaces/workspace-1/views/view-1/favorite'],
-    ['DELETE', '/api/v1/workspaces/workspace-1/views/view-1/favorite'],
-  ])
-})
-
-test('starring a view puts it after the existing favorites at once', async () => {
-  serve(() => new Response(null, { status: 204 }))
-  const client = testClient()
-  client.setQueryData(queryKeys.views('workspace-1'), [
-    savedView({ id: 'view-1' }),
-    savedView({ id: 'view-2', is_favorite: true, favorite_position: 0 }),
-    savedView({ id: 'view-3', is_favorite: true, favorite_position: 4 }),
-  ])
-  client.setQueryData(queryKeys.view('workspace-1', 'view-1'), savedView({ id: 'view-1' }))
-  const view = renderHook(() => useSetFavorite('workspace-1'), { wrapper: withClient(client) })
-
-  act(() => view.result.current.mutate({ viewId: 'view-1', favorite: true }))
-
-  await waitFor(() => expect(client.getQueryData<SavedView[]>(queryKeys.views('workspace-1'))?.[0]).toMatchObject({ is_favorite: true, favorite_position: 5 }))
-  expect(client.getQueryData<SavedView>(queryKeys.view('workspace-1', 'view-1'))).toMatchObject({ is_favorite: true, favorite_position: 5 })
-})
-
-test('a failed favorite toggle restores the star', async () => {
-  serve(() => problem(500, 'internal_error'))
-  const client = testClient()
-  client.setQueryData(queryKeys.views('workspace-1'), [savedView()])
-  client.setQueryData(queryKeys.view('workspace-1', 'view-1'), savedView())
-  const view = renderHook(() => useSetFavorite('workspace-1'), { wrapper: withClient(client) })
-
-  await act(async () => { await view.result.current.mutateAsync({ viewId: 'view-1', favorite: true }).catch(() => undefined) })
-
-  expect(client.getQueryData<SavedView[]>(queryKeys.views('workspace-1'))?.[0]?.is_favorite).toBeFalse()
-  expect(client.getQueryData<SavedView>(queryKeys.view('workspace-1', 'view-1'))?.is_favorite).toBeFalse()
-})
-
-test('reordering favorites sends the full order and updates positions at once', async () => {
-  const requests = serve(() => new Response(null, { status: 204 }))
-  const client = testClient()
-  client.setQueryData(queryKeys.views('workspace-1'), [
-    savedView({ id: 'view-1', is_favorite: true, favorite_position: 0 }),
-    savedView({ id: 'view-2', is_favorite: true, favorite_position: 1 }),
-  ])
-  const view = renderHook(() => useReorderFavorites('workspace-1'), { wrapper: withClient(client) })
-
-  act(() => view.result.current.mutate(['view-2', 'view-1']))
-
-  await waitFor(() => expect(client.getQueryData<SavedView[]>(queryKeys.views('workspace-1'))?.map((item) => [item.id, item.favorite_position])).toEqual([['view-1', 1], ['view-2', 0]]))
-  await waitFor(() => expect(requests).toEqual([{ method: 'PUT', path: '/api/v1/workspaces/workspace-1/view-favorites/order', body: { view_ids: ['view-2', 'view-1'] } }]))
 })
 
 test('a 404 preference resolves to null without retrying', async () => {

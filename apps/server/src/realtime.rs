@@ -101,7 +101,7 @@ pub async fn replay(
         let (workspace, profile, views): (i64, i64, i64) = sqlx::query_as(
             "SELECT COALESCE(MAX(a.resource_type IN ('workspace', 'membership')), 0), \
                     COALESCE(MAX(a.resource_type = 'user'), 0), \
-                    COALESCE(MIN(COALESCE(a.resource_type = 'saved_view', 0)), 0) \
+                    COALESCE(MIN(COALESCE(a.resource_type IN ('saved_view', 'favorite'), 0)), 0) \
              FROM outbox_events e LEFT JOIN audit_events a ON a.id = e.id \
              WHERE e.scope = ? AND e.sequence > ? AND e.sequence <= ?",
         )

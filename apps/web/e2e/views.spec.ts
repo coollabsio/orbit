@@ -121,8 +121,20 @@ async function mockApi(page: Page, person: Person, store: Store) {
       if (method === 'PUT') return json({ page_key: pageKey, state: request.postDataJSON().state, state_error: null, updated_at: new Date().toISOString() })
       return json(problem(404, 'not_found', 'No saved preference.', path), 404)
     }
-    if (path === `${WS}/view-favorites/order` && method === 'PUT') {
-      store.favorites.set(person.id, request.postDataJSON().view_ids)
+    if (path === `${WS}/favorites/order` && method === 'PUT') {
+      store.favorites.set(person.id, (request.postDataJSON().items as Array<{ target_id: string }>).map((item) => item.target_id))
+      return empty()
+    }
+    if (path === `${WS}/favorites` && method === 'GET') {
+      const starred = store.favorites.get(person.id) ?? []
+      return json({ items: visibleTo(store, person).filter((view) => starred.includes(view.id)).map((view) => ({
+        kind: 'view', target_id: view.id, title: view.name, identifier: null, color: null, icon: null, path: `/views/${view.id}`, position: starred.indexOf(view.id),
+      })) })
+    }
+    const starred = path.match(/\/favorites\/view\/([^/]+)$/)
+    if (starred) {
+      const others = (store.favorites.get(person.id) ?? []).filter((id) => id !== starred[1])
+      store.favorites.set(person.id, method === 'PUT' ? [...others, starred[1]!] : others)
       return empty()
     }
     if (path === `${WS}/views` && method === 'GET') return json(visibleTo(store, person).map((view) => record(view, person, store)))

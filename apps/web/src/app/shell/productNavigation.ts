@@ -13,7 +13,7 @@ export const disabledProductPathsFor = (chat: boolean): readonly string[] => (ch
 export const mobileDockPathsFor = (chat: boolean): readonly string[] => (chat ? ['/', '/tasks', '/docs', '/chat', '/settings'] : ['/', '/tasks', '/docs', '/settings'])
 
 export const disabledProductPaths = disabledProductPathsFor(chatEnabled)
-export const coreSettingsPaths = ['/settings', '/settings/members', '/settings/sessions', '/settings/danger-zone', '/tasks-trash'] as const
+export const coreSettingsPaths = ['/settings', '/settings/members', '/settings/sessions', '/settings/danger-zone', '/tasks-trash', '/tasks-archive'] as const
 export const mobileDockPaths = mobileDockPathsFor(chatEnabled)
 
 export function isDisabledProductPath(pathname: string) {

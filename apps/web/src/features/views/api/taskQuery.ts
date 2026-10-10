@@ -25,6 +25,7 @@ export function taskQueryBody(filter: FilterGroup, display: DisplayOptions): Tas
     order_direction: display.order_direction,
     show_completed: display.show_completed,
     ...(display.sub_issues === 'hidden' ? { sub_issues: 'hidden' as const } : {}),
+    ...(display.show_archived ? { archived: 'include' as const } : {}),
   }
 }
 

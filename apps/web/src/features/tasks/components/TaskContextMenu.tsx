@@ -1,6 +1,7 @@
 import { useRef, useState, type ReactNode } from 'react'
 import { toast } from 'sonner'
-import { ArrowUpRightSquare, Calendar, Clipboard, Copy, Flag, Folder, Hierarchy2, LinkBroken, RecordCircle, Refresh2, Signpost, Tag, Trash, User as UserIcon, UserAdd, Weight } from 'reicon-react'
+import { ArchiveBox, ArrowUpRightSquare, Calendar, Clipboard, Copy, Flag, Folder, Hierarchy2, LinkBroken, RecordCircle, Refresh2, Signpost, Tag, Trash, User as UserIcon, UserAdd, Weight } from 'reicon-react'
+import { canArchive, useArchiveActions } from '@/features/tasks/useArchiveActions'
 import type { BulkItem, LabelRecord } from '@/api/generated/types.gen'
 import { ColorDot } from '@/components/common/ColorDot'
 import { UserAvatar } from '@/components/common/UserAvatar'
@@ -67,6 +68,7 @@ export function TaskContextMenu({ tasks, users, labels, statuses, groupContext, 
   const { selectedIds, setSelected } = useTaskTarget()
   const bulkTasks = useBulkTasks(workspace.id)
   const trashTasks = useTrashTasks(workspace.id)
+  const archiveActions = useArchiveActions(workspace.id)
   const duplicates = useDuplicateActions(workspace.id)
   const parentActions = useParentActions(workspace.id)
   const moveToProject = useMoveToProject(workspace.id)
@@ -214,7 +216,7 @@ export function TaskContextMenu({ tasks, users, labels, statuses, groupContext, 
               </ContextMenuSubTrigger>
               <ContextMenuSubContent className="min-w-45">
                 {labels.map((label) => (
-                  <ContextMenuCheckboxItem key={label.id} checked={targets.every((task) => task.labels.includes(label.id))} onCheckedChange={() => mutate(labelToggleUpdates(targets, label.id))}>
+                  <ContextMenuCheckboxItem key={label.id} checked={targets.every((task) => task.labels.includes(label.id))} onCheckedChange={() => mutate(labelToggleUpdates(targets, label.id, labels))}>
                     <LabelPill label={label} />
                   </ContextMenuCheckboxItem>
                 ))}
@@ -342,6 +344,17 @@ export function TaskContextMenu({ tasks, users, labels, statuses, groupContext, 
               </ContextMenuItem>
               <ContextMenuSeparator />
             </>
+          ) : null}
+          {/* closed tasks only: a task goes to the archive with its closed tree */}
+          {canArchive(targets, statuses) ? (
+            <ContextMenuItem
+              onClick={async () => {
+                if (await archiveActions.archive(targets)) setSelected([])
+              }}
+            >
+              <ArchiveBox aria-hidden />
+              Archive
+            </ContextMenuItem>
           ) : null}
           <ContextMenuItem
             onClick={async () => {

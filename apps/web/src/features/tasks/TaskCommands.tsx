@@ -1,3 +1,4 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { toast } from 'sonner'
 import type { BulkItem, LabelRecord } from '@/api/generated/types.gen'
@@ -7,6 +8,7 @@ import { Command, CommandDialog, CommandEmpty, CommandInput, CommandItem, Comman
 import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
 import { useProjects } from '@/features/tasks/api/projects'
 import { useBulkTasks } from '@/features/tasks/api/tasks'
+import { favoritesQueryOptions, useSetFavorite } from '@/features/favorites/api/favorites'
 import { assignUpdates, assigneeToggleUpdates, cycleUpdates, dueUpdates, estimateUpdates, labelToggleUpdates, priorityUpdates, sharedProjectCycles, sharedProjectId, statusUpdates } from '@/features/tasks/bulkUpdates'
 import { cycleName, estimateOptions } from '@/features/tasks/cyclesLib'
 import { DueDateDialog } from '@/features/tasks/components/DueDateDialog'
@@ -45,6 +47,8 @@ export function TaskCommands({ tasks, users, labels, statuses, groupContext, cur
   const bulkTasks = useBulkTasks(workspace.id)
   const trashTasks = useTrashTasks(workspace.id)
   const moveToProject = useMoveToProject(workspace.id)
+  const queryClient = useQueryClient()
+  const setFavorite = useSetFavorite(workspace.id)
   // every project: a project page's group context knows only its own
   const projects = useProjects(workspace.id).data ?? []
   // `focused`: the row that had the keyboard focus, to give it back when the list closes
@@ -77,6 +81,14 @@ export function TaskCommands({ tasks, users, labels, statuses, groupContext, cur
   useCommand('task.assignMe', () => mutate(assignUpdates(targets(), currentUserId)), { available })
   useCommand('task.copyId', () => copy(targets()[0].identifier, 'Copied task ID'), { available: single })
   useCommand('task.copyLink', () => copy(`${window.location.origin}${taskPath(targets()[0])}`, 'Copied task link'), { available: single })
+  // a toggle: a second use removes the favorite
+  useCommand('task.favorite', () => void (async () => {
+    const [task] = targets()
+    // the sidebar keeps this list loaded; a cold cache asks the server once
+    const favorites = await queryClient.fetchQuery({ ...favoritesQueryOptions(workspace.id), staleTime: Infinity })
+    const favorite = !favorites.some((item) => item.kind === 'task' && item.target_id === task.id)
+    setFavorite.mutate({ kind: 'task', targetId: task.id, favorite }, { onSuccess: () => toast(favorite ? 'Added to favorites' : 'Removed from favorites') })
+  })(), { available: single })
   useCommand('task.copyBranch', () => copy(taskBranchName(targets()[0].identifier, targets()[0].title), 'Copied git branch name'), { available: single })
   // the open task has its own trash action, which also closes the page
   useCommand('task.trash', openTaskId ? null : async () => {
@@ -146,7 +158,7 @@ export function TaskCommands({ tasks, users, labels, statuses, groupContext, cur
             </CommandItem>
           )) : null}
           {menu.field === 'labels' ? labels.map((label) => (
-            <CommandItem key={label.id} value={label.name} data-checked={menuTasks.every((task) => task.labels.includes(label.id))} onSelect={() => mutate(labelToggleUpdates(menuTasks, label.id))}>
+            <CommandItem key={label.id} value={label.name} data-checked={menuTasks.every((task) => task.labels.includes(label.id))} onSelect={() => mutate(labelToggleUpdates(menuTasks, label.id, labels))}>
               <LabelPill label={label} />
             </CommandItem>
           )) : null}
