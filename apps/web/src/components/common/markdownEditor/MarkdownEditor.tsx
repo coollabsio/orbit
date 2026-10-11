@@ -70,13 +70,13 @@ export default function MarkdownEditor({ value, members, ariaLabel, className, c
   const tokens = useMemo(() => buildMentionTokens(members), [members])
   // Parsed once, with an editor that is never shown: the visible editor then starts with the blocks, and its first
   // change event is a change by the person.
-  const initial = useRef<{ supported: boolean; blocks: ReturnType<typeof markdownToBlocks> } | null>(null)
+  const initial = useRef<{ supported: boolean; blocks: ReturnType<typeof markdownToBlocks>; parser: MarkdownEditorInstance } | null>(null)
   if (initial.current === null) {
-    const parser = BlockNoteEditor.create({ schema: markdownEditorSchema, _tiptapOptions: { injectCSS: false } })
+    const parser: MarkdownEditorInstance = BlockNoteEditor.create({ schema: markdownEditorSchema, _tiptapOptions: { injectCSS: false } })
     const supported = roundTrips(parser, value, tokens)
-    initial.current = { supported, blocks: supported ? markdownToBlocks(parser, value, tokens) : [] }
+    initial.current = { supported, blocks: supported ? markdownToBlocks(parser, value, tokens) : [], parser }
   }
-  const { supported, blocks } = initial.current
+  const { supported, blocks, parser } = initial.current
   // Whether uploads exist is fixed per editor; the latest callback is read through a ref.
   const upload = useRef(uploadImage)
   useEffect(() => { upload.current = uploadImage }, [uploadImage])
@@ -87,6 +87,15 @@ export default function MarkdownEditor({ value, members, ariaLabel, className, c
     // Tiptap would inject a <style> tag, which the production CSP (`style-src 'self'`) blocks; the rules are in index.css.
     _tiptapOptions: { injectCSS: false },
     dictionary,
+    // Pasted markdown becomes blocks with no step by the person. Plain text that the editor cannot hold as markdown
+    // (`Vec<String>`, `__name__`) is pasted as the characters it is, so nothing of it is lost.
+    pasteHandler: ({ event, editor: target, defaultPasteHandler }) => {
+      const text = event.clipboardData?.getData('text/plain') ?? ''
+      if (!text || event.clipboardData?.types.includes('text/html')) return defaultPasteHandler({ plainTextAsMarkdown: false })
+      if (!roundTrips(parser, text)) return target.pasteText(text)
+      target.pasteMarkdown(text)
+      return true
+    },
   })
   const root = useRef<HTMLDivElement>(null)
   // the caret goes to the end of the text, as in the plain field

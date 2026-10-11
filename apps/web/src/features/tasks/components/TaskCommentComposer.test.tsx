@@ -44,7 +44,7 @@ test('a second click while sending does not send the comment again', async () =>
   expect(onSend).toHaveBeenCalledTimes(1)
 })
 
-test('the rich composer sends its markdown, and the Markdown button gives the plain field', async () => {
+test('the rich composer sends its markdown, and pasted markdown becomes rich text', async () => {
   const sent: string[] = []
   const view = render(<TaskCommentComposer rich placeholder="Leave a comment…" pending={false} onSend={async (body) => { sent.push(body) }} />)
   const editors = () => view.container.querySelectorAll('[data-slot="markdown-editor"]').length
@@ -59,13 +59,26 @@ test('the rich composer sends its markdown, and the Markdown button gives the pl
   await waitFor(() => { if (sent.length !== 1) throw new Error('not sent') })
   expect(sent[0]).toBe('Ship it')
 
-  // the plain field is always there
-  fireEvent.click(view.getByRole('button', { name: 'Markdown' }))
-  const field = view.getByPlaceholderText('Leave a comment…') as HTMLTextAreaElement
-  expect(field.tagName).toBe('TEXTAREA')
-  expect(editors()).toBe(0)
-  await userEvent.type(field, 'plain **text**')
-  fireEvent.click(view.getByRole('button', { name: 'Send' }))
-  await waitFor(() => { if (sent.length !== 2) throw new Error('not sent') })
-  expect(sent[1]).toBe('plain **text**')
+  // there is no mode to choose
+  expect(view.queryAllByRole('button', { name: 'Markdown' })).toHaveLength(0)
+  const paste = (text: string) => {
+    const data = new DataTransfer()
+    data.setData('text/plain', text)
+    const event = new Event('paste', { bubbles: true, cancelable: true }) as Event & { clipboardData: DataTransfer }
+    event.clipboardData = data
+    view.container.querySelector('.ProseMirror')!.dispatchEvent(event)
+  }
+  const sendPasted = async (text: string) => {
+    await waitFor(() => { if (view.container.querySelectorAll('[data-slot="markdown-editor"]').length !== 1) throw new Error('no editor') })
+    paste(text)
+    await waitFor(() => { if ((view.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled) throw new Error('no text yet') })
+    const count = sent.length
+    fireEvent.click(view.getByRole('button', { name: 'Send' }))
+    await waitFor(() => { if (sent.length !== count + 1) throw new Error('not sent') })
+    return sent[count]
+  }
+  // markdown is parsed: it comes back as the same markdown, and the editor holds a list
+  expect(await sendPasted('Steps:\n\n- one\n- **two**')).toBe('Steps:\n\n- one\n- **two**')
+  // text that markdown parsing would damage is pasted as it is
+  expect(await sendPasted('Use Vec<String> here')).toContain('Vec<String>')
 })

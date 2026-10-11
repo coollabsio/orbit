@@ -14,7 +14,7 @@ const MarkdownEditor = lazy(() => import('@/components/common/markdownEditor/Mar
 
 /**
  * The field of a new comment or reply. With `rich` it is the rich editor (Mod+Enter sends, "/" and "@" open their
- * menus), and the "Markdown" button changes to the plain field, from which a comment can always be sent. The text is
+ * menus; typed and pasted markdown becomes rich text). Without it, it is the plain markdown field. The text is
  * markdown in both.
  */
 export function TaskCommentComposer({ placeholder, pending, progress, error, members = [], compact, rich = false, onUploadImage, onSend }: {
@@ -30,7 +30,7 @@ export function TaskCommentComposer({ placeholder, pending, progress, error, mem
   onSend: (body: string, files: File[]) => Promise<unknown>
 }) {
   const [body, setBody] = useState('')
-  const [plain, setPlain] = useState(!rich)
+  const plain = !rich
   // A reply field is in each thread: its editor mounts when the person goes to it, not with the page.
   const [active, setActive] = useState(!compact)
   // a new editor for each comment: the editor reads its text one time
@@ -153,11 +153,6 @@ export function TaskCommentComposer({ placeholder, pending, progress, error, mem
       <div className={cn('ml-auto flex items-center gap-1', !compact && 'p-1.5')}>
         <input ref={input} type="file" multiple hidden aria-label="Attach comment files" onChange={(event) => setFiles(Array.from(event.target.files ?? []))} />
         {progress !== undefined && (pending || error) ? <span role="status" aria-live="polite" className="text-xs text-muted-foreground/70 tabular-nums">Uploading {progress}%</span> : null}
-        {rich ? (
-          <Tip label={plain ? 'Use the rich editor' : 'Write plain markdown'}>
-            <Button variant="ghost" size="sm" type="button" className="text-xs text-muted-foreground" aria-pressed={plain} onClick={() => setPlain((current) => !current)}>Markdown</Button>
-          </Tip>
-        ) : null}
         <Tip label="Attach files"><Button variant="ghost" size="icon-sm" type="button" className="text-muted-foreground" aria-label="Attach" onClick={() => input.current?.click()}><Paperclip /></Button></Tip>
         {error ? (
           <Button type="button" size="sm" disabled={pending} onClick={() => void send()}>Retry</Button>
