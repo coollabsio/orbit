@@ -17,6 +17,9 @@ async fn quick_and_full_checks_accept_a_healthy_database() {
 
 #[tokio::test]
 async fn full_check_accepts_updated_fts5_tables() {
+    if orbit_platform::testing_postgres() {
+        return; // SQLite-only checks (FTS5, file damage, PRAGMA foreign_key_check)
+    }
     // SQLite 3.46.0's PRAGMA integrity_check reports "malformed inverted index" for an FTS5
     // table after two UPDATEs of a row; FTS5's own check (and every query) is fine.
     let database = orbit_platform::TestDatabase::new().await.unwrap();
@@ -42,6 +45,9 @@ async fn full_check_accepts_updated_fts5_tables() {
 
 #[tokio::test]
 async fn a_failed_quick_check_makes_readiness_fail() {
+    if orbit_platform::testing_postgres() {
+        return; // SQLite-only checks (FTS5, file damage, PRAGMA foreign_key_check)
+    }
     let root = tempfile::tempdir().unwrap();
     let path = root.path().join("corrupt.sqlite");
     let database = Database::open(&DatabaseConfig::new(&path)).await.unwrap();
@@ -90,6 +96,9 @@ async fn a_failed_quick_check_makes_readiness_fail() {
 
 #[tokio::test]
 async fn full_check_rejects_foreign_key_orphans() {
+    if orbit_platform::testing_postgres() {
+        return; // SQLite-only checks (FTS5, file damage, PRAGMA foreign_key_check)
+    }
     let database = orbit_platform::TestDatabase::new().await.unwrap();
     database
         .execute(

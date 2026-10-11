@@ -60,7 +60,7 @@ impl Fixture {
         let now = TimestampMillis::now();
         sqlx::query(
             "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) \
-             VALUES (?, ?, ?, 'Other', 'unused', ?, ?)",
+             VALUES ($1, $2, $3, 'Other', 'unused', $4, $5)",
         )
         .bind(id.to_string())
         .bind(email)

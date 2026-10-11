@@ -17,16 +17,17 @@
 //!
 //! Versions are visible exactly like their page: a live page the caller can see.
 
+use orbit_platform::Row;
 use orbit_platform::{Id, TimestampMillis};
 use serde::Serialize;
 use serde_json::{Value, json};
-use sqlx::{Row, Sqlite, Transaction};
+use sqlx::{Any, Transaction};
 use utoipa::ToSchema;
 
 use super::page_mentions::notify_new_mentions;
 use super::pages::{
-    PageError, PageRecord, PageRepository, VISIBLE, check_version, content_text, page_by_id_in_tx,
-    page_in_tx, parse_id, user_in_tx,
+    PageError, PageRecord, PageRepository, check_version, content_text, page_by_id_in_tx,
+    page_in_tx, parse_id, user_in_tx, visible,
 };
 use super::tasks::{record_mutation, require_access, require_access_tx};
 use crate::audit::{self, AuditOutcome};
@@ -164,7 +165,7 @@ impl PageRepository {
             Some(cursor) => {
                 let cursor_id = cursor.parse::<Id>().map_err(|_| PageError::InvalidCursor)?;
                 let at: i64 = sqlx::query_scalar(
-                    "SELECT created_at FROM page_versions WHERE id = ? AND page_id = ?",
+                    "SELECT created_at FROM page_versions WHERE id = $1 AND page_id = $2",
                 )
                 .bind(cursor_id.to_string())
                 .bind(page_id.to_string())
@@ -175,13 +176,13 @@ impl PageRepository {
             }
         };
         let limit = limit.clamp(1, MAX_VERSION_LIMIT);
-        let rows = sqlx::query(&format!(
+        let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT {SUMMARY_COLUMNS} FROM page_versions \
              LEFT JOIN users ON users.id = page_versions.created_by \
-             WHERE page_versions.page_id = ? AND page_versions.workspace_id = ? \
-             AND (page_versions.created_at, page_versions.id) < (?, ?) \
-             ORDER BY page_versions.created_at DESC, page_versions.id DESC LIMIT ?"
-        ))
+             WHERE page_versions.page_id = $1 AND page_versions.workspace_id = $2 \
+             AND (page_versions.created_at, page_versions.id) < ($3, $4) \
+             ORDER BY page_versions.created_at DESC, page_versions.id DESC LIMIT $5"
+        )))
         .bind(page_id.to_string())
         .bind(workspace_id.to_string())
         .bind(before_at)
@@ -317,7 +318,7 @@ pub struct ContentReplacement<'a> {
 /// logged in `tx`, and connected editors switch to it live once the caller commits and calls
 /// [`CollabWrite::commit`].
 pub async fn replace_content(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     replacement: ContentReplacement<'_>,
     collab: &mut CollabWrite,
     now: TimestampMillis,
@@ -325,9 +326,9 @@ pub async fn replace_content(
     let content_json =
         serde_json::to_string(replacement.content).map_err(|_| PageError::Corrupt)?;
     let updated = sqlx::query(
-        "UPDATE pages SET title = ?, icon = ?, content_json = ?, content_text = ?, \
-         updated_by = ?, updated_at = ?, version = version + 1 \
-         WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND version = ?",
+        "UPDATE pages SET title = $1, icon = $2, content_json = $3, content_text = $4, \
+         updated_by = $5, updated_at = $6, version = version + 1 \
+         WHERE id = $7 AND workspace_id = $8 AND deleted_at IS NULL AND version = $9",
     )
     .bind(replacement.title)
     .bind(replacement.icon)
@@ -358,7 +359,7 @@ pub async fn replace_content(
 /// asks for that at most once per page per 10 minutes. Returns whether the content changed.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn project_collab_content(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     page_id: Id,
     content: &[Value],
     editor: Option<Id>,
@@ -374,8 +375,8 @@ pub(crate) async fn project_collab_content(
     }
     snapshot_before_edit(tx, &current, now).await?;
     sqlx::query(
-        "UPDATE pages SET content_json = ?, content_text = ?, updated_by = COALESCE(?, updated_by), \
-         updated_at = ? WHERE id = ?",
+        "UPDATE pages SET content_json = $1, content_text = $2, updated_by = COALESCE($3, updated_by), \
+         updated_at = $4 WHERE id = $5",
     )
     .bind(serde_json::to_string(content).map_err(|_| PageError::Corrupt)?)
     .bind(content_text(content))
@@ -415,12 +416,12 @@ pub(crate) async fn project_collab_content(
 /// stores `current` (the state being replaced) as an `auto` version when the page's newest
 /// version, or the page itself when it has none, is at least 10 minutes old.
 pub(super) async fn snapshot_before_edit(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     current: &PageRecord,
     now: TimestampMillis,
 ) -> Result<(), PageError> {
     let newest: Option<i64> =
-        sqlx::query_scalar("SELECT MAX(created_at) FROM page_versions WHERE page_id = ?")
+        sqlx::query_scalar("SELECT MAX(created_at) FROM page_versions WHERE page_id = $1")
             .bind(current.id.to_string())
             .fetch_one(&mut **tx)
             .await?;
@@ -435,7 +436,7 @@ pub(super) async fn snapshot_before_edit(
 /// Stores `state` as a version unless it is blank or equals the page's newest version.
 /// Returns whether a row was written.
 pub(super) async fn store_version(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     state: &PageRecord,
     kind: PageVersionKind,
     created_by: Id,
@@ -445,7 +446,7 @@ pub(super) async fn store_version(
         return Ok(false);
     }
     let newest = sqlx::query(
-        "SELECT title, icon, content_json FROM page_versions WHERE page_id = ? \
+        "SELECT title, icon, content_json FROM page_versions WHERE page_id = $1 \
          ORDER BY created_at DESC, id DESC LIMIT 1",
     )
     .bind(state.id.to_string())
@@ -463,7 +464,7 @@ pub(super) async fn store_version(
     }
     sqlx::query(
         "INSERT INTO page_versions (id, workspace_id, page_id, title, icon, content_json, kind, \
-         created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         created_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
     )
     .bind(Id::new_v7().to_string())
     .bind(state.workspace_id.to_string())
@@ -483,7 +484,7 @@ pub(super) async fn store_version(
 /// younger than 30 days, the newest version of each UTC day up to a year, and the newest 20
 /// whatever their age.
 pub(crate) async fn thin_versions(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     now: TimestampMillis,
 ) -> Result<u64, sqlx::Error> {
     Ok(sqlx::query(
@@ -491,10 +492,10 @@ pub(crate) async fn thin_versions(
              SELECT id FROM ( \
                  SELECT id, created_at, \
                  ROW_NUMBER() OVER (PARTITION BY page_id ORDER BY created_at DESC, id DESC) AS recent, \
-                 ROW_NUMBER() OVER (PARTITION BY page_id, created_at / ? \
+                 ROW_NUMBER() OVER (PARTITION BY page_id, created_at / $1 \
                      ORDER BY created_at DESC, id DESC) AS in_day \
                  FROM page_versions \
-             ) WHERE recent > ? AND created_at <= ? AND (created_at <= ? OR in_day > 1) \
+             ) WHERE recent > $2 AND created_at <= $3 AND (created_at <= $4 OR in_day > 1) \
          )",
     )
     .bind(DAY_MILLIS)
@@ -522,14 +523,15 @@ fn is_blank(title: &str, content: &[Value]) -> bool {
 }
 
 async fn require_visible_page(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     page_id: Id,
     actor_id: Id,
 ) -> Result<(), PageError> {
-    sqlx::query(&format!(
-        "SELECT 1 FROM pages WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND {VISIBLE}"
-    ))
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "SELECT 1 FROM pages WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL AND {visible}",
+        visible = visible(3)
+    )))
     .bind(page_id.to_string())
     .bind(workspace_id.to_string())
     .bind(actor_id.to_string())
@@ -540,16 +542,16 @@ async fn require_visible_page(
 }
 
 async fn version_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     page_id: Id,
     version_id: Id,
 ) -> Result<PageVersion, PageError> {
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {SUMMARY_COLUMNS}, page_versions.content_json AS content_json FROM page_versions \
          LEFT JOIN users ON users.id = page_versions.created_by \
-         WHERE page_versions.id = ? AND page_versions.page_id = ? AND page_versions.workspace_id = ?"
-    ))
+         WHERE page_versions.id = $1 AND page_versions.page_id = $2 AND page_versions.workspace_id = $3"
+    )))
     .bind(version_id.to_string())
     .bind(page_id.to_string())
     .bind(workspace_id.to_string())
@@ -571,7 +573,7 @@ async fn version_in_tx(
     })
 }
 
-fn summary_from_row(row: &sqlx::sqlite::SqliteRow) -> Result<PageVersionSummary, PageError> {
+fn summary_from_row(row: &sqlx::any::AnyRow) -> Result<PageVersionSummary, PageError> {
     let created_by = match (
         row.get::<Option<String>, _>("created_by"),
         row.get::<Option<String>, _>("display_name"),

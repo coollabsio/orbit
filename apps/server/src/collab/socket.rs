@@ -14,9 +14,9 @@ use axum::body::Bytes;
 use axum::extract::ws::{CloseFrame, Message as WsMessage, WebSocket, WebSocketUpgrade};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use orbit_platform::{Database, Id, TimestampMillis};
+use orbit_platform::{Database, Id, Row, TimestampMillis};
 use serde::Deserialize;
-use sqlx::{Row, SqlitePool};
+use sqlx::AnyPool;
 use tokio::sync::broadcast;
 
 use super::close;
@@ -107,7 +107,7 @@ pub async fn upgrade(
 
 struct Connection {
     hub: CollabHub,
-    pool: SqlitePool,
+    pool: AnyPool,
     workspace_id: Id,
     page_id: Id,
     session_id: Id,
@@ -272,7 +272,7 @@ impl Connection {
 /// `None` when the session is valid, the user is a member of the workspace and the page is live
 /// and visible to them.
 async fn check_access(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     workspace_id: Id,
     page_id: Id,
     session_id: Id,
@@ -282,14 +282,14 @@ async fn check_access(
     let row = sqlx::query(
         "SELECT \
          EXISTS(SELECT 1 FROM sessions JOIN users ON users.id = sessions.user_id \
-                WHERE sessions.id = ?1 AND sessions.revoked_at IS NULL AND users.suspended_at IS NULL \
-                AND sessions.idle_expires_at > ?5 AND sessions.absolute_expires_at > ?5) AS session_ok, \
+                WHERE sessions.id = $1 AND sessions.revoked_at IS NULL AND users.suspended_at IS NULL \
+                AND sessions.idle_expires_at > $5 AND sessions.absolute_expires_at > $5) AS session_ok, \
          EXISTS(SELECT 1 FROM memberships JOIN workspaces ON workspaces.id = memberships.workspace_id \
-                WHERE memberships.user_id = ?2 AND memberships.workspace_id = ?3 \
+                WHERE memberships.user_id = $2 AND memberships.workspace_id = $3 \
                 AND workspaces.deleted_at IS NULL) AS member, \
          (SELECT CASE WHEN deleted_at IS NOT NULL THEN 2 \
-                      WHEN teamspace_id IS NULL AND owner_id IS NOT ?2 THEN 1 ELSE 0 END \
-          FROM pages WHERE id = ?4 AND workspace_id = ?3) AS page_state",
+                      WHEN teamspace_id IS NULL AND owner_id IS DISTINCT FROM $2 THEN 1 ELSE 0 END \
+          FROM pages WHERE id = $4 AND workspace_id = $3) AS page_state",
     )
     .bind(session_id.to_string())
     .bind(user_id.to_string())

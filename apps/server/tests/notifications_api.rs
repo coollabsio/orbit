@@ -48,7 +48,7 @@ impl Fixture {
             .await
             .unwrap();
         let status_id: String = sqlx::query_scalar(
-            "SELECT id FROM task_statuses WHERE project_id = ? ORDER BY position LIMIT 1",
+            "SELECT id FROM task_statuses WHERE project_id = $1 ORDER BY position LIMIT 1",
         )
         .bind(setup.project_id.to_string())
         .fetch_one(database.pool())
@@ -128,10 +128,14 @@ async fn mentions_notify_named_members_and_rolled_back_writes_do_not() {
     let (member_id, member_cookie) = add_member(&fixture, "member@example.com").await;
     let task = create_task(&fixture).await;
 
-    sqlx::query("CREATE TRIGGER reject_comment_audit BEFORE INSERT ON audit_events WHEN NEW.action = 'comment.created' BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END")
-        .execute(fixture.database.pool())
-        .await
-        .unwrap();
+    fail_inserts(
+        &fixture.database,
+        "reject_comment_audit",
+        "audit_events",
+        "NEW.action = 'comment.created'",
+        "audit unavailable",
+    )
+    .await;
     let failed = fixture
         .app
         .clone()
@@ -153,8 +157,14 @@ async fn mentions_notify_named_members_and_rolled_back_writes_do_not() {
     assert_eq!(failed.status(), StatusCode::INTERNAL_SERVER_ERROR);
     let inbox = list_notifications(&fixture, &member_cookie, false).await;
     assert_eq!(inbox["items"].as_array().unwrap().len(), 0);
-    sqlx::query("DROP TRIGGER reject_comment_audit")
-        .execute(fixture.database.pool())
+    fixture
+        .database
+        .execute(match fixture.database.backend() {
+            orbit_platform::Backend::Sqlite => "DROP TRIGGER reject_comment_audit",
+            orbit_platform::Backend::Postgres => {
+                "DROP TRIGGER reject_comment_audit ON audit_events"
+            }
+        })
         .await
         .unwrap();
 
@@ -242,7 +252,7 @@ async fn read_state_is_isolated_and_removed_members_cannot_read_notifications() 
     let unread = list_notifications(&fixture, &member_cookie, true).await;
     assert_eq!(unread["items"].as_array().unwrap().len(), 0);
 
-    sqlx::query("DELETE FROM memberships WHERE user_id = ? AND workspace_id = ?")
+    sqlx::query("DELETE FROM memberships WHERE user_id = $1 AND workspace_id = $2")
         .bind(member_id.to_string())
         .bind(&fixture.workspace_id)
         .execute(fixture.database.pool())
@@ -307,7 +317,7 @@ async fn add_member(fixture: &Fixture, email: &str) -> (Id, String) {
     let now = TimestampMillis::now();
     sqlx::query(
         "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) \
-         VALUES (?, ?, ?, 'Member', 'unused', ?, ?)",
+         VALUES ($1, $2, $3, 'Member', 'unused', $4, $5)",
     )
     .bind(id.to_string())
     .bind(email)
@@ -319,7 +329,7 @@ async fn add_member(fixture: &Fixture, email: &str) -> (Id, String) {
     .unwrap();
     sqlx::query(
         "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
-         VALUES (?, ?, ?, 'member', 0, ?, ?)",
+         VALUES ($1, $2, $3, 'member', 0, $4, $5)",
     )
     .bind(membership_id.to_string())
     .bind(&fixture.workspace_id)
@@ -365,4 +375,27 @@ fn cookie_request(method: &str, uri: &str, cookie: &str) -> Request<Body> {
 
 async fn response_json(response: axum::response::Response) -> Value {
     serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()
+}
+
+/// Makes inserts into `table` that match `when` (an SQL condition on `NEW`) fail with `message`.
+async fn fail_inserts(
+    database: &orbit_platform::Database,
+    name: &str,
+    table: &str,
+    when: &str,
+    message: &str,
+) {
+    let sql = match database.backend() {
+        orbit_platform::Backend::Sqlite => format!(
+            "CREATE TRIGGER {name} BEFORE INSERT ON {table} WHEN {when} \
+             BEGIN SELECT RAISE(ABORT, '{message}'); END"
+        ),
+        orbit_platform::Backend::Postgres => format!(
+            "CREATE FUNCTION {name}_fn() RETURNS trigger LANGUAGE plpgsql AS $$ \
+             BEGIN RAISE EXCEPTION '{message}'; END $$; \
+             CREATE TRIGGER {name} BEFORE INSERT ON {table} FOR EACH ROW WHEN ({when}) \
+             EXECUTE FUNCTION {name}_fn()"
+        ),
+    };
+    database.execute(&sql).await.unwrap();
 }

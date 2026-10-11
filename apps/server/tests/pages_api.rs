@@ -142,7 +142,7 @@ impl Fixture {
     }
 
     async fn restore(&self, page_id: &str) -> (StatusCode, Value) {
-        let version: i64 = sqlx::query_scalar("SELECT version FROM pages WHERE id = ?")
+        let version: i64 = sqlx::query_scalar("SELECT version FROM pages WHERE id = $1")
             .bind(page_id)
             .fetch_one(self.database.pool())
             .await
@@ -239,7 +239,7 @@ impl Fixture {
     }
 
     async fn purge(&self, page_id: &str) {
-        let version: i64 = sqlx::query_scalar("SELECT version FROM pages WHERE id = ?")
+        let version: i64 = sqlx::query_scalar("SELECT version FROM pages WHERE id = $1")
             .bind(page_id)
             .fetch_one(self.database.pool())
             .await
@@ -259,7 +259,7 @@ impl Fixture {
 
     /// `(parent_id, trashed_with)` of a stored page.
     async fn get_raw(&self, page_id: &str) -> (Option<String>, Option<String>) {
-        sqlx::query_as("SELECT parent_id, trashed_with FROM pages WHERE id = ?")
+        sqlx::query_as("SELECT parent_id, trashed_with FROM pages WHERE id = $1")
             .bind(page_id)
             .fetch_one(self.database.pool())
             .await
@@ -347,7 +347,7 @@ async fn pages_can_be_created_read_updated_and_listed_in_tree_order() {
     assert_eq!(updated["content"], content);
     assert_eq!(updated["version"], 1);
     assert_eq!(fixture.get(id_of(&guide)).await, updated);
-    let text: String = sqlx::query_scalar("SELECT content_text FROM pages WHERE id = ?")
+    let text: String = sqlx::query_scalar("SELECT content_text FROM pages WHERE id = $1")
         .bind(id_of(&guide))
         .fetch_one(fixture.database.pool())
         .await
@@ -631,7 +631,7 @@ async fn trash_takes_the_live_subtree_and_restore_brings_back_that_batch() {
     let (status, _) = fixture.restore(id_of(&parent)).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
     fixture.trash(id_of(&child)).await;
-    sqlx::query("UPDATE pages SET deleted_at = ? WHERE deleted_at IS NOT NULL")
+    sqlx::query("UPDATE pages SET deleted_at = $1 WHERE deleted_at IS NOT NULL")
         .bind(TimestampMillis::now().as_millis() - RETENTION_MILLIS - 1_000)
         .execute(fixture.database.pool())
         .await
@@ -909,7 +909,7 @@ async fn delete_forever_purges_a_trashed_batch_by_permission() {
         add_member(&fixture, &fixture.workspace_id, "member@example.com").await;
     let (admin_id, admin_cookie) =
         add_member(&fixture, &fixture.workspace_id, "admin@example.com").await;
-    sqlx::query("UPDATE memberships SET role = 'admin' WHERE user_id = ?")
+    sqlx::query("UPDATE memberships SET role = 'admin' WHERE user_id = $1")
         .bind(admin_id.to_string())
         .execute(fixture.database.pool())
         .await
@@ -1335,7 +1335,7 @@ async fn duplicate_copies_a_page_or_subtree_after_the_original() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
 
     let duplicated: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM audit_events WHERE action = 'page.duplicated' AND resource_id = ?",
+        "SELECT COUNT(*) FROM audit_events WHERE action = 'page.duplicated' AND resource_id = $1",
     )
     .bind(a_copy)
     .fetch_one(fixture.database.pool())
@@ -1447,7 +1447,7 @@ async fn page_mutations_are_audited_and_emit_realtime_events() {
     let rows = sqlx::query_as::<_, (String, String, i64)>(
         "SELECT audit_events.action, audit_events.resource_type, \
          (SELECT COUNT(*) FROM outbox_events WHERE outbox_events.id = audit_events.id AND outbox_events.topic = 'workspace.changed') \
-         FROM audit_events WHERE workspace_id = ? AND resource_id = ? ORDER BY occurred_at, id",
+         FROM audit_events WHERE workspace_id = $1 AND resource_id = $2 ORDER BY occurred_at, id",
     )
     .bind(&fixture.workspace_id)
     .bind(id_of(&page))
@@ -1483,7 +1483,7 @@ async fn retention_purges_expired_pages_and_deleted_workspaces() {
         .await;
     fixture.trash(id_of(&parent)).await;
     fixture.trash(id_of(&recent)).await;
-    sqlx::query("UPDATE pages SET deleted_at = ? WHERE trashed_with = ?")
+    sqlx::query("UPDATE pages SET deleted_at = $1 WHERE trashed_with = $2")
         .bind(TimestampMillis::now().as_millis() - RETENTION_MILLIS - 1_000)
         .bind(id_of(&parent))
         .execute(fixture.database.pool())
@@ -1495,7 +1495,7 @@ async fn retention_purges_expired_pages_and_deleted_workspaces() {
         .await
         .unwrap();
     let titles: Vec<String> =
-        sqlx::query_scalar("SELECT title FROM pages WHERE workspace_id = ? ORDER BY title")
+        sqlx::query_scalar("SELECT title FROM pages WHERE workspace_id = $1 ORDER BY title")
             .bind(&fixture.workspace_id)
             .fetch_all(fixture.database.pool())
             .await
@@ -1505,7 +1505,7 @@ async fn retention_purges_expired_pages_and_deleted_workspaces() {
         ["Live", "Private child", "Private live", "Recently trashed"]
     );
 
-    sqlx::query("UPDATE workspaces SET deleted_at = ? WHERE id = ?")
+    sqlx::query("UPDATE workspaces SET deleted_at = $1 WHERE id = $2")
         .bind(TimestampMillis::now().as_millis() - RETENTION_MILLIS - 1_000)
         .bind(&fixture.workspace_id)
         .execute(fixture.database.pool())
@@ -1521,7 +1521,7 @@ async fn retention_purges_expired_pages_and_deleted_workspaces() {
         .unwrap();
     assert_eq!(remaining, 0);
     let teamspaces: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM teamspaces WHERE workspace_id = ?")
+        sqlx::query_scalar("SELECT COUNT(*) FROM teamspaces WHERE workspace_id = $1")
             .bind(&fixture.workspace_id)
             .fetch_one(fixture.database.pool())
             .await
@@ -1673,7 +1673,7 @@ async fn new_pages_go_to_the_requested_space_and_sub_pages_inherit_it() {
     assert_eq!(private_child["private"], true);
     assert_eq!(private_child["teamspace_id"], Value::Null);
     let stored: (Option<String>, Option<String>) =
-        sqlx::query_as("SELECT teamspace_id, owner_id FROM pages WHERE id = ?")
+        sqlx::query_as("SELECT teamspace_id, owner_id FROM pages WHERE id = $1")
             .bind(id_of(&private_child))
             .fetch_one(fixture.database.pool())
             .await
@@ -1938,7 +1938,7 @@ async fn favorites_are_idempotent_ordered_and_reorderable() {
         [(a.to_owned(), 0), (c.to_owned(), 1)]
     );
     let positions: Vec<i64> = sqlx::query_scalar(
-        "SELECT position FROM page_favorites WHERE user_id = ? ORDER BY position",
+        "SELECT position FROM page_favorites WHERE user_id = $1 ORDER BY position",
     )
     .bind(fixture.owner_id.to_string())
     .fetch_all(fixture.database.pool())
@@ -2131,7 +2131,7 @@ async fn purges_take_favorites_along() {
     fixture.favorite(id_of(&expired)).await;
     fixture.favorite(id_of(&live)).await;
     fixture.trash(id_of(&expired)).await;
-    sqlx::query("UPDATE pages SET deleted_at = ? WHERE id = ?")
+    sqlx::query("UPDATE pages SET deleted_at = $1 WHERE id = $2")
         .bind(TimestampMillis::now().as_millis() - RETENTION_MILLIS - 1_000)
         .bind(id_of(&expired))
         .execute(fixture.database.pool())
@@ -2151,7 +2151,7 @@ async fn purges_take_favorites_along() {
     assert_eq!(count().await, 1);
     assert_eq!(fixture.favorite_ids().await, [id_of(&live)]);
 
-    sqlx::query("UPDATE workspaces SET deleted_at = ? WHERE id = ?")
+    sqlx::query("UPDATE workspaces SET deleted_at = $1 WHERE id = $2")
         .bind(TimestampMillis::now().as_millis() - RETENTION_MILLIS - 1_000)
         .bind(&fixture.workspace_id)
         .execute(fixture.database.pool())
@@ -2269,7 +2269,7 @@ async fn add_member(fixture: &Fixture, workspace_id: &str, email: &str) -> (Id, 
     let now = TimestampMillis::now();
     sqlx::query(
         "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) \
-         VALUES (?, ?, ?, 'Member', 'unused', ?, ?)",
+         VALUES ($1, $2, $3, 'Member', 'unused', $4, $5)",
     )
     .bind(id.to_string())
     .bind(email)
@@ -2281,7 +2281,7 @@ async fn add_member(fixture: &Fixture, workspace_id: &str, email: &str) -> (Id, 
     .unwrap();
     sqlx::query(
         "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
-         VALUES (?, ?, ?, 'member', 0, ?, ?)",
+         VALUES ($1, $2, $3, 'member', 0, $4, $5)",
     )
     .bind(Id::new_v7().to_string())
     .bind(workspace_id)

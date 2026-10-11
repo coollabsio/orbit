@@ -111,7 +111,7 @@ impl Server {
         let email = format!("{name}@example.com");
         sqlx::query(
             "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, 'unused', ?, ?)",
+             VALUES ($1, $2, $3, $4, 'unused', $5, $6)",
         )
         .bind(id.to_string())
         .bind(&email)
@@ -125,7 +125,7 @@ impl Server {
         if member {
             sqlx::query(
                 "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
-                 VALUES (?, ?, ?, 'member', 0, ?, ?)",
+                 VALUES ($1, $2, $3, 'member', 0, $4, $5)",
             )
             .bind(Id::new_v7().to_string())
             .bind(&self.workspace)

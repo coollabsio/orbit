@@ -3,10 +3,10 @@
 //! until the background mover moves them.
 
 use orbit_domain::{Actor, Permission};
-use orbit_platform::{Id, TimestampMillis};
+use orbit_platform::{Flag, Id, Row, TimestampMillis};
 use serde::Serialize;
-use sqlx::sqlite::SqliteRow;
-use sqlx::{Row, SqliteConnection};
+use sqlx::AnyConnection;
+use sqlx::any::AnyRow;
 use utoipa::ToSchema;
 
 use super::{ChatError, ChatEvent, ChatRepository, Events, Written, finish, load_actor, parse_id};
@@ -55,7 +55,7 @@ pub(super) fn image_url(workspace_id: Id, id: Id) -> String {
     format!("/api/v1/workspaces/{workspace_id}/chat/stickers/{id}/image")
 }
 
-fn record(workspace_id: Id, row: &SqliteRow) -> Result<CustomStickerRecord, ChatError> {
+fn record(workspace_id: Id, row: &AnyRow) -> Result<CustomStickerRecord, ChatError> {
     let id = parse_id(row.get("id"))?;
     Ok(CustomStickerRecord {
         id,
@@ -91,12 +91,12 @@ fn require_manager(actor: Actor) -> Result<(), ChatError> {
 
 /// The sticker of a new message: it must be one of the workspace.
 pub(super) async fn load_sticker(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     workspace_id: Id,
     sticker_id: Id,
 ) -> Result<StickerRecord, ChatError> {
     let name: String =
-        sqlx::query_scalar("SELECT name FROM custom_stickers WHERE id = ? AND workspace_id = ?")
+        sqlx::query_scalar("SELECT name FROM custom_stickers WHERE id = $1 AND workspace_id = $2")
             .bind(sticker_id.to_string())
             .bind(workspace_id.to_string())
             .fetch_optional(&mut *conn)
@@ -120,7 +120,7 @@ impl ChatRepository {
         load_actor(&mut conn, workspace_id, actor_id).await?;
         sqlx::query(
             "SELECT id, name, mime_type, created_by, created_at FROM custom_stickers \
-             WHERE workspace_id = ? ORDER BY name",
+             WHERE workspace_id = $1 ORDER BY lower(name)",
         )
         .bind(workspace_id.to_string())
         .fetch_all(&mut *conn)
@@ -155,8 +155,9 @@ impl ChatRepository {
             return Err(ChatError::Invalid { field: "file" });
         }
         // `name` is NOCASE: the comparison ignores the case of ASCII letters.
-        let (count, taken): (i64, bool) = sqlx::query_as(
-            "SELECT COUNT(*), COALESCE(MAX(name = ?), 0) FROM custom_stickers WHERE workspace_id = ?",
+        let (count, Flag(taken)): (i64, Flag) = sqlx::query_as(
+            "SELECT COUNT(*), COALESCE(MAX(CASE WHEN lower(name) = lower($1) THEN 1 ELSE 0 END), 0) \
+             FROM custom_stickers WHERE workspace_id = $2",
         )
         .bind(&name)
         .bind(workspace_id.to_string())
@@ -174,7 +175,7 @@ impl ChatRepository {
         let id = Id::new_v7();
         sqlx::query(
             "INSERT INTO custom_stickers (id, workspace_id, name, mime_type, blob_id, created_by, created_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
         )
         .bind(id.to_string())
         .bind(workspace_id.to_string())
@@ -211,12 +212,13 @@ impl ChatRepository {
     ) -> Result<Written<()>, ChatError> {
         let mut tx = self.database.immediate_transaction().await?;
         require_manager(load_actor(&mut tx, workspace_id, actor_id).await?)?;
-        let deleted = sqlx::query("DELETE FROM custom_stickers WHERE id = ? AND workspace_id = ?")
-            .bind(sticker_id.to_string())
-            .bind(workspace_id.to_string())
-            .execute(&mut *tx)
-            .await?
-            .rows_affected();
+        let deleted =
+            sqlx::query("DELETE FROM custom_stickers WHERE id = $1 AND workspace_id = $2")
+                .bind(sticker_id.to_string())
+                .bind(workspace_id.to_string())
+                .execute(&mut *tx)
+                .await?
+                .rows_affected();
         if deleted == 0 {
             return Err(ChatError::NotFound);
         }
@@ -236,7 +238,7 @@ impl ChatRepository {
         load_actor(&mut conn, workspace_id, actor_id).await?;
         let row = sqlx::query(
             "SELECT i.mime_type, i.bytes, b.storage_key FROM custom_stickers i \
-             LEFT JOIN attachment_blobs b ON b.id = i.blob_id WHERE i.id = ? AND i.workspace_id = ?",
+             LEFT JOIN attachment_blobs b ON b.id = i.blob_id WHERE i.id = $1 AND i.workspace_id = $2",
         )
         .bind(sticker_id.to_string())
         .bind(workspace_id.to_string())

@@ -65,7 +65,7 @@ impl Fixture {
         let now = TimestampMillis::now();
         sqlx::query(
             "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, 'unused', ?, ?)",
+             VALUES ($1, $2, $3, $4, 'unused', $5, $6)",
         )
         .bind(id.to_string())
         .bind(email)
@@ -79,7 +79,7 @@ impl Fixture {
         if let Some(role) = role {
             sqlx::query(
                 "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
-                 VALUES (?, ?, ?, ?, 0, ?, ?)",
+                 VALUES ($1, $2, $3, $4, 0, $5, $6)",
             )
             .bind(Id::new_v7().to_string())
             .bind(&self.workspace_id)
@@ -163,7 +163,7 @@ impl Fixture {
     /// Workspace realtime sequence; every broadcast write bumps it by one.
     async fn sequence(&self) -> i64 {
         sqlx::query_scalar(
-            "SELECT COALESCE((SELECT sequence FROM realtime_sequences WHERE workspace_id = ?), 0)",
+            "SELECT COALESCE((SELECT sequence FROM realtime_sequences WHERE workspace_id = $1), 0)",
         )
         .bind(&self.workspace_id)
         .fetch_one(self.database.pool())
@@ -297,7 +297,7 @@ async fn owner_creates_reads_updates_and_deletes_a_personal_view() {
     assert_eq!(fetched, updated);
 
     sqlx::query(
-        "INSERT INTO saved_view_favorites (view_id, user_id, position, created_at) VALUES (?, ?, 0, 0)",
+        "INSERT INTO saved_view_favorites (view_id, user_id, position, created_at) VALUES ($1, $2, 0, 0)",
     )
     .bind(&id)
     .bind(fixture.owner_id.to_string())
@@ -309,7 +309,7 @@ async fn owner_creates_reads_updates_and_deletes_a_personal_view() {
         .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     let favorites: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM saved_view_favorites WHERE view_id = ?")
+        sqlx::query_scalar("SELECT COUNT(*) FROM saved_view_favorites WHERE view_id = $1")
             .bind(&id)
             .fetch_one(fixture.database.pool())
             .await
@@ -504,7 +504,7 @@ async fn making_a_view_personal_drops_other_users_favorites() {
     let id = id_of(&fixture.create_view(&author, "Shared", "workspace").await);
     for (user_id, position) in [(author_id, 0), (reader_id, 0), (fixture.owner_id, 3)] {
         sqlx::query(
-            "INSERT INTO saved_view_favorites (view_id, user_id, position, created_at) VALUES (?, ?, ?, 0)",
+            "INSERT INTO saved_view_favorites (view_id, user_id, position, created_at) VALUES ($1, $2, $3, 0)",
         )
         .bind(&id)
         .bind(user_id.to_string())
@@ -525,7 +525,7 @@ async fn making_a_view_personal_drops_other_users_favorites() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["is_favorite"], true);
     let remaining: Vec<String> =
-        sqlx::query_scalar("SELECT user_id FROM saved_view_favorites WHERE view_id = ?")
+        sqlx::query_scalar("SELECT user_id FROM saved_view_favorites WHERE view_id = $1")
             .bind(&id)
             .fetch_all(fixture.database.pool())
             .await
@@ -725,7 +725,7 @@ async fn unreadable_stored_state_is_returned_with_a_state_error() {
         sqlx::query(
             "INSERT INTO saved_views (id, workspace_id, owner_user_id, name, description, icon, color, \
              visibility, state_json, version, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, '', NULL, NULL, 'workspace', ?, 1, 0, 0)",
+             VALUES ($1, $2, $3, $4, '', NULL, NULL, 'workspace', $5, 1, 0, 0)",
         )
         .bind(&id)
         .bind(&fixture.workspace_id)
@@ -879,7 +879,7 @@ async fn view_writes_are_audited_and_broadcast() {
     assert_eq!(fixture.sequence().await, start + 3);
 
     let actions: Vec<String> = sqlx::query_scalar(
-        "SELECT action FROM audit_events WHERE resource_type = 'saved_view' AND resource_id = ? ORDER BY rowid",
+        "SELECT action FROM audit_events WHERE resource_type = 'saved_view' AND resource_id = $1 ORDER BY occurred_at, id",
     )
     .bind(&id)
     .fetch_all(fixture.database.pool())
@@ -1295,7 +1295,7 @@ async fn view_preferences_round_trip_and_upsert() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(fetched["state"], other_state());
     let rows: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM view_preferences WHERE workspace_id = ? AND user_id = ?",
+        "SELECT COUNT(*) FROM view_preferences WHERE workspace_id = $1 AND user_id = $2",
     )
     .bind(&fixture.workspace_id)
     .bind(fixture.owner_id.to_string())
@@ -1310,7 +1310,7 @@ async fn view_preference_page_keys_are_validated() {
     let fixture = Fixture::new().await;
     let cookie = fixture.owner_cookie.clone();
     let project_id: String =
-        sqlx::query_scalar("SELECT id FROM projects WHERE workspace_id = ? LIMIT 1")
+        sqlx::query_scalar("SELECT id FROM projects WHERE workspace_id = $1 LIMIT 1")
             .bind(&fixture.workspace_id)
             .fetch_one(fixture.database.pool())
             .await
@@ -1365,7 +1365,7 @@ async fn view_preference_page_keys_are_validated() {
     let (status, problem) =
         preference(&fixture, "PUT", &cookie, &unknown, Some(view_state())).await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{problem}");
-    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM view_preferences WHERE page_key = ?")
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM view_preferences WHERE page_key = $1")
         .bind(&unknown)
         .fetch_one(fixture.database.pool())
         .await
@@ -1474,7 +1474,7 @@ async fn unreadable_stored_preference_is_returned_with_a_state_error() {
     let fixture = Fixture::new().await;
     sqlx::query(
         "INSERT INTO view_preferences (workspace_id, user_id, page_key, state_json, updated_at) \
-         VALUES (?, ?, 'preset:overdue', '{\"filter\":', 0)",
+         VALUES ($1, $2, 'preset:overdue', '{\"filter\":', 0)",
     )
     .bind(&fixture.workspace_id)
     .bind(fixture.owner_id.to_string())

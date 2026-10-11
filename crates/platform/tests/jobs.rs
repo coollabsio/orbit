@@ -914,7 +914,7 @@ async fn graceful_shutdown_requeues_without_spending_attempts() {
         assert_eq!(stored.state, JobState::Queued);
         assert_eq!(stored.attempt_count, 0);
         let attempts: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM job_attempts WHERE job_id = ?")
+            sqlx::query_scalar("SELECT COUNT(*) FROM job_attempts WHERE job_id = $1")
                 .bind(id.to_string())
                 .fetch_one(database.pool())
                 .await

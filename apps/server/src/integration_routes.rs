@@ -9,13 +9,12 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use hmac::{Hmac, Mac};
 use orbit_domain::Permission;
-use orbit_platform::{Id, Problem, RequestId, TimestampMillis, generate_opaque_token};
+use orbit_platform::{Flag, Id, Problem, RequestId, Row, TimestampMillis, generate_opaque_token};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use sqlx::Row;
-use sqlx::{Sqlite, Transaction};
+use sqlx::{Any, Transaction};
 use utoipa::ToSchema;
 
 use crate::audit::{self, AuditOutcome};
@@ -36,7 +35,7 @@ const MAX_DESCRIPTION_CHARS: usize = 100_000;
 const MAX_URL_CHARS: usize = 2_048;
 
 async fn record_github_change(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     workspace: &str,
     action: &str,
     request_id: Option<&RequestId>,
@@ -296,8 +295,8 @@ async fn github_project_access(
     let actor = membership::actor(pool, workspace_id, user_id)
         .await
         .map_err(|_| ApiError::internal(request_id))?;
-    let project_exists: bool = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM projects WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+    let Flag(project_exists) = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM projects WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL",
     )
     .bind(project)
     .bind(workspace)
@@ -347,7 +346,7 @@ pub(crate) async fn github_workspace_settings(
     let id = request_id.as_ref().map(|Extension(id)| id);
     let (_, can_manage) = github_workspace_access(&state, &headers, &workspace, id).await?;
     let app: Option<String> =
-        sqlx::query_scalar("SELECT slug FROM github_apps WHERE workspace_id = ?")
+        sqlx::query_scalar("SELECT slug FROM github_apps WHERE workspace_id = $1")
             .bind(&workspace)
             .fetch_optional(state.tasks.database().pool())
             .await
@@ -377,12 +376,12 @@ pub(crate) async fn github_project_settings(
     let (_, _, can_manage) =
         github_project_access(&state, &headers, &workspace, &project, request_id).await?;
     let app: Option<String> =
-        sqlx::query_scalar("SELECT slug FROM github_apps WHERE workspace_id = ?")
+        sqlx::query_scalar("SELECT slug FROM github_apps WHERE workspace_id = $1")
             .bind(&workspace)
             .fetch_optional(state.tasks.database().pool())
             .await
             .map_err(|_| ApiError::internal(request_id))?;
-    let connection = sqlx::query("SELECT repository, label FROM github_project_connections WHERE workspace_id = ? AND project_id = ?")
+    let connection = sqlx::query("SELECT repository, label FROM github_project_connections WHERE workspace_id = $1 AND project_id = $2")
         .bind(&workspace).bind(&project).fetch_optional(state.tasks.database().pool()).await.map_err(|_| ApiError::internal(request_id))?;
     Ok(Json(GithubProjectSettings {
         install_url: app
@@ -405,7 +404,7 @@ async fn github_repositories(
     workspace: &str,
     request_id: Option<&RequestId>,
 ) -> Result<Vec<GithubRepositoryOption>, ApiError> {
-    let rows = sqlx::query("SELECT github_installation_repositories.installation_id, github_installation_repositories.repository FROM github_installation_repositories JOIN github_installations ON github_installations.installation_id = github_installation_repositories.installation_id WHERE github_installations.workspace_id = ? ORDER BY repository")
+    let rows = sqlx::query("SELECT github_installation_repositories.installation_id, github_installation_repositories.repository FROM github_installation_repositories JOIN github_installations ON github_installations.installation_id = github_installation_repositories.installation_id WHERE github_installations.workspace_id = $1 ORDER BY repository")
         .bind(workspace).fetch_all(state.tasks.database().pool()).await.map_err(|_| ApiError::internal(request_id))?;
     Ok(rows
         .into_iter()
@@ -438,7 +437,7 @@ pub(crate) async fn save_github_project_connection(
             id,
         ));
     }
-    let installed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM github_installation_repositories JOIN github_installations ON github_installations.installation_id = github_installation_repositories.installation_id WHERE github_installations.workspace_id = ? AND github_installation_repositories.installation_id = ? AND github_installation_repositories.repository = ?)")
+    let Flag(installed) = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM github_installation_repositories JOIN github_installations ON github_installations.installation_id = github_installation_repositories.installation_id WHERE github_installations.workspace_id = $1 AND github_installation_repositories.installation_id = $2 AND github_installation_repositories.repository = $3)")
         .bind(&workspace).bind(body.installation_id).bind(&body.repository).fetch_one(state.tasks.database().pool()).await.map_err(|_| ApiError::internal(id))?;
     if !installed {
         return Err(ApiError::new(
@@ -455,7 +454,7 @@ pub(crate) async fn save_github_project_connection(
         .immediate_transaction()
         .await
         .map_err(|_| ApiError::internal(id))?;
-    let changed = sqlx::query("INSERT INTO github_project_connections (workspace_id, project_id, installation_id, repository, label) VALUES (?, ?, ?, ?, ?) ON CONFLICT(project_id) DO UPDATE SET installation_id = excluded.installation_id, repository = excluded.repository, label = excluded.label WHERE installation_id != excluded.installation_id OR repository != excluded.repository OR label != excluded.label")
+    let changed = sqlx::query("INSERT INTO github_project_connections (workspace_id, project_id, installation_id, repository, label) VALUES ($1, $2, $3, $4, $5) ON CONFLICT(project_id) DO UPDATE SET installation_id = excluded.installation_id, repository = excluded.repository, label = excluded.label WHERE github_project_connections.installation_id != excluded.installation_id OR github_project_connections.repository != excluded.repository OR github_project_connections.label != excluded.label")
         .bind(&workspace).bind(&project).bind(body.installation_id).bind(&body.repository).bind(label).execute(&mut *tx).await;
     match changed {
         Ok(result) if result.rows_affected() > 0 => {
@@ -501,7 +500,7 @@ pub(crate) async fn delete_github_project_connection(
         .await
         .map_err(|_| ApiError::internal(id))?;
     let removed = sqlx::query(
-        "DELETE FROM github_project_connections WHERE workspace_id = ? AND project_id = ?",
+        "DELETE FROM github_project_connections WHERE workspace_id = $1 AND project_id = $2",
     )
     .bind(&workspace)
     .bind(&project)
@@ -585,8 +584,8 @@ pub(crate) async fn start_github_manifest(
             id,
         ));
     }
-    let exists: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM github_apps WHERE workspace_id = ?)")
+    let Flag(exists) =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM github_apps WHERE workspace_id = $1)")
             .bind(&workspace)
             .fetch_one(state.tasks.database().pool())
             .await
@@ -602,12 +601,12 @@ pub(crate) async fn start_github_manifest(
     }
     let token = generate_opaque_token();
     let hash: [u8; 32] = Sha256::digest(token.as_bytes()).into();
-    sqlx::query("DELETE FROM github_app_registrations WHERE expires_at <= ?")
+    sqlx::query("DELETE FROM github_app_registrations WHERE expires_at <= $1")
         .bind(TimestampMillis::now().as_millis())
         .execute(state.tasks.database().pool())
         .await
         .map_err(|_| ApiError::internal(id))?;
-    sqlx::query("INSERT INTO github_app_registrations (state_hash, workspace_id, expires_at, public_origin) VALUES (?, ?, ?, ?) ON CONFLICT(workspace_id) DO UPDATE SET state_hash = excluded.state_hash, expires_at = excluded.expires_at, public_origin = excluded.public_origin")
+    sqlx::query("INSERT INTO github_app_registrations (state_hash, workspace_id, expires_at, public_origin) VALUES ($1, $2, $3, $4) ON CONFLICT(workspace_id) DO UPDATE SET state_hash = excluded.state_hash, expires_at = excluded.expires_at, public_origin = excluded.public_origin")
          .bind(hash.to_vec()).bind(&workspace).bind(TimestampMillis::now().as_millis() + 3_600_000).bind(&origin)
         .execute(state.tasks.database().pool()).await.map_err(|_| ApiError::internal(id))?;
     Ok(Json(GithubManifestStart {
@@ -668,7 +667,7 @@ pub(crate) async fn github_manifest_callback(
     }
     let hash: [u8; 32] = Sha256::digest(query.state.as_bytes()).into();
     let pending = sqlx::query(
-        "SELECT workspace_id, public_origin FROM github_app_registrations WHERE state_hash = ? AND expires_at > ?",
+        "SELECT workspace_id, public_origin FROM github_app_registrations WHERE state_hash = $1 AND expires_at > $2",
     )
     .bind(hash.to_vec())
     .bind(TimestampMillis::now().as_millis())
@@ -756,7 +755,7 @@ async fn store_github_app(
         .immediate_transaction()
         .await
         .map_err(|_| ApiError::internal(id))?;
-    let consumed = sqlx::query("DELETE FROM github_app_registrations WHERE state_hash = ? AND workspace_id = ? AND expires_at > ?")
+    let consumed = sqlx::query("DELETE FROM github_app_registrations WHERE state_hash = $1 AND workspace_id = $2 AND expires_at > $3")
         .bind(hash.to_vec()).bind(workspace).bind(TimestampMillis::now().as_millis())
         .execute(&mut *tx).await.map_err(|_| ApiError::internal(id))?;
     if consumed.rows_affected() != 1 {
@@ -768,7 +767,7 @@ async fn store_github_app(
             id,
         ));
     }
-    let inserted = sqlx::query("INSERT INTO github_apps (workspace_id, app_id, slug, private_key_encrypted, webhook_secret_encrypted, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+    let inserted = sqlx::query("INSERT INTO github_apps (workspace_id, app_id, slug, private_key_encrypted, webhook_secret_encrypted, created_at) VALUES ($1, $2, $3, $4, $5, $6)")
         .bind(workspace).bind(app.id).bind(&app.slug).bind(pem).bind(secret).bind(TimestampMillis::now().as_millis()).execute(&mut *tx).await;
     match inserted {
         Ok(_) => {}
@@ -900,7 +899,7 @@ async fn github_webhook_from_database(
         .pointer("/installation/id")
         .and_then(Value::as_i64)
         .unwrap_or(0);
-    let connections = sqlx::query("SELECT project_id, label FROM github_project_connections WHERE workspace_id = ? AND repository = ? AND installation_id = ?")
+    let connections = sqlx::query("SELECT project_id, label FROM github_project_connections WHERE workspace_id = $1 AND repository = $2 AND installation_id = $3")
         .bind(&workspace).bind(repository).bind(installation_id).fetch_all(state.tasks.database().pool()).await.map_err(|_| ApiError::internal(id))?;
     if connections.is_empty() {
         return Ok(StatusCode::ACCEPTED);
@@ -968,7 +967,7 @@ async fn github_webhook_from_database(
                 .immediate_transaction()
                 .await
                 .map_err(|_| ApiError::internal(id))?;
-            let paused = sqlx::query("UPDATE github_issue_links SET sync_paused = 1 WHERE workspace_id = ? AND repository = ? AND issue_number = ? AND kind = ? AND sync_paused = 0")
+            let paused = sqlx::query("UPDATE github_issue_links SET sync_paused = 1 WHERE workspace_id = $1 AND repository = $2 AND issue_number = $3 AND kind = $4 AND sync_paused = 0")
                 .bind(&workspace).bind(repository).bind(number).bind(kind)
                 .execute(&mut *tx).await.map_err(|_| ApiError::internal(id))?;
             if paused.rows_affected() > 0 {
@@ -994,7 +993,7 @@ async fn github_webhook_from_database(
         .map_err(|_| ApiError::internal(id))?;
     let workspace_id: Id = workspace.parse().map_err(|_| ApiError::internal(id))?;
     let actor: String = sqlx::query_scalar(
-        "SELECT user_id FROM memberships WHERE workspace_id = ? AND role = 'owner' LIMIT 1",
+        "SELECT user_id FROM memberships WHERE workspace_id = $1 AND role = 'owner' LIMIT 1",
     )
     .bind(&workspace)
     .fetch_one(state.tasks.database().pool())
@@ -1095,7 +1094,7 @@ async fn update_github_installation(
     let mut changed = false;
     if event == "installation" && action == "deleted" {
         changed |= sqlx::query(
-            "DELETE FROM github_installations WHERE workspace_id = ? AND installation_id = ?",
+            "DELETE FROM github_installations WHERE workspace_id = $1 AND installation_id = $2",
         )
         .bind(workspace)
         .bind(installation_id)
@@ -1109,10 +1108,10 @@ async fn update_github_installation(
             .pointer("/installation/account/login")
             .and_then(Value::as_str)
             .unwrap_or("");
-        let installed = sqlx::query("INSERT INTO github_installations (installation_id, workspace_id, account_login) VALUES (?, ?, ?) ON CONFLICT(installation_id) DO UPDATE SET account_login = excluded.account_login WHERE workspace_id = excluded.workspace_id AND account_login != excluded.account_login")
+        let installed = sqlx::query("INSERT INTO github_installations (installation_id, workspace_id, account_login) VALUES ($1, $2, $3) ON CONFLICT(installation_id) DO UPDATE SET account_login = excluded.account_login WHERE github_installations.workspace_id = excluded.workspace_id AND github_installations.account_login != excluded.account_login")
             .bind(installation_id).bind(workspace).bind(account).execute(&mut *tx).await.map_err(|_| ApiError::internal(request_id))?;
-        if installed.rows_affected() == 0 && !sqlx::query_scalar::<_, bool>("SELECT EXISTS(SELECT 1 FROM github_installations WHERE installation_id = ? AND workspace_id = ?)")
-            .bind(installation_id).bind(workspace).fetch_one(&mut *tx).await.map_err(|_| ApiError::internal(request_id))? {
+        if installed.rows_affected() == 0 && !sqlx::query_scalar::<_, Flag>("SELECT EXISTS(SELECT 1 FROM github_installations WHERE installation_id = $1 AND workspace_id = $2)")
+            .bind(installation_id).bind(workspace).fetch_one(&mut *tx).await.map_err(|_| ApiError::internal(request_id))?.0 {
             return Err(ApiError::new(
                 StatusCode::FORBIDDEN,
                 "github_installation_forbidden",
@@ -1124,7 +1123,7 @@ async fn update_github_installation(
         changed |= installed.rows_affected() > 0;
         if event == "installation" && action == "created" {
             changed |= sqlx::query(
-                "DELETE FROM github_installation_repositories WHERE installation_id = ?",
+                "DELETE FROM github_installation_repositories WHERE installation_id = $1",
             )
             .bind(installation_id)
             .execute(&mut *tx)
@@ -1145,7 +1144,7 @@ async fn update_github_installation(
                     .and_then(Value::as_str)
                     .filter(|name| valid_repository(name))
                 {
-                    changed |= sqlx::query("INSERT OR IGNORE INTO github_installation_repositories (installation_id, repository) VALUES (?, ?)")
+                    changed |= sqlx::query("INSERT INTO github_installation_repositories (installation_id, repository) VALUES ($1, $2) ON CONFLICT DO NOTHING")
                         .bind(installation_id).bind(name).execute(&mut *tx).await.map_err(|_| ApiError::internal(request_id))?.rows_affected() > 0;
                 }
             }
@@ -1156,9 +1155,9 @@ async fn update_github_installation(
         {
             for repository in repositories {
                 if let Some(name) = repository.get("full_name").and_then(Value::as_str) {
-                    changed |= sqlx::query("DELETE FROM github_installation_repositories WHERE installation_id = ? AND repository = ?")
+                    changed |= sqlx::query("DELETE FROM github_installation_repositories WHERE installation_id = $1 AND repository = $2")
                         .bind(installation_id).bind(name).execute(&mut *tx).await.map_err(|_| ApiError::internal(request_id))?.rows_affected() > 0;
-                    changed |= sqlx::query("DELETE FROM github_project_connections WHERE installation_id = ? AND repository = ?")
+                    changed |= sqlx::query("DELETE FROM github_project_connections WHERE installation_id = $1 AND repository = $2")
                         .bind(installation_id).bind(name).execute(&mut *tx).await.map_err(|_| ApiError::internal(request_id))?.rows_affected() > 0;
                 }
             }
@@ -1507,9 +1506,9 @@ impl IntoResponse for ApiError {
 mod tests {
     use std::sync::Arc;
 
+    use orbit_platform::Row;
     use orbit_platform::{PasswordService, TestDatabase, TimestampMillis};
     use sha2::{Digest, Sha256};
-    use sqlx::Row;
 
     use crate::repositories::api_tokens::ApiTokenRepository;
     use crate::repositories::identity::{IdentityRepository, SetupRequest};
@@ -1568,7 +1567,7 @@ mod tests {
             Arc::new(TaskRepository::new((*database).clone())),
         );
         let hash: [u8; 32] = Sha256::digest(b"one-time-state").into();
-        sqlx::query("INSERT INTO github_app_registrations (state_hash, workspace_id, expires_at) VALUES (?, ?, ?)")
+        sqlx::query("INSERT INTO github_app_registrations (state_hash, workspace_id, expires_at) VALUES ($1, $2, $3)")
              .bind(hash.to_vec()).bind(setup.workspace_id.to_string())
             .bind(now.as_millis() + 60_000).execute(database.pool()).await.unwrap();
         let app = GithubManifestConversion {
@@ -1589,7 +1588,7 @@ mod tests {
             .await
             .is_ok()
         );
-        let row = sqlx::query("SELECT app_id, slug, private_key_encrypted, webhook_secret_encrypted FROM github_apps WHERE workspace_id = ?")
+        let row = sqlx::query("SELECT app_id, slug, private_key_encrypted, webhook_secret_encrypted FROM github_apps WHERE workspace_id = $1")
             .bind(setup.workspace_id.to_string()).fetch_one(database.pool()).await.unwrap();
         assert_eq!(row.get::<i64, _>("app_id"), 77);
         assert_eq!(row.get::<String, _>("slug"), "orbit-test");
@@ -1607,7 +1606,7 @@ mod tests {
             "hook-secret"
         );
         let pending: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM github_app_registrations WHERE state_hash = ?",
+            "SELECT COUNT(*) FROM github_app_registrations WHERE state_hash = $1",
         )
         .bind(hash.to_vec())
         .fetch_one(database.pool())

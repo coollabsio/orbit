@@ -40,12 +40,142 @@ impl Fixture {
     }
 }
 
+/// Data, attachments, identity sequences, triggers and collab epochs come back as they were.
+#[tokio::test]
+async fn postgres_restore_replaces_the_database_and_attachments() {
+    if !orbit_platform::testing_postgres() {
+        return; // SQLite restores are covered by the tests below.
+    }
+    let fixture = Fixture::new().await;
+    fixture
+        .database
+        .execute(
+            "INSERT INTO users (id, email, normalized_email, display_name, password_hash, \
+             created_at, updated_at) VALUES ('kept', 'Kept@example.com', 'kept@example.com', \
+             'Kept ü', 'x', 1, 1); \
+             INSERT INTO workspaces (id, name, created_at, updated_at, owner_membership_id) \
+             VALUES ('w', 'W', 1, 1, 'm'); \
+             INSERT INTO memberships (id, workspace_id, user_id, role, created_at, updated_at) \
+             VALUES ('m', 'w', 'kept', 'owner', 1, 1)",
+        )
+        .await
+        .unwrap();
+    let epoch: String = fixture
+        .database
+        .scalar("SELECT generation FROM page_collab_meta")
+        .await
+        .unwrap();
+    let snapshot = fixture.service.create(&fixture.database).await.unwrap();
+    assert_eq!(
+        snapshot.manifest.database,
+        orbit_platform::Backend::Postgres
+    );
+    assert!(
+        snapshot
+            .manifest
+            .files
+            .iter()
+            .any(|file| file.path == "database/users.copy")
+    );
+
+    fixture
+        .database
+        .execute(
+            "UPDATE users SET display_name = 'Changed' WHERE id = 'kept'; \
+             INSERT INTO users (id, email, normalized_email, display_name, password_hash, \
+             created_at, updated_at) VALUES ('later', 'l@example.com', 'l@example.com', 'L', 'x', 2, 2)",
+        )
+        .await
+        .unwrap();
+    let attachments = fixture._root.path().join("attachments");
+    fs::write(attachments.join("record.txt"), b"changed").unwrap();
+    fs::write(attachments.join("later.txt"), b"later").unwrap();
+
+    fixture
+        .service
+        .restore_postgres(&snapshot.id, &fixture.database)
+        .await
+        .unwrap();
+
+    let users: String = fixture
+        .database
+        .scalar("SELECT string_agg(id || ':' || display_name, ',' ORDER BY id) FROM users")
+        .await
+        .unwrap();
+    assert_eq!(users, "kept:Kept ü");
+    // The workspace owner is a deferred key, checked before the triggers come back.
+    let owner: String = fixture
+        .database
+        .scalar("SELECT owner_membership_id FROM workspaces WHERE id = 'w'")
+        .await
+        .unwrap();
+    assert_eq!(owner, "m");
+    assert_eq!(
+        fs::read(attachments.join("record.txt")).unwrap(),
+        b"attachment contents"
+    );
+    assert!(!attachments.join("later.txt").exists());
+    let initialized: i64 = fixture
+        .database
+        .scalar("SELECT initialized FROM installation_state WHERE id = 1")
+        .await
+        .unwrap();
+    assert_eq!(initialized, 1);
+    let migrations: i64 = fixture
+        .database
+        .scalar("SELECT COUNT(*) FROM schema_migrations WHERE version = 46")
+        .await
+        .unwrap();
+    assert_eq!(migrations, 1);
+    let disabled_triggers: i64 = fixture
+        .database
+        .scalar("SELECT COUNT(*) FROM pg_trigger WHERE NOT tgisinternal AND tgenabled <> 'O'")
+        .await
+        .unwrap();
+    assert_eq!(disabled_triggers, 0);
+    let next_id: i64 = fixture
+        .database
+        .scalar("SELECT nextval(pg_get_serial_sequence('instance_settings', 'id'))")
+        .await
+        .unwrap();
+    assert_eq!(next_id, 2);
+    let new_epoch: String = fixture
+        .database
+        .scalar("SELECT generation FROM page_collab_meta")
+        .await
+        .unwrap();
+    assert_ne!(new_epoch, epoch);
+}
+
+#[tokio::test]
+async fn a_snapshot_restores_only_into_its_own_backend() {
+    let fixture = Fixture::new().await;
+    let snapshot = fixture.service.create(&fixture.database).await.unwrap();
+
+    let error = if orbit_platform::testing_postgres() {
+        fixture
+            .service
+            .restore(&snapshot.id, &fixture._root.path().join("other.sqlite"))
+            .await
+    } else {
+        fixture
+            .service
+            .restore_postgres(&snapshot.id, &fixture.database)
+            .await
+    }
+    .unwrap_err();
+    assert!(matches!(error, BackupError::WrongBackend { .. }), "{error}");
+}
+
 fn checksum(contents: &[u8]) -> String {
     format!("{:x}", Sha256::digest(contents))
 }
 
 #[tokio::test]
 async fn snapshot_manifest_checksums_the_database_and_attachment() {
+    if orbit_platform::testing_postgres() {
+        return; // Checks the SQLite file of a snapshot.
+    }
     let fixture = Fixture::new().await;
 
     let snapshot = fixture.service.create(&fixture.database).await.unwrap();
@@ -126,6 +256,9 @@ async fn verify_rejects_a_damaged_attachment() {
 
 #[tokio::test]
 async fn restore_refuses_a_database_with_a_held_ownership_lock() {
+    if orbit_platform::testing_postgres() {
+        return; // SQLite file restore.
+    }
     let fixture = Fixture::new().await;
     let snapshot = fixture.service.create(&fixture.database).await.unwrap();
 
@@ -140,6 +273,9 @@ async fn restore_refuses_a_database_with_a_held_ownership_lock() {
 
 #[tokio::test]
 async fn restore_rotates_collaborative_document_epochs() {
+    if orbit_platform::testing_postgres() {
+        return; // SQLite file restore; Postgres: postgres_restore_replaces_the_database_and_attachments.
+    }
     // Clients still hold post-backup document state; a new generation makes them reset.
     let fixture = Fixture::new().await;
     let before: String = fixture
@@ -168,6 +304,9 @@ async fn restore_rotates_collaborative_document_epochs() {
 
 #[tokio::test]
 async fn restore_recovers_the_database_record_and_attachment() {
+    if orbit_platform::testing_postgres() {
+        return; // SQLite file restore; Postgres: postgres_restore_replaces_the_database_and_attachments.
+    }
     let fixture = Fixture::new().await;
     let snapshot = fixture.service.create(&fixture.database).await.unwrap();
     let restored_database = fixture._root.path().join("restored.sqlite");
@@ -197,6 +336,9 @@ async fn restore_recovers_the_database_record_and_attachment() {
 
 #[tokio::test]
 async fn restore_rejects_a_database_nested_in_the_attachment_target() {
+    if orbit_platform::testing_postgres() {
+        return; // SQLite file restore.
+    }
     let fixture = Fixture::new().await;
     let snapshot = fixture.service.create(&fixture.database).await.unwrap();
     let restored_attachments = fixture._root.path().join("overlapping-restore");
@@ -214,6 +356,9 @@ async fn restore_rejects_a_database_nested_in_the_attachment_target() {
 
 #[tokio::test]
 async fn restore_removes_sqlite_sidecars_for_any_database_extension() {
+    if orbit_platform::testing_postgres() {
+        return; // SQLite file restore.
+    }
     let fixture = Fixture::new().await;
     let snapshot = fixture.service.create(&fixture.database).await.unwrap();
     let restored_database = fixture._root.path().join("restored.db");

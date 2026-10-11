@@ -1,8 +1,9 @@
 //! Messages, thread replies, reactions and pins, and the lists that read them.
 
+use orbit_platform::Row;
 use orbit_platform::{Id, TimestampMillis};
-use sqlx::sqlite::SqliteRow;
-use sqlx::{Row, SqliteConnection};
+use sqlx::AnyConnection;
+use sqlx::any::AnyRow;
 
 use super::files::{MAX_MESSAGE_FILES, attach_files, copy_files};
 use super::stickers::load_sticker;
@@ -10,8 +11,8 @@ use super::{
     Access, ChatError, ChatEvent, ChatRepository, ConversationKind, Events, FollowedThreadRecord,
     ForwardedRecord, MESSAGE_MAX_CHARS, MESSAGE_SELECT, MentionsRecord, MessageKind, MessagePage,
     MessageRecord, ReplyToRecord, StickerRecord, ThreadMember, ThreadPage, Written, current_state,
-    finish, hydrate, id_list, load_access, load_actor, load_message, load_message_access,
-    load_thread_member, mentioned_user_ids, parse_id, parse_optional_id,
+    finish, hydrate, id_list, in_ids, json_values, load_access, load_actor, load_message,
+    load_message_access, load_thread_member, mentioned_user_ids, parse_id, parse_optional_id,
 };
 
 const DEFAULT_PAGE: usize = 50;
@@ -77,9 +78,9 @@ impl Scope {
     const fn filter(self) -> &'static str {
         match self {
             Self::Main(_) => {
-                "m.conversation_id = ? AND (m.thread_root_id IS NULL OR m.also_in_channel = 1)"
+                "m.conversation_id = $1 AND (m.thread_root_id IS NULL OR m.also_in_channel = 1)"
             }
-            Self::Thread(_) => "m.thread_root_id = ?",
+            Self::Thread(_) => "m.thread_root_id = $1",
         }
     }
 
@@ -142,7 +143,7 @@ impl ChatRepository {
     ) -> Result<Vec<MessageRecord>, ChatError> {
         let mut tx = self.database.pool().begin().await?;
         load_access(&mut tx, workspace_id, actor_id, conversation_id).await?;
-        let rows = sqlx::query(&threads_sql())
+        let rows = sqlx::query(sqlx::AssertSqlSafe(threads_sql()))
             .bind(conversation_id.to_string())
             .bind(LIST_LIMIT)
             .fetch_all(&mut *tx)
@@ -159,7 +160,7 @@ impl ChatRepository {
     ) -> Result<Vec<MessageRecord>, ChatError> {
         let mut tx = self.database.pool().begin().await?;
         load_access(&mut tx, workspace_id, actor_id, conversation_id).await?;
-        let rows = sqlx::query(&pins_sql())
+        let rows = sqlx::query(sqlx::AssertSqlSafe(pins_sql()))
             .bind(conversation_id.to_string())
             .bind(LIST_LIMIT)
             .fetch_all(&mut *tx)
@@ -182,11 +183,11 @@ impl ChatRepository {
              FROM chat_thread_members t \
              JOIN chat_messages r ON r.id = t.root_id \
              JOIN chat_conversations c ON c.id = t.conversation_id \
-             WHERE t.workspace_id = ? AND t.user_id = ? AND t.following = 1 \
+             WHERE t.workspace_id = $1 AND t.user_id = $2 AND t.following = 1 \
              AND (c.kind = 'public' OR EXISTS (SELECT 1 FROM chat_members \
                   WHERE chat_members.conversation_id = c.id AND chat_members.user_id = t.user_id)) \
              ORDER BY (r.reply_count > t.read_reply_count) DESC, r.last_reply_id DESC, r.id DESC \
-             LIMIT ?",
+             LIMIT $3",
         )
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
@@ -201,9 +202,10 @@ impl ChatRepository {
             ids.push(parse_id(row.get("root_id"))?);
             ids.extend(parse_optional_id(row.get("last_reply_id"))?);
         }
-        let rows = sqlx::query(&format!(
-            "{MESSAGE_SELECT} WHERE m.id IN (SELECT value FROM json_each(?))"
-        ))
+        let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "{MESSAGE_SELECT} WHERE m.id {}",
+            in_ids(&*tx, 1)
+        )))
         .bind(id_list(ids))
         .fetch_all(&mut *tx)
         .await?;
@@ -340,8 +342,8 @@ impl ChatRepository {
         if message.in_main() {
             events.counted = Some(conversation_id);
             sqlx::query(
-                "UPDATE chat_conversations SET message_count = message_count + 1, last_message_at = ? \
-                 WHERE id = ?",
+                "UPDATE chat_conversations SET message_count = message_count + 1, last_message_at = $1 \
+                 WHERE id = $2",
             )
             .bind(now.as_millis())
             .bind(conversation_id.to_string())
@@ -475,8 +477,8 @@ impl ChatRepository {
         );
         events.counted = Some(conversation_id);
         sqlx::query(
-            "UPDATE chat_conversations SET message_count = message_count + 1, last_message_at = ? \
-             WHERE id = ?",
+            "UPDATE chat_conversations SET message_count = message_count + 1, last_message_at = $1 \
+             WHERE id = $2",
         )
         .bind(now.as_millis())
         .bind(conversation_id.to_string())
@@ -543,10 +545,10 @@ impl ChatRepository {
             .collect();
         adjust_mentions(&mut tx, &message, &removed, -1).await?;
         let removed_any = !removed.is_empty();
-        sqlx::query(
-            "DELETE FROM chat_message_mentions WHERE message_id = ? \
-             AND user_id IN (SELECT value FROM json_each(?))",
-        )
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "DELETE FROM chat_message_mentions WHERE message_id = $1 AND user_id {}",
+            in_ids(&*tx, 2)
+        )))
         .bind(message.id.to_string())
         .bind(id_list(removed))
         .execute(&mut *tx)
@@ -567,12 +569,12 @@ impl ChatRepository {
             events.replied = message.thread_root_id;
         }
         sqlx::query(
-            "UPDATE chat_messages SET body = ?, mention_channel = ?, mention_here = ?, edited_at = ? \
-             WHERE id = ?",
+            "UPDATE chat_messages SET body = $1, mention_channel = $2, mention_here = $3, edited_at = $4 \
+             WHERE id = $5",
         )
         .bind(&body)
-        .bind(channel)
-        .bind(here)
+        .bind(i64::from(channel))
+        .bind(i64::from(here))
         .bind(now.as_millis())
         .bind(message.id.to_string())
         .execute(&mut *tx)
@@ -628,7 +630,7 @@ impl ChatRepository {
         events.replied = message.thread_root_id;
 
         if message.thread_root_id.is_none() && message.reply_count > 0 {
-            sqlx::query("DELETE FROM notifications WHERE chat_message_id = ?")
+            sqlx::query("DELETE FROM notifications WHERE chat_message_id = $1")
                 .bind(message.id.to_string())
                 .execute(&mut *tx)
                 .await?;
@@ -637,14 +639,16 @@ impl ChatRepository {
                 "chat_reactions",
                 "chat_message_files",
             ] {
-                sqlx::query(&format!("DELETE FROM {table} WHERE message_id = ?"))
-                    .bind(message.id.to_string())
-                    .execute(&mut *tx)
-                    .await?;
+                sqlx::query(sqlx::AssertSqlSafe(format!(
+                    "DELETE FROM {table} WHERE message_id = $1"
+                )))
+                .bind(message.id.to_string())
+                .execute(&mut *tx)
+                .await?;
             }
             sqlx::query(
-                "UPDATE chat_messages SET body = '', deleted_at = ?, pinned_at = NULL, pinned_by = NULL, \
-                 mention_channel = 0, mention_here = 0, sticker_id = NULL WHERE id = ?",
+                "UPDATE chat_messages SET body = '', deleted_at = $1, pinned_at = NULL, pinned_by = NULL, \
+                 mention_channel = 0, mention_here = 0, sticker_id = NULL WHERE id = $2",
             )
             .bind(now.as_millis())
             .bind(message.id.to_string())
@@ -657,8 +661,9 @@ impl ChatRepository {
         } else {
             if message.thread_root_id.is_some() {
                 sqlx::query(
-                    "UPDATE chat_thread_members SET read_reply_count = MAX(read_reply_count - 1, 0) \
-                     WHERE root_id = ? AND (user_id = ? OR last_read_reply_id >= ?)",
+                    "UPDATE chat_thread_members SET read_reply_count = \
+                     CASE WHEN read_reply_count > 0 THEN read_reply_count - 1 ELSE 0 END \
+                     WHERE root_id = $1 AND (user_id = $2 OR last_read_reply_id >= $3)",
                 )
                 .bind(message.thread_root_id.map(|id| id.to_string()))
                 .bind(message.author_id.to_string())
@@ -715,7 +720,7 @@ impl ChatRepository {
                 ));
             }
             sqlx::query(
-                "INSERT INTO chat_reactions (message_id, emoji, user_id, created_at) VALUES (?, ?, ?, ?) \
+                "INSERT INTO chat_reactions (message_id, emoji, user_id, created_at) VALUES ($1, $2, $3, $4) \
                  ON CONFLICT DO NOTHING",
             )
             .bind(message.id.to_string())
@@ -726,7 +731,7 @@ impl ChatRepository {
             .await?;
         } else {
             sqlx::query(
-                "DELETE FROM chat_reactions WHERE message_id = ? AND emoji = ? AND user_id = ?",
+                "DELETE FROM chat_reactions WHERE message_id = $1 AND emoji = $2 AND user_id = $3",
             )
             .bind(message.id.to_string())
             .bind(emoji)
@@ -768,7 +773,7 @@ impl ChatRepository {
             return Ok(events.written(message));
         }
         access.require_open()?;
-        sqlx::query("UPDATE chat_messages SET pinned_at = ?, pinned_by = ? WHERE id = ?")
+        sqlx::query("UPDATE chat_messages SET pinned_at = $1, pinned_by = $2 WHERE id = $3")
             .bind(pinned.then_some(now.as_millis()))
             .bind(pinned.then(|| actor_id.to_string()))
             .bind(message.id.to_string())
@@ -813,22 +818,26 @@ fn clean_body(body: &str, may_be_blank: bool) -> Result<String, ChatError> {
 
 fn threads_sql() -> String {
     format!(
-        "{MESSAGE_SELECT} WHERE m.conversation_id = ? AND m.reply_count > 0 \
-         ORDER BY m.last_reply_id DESC LIMIT ?"
+        "{MESSAGE_SELECT} WHERE m.conversation_id = $1 AND m.reply_count > 0 \
+         ORDER BY m.last_reply_id DESC LIMIT $2"
     )
 }
 
 fn pins_sql() -> String {
     format!(
-        "{MESSAGE_SELECT} WHERE m.conversation_id = ? AND m.pinned_at IS NOT NULL \
-         ORDER BY m.id DESC LIMIT ?"
+        "{MESSAGE_SELECT} WHERE m.conversation_id = $1 AND m.pinned_at IS NOT NULL \
+         ORDER BY m.id DESC LIMIT $2"
     )
 }
 
 fn older_sql(scope: Scope, bounded: bool) -> String {
-    let bound = if bounded { "AND m.id < ?" } else { "" };
+    let (bound, limit) = if bounded {
+        ("AND m.id < $2", "$3")
+    } else {
+        ("", "$2")
+    };
     format!(
-        "{MESSAGE_SELECT} WHERE {} {bound} ORDER BY m.id DESC LIMIT ?",
+        "{MESSAGE_SELECT} WHERE {} {bound} ORDER BY m.id DESC LIMIT {limit}",
         scope.filter()
     )
 }
@@ -836,14 +845,14 @@ fn older_sql(scope: Scope, bounded: bool) -> String {
 fn newer_sql(scope: Scope, inclusive: bool) -> String {
     let compare = if inclusive { ">=" } else { ">" };
     format!(
-        "{MESSAGE_SELECT} WHERE {} AND m.id {compare} ? ORDER BY m.id LIMIT ?",
+        "{MESSAGE_SELECT} WHERE {} AND m.id {compare} $2 ORDER BY m.id LIMIT $3",
         scope.filter()
     )
 }
 
 /// One page in ascending order, with the cursors of the pages next to it.
 async fn page(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     scope: Scope,
     cursor: MessageCursor,
 ) -> Result<(Vec<MessageRecord>, Option<Id>, Option<Id>), ChatError> {
@@ -878,13 +887,13 @@ async fn page(
 
 /// Up to `take` rows below `bound` in ascending order, and whether older rows exist.
 async fn older(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     scope: Scope,
     bound: Option<Id>,
     take: usize,
-) -> Result<(Vec<SqliteRow>, bool), ChatError> {
+) -> Result<(Vec<AnyRow>, bool), ChatError> {
     let sql = older_sql(scope, bound.is_some());
-    let mut query = sqlx::query(&sql).bind(scope.key());
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql)).bind(scope.key());
     if let Some(bound) = bound {
         query = query.bind(bound.to_string());
     }
@@ -897,14 +906,14 @@ async fn older(
 
 /// Up to `take` rows above `bound` (or from it on) in ascending order, and whether newer rows exist.
 async fn newer(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     scope: Scope,
     bound: Id,
     inclusive: bool,
     take: usize,
-) -> Result<(Vec<SqliteRow>, bool), ChatError> {
+) -> Result<(Vec<AnyRow>, bool), ChatError> {
     let sql = newer_sql(scope, inclusive);
-    let mut rows = sqlx::query(&sql)
+    let mut rows = sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(scope.key())
         .bind(bound.to_string())
         .bind(take as i64 + 1)
@@ -917,13 +926,13 @@ async fn newer(
 
 /// The message that `author_id` sent to the conversation with this nonce, if there is one.
 async fn sent_before(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     conversation_id: Id,
     author_id: Id,
     nonce: &str,
 ) -> Result<Option<MessageRecord>, ChatError> {
     let existing: Option<String> = sqlx::query_scalar(
-        "SELECT id FROM chat_messages WHERE conversation_id = ? AND author_id = ? AND nonce = ?",
+        "SELECT id FROM chat_messages WHERE conversation_id = $1 AND author_id = $2 AND nonce = $3",
     )
     .bind(conversation_id.to_string())
     .bind(author_id.to_string())
@@ -962,7 +971,7 @@ struct NewMessage<'a> {
 /// The id is made inside the write transaction, so id order is commit order and a page read
 /// with `after` cannot miss a message.
 async fn insert_message(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     new: NewMessage<'_>,
 ) -> Result<MessageRecord, ChatError> {
     let id = Id::new_v7();
@@ -970,7 +979,7 @@ async fn insert_message(
         "INSERT INTO chat_messages (id, conversation_id, thread_root_id, kind, author_id, body, \
          mention_channel, mention_here, also_in_channel, nonce, reply_to_id, forward_of_id, \
          forward_conversation_id, forward_author_id, forward_created_at, sticker_id, created_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)",
     )
     .bind(id.to_string())
     .bind(new.conversation_id.to_string())
@@ -978,9 +987,9 @@ async fn insert_message(
     .bind(new.kind.as_str())
     .bind(new.author_id.to_string())
     .bind(new.body)
-    .bind(new.mention_channel)
-    .bind(new.mention_here)
-    .bind(new.also_in_channel)
+    .bind(i64::from(new.mention_channel))
+    .bind(i64::from(new.mention_here))
+    .bind(i64::from(new.also_in_channel))
     .bind(new.nonce)
     .bind(new.reply_to.as_ref().map(|target| target.id.to_string()))
     .bind(new.forwarded.map(|origin| origin.message_id.to_string()))
@@ -1034,7 +1043,7 @@ async fn insert_message(
 /// A `pin`, `join` or `leave` row about `author_id`. System rows are never unread, and the row
 /// reads the conversation for the member it is about.
 pub(super) async fn add_system_row(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     conversation_id: Id,
     kind: MessageKind,
     author_id: Id,
@@ -1060,7 +1069,7 @@ pub(super) async fn add_system_row(
         },
     )
     .await?;
-    sqlx::query("UPDATE chat_conversations SET last_message_at = ? WHERE id = ?")
+    sqlx::query("UPDATE chat_conversations SET last_message_at = $1 WHERE id = $2")
         .bind(now.as_millis())
         .bind(conversation_id.to_string())
         .execute(&mut *conn)
@@ -1072,16 +1081,16 @@ pub(super) async fn add_system_row(
 /// Moves a member's cursor to the newest message: nothing is unread after it.
 /// Returns whether that also marked inbox notifications of chat mentions as read.
 pub(super) async fn mark_read_to(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     conversation_id: Id,
     user_id: Id,
     message_id: Option<Id>,
 ) -> Result<bool, ChatError> {
     sqlx::query(
-        "UPDATE chat_members SET last_read_message_id = ?, mention_count = 0, broadcast_count = 0, \
+        "UPDATE chat_members SET last_read_message_id = $1, mention_count = 0, broadcast_count = 0, \
          read_count = (SELECT message_count FROM chat_conversations \
                        WHERE chat_conversations.id = chat_members.conversation_id) \
-         WHERE conversation_id = ? AND user_id = ?",
+         WHERE conversation_id = $2 AND user_id = $3",
     )
     .bind(message_id.map(|id| id.to_string()))
     .bind(conversation_id.to_string())
@@ -1089,8 +1098,8 @@ pub(super) async fn mark_read_to(
     .execute(&mut *conn)
     .await?;
     let marked = sqlx::query(
-        "UPDATE notifications SET read_at = ? \
-         WHERE chat_conversation_id = ? AND recipient_user_id = ? AND read_at IS NULL",
+        "UPDATE notifications SET read_at = $1 \
+         WHERE chat_conversation_id = $2 AND recipient_user_id = $3 AND read_at IS NULL",
     )
     .bind(TimestampMillis::now().as_millis())
     .bind(conversation_id.to_string())
@@ -1105,7 +1114,7 @@ pub(super) async fn mark_read_to(
 /// mentions, and with `@channel` for every member who has not muted the channel (`@here`: of
 /// those, the members who are online). Returns who was notified.
 async fn notify_mentions(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     access: &Access,
     message: &MessageRecord,
     mentioned: &[Id],
@@ -1118,7 +1127,7 @@ async fn notify_mentions(
     let mut recipients = mentioned.to_vec();
     if message.mentions.channel || message.mentions.here {
         let listening = sqlx::query_scalar::<_, String>(
-            "SELECT user_id FROM chat_members WHERE conversation_id = ? AND user_id <> ? \
+            "SELECT user_id FROM chat_members WHERE conversation_id = $1 AND user_id <> $2 \
              AND notify <> 'muted'",
         )
         .bind(conversation.id.to_string())
@@ -1136,9 +1145,9 @@ async fn notify_mentions(
     recipients.dedup();
     for recipient in &recipients {
         sqlx::query(
-            "INSERT OR IGNORE INTO notifications (id, workspace_id, recipient_user_id, actor_user_id, \
+            "INSERT INTO notifications (id, workspace_id, recipient_user_id, actor_user_id, \
              kind, chat_conversation_id, chat_message_id, dedupe_key, created_at) \
-             VALUES (?, ?, ?, ?, 'chat_mentioned', ?, ?, ?, ?)",
+             VALUES ($1, $2, $3, $4, 'chat_mentioned', $5, $6, $7, $8) ON CONFLICT DO NOTHING",
         )
         .bind(Id::new_v7().to_string())
         .bind(conversation.workspace_id.to_string())
@@ -1159,7 +1168,7 @@ async fn notify_mentions(
 
 /// The members of the conversation among `user_ids`, without `except` (nobody mentions themselves).
 async fn members_among(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     conversation_id: Id,
     user_ids: &[Id],
     except: Id,
@@ -1167,10 +1176,11 @@ async fn members_among(
     if user_ids.is_empty() {
         return Ok(Vec::new());
     }
-    sqlx::query_scalar::<_, String>(
-        "SELECT user_id FROM chat_members WHERE conversation_id = ? AND user_id <> ? \
-         AND user_id IN (SELECT value FROM json_each(?))",
-    )
+    sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
+        "SELECT user_id FROM chat_members WHERE conversation_id = $1 AND user_id <> $2 \
+         AND user_id {}",
+        in_ids(&*conn, 3)
+    )))
     .bind(conversation_id.to_string())
     .bind(except.to_string())
     .bind(id_list(user_ids.iter().copied()))
@@ -1181,12 +1191,9 @@ async fn members_among(
     .collect()
 }
 
-async fn mention_row_users(
-    conn: &mut SqliteConnection,
-    message_id: Id,
-) -> Result<Vec<Id>, ChatError> {
+async fn mention_row_users(conn: &mut AnyConnection, message_id: Id) -> Result<Vec<Id>, ChatError> {
     sqlx::query_scalar::<_, String>(
-        "SELECT user_id FROM chat_message_mentions WHERE message_id = ?",
+        "SELECT user_id FROM chat_message_mentions WHERE message_id = $1",
     )
     .bind(message_id.to_string())
     .fetch_all(&mut *conn)
@@ -1197,21 +1204,22 @@ async fn mention_row_users(
 }
 
 async fn insert_mention_rows(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     message: &MessageRecord,
     user_ids: &[Id],
 ) -> Result<(), ChatError> {
     if user_ids.is_empty() {
         return Ok(());
     }
-    sqlx::query(
+    sqlx::query(sqlx::AssertSqlSafe(format!(
         "INSERT INTO chat_message_mentions (message_id, user_id, conversation_id, thread_root_id, in_main) \
-         SELECT ?, value, ?, ?, ? FROM json_each(?)",
-    )
+         SELECT $1, value, $2, $3, $4 FROM {}",
+        json_values(&*conn, 5, "users")
+    )))
     .bind(message.id.to_string())
     .bind(message.conversation_id.to_string())
     .bind(message.thread_root_id.map(|id| id.to_string()))
-    .bind(message.in_main())
+    .bind(i64::from(message.in_main()))
     .bind(id_list(user_ids.iter().copied()))
     .execute(&mut *conn)
     .await?;
@@ -1222,7 +1230,7 @@ async fn insert_mention_rows(
 /// message is in the main list, and in the thread for the members who follow it. Only for
 /// members whose cursor is before the message.
 async fn adjust_mentions(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     message: &MessageRecord,
     user_ids: &[Id],
     delta: i64,
@@ -1232,11 +1240,13 @@ async fn adjust_mentions(
     }
     let users = id_list(user_ids.iter().copied());
     if message.in_main() {
-        sqlx::query(
-            "UPDATE chat_members SET mention_count = MAX(mention_count + ?, 0) \
-             WHERE conversation_id = ? AND user_id IN (SELECT value FROM json_each(?)) \
-             AND (last_read_message_id IS NULL OR last_read_message_id < ?)",
-        )
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "UPDATE chat_members SET mention_count = \
+             CASE WHEN mention_count + $1 > 0 THEN mention_count + $1 ELSE 0 END \
+             WHERE conversation_id = $2 AND user_id {} \
+             AND (last_read_message_id IS NULL OR last_read_message_id < $4)",
+            in_ids(&*conn, 3)
+        )))
         .bind(delta)
         .bind(message.conversation_id.to_string())
         .bind(&users)
@@ -1245,11 +1255,13 @@ async fn adjust_mentions(
         .await?;
     }
     if let Some(root_id) = message.thread_root_id {
-        sqlx::query(
-            "UPDATE chat_thread_members SET mention_count = MAX(mention_count + ?, 0) \
-             WHERE root_id = ? AND following = 1 AND user_id IN (SELECT value FROM json_each(?)) \
-             AND (last_read_reply_id IS NULL OR last_read_reply_id < ?)",
-        )
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "UPDATE chat_thread_members SET mention_count = \
+             CASE WHEN mention_count + $1 > 0 THEN mention_count + $1 ELSE 0 END \
+             WHERE root_id = $2 AND following = 1 AND user_id {} \
+             AND (last_read_reply_id IS NULL OR last_read_reply_id < $4)",
+            in_ids(&*conn, 3)
+        )))
         .bind(delta)
         .bind(root_id.to_string())
         .bind(&users)
@@ -1263,7 +1275,7 @@ async fn adjust_mentions(
 /// Adds `delta` to the `@channel`/`@here` counter of every member but the author for whom the
 /// message is unread. The caller decides whether the message has (or had) such a mention.
 async fn adjust_broadcast(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     message: &MessageRecord,
     delta: i64,
 ) -> Result<(), ChatError> {
@@ -1271,9 +1283,10 @@ async fn adjust_broadcast(
         return Ok(());
     }
     sqlx::query(
-        "UPDATE chat_members SET broadcast_count = MAX(broadcast_count + ?, 0) \
-         WHERE conversation_id = ? AND user_id <> ? \
-         AND (last_read_message_id IS NULL OR last_read_message_id < ?)",
+        "UPDATE chat_members SET broadcast_count = \
+         CASE WHEN broadcast_count + $1 > 0 THEN broadcast_count + $1 ELSE 0 END \
+         WHERE conversation_id = $2 AND user_id <> $3 \
+         AND (last_read_message_id IS NULL OR last_read_message_id < $4)",
     )
     .bind(delta)
     .bind(message.conversation_id.to_string())
@@ -1286,19 +1299,17 @@ async fn adjust_broadcast(
 
 /// Takes a main-list message out of the counters: the conversation's total, and `read_count`
 /// of the members for whom it was not unread (its author, and everyone who read past it).
-async fn uncount_main(
-    conn: &mut SqliteConnection,
-    message: &MessageRecord,
-) -> Result<(), ChatError> {
+async fn uncount_main(conn: &mut AnyConnection, message: &MessageRecord) -> Result<(), ChatError> {
     sqlx::query(
-        "UPDATE chat_conversations SET message_count = MAX(message_count - 1, 0) WHERE id = ?",
+        "UPDATE chat_conversations SET message_count = \
+         CASE WHEN message_count > 0 THEN message_count - 1 ELSE 0 END WHERE id = $1",
     )
     .bind(message.conversation_id.to_string())
     .execute(&mut *conn)
     .await?;
     sqlx::query(
-        "UPDATE chat_members SET read_count = MAX(read_count - 1, 0) \
-         WHERE conversation_id = ? AND (user_id = ? OR last_read_message_id >= ?)",
+        "UPDATE chat_members SET read_count = CASE WHEN read_count > 0 THEN read_count - 1 ELSE 0 END \
+         WHERE conversation_id = $1 AND (user_id = $2 OR last_read_message_id >= $3)",
     )
     .bind(message.conversation_id.to_string())
     .bind(message.author_id.to_string())
@@ -1312,12 +1323,12 @@ async fn uncount_main(
 }
 
 async fn delete_row(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     message: &MessageRecord,
     events: &mut Events,
 ) -> Result<(), ChatError> {
     // Reactions, mention rows and thread states go with it through `ON DELETE CASCADE`.
-    sqlx::query("DELETE FROM chat_messages WHERE id = ?")
+    sqlx::query("DELETE FROM chat_messages WHERE id = $1")
         .bind(message.id.to_string())
         .execute(&mut *conn)
         .await?;
@@ -1334,7 +1345,7 @@ async fn delete_row(
 
 /// The thread's side of a new reply: the root's summary, and who follows the thread now.
 async fn after_reply(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     access: &Access,
     root: &MessageRecord,
     reply: &MessageRecord,
@@ -1347,7 +1358,7 @@ async fn after_reply(
         authors.push(reply.author_id);
     }
     sqlx::query(
-        "UPDATE chat_messages SET reply_count = ?, last_reply_id = ?, reply_user_ids = ? WHERE id = ?",
+        "UPDATE chat_messages SET reply_count = $1, last_reply_id = $2, reply_user_ids = $3 WHERE id = $4",
     )
     .bind(reply_count)
     .bind(reply.id.to_string())
@@ -1415,7 +1426,7 @@ async fn after_reply(
 
 /// Writes a member's state in a thread.
 pub(super) async fn upsert_thread_member(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     workspace_id: Id,
     root: &MessageRecord,
     user_id: Id,
@@ -1423,7 +1434,7 @@ pub(super) async fn upsert_thread_member(
 ) -> Result<(), ChatError> {
     sqlx::query(
         "INSERT INTO chat_thread_members (root_id, user_id, workspace_id, conversation_id, following, \
-         last_read_reply_id, read_reply_count, mention_count) VALUES (?, ?, ?, ?, ?, ?, ?, ?) \
+         last_read_reply_id, read_reply_count, mention_count) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
          ON CONFLICT (root_id, user_id) DO UPDATE SET following = excluded.following, \
          last_read_reply_id = excluded.last_read_reply_id, \
          read_reply_count = excluded.read_reply_count, mention_count = excluded.mention_count",
@@ -1432,7 +1443,7 @@ pub(super) async fn upsert_thread_member(
     .bind(user_id.to_string())
     .bind(workspace_id.to_string())
     .bind(root.conversation_id.to_string())
-    .bind(member.following)
+    .bind(i64::from(member.following))
     .bind(member.last_read_reply_id.map(|id| id.to_string()))
     .bind(member.read_reply_count)
     .bind(member.mention_count)
@@ -1444,7 +1455,7 @@ pub(super) async fn upsert_thread_member(
 /// The root's summary after one of its replies was removed. A deleted root goes with its last
 /// reply.
 async fn after_reply_removed(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     root_id: Id,
     actor_id: Id,
     events: &mut Events,
@@ -1453,7 +1464,7 @@ async fn after_reply_removed(
         return Ok(());
     };
     let last_reply_id: Option<String> = sqlx::query_scalar(
-        "SELECT id FROM chat_messages WHERE thread_root_id = ? ORDER BY id DESC LIMIT 1",
+        "SELECT id FROM chat_messages WHERE thread_root_id = $1 ORDER BY id DESC LIMIT 1",
     )
     .bind(root_id.to_string())
     .fetch_optional(&mut *conn)
@@ -1462,16 +1473,17 @@ async fn after_reply_removed(
         return delete_row(conn, &root, events).await;
     }
     let authors = sqlx::query_scalar::<_, String>(
-        "SELECT author_id FROM chat_messages WHERE thread_root_id = ? \
-         GROUP BY author_id ORDER BY MIN(id) LIMIT ?",
+        "SELECT author_id FROM chat_messages WHERE thread_root_id = $1 \
+         GROUP BY author_id ORDER BY MIN(id) LIMIT $2",
     )
     .bind(root_id.to_string())
     .bind(REPLY_AUTHORS as i64)
     .fetch_all(&mut *conn)
     .await?;
     sqlx::query(
-        "UPDATE chat_messages SET reply_count = MAX(reply_count - 1, 0), last_reply_id = ?, \
-         reply_user_ids = ? WHERE id = ?",
+        "UPDATE chat_messages SET reply_count = \
+         CASE WHEN reply_count > 0 THEN reply_count - 1 ELSE 0 END, last_reply_id = $1, \
+         reply_user_ids = $2 WHERE id = $3",
     )
     .bind(last_reply_id)
     .bind(serde_json::to_string(&authors).expect("a list of strings serializes"))
@@ -1498,8 +1510,8 @@ async fn after_reply_removed(
 
 #[cfg(test)]
 mod tests {
+    use orbit_platform::Row;
     use orbit_platform::TestDatabase;
-    use sqlx::Row;
 
     use super::super::state::{mention_count_sql, newest_main_sql, unread_count_sql};
     use super::*;
@@ -1507,8 +1519,18 @@ mod tests {
     /// The steps of SQLite's plan for a query.
     async fn plan(database: &TestDatabase, sql: &str) -> Vec<String> {
         let explain = format!("EXPLAIN QUERY PLAN {sql}");
-        let mut query = sqlx::query(&explain);
-        for _ in 0..sql.matches('?').count() {
+        let mut query = sqlx::query(sqlx::AssertSqlSafe(explain));
+        let params = sql
+            .split('$')
+            .skip(1)
+            .filter_map(|rest| {
+                let digits =
+                    rest.len() - rest.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+                rest[..digits].parse::<usize>().ok()
+            })
+            .max()
+            .unwrap_or(0);
+        for _ in 0..params {
             query = query.bind("x");
         }
         query
@@ -1524,6 +1546,10 @@ mod tests {
     /// index: no table scan and no sort, however many messages there are.
     #[tokio::test]
     async fn message_queries_read_one_index_without_a_scan_or_a_sort() {
+        // EXPLAIN QUERY PLAN and its output format are SQLite's.
+        if orbit_platform::testing_postgres() {
+            return;
+        }
         let database = TestDatabase::new().await.unwrap();
         let main = Scope::Main(Id::new_v7());
         let thread = Scope::Thread(Id::new_v7());

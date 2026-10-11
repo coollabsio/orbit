@@ -4,11 +4,11 @@
 //! readable by every member and editable by their owner or a workspace owner/admin.
 
 use orbit_domain::Actor;
-use orbit_platform::{Database, Id, TimestampMillis};
+use orbit_platform::{Database, Flag, Id, Row, TimestampMillis};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::sqlite::SqliteRow;
-use sqlx::{Row, Sqlite};
+use sqlx::Any;
+use sqlx::any::AnyRow;
 use utoipa::ToSchema;
 
 use super::membership;
@@ -141,8 +141,8 @@ impl ViewRepository {
         actor_id: Id,
     ) -> Result<Vec<SavedViewRecord>, TaskError> {
         let caller = load_caller(self.database.pool(), workspace_id, actor_id).await?;
-        let sql = visible_views_sql("ORDER BY saved_views.name COLLATE NOCASE, saved_views.id");
-        sqlx::query(&sql)
+        let sql = visible_views_sql("ORDER BY lower(saved_views.name), saved_views.id");
+        sqlx::query(sqlx::AssertSqlSafe(sql))
             .bind(actor_id.to_string())
             .bind(workspace_id.to_string())
             .bind(actor_id.to_string())
@@ -182,7 +182,7 @@ impl ViewRepository {
         sqlx::query(
             "INSERT INTO saved_views (id, workspace_id, owner_user_id, name, description, icon, color, \
              visibility, state_json, version, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10, $11)",
         )
         .bind(id.to_string())
         .bind(workspace_id.to_string())
@@ -244,9 +244,9 @@ impl ViewRepository {
             });
         }
         let updated = sqlx::query(
-            "UPDATE saved_views SET name = ?, description = ?, icon = ?, color = ?, visibility = ?, \
-             state_json = COALESCE(?, state_json), version = version + 1, updated_at = ? \
-             WHERE id = ? AND workspace_id = ? AND version = ?",
+            "UPDATE saved_views SET name = $1, description = $2, icon = $3, color = $4, visibility = $5, \
+             state_json = COALESCE($6, state_json), version = version + 1, updated_at = $7 \
+             WHERE id = $8 AND workspace_id = $9 AND version = $10",
         )
         .bind(name.unwrap_or_else(|| current.name.clone()))
         .bind(description.unwrap_or_else(|| current.description.clone()))
@@ -264,7 +264,7 @@ impl ViewRepository {
             return Err(TaskError::Conflict);
         }
         if current.visibility == Visibility::Workspace && visibility == Visibility::Personal {
-            sqlx::query("DELETE FROM saved_view_favorites WHERE view_id = ? AND user_id <> ?")
+            sqlx::query("DELETE FROM saved_view_favorites WHERE view_id = $1 AND user_id <> $2")
                 .bind(view_id.to_string())
                 .bind(current.owner.user_id.to_string())
                 .execute(&mut *tx)
@@ -301,7 +301,7 @@ impl ViewRepository {
             return Err(TaskError::Forbidden);
         }
         // Favorites go with it through `ON DELETE CASCADE`.
-        sqlx::query("DELETE FROM saved_views WHERE id = ? AND workspace_id = ?")
+        sqlx::query("DELETE FROM saved_views WHERE id = $1 AND workspace_id = $2")
             .bind(view_id.to_string())
             .bind(workspace_id.to_string())
             .execute(&mut *tx)
@@ -341,10 +341,10 @@ impl ViewRepository {
         if favorite {
             sqlx::query(
                 "INSERT INTO saved_view_favorites (view_id, user_id, position, created_at) \
-                 SELECT ?, ?, COALESCE(MAX(saved_view_favorites.position) + 1, 0), ? \
+                 SELECT $1, $2, COALESCE(MAX(saved_view_favorites.position) + 1, 0), $3 \
                  FROM saved_view_favorites \
                  JOIN saved_views ON saved_views.id = saved_view_favorites.view_id \
-                 WHERE saved_view_favorites.user_id = ? AND saved_views.workspace_id = ?",
+                 WHERE saved_view_favorites.user_id = $4 AND saved_views.workspace_id = $5",
             )
             .bind(view_id.to_string())
             .bind(actor_id.to_string())
@@ -354,7 +354,7 @@ impl ViewRepository {
             .execute(&mut *tx)
             .await?;
         } else {
-            sqlx::query("DELETE FROM saved_view_favorites WHERE view_id = ? AND user_id = ?")
+            sqlx::query("DELETE FROM saved_view_favorites WHERE view_id = $1 AND user_id = $2")
                 .bind(view_id.to_string())
                 .bind(actor_id.to_string())
                 .execute(&mut *tx)
@@ -397,8 +397,8 @@ impl ViewRepository {
         let ordered = sqlx::query_scalar::<_, String>(
             "SELECT saved_view_favorites.view_id FROM saved_view_favorites \
              JOIN saved_views ON saved_views.id = saved_view_favorites.view_id \
-             WHERE saved_view_favorites.user_id = ? AND saved_views.workspace_id = ? \
-             AND (saved_views.visibility = 'workspace' OR saved_views.owner_user_id = ?) \
+             WHERE saved_view_favorites.user_id = $1 AND saved_views.workspace_id = $2 \
+             AND (saved_views.visibility = 'workspace' OR saved_views.owner_user_id = $3) \
              ORDER BY saved_view_favorites.position",
         )
         .bind(actor_id.to_string())
@@ -420,7 +420,7 @@ impl ViewRepository {
         }
         for (position, view_id) in view_ids.iter().enumerate() {
             sqlx::query(
-                "UPDATE saved_view_favorites SET position = ? WHERE view_id = ? AND user_id = ?",
+                "UPDATE saved_view_favorites SET position = $1 WHERE view_id = $2 AND user_id = $3",
             )
             .bind(i64::try_from(position).map_err(|_| invalid())?)
             .bind(view_id.to_string())
@@ -456,7 +456,7 @@ impl ViewRepository {
         load_caller(self.database.pool(), workspace_id, actor_id).await?;
         let row = sqlx::query(
             "SELECT state_json, updated_at FROM view_preferences \
-             WHERE workspace_id = ? AND user_id = ? AND page_key = ?",
+             WHERE workspace_id = $1 AND user_id = $2 AND page_key = $3",
         )
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
@@ -488,9 +488,9 @@ impl ViewRepository {
         load_caller(&mut *tx, workspace_id, actor_id).await?;
         // Only live projects of this workspace get a row, so made-up ids cannot pile up rows.
         if let Some(project_id) = page_key.strip_prefix("project:") {
-            let exists: bool = sqlx::query_scalar(
+            let Flag(exists) = sqlx::query_scalar(
                 "SELECT EXISTS(SELECT 1 FROM projects \
-                 WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL)",
+                 WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL)",
             )
             .bind(project_id)
             .bind(workspace_id.to_string())
@@ -502,7 +502,7 @@ impl ViewRepository {
         }
         sqlx::query(
             "INSERT INTO view_preferences (workspace_id, user_id, page_key, state_json, updated_at) \
-             VALUES (?, ?, ?, ?, ?) \
+             VALUES ($1, $2, $3, $4, $5) \
              ON CONFLICT (workspace_id, user_id, page_key) \
              DO UPDATE SET state_json = excluded.state_json, updated_at = excluded.updated_at",
         )
@@ -526,7 +526,7 @@ impl ViewRepository {
 /// Same membership rule as `require_access`: non-members and deleted workspaces are `NotFound`.
 async fn load_caller<'e, E>(executor: E, workspace_id: Id, actor_id: Id) -> Result<Actor, TaskError>
 where
-    E: sqlx::Executor<'e, Database = Sqlite>,
+    E: sqlx::Executor<'e, Database = Any>,
 {
     membership::actor(executor, workspace_id, actor_id)
         .await?
@@ -543,9 +543,9 @@ fn visible_views_sql(tail: &str) -> String {
          saved_view_favorites.position AS favorite_position \
          FROM saved_views JOIN users ON users.id = saved_views.owner_user_id \
          LEFT JOIN saved_view_favorites ON saved_view_favorites.view_id = saved_views.id \
-         AND saved_view_favorites.user_id = ? \
-         WHERE saved_views.workspace_id = ? \
-         AND (saved_views.visibility = 'workspace' OR saved_views.owner_user_id = ?) {tail}"
+         AND saved_view_favorites.user_id = $1 \
+         WHERE saved_views.workspace_id = $2 \
+         AND (saved_views.visibility = 'workspace' OR saved_views.owner_user_id = $3) {tail}"
     )
 }
 
@@ -556,10 +556,10 @@ async fn find_view<'e, E>(
     view_id: Id,
 ) -> Result<SavedViewRecord, TaskError>
 where
-    E: sqlx::Executor<'e, Database = Sqlite>,
+    E: sqlx::Executor<'e, Database = Any>,
 {
-    let sql = visible_views_sql("AND saved_views.id = ?");
-    let row = sqlx::query(&sql)
+    let sql = visible_views_sql("AND saved_views.id = $4");
+    let row = sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(caller.user_id.to_string())
         .bind(workspace_id.to_string())
         .bind(caller.user_id.to_string())
@@ -570,7 +570,7 @@ where
     view_from_row(row, caller)
 }
 
-fn view_from_row(row: SqliteRow, caller: Actor) -> Result<SavedViewRecord, TaskError> {
+fn view_from_row(row: AnyRow, caller: Actor) -> Result<SavedViewRecord, TaskError> {
     let owner_id = parse_id(row.get("owner_user_id"))?;
     let visibility = Visibility::from_db(row.get::<String, _>("visibility").as_str())?;
     let (state, state_error) = decode_state(row.get::<String, _>("state_json").as_str());

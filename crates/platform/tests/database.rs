@@ -1,15 +1,34 @@
 use std::time::Duration;
 
 use orbit_platform::{
-    Database, DatabaseConfig, DatabaseError, Id, Migration, MigrationError, MigrationRunner,
-    TestDatabase,
+    Backend, Database, DatabaseConfig, DatabaseError, Id, Migration, MigrationError,
+    MigrationRunner, TestDatabase,
 };
 
 const OWNERSHIP_CHILD_PATH: &str = "ORBIT_TEST_OWNERSHIP_CHILD_PATH";
 static PROCESS_OWNERSHIP_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+/// How many tables named `name` the database has (0 or 1), on either backend.
+async fn table_count(database: &Database, name: &str) -> i64 {
+    let query = match database.backend() {
+        Backend::Sqlite => "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = $1",
+        Backend::Postgres => {
+            "SELECT COUNT(*) FROM information_schema.tables \
+             WHERE table_schema = current_schema() AND table_name = $1"
+        }
+    };
+    sqlx::query_scalar(query)
+        .bind(name)
+        .fetch_one(database.pool())
+        .await
+        .unwrap()
+}
+
 #[tokio::test]
 async fn opens_sqlite_with_required_pragmas() {
+    if orbit_platform::testing_postgres() {
+        return; // SQLite PRAGMAs
+    }
     let db = TestDatabase::new().await.unwrap();
 
     assert_eq!(
@@ -41,18 +60,15 @@ async fn creates_the_platform_schema() {
         "attachment_blobs",
         "pending_uploads",
     ] {
-        let count = db
-            .scalar::<i64>(&format!(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = '{expected}'"
-            ))
-            .await
-            .unwrap();
-        assert_eq!(count, 1, "missing {expected}");
+        assert_eq!(table_count(&db, expected).await, 1, "missing {expected}");
     }
 }
 
 #[tokio::test]
 async fn github_schema_is_in_one_draft_migration() {
+    if orbit_platform::testing_postgres() {
+        return; // SQLite migration history (pragma_table_info)
+    }
     let db = TestDatabase::new().await.unwrap();
     assert_eq!(
         db.scalar::<i64>("SELECT MAX(version) FROM schema_migrations")
@@ -154,9 +170,16 @@ async fn audit_events_store_outcomes_and_request_ids() {
 #[tokio::test]
 async fn rejects_a_changed_applied_migration() {
     let db = TestDatabase::new().await.unwrap();
-    db.execute("UPDATE schema_migrations SET checksum = 'changed' WHERE version = 1")
+    // Version 1 on SQLite, the baseline on Postgres.
+    let first = db
+        .scalar::<i64>("SELECT MIN(version) FROM schema_migrations")
         .await
         .unwrap();
+    db.execute(&format!(
+        "UPDATE schema_migrations SET checksum = 'changed' WHERE version = {first}"
+    ))
+    .await
+    .unwrap();
 
     let error = MigrationRunner::embedded(env!("CARGO_PKG_VERSION"))
         .run(&db)
@@ -165,7 +188,7 @@ async fn rejects_a_changed_applied_migration() {
 
     assert!(matches!(
         error,
-        MigrationError::ChecksumMismatch { version: 1, .. }
+        MigrationError::ChecksumMismatch { version, .. } if version == first
     ));
 }
 
@@ -245,16 +268,7 @@ async fn rejects_duplicate_migration_versions_before_touching_the_schema() {
         error,
         MigrationError::DuplicateVersion { version: 1 }
     ));
-    assert_eq!(
-        database
-            .scalar::<i64>(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' \
-                 AND name = 'schema_migrations'"
-            )
-            .await
-            .unwrap(),
-        0
-    );
+    assert_eq!(table_count(&database, "schema_migrations").await, 0);
 }
 
 #[tokio::test]
@@ -276,13 +290,7 @@ async fn rolls_back_a_failing_transactional_migration() {
             .await
             .is_err()
     );
-    let table_count: i64 = database
-        .scalar(
-            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'rollback_probe'",
-        )
-        .await
-        .unwrap();
-    assert_eq!(table_count, 0);
+    assert_eq!(table_count(&database, "rollback_probe").await, 0);
 }
 
 #[tokio::test]
@@ -433,6 +441,7 @@ async fn exposes_pending_destructive_migrations_without_running_backups() {
     let directory = tempfile::tempdir().unwrap();
     let database = Database::open(&DatabaseConfig {
         path: directory.path().join("db.sqlite"),
+        postgres_url: None,
         max_connections: 1,
         busy_timeout: Duration::from_secs(1),
     })
@@ -456,6 +465,9 @@ async fn exposes_pending_destructive_migrations_without_running_backups() {
 
 #[tokio::test]
 async fn task_relations_migration_rebuilds_statuses_and_seeds_duplicate_statuses() {
+    if orbit_platform::testing_postgres() {
+        return; // SQLite migration history (embedded_through)
+    }
     let directory = tempfile::tempdir().unwrap();
     let database = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
         .await
@@ -495,7 +507,7 @@ async fn task_relations_migration_rebuilds_statuses_and_seeds_duplicate_statuses
                 ('{third_task}', '{workspace}', '{live_project}', '{todo}', 'Third', '{user}', 1, 1);"
     );
     let mut transaction = database.transaction().await.unwrap();
-    sqlx::raw_sql(&seed)
+    sqlx::raw_sql(sqlx::AssertSqlSafe(seed))
         .execute(&mut *transaction)
         .await
         .unwrap();
@@ -521,7 +533,7 @@ async fn task_relations_migration_rebuilds_statuses_and_seeds_duplicate_statuses
         "ok"
     );
     let statuses: Vec<(String, String, i64, i64)> = sqlx::query_as(
-        "SELECT id, category, position, version FROM task_statuses WHERE project_id = ? ORDER BY position",
+        "SELECT id, category, position, version FROM task_statuses WHERE project_id = $1 ORDER BY position",
     )
     .bind(live_project.to_string())
     .fetch_all(database.pool())
@@ -542,7 +554,7 @@ async fn task_relations_migration_rebuilds_statuses_and_seeds_duplicate_statuses
         statuses[2].0
     );
     let (name, color, description): (String, String, String) =
-        sqlx::query_as("SELECT name, color, description FROM task_statuses WHERE id = ?")
+        sqlx::query_as("SELECT name, color, description FROM task_statuses WHERE id = $1")
             .bind(&statuses[2].0)
             .fetch_one(database.pool())
             .await
@@ -552,7 +564,7 @@ async fn task_relations_migration_rebuilds_statuses_and_seeds_duplicate_statuses
         ("Duplicate", "#8b8f98", "")
     );
     let trashed_position: i64 = sqlx::query_scalar(
-        "SELECT position FROM task_statuses WHERE project_id = ? AND category = 'duplicate'",
+        "SELECT position FROM task_statuses WHERE project_id = $1 AND category = 'duplicate'",
     )
     .bind(trashed_project.to_string())
     .fetch_one(database.pool())
@@ -649,6 +661,9 @@ async fn task_relations_migration_rebuilds_statuses_and_seeds_duplicate_statuses
 
 #[tokio::test]
 async fn pages_migration_scopes_parents_to_their_workspace() {
+    if orbit_platform::testing_postgres() {
+        return; // SQLite migration history (embedded_through)
+    }
     // Pinned to 0022: later migrations add space columns every page insert must set.
     let directory = tempfile::tempdir().unwrap();
     let db = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
@@ -730,6 +745,9 @@ async fn pages_migration_scopes_parents_to_their_workspace() {
 
 #[tokio::test]
 async fn page_spaces_migration_backfills_a_general_teamspace_per_workspace() {
+    if orbit_platform::testing_postgres() {
+        return; // SQLite migration history (embedded_through)
+    }
     let directory = tempfile::tempdir().unwrap();
     let db = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
         .await
@@ -783,7 +801,7 @@ async fn page_spaces_migration_backfills_a_general_teamspace_per_workspace() {
     );
     let teamspaces: Vec<(String, String, String, i64, i64, Option<String>)> = sqlx::query_as(
         "SELECT id, workspace_id, name, position, version, created_by FROM teamspaces \
-         ORDER BY workspace_id = ? DESC",
+         ORDER BY workspace_id = $1 DESC",
     )
     .bind(first.to_string())
     .fetch_all(db.pool())
@@ -880,7 +898,7 @@ async fn page_spaces_migration_backfills_a_general_teamspace_per_workspace() {
         .await
         .unwrap();
     let remaining: Vec<(String, Option<String>)> =
-        sqlx::query_as("SELECT workspace_id, owner_id FROM pages ORDER BY workspace_id = ? DESC")
+        sqlx::query_as("SELECT workspace_id, owner_id FROM pages ORDER BY workspace_id = $1 DESC")
             .bind(first.to_string())
             .fetch_all(db.pool())
             .await
@@ -896,6 +914,9 @@ async fn page_spaces_migration_backfills_a_general_teamspace_per_workspace() {
 
 #[tokio::test]
 async fn page_favorites_migration_scopes_rows_and_cascades() {
+    if orbit_platform::testing_postgres() {
+        return; // SQLite migration history (embedded_through)
+    }
     let directory = tempfile::tempdir().unwrap();
     let db = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
         .await
@@ -990,6 +1011,9 @@ async fn page_favorites_migration_scopes_rows_and_cascades() {
 
 #[tokio::test]
 async fn page_files_migration_scopes_rows_and_releases_blobs() {
+    if orbit_platform::testing_postgres() {
+        return; // SQLite migration history (embedded_through)
+    }
     let directory = tempfile::tempdir().unwrap();
     let db = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
         .await
@@ -1117,6 +1141,9 @@ async fn page_files_migration_scopes_rows_and_releases_blobs() {
 
 #[tokio::test]
 async fn page_search_migration_backfills_and_tracks_pages() {
+    if orbit_platform::testing_postgres() {
+        return; // SQLite migration history (embedded_through)
+    }
     let directory = tempfile::tempdir().unwrap();
     let db = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
         .await
@@ -1154,7 +1181,7 @@ async fn page_search_migration_backfills_and_tracks_pages() {
             let mut ids: Vec<String> = sqlx::query_scalar(
                 "SELECT page_search_rows.page_id FROM page_search \
                  JOIN page_search_rows ON page_search_rows.id = page_search.rowid \
-                 WHERE page_search MATCH ?",
+                 WHERE page_search MATCH $1",
             )
             .bind(query)
             .fetch_all(db.pool())
@@ -1226,6 +1253,9 @@ async fn page_search_migration_backfills_and_tracks_pages() {
 
 #[tokio::test]
 async fn page_versions_migration_scopes_rows_and_cascades() {
+    if orbit_platform::testing_postgres() {
+        return; // SQLite migration history (embedded_through)
+    }
     let directory = tempfile::tempdir().unwrap();
     let db = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
         .await
@@ -1354,6 +1384,9 @@ async fn page_versions_migration_scopes_rows_and_cascades() {
 
 #[tokio::test]
 async fn page_options_migration_adds_lock_width_and_scoped_visits() {
+    if orbit_platform::testing_postgres() {
+        return; // SQLite migration history (embedded_through)
+    }
     let directory = tempfile::tempdir().unwrap();
     let db = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
         .await
@@ -1483,6 +1516,9 @@ async fn page_options_migration_adds_lock_width_and_scoped_visits() {
 
 #[tokio::test]
 async fn page_mentions_migration_keeps_notifications_and_adds_the_kind() {
+    if orbit_platform::testing_postgres() {
+        return; // SQLite migration history (embedded_through)
+    }
     let directory = tempfile::tempdir().unwrap();
     let db = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
         .await
@@ -1577,6 +1613,9 @@ async fn page_mentions_migration_keeps_notifications_and_adds_the_kind() {
 
 #[tokio::test]
 async fn views_migration_backfills_completed_at_and_creates_view_tables() {
+    if orbit_platform::testing_postgres() {
+        return; // SQLite migration history (embedded_through)
+    }
     let directory = tempfile::tempdir().unwrap();
     let database = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
         .await
@@ -1611,7 +1650,7 @@ async fn views_migration_backfills_completed_at_and_creates_view_tables() {
                 ('{duplicate_task}', '{workspace}', '{project}', '{duplicate}', 'Duplicate', '{user}', 1, 40);"
     );
     let mut transaction = database.transaction().await.unwrap();
-    sqlx::raw_sql(&seed)
+    sqlx::raw_sql(sqlx::AssertSqlSafe(seed))
         .execute(&mut *transaction)
         .await
         .unwrap();
@@ -1677,6 +1716,9 @@ async fn views_migration_backfills_completed_at_and_creates_view_tables() {
 
 #[tokio::test]
 async fn sub_issues_migration_links_parents_in_one_workspace_and_adds_project_flags() {
+    if orbit_platform::testing_postgres() {
+        return; // SQLite migration history (embedded_through)
+    }
     let directory = tempfile::tempdir().unwrap();
     let database = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
         .await
@@ -1711,7 +1753,7 @@ async fn sub_issues_migration_links_parents_in_one_workspace_and_adds_project_fl
                 ('{foreign}', '{other_workspace}', '{other_project}', '{other_todo}', 'Foreign', '{user}', 1, 1);"
     );
     let mut transaction = database.transaction().await.unwrap();
-    sqlx::raw_sql(&seed)
+    sqlx::raw_sql(sqlx::AssertSqlSafe(seed))
         .execute(&mut *transaction)
         .await
         .unwrap();
@@ -1803,6 +1845,9 @@ async fn sub_issues_migration_links_parents_in_one_workspace_and_adds_project_fl
 
 #[tokio::test]
 async fn chat_migration_gives_every_workspace_member_the_default_channel() {
+    if orbit_platform::testing_postgres() {
+        return; // SQLite migration history (embedded_through)
+    }
     let directory = tempfile::tempdir().unwrap();
     let db = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
         .await
@@ -1905,6 +1950,9 @@ async fn chat_migration_gives_every_workspace_member_the_default_channel() {
 
 #[tokio::test]
 async fn task_numbers_migration_backfills_allocates_and_never_reuses() {
+    if orbit_platform::testing_postgres() {
+        return; // SQLite migration history (embedded_through)
+    }
     let directory = tempfile::tempdir().unwrap();
     let db = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
         .await
@@ -2043,4 +2091,168 @@ async fn task_numbers_migration_backfills_allocates_and_never_reuses() {
         db.scalar::<String>("PRAGMA integrity_check").await.unwrap(),
         "ok"
     );
+}
+
+#[tokio::test]
+async fn write_transactions_are_serialized() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
+        .await
+        .unwrap();
+    database
+        .execute("CREATE TABLE counter (id INTEGER PRIMARY KEY, value INTEGER NOT NULL)")
+        .await
+        .unwrap();
+    let first = database.immediate_transaction().await.unwrap();
+
+    let second = database.clone();
+    let mut waiting = tokio::spawn(async move {
+        let transaction = second.immediate_transaction().await.unwrap();
+        transaction.commit().await.unwrap();
+    });
+    let orm = database.clone();
+    let mut orm_waiting = tokio::spawn(async move {
+        let transaction = orbit_platform::orm_write_transaction(orm.orm())
+            .await
+            .unwrap();
+        transaction.commit().await.unwrap();
+    });
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), &mut waiting)
+            .await
+            .is_err(),
+        "a second writer started while the first was open"
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(200), &mut orm_waiting)
+            .await
+            .is_err(),
+        "a SeaORM writer started while the first was open"
+    );
+
+    first.commit().await.unwrap();
+    waiting.await.unwrap();
+    orm_waiting.await.unwrap();
+}
+
+#[tokio::test]
+async fn read_then_write_in_write_transactions_loses_no_update() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
+        .await
+        .unwrap();
+    database
+        .execute(
+            "CREATE TABLE counter (id INTEGER PRIMARY KEY, value INTEGER NOT NULL);\
+             INSERT INTO counter (id, value) VALUES (1, 0);",
+        )
+        .await
+        .unwrap();
+
+    let mut tasks = Vec::new();
+    for _ in 0..8 {
+        let database = database.clone();
+        tasks.push(tokio::spawn(async move {
+            let mut transaction = database.immediate_transaction().await.unwrap();
+            let value: i64 = sqlx::query_scalar("SELECT value FROM counter WHERE id = $1")
+                .bind(1_i64)
+                .fetch_one(&mut *transaction)
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_millis(5)).await;
+            sqlx::query("UPDATE counter SET value = $1 WHERE id = $2")
+                .bind(value + 1)
+                .bind(1_i64)
+                .execute(&mut *transaction)
+                .await
+                .unwrap();
+            transaction.commit().await.unwrap();
+        }));
+    }
+    for task in tasks {
+        task.await.unwrap();
+    }
+
+    assert_eq!(
+        database
+            .scalar::<i64>("SELECT value FROM counter WHERE id = 1")
+            .await
+            .unwrap(),
+        8
+    );
+}
+
+#[tokio::test]
+async fn a_reopened_path_keeps_its_data_and_a_new_path_starts_empty() {
+    let directory = tempfile::tempdir().unwrap();
+    let config = DatabaseConfig::new(directory.path().join("with space ü.sqlite"));
+    let database = Database::open(&config).await.unwrap();
+    database
+        .execute(
+            "CREATE TABLE kept (id INTEGER PRIMARY KEY);\
+             INSERT INTO kept (id) VALUES (7);",
+        )
+        .await
+        .unwrap();
+    drop(database);
+
+    let reopened = Database::open(&config).await.unwrap();
+    assert_eq!(
+        reopened.scalar::<i64>("SELECT id FROM kept").await.unwrap(),
+        7
+    );
+
+    let other = Database::open(&DatabaseConfig::new(directory.path().join("other.sqlite")))
+        .await
+        .unwrap();
+    assert_eq!(table_count(&other, "kept").await, 0);
+}
+
+#[tokio::test]
+async fn database_now_follows_the_system_clock() {
+    let database = TestDatabase::new().await.unwrap();
+    let now = database.database_now().await.unwrap().as_millis();
+    let system = orbit_platform::TimestampMillis::now().as_millis();
+    assert!((now - system).abs() < 5_000, "{now} vs {system}");
+}
+
+#[tokio::test]
+async fn a_configured_postgres_database_has_one_owner() {
+    let Ok(server) = std::env::var("ORBIT_TEST_POSTGRES_URL") else {
+        return; // needs a Postgres server
+    };
+    use sqlx::Connection;
+
+    let name = format!(
+        "orbit_t_owner_{}",
+        Id::new_v7().to_string().replace('-', "")
+    );
+    let mut admin = sqlx::PgConnection::connect(&server).await.unwrap();
+    sqlx::raw_sql(sqlx::AssertSqlSafe(format!("CREATE DATABASE {name}")))
+        .execute(&mut admin)
+        .await
+        .unwrap();
+    let (base, _) = server.rsplit_once('/').unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let config = DatabaseConfig {
+        postgres_url: Some(format!("{base}/{name}")),
+        ..DatabaseConfig::new(directory.path().join("orbit.sqlite"))
+    };
+
+    let database = Database::open(&config).await.unwrap();
+    assert_eq!(database.backend(), Backend::Postgres);
+    assert_eq!(database.path(), config.path);
+    assert!(matches!(
+        Database::open(&config).await.unwrap_err(),
+        DatabaseError::AlreadyOwned { .. }
+    ));
+    drop(database);
+    Database::open(&config).await.unwrap();
+
+    sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+        "DROP DATABASE {name} WITH (FORCE)"
+    )))
+    .execute(&mut admin)
+    .await
+    .unwrap();
 }

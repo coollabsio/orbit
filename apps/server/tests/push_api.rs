@@ -123,7 +123,7 @@ impl Fixture {
         let email = format!("{name}@example.com");
         sqlx::query(
             "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, 'unused', ?, ?)",
+             VALUES ($1, $2, $3, $4, 'unused', $5, $6)",
         )
         .bind(id.to_string())
         .bind(&email)
@@ -136,7 +136,7 @@ impl Fixture {
         .unwrap();
         sqlx::query(
             "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
-             VALUES (?, ?, ?, 'member', 0, ?, ?)",
+             VALUES ($1, $2, $3, 'member', 0, $4, $5)",
         )
         .bind(Id::new_v7().to_string())
         .bind(self.workspace_id.to_string())
@@ -390,7 +390,7 @@ async fn a_user_keeps_the_newest_twenty_subscriptions() {
     fixture
         .subscribe(&ada_cookie, "https://web.push.apple.com/ada")
         .await;
-    let session: String = sqlx::query_scalar("SELECT id FROM sessions WHERE user_id = ?")
+    let session: String = sqlx::query_scalar("SELECT id FROM sessions WHERE user_id = $1")
         .bind(fixture.owner_id.to_string())
         .fetch_one(fixture.database.pool())
         .await
@@ -505,7 +505,7 @@ async fn inbox_notifications_are_pushed_once() {
         .await
         .unwrap();
     let status: String = sqlx::query_scalar(
-        "SELECT id FROM task_statuses WHERE project_id = ? ORDER BY position LIMIT 1",
+        "SELECT id FROM task_statuses WHERE project_id = $1 ORDER BY position LIMIT 1",
     )
     .bind(&project)
     .fetch_one(fixture.database.pool())
@@ -551,7 +551,7 @@ async fn a_busy_push_service_gets_the_push_again_and_a_subscription_that_keeps_f
         let pool = fixture.database.pool().clone();
         async move {
             sqlx::query_scalar::<_, i64>(
-                "SELECT failures FROM push_subscriptions WHERE endpoint = ?",
+                "SELECT failures FROM push_subscriptions WHERE endpoint = $1",
             )
             .bind(endpoint)
             .fetch_optional(&pool)

@@ -531,7 +531,7 @@ async fn user_suspension_invalidates_both_access_and_refresh() {
     let client = f.register().await;
     let code = f.code(&client).await;
     let tokens = f.issue(&client, &code).await;
-    sqlx::query("UPDATE users SET suspended_at=1 WHERE id=?")
+    sqlx::query("UPDATE users SET suspended_at=1 WHERE id=$1")
         .bind(f.user.to_string())
         .execute(f.db.pool())
         .await

@@ -212,7 +212,7 @@ async fn add_user(
     let pool = server.database.pool();
     sqlx::query(
         "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, 'unused', ?, ?)",
+         VALUES ($1, $2, $3, $4, 'unused', $5, $6)",
     )
     .bind(id.to_string())
     .bind(email)
@@ -226,7 +226,7 @@ async fn add_user(
     if let Some(workspace) = workspace {
         sqlx::query(
             "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
-             VALUES (?, ?, ?, 'member', 0, ?, ?)",
+             VALUES ($1, $2, $3, 'member', 0, $4, $5)",
         )
         .bind(Id::new_v7().to_string())
         .bind(workspace)
@@ -501,7 +501,7 @@ where
     }
 }
 
-async fn scalar_i64(server: &Server, sql: &str, page: &str) -> i64 {
+async fn scalar_i64(server: &Server, sql: &'static str, page: &str) -> i64 {
     sqlx::query_scalar(sql)
         .bind(page)
         .fetch_one(server.database.pool())
@@ -514,7 +514,7 @@ fn pages_path(users: &Users) -> String {
 }
 
 async fn audits(server: &Server, page: &str, action: &str) -> i64 {
-    sqlx::query_scalar("SELECT COUNT(*) FROM audit_events WHERE resource_id = ? AND action = ?")
+    sqlx::query_scalar("SELECT COUNT(*) FROM audit_events WHERE resource_id = $1 AND action = $2")
         .bind(page)
         .bind(action)
         .fetch_one(server.database.pool())
@@ -773,7 +773,7 @@ async fn private_pages_cannot_be_locked_widened_or_visited_by_others() {
     assert_eq!(
         scalar_i64(
             &server,
-            "SELECT COUNT(*) FROM page_visits WHERE page_id = ?",
+            "SELECT COUNT(*) FROM page_visits WHERE page_id = $1",
             id
         )
         .await,
@@ -800,7 +800,7 @@ async fn version_restore_and_imports_are_refused_on_locked_pages() {
     .await;
     let id = page["id"].as_str().unwrap();
     // Backdate so the next edit keeps the current state as a version.
-    sqlx::query("UPDATE pages SET created_at = created_at - 3600000, updated_at = updated_at - 3600000 WHERE id = ?")
+    sqlx::query("UPDATE pages SET created_at = created_at - 3600000, updated_at = updated_at - 3600000 WHERE id = $1")
         .bind(id)
         .execute(server.database.pool())
         .await
@@ -1127,7 +1127,7 @@ async fn recent_pages_are_ordered_limited_private_and_scoped() {
     assert_eq!(
         scalar_i64(
             &server,
-            "SELECT COUNT(*) FROM page_visits WHERE page_id = ?",
+            "SELECT COUNT(*) FROM page_visits WHERE page_id = $1",
             &ids[0]
         )
         .await,
@@ -1211,7 +1211,7 @@ async fn visits_are_pruned_to_the_newest_fifty() {
         ids.push(id);
         tokio::time::sleep(Duration::from_millis(2)).await;
     }
-    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM page_visits WHERE user_id = ?")
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM page_visits WHERE user_id = $1")
         .bind(users.owner_id.to_string())
         .fetch_one(server.database.pool())
         .await

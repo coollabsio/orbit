@@ -60,7 +60,7 @@ impl Fixture {
             .await
             .unwrap();
         let status_id: String = sqlx::query_scalar(
-            "SELECT id FROM task_statuses WHERE project_id = ? ORDER BY position LIMIT 1",
+            "SELECT id FROM task_statuses WHERE project_id = $1 ORDER BY position LIMIT 1",
         )
         .bind(setup.project_id.to_string())
         .fetch_one(database.pool())
@@ -264,7 +264,7 @@ async fn target_is_revalidated_atomically_after_the_stream_finishes() {
     let app = fixture.app.clone();
     let response = tokio::spawn(async move { app.oneshot(request).await.unwrap() });
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    sqlx::query("UPDATE tasks SET deleted_at = ? WHERE id = ?")
+    sqlx::query("UPDATE tasks SET deleted_at = $1 WHERE id = $2")
         .bind(TimestampMillis::now().as_millis())
         .bind(&fixture.task_id)
         .execute(fixture.database.pool())
@@ -479,7 +479,7 @@ async fn revoked_actor_cannot_finalize_after_streaming_bytes() {
     let app = fixture.app.clone();
     let response = tokio::spawn(async move { app.oneshot(request).await.unwrap() });
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    sqlx::query("UPDATE users SET suspended_at = ? WHERE id = ?")
+    sqlx::query("UPDATE users SET suspended_at = $1 WHERE id = $2")
         .bind(TimestampMillis::now().as_millis())
         .bind(&fixture.owner_id)
         .execute(fixture.database.pool())
@@ -597,7 +597,7 @@ async fn revoked_session_cannot_finalize_after_streaming_bytes() {
     let app = fixture.app.clone();
     let response = tokio::spawn(async move { app.oneshot(request).await.unwrap() });
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    sqlx::query("UPDATE sessions SET revoked_at = ? WHERE user_id = ?")
+    sqlx::query("UPDATE sessions SET revoked_at = $1 WHERE user_id = $2")
         .bind(TimestampMillis::now().as_millis())
         .bind(&fixture.owner_id)
         .execute(fixture.database.pool())
@@ -806,13 +806,14 @@ async fn cancelling_http_after_a_complete_field_discards_staged_bytes() {
 #[tokio::test]
 async fn database_finalization_failure_leaves_new_bytes_quarantined_for_reconciliation() {
     let fixture = Fixture::new(UploadLimits::default()).await;
-    sqlx::query(
-        "CREATE TRIGGER fail_attachment_finalize BEFORE INSERT ON attachment_references \
-         BEGIN SELECT RAISE(ABORT, 'injected metadata failure'); END",
+    fail_inserts(
+        &fixture.database,
+        "fail_attachment_finalize",
+        "attachment_references",
+        "1 = 1",
+        "injected metadata failure",
     )
-    .execute(fixture.database.pool())
-    .await
-    .unwrap();
+    .await;
     let response = fixture.upload("orphan.png", PNG).await;
     assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     assert_eq!(fixture.store.blobs().await.unwrap().len(), 1);
@@ -842,13 +843,14 @@ async fn database_finalization_failure_leaves_new_bytes_quarantined_for_reconcil
 #[tokio::test]
 async fn attachment_only_comment_and_reference_finalize_in_one_database_transaction() {
     let fixture = Fixture::new(UploadLimits::default()).await;
-    sqlx::query(
-        "CREATE TRIGGER fail_comment_attachment BEFORE INSERT ON attachment_references \
-         BEGIN SELECT RAISE(ABORT, 'injected comment attachment failure'); END",
+    fail_inserts(
+        &fixture.database,
+        "fail_comment_attachment",
+        "attachment_references",
+        "1 = 1",
+        "injected comment attachment failure",
     )
-    .execute(fixture.database.pool())
-    .await
-    .unwrap();
+    .await;
     let response = fixture
         .app
         .clone()
@@ -960,7 +962,7 @@ async fn only_the_author_changes_the_attachments_of_a_comment() {
     let now = TimestampMillis::now();
     sqlx::query(
         "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) \
-         VALUES (?, 'member@example.com', 'member@example.com', 'Member', 'unused', ?, ?)",
+         VALUES ($1, 'member@example.com', 'member@example.com', 'Member', 'unused', $2, $3)",
     )
     .bind(member_id.to_string())
     .bind(now.as_millis())
@@ -970,7 +972,7 @@ async fn only_the_author_changes_the_attachments_of_a_comment() {
     .unwrap();
     sqlx::query(
         "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
-         VALUES (?, ?, ?, 'member', 0, ?, ?)",
+         VALUES ($1, $2, $3, 'member', 0, $4, $5)",
     )
     .bind(Id::new_v7().to_string())
     .bind(&fixture.workspace_id)
@@ -1119,4 +1121,27 @@ fn cookie_request(method: &str, uri: &str, cookie: &str) -> Request<Body> {
 
 async fn response_json(response: axum::response::Response) -> Value {
     serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()
+}
+
+/// Makes inserts into `table` that match `when` (an SQL condition on `NEW`) fail with `message`.
+async fn fail_inserts(
+    database: &orbit_platform::Database,
+    name: &str,
+    table: &str,
+    when: &str,
+    message: &str,
+) {
+    let sql = match database.backend() {
+        orbit_platform::Backend::Sqlite => format!(
+            "CREATE TRIGGER {name} BEFORE INSERT ON {table} WHEN {when} \
+             BEGIN SELECT RAISE(ABORT, '{message}'); END"
+        ),
+        orbit_platform::Backend::Postgres => format!(
+            "CREATE FUNCTION {name}_fn() RETURNS trigger LANGUAGE plpgsql AS $$ \
+             BEGIN RAISE EXCEPTION '{message}'; END $$; \
+             CREATE TRIGGER {name} BEFORE INSERT ON {table} FOR EACH ROW WHEN ({when}) \
+             EXECUTE FUNCTION {name}_fn()"
+        ),
+    };
+    database.execute(&sql).await.unwrap();
 }

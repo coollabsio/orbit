@@ -4,12 +4,12 @@
 
 use std::collections::{HashMap, HashSet};
 
+use orbit_platform::Row;
 use orbit_platform::{Database, Id};
 use serde_json::Value;
-use sqlx::Row;
 use thiserror::Error;
 
-use super::pages::{VISIBLE, parse_id};
+use super::pages::{json_text_array, parse_id, visible};
 use super::tasks::{TaskError, require_access};
 use crate::collab::CollabHub;
 
@@ -101,16 +101,18 @@ impl PageExportRepository {
         let limit = i64::try_from(max_pages)
             .unwrap_or(i64::MAX)
             .saturating_add(1);
-        let ids: Vec<String> = sqlx::query_scalar(&format!(
+        let ids: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "WITH RECURSIVE subtree(id) AS ( \
-                 SELECT pages.id FROM pages WHERE pages.id = ? AND pages.workspace_id = ? \
-                 AND pages.deleted_at IS NULL AND {VISIBLE} \
+                 SELECT pages.id FROM pages WHERE pages.id = $1 AND pages.workspace_id = $2 \
+                 AND pages.deleted_at IS NULL AND {visible3} \
                  UNION \
                  SELECT pages.id FROM pages JOIN subtree ON pages.parent_id = subtree.id \
-                 WHERE ? = 1 AND pages.workspace_id = ? AND pages.deleted_at IS NULL AND {VISIBLE} \
+                 WHERE $4 = 1 AND pages.workspace_id = $5 AND pages.deleted_at IS NULL AND {visible6} \
              ) \
-             SELECT id FROM subtree LIMIT ?"
-        ))
+             SELECT id FROM subtree LIMIT $7",
+            visible3 = visible(3),
+            visible6 = visible(6)
+        )))
         .bind(page_id.to_string())
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
@@ -141,11 +143,13 @@ impl PageExportRepository {
 
         let id_list = serde_json::to_string(&ids.iter().map(Id::to_string).collect::<Vec<_>>())
             .map_err(|_| PageExportError::Corrupt)?;
-        let rows = sqlx::query(&format!(
+        let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT id, parent_id, title, icon, cover_url, content_json FROM pages \
-             WHERE id IN (SELECT value FROM json_each(?)) AND workspace_id = ? \
-             AND deleted_at IS NULL AND {VISIBLE} ORDER BY position, id"
-        ))
+             WHERE id IN ({id_list}) AND workspace_id = $2 \
+             AND deleted_at IS NULL AND {visible} ORDER BY position, id",
+            id_list = json_text_array(self.database.backend(), 1),
+            visible = visible(3)
+        )))
         .bind(&id_list)
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
@@ -204,9 +208,10 @@ impl PageExportRepository {
             }
         }
 
-        let title_rows = sqlx::query(&format!(
-            "SELECT id, title FROM pages WHERE workspace_id = ? AND deleted_at IS NULL AND {VISIBLE}"
-        ))
+        let title_rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT id, title FROM pages WHERE workspace_id = $1 AND deleted_at IS NULL AND {visible}",
+            visible = visible(2)
+        )))
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
         .fetch_all(pool)
@@ -219,10 +224,11 @@ impl PageExportRepository {
 
         let exported: Vec<String> = pages.iter().map(|page| page.id.to_string()).collect();
         let exported = serde_json::to_string(&exported).map_err(|_| PageExportError::Corrupt)?;
-        let file_rows = sqlx::query(
+        let file_rows = sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT id, page_id, file_name, mime_type, size_bytes FROM page_files \
-             WHERE workspace_id = ? AND page_id IN (SELECT value FROM json_each(?))",
-        )
+             WHERE workspace_id = $1 AND page_id IN ({ids})",
+            ids = json_text_array(self.database.backend(), 2)
+        )))
         .bind(workspace_id.to_string())
         .bind(&exported)
         .fetch_all(pool)
@@ -244,7 +250,7 @@ impl PageExportRepository {
         }
         let member_rows = sqlx::query(
             "SELECT users.id, users.display_name FROM memberships \
-             JOIN users ON users.id = memberships.user_id WHERE memberships.workspace_id = ?",
+             JOIN users ON users.id = memberships.user_id WHERE memberships.workspace_id = $1",
         )
         .bind(workspace_id.to_string())
         .fetch_all(pool)

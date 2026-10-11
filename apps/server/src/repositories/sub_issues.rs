@@ -3,10 +3,10 @@
 
 use std::collections::BTreeMap;
 
-use orbit_platform::{Id, TimestampMillis};
+use orbit_platform::{Backend, Flag, Id, Row, TimestampMillis};
 use serde::Serialize;
 use serde_json::json;
-use sqlx::{Row, Sqlite, SqlitePool, Transaction};
+use sqlx::{Any, AnyPool, Transaction};
 use utoipa::ToSchema;
 
 use super::tasks::{TaskError, TaskRef, parse_id};
@@ -26,10 +26,11 @@ const VISIBLE_PARENT_WHERE: &str =
 
 /// Correlated subquery rendering the visible parent `parent_id_sql` as a `TaskRef` JSON object,
 /// or NULL when there is none or it (or its project) is in the trash.
-pub(super) fn parent_subquery(parent_id_sql: &str) -> String {
+pub(super) fn parent_subquery(backend: Backend, parent_id_sql: &str) -> String {
+    let (open, close) = super::tasks::json_object_sql(backend);
     format!(
-        "(SELECT json_object('id', parent.id, 'project_id', parent.project_id, \
-         'project_key', parent_project.project_key, 'number', parent.number, 'title', parent.title) \
+        "(SELECT {open}'id', parent.id, 'project_id', parent.project_id, \
+         'project_key', parent_project.project_key, 'number', parent.number, 'title', parent.title{close} \
          FROM {VISIBLE_PARENT_FROM} WHERE parent.id = {parent_id_sql} AND {VISIBLE_PARENT_WHERE})"
     )
 }
@@ -46,7 +47,7 @@ pub(super) fn has_visible_parent_sql(parent_id_sql: &str) -> String {
 /// Self-parent and any parent that has `task_id` among its ancestors are `ParentCycle`; a parent
 /// that is missing, in another workspace, in the trash or in a trashed project is `ParentInvalid`.
 pub(super) async fn validate_parent_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     task_id: Option<Id>,
     parent_id: Id,
@@ -54,9 +55,9 @@ pub(super) async fn validate_parent_in_tx(
     if task_id == Some(parent_id) {
         return Err(TaskError::ParentCycle);
     }
-    let live: bool = sqlx::query_scalar(
+    let Flag(live) = sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM tasks JOIN projects ON projects.id = tasks.project_id \
-         WHERE tasks.id = ? AND tasks.workspace_id = ? AND tasks.deleted_at IS NULL \
+         WHERE tasks.id = $1 AND tasks.workspace_id = $2 AND tasks.deleted_at IS NULL \
          AND projects.deleted_at IS NULL)",
     )
     .bind(parent_id.to_string())
@@ -68,14 +69,14 @@ pub(super) async fn validate_parent_in_tx(
     }
     if let Some(task_id) = task_id {
         // Walk up from the new parent; UNION (not UNION ALL) stops on repeated ids.
-        let cycle: bool = sqlx::query_scalar(
+        let Flag(cycle) = sqlx::query_scalar(
             "WITH RECURSIVE chain(id) AS ( \
-                 SELECT ? \
+                 SELECT $1 \
                  UNION \
                  SELECT tasks.parent_task_id FROM tasks JOIN chain ON tasks.id = chain.id \
                  WHERE tasks.parent_task_id IS NOT NULL \
              ) \
-             SELECT EXISTS (SELECT 1 FROM chain WHERE id = ?)",
+             SELECT EXISTS (SELECT 1 FROM chain WHERE id = $2)",
         )
         .bind(parent_id.to_string())
         .bind(task_id.to_string())
@@ -90,20 +91,20 @@ pub(super) async fn validate_parent_in_tx(
 
 /// Visible ancestors of `task_id`, root first (`GET /tasks/{id}`). The walk stops at the first
 /// hidden ancestor, as the `parent` field does, so the chain always ends at the task's parent.
-pub(super) async fn ancestors(pool: &SqlitePool, task_id: Id) -> Result<Vec<TaskRef>, TaskError> {
+pub(super) async fn ancestors(pool: &AnyPool, task_id: Id) -> Result<Vec<TaskRef>, TaskError> {
     let sql = format!(
         "WITH RECURSIVE chain(id, project_id, project_key, number, title, parent_task_id, depth) AS ( \
              SELECT parent.id, parent.project_id, parent_project.project_key, parent.number, parent.title, \
              parent.parent_task_id, 1 FROM tasks AS child, {VISIBLE_PARENT_FROM} \
-             WHERE child.id = ? AND parent.id = child.parent_task_id AND {VISIBLE_PARENT_WHERE} \
+             WHERE child.id = $1 AND parent.id = child.parent_task_id AND {VISIBLE_PARENT_WHERE} \
              UNION ALL \
              SELECT parent.id, parent.project_id, parent_project.project_key, parent.number, parent.title, \
              parent.parent_task_id, chain.depth + 1 FROM chain, {VISIBLE_PARENT_FROM} \
-             WHERE parent.id = chain.parent_task_id AND {VISIBLE_PARENT_WHERE} AND chain.depth < ? \
+             WHERE parent.id = chain.parent_task_id AND {VISIBLE_PARENT_WHERE} AND chain.depth < $2 \
          ) \
          SELECT id, project_id, project_key, number, title FROM chain ORDER BY depth DESC"
     );
-    let rows = sqlx::query(&sql)
+    let rows = sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(task_id.to_string())
         .bind(MAX_DEPTH)
         .fetch_all(pool)
@@ -124,11 +125,11 @@ pub(super) async fn ancestors(pool: &SqlitePool, task_id: Id) -> Result<Vec<Task
 /// The recursive "every descendant of `root`" CTE shared by `live_descendants` and
 /// `trashed_with` (the auto-close cascade reuses `live_descendants` instead of duplicating the
 /// walk). `predicate` is a SQL fragment tested against `tasks.deleted_at` in
-/// both the seed and recursive branches, e.g. `"IS NULL"` or `"= ?"`.
+/// both the seed and recursive branches, e.g. `"IS NULL"` or `"= $2"`.
 pub(super) fn descendants_sql(predicate: &str) -> String {
     format!(
         "WITH RECURSIVE subtree(id) AS ( \
-             SELECT id FROM tasks WHERE parent_task_id = ? AND deleted_at {predicate} \
+             SELECT id FROM tasks WHERE parent_task_id = $1 AND deleted_at {predicate} \
              UNION \
              SELECT tasks.id FROM tasks JOIN subtree ON tasks.parent_task_id = subtree.id \
              WHERE tasks.deleted_at {predicate} \
@@ -140,9 +141,9 @@ pub(super) fn descendants_sql(predicate: &str) -> String {
 /// Live descendants of `root` at every depth (not `root` itself).
 pub(super) async fn live_descendants<'e, E>(executor: E, root: Id) -> Result<Vec<Id>, TaskError>
 where
-    E: sqlx::Executor<'e, Database = Sqlite>,
+    E: sqlx::Executor<'e, Database = Any>,
 {
-    sqlx::query_scalar::<_, String>(&descendants_sql("IS NULL"))
+    sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(descendants_sql("IS NULL")))
         .bind(root.to_string())
         .fetch_all(executor)
         .await?
@@ -159,11 +160,10 @@ pub(super) async fn trashed_with<'e, E>(
     deleted_at: i64,
 ) -> Result<Vec<Id>, TaskError>
 where
-    E: sqlx::Executor<'e, Database = Sqlite>,
+    E: sqlx::Executor<'e, Database = Any>,
 {
-    sqlx::query_scalar::<_, String>(&descendants_sql("= ?"))
+    sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(descendants_sql("= $2")))
         .bind(root.to_string())
-        .bind(deleted_at)
         .bind(deleted_at)
         .fetch_all(executor)
         .await?
@@ -175,13 +175,13 @@ where
 /// `trashed_with(root, root.deleted_at).len()` for every root in `roots` in one query (the
 /// trash page's "+N sub-issues"). Roots with no such descendants are absent from the map.
 pub(super) async fn trashed_with_counts(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     roots: &[Id],
 ) -> Result<BTreeMap<Id, i64>, TaskError> {
     if roots.is_empty() {
         return Ok(BTreeMap::new());
     }
-    let mut query = sqlx::QueryBuilder::<Sqlite>::new(
+    let mut query = orbit_platform::SqlBuilder::new(
         "WITH RECURSIVE subtree(root, id, deleted_at) AS ( \
              SELECT root.id, tasks.id, tasks.deleted_at FROM tasks \
              JOIN tasks AS root ON root.id = tasks.parent_task_id AND root.deleted_at = tasks.deleted_at \
@@ -214,15 +214,16 @@ pub(super) async fn trashed_with_counts(
 /// that project is restored. `validate_parent_in_tx` is stricter because it gates picking a new
 /// parent, which must be visible.
 pub(super) async fn task_is_live_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     task_id: Id,
 ) -> Result<bool, TaskError> {
-    Ok(sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM tasks WHERE id = ? AND deleted_at IS NULL)",
+    let Flag(live) = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM tasks WHERE id = $1 AND deleted_at IS NULL)",
     )
     .bind(task_id.to_string())
     .fetch_one(&mut **tx)
-    .await?)
+    .await?;
+    Ok(live)
 }
 
 /// A task the automation changed in the same request (`auto_closed` in PATCH and bulk responses).
@@ -260,12 +261,12 @@ fn is_closed(category: &str) -> bool {
 }
 
 pub(super) async fn snapshot_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     task_id: Id,
 ) -> Result<Option<TaskSnapshot>, TaskError> {
     let Some(row) = sqlx::query(
         "SELECT tasks.project_id, tasks.parent_task_id, task_statuses.category FROM tasks \
-         JOIN task_statuses ON task_statuses.id = tasks.status_id WHERE tasks.id = ?",
+         JOIN task_statuses ON task_statuses.id = tasks.status_id WHERE tasks.id = $1",
     )
     .bind(task_id.to_string())
     .fetch_optional(&mut **tx)
@@ -286,13 +287,13 @@ pub(super) async fn snapshot_in_tx(
 /// The id of the project `task_id` belongs to, even when the task or its project is in the
 /// trash (audit rows use it to build identifiers of hidden tasks).
 pub(super) async fn project_id_of_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     task_id: Option<Id>,
 ) -> Result<Option<Id>, TaskError> {
     let Some(task_id) = task_id else {
         return Ok(None);
     };
-    sqlx::query_scalar::<_, String>("SELECT project_id FROM tasks WHERE id = ?")
+    sqlx::query_scalar::<_, String>("SELECT project_id FROM tasks WHERE id = $1")
         .bind(task_id.to_string())
         .fetch_optional(&mut **tx)
         .await?
@@ -305,7 +306,7 @@ pub(super) async fn project_id_of_in_tx(
 /// runs, so a task the automation closed never looks like it was closed by the caller (rule B
 /// only follows the caller's writes, whatever order a bulk request lists them in).
 pub(super) async fn run_automation_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     actor: AutomationActor<'_>,
     task_id: Id,
     before: &TaskSnapshot,
@@ -338,26 +339,26 @@ pub(super) async fn run_automation_in_tx(
 }
 
 async fn closes_sub_issues_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     project_id: Id,
 ) -> Result<bool, TaskError> {
     Ok(
-        sqlx::query_scalar::<_, bool>("SELECT auto_close_sub_issues FROM projects WHERE id = ?")
+        sqlx::query_scalar::<_, Flag>("SELECT auto_close_sub_issues FROM projects WHERE id = $1")
             .bind(project_id.to_string())
             .fetch_optional(&mut **tx)
             .await?
-            .unwrap_or(false),
+            .is_some_and(|flag| flag.0),
     )
 }
 
 /// The project's first status of `category` (lowest position, then id), if it has one.
 async fn first_status_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     project_id: Id,
     category: &str,
 ) -> Result<Option<Id>, TaskError> {
     sqlx::query_scalar::<_, String>(
-        "SELECT id FROM task_statuses WHERE project_id = ? AND category = ? ORDER BY position, id LIMIT 1",
+        "SELECT id FROM task_statuses WHERE project_id = $1 AND category = $2 ORDER BY position, id LIMIT 1",
     )
     .bind(project_id.to_string())
     .bind(category)
@@ -371,7 +372,7 @@ async fn first_status_in_tx(
 /// moves to its own project's first status of `category` (`completed` or `cancelled`); tasks in
 /// trashed projects and projects without such a status are skipped.
 async fn close_descendants_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     actor: AutomationActor<'_>,
     root: Id,
     category: &str,
@@ -383,7 +384,7 @@ async fn close_descendants_in_tx(
             "SELECT tasks.project_id, tasks.status_id FROM tasks \
              JOIN projects ON projects.id = tasks.project_id \
              JOIN task_statuses ON task_statuses.id = tasks.status_id \
-             WHERE tasks.id = ? AND projects.deleted_at IS NULL \
+             WHERE tasks.id = $1 AND projects.deleted_at IS NULL \
              AND task_statuses.category NOT IN ('completed', 'cancelled', 'duplicate')",
         )
         .bind(id.to_string())
@@ -412,7 +413,7 @@ async fn close_descendants_in_tx(
 /// Rule A for `parent_id`, then upward: an open parent whose live direct children are all closed
 /// with at least one completed moves to its project's first completed status.
 pub(super) async fn close_ancestors_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     actor: AutomationActor<'_>,
     parent_id: Id,
     source_id: Id,
@@ -425,7 +426,7 @@ pub(super) async fn close_ancestors_in_tx(
              projects.auto_close_parent FROM tasks \
              JOIN projects ON projects.id = tasks.project_id \
              JOIN task_statuses ON task_statuses.id = tasks.status_id \
-             WHERE tasks.id = ? AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL",
+             WHERE tasks.id = $1 AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL",
         )
         .bind(parent_id.to_string())
         .fetch_optional(&mut **tx)
@@ -439,11 +440,11 @@ pub(super) async fn close_ancestors_in_tx(
         }
         let (total, open, completed): (i64, i64, i64) = sqlx::query_as(
             "SELECT COUNT(*), \
-             COALESCE(SUM(task_statuses.category NOT IN ('completed', 'cancelled', 'duplicate')), 0), \
-             COALESCE(SUM(task_statuses.category = 'completed'), 0) \
+             COUNT(CASE WHEN task_statuses.category NOT IN ('completed', 'cancelled', 'duplicate') THEN 1 END), \
+             COUNT(CASE WHEN task_statuses.category = 'completed' THEN 1 END) \
              FROM tasks JOIN projects ON projects.id = tasks.project_id \
              JOIN task_statuses ON task_statuses.id = tasks.status_id \
-             WHERE tasks.parent_task_id = ? AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL",
+             WHERE tasks.parent_task_id = $1 AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL",
         )
         .bind(parent_id.to_string())
         .fetch_one(&mut **tx)
@@ -484,7 +485,7 @@ pub(super) async fn close_ancestors_in_tx(
 
 #[allow(clippy::too_many_arguments)]
 async fn close_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     actor: AutomationActor<'_>,
     task_id: Id,
     from: Id,
@@ -495,7 +496,7 @@ async fn close_in_tx(
 ) -> Result<(), TaskError> {
     // updated_at drives the completed_at trigger from 0033.
     sqlx::query(
-        "UPDATE tasks SET status_id = ?, version = version + 1, updated_at = ? WHERE id = ? AND deleted_at IS NULL",
+        "UPDATE tasks SET status_id = $1, version = version + 1, updated_at = $2 WHERE id = $3 AND deleted_at IS NULL",
     )
     .bind(to.to_string())
     .bind(actor.now.as_millis())
@@ -503,10 +504,11 @@ async fn close_in_tx(
     .execute(&mut **tx)
     .await?;
     // The source's project lets the activity feed build its identifier (ORB-91C0).
-    let source_project_id: String = sqlx::query_scalar("SELECT project_id FROM tasks WHERE id = ?")
-        .bind(source_id.to_string())
-        .fetch_one(&mut **tx)
-        .await?;
+    let source_project_id: String =
+        sqlx::query_scalar("SELECT project_id FROM tasks WHERE id = $1")
+            .bind(source_id.to_string())
+            .fetch_one(&mut **tx)
+            .await?;
     let mut metadata = json!({
         "source_task_id": source_id,
         "source_project_id": source_project_id,

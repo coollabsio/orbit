@@ -9,9 +9,9 @@
 
 use std::collections::BTreeMap;
 
-use orbit_platform::{Id, TimestampMillis};
+use orbit_platform::{Flag, Id, Row, TimestampMillis};
 use serde_json::{Value, json};
-use sqlx::{Row, Sqlite, Transaction};
+use sqlx::{Any, Transaction};
 
 use crate::audit::{self, AuditOutcome};
 use crate::collab::sanitize::is_uuid;
@@ -81,7 +81,7 @@ fn walk_inline(value: &Value, block_id: Option<&str>, found: &mut BTreeMap<Id, O
 /// the recipients. `editor` is who made the change (no editor, no notification).
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn notify_new_mentions(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     page_id: Id,
     before: &[Value],
     after: &[Value],
@@ -100,11 +100,12 @@ pub(crate) async fn notify_new_mentions(
     if added.is_empty() {
         return Ok(Vec::new());
     }
-    let Some(page) =
-        sqlx::query("SELECT workspace_id, owner_id FROM pages WHERE id = ? AND deleted_at IS NULL")
-            .bind(page_id.to_string())
-            .fetch_optional(&mut **tx)
-            .await?
+    let Some(page) = sqlx::query(
+        "SELECT workspace_id, owner_id FROM pages WHERE id = $1 AND deleted_at IS NULL",
+    )
+    .bind(page_id.to_string())
+    .fetch_optional(&mut **tx)
+    .await?
     else {
         return Ok(Vec::new());
     };
@@ -120,12 +121,12 @@ pub(crate) async fn notify_new_mentions(
         {
             continue;
         }
-        let allowed: bool = sqlx::query_scalar(
+        let Flag(allowed) = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM memberships JOIN users ON users.id = memberships.user_id \
-             WHERE memberships.workspace_id = ? AND memberships.user_id = ? \
+             WHERE memberships.workspace_id = $1 AND memberships.user_id = $2 \
              AND users.suspended_at IS NULL) \
              AND NOT EXISTS(SELECT 1 FROM notifications WHERE kind = 'page_mentioned' \
-             AND page_id = ? AND recipient_user_id = ? AND created_at > ?)",
+             AND page_id = $3 AND recipient_user_id = $4 AND created_at > $5)",
         )
         .bind(&workspace_id)
         .bind(&recipient_text)
@@ -139,10 +140,11 @@ pub(crate) async fn notify_new_mentions(
         }
         let id = Id::new_v7();
         sqlx::query(
-            "INSERT OR IGNORE INTO notifications \
+            "INSERT INTO notifications \
              (id, workspace_id, recipient_user_id, actor_user_id, kind, page_id, page_block_id, \
               dedupe_key, created_at) \
-             VALUES (?, ?, ?, ?, 'page_mentioned', ?, ?, ?, ?)",
+             VALUES ($1, $2, $3, $4, 'page_mentioned', $5, $6, $7, $8) \
+             ON CONFLICT DO NOTHING",
         )
         .bind(id.to_string())
         .bind(&workspace_id)

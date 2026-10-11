@@ -142,14 +142,14 @@ impl Fixture {
     }
 
     async fn count(&self, sql: &str) -> i64 {
-        sqlx::query_scalar(sql)
+        sqlx::query_scalar(sqlx::AssertSqlSafe(sql.to_owned()))
             .fetch_one(self.database.pool())
             .await
             .unwrap()
     }
 
     async fn page_version(&self, page_id: &str) -> i64 {
-        sqlx::query_scalar("SELECT version FROM pages WHERE id = ?")
+        sqlx::query_scalar("SELECT version FROM pages WHERE id = $1")
             .bind(page_id)
             .fetch_one(self.database.pool())
             .await
@@ -161,7 +161,7 @@ impl Fixture {
         let now = TimestampMillis::now();
         sqlx::query(
             "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, 'unused', ?, ?)",
+             VALUES ($1, $2, $3, $4, 'unused', $5, $6)",
         )
         .bind(id.to_string())
         .bind(email)
@@ -174,7 +174,7 @@ impl Fixture {
         .unwrap();
         sqlx::query(
             "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
-             VALUES (?, ?, ?, 'member', 0, ?, ?)",
+             VALUES ($1, $2, $3, 'member', 0, $4, $5)",
         )
         .bind(Id::new_v7().to_string())
         .bind(workspace_id)
@@ -750,10 +750,13 @@ async fn trashed_pages_hide_threads_and_purge_removes_them() {
             "{table}"
         );
     }
-    assert_eq!(
-        fixture
-            .count("SELECT COUNT(*) FROM pragma_foreign_key_check")
-            .await,
-        0
-    );
+    // Postgres enforces foreign keys on every statement; SQLite needs the explicit check.
+    if !orbit_platform::testing_postgres() {
+        assert_eq!(
+            fixture
+                .count("SELECT COUNT(*) FROM pragma_foreign_key_check")
+                .await,
+            0
+        );
+    }
 }

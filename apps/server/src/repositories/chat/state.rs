@@ -4,8 +4,9 @@
 use std::collections::HashSet;
 
 use orbit_platform::Id;
+use orbit_platform::Row;
 use serde::Serialize;
-use sqlx::{Row, SqliteConnection};
+use sqlx::AnyConnection;
 use utoipa::ToSchema;
 
 use super::messages::{mark_read_to, upsert_thread_member};
@@ -13,8 +14,8 @@ use super::{
     CONVERSATION_COLUMNS, ChatError, ChatEvent, ChatRepository, Conversation, ConversationKind,
     ConversationStateRecord, Events, MEMBER_COLUMNS, MessageRecord, NotifyLevel, Recipients,
     ThreadMember, ThreadStateRecord, Written, conversation_from_row, current_state, finish,
-    id_list, load_access, load_actor, load_message, load_message_access, load_thread_member,
-    member_from_row, member_ids, parse_id, parse_optional_id,
+    id_list, in_ids, load_access, load_actor, load_message, load_message_access,
+    load_thread_member, member_from_row, member_ids, parse_id, parse_optional_id,
 };
 
 /// Cursors that one `restore_read` call may put back.
@@ -62,11 +63,11 @@ impl ChatRepository {
     ) -> Result<Vec<ConversationStateRecord>, ChatError> {
         let mut tx = self.database.pool().begin().await?;
         load_actor(&mut tx, workspace_id, actor_id).await?;
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT {CONVERSATION_COLUMNS}, {MEMBER_COLUMNS} FROM chat_members m \
              JOIN chat_conversations c ON c.id = m.conversation_id \
-             WHERE m.workspace_id = ? AND m.user_id = ? AND c.archived_at IS NULL"
-        ))
+             WHERE m.workspace_id = $1 AND m.user_id = $2 AND c.archived_at IS NULL"
+        )))
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
         .fetch_all(&mut *tx)
@@ -137,7 +138,7 @@ impl ChatRepository {
                     .await?
                     .ok_or(ChatError::NotFound)?;
                 let previous = sqlx::query_scalar::<_, String>(
-                    "SELECT id FROM chat_messages WHERE thread_root_id = ? AND id < ? \
+                    "SELECT id FROM chat_messages WHERE thread_root_id = $1 AND id < $2 \
                      ORDER BY id DESC LIMIT 1",
                 )
                 .bind(root_id.to_string())
@@ -151,8 +152,8 @@ impl ChatRepository {
             }
             _ => {
                 let previous = sqlx::query_scalar::<_, String>(
-                    "SELECT id FROM chat_messages m WHERE m.conversation_id = ? \
-                     AND (m.thread_root_id IS NULL OR m.also_in_channel = 1) AND m.id < ? \
+                    "SELECT id FROM chat_messages m WHERE m.conversation_id = $1 \
+                     AND (m.thread_root_id IS NULL OR m.also_in_channel = 1) AND m.id < $2 \
                      ORDER BY m.id DESC LIMIT 1",
                 )
                 .bind(conversation_id.to_string())
@@ -246,12 +247,12 @@ impl ChatRepository {
         load_actor(&mut tx, workspace_id, actor_id).await?;
         let mut events = Events::default();
 
-        let states = sqlx::query(&format!(
+        let states = sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT {CONVERSATION_COLUMNS}, {MEMBER_COLUMNS} FROM chat_members m \
              JOIN chat_conversations c ON c.id = m.conversation_id \
-             WHERE m.workspace_id = ? AND m.user_id = ? AND c.archived_at IS NULL \
+             WHERE m.workspace_id = $1 AND m.user_id = $2 AND c.archived_at IS NULL \
              AND c.message_count > m.read_count"
-        ))
+        )))
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
         .fetch_all(&mut *tx)
@@ -284,7 +285,7 @@ impl ChatRepository {
 
         let roots = sqlx::query_scalar::<_, String>(
             "SELECT t.root_id FROM chat_thread_members t JOIN chat_messages r ON r.id = t.root_id \
-             WHERE t.workspace_id = ? AND t.user_id = ? AND t.following = 1 \
+             WHERE t.workspace_id = $1 AND t.user_id = $2 AND t.following = 1 \
              AND r.reply_count > t.read_reply_count",
         )
         .bind(workspace_id.to_string())
@@ -396,10 +397,10 @@ impl ChatRepository {
         let access = load_access(&mut tx, workspace_id, actor_id, conversation_id).await?;
         let member = access.require_member()?;
         sqlx::query(
-            "UPDATE chat_members SET notify = ?, favorite = ? WHERE conversation_id = ? AND user_id = ?",
+            "UPDATE chat_members SET notify = $1, favorite = $2 WHERE conversation_id = $3 AND user_id = $4",
         )
         .bind(update.notify.unwrap_or(member.notify).as_str())
-        .bind(update.favorite.unwrap_or(member.favorite))
+        .bind(i64::from(update.favorite.unwrap_or(member.favorite)))
         .bind(conversation_id.to_string())
         .bind(actor_id.to_string())
         .execute(&mut *tx)
@@ -429,11 +430,12 @@ impl ChatRepository {
         if user_ids.is_empty() {
             return Ok(Vec::new());
         }
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT m.user_id, {CONVERSATION_COLUMNS}, {MEMBER_COLUMNS} FROM chat_members m \
              JOIN chat_conversations c ON c.id = m.conversation_id \
-             WHERE m.conversation_id = ? AND m.user_id IN (SELECT value FROM json_each(?))"
-        ))
+             WHERE m.conversation_id = $1 AND m.user_id {}",
+            in_ids(&self.database, 2)
+        )))
         .bind(conversation_id.to_string())
         .bind(id_list(user_ids.iter().copied()))
         .fetch_all(self.database.pool())
@@ -461,16 +463,17 @@ impl ChatRepository {
         let Some(root) = load_message(&mut conn, root_id).await? else {
             return Ok(Vec::new());
         };
-        sqlx::query(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT user_id, last_read_reply_id, read_reply_count, mention_count \
-             FROM chat_thread_members WHERE root_id = ? AND following = 1 \
-             AND user_id IN (SELECT value FROM json_each(?)) \
+             FROM chat_thread_members WHERE root_id = $1 AND following = 1 \
+             AND user_id {} \
              AND EXISTS (SELECT 1 FROM chat_conversations c \
                          WHERE c.id = chat_thread_members.conversation_id \
                            AND (c.kind = 'public' OR EXISTS ( \
                                SELECT 1 FROM chat_members m WHERE m.conversation_id = c.id \
                                  AND m.user_id = chat_thread_members.user_id)))",
-        )
+            in_ids(&*conn, 2)
+        )))
         .bind(root_id.to_string())
         .bind(id_list(user_ids.iter().copied()))
         .fetch_all(&mut *conn)
@@ -511,7 +514,7 @@ impl ChatRepository {
 
 /// A thread root that the caller can read.
 async fn load_root(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     workspace_id: Id,
     actor_id: Id,
     root_id: Id,
@@ -524,7 +527,7 @@ async fn load_root(
 }
 
 pub(super) async fn newest_main_id(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     conversation_id: Id,
 ) -> Result<Option<Id>, ChatError> {
     sqlx::query_scalar::<_, String>(newest_main_sql())
@@ -536,35 +539,35 @@ pub(super) async fn newest_main_id(
 }
 
 pub(super) const fn newest_main_sql() -> &'static str {
-    "SELECT id FROM chat_messages m WHERE m.conversation_id = ? \
+    "SELECT id FROM chat_messages m WHERE m.conversation_id = $1 \
      AND (m.thread_root_id IS NULL OR m.also_in_channel = 1) ORDER BY m.id DESC LIMIT 1"
 }
 
 /// The unread messages of a member after a cursor (or all of them), and how many of them
 /// have `@channel` or `@here`. Binds: conversation, member, cursor.
 pub(super) fn unread_count_sql(bounded: bool) -> String {
-    let after = if bounded { "AND m.id > ?" } else { "" };
+    let after = if bounded { "AND m.id > $3" } else { "" };
     format!(
-        "SELECT COUNT(*) AS unread, COALESCE(SUM(m.mention_channel OR m.mention_here), 0) AS broadcasts \
-         FROM chat_messages m WHERE m.conversation_id = ? \
+        "SELECT COUNT(*) AS unread, CAST(COALESCE(SUM(CASE WHEN m.mention_channel <> 0 OR m.mention_here <> 0 THEN 1 ELSE 0 END), 0) AS BIGINT) AS broadcasts \
+         FROM chat_messages m WHERE m.conversation_id = $1 \
          AND (m.thread_root_id IS NULL OR m.also_in_channel = 1) AND m.kind = 'message' \
-         AND m.deleted_at IS NULL AND m.author_id <> ? {after}"
+         AND m.deleted_at IS NULL AND m.author_id <> $2 {after}"
     )
 }
 
 /// The main-list messages after a cursor that mention a member. Binds: member, conversation,
 /// cursor.
 pub(super) fn mention_count_sql(bounded: bool) -> String {
-    let after = if bounded { "AND message_id > ?" } else { "" };
+    let after = if bounded { "AND message_id > $3" } else { "" };
     format!(
-        "SELECT COUNT(*) FROM chat_message_mentions WHERE user_id = ? AND conversation_id = ? \
+        "SELECT COUNT(*) FROM chat_message_mentions WHERE user_id = $1 AND conversation_id = $2 \
          AND in_main = 1 {after}"
     )
 }
 
 /// The caller's state after a change, as an event for the caller.
 pub(super) async fn emit_state(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     workspace_id: Id,
     conversation_id: Id,
     user_id: Id,
@@ -583,7 +586,7 @@ pub(super) async fn emit_state(
 }
 
 async fn emit_thread_state(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     root: &MessageRecord,
     user_id: Id,
     events: &mut Events,
@@ -617,13 +620,13 @@ fn last_of_each<T>(entries: Vec<T>, key: impl Fn(&T) -> Id) -> Vec<T> {
 /// Puts a member's cursor at `cursor` and counts what is unread after it. This is the one place
 /// that counts messages; its cost is the number of main-list rows after the cursor.
 async fn set_cursor(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     conversation: &Conversation,
     user_id: Id,
     cursor: Option<Id>,
 ) -> Result<(), ChatError> {
     let sql = unread_count_sql(cursor.is_some());
-    let mut query = sqlx::query(&sql)
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(conversation.id.to_string())
         .bind(user_id.to_string());
     if let Some(cursor) = cursor {
@@ -634,7 +637,7 @@ async fn set_cursor(
     let broadcasts: i64 = row.get("broadcasts");
 
     let sql = mention_count_sql(cursor.is_some());
-    let mut query = sqlx::query_scalar::<_, i64>(&sql)
+    let mut query = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(sql))
         .bind(user_id.to_string())
         .bind(conversation.id.to_string());
     if let Some(cursor) = cursor {
@@ -643,10 +646,10 @@ async fn set_cursor(
     let mentions = query.fetch_one(&mut *conn).await?;
 
     sqlx::query(
-        "UPDATE chat_members SET last_read_message_id = ?, mention_count = ?, broadcast_count = ?, \
-         read_count = MAX((SELECT message_count FROM chat_conversations \
-                           WHERE chat_conversations.id = chat_members.conversation_id) - ?, 0) \
-         WHERE conversation_id = ? AND user_id = ?",
+        "UPDATE chat_members SET last_read_message_id = $1, mention_count = $2, broadcast_count = $3, \
+         read_count = (SELECT CASE WHEN message_count > $4 THEN message_count - $4 ELSE 0 END \
+                       FROM chat_conversations WHERE chat_conversations.id = chat_members.conversation_id) \
+         WHERE conversation_id = $5 AND user_id = $6",
     )
     .bind(cursor.map(|id| id.to_string()))
     .bind(mentions)
@@ -661,19 +664,21 @@ async fn set_cursor(
 
 /// The thread form of `set_cursor`.
 async fn set_thread_cursor(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     workspace_id: Id,
     root: &MessageRecord,
     user_id: Id,
     cursor: Option<Id>,
     following: bool,
 ) -> Result<(), ChatError> {
-    let after = |column: &str| cursor.map_or_else(String::new, |_| format!("AND {column} > ?"));
+    let after = |column: &str, n: usize| {
+        cursor.map_or_else(String::new, |_| format!("AND {column} > ${n}"))
+    };
     let sql = format!(
-        "SELECT COUNT(*) FROM chat_messages WHERE thread_root_id = ? AND author_id <> ? {}",
-        after("id")
+        "SELECT COUNT(*) FROM chat_messages WHERE thread_root_id = $1 AND author_id <> $2 {}",
+        after("id", 3)
     );
-    let mut query = sqlx::query_scalar::<_, i64>(&sql)
+    let mut query = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(sql))
         .bind(root.id.to_string())
         .bind(user_id.to_string());
     if let Some(cursor) = cursor {
@@ -682,11 +687,11 @@ async fn set_thread_cursor(
     let unread = query.fetch_one(&mut *conn).await?;
 
     let sql = format!(
-        "SELECT COUNT(*) FROM chat_message_mentions WHERE user_id = ? AND conversation_id = ? \
-         AND thread_root_id = ? {}",
-        after("message_id")
+        "SELECT COUNT(*) FROM chat_message_mentions WHERE user_id = $1 AND conversation_id = $2 \
+         AND thread_root_id = $3 {}",
+        after("message_id", 4)
     );
-    let mut query = sqlx::query_scalar::<_, i64>(&sql)
+    let mut query = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(sql))
         .bind(user_id.to_string())
         .bind(root.conversation_id.to_string())
         .bind(root.id.to_string());

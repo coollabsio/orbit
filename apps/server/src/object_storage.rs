@@ -4,11 +4,11 @@
 
 use std::time::Duration;
 
+use orbit_platform::Row;
 use orbit_platform::{
     BackupService, Database, Id, ObjectStorage, ObjectStorageState, S3Bucket, S3Config,
     TieredBlobStore, TimestampMillis, UploadError, UploadService,
 };
-use sqlx::Row;
 use tokio_util::sync::CancellationToken;
 
 use crate::repositories::instance_settings::{
@@ -111,9 +111,9 @@ pub async fn move_images_to_blobs(
         ("custom_emoji", "id", "workspace_id"),
         ("custom_stickers", "id", "workspace_id"),
     ] {
-        let rows = sqlx::query(&format!(
+        let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT {key} AS key, {scope} AS scope FROM {table} WHERE bytes IS NOT NULL"
-        ))
+        )))
         .fetch_all(database.pool())
         .await?;
         for row in rows {
@@ -126,9 +126,9 @@ pub async fn move_images_to_blobs(
             let now = database.database_now().await?;
             let mut transaction = database.immediate_transaction().await?;
             // Replaced or deleted since the list was read.
-            let Some(bytes) = sqlx::query_scalar::<_, Vec<u8>>(&format!(
-                "SELECT bytes FROM {table} WHERE {key} = ? AND bytes IS NOT NULL"
-            ))
+            let Some(bytes) = sqlx::query_scalar::<_, Vec<u8>>(sqlx::AssertSqlSafe(format!(
+                "SELECT bytes FROM {table} WHERE {key} = $1 AND bytes IS NOT NULL"
+            )))
             .bind(&row_key)
             .fetch_optional(&mut *transaction)
             .await?
@@ -138,9 +138,9 @@ pub async fn move_images_to_blobs(
             let blob = finalization
                 .finalize_bytes_in_transaction(&mut transaction, scope, &bytes, now)
                 .await?;
-            sqlx::query(&format!(
-                "UPDATE {table} SET bytes = NULL, blob_id = ? WHERE {key} = ?"
-            ))
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "UPDATE {table} SET bytes = NULL, blob_id = $1 WHERE {key} = $2"
+            )))
             .bind(blob.id.to_string())
             .bind(&row_key)
             .execute(&mut *transaction)

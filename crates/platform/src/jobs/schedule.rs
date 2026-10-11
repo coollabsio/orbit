@@ -191,7 +191,7 @@ impl Scheduler {
         sqlx::query(
             "INSERT INTO schedules (id, workspace_id, job_kind, payload_json, schedule, \
              next_run_at, catch_up_mode, consecutive_failures, enabled, updated_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8, $9) \
              ON CONFLICT(id) DO UPDATE SET workspace_id = excluded.workspace_id, \
              job_kind = excluded.job_kind, payload_json = excluded.payload_json, \
              schedule = excluded.schedule, next_run_at = excluded.next_run_at, \
@@ -205,7 +205,7 @@ impl Scheduler {
         .bind(schedule.encoded_recurrence())
         .bind(schedule.next_run_at.as_millis())
         .bind(schedule.catch_up.as_str())
-        .bind(schedule.enabled)
+        .bind(i64::from(schedule.enabled))
         .bind(TimestampMillis::now().as_millis())
         .execute(self.store.database().pool())
         .await?;
@@ -215,7 +215,7 @@ impl Scheduler {
     pub async fn materialize_due(&self, now: TimestampMillis) -> Result<Vec<Id>, ScheduleError> {
         let rows = sqlx::query(
             "SELECT id, workspace_id, job_kind, payload_json, schedule, next_run_at, \
-             catch_up_mode FROM schedules WHERE enabled = 1 AND next_run_at <= ? \
+             catch_up_mode FROM schedules WHERE enabled = 1 AND next_run_at <= $1 \
              ORDER BY next_run_at, id",
         )
         .bind(now.as_millis())
@@ -229,10 +229,11 @@ impl Scheduler {
             for occurrence in occurrences {
                 let job_id = Id::new_v7();
                 let result = sqlx::query(
-                    "INSERT OR IGNORE INTO jobs (id, workspace_id, schedule_id, scheduled_for, \
+                    "INSERT INTO jobs (id, workspace_id, schedule_id, scheduled_for, \
                      kind, payload_json, state, priority, attempt_count, max_attempts, \
                      available_at, created_at, updated_at) \
-                     VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, 0, ?, ?, ?, ?)",
+                     VALUES ($1, $2, $3, $4, $5, $6, 'queued', $7, 0, $8, $9, $10, $11) \
+                     ON CONFLICT DO NOTHING",
                 )
                 .bind(job_id.to_string())
                 .bind(&schedule.workspace_id)
@@ -241,7 +242,7 @@ impl Scheduler {
                 .bind(schedule.kind.name())
                 .bind(serde_json::to_string(&schedule.payload)?)
                 .bind(JobPriority::Normal.as_str())
-                .bind(schedule.kind.max_attempts())
+                .bind(i64::from(schedule.kind.max_attempts()))
                 .bind(occurrence.as_millis())
                 .bind(now.as_millis())
                 .bind(now.as_millis())
@@ -252,8 +253,8 @@ impl Scheduler {
                 }
             }
             sqlx::query(
-                "UPDATE schedules SET next_run_at = ?, last_materialized_at = ?, updated_at = ? \
-                 WHERE id = ?",
+                "UPDATE schedules SET next_run_at = $1, last_materialized_at = $2, updated_at = $3 \
+                 WHERE id = $4",
             )
             .bind(next_run_at.as_millis())
             .bind(now.as_millis())
@@ -283,7 +284,7 @@ impl Scheduler {
 }
 
 fn decode_schedule(
-    row: &sqlx::sqlite::SqliteRow,
+    row: &sqlx::any::AnyRow,
     store: &JobStore,
 ) -> Result<RecurringSchedule, ScheduleError> {
     let encoded: String = row.try_get("schedule")?;

@@ -133,7 +133,7 @@ impl App {
             &config.data.backups,
         )?;
 
-        let database = Database::open(&DatabaseConfig::new(&config.data.database))
+        let database = Database::open(&DatabaseConfig::for_data(&config.data))
             .await
             .map_err(|error| AppError::Database(error.to_string()))?;
         let migrations = MigrationRunner::embedded(env!("CARGO_PKG_VERSION"));
@@ -795,7 +795,7 @@ async fn ensure_schedule(
     cadence: Duration,
     now: TimestampMillis,
 ) -> Result<(), AppError> {
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM schedules WHERE job_kind = ?")
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM schedules WHERE job_kind = $1")
         .bind(kind)
         .fetch_one(database.pool())
         .await

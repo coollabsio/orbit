@@ -2142,7 +2142,8 @@ async fn create_backup(
     let snapshot = backups
         .create(state.identity.database())
         .await
-        .map_err(|_| {
+        .map_err(|error| {
+            tracing::error!(%error, "backup failed");
             ApiError::new(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "backup_failed",

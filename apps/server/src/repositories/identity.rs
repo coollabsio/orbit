@@ -1,11 +1,11 @@
 use orbit_domain::WorkspaceDefaults;
 use orbit_platform::{
-    AuthenticatedUser, Database, Id, IssuedSession, IssuedToken, SessionRecord, TimestampMillis,
-    UploadError, UploadService, generate_opaque_token, normalize_email,
+    AuthenticatedUser, Database, Id, IssuedSession, IssuedToken, Row, SessionRecord,
+    TimestampMillis, UploadError, UploadService, generate_opaque_token, normalize_email,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use sqlx::{Row, Sqlite, Transaction};
+use sqlx::{Any, Transaction};
 use thiserror::Error;
 use utoipa::ToSchema;
 
@@ -295,9 +295,11 @@ impl IdentityRepository {
         now: TimestampMillis,
     ) -> Result<Option<IssuedToken>, IdentityError> {
         let mut transaction = self.database.immediate_transaction().await?;
-        sqlx::query("INSERT OR IGNORE INTO installation_state (id, initialized) VALUES (1, 0)")
-            .execute(&mut *transaction)
-            .await?;
+        sqlx::query(
+            "INSERT INTO installation_state (id, initialized) VALUES (1, 0) ON CONFLICT DO NOTHING",
+        )
+        .execute(&mut *transaction)
+        .await?;
         let initialized =
             sqlx::query_scalar::<_, i64>("SELECT initialized FROM installation_state WHERE id = 1")
                 .fetch_one(&mut *transaction)
@@ -305,7 +307,7 @@ impl IdentityRepository {
         if initialized != 0 {
             return Ok(None);
         }
-        sqlx::query("DELETE FROM setup_tokens WHERE expires_at <= ?")
+        sqlx::query("DELETE FROM setup_tokens WHERE expires_at <= $1")
             .bind(now.as_millis())
             .execute(&mut *transaction)
             .await?;
@@ -328,9 +330,11 @@ impl IdentityRepository {
         now: TimestampMillis,
     ) -> Result<IssuedToken, IdentityError> {
         let mut transaction = self.database.immediate_transaction().await?;
-        sqlx::query("INSERT OR IGNORE INTO installation_state (id, initialized) VALUES (1, 0)")
-            .execute(&mut *transaction)
-            .await?;
+        sqlx::query(
+            "INSERT INTO installation_state (id, initialized) VALUES (1, 0) ON CONFLICT DO NOTHING",
+        )
+        .execute(&mut *transaction)
+        .await?;
         let initialized =
             sqlx::query_scalar::<_, i64>("SELECT initialized FROM installation_state WHERE id = 1")
                 .fetch_one(&mut *transaction)
@@ -366,7 +370,7 @@ impl IdentityRepository {
         }
         let supplied = token_hash(token);
         let row =
-            sqlx::query("SELECT token_hash, expires_at FROM setup_tokens WHERE token_hash = ?")
+            sqlx::query("SELECT token_hash, expires_at FROM setup_tokens WHERE token_hash = $1")
                 .bind(supplied.to_vec())
                 .fetch_optional(self.database.pool())
                 .await?;
@@ -383,9 +387,11 @@ impl IdentityRepository {
     ) -> Result<(), IdentityError> {
         let now = self.database.database_now().await?;
         let mut transaction = self.database.immediate_transaction().await?;
-        sqlx::query("INSERT OR IGNORE INTO installation_state (id, initialized) VALUES (1, 0)")
-            .execute(&mut *transaction)
-            .await?;
+        sqlx::query(
+            "INSERT INTO installation_state (id, initialized) VALUES (1, 0) ON CONFLICT DO NOTHING",
+        )
+        .execute(&mut *transaction)
+        .await?;
         let initialized =
             sqlx::query_scalar::<_, i64>("SELECT initialized FROM installation_state WHERE id = 1")
                 .fetch_one(&mut *transaction)
@@ -395,7 +401,7 @@ impl IdentityRepository {
                 .execute(&mut *transaction)
                 .await?;
             sqlx::query(
-                "INSERT INTO setup_tokens (token_hash, expires_at, created_at) VALUES (?, ?, ?)",
+                "INSERT INTO setup_tokens (token_hash, expires_at, created_at) VALUES ($1, $2, $3)",
             )
             .bind(token_hash(token).to_vec())
             .bind(expires_at.as_millis())
@@ -459,10 +465,12 @@ impl IdentityRepository {
             .immediate_transaction()
             .await
             .map_err(SetupError::Unavailable)?;
-        sqlx::query("INSERT OR IGNORE INTO installation_state (id, initialized) VALUES (1, 0)")
-            .execute(&mut *transaction)
-            .await
-            .map_err(SetupError::Unavailable)?;
+        sqlx::query(
+            "INSERT INTO installation_state (id, initialized) VALUES (1, 0) ON CONFLICT DO NOTHING",
+        )
+        .execute(&mut *transaction)
+        .await
+        .map_err(SetupError::Unavailable)?;
         let initialized =
             sqlx::query_scalar::<_, i64>("SELECT initialized FROM installation_state WHERE id = 1")
                 .fetch_one(&mut *transaction)
@@ -531,7 +539,7 @@ impl IdentityRepository {
         let timestamp = now.as_millis();
         sqlx::query(
             "INSERT INTO users (id, email, normalized_email, display_name, password_hash, \
-             installation_admin, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+             installation_admin, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, 1, $6, $7)",
         )
         .bind(user_id.to_string())
         .bind(email)
@@ -552,7 +560,7 @@ impl IdentityRepository {
             .await
             .map_err(SetupError::Unavailable)?;
         sqlx::query(
-            "UPDATE installation_state SET initialized = 1, initialized_at = ?, root_user_id = ? WHERE id = 1",
+            "UPDATE installation_state SET initialized = 1, initialized_at = $1, root_user_id = $2 WHERE id = 1",
         )
         .bind(timestamp)
         .bind(user_id.to_string())
@@ -591,7 +599,7 @@ impl IdentityRepository {
     ) -> Result<Option<StoredIdentity>, IdentityError> {
         let row = sqlx::query(
             "SELECT id, email, normalized_email, display_name, password_hash, suspended_at, \
-             installation_admin FROM users WHERE normalized_email = ?",
+             installation_admin FROM users WHERE normalized_email = $1",
         )
         .bind(normalize_email(email))
         .fetch_optional(self.database.pool())
@@ -601,7 +609,7 @@ impl IdentityRepository {
 
     pub async fn is_installation_admin(&self, user_id: Id) -> Result<bool, IdentityError> {
         Ok(sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM users WHERE id = ? AND installation_admin = 1 AND suspended_at IS NULL",
+            "SELECT COUNT(*) FROM users WHERE id = $1 AND installation_admin = 1 AND suspended_at IS NULL",
         )
         .bind(user_id.to_string())
         .fetch_one(self.database.pool())
@@ -636,7 +644,7 @@ impl IdentityRepository {
     ) -> Result<(), AdminAccountError> {
         let mut transaction = self.database.immediate_transaction().await?;
         let installation_admin = sqlx::query_scalar::<_, i64>(
-            "SELECT installation_admin FROM users WHERE id = ? AND suspended_at IS NULL",
+            "SELECT installation_admin FROM users WHERE id = $1 AND suspended_at IS NULL",
         )
         .bind(actor_id.to_string())
         .fetch_optional(&mut *transaction)
@@ -661,8 +669,8 @@ impl IdentityRepository {
         Self::may_manage(&mut transaction, actor_id, user_id).await?;
         let changed = if suspended {
             sqlx::query(
-                "UPDATE users SET suspended_at = COALESCE(suspended_at, ?), version = version + 1, \
-                 updated_at = ? WHERE id = ?",
+                "UPDATE users SET suspended_at = COALESCE(suspended_at, $1), version = version + 1, \
+                 updated_at = $2 WHERE id = $3",
             )
             .bind(now.as_millis())
             .bind(now.as_millis())
@@ -672,7 +680,7 @@ impl IdentityRepository {
             .rows_affected()
         } else {
             sqlx::query(
-                "UPDATE users SET suspended_at = NULL, version = version + 1, updated_at = ? WHERE id = ?",
+                "UPDATE users SET suspended_at = NULL, version = version + 1, updated_at = $1 WHERE id = $2",
             )
             .bind(now.as_millis())
             .bind(user_id.to_string())
@@ -685,7 +693,7 @@ impl IdentityRepository {
         }
         if suspended {
             sqlx::query(
-                "UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL",
+                "UPDATE sessions SET revoked_at = $1 WHERE user_id = $2 AND revoked_at IS NULL",
             )
             .bind(now.as_millis())
             .bind(user_id.to_string())
@@ -722,7 +730,7 @@ impl IdentityRepository {
     ) -> Result<(), IdentityError> {
         let mut transaction = self.database.immediate_transaction().await?;
         sqlx::query(
-            "DELETE FROM registration_tokens WHERE expires_at <= ? OR normalized_email = ?",
+            "DELETE FROM registration_tokens WHERE expires_at <= $1 OR normalized_email = $2",
         )
         .bind(now.as_millis())
         .bind(normalize_email(email))
@@ -730,7 +738,7 @@ impl IdentityRepository {
         .await?;
         sqlx::query(
             "INSERT INTO registration_tokens (token_hash, normalized_email, expires_at, created_at) \
-             VALUES (?, ?, ?, ?)",
+             VALUES ($1, $2, $3, $4)",
         )
         .bind(token_hash(token).to_vec())
         .bind(normalize_email(email))
@@ -762,7 +770,7 @@ impl IdentityRepository {
             return Err(RegistrationError::Closed);
         }
         let email = sqlx::query_scalar::<_, String>(
-            "SELECT normalized_email FROM registration_tokens WHERE token_hash = ? AND expires_at > ?",
+            "SELECT normalized_email FROM registration_tokens WHERE token_hash = $1 AND expires_at > $2",
         )
         .bind(token_hash(token).to_vec())
         .bind(now.as_millis())
@@ -770,7 +778,7 @@ impl IdentityRepository {
         .await?
         .ok_or(RegistrationError::InvalidToken)?;
         let existing =
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE normalized_email = ?")
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE normalized_email = $1")
                 .bind(&email)
                 .fetch_one(&mut *transaction)
                 .await?;
@@ -780,7 +788,7 @@ impl IdentityRepository {
         let user_id = Id::new_v7();
         sqlx::query(
             "INSERT INTO users (id, email, normalized_email, display_name, password_hash, \
-             email_verified_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+             email_verified_at, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         )
         .bind(user_id.to_string())
         .bind(&email)
@@ -792,7 +800,7 @@ impl IdentityRepository {
         .bind(now.as_millis())
         .execute(&mut *transaction)
         .await?;
-        sqlx::query("DELETE FROM registration_tokens WHERE normalized_email = ?")
+        sqlx::query("DELETE FROM registration_tokens WHERE normalized_email = $1")
             .bind(&email)
             .execute(&mut *transaction)
             .await?;
@@ -837,7 +845,8 @@ impl IdentityRepository {
         // The sort key is (root_rank, admin_rank, created_at, id) ascending, so a page starts after the cursor row.
         let rows = sqlx::query(
             "WITH keyed AS (SELECT users.*, \
-               users.id IS NOT (SELECT root_user_id FROM installation_state WHERE id = 1) AS root_rank, \
+               CASE WHEN users.id = (SELECT root_user_id FROM installation_state WHERE id = 1) \
+                 THEN 0 ELSE 1 END AS root_rank, \
                1 - users.installation_admin AS admin_rank FROM users) \
              SELECT keyed.id, keyed.email, keyed.display_name, keyed.installation_admin, keyed.suspended_at, \
              keyed.created_at, 1 - keyed.root_rank AS root, \
@@ -848,11 +857,11 @@ impl IdentityRepository {
              (SELECT COUNT(*) FROM memberships JOIN workspaces ON workspaces.id = memberships.workspace_id \
                WHERE memberships.user_id = keyed.id AND workspaces.deleted_at IS NULL) AS workspace_count \
              FROM keyed \
-             WHERE (?1 IS NULL OR LOWER(keyed.display_name) LIKE ?1 ESCAPE '\\' \
-               OR LOWER(keyed.email) LIKE ?1 ESCAPE '\\') \
-             AND (?2 IS NULL OR (keyed.root_rank, keyed.admin_rank, keyed.created_at, keyed.id) > \
-               (SELECT root_rank, admin_rank, created_at, id FROM keyed WHERE id = ?2)) \
-             ORDER BY keyed.root_rank, keyed.admin_rank, keyed.created_at, keyed.id LIMIT ?3",
+             WHERE ($1 IS NULL OR LOWER(keyed.display_name) LIKE $1 ESCAPE '\\' \
+               OR LOWER(keyed.email) LIKE $1 ESCAPE '\\') \
+             AND ($2 IS NULL OR (keyed.root_rank, keyed.admin_rank, keyed.created_at, keyed.id) > \
+               (SELECT root_rank, admin_rank, created_at, id FROM keyed WHERE id = $2)) \
+             ORDER BY keyed.root_rank, keyed.admin_rank, keyed.created_at, keyed.id LIMIT $3",
         )
         .bind(pattern)
         .bind(cursor.map(|id| id.to_string()))
@@ -870,7 +879,7 @@ impl IdentityRepository {
                 root: row.get::<i64, _>("root") == 1,
                 admin: row.get::<i64, _>("installation_admin") == 1,
                 suspended: row.get::<Option<i64>, _>("suspended_at").is_some(),
-                two_factor: row.get::<i64, _>("two_factor") == 1,
+                two_factor: row.get::<bool, _>("two_factor"),
                 created_at: TimestampMillis::from_millis(row.get("created_at")),
                 last_active_at: row
                     .get::<Option<i64>, _>("last_active_at")
@@ -904,7 +913,7 @@ impl IdentityRepository {
         }
         Self::may_manage(&mut transaction, actor_id, user_id).await?;
         let suspended_at =
-            sqlx::query_scalar::<_, Option<i64>>("SELECT suspended_at FROM users WHERE id = ?")
+            sqlx::query_scalar::<_, Option<i64>>("SELECT suspended_at FROM users WHERE id = $1")
                 .bind(user_id.to_string())
                 .fetch_optional(&mut *transaction)
                 .await?
@@ -955,7 +964,7 @@ impl IdentityRepository {
             return Err(AdminAccountError::RootAccount);
         }
         let suspended_at =
-            sqlx::query_scalar::<_, Option<i64>>("SELECT suspended_at FROM users WHERE id = ?")
+            sqlx::query_scalar::<_, Option<i64>>("SELECT suspended_at FROM users WHERE id = $1")
                 .bind(user_id.to_string())
                 .fetch_optional(&mut *transaction)
                 .await?
@@ -964,7 +973,7 @@ impl IdentityRepository {
             return Err(AdminAccountError::Suspended);
         }
         sqlx::query(
-            "UPDATE users SET installation_admin = ?, version = version + 1, updated_at = ? WHERE id = ?",
+            "UPDATE users SET installation_admin = $1, version = version + 1, updated_at = $2 WHERE id = $3",
         )
         .bind(i64::from(admin))
         .bind(now.as_millis())
@@ -1018,7 +1027,7 @@ impl IdentityRepository {
         if initialized == 0 {
             return Err(RootChangeError::SetupIncomplete);
         }
-        let target = sqlx::query("SELECT id, suspended_at FROM users WHERE normalized_email = ?")
+        let target = sqlx::query("SELECT id, suspended_at FROM users WHERE normalized_email = $1")
             .bind(normalize_email(email))
             .fetch_optional(&mut *transaction)
             .await?
@@ -1032,14 +1041,14 @@ impl IdentityRepository {
         .fetch_one(&mut *transaction)
         .await?;
         sqlx::query(
-            "UPDATE users SET installation_admin = 1, suspended_at = NULL, version = version + 1, updated_at = ? \
-             WHERE id = ?",
+            "UPDATE users SET installation_admin = 1, suspended_at = NULL, version = version + 1, updated_at = $1 \
+             WHERE id = $2",
         )
         .bind(now.as_millis())
         .bind(&target_id)
         .execute(&mut *transaction)
         .await?;
-        sqlx::query("UPDATE installation_state SET root_user_id = ? WHERE id = 1")
+        sqlx::query("UPDATE installation_state SET root_user_id = $1 WHERE id = 1")
             .bind(&target_id)
             .execute(&mut *transaction)
             .await?;
@@ -1068,11 +1077,11 @@ impl IdentityRepository {
     }
 
     pub(super) async fn is_active_admin(
-        transaction: &mut Transaction<'_, Sqlite>,
+        transaction: &mut Transaction<'_, Any>,
         user_id: Id,
     ) -> Result<bool, sqlx::Error> {
         Ok(sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM users WHERE id = ? AND installation_admin = 1 AND suspended_at IS NULL",
+            "SELECT COUNT(*) FROM users WHERE id = $1 AND installation_admin = 1 AND suspended_at IS NULL",
         )
         .bind(user_id.to_string())
         .fetch_one(&mut **transaction)
@@ -1081,11 +1090,11 @@ impl IdentityRepository {
     }
 
     async fn is_root_account(
-        transaction: &mut Transaction<'_, Sqlite>,
+        transaction: &mut Transaction<'_, Any>,
         user_id: Id,
     ) -> Result<bool, sqlx::Error> {
         Ok(sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM installation_state WHERE id = 1 AND root_user_id = ?",
+            "SELECT COUNT(*) FROM installation_state WHERE id = 1 AND root_user_id = $1",
         )
         .bind(user_id.to_string())
         .fetch_one(&mut **transaction)
@@ -1096,7 +1105,7 @@ impl IdentityRepository {
     /// Whether an admin may suspend or reset `target`: nobody may touch the root account, and only the root user may
     /// touch another admin. Suspending the root account would lock everyone out of Admin.
     pub(super) async fn may_manage(
-        transaction: &mut Transaction<'_, Sqlite>,
+        transaction: &mut Transaction<'_, Any>,
         actor_id: Id,
         target_id: Id,
     ) -> Result<(), AdminAccountError> {
@@ -1104,7 +1113,7 @@ impl IdentityRepository {
             return Err(AdminAccountError::RootAccount);
         }
         let target_admin =
-            sqlx::query_scalar::<_, i64>("SELECT installation_admin FROM users WHERE id = ?")
+            sqlx::query_scalar::<_, i64>("SELECT installation_admin FROM users WHERE id = $1")
                 .bind(target_id.to_string())
                 .fetch_optional(&mut **transaction)
                 .await?
@@ -1122,7 +1131,7 @@ impl IdentityRepository {
         now: TimestampMillis,
     ) -> Result<(), IdentityError> {
         sqlx::query(
-            "UPDATE users SET password_hash = ?, updated_at = ?, version = version + 1 WHERE id = ?",
+            "UPDATE users SET password_hash = $1, updated_at = $2, version = version + 1 WHERE id = $3",
         )
         .bind(password_hash)
         .bind(now.as_millis())
@@ -1135,7 +1144,7 @@ impl IdentityRepository {
     /// The user's keyboard shortcut overrides as stored JSON; `None` before the first save.
     pub async fn shortcut_bindings(&self, user_id: Id) -> Result<Option<String>, IdentityError> {
         Ok(
-            sqlx::query_scalar("SELECT bindings_json FROM user_shortcuts WHERE user_id = ?")
+            sqlx::query_scalar("SELECT bindings_json FROM user_shortcuts WHERE user_id = $1")
                 .bind(user_id.to_string())
                 .fetch_optional(self.database.pool())
                 .await?,
@@ -1150,7 +1159,7 @@ impl IdentityRepository {
         now: TimestampMillis,
     ) -> Result<(), IdentityError> {
         sqlx::query(
-            "INSERT INTO user_shortcuts (user_id, bindings_json, updated_at) VALUES (?, ?, ?) \
+            "INSERT INTO user_shortcuts (user_id, bindings_json, updated_at) VALUES ($1, $2, $3) \
              ON CONFLICT (user_id) DO UPDATE SET bindings_json = excluded.bindings_json, updated_at = excluded.updated_at",
         )
         .bind(user_id.to_string())
@@ -1164,7 +1173,7 @@ impl IdentityRepository {
     /// The optional parts of the user's profile.
     pub async fn profile_fields(&self, user_id: Id) -> Result<ProfileFields, IdentityError> {
         let row =
-            sqlx::query("SELECT title, pronouns, timezone, bio, phone FROM users WHERE id = ?")
+            sqlx::query("SELECT title, pronouns, timezone, bio, phone FROM users WHERE id = $1")
                 .bind(user_id.to_string())
                 .fetch_optional(self.database.pool())
                 .await?;
@@ -1192,13 +1201,13 @@ impl IdentityRepository {
     ) -> Result<(), IdentityError> {
         let mut transaction = self.database.immediate_transaction().await?;
         let mut update = sqlx::query(
-            "UPDATE users SET display_name = ?, \
-             title = CASE WHEN ? THEN ? ELSE title END, \
-             pronouns = CASE WHEN ? THEN ? ELSE pronouns END, \
-             timezone = CASE WHEN ? THEN ? ELSE timezone END, \
-             bio = CASE WHEN ? THEN ? ELSE bio END, \
-             phone = CASE WHEN ? THEN ? ELSE phone END, \
-             updated_at = ?, version = version + 1 WHERE id = ?",
+            "UPDATE users SET display_name = $1, \
+             title = CASE WHEN $2 THEN $3 ELSE title END, \
+             pronouns = CASE WHEN $4 THEN $5 ELSE pronouns END, \
+             timezone = CASE WHEN $6 THEN $7 ELSE timezone END, \
+             bio = CASE WHEN $8 THEN $9 ELSE bio END, \
+             phone = CASE WHEN $10 THEN $11 ELSE phone END, \
+             updated_at = $12, version = version + 1 WHERE id = $13",
         )
         .bind(display_name);
         for part in [
@@ -1231,7 +1240,7 @@ impl IdentityRepository {
         now: TimestampMillis,
     ) -> Result<UserStatus, IdentityError> {
         let row = sqlx::query(
-            "SELECT presence, emoji, text, expires_at FROM user_status WHERE user_id = ?",
+            "SELECT presence, emoji, text, expires_at FROM user_status WHERE user_id = $1",
         )
         .bind(user_id.to_string())
         .fetch_optional(self.database.pool())
@@ -1258,7 +1267,7 @@ impl IdentityRepository {
     ) -> Result<(), IdentityError> {
         sqlx::query(
             "INSERT INTO user_status (user_id, presence, emoji, text, expires_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (user_id) DO UPDATE SET \
+             VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (user_id) DO UPDATE SET \
              presence = excluded.presence, emoji = excluded.emoji, text = excluded.text, \
              expires_at = excluded.expires_at, updated_at = excluded.updated_at",
         )
@@ -1276,7 +1285,7 @@ impl IdentityRepository {
     /// When the user's profile picture last changed; `None` while they have none.
     pub async fn avatar_updated_at(&self, user_id: Id) -> Result<Option<i64>, IdentityError> {
         Ok(
-            sqlx::query_scalar("SELECT updated_at FROM user_avatars WHERE user_id = ?")
+            sqlx::query_scalar("SELECT updated_at FROM user_avatars WHERE user_id = $1")
                 .bind(user_id.to_string())
                 .fetch_optional(self.database.pool())
                 .await?,
@@ -1293,10 +1302,10 @@ impl IdentityRepository {
         let row = sqlx::query(
             "SELECT a.mime_type, a.bytes, b.storage_key FROM user_avatars a \
              LEFT JOIN attachment_blobs b ON b.id = a.blob_id \
-             WHERE a.user_id = ?1 AND (?1 = ?2 OR EXISTS ( \
+             WHERE a.user_id = $1 AND ($1 = $2 OR EXISTS ( \
              SELECT 1 FROM memberships AS theirs JOIN memberships AS mine \
              ON mine.workspace_id = theirs.workspace_id \
-             WHERE theirs.user_id = ?1 AND mine.user_id = ?2))",
+             WHERE theirs.user_id = $1 AND mine.user_id = $2))",
         )
         .bind(user_id.to_string())
         .bind(viewer_id.to_string())
@@ -1331,7 +1340,7 @@ impl IdentityRepository {
             .finalize_bytes_in_transaction(&mut transaction, user_id, bytes, now)
             .await?;
         sqlx::query(
-            "INSERT INTO user_avatars (user_id, mime_type, blob_id, updated_at) VALUES (?, ?, ?, ?) \
+            "INSERT INTO user_avatars (user_id, mime_type, blob_id, updated_at) VALUES ($1, $2, $3, $4) \
              ON CONFLICT (user_id) DO UPDATE SET mime_type = excluded.mime_type, bytes = NULL, \
              blob_id = excluded.blob_id, updated_at = excluded.updated_at",
         )
@@ -1354,7 +1363,7 @@ impl IdentityRepository {
         now: TimestampMillis,
     ) -> Result<(), IdentityError> {
         let mut transaction = self.database.immediate_transaction().await?;
-        let removed = sqlx::query("DELETE FROM user_avatars WHERE user_id = ?")
+        let removed = sqlx::query("DELETE FROM user_avatars WHERE user_id = $1")
             .bind(user_id.to_string())
             .execute(&mut *transaction)
             .await?
@@ -1376,7 +1385,7 @@ impl IdentityRepository {
     ) -> Result<(), IdentityError> {
         let mut transaction = self.database.immediate_transaction().await?;
         let changed = sqlx::query(
-            "UPDATE users SET password_hash = ?, updated_at = ?, version = version + 1 WHERE id = ?",
+            "UPDATE users SET password_hash = $1, updated_at = $2, version = version + 1 WHERE id = $3",
         )
         .bind(password_hash)
         .bind(now.as_millis())
@@ -1388,7 +1397,7 @@ impl IdentityRepository {
             return Err(IdentityError::InvalidCredential);
         }
         sqlx::query(
-            "UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND id != ? AND revoked_at IS NULL",
+            "UPDATE sessions SET revoked_at = $1 WHERE user_id = $2 AND id != $3 AND revoked_at IS NULL",
         )
         .bind(now.as_millis())
         .bind(user_id.to_string())
@@ -1464,7 +1473,7 @@ impl IdentityRepository {
     ) -> Result<bool, IdentityError> {
         let supplied = token_hash(token);
         let row =
-            sqlx::query("SELECT token_hash, expires_at FROM recovery_tokens WHERE token_hash = ?")
+            sqlx::query("SELECT token_hash, expires_at FROM recovery_tokens WHERE token_hash = $1")
                 .bind(supplied.to_vec())
                 .fetch_optional(self.database.pool())
                 .await?;
@@ -1482,12 +1491,12 @@ impl IdentityRepository {
     ) -> Result<Id, IdentityError> {
         let supplied = token_hash(token);
         let mut transaction = self.database.immediate_transaction().await?;
-        sqlx::query("DELETE FROM recovery_tokens WHERE expires_at <= ?")
+        sqlx::query("DELETE FROM recovery_tokens WHERE expires_at <= $1")
             .bind(now.as_millis())
             .execute(&mut *transaction)
             .await?;
         let row =
-            sqlx::query("SELECT token_hash, user_id FROM recovery_tokens WHERE token_hash = ?")
+            sqlx::query("SELECT token_hash, user_id FROM recovery_tokens WHERE token_hash = $1")
                 .bind(supplied.to_vec())
                 .fetch_optional(&mut *transaction)
                 .await?
@@ -1501,19 +1510,21 @@ impl IdentityRepository {
             .parse::<Id>()
             .map_err(|_| IdentityError::InvalidIdentifier)?;
         sqlx::query(
-            "UPDATE users SET password_hash = ?, updated_at = ?, version = version + 1 WHERE id = ?",
+            "UPDATE users SET password_hash = $1, updated_at = $2, version = version + 1 WHERE id = $3",
         )
         .bind(password_hash)
         .bind(now.as_millis())
         .bind(user_id.to_string())
         .execute(&mut *transaction)
         .await?;
-        sqlx::query("UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL")
-            .bind(now.as_millis())
-            .bind(user_id.to_string())
-            .execute(&mut *transaction)
-            .await?;
-        sqlx::query("DELETE FROM recovery_tokens WHERE token_hash = ?")
+        sqlx::query(
+            "UPDATE sessions SET revoked_at = $1 WHERE user_id = $2 AND revoked_at IS NULL",
+        )
+        .bind(now.as_millis())
+        .bind(user_id.to_string())
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query("DELETE FROM recovery_tokens WHERE token_hash = $1")
             .bind(stored)
             .execute(&mut *transaction)
             .await?;
@@ -1530,12 +1541,12 @@ impl IdentityRepository {
     ) -> Result<Id, IdentityError> {
         let supplied = token_hash(token);
         let mut transaction = self.database.immediate_transaction().await?;
-        sqlx::query("DELETE FROM recovery_tokens WHERE expires_at <= ?")
+        sqlx::query("DELETE FROM recovery_tokens WHERE expires_at <= $1")
             .bind(now.as_millis())
             .execute(&mut *transaction)
             .await?;
         let row =
-            sqlx::query("SELECT token_hash, user_id FROM recovery_tokens WHERE token_hash = ?")
+            sqlx::query("SELECT token_hash, user_id FROM recovery_tokens WHERE token_hash = $1")
                 .bind(supplied.to_vec())
                 .fetch_optional(&mut *transaction)
                 .await?;
@@ -1563,18 +1574,20 @@ impl IdentityRepository {
             .get::<String, _>("user_id")
             .parse::<Id>()
             .map_err(|_| IdentityError::InvalidIdentifier)?;
-        sqlx::query("UPDATE users SET password_hash = ?, updated_at = ?, version = version + 1 WHERE id = ?")
+        sqlx::query("UPDATE users SET password_hash = $1, updated_at = $2, version = version + 1 WHERE id = $3")
             .bind(password_hash)
             .bind(now.as_millis())
             .bind(user_id.to_string())
             .execute(&mut *transaction)
             .await?;
-        sqlx::query("UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL")
-            .bind(now.as_millis())
-            .bind(user_id.to_string())
-            .execute(&mut *transaction)
-            .await?;
-        sqlx::query("DELETE FROM recovery_tokens WHERE token_hash = ?")
+        sqlx::query(
+            "UPDATE sessions SET revoked_at = $1 WHERE user_id = $2 AND revoked_at IS NULL",
+        )
+        .bind(now.as_millis())
+        .bind(user_id.to_string())
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query("DELETE FROM recovery_tokens WHERE token_hash = $1")
             .bind(stored)
             .execute(&mut *transaction)
             .await?;
@@ -1606,7 +1619,7 @@ impl IdentityRepository {
         let absolute_expires_at = TimestampMillis::from_millis(now.as_millis() + 90 * DAY);
         sqlx::query(
             "INSERT INTO sessions (id, token_hash, user_id, created_at, last_activity_at, \
-             idle_expires_at, absolute_expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+             idle_expires_at, absolute_expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
         )
         .bind(id.to_string())
         .bind(token_hash(&token).to_vec())
@@ -1637,7 +1650,7 @@ impl IdentityRepository {
         let token = generate_opaque_token();
         let mut transaction = self.database.immediate_transaction().await?;
         let credential_unchanged = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM users WHERE id = ? AND password_hash = ? \
+            "SELECT COUNT(*) FROM users WHERE id = $1 AND password_hash = $2 \
              AND suspended_at IS NULL",
         )
         .bind(user.id.to_string())
@@ -1649,7 +1662,7 @@ impl IdentityRepository {
         }
         if let Some(replacement_hash) = replacement_hash {
             sqlx::query(
-                "UPDATE users SET password_hash = ?, updated_at = ?, version = version + 1 WHERE id = ?",
+                "UPDATE users SET password_hash = $1, updated_at = $2, version = version + 1 WHERE id = $3",
             )
             .bind(replacement_hash)
             .bind(now.as_millis())
@@ -1699,7 +1712,7 @@ impl IdentityRepository {
              sessions.last_activity_at, sessions.idle_expires_at, sessions.absolute_expires_at, \
              users.id AS user_id, users.email, users.display_name, users.suspended_at \
              FROM sessions JOIN users ON users.id = sessions.user_id \
-             WHERE sessions.token_hash = ? AND sessions.revoked_at IS NULL",
+             WHERE sessions.token_hash = $1 AND sessions.revoked_at IS NULL",
         )
         .bind(supplied.to_vec())
         .fetch_optional(self.database.pool())
@@ -1724,7 +1737,7 @@ impl IdentityRepository {
             || now.as_millis() >= absolute_expires_at
             || row.get::<Option<i64>, _>("suspended_at").is_some()
         {
-            sqlx::query("DELETE FROM sessions WHERE id = ?")
+            sqlx::query("DELETE FROM sessions WHERE id = $1")
                 .bind(session_id.to_string())
                 .execute(self.database.pool())
                 .await?;
@@ -1735,8 +1748,8 @@ impl IdentityRepository {
         if now.as_millis() - last_activity_at >= ACTIVITY_WRITE_INTERVAL {
             let idle_expires_at = (now.as_millis() + IDLE_LIFETIME).min(absolute_expires_at);
             sqlx::query(
-                "UPDATE sessions SET last_activity_at = ?, idle_expires_at = ? \
-                 WHERE id = ? AND last_activity_at = ? AND revoked_at IS NULL",
+                "UPDATE sessions SET last_activity_at = $1, idle_expires_at = $2 \
+                 WHERE id = $3 AND last_activity_at = $4 AND revoked_at IS NULL",
             )
             .bind(now.as_millis())
             .bind(idle_expires_at)
@@ -1765,8 +1778,8 @@ impl IdentityRepository {
             "SELECT sessions.id, sessions.created_at, sessions.last_activity_at, \
              sessions.idle_expires_at, sessions.absolute_expires_at, users.email, users.display_name \
              FROM sessions JOIN users ON users.id = sessions.user_id \
-             WHERE sessions.user_id = ? AND sessions.revoked_at IS NULL \
-             AND sessions.idle_expires_at > ? AND sessions.absolute_expires_at > ? \
+             WHERE sessions.user_id = $1 AND sessions.revoked_at IS NULL \
+             AND sessions.idle_expires_at > $2 AND sessions.absolute_expires_at > $3 \
              ORDER BY sessions.created_at DESC",
         )
         .bind(user_id.to_string())
@@ -1805,7 +1818,7 @@ impl IdentityRepository {
         now: TimestampMillis,
     ) -> Result<bool, IdentityError> {
         let affected = sqlx::query(
-            "UPDATE sessions SET revoked_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL",
+            "UPDATE sessions SET revoked_at = $1 WHERE id = $2 AND user_id = $3 AND revoked_at IS NULL",
         )
         .bind(now.as_millis())
         .bind(session_id.to_string())
@@ -1843,7 +1856,7 @@ impl IdentityRepository {
     ) -> Result<bool, IdentityError> {
         let mut transaction = self.database.immediate_transaction().await?;
         let affected = sqlx::query(
-            "UPDATE sessions SET revoked_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL",
+            "UPDATE sessions SET revoked_at = $1 WHERE id = $2 AND user_id = $3 AND revoked_at IS NULL",
         )
         .bind(now.as_millis())
         .bind(session_id.to_string())
@@ -1886,21 +1899,23 @@ fn issue_setup_token(now: TimestampMillis) -> IssuedToken {
 }
 
 async fn insert_setup_token(
-    transaction: &mut Transaction<'_, Sqlite>,
+    transaction: &mut Transaction<'_, Any>,
     issued: &IssuedToken,
     now: TimestampMillis,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("INSERT INTO setup_tokens (token_hash, expires_at, created_at) VALUES (?, ?, ?)")
-        .bind(token_hash(&issued.token).to_vec())
-        .bind(issued.expires_at.as_millis())
-        .bind(now.as_millis())
-        .execute(&mut **transaction)
-        .await?;
+    sqlx::query(
+        "INSERT INTO setup_tokens (token_hash, expires_at, created_at) VALUES ($1, $2, $3)",
+    )
+    .bind(token_hash(&issued.token).to_vec())
+    .bind(issued.expires_at.as_millis())
+    .bind(now.as_millis())
+    .execute(&mut **transaction)
+    .await?;
     Ok(())
 }
 
 pub(super) async fn insert_session(
-    transaction: &mut Transaction<'_, Sqlite>,
+    transaction: &mut Transaction<'_, Any>,
     id: Id,
     token: &str,
     user_id: Id,
@@ -1911,7 +1926,7 @@ pub(super) async fn insert_session(
     let absolute_expires_at = TimestampMillis::from_millis(now.as_millis() + 90 * DAY);
     sqlx::query(
         "INSERT INTO sessions (id, token_hash, user_id, created_at, last_activity_at, \
-         idle_expires_at, absolute_expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+         idle_expires_at, absolute_expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
     )
     .bind(id.to_string())
     .bind(token_hash(token).to_vec())
@@ -1933,7 +1948,7 @@ pub(super) async fn insert_session(
 /// The first workspace that `complete_setup` creates with the account: owner membership, default project and workflow,
 /// default teamspace, and the public chat channels.
 async fn insert_first_workspace(
-    transaction: &mut Transaction<'_, Sqlite>,
+    transaction: &mut Transaction<'_, Any>,
     defaults: &WorkspaceDefaults,
     user_id: Id,
     now: TimestampMillis,
@@ -1941,7 +1956,7 @@ async fn insert_first_workspace(
     let timestamp = now.as_millis();
     sqlx::query(
         "INSERT INTO workspaces (id, name, version, owner_membership_id, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?, ?)",
+             VALUES ($1, $2, $3, $4, $5, $6)",
     )
     .bind(defaults.workspace.id.to_string())
     .bind(&defaults.workspace.name)
@@ -1953,7 +1968,7 @@ async fn insert_first_workspace(
     .await?;
     sqlx::query(
         "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
-         VALUES (?, ?, ?, 'owner', ?, ?, ?)",
+         VALUES ($1, $2, $3, 'owner', $4, $5, $6)",
     )
     .bind(defaults.owner.id.to_string())
     .bind(defaults.workspace.id.to_string())
@@ -1966,7 +1981,7 @@ async fn insert_first_workspace(
     join_public_channels(transaction, defaults.workspace.id, user_id, now).await?;
     sqlx::query(
         "INSERT INTO projects (id, workspace_id, name, project_key, color, version, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
     )
     .bind(defaults.project.id.to_string())
     .bind(defaults.workspace.id.to_string())
@@ -1981,7 +1996,7 @@ async fn insert_first_workspace(
     for status in &defaults.statuses {
         sqlx::query(
             "INSERT INTO task_statuses (id, workspace_id, project_id, name, description, color, \
-             category, position, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             category, position, version, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
         )
         .bind(status.id.to_string())
         .bind(status.workspace_id.to_string())
@@ -2001,7 +2016,7 @@ async fn insert_first_workspace(
     Ok(())
 }
 
-fn decode_identity(row: sqlx::sqlite::SqliteRow) -> Result<StoredIdentity, IdentityError> {
+fn decode_identity(row: sqlx::any::AnyRow) -> Result<StoredIdentity, IdentityError> {
     let id = row
         .get::<String, _>("id")
         .parse()
@@ -2023,20 +2038,20 @@ pub(super) fn token_hash(token: &str) -> [u8; 32] {
 
 /// Replaces the account's recovery token (one live link per account) and drops expired ones.
 async fn insert_recovery_token(
-    transaction: &mut Transaction<'_, Sqlite>,
+    transaction: &mut Transaction<'_, Any>,
     user_id: &str,
     token: &str,
     expires_at: TimestampMillis,
     now: TimestampMillis,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("DELETE FROM recovery_tokens WHERE expires_at <= ? OR user_id = ?")
+    sqlx::query("DELETE FROM recovery_tokens WHERE expires_at <= $1 OR user_id = $2")
         .bind(now.as_millis())
         .bind(user_id)
         .execute(&mut **transaction)
         .await?;
     sqlx::query(
         "INSERT INTO recovery_tokens (token_hash, user_id, expires_at, created_at) \
-         VALUES (?, ?, ?, ?)",
+         VALUES ($1, $2, $3, $4)",
     )
     .bind(token_hash(token).to_vec())
     .bind(user_id)
@@ -2061,7 +2076,7 @@ fn constant_time_eq(stored: &[u8], supplied: &[u8; 32]) -> bool {
 /// Audits a profile change globally and in each of the user's workspaces. The workspace
 /// events also tell connected clients (realtime) to reload the members list.
 async fn record_profile_update(
-    transaction: &mut Transaction<'_, Sqlite>,
+    transaction: &mut Transaction<'_, Any>,
     user_id: Id,
     field: &str,
     request_id: &str,
@@ -2081,7 +2096,7 @@ async fn record_profile_update(
     )
     .await?;
     let workspaces: Vec<String> =
-        sqlx::query_scalar("SELECT workspace_id FROM memberships WHERE user_id = ?")
+        sqlx::query_scalar("SELECT workspace_id FROM memberships WHERE user_id = $1")
             .bind(user_id.to_string())
             .fetch_all(&mut **transaction)
             .await?;
@@ -2207,8 +2222,8 @@ mod tests {
         // The root account cannot be suspended through `set_suspended`; this test only needs a suspended account
         // whose sessions are revoked, as `set_suspended` leaves them.
         for statement in [
-            "UPDATE users SET suspended_at = 2000 WHERE id = ?",
-            "UPDATE sessions SET revoked_at = 2000 WHERE user_id = ?",
+            "UPDATE users SET suspended_at = 2000 WHERE id = $1",
+            "UPDATE sessions SET revoked_at = 2000 WHERE user_id = $1",
         ] {
             sqlx::query(statement)
                 .bind(setup.user_id.to_string())
@@ -2249,13 +2264,15 @@ mod tests {
             .store_setup_token("operator-secret", TimestampMillis::from_millis(60_000))
             .await
             .unwrap();
-        database
-            .execute(
-                "CREATE TRIGGER reject_initial_session BEFORE INSERT ON sessions \
-                 BEGIN SELECT RAISE(ABORT, 'session unavailable'); END",
-            )
-            .await
-            .unwrap();
+        crate::repositories::fail_writes(
+            &database,
+            "reject_initial_session",
+            "BEFORE INSERT",
+            "sessions",
+            "1 = 1",
+            "session unavailable",
+        )
+        .await;
 
         let result = repository
             .complete_setup(
@@ -2290,7 +2307,15 @@ mod tests {
             .store_setup_token("operator-secret", TimestampMillis::from_millis(60_000))
             .await
             .unwrap();
-        database.execute("CREATE TRIGGER reject_setup_audit BEFORE INSERT ON audit_events WHEN NEW.action = 'setup.complete' BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END").await.unwrap();
+        crate::repositories::fail_writes(
+            &database,
+            "reject_setup_audit",
+            "BEFORE INSERT",
+            "audit_events",
+            "NEW.action = 'setup.complete'",
+            "audit unavailable",
+        )
+        .await;
 
         assert!(
             repository
@@ -2346,13 +2371,15 @@ mod tests {
             )
             .await
             .unwrap();
-        database
-            .execute(
-                "CREATE TRIGGER reject_revocation BEFORE UPDATE OF revoked_at ON sessions \
-                 BEGIN SELECT RAISE(ABORT, 'revocation unavailable'); END",
-            )
-            .await
-            .unwrap();
+        crate::repositories::fail_writes(
+            &database,
+            "reject_revocation",
+            "BEFORE UPDATE OF revoked_at",
+            "sessions",
+            "1 = 1",
+            "revocation unavailable",
+        )
+        .await;
         let old_hash = database
             .scalar::<String>("SELECT password_hash FROM users")
             .await
@@ -2410,11 +2437,20 @@ mod tests {
             .await
             .unwrap();
         database
-            .execute(
-                "CREATE TABLE session_touch_log (value INTEGER NOT NULL); \
-            CREATE TRIGGER count_session_touch AFTER UPDATE OF last_activity_at ON sessions \
-            BEGIN INSERT INTO session_touch_log VALUES (1); END;",
-            )
+            .execute(match database.backend() {
+                orbit_platform::Backend::Sqlite => {
+                    "CREATE TABLE session_touch_log (value INTEGER NOT NULL); \
+                     CREATE TRIGGER count_session_touch AFTER UPDATE OF last_activity_at ON sessions \
+                     BEGIN INSERT INTO session_touch_log VALUES (1); END;"
+                }
+                orbit_platform::Backend::Postgres => {
+                    "CREATE TABLE session_touch_log (value BIGINT NOT NULL); \
+                     CREATE FUNCTION count_session_touch_fn() RETURNS trigger LANGUAGE plpgsql AS $$ \
+                     BEGIN INSERT INTO session_touch_log VALUES (1); RETURN NEW; END $$; \
+                     CREATE TRIGGER count_session_touch AFTER UPDATE OF last_activity_at ON sessions \
+                     FOR EACH ROW EXECUTE FUNCTION count_session_touch_fn();"
+                }
+            })
             .await
             .unwrap();
         let first = repository

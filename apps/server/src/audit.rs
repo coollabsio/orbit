@@ -1,7 +1,7 @@
-use orbit_platform::{Database, Id, TimestampMillis};
+use orbit_platform::{Database, Id, Row, TimestampMillis};
 use serde::Serialize;
 use serde_json::Value;
-use sqlx::{Row, Sqlite, Transaction};
+use sqlx::{Any, Transaction};
 use utoipa::ToSchema;
 
 const MAX_METADATA_BYTES: usize = 2_048;
@@ -44,7 +44,7 @@ pub struct AuditEvent {
 
 #[allow(clippy::too_many_arguments)]
 pub async fn record(
-    transaction: &mut Transaction<'_, Sqlite>,
+    transaction: &mut Transaction<'_, Any>,
     workspace_id: Id,
     actor_id: Option<Id>,
     action: &str,
@@ -72,7 +72,7 @@ pub async fn record(
 
 #[allow(clippy::too_many_arguments)]
 pub async fn record_global(
-    transaction: &mut Transaction<'_, Sqlite>,
+    transaction: &mut Transaction<'_, Any>,
     actor_id: Option<Id>,
     action: &str,
     outcome: AuditOutcome,
@@ -99,7 +99,7 @@ pub async fn record_global(
 
 #[allow(clippy::too_many_arguments)]
 async fn record_scoped(
-    transaction: &mut Transaction<'_, Sqlite>,
+    transaction: &mut Transaction<'_, Any>,
     workspace_id: Option<Id>,
     actor_id: Option<Id>,
     action: &str,
@@ -112,7 +112,7 @@ async fn record_scoped(
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "INSERT INTO audit_events (id, workspace_id, actor_id, action, outcome, resource_type, \
-         resource_id, request_id, metadata_json, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         resource_id, request_id, metadata_json, occurred_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
     )
     .bind(Id::new_v7().to_string())
     .bind(workspace_id.map(|id| id.to_string()))
@@ -129,6 +129,41 @@ async fn record_scoped(
     Ok(())
 }
 
+/// As `record`, inside a SeaORM transaction on any backend (spike: used by `api_tokens`).
+#[allow(clippy::too_many_arguments)]
+pub async fn record_orm(
+    connection: &impl sea_orm::ConnectionTrait,
+    workspace_id: Id,
+    actor_id: Option<Id>,
+    action: &str,
+    outcome: AuditOutcome,
+    resource_type: &str,
+    resource_id: Option<Id>,
+    request_id: &str,
+    metadata: Value,
+    now: TimestampMillis,
+) -> Result<(), sea_orm::DbErr> {
+    use sea_orm::{ActiveValue::Set, EntityTrait};
+
+    use crate::entities::audit_events;
+
+    audit_events::Entity::insert(audit_events::ActiveModel {
+        id: Set(Id::new_v7().to_string()),
+        workspace_id: Set(Some(workspace_id.to_string())),
+        actor_id: Set(actor_id.map(|id| id.to_string())),
+        action: Set(action.to_owned()),
+        outcome: Set(outcome.as_str().to_owned()),
+        resource_type: Set(resource_type.to_owned()),
+        resource_id: Set(resource_id.map(|id| id.to_string())),
+        request_id: Set(bounded_text(request_id, 128)),
+        metadata_json: Set(bounded_metadata(metadata)),
+        occurred_at: Set(now.as_millis()),
+    })
+    .exec_without_returning(connection)
+    .await?;
+    Ok(())
+}
+
 pub async fn list(
     database: &Database,
     workspace_id: Id,
@@ -139,7 +174,7 @@ pub async fn list(
         "SELECT audit_events.id, workspace_id, actor_id, users.display_name AS actor_name, action, outcome, \
          resource_type, resource_id, request_id, metadata_json, occurred_at FROM audit_events \
          LEFT JOIN users ON users.id = audit_events.actor_id \
-         WHERE workspace_id = ? AND (? IS NULL OR audit_events.id < ?) ORDER BY audit_events.id DESC LIMIT ?",
+         WHERE workspace_id = $1 AND ($2 IS NULL OR audit_events.id < $3) ORDER BY audit_events.id DESC LIMIT $4",
     )
     .bind(workspace_id.to_string())
     .bind(cursor.map(|id| id.to_string()))
@@ -161,8 +196,8 @@ pub async fn list_global(
         "SELECT audit_events.id, workspace_id, actor_id, users.display_name AS actor_name, action, outcome, \
          resource_type, resource_id, request_id, metadata_json, occurred_at FROM audit_events \
          LEFT JOIN users ON users.id = audit_events.actor_id \
-         WHERE (? IS NULL OR workspace_id = ?) AND (? IS NULL OR action = ?) \
-         AND (? IS NULL OR audit_events.id < ?) ORDER BY audit_events.id DESC LIMIT ?",
+         WHERE ($1 IS NULL OR workspace_id = $2) AND ($3 IS NULL OR action = $4) \
+         AND ($5 IS NULL OR audit_events.id < $6) ORDER BY audit_events.id DESC LIMIT $7",
     )
     .bind(workspace_id.map(|id| id.to_string()))
     .bind(workspace_id.map(|id| id.to_string()))
@@ -188,8 +223,8 @@ pub async fn list_resource(
         "SELECT audit_events.id, workspace_id, actor_id, users.display_name AS actor_name, action, outcome, \
          resource_type, resource_id, request_id, metadata_json, occurred_at FROM audit_events \
          LEFT JOIN users ON users.id = audit_events.actor_id \
-         WHERE workspace_id = ? AND resource_type = ? AND resource_id = ? \
-         AND (? IS NULL OR audit_events.id < ?) ORDER BY audit_events.id DESC LIMIT ?",
+         WHERE workspace_id = $1 AND resource_type = $2 AND resource_id = $3 \
+         AND ($4 IS NULL OR audit_events.id < $5) ORDER BY audit_events.id DESC LIMIT $6",
     )
     .bind(workspace_id.to_string())
     .bind(resource_type)
@@ -203,7 +238,7 @@ pub async fn list_resource(
 }
 
 fn decode_page(
-    rows: Vec<sqlx::sqlite::SqliteRow>,
+    rows: Vec<sqlx::any::AnyRow>,
     limit: usize,
 ) -> Result<(Vec<AuditEvent>, Option<Id>), sqlx::Error> {
     let has_more = rows.len() > limit;
@@ -218,7 +253,7 @@ fn decode_page(
     Ok((events, next))
 }
 
-fn decode_event(row: sqlx::sqlite::SqliteRow) -> Result<AuditEvent, sqlx::Error> {
+fn decode_event(row: sqlx::any::AnyRow) -> Result<AuditEvent, sqlx::Error> {
     let parse_id = |value: String| {
         value
             .parse()

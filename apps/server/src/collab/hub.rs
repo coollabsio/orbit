@@ -15,9 +15,9 @@ use std::sync::{Arc, Mutex as StdMutex, OnceLock, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
 use axum::body::Bytes;
-use orbit_platform::{Database, Id, TimestampMillis};
+use orbit_platform::{Backend, Database, Id, Row, TimestampMillis};
 use serde_json::Value;
-use sqlx::{Row, Sqlite, SqlitePool, Transaction};
+use sqlx::{Any, AnyPool, Transaction};
 use thiserror::Error;
 use tokio::sync::{Mutex, OwnedMutexGuard, broadcast};
 use yrs::encoding::read::Cursor;
@@ -243,7 +243,8 @@ pub struct CollabHub {
 }
 
 pub(crate) struct HubInner {
-    pool: SqlitePool,
+    pool: AnyPool,
+    backend: Backend,
     config: CollabConfig,
     rooms: StdMutex<HashMap<Id, Arc<Room>>>,
     users: StdMutex<HashMap<Id, usize>>,
@@ -277,6 +278,22 @@ pub(crate) struct Handled {
 }
 
 impl CollabHub {
+    /// A write transaction serialized like `Database::immediate_transaction` (the hub keeps the
+    /// pool, not the `Database`, which owns the hub).
+    async fn write_transaction(&self) -> Result<Transaction<'static, Any>, sqlx::Error> {
+        match self.inner.backend {
+            Backend::Sqlite => self.inner.pool.begin_with("BEGIN IMMEDIATE").await,
+            Backend::Postgres => {
+                let mut tx = self.inner.pool.begin().await?;
+                // Same advisory lock as `orbit_platform::Database::immediate_transaction`.
+                sqlx::query("SELECT 1 FROM pg_advisory_xact_lock(8030594652542121842)")
+                    .execute(&mut *tx)
+                    .await?;
+                Ok(tx)
+            }
+        }
+    }
+
     /// The hub of this database (one per open database; created on first use).
     #[must_use]
     pub fn of(database: &Database) -> Self {
@@ -286,8 +303,10 @@ impl CollabHub {
     /// Like [`Self::of`], but creates the hub with `config` if the database has none yet (tests).
     pub fn install(database: &Database, config: CollabConfig) -> Self {
         let pool = database.pool().clone();
+        let backend = database.backend();
         let inner = database.extension(move || HubInner {
             pool,
+            backend,
             config,
             rooms: StdMutex::new(HashMap::new()),
             users: StdMutex::new(HashMap::new()),
@@ -427,7 +446,7 @@ impl CollabHub {
     async fn load(&self, room: &Room, state: &mut RoomState) -> Result<(), CollabError> {
         let pool = &self.inner.pool;
         let page = sqlx::query(
-            "SELECT workspace_id, locked_at IS NOT NULL AS locked FROM pages WHERE id = ?",
+            "SELECT workspace_id, locked_at IS NOT NULL AS locked FROM pages WHERE id = $1",
         )
         .bind(room.page_id.to_string())
         .fetch_optional(pool)
@@ -438,7 +457,7 @@ impl CollabHub {
         state.locked = page.get("locked");
         let row = sqlx::query(
             "SELECT snapshot, snapshot_seq, epoch, converter_version, projected_seq \
-             FROM page_collab_docs WHERE page_id = ?",
+             FROM page_collab_docs WHERE page_id = $1",
         )
         .bind(room.page_id.to_string())
         .fetch_optional(pool)
@@ -451,7 +470,7 @@ impl CollabHub {
         };
         let snapshot_seq: i64 = row.get("snapshot_seq");
         let log = sqlx::query(
-            "SELECT seq, data, user_id FROM page_collab_updates WHERE page_id = ? AND seq > ? \
+            "SELECT seq, data, user_id FROM page_collab_updates WHERE page_id = $1 AND seq > $2 \
              ORDER BY seq",
         )
         .bind(room.page_id.to_string())
@@ -499,7 +518,7 @@ impl CollabHub {
     /// First open of a page: builds the document from `pages.content_json`.
     async fn initialize(&self, room: &Room, state: &mut RoomState) -> Result<(), CollabError> {
         let pool = &self.inner.pool;
-        let content: String = sqlx::query_scalar("SELECT content_json FROM pages WHERE id = ?")
+        let content: String = sqlx::query_scalar("SELECT content_json FROM pages WHERE id = $1")
             .bind(room.page_id.to_string())
             .fetch_optional(pool)
             .await?
@@ -514,7 +533,7 @@ impl CollabHub {
         sqlx::query(
             "INSERT INTO page_collab_docs (page_id, workspace_id, snapshot, snapshot_seq, epoch, \
              converter_version, projected_seq, created_at, updated_at) \
-             VALUES (?, ?, ?, 0, ?, ?, 0, ?, ?)",
+             VALUES ($1, $2, $3, 0, $4, $5, 0, $6, $7)",
         )
         .bind(room.page_id.to_string())
         .bind(workspace_id.to_string())
@@ -543,7 +562,7 @@ impl CollabHub {
         if state.unprojected_since.is_some() {
             self.persist(room, state, true, false).await?;
         }
-        let content: String = sqlx::query_scalar("SELECT content_json FROM pages WHERE id = ?")
+        let content: String = sqlx::query_scalar("SELECT content_json FROM pages WHERE id = $1")
             .bind(room.page_id.to_string())
             .fetch_optional(&self.inner.pool)
             .await?
@@ -554,10 +573,10 @@ impl CollabHub {
         state.take_captured();
         let snapshot = state.full_state();
         let epoch = random_epoch();
-        let mut tx = self.inner.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let mut tx = self.write_transaction().await?;
         sqlx::query(
-            "UPDATE page_collab_docs SET snapshot = ?, snapshot_seq = ?, epoch = ?, \
-             converter_version = ?, projected_seq = ?, updated_at = ? WHERE page_id = ?",
+            "UPDATE page_collab_docs SET snapshot = $1, snapshot_seq = $2, epoch = $3, \
+             converter_version = $4, projected_seq = $5, updated_at = $6 WHERE page_id = $7",
         )
         .bind(&snapshot)
         .bind(state.last_seq)
@@ -568,7 +587,7 @@ impl CollabHub {
         .bind(room.page_id.to_string())
         .execute(&mut *tx)
         .await?;
-        sqlx::query("DELETE FROM page_collab_updates WHERE page_id = ? AND seq <= ?")
+        sqlx::query("DELETE FROM page_collab_updates WHERE page_id = $1 AND seq <= $2")
             .bind(room.page_id.to_string())
             .bind(state.last_seq)
             .execute(&mut *tx)
@@ -636,7 +655,7 @@ impl CollabHub {
         let blocks =
             project.then(|| sanitize_blocks(&blocknote::doc_to_blocks(state.awareness.doc())));
         let snapshot = compact.then(|| state.full_state());
-        let mut tx = self.inner.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let mut tx = self.write_transaction().await?;
         let result: Result<(i64, bool), CollabError> = async {
             let mut seq = state.last_seq;
             if let Some(data) = &merged {
@@ -644,12 +663,13 @@ impl CollabHub {
             }
             let mut audited = false;
             if let Some(blocks) = &blocks {
-                let audited_at: Option<i64> =
-                    sqlx::query_scalar("SELECT audited_at FROM page_collab_docs WHERE page_id = ?")
-                        .bind(page_id.to_string())
-                        .fetch_optional(&mut *tx)
-                        .await?
-                        .flatten();
+                let audited_at: Option<i64> = sqlx::query_scalar(
+                    "SELECT audited_at FROM page_collab_docs WHERE page_id = $1",
+                )
+                .bind(page_id.to_string())
+                .fetch_optional(&mut *tx)
+                .await?
+                .flatten();
                 let interval =
                     i64::try_from(self.inner.config.audit_interval.as_millis()).unwrap_or(i64::MAX);
                 let audit = state.last_editor.is_some()
@@ -673,9 +693,9 @@ impl CollabHub {
                 })?;
                 audited = changed && audit;
                 sqlx::query(
-                    "UPDATE page_collab_docs SET projected_seq = ?, \
-                     audited_at = CASE WHEN ? THEN ? ELSE audited_at END, updated_at = ? \
-                     WHERE page_id = ?",
+                    "UPDATE page_collab_docs SET projected_seq = $1, \
+                     audited_at = CASE WHEN $2 THEN $3 ELSE audited_at END, updated_at = $4 \
+                     WHERE page_id = $5",
                 )
                 .bind(seq)
                 .bind(audited)
@@ -1208,7 +1228,7 @@ impl CollabWrite {
     /// update log inside `tx`; `content_json` is the caller's to write in the same transaction.
     pub async fn replace(
         &mut self,
-        tx: &mut Transaction<'_, Sqlite>,
+        tx: &mut Transaction<'_, Any>,
         blocks: &[Value],
         actor_id: Id,
         now: TimestampMillis,
@@ -1244,7 +1264,7 @@ impl CollabWrite {
         )
         .await?;
         sqlx::query(
-            "UPDATE page_collab_docs SET projected_seq = ?, updated_at = ? WHERE page_id = ?",
+            "UPDATE page_collab_docs SET projected_seq = $1, updated_at = $2 WHERE page_id = $3",
         )
         .bind(seq)
         .bind(now.as_millis())
@@ -1458,14 +1478,14 @@ fn random_epoch() -> String {
 }
 
 /// The epoch of pages without a collaborative document (rotated by backup restores).
-pub(crate) async fn generation(pool: &SqlitePool) -> Result<String, sqlx::Error> {
+pub(crate) async fn generation(pool: &AnyPool) -> Result<String, sqlx::Error> {
     sqlx::query_scalar("SELECT generation FROM page_collab_meta WHERE id = 1")
         .fetch_one(pool)
         .await
 }
 
 async fn append(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     page_id: Id,
     workspace_id: Id,
     data: &[u8],
@@ -1474,7 +1494,7 @@ async fn append(
 ) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar(
         "INSERT INTO page_collab_updates (page_id, workspace_id, data, user_id, created_at) \
-         VALUES (?, ?, ?, ?, ?) RETURNING seq",
+         VALUES ($1, $2, $3, $4, $5) RETURNING seq",
     )
     .bind(page_id.to_string())
     .bind(workspace_id.to_string())
@@ -1486,15 +1506,15 @@ async fn append(
 }
 
 async fn compact_log(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     page_id: Id,
     snapshot: &[u8],
     seq: i64,
     now: TimestampMillis,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
-        "UPDATE page_collab_docs SET snapshot = ?, snapshot_seq = ?, updated_at = ? \
-         WHERE page_id = ?",
+        "UPDATE page_collab_docs SET snapshot = $1, snapshot_seq = $2, updated_at = $3 \
+         WHERE page_id = $4",
     )
     .bind(snapshot)
     .bind(seq)
@@ -1502,7 +1522,7 @@ async fn compact_log(
     .bind(page_id.to_string())
     .execute(&mut **tx)
     .await?;
-    sqlx::query("DELETE FROM page_collab_updates WHERE page_id = ? AND seq <= ?")
+    sqlx::query("DELETE FROM page_collab_updates WHERE page_id = $1 AND seq <= $2")
         .bind(page_id.to_string())
         .bind(seq)
         .execute(&mut **tx)

@@ -2119,14 +2119,15 @@ mod tests {
             .next()
             .unwrap()
             .to_owned();
-        repository
-            .database()
-            .execute(
-                "CREATE TRIGGER reject_logout BEFORE UPDATE OF revoked_at ON sessions \
-             BEGIN SELECT RAISE(ABORT, 'revocation unavailable'); END",
-            )
-            .await
-            .unwrap();
+        crate::repositories::fail_writes(
+            repository.database(),
+            "reject_logout",
+            "BEFORE UPDATE OF revoked_at",
+            "sessions",
+            "1 = 1",
+            "revocation unavailable",
+        )
+        .await;
 
         let logout = app
             .clone()
@@ -2471,15 +2472,15 @@ mod tests {
     #[tokio::test]
     async fn login_session_and_success_audit_commit_atomically() {
         let (app, repository, database) = application(CookieMode::secure()).await;
-        repository
-            .database()
-            .execute(
-                "CREATE TRIGGER reject_login_audit BEFORE INSERT ON audit_events \
-                 WHEN NEW.action = 'authentication.login' AND NEW.outcome = 'success' \
-                 BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END",
-            )
-            .await
-            .unwrap();
+        crate::repositories::fail_writes(
+            repository.database(),
+            "reject_login_audit",
+            "BEFORE INSERT",
+            "audit_events",
+            "NEW.action = 'authentication.login' AND NEW.outcome = 'success'",
+            "audit unavailable",
+        )
+        .await;
         let before: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sessions")
             .fetch_one(database.pool())
             .await
@@ -2667,7 +2668,7 @@ mod tests {
         .fetch_one(database.pool()).await.unwrap();
         assert_eq!(profile_events, 1);
         // the picture is an attachment blob, not bytes in the database
-        let in_blob: bool =
+        let orbit_platform::Flag(in_blob) =
             sqlx::query_scalar("SELECT bytes IS NULL AND blob_id IS NOT NULL FROM user_avatars")
                 .fetch_one(database.pool())
                 .await
@@ -2697,7 +2698,7 @@ mod tests {
         let stranger = orbit_platform::Id::new_v7();
         sqlx::query(
             "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) \
-             VALUES (?, 'stranger@example.com', 'stranger@example.com', 'Stranger', 'x', 0, 0)",
+             VALUES ($1, 'stranger@example.com', 'stranger@example.com', 'Stranger', 'x', 0, 0)",
         )
         .bind(stranger.to_string())
         .execute(database.pool())
@@ -2923,7 +2924,15 @@ mod tests {
             .next()
             .unwrap()
             .to_owned();
-        repository.database().execute("CREATE TRIGGER reject_logout_audit BEFORE INSERT ON audit_events WHEN NEW.action = 'session.logout' BEGIN SELECT RAISE(ABORT, 'audit unavailable'); END").await.unwrap();
+        crate::repositories::fail_writes(
+            repository.database(),
+            "reject_logout_audit",
+            "BEFORE INSERT",
+            "audit_events",
+            "NEW.action = 'session.logout'",
+            "audit unavailable",
+        )
+        .await;
 
         let logout = app
             .clone()

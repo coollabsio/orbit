@@ -18,6 +18,7 @@ const HTTP_PUBLIC_ORIGIN_ENV: &str = "ORBIT__HTTP__PUBLIC_ORIGIN";
 const HTTP_TRUSTED_PROXIES_ENV: &str = "ORBIT__HTTP__TRUSTED_PROXIES";
 const ENVIRONMENT_ENV: &str = "ORBIT__ENVIRONMENT";
 const DATA_DATABASE_ENV: &str = "ORBIT__DATA__DATABASE";
+const DATA_DATABASE_URL_ENV: &str = "ORBIT__DATA__DATABASE_URL";
 const DATA_ATTACHMENTS_ENV: &str = "ORBIT__DATA__ATTACHMENTS";
 const DATA_BACKUPS_ENV: &str = "ORBIT__DATA__BACKUPS";
 const JOBS_CONCURRENCY_ENV: &str = "ORBIT__JOBS__CONCURRENCY";
@@ -100,9 +101,12 @@ impl HttpConfig {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct DataConfig {
+    /// The SQLite database; with `database_url` only the directory that holds `app.key`.
     pub database: PathBuf,
+    /// A Postgres URL (`postgres://user:password@host/database`) used instead of SQLite.
+    pub database_url: Option<String>,
     pub attachments: PathBuf,
     pub backups: PathBuf,
 }
@@ -111,9 +115,39 @@ impl Default for DataConfig {
     fn default() -> Self {
         Self {
             database: PathBuf::from("data/orbit.sqlite"),
+            database_url: None,
             attachments: PathBuf::from("data/attachments"),
             backups: PathBuf::from("backups"),
         }
+    }
+}
+
+impl fmt::Debug for DataConfig {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("DataConfig")
+            .field("database", &self.database)
+            .field(
+                "database_url",
+                &self.database_url.as_deref().map(redact_database_url),
+            )
+            .field("attachments", &self.attachments)
+            .field("backups", &self.backups)
+            .finish()
+    }
+}
+
+/// `url` with its password replaced, for logs and error messages.
+#[must_use]
+pub fn redact_database_url(url: &str) -> String {
+    match url::Url::parse(url) {
+        Ok(mut parsed) => {
+            if parsed.password().is_some() {
+                let _ = parsed.set_password(Some("REDACTED"));
+            }
+            parsed.into()
+        }
+        Err(_) => "[invalid database URL]".to_owned(),
     }
 }
 
@@ -318,6 +352,25 @@ impl Config {
             }
             _ => {}
         }
+        if let Some(url) = &self.data.database_url
+            && !(url.starts_with("postgres://") || url.starts_with("postgresql://"))
+        {
+            return Err(ConfigError::InvalidSetting {
+                key: "data.database_url",
+                detail: "must be a postgres:// or postgresql:// URL".to_owned(),
+            });
+        }
+        // With Postgres the database lives on another host and the server can be replaced, so the key
+        // for saved secrets (the S3 secret among them) must come from the configuration, not an
+        // `app.key` file on this server's disk.
+        if self.data.database_url.is_some() && !self.secrets.contains_key("app_key") {
+            return Err(ConfigError::InvalidSetting {
+                key: "secrets.app_key",
+                detail: "a Postgres database (data.database_url) needs secrets.app_key \
+                         (base64 of 32 random bytes): the server keeps no app.key file"
+                    .to_owned(),
+            });
+        }
         if self.jobs.concurrency == 0 {
             return Err(ConfigError::InvalidSetting {
                 key: "jobs.concurrency",
@@ -394,6 +447,7 @@ impl RawConfig {
             },
             data: DataConfig {
                 database: self.data.database,
+                database_url: self.data.database_url.filter(|url| !url.is_empty()),
                 attachments: self.data.attachments,
                 backups: self.data.backups,
             },
@@ -453,6 +507,7 @@ impl Default for RawHttpConfig {
 #[serde(default, deny_unknown_fields)]
 struct RawDataConfig {
     database: PathBuf,
+    database_url: Option<String>,
     attachments: PathBuf,
     backups: PathBuf,
 }
@@ -462,6 +517,7 @@ impl Default for RawDataConfig {
         let defaults = DataConfig::default();
         Self {
             database: defaults.database,
+            database_url: defaults.database_url,
             attachments: defaults.attachments,
             backups: defaults.backups,
         }
@@ -565,6 +621,8 @@ fn apply_environment(
                 .collect::<Result<Vec<_>, _>>()?;
         } else if key == DATA_DATABASE_ENV {
             config.data.database = PathBuf::from(value);
+        } else if key == DATA_DATABASE_URL_ENV {
+            config.data.database_url = Some(value.clone()).filter(|value| !value.is_empty());
         } else if key == DATA_ATTACHMENTS_ENV {
             config.data.attachments = PathBuf::from(value);
         } else if key == DATA_BACKUPS_ENV {

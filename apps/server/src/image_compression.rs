@@ -8,9 +8,8 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use image::imageops::FilterType;
 use image::{DynamicImage, ImageDecoder, ImageFormat, ImageReader};
-use orbit_platform::{Database, UploadError, UploadService};
+use orbit_platform::{Database, Row, UploadError, UploadService};
 use serde::Serialize;
-use sqlx::Row;
 use utoipa::ToSchema;
 
 /// The same limits as the web client (`apps/web/src/lib/shrinkImage.ts`).
@@ -100,7 +99,7 @@ pub async fn compress_images(
     progress: impl Fn(&CompressSummary),
 ) -> Result<CompressSummary, UploadError> {
     let blobs = sqlx::query(
-        "SELECT id, storage_key FROM attachment_blobs WHERE byte_size >= ? ORDER BY created_at, id",
+        "SELECT id, storage_key FROM attachment_blobs WHERE byte_size >= $1 ORDER BY created_at, id",
     )
     .bind(SHRINK_MIN_BYTES)
     .fetch_all(database.pool())

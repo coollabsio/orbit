@@ -1,10 +1,10 @@
 //! Task relations. A duplicate relation is kept in sync with the project's system Duplicate
 //! status: a task is in that status exactly while it has an outgoing duplicate relation.
 
-use orbit_platform::{Id, TimestampMillis};
+use orbit_platform::{Flag, Id, Row, TimestampMillis};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::{Row, Sqlite, Transaction};
+use sqlx::{Any, Transaction};
 use utoipa::ToSchema;
 
 use super::tasks::{
@@ -26,11 +26,11 @@ pub(super) struct RelationActor<'a> {
 }
 
 pub(super) async fn status_category_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     status_id: Id,
 ) -> Result<String, TaskError> {
-    sqlx::query_scalar("SELECT category FROM task_statuses WHERE id = ? AND workspace_id = ?")
+    sqlx::query_scalar("SELECT category FROM task_statuses WHERE id = $1 AND workspace_id = $2")
         .bind(status_id.to_string())
         .bind(workspace_id.to_string())
         .fetch_optional(&mut **tx)
@@ -39,12 +39,12 @@ pub(super) async fn status_category_in_tx(
 }
 
 pub(super) async fn duplicate_status_id_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     project_id: Id,
 ) -> Result<Id, TaskError> {
     let id: String = sqlx::query_scalar(
-        "SELECT id FROM task_statuses WHERE workspace_id = ? AND project_id = ? AND category = 'duplicate'",
+        "SELECT id FROM task_statuses WHERE workspace_id = $1 AND project_id = $2 AND category = 'duplicate'",
     )
     .bind(workspace_id.to_string())
     .bind(project_id.to_string())
@@ -57,7 +57,7 @@ pub(super) async fn duplicate_status_id_in_tx(
 /// Where an unmarked duplicate goes: the status it had before it was marked, while that still
 /// exists in `project_id`, otherwise the project's first unstarted (then first) status.
 pub(super) async fn restore_status_id_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     task_id: Id,
     project_id: Id,
@@ -65,8 +65,8 @@ pub(super) async fn restore_status_id_in_tx(
     let previous: Option<String> = sqlx::query_scalar(
         "SELECT task_statuses.id FROM task_relations \
          JOIN task_statuses ON task_statuses.id = task_relations.previous_status_id \
-         WHERE task_relations.task_id = ? AND task_relations.type = 'duplicate' \
-         AND task_statuses.workspace_id = ? AND task_statuses.project_id = ? \
+         WHERE task_relations.task_id = $1 AND task_relations.type = 'duplicate' \
+         AND task_statuses.workspace_id = $2 AND task_statuses.project_id = $3 \
          AND task_statuses.category <> 'duplicate'",
     )
     .bind(task_id.to_string())
@@ -87,12 +87,12 @@ pub(super) async fn restore_status_id_in_tx(
 /// A project's default status: its first unstarted status, otherwise its first status that is
 /// not the Duplicate status.
 pub(super) async fn default_status_id_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     project_id: Id,
 ) -> Result<Option<Id>, TaskError> {
     sqlx::query_scalar(
-        "SELECT id FROM task_statuses WHERE workspace_id = ? AND project_id = ? AND category <> 'duplicate' \
+        "SELECT id FROM task_statuses WHERE workspace_id = $1 AND project_id = $2 AND category <> 'duplicate' \
          ORDER BY CASE category WHEN 'unstarted' THEN 0 ELSE 1 END, position, id LIMIT 1",
     )
     .bind(workspace_id.to_string())
@@ -106,14 +106,14 @@ pub(super) async fn default_status_id_in_tx(
 /// Moves every duplicate of `task_id` out of the Duplicate status. Run before `task_id` is
 /// hard-deleted: the duplicate relations cascade away, so the duplicates must not stay in it.
 pub(super) async fn release_duplicates_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     task_id: &str,
     now: TimestampMillis,
 ) -> Result<(), TaskError> {
     let duplicates = sqlx::query(
         "SELECT tasks.id, tasks.workspace_id, tasks.project_id FROM task_relations \
          JOIN tasks ON tasks.id = task_relations.task_id \
-         WHERE task_relations.related_task_id = ? AND task_relations.type = 'duplicate'",
+         WHERE task_relations.related_task_id = $1 AND task_relations.type = 'duplicate'",
     )
     .bind(task_id)
     .fetch_all(&mut **tx)
@@ -124,7 +124,7 @@ pub(super) async fn release_duplicates_in_tx(
         let project_id = parse_id(row.get("project_id"))?;
         let status_id = restore_status_id_in_tx(tx, workspace_id, id, project_id).await?;
         sqlx::query(
-            "UPDATE tasks SET status_id = ?, version = version + 1, updated_at = ? WHERE id = ?",
+            "UPDATE tasks SET status_id = $1, version = version + 1, updated_at = $2 WHERE id = $3",
         )
         .bind(status_id.to_string())
         .bind(now.as_millis())
@@ -137,13 +137,13 @@ pub(super) async fn release_duplicates_in_tx(
 
 /// The title of a live task (neither it nor its project is in the trash), if it is one.
 pub(super) async fn visible_task_title_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     task_id: Id,
 ) -> Result<Option<String>, TaskError> {
     Ok(sqlx::query_scalar(
         "SELECT tasks.title FROM tasks JOIN projects ON projects.id = tasks.project_id \
-         WHERE tasks.id = ? AND tasks.workspace_id = ? AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL",
+         WHERE tasks.id = $1 AND tasks.workspace_id = $2 AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL",
     )
     .bind(task_id.to_string())
     .bind(workspace_id.to_string())
@@ -157,7 +157,7 @@ pub(super) async fn visible_task_title_in_tx(
 /// (the canonical, or the blocked task) is `incoming`.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn record_relation_audit(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     actor: RelationActor<'_>,
     action: &str,
@@ -172,7 +172,7 @@ pub(super) async fn record_relation_audit(
         (related_task_id, task_id, "incoming"),
     ] {
         let (title, project_id): (String, String) =
-            sqlx::query_as("SELECT title, project_id FROM tasks WHERE id = ?")
+            sqlx::query_as("SELECT title, project_id FROM tasks WHERE id = $1")
                 .bind(other_id.to_string())
                 .fetch_one(&mut **tx)
                 .await?;
@@ -211,7 +211,7 @@ pub(super) async fn record_relation_audit(
 /// Deletes `task_id`'s duplicate relation, if any, and audits it. The caller owns the task's
 /// status change. Returns whether a relation existed.
 pub(super) async fn delete_duplicate_relation_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     actor: RelationActor<'_>,
     task_id: Id,
@@ -219,7 +219,7 @@ pub(super) async fn delete_duplicate_relation_in_tx(
     now: TimestampMillis,
 ) -> Result<bool, TaskError> {
     let Some(row) = sqlx::query(
-        "SELECT id, related_task_id FROM task_relations WHERE task_id = ? AND type = 'duplicate'",
+        "SELECT id, related_task_id FROM task_relations WHERE task_id = $1 AND type = 'duplicate'",
     )
     .bind(task_id.to_string())
     .fetch_optional(&mut **tx)
@@ -228,7 +228,7 @@ pub(super) async fn delete_duplicate_relation_in_tx(
         return Ok(false);
     };
     let related_task_id = parse_id(row.get("related_task_id"))?;
-    sqlx::query("DELETE FROM task_relations WHERE id = ?")
+    sqlx::query("DELETE FROM task_relations WHERE id = $1")
         .bind(row.get::<String, _>("id"))
         .execute(&mut **tx)
         .await?;
@@ -250,7 +250,7 @@ pub(super) async fn delete_duplicate_relation_in_tx(
 /// Removes a blocks/related relation between two tasks, in either direction, and audits it.
 #[allow(clippy::too_many_arguments)]
 async fn delete_plain_pair_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     actor: RelationActor<'_>,
     first: Id,
@@ -260,7 +260,7 @@ async fn delete_plain_pair_in_tx(
 ) -> Result<(), TaskError> {
     let Some(row) = sqlx::query(
         "SELECT id, task_id, related_task_id, type FROM task_relations WHERE type <> 'duplicate' \
-         AND ((task_id = ? AND related_task_id = ?) OR (task_id = ? AND related_task_id = ?))",
+         AND ((task_id = $1 AND related_task_id = $2) OR (task_id = $3 AND related_task_id = $4))",
     )
     .bind(first.to_string())
     .bind(second.to_string())
@@ -271,7 +271,7 @@ async fn delete_plain_pair_in_tx(
     else {
         return Ok(());
     };
-    sqlx::query("DELETE FROM task_relations WHERE id = ?")
+    sqlx::query("DELETE FROM task_relations WHERE id = $1")
         .bind(row.get::<String, _>("id"))
         .execute(&mut **tx)
         .await?;
@@ -294,7 +294,7 @@ async fn delete_plain_pair_in_tx(
 /// `task_id` are re-pointed to `target_id` (without a version bump) so chains never form.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn mark_duplicate_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     actor: RelationActor<'_>,
     task_id: Id,
@@ -312,8 +312,8 @@ pub(super) async fn mark_duplicate_in_tx(
             field: "duplicate_of_id",
         });
     }
-    let target_is_duplicate: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM task_relations WHERE task_id = ? AND type = 'duplicate')",
+    let Flag(target_is_duplicate) = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM task_relations WHERE task_id = $1 AND type = 'duplicate')",
     )
     .bind(target_id.to_string())
     .fetch_one(&mut **tx)
@@ -324,7 +324,7 @@ pub(super) async fn mark_duplicate_in_tx(
         });
     }
     let existing = sqlx::query(
-        "SELECT id, related_task_id FROM task_relations WHERE task_id = ? AND type = 'duplicate'",
+        "SELECT id, related_task_id FROM task_relations WHERE task_id = $1 AND type = 'duplicate'",
     )
     .bind(task_id.to_string())
     .fetch_optional(&mut **tx)
@@ -341,7 +341,7 @@ pub(super) async fn mark_duplicate_in_tx(
     // Re-point this task's own duplicates first: the chain triggers reject a new duplicate
     // relation for a task that others still point at.
     let followers: Vec<String> = sqlx::query_scalar(
-        "SELECT task_id FROM task_relations WHERE related_task_id = ? AND type = 'duplicate'",
+        "SELECT task_id FROM task_relations WHERE related_task_id = $1 AND type = 'duplicate'",
     )
     .bind(task_id.to_string())
     .fetch_all(&mut **tx)
@@ -359,7 +359,7 @@ pub(super) async fn mark_duplicate_in_tx(
         )
         .await?;
         sqlx::query(
-            "UPDATE task_relations SET related_task_id = ? WHERE task_id = ? AND type = 'duplicate'",
+            "UPDATE task_relations SET related_task_id = $1 WHERE task_id = $2 AND type = 'duplicate'",
         )
         .bind(target_id.to_string())
         .bind(follower.to_string())
@@ -394,7 +394,7 @@ pub(super) async fn mark_duplicate_in_tx(
     match (existing, existing_target) {
         (Some(row), Some(old_target)) => {
             // Re-point, keeping the original previous_status_id.
-            sqlx::query("UPDATE task_relations SET related_task_id = ? WHERE id = ?")
+            sqlx::query("UPDATE task_relations SET related_task_id = $1 WHERE id = $2")
                 .bind(target_id.to_string())
                 .bind(row.get::<String, _>("id"))
                 .execute(&mut **tx)
@@ -415,7 +415,7 @@ pub(super) async fn mark_duplicate_in_tx(
         _ => {
             sqlx::query(
                 "INSERT INTO task_relations (id, workspace_id, task_id, related_task_id, type, previous_status_id, created_by, created_at) \
-                 VALUES (?, ?, ?, ?, 'duplicate', ?, ?, ?)",
+                 VALUES ($1, $2, $3, $4, 'duplicate', $5, $6, $7)",
             )
             .bind(Id::new_v7().to_string())
             .bind(workspace_id.to_string())
@@ -503,15 +503,15 @@ const RELATION_SELECT: &str = "SELECT task_relations.id, task_relations.type, ta
      other.number AS other_number, other.title AS other_title, other.status_id AS other_status_id, \
      other.version AS other_version \
      FROM task_relations \
-     JOIN tasks AS other ON other.id = CASE WHEN task_relations.task_id = ? \
+     JOIN tasks AS other ON other.id = CASE WHEN task_relations.task_id = $1 \
          THEN task_relations.related_task_id ELSE task_relations.task_id END \
      JOIN projects AS other_project ON other_project.id = other.project_id \
-     WHERE task_relations.workspace_id = ? \
-     AND (task_relations.task_id = ? OR task_relations.related_task_id = ?) \
+     WHERE task_relations.workspace_id = $2 \
+     AND (task_relations.task_id = $3 OR task_relations.related_task_id = $4) \
      AND other.deleted_at IS NULL AND other_project.deleted_at IS NULL";
 
 fn relation_from_row(
-    row: &sqlx::sqlite::SqliteRow,
+    row: &sqlx::any::AnyRow,
     viewer_id: Id,
 ) -> Result<TaskRelationRecord, TaskError> {
     let relation_type = match row.get::<String, _>("type").as_str() {
@@ -544,13 +544,13 @@ fn relation_from_row(
 }
 
 async fn relation_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     viewer_id: Id,
     relation_id: Id,
 ) -> Result<TaskRelationRecord, TaskError> {
-    let sql = format!("{RELATION_SELECT} AND task_relations.id = ?");
-    let row = sqlx::query(&sql)
+    let sql = format!("{RELATION_SELECT} AND task_relations.id = $5");
+    let row = sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(viewer_id.to_string())
         .bind(workspace_id.to_string())
         .bind(viewer_id.to_string())
@@ -572,7 +572,7 @@ impl TaskRepository {
         self.get_task(workspace_id, task_id, actor_id).await?;
         let sql =
             format!("{RELATION_SELECT} ORDER BY task_relations.created_at, task_relations.id");
-        sqlx::query(&sql)
+        sqlx::query(sqlx::AssertSqlSafe(sql))
             .bind(task_id.to_string())
             .bind(workspace_id.to_string())
             .bind(task_id.to_string())
@@ -624,7 +624,7 @@ impl TaskRepository {
         };
         let existing = sqlx::query(
             "SELECT id, task_id, related_task_id, type FROM task_relations \
-             WHERE (task_id = ? AND related_task_id = ?) OR (task_id = ? AND related_task_id = ?)",
+             WHERE (task_id = $1 AND related_task_id = $2) OR (task_id = $3 AND related_task_id = $4)",
         )
         .bind(source.to_string())
         .bind(target.to_string())
@@ -647,7 +647,7 @@ impl TaskRepository {
                 tx.commit().await?;
                 return Ok(record);
             }
-            sqlx::query("DELETE FROM task_relations WHERE id = ?")
+            sqlx::query("DELETE FROM task_relations WHERE id = $1")
                 .bind(existing_id.to_string())
                 .execute(&mut *tx)
                 .await?;
@@ -667,7 +667,7 @@ impl TaskRepository {
         let id = Id::new_v7();
         sqlx::query(
             "INSERT INTO task_relations (id, workspace_id, task_id, related_task_id, type, previous_status_id, created_by, created_at) \
-             VALUES (?, ?, ?, ?, ?, NULL, ?, ?)",
+             VALUES ($1, $2, $3, $4, $5, NULL, $6, $7)",
         )
         .bind(id.to_string())
         .bind(workspace_id.to_string())
@@ -742,7 +742,7 @@ impl TaskRepository {
             )
             .await?;
         } else {
-            sqlx::query("DELETE FROM task_relations WHERE id = ?")
+            sqlx::query("DELETE FROM task_relations WHERE id = $1")
                 .bind(relation_id.to_string())
                 .execute(&mut *tx)
                 .await?;

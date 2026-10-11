@@ -4,10 +4,10 @@
 //! teamspace to the top makes it the default.
 
 use orbit_domain::Permission;
-use orbit_platform::{Database, Id, TimestampMillis};
+use orbit_platform::{Database, Flag, Id, Row, TimestampMillis};
 use serde::Serialize;
 use serde_json::Value;
-use sqlx::{Row, Sqlite, Transaction};
+use sqlx::{Any, Transaction};
 use thiserror::Error;
 use utoipa::ToSchema;
 
@@ -125,14 +125,14 @@ impl TeamspaceRepository {
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let position: i64 = sqlx::query_scalar(
-            "SELECT COALESCE(MAX(position) + 1, 0) FROM teamspaces WHERE workspace_id = ?",
+            "SELECT COALESCE(MAX(position) + 1, 0) FROM teamspaces WHERE workspace_id = $1",
         )
         .bind(workspace_id.to_string())
         .fetch_one(&mut *tx)
         .await?;
         sqlx::query(
             "INSERT INTO teamspaces (id, workspace_id, name, icon, position, version, created_by, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)",
+             VALUES ($1, $2, $3, $4, $5, 0, $6, $7, $8)",
         )
         .bind(id.to_string())
         .bind(workspace_id.to_string())
@@ -188,8 +188,8 @@ impl TeamspaceRepository {
         let name = changes.name.unwrap_or_else(|| current.name.clone());
         let icon = changes.icon.unwrap_or_else(|| current.icon.clone());
         sqlx::query(
-            "UPDATE teamspaces SET name = ?, icon = ?, updated_at = ?, version = version + 1 \
-             WHERE id = ? AND workspace_id = ? AND version = ?",
+            "UPDATE teamspaces SET name = $1, icon = $2, updated_at = $3, version = version + 1 \
+             WHERE id = $4 AND workspace_id = $5 AND version = $6",
         )
         .bind(&name)
         .bind(&icon)
@@ -239,7 +239,7 @@ impl TeamspaceRepository {
         let current = teamspace_in_tx(&mut tx, workspace_id, teamspace_id).await?;
         check_version(expected_version, &current)?;
         let mut order = sqlx::query_scalar::<_, String>(
-            "SELECT id FROM teamspaces WHERE workspace_id = ? ORDER BY position, id",
+            "SELECT id FROM teamspaces WHERE workspace_id = $1 ORDER BY position, id",
         )
         .bind(workspace_id.to_string())
         .fetch_all(&mut *tx)
@@ -255,8 +255,8 @@ impl TeamspaceRepository {
         for (position, id) in order.iter().enumerate() {
             if *id == teamspace_id {
                 sqlx::query(
-                    "UPDATE teamspaces SET position = ?, updated_at = ?, version = version + 1 \
-                     WHERE id = ? AND workspace_id = ? AND version = ?",
+                    "UPDATE teamspaces SET position = $1, updated_at = $2, version = version + 1 \
+                     WHERE id = $3 AND workspace_id = $4 AND version = $5",
                 )
                 .bind(position as i64)
                 .bind(now.as_millis())
@@ -267,7 +267,7 @@ impl TeamspaceRepository {
                 .await?;
             } else {
                 sqlx::query(
-                    "UPDATE teamspaces SET position = ? WHERE id = ? AND workspace_id = ? AND position <> ?",
+                    "UPDATE teamspaces SET position = $1 WHERE id = $2 AND workspace_id = $3 AND position <> $4",
                 )
                 .bind(position as i64)
                 .bind(id.to_string())
@@ -339,8 +339,8 @@ impl TeamspaceRepository {
         let current = teamspace_in_tx(&mut tx, workspace_id, teamspace_id).await?;
         check_version(expected_version, &current)?;
         let (teamspaces, live_pages): (i64, i64) = sqlx::query_as(
-            "SELECT (SELECT COUNT(*) FROM teamspaces WHERE workspace_id = ?), \
-             (SELECT COUNT(*) FROM pages WHERE teamspace_id = ? AND deleted_at IS NULL)",
+            "SELECT (SELECT COUNT(*) FROM teamspaces WHERE workspace_id = $1), \
+             (SELECT COUNT(*) FROM pages WHERE teamspace_id = $2 AND deleted_at IS NULL)",
         )
         .bind(workspace_id.to_string())
         .bind(teamspace_id.to_string())
@@ -354,11 +354,11 @@ impl TeamspaceRepository {
         }
         // The trashed pages go explicitly, in one statement (pages.parent_id is ON DELETE SET
         // NULL, so the order inside it does not matter), before the teamspace row itself.
-        sqlx::query("DELETE FROM pages WHERE teamspace_id = ?")
+        sqlx::query("DELETE FROM pages WHERE teamspace_id = $1")
             .bind(teamspace_id.to_string())
             .execute(&mut *tx)
             .await?;
-        sqlx::query("DELETE FROM teamspaces WHERE id = ? AND workspace_id = ?")
+        sqlx::query("DELETE FROM teamspaces WHERE id = $1 AND workspace_id = $2")
             .bind(teamspace_id.to_string())
             .bind(workspace_id.to_string())
             .execute(&mut *tx)
@@ -381,12 +381,12 @@ impl TeamspaceRepository {
 
 /// The workspace's teamspaces ordered by `position, id`; the first one is the default.
 async fn ordered_teamspaces(
-    connection: &mut sqlx::SqliteConnection,
+    connection: &mut sqlx::AnyConnection,
     workspace_id: Id,
 ) -> Result<TeamspaceList, TeamspaceError> {
-    let rows = sqlx::query(&format!(
-        "SELECT {TEAMSPACE_COLUMNS} FROM teamspaces WHERE workspace_id = ? ORDER BY position, id"
-    ))
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "SELECT {TEAMSPACE_COLUMNS} FROM teamspaces WHERE workspace_id = $1 ORDER BY position, id"
+    )))
     .bind(workspace_id.to_string())
     .fetch_all(&mut *connection)
     .await?;
@@ -400,14 +400,14 @@ async fn ordered_teamspaces(
 
 /// Creates the default "General" teamspace of a new workspace, inside its creating transaction.
 pub(super) async fn insert_default_teamspace(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     created_by: Id,
     now: TimestampMillis,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "INSERT INTO teamspaces (id, workspace_id, name, icon, position, version, created_by, created_at, updated_at) \
-         VALUES (?, ?, ?, NULL, 0, 0, ?, ?, ?)",
+         VALUES ($1, $2, $3, NULL, 0, 0, $4, $5, $6)",
     )
     .bind(Id::new_v7().to_string())
     .bind(workspace_id.to_string())
@@ -422,11 +422,11 @@ pub(super) async fn insert_default_teamspace(
 
 /// The workspace's default teamspace: the lowest `(position, id)`.
 pub(super) async fn default_teamspace(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
 ) -> Result<Option<Id>, sqlx::Error> {
     sqlx::query_scalar::<_, String>(
-        "SELECT id FROM teamspaces WHERE workspace_id = ? ORDER BY position, id LIMIT 1",
+        "SELECT id FROM teamspaces WHERE workspace_id = $1 ORDER BY position, id LIMIT 1",
     )
     .bind(workspace_id.to_string())
     .fetch_optional(&mut **tx)
@@ -439,25 +439,28 @@ pub(super) async fn default_teamspace(
 }
 
 pub(super) async fn teamspace_exists(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     teamspace_id: Id,
 ) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM teamspaces WHERE id = ? AND workspace_id = ?)")
-        .bind(teamspace_id.to_string())
-        .bind(workspace_id.to_string())
-        .fetch_one(&mut **tx)
-        .await
+    let Flag(found) = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM teamspaces WHERE id = $1 AND workspace_id = $2)",
+    )
+    .bind(teamspace_id.to_string())
+    .bind(workspace_id.to_string())
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(found)
 }
 
 async fn teamspace_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     teamspace_id: Id,
 ) -> Result<TeamspaceRecord, TeamspaceError> {
-    let row = sqlx::query(&format!(
-        "SELECT {TEAMSPACE_COLUMNS} FROM teamspaces WHERE id = ? AND workspace_id = ?"
-    ))
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "SELECT {TEAMSPACE_COLUMNS} FROM teamspaces WHERE id = $1 AND workspace_id = $2"
+    )))
     .bind(teamspace_id.to_string())
     .bind(workspace_id.to_string())
     .fetch_optional(&mut **tx)
@@ -478,7 +481,7 @@ fn check_version(expected: u64, record: &TeamspaceRecord) -> Result<(), Teamspac
 }
 
 fn teamspace_from_row(
-    row: sqlx::sqlite::SqliteRow,
+    row: sqlx::any::AnyRow,
     is_default: bool,
 ) -> Result<TeamspaceRecord, TeamspaceError> {
     Ok(TeamspaceRecord {

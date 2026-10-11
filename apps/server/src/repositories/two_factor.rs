@@ -3,10 +3,9 @@
 use base64::Engine as _;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use orbit_platform::{
-    AuthenticatedUser, Id, IssuedSession, TimestampMillis, generate_opaque_token,
+    AuthenticatedUser, Id, IssuedSession, Row, TimestampMillis, generate_opaque_token,
 };
 use serde::Serialize;
-use sqlx::Row;
 use utoipa::ToSchema;
 use webauthn_rs::prelude::Passkey;
 
@@ -105,21 +104,21 @@ impl IdentityRepository {
     pub async fn two_factor_status(&self, user_id: Id) -> Result<TwoFactorStatus, IdentityError> {
         let row = sqlx::query(
             "SELECT \
-               EXISTS (SELECT 1 FROM user_totp WHERE user_id = ?1 AND enabled_at IS NOT NULL) AS totp_enabled, \
-               (SELECT COUNT(*) FROM user_recovery_codes WHERE user_id = ?1) AS recovery_codes_left",
+               EXISTS (SELECT 1 FROM user_totp WHERE user_id = $1 AND enabled_at IS NOT NULL) AS totp_enabled, \
+               (SELECT COUNT(*) FROM user_recovery_codes WHERE user_id = $1) AS recovery_codes_left",
         )
         .bind(user_id.to_string())
         .fetch_one(self.database().pool())
         .await?;
         Ok(TwoFactorStatus {
-            totp_enabled: row.get::<i64, _>("totp_enabled") == 1,
+            totp_enabled: row.get::<bool, _>("totp_enabled"),
             recovery_codes_left: row.get("recovery_codes_left"),
         })
     }
 
     pub async fn totp(&self, user_id: Id) -> Result<Option<StoredTotp>, IdentityError> {
         let row = sqlx::query(
-            "SELECT secret, enabled_at, last_used_step FROM user_totp WHERE user_id = ?",
+            "SELECT secret, enabled_at, last_used_step FROM user_totp WHERE user_id = $1",
         )
         .bind(user_id.to_string())
         .fetch_optional(self.database().pool())
@@ -139,8 +138,8 @@ impl IdentityRepository {
         now: TimestampMillis,
     ) -> Result<bool, IdentityError> {
         let changed = sqlx::query(
-            "INSERT INTO user_totp (user_id, secret, created_at) VALUES (?1, ?2, ?3) \
-             ON CONFLICT (user_id) DO UPDATE SET secret = ?2, created_at = ?3, last_used_step = 0 \
+            "INSERT INTO user_totp (user_id, secret, created_at) VALUES ($1, $2, $3) \
+             ON CONFLICT (user_id) DO UPDATE SET secret = $2, created_at = $3, last_used_step = 0 \
              WHERE user_totp.enabled_at IS NULL",
         )
         .bind(user_id.to_string())
@@ -163,8 +162,8 @@ impl IdentityRepository {
     ) -> Result<Option<Vec<String>>, IdentityError> {
         let mut transaction = self.database().immediate_transaction().await?;
         let changed = sqlx::query(
-            "UPDATE user_totp SET enabled_at = ?, last_used_step = ? \
-             WHERE user_id = ? AND enabled_at IS NULL",
+            "UPDATE user_totp SET enabled_at = $1, last_used_step = $2 \
+             WHERE user_id = $3 AND enabled_at IS NULL",
         )
         .bind(now.as_millis())
         .bind(step)
@@ -196,8 +195,8 @@ impl IdentityRepository {
     /// step or a newer one was already accepted.
     pub async fn use_totp_step(&self, user_id: Id, step: i64) -> Result<bool, IdentityError> {
         let changed = sqlx::query(
-            "UPDATE user_totp SET last_used_step = ? \
-             WHERE user_id = ? AND enabled_at IS NOT NULL AND last_used_step < ?",
+            "UPDATE user_totp SET last_used_step = $1 \
+             WHERE user_id = $2 AND enabled_at IS NOT NULL AND last_used_step < $3",
         )
         .bind(step)
         .bind(user_id.to_string())
@@ -218,7 +217,7 @@ impl IdentityRepository {
     ) -> Result<bool, IdentityError> {
         let mut transaction = self.database().immediate_transaction().await?;
         let used =
-            sqlx::query("DELETE FROM user_recovery_codes WHERE user_id = ? AND code_hash = ?")
+            sqlx::query("DELETE FROM user_recovery_codes WHERE user_id = $1 AND code_hash = $2")
                 .bind(user_id.to_string())
                 .bind(token_hash(&normalized_recovery_code(code)).to_vec())
                 .execute(&mut *transaction)
@@ -252,7 +251,7 @@ impl IdentityRepository {
     ) -> Result<Option<Vec<String>>, IdentityError> {
         let mut transaction = self.database().immediate_transaction().await?;
         let enabled = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM user_totp WHERE user_id = ? AND enabled_at IS NOT NULL",
+            "SELECT COUNT(*) FROM user_totp WHERE user_id = $1 AND enabled_at IS NOT NULL",
         )
         .bind(user_id.to_string())
         .fetch_one(&mut *transaction)
@@ -319,7 +318,7 @@ impl IdentityRepository {
             return Err(AdminAccountError::OwnAccount);
         }
         Self::may_manage(&mut transaction, actor_id, user_id).await?;
-        let exists = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE id = ?")
+        let exists = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE id = $1")
             .bind(user_id.to_string())
             .fetch_one(&mut *transaction)
             .await?;
@@ -346,7 +345,7 @@ impl IdentityRepository {
     pub async fn list_passkeys(&self, user_id: Id) -> Result<Vec<PasskeyRecord>, IdentityError> {
         let rows = sqlx::query(
             "SELECT id, name, created_at, last_used_at FROM user_passkeys \
-             WHERE user_id = ? ORDER BY created_at, id",
+             WHERE user_id = $1 ORDER BY created_at, id",
         )
         .bind(user_id.to_string())
         .fetch_all(self.database().pool())
@@ -367,7 +366,7 @@ impl IdentityRepository {
     /// The credentials of an account, so a new passkey on the same device is refused by the browser.
     pub async fn passkeys_of(&self, user_id: Id) -> Result<Vec<Passkey>, IdentityError> {
         let rows =
-            sqlx::query_scalar::<_, String>("SELECT passkey FROM user_passkeys WHERE user_id = ?")
+            sqlx::query_scalar::<_, String>("SELECT passkey FROM user_passkeys WHERE user_id = $1")
                 .bind(user_id.to_string())
                 .fetch_all(self.database().pool())
                 .await?;
@@ -389,7 +388,7 @@ impl IdentityRepository {
         let mut transaction = self.database().immediate_transaction().await?;
         let inserted = sqlx::query(
             "INSERT INTO user_passkeys (id, user_id, credential_id, name, passkey, created_at) \
-             VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (credential_id) DO NOTHING",
+             VALUES ($1, $2, $3, $4, $5, $6) ON CONFLICT (credential_id) DO NOTHING",
         )
         .bind(id.to_string())
         .bind(user_id.to_string())
@@ -433,7 +432,7 @@ impl IdentityRepository {
         now: TimestampMillis,
     ) -> Result<bool, IdentityError> {
         let mut transaction = self.database().immediate_transaction().await?;
-        let deleted = sqlx::query("DELETE FROM user_passkeys WHERE id = ? AND user_id = ?")
+        let deleted = sqlx::query("DELETE FROM user_passkeys WHERE id = $1 AND user_id = $2")
             .bind(passkey_id.to_string())
             .bind(user_id.to_string())
             .execute(&mut *transaction)
@@ -463,7 +462,7 @@ impl IdentityRepository {
         credential_id: &[u8],
     ) -> Result<Option<StoredPasskey>, IdentityError> {
         let row =
-            sqlx::query("SELECT id, user_id, passkey FROM user_passkeys WHERE credential_id = ?")
+            sqlx::query("SELECT id, user_id, passkey FROM user_passkeys WHERE credential_id = $1")
                 .bind(credential_key(credential_id))
                 .fetch_optional(self.database().pool())
                 .await?;
@@ -496,7 +495,7 @@ impl IdentityRepository {
             .map_err(|_| IdentityError::InvalidIdentifier)?;
         let mut transaction = self.database().immediate_transaction().await?;
         let updated = sqlx::query(
-            "UPDATE user_passkeys SET passkey = ?, last_used_at = ? WHERE id = ? AND user_id = ?",
+            "UPDATE user_passkeys SET passkey = $1, last_used_at = $2 WHERE id = $3 AND user_id = $4",
         )
         .bind(json)
         .bind(now.as_millis())
@@ -506,7 +505,7 @@ impl IdentityRepository {
         .await?
         .rows_affected();
         let user = sqlx::query(
-            "SELECT email, display_name FROM users WHERE id = ? AND suspended_at IS NULL",
+            "SELECT email, display_name FROM users WHERE id = $1 AND suspended_at IS NULL",
         )
         .bind(passkey.user_id.to_string())
         .fetch_optional(&mut *transaction)
@@ -540,18 +539,18 @@ impl IdentityRepository {
 }
 
 async fn replace_recovery_codes(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    transaction: &mut sqlx::Transaction<'_, sqlx::Any>,
     user_id: Id,
     now: TimestampMillis,
 ) -> Result<Vec<String>, sqlx::Error> {
-    sqlx::query("DELETE FROM user_recovery_codes WHERE user_id = ?")
+    sqlx::query("DELETE FROM user_recovery_codes WHERE user_id = $1")
         .bind(user_id.to_string())
         .execute(&mut **transaction)
         .await?;
     let codes = new_recovery_codes();
     for code in &codes {
         sqlx::query(
-            "INSERT INTO user_recovery_codes (user_id, code_hash, created_at) VALUES (?, ?, ?)",
+            "INSERT INTO user_recovery_codes (user_id, code_hash, created_at) VALUES ($1, $2, $3)",
         )
         .bind(user_id.to_string())
         .bind(token_hash(&normalized_recovery_code(code)).to_vec())
@@ -563,14 +562,14 @@ async fn replace_recovery_codes(
 }
 
 async fn delete_two_factor(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    transaction: &mut sqlx::Transaction<'_, sqlx::Any>,
     user_id: Id,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query("DELETE FROM user_totp WHERE user_id = ?")
+    sqlx::query("DELETE FROM user_totp WHERE user_id = $1")
         .bind(user_id.to_string())
         .execute(&mut **transaction)
         .await?;
-    sqlx::query("DELETE FROM user_recovery_codes WHERE user_id = ?")
+    sqlx::query("DELETE FROM user_recovery_codes WHERE user_id = $1")
         .bind(user_id.to_string())
         .execute(&mut **transaction)
         .await?;

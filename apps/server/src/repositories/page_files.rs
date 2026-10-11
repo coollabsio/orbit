@@ -5,16 +5,16 @@
 //! page's by nobody.
 
 use orbit_platform::{
-    AuthorizedAttachment, BlobDownload, Database, Id, StagedUpload, TimestampMillis, UploadError,
-    UploadService,
+    AuthorizedAttachment, BlobDownload, Database, Flag, Id, Row, StagedUpload, TimestampMillis,
+    UploadError, UploadService,
 };
 use serde::Serialize;
 use serde_json::json;
-use sqlx::{Row, Sqlite, Transaction};
+use sqlx::{Any, Transaction};
 use thiserror::Error;
 use utoipa::ToSchema;
 
-use super::pages::VISIBLE;
+use super::pages::visible;
 use crate::audit::{self, AuditOutcome};
 
 /// A file attached to a page.
@@ -128,7 +128,7 @@ impl PageFileRepository {
         let size = i64::try_from(upload.size_bytes).map_err(|_| UploadError::SizeOverflow)?;
         sqlx::query(
             "INSERT INTO page_files (id, workspace_id, page_id, blob_id, file_name, mime_type, \
-             size_bytes, uploaded_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             size_bytes, uploaded_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
         )
         .bind(id.to_string())
         .bind(workspace_id.to_string())
@@ -226,34 +226,36 @@ impl PageFileRepository {
 
 /// True when the page has a file with this id (used to validate uploaded covers).
 pub(super) async fn page_has_file(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     page_id: Id,
     file_id: Id,
 ) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM page_files WHERE id = ? AND page_id = ? AND workspace_id = ?)",
+    let Flag(found) = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM page_files WHERE id = $1 AND page_id = $2 AND workspace_id = $3)",
     )
     .bind(file_id.to_string())
     .bind(page_id.to_string())
     .bind(workspace_id.to_string())
     .fetch_one(&mut **tx)
-    .await
+    .await?;
+    Ok(found)
 }
 
 async fn require_live_page(
-    connection: &mut sqlx::SqliteConnection,
+    connection: &mut sqlx::AnyConnection,
     workspace_id: Id,
     page_id: Id,
     actor_id: Id,
 ) -> Result<(), PageFileError> {
-    let allowed: bool = sqlx::query_scalar(&format!(
+    let Flag(allowed) = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT EXISTS(SELECT 1 FROM pages \
          JOIN workspaces ON workspaces.id = pages.workspace_id \
-         JOIN memberships ON memberships.workspace_id = pages.workspace_id AND memberships.user_id = ? \
-         WHERE pages.id = ? AND pages.workspace_id = ? AND pages.deleted_at IS NULL \
-         AND workspaces.deleted_at IS NULL AND {VISIBLE})"
-    ))
+         JOIN memberships ON memberships.workspace_id = pages.workspace_id AND memberships.user_id = $1 \
+         WHERE pages.id = $2 AND pages.workspace_id = $3 AND pages.deleted_at IS NULL \
+         AND workspaces.deleted_at IS NULL AND {visible})",
+        visible = visible(4)
+    )))
     .bind(actor_id.to_string())
     .bind(page_id.to_string())
     .bind(workspace_id.to_string())
@@ -274,17 +276,18 @@ async fn authorized_file(
     file_id: Id,
     actor_id: Id,
 ) -> Result<AuthorizedAttachment, PageFileError> {
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT attachment_blobs.storage_key AS storage_key, page_files.mime_type AS mime_type, \
          page_files.file_name AS file_name FROM page_files \
          JOIN attachment_blobs ON attachment_blobs.id = page_files.blob_id \
          AND attachment_blobs.workspace_id = page_files.workspace_id \
          JOIN pages ON pages.id = page_files.page_id AND pages.workspace_id = page_files.workspace_id \
          JOIN workspaces ON workspaces.id = page_files.workspace_id \
-         JOIN memberships ON memberships.workspace_id = page_files.workspace_id AND memberships.user_id = ? \
-         WHERE page_files.id = ? AND page_files.page_id = ? AND page_files.workspace_id = ? \
-         AND pages.deleted_at IS NULL AND workspaces.deleted_at IS NULL AND {VISIBLE}"
-    ))
+         JOIN memberships ON memberships.workspace_id = page_files.workspace_id AND memberships.user_id = $1 \
+         WHERE page_files.id = $2 AND page_files.page_id = $3 AND page_files.workspace_id = $4 \
+         AND pages.deleted_at IS NULL AND workspaces.deleted_at IS NULL AND {visible}",
+        visible = visible(5)
+    )))
     .bind(actor_id.to_string())
     .bind(file_id.to_string())
     .bind(page_id.to_string())

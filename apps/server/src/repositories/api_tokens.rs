@@ -1,13 +1,21 @@
-use orbit_domain::{Actor, Permission};
-use orbit_platform::{Database, Id, TimestampMillis, generate_opaque_token};
+use orbit_domain::Permission;
+use orbit_platform::{Database, Id, TimestampMillis, generate_opaque_token, orm_write_transaction};
+use sea_orm::ActiveValue::{NotSet, Set};
+use sea_orm::sea_query::{Expr, Func};
+use sea_orm::{
+    ColumnTrait, Condition, ConnectionTrait, DatabaseConnection, DbErr, EntityTrait, ExprTrait,
+    FromQueryResult, JoinType, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, RelationTrait,
+};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use sqlx::Row;
 use thiserror::Error;
 use utoipa::ToSchema;
 
 use super::membership;
 use crate::audit::{self, AuditOutcome};
+use crate::entities::{
+    api_token_projects, api_tokens, memberships, projects, service_accounts, users, workspaces,
+};
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct ApiTokenRecord {
@@ -61,20 +69,42 @@ pub enum ApiTokenError {
     #[error("workspace administrator access is required")]
     Forbidden,
     #[error("api token repository is unavailable")]
-    Unavailable(#[from] sqlx::Error),
+    Unavailable(#[from] DbErr),
     #[error("api token repository contains an invalid identifier")]
     InvalidIdentifier,
 }
 
 #[derive(Clone, Debug)]
 pub struct ApiTokenRepository {
-    database: Database,
+    connection: DatabaseConnection,
+}
+
+/// One row of `list`: the token and the name of its service account.
+#[derive(Debug, FromQueryResult)]
+struct ListRow {
+    id: String,
+    name: String,
+    token_prefix: String,
+    can_read: i64,
+    can_write: i64,
+    project_id: Option<String>,
+    created_at: i64,
+    last_used_at: Option<i64>,
+    expires_at: Option<i64>,
+    service_account_id: Option<String>,
+    service_account_name: Option<String>,
 }
 
 impl ApiTokenRepository {
     #[must_use]
     pub fn new(database: Database) -> Self {
-        Self { database }
+        Self::with_connection(database.orm().clone())
+    }
+
+    /// A repository on any SeaORM connection, e.g. Postgres.
+    #[must_use]
+    pub fn with_connection(connection: DatabaseConnection) -> Self {
+        Self { connection }
     }
 
     pub async fn list(
@@ -82,12 +112,36 @@ impl ApiTokenRepository {
         workspace_id: Id,
         actor_id: Id,
     ) -> Result<Vec<ApiTokenRecord>, ApiTokenError> {
-        self.require_manager(workspace_id, actor_id).await?;
-        let rows = sqlx::query("SELECT api_tokens.id, api_tokens.name, api_tokens.token_prefix, api_tokens.can_read, api_tokens.can_write, api_tokens.project_id, api_tokens.created_at, api_tokens.last_used_at, api_tokens.expires_at, api_tokens.service_account_id, service_accounts.name AS service_account_name FROM api_tokens LEFT JOIN service_accounts ON service_accounts.id = api_tokens.service_account_id WHERE api_tokens.workspace_id = ? AND api_tokens.revoked_at IS NULL ORDER BY api_tokens.created_at DESC, api_tokens.id DESC")
-            .bind(workspace_id.to_string()).fetch_all(self.database.pool()).await?;
+        require_manager(&self.connection, workspace_id, actor_id).await?;
+        let rows = api_tokens::Entity::find()
+            .select_only()
+            .columns([
+                api_tokens::Column::Id,
+                api_tokens::Column::Name,
+                api_tokens::Column::TokenPrefix,
+                api_tokens::Column::CanRead,
+                api_tokens::Column::CanWrite,
+                api_tokens::Column::ProjectId,
+                api_tokens::Column::CreatedAt,
+                api_tokens::Column::LastUsedAt,
+                api_tokens::Column::ExpiresAt,
+                api_tokens::Column::ServiceAccountId,
+            ])
+            .column_as(service_accounts::Column::Name, "service_account_name")
+            .join(
+                JoinType::LeftJoin,
+                api_tokens::Relation::ServiceAccount.def(),
+            )
+            .filter(api_tokens::Column::WorkspaceId.eq(workspace_id.to_string()))
+            .filter(api_tokens::Column::RevokedAt.is_null())
+            .order_by_desc(api_tokens::Column::CreatedAt)
+            .order_by_desc(api_tokens::Column::Id)
+            .into_model::<ListRow>()
+            .all(&self.connection)
+            .await?;
         let mut records = Vec::with_capacity(rows.len());
         for row in rows {
-            let id = parse_id(&row, "id")?;
+            let id = parse_id(&row.id)?;
             records.push(decode(row, self.project_ids(id).await?)?);
         }
         Ok(records)
@@ -107,33 +161,42 @@ impl ApiTokenRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<IssuedApiToken, ApiTokenError> {
-        let mut transaction = self.database.immediate_transaction().await?;
-        require_manager_in(&mut transaction, workspace_id, actor_id).await?;
+        let transaction = orm_write_transaction(&self.connection).await?;
+        require_manager(&transaction, workspace_id, actor_id).await?;
         if project_ids.is_empty() {
             return Err(ApiTokenError::NotFound);
         }
         for project_id in &project_ids {
-            require_active_project(&mut transaction, workspace_id, *project_id).await?;
+            require_active_project(&transaction, workspace_id, *project_id).await?;
         }
         let id = Id::new_v7();
         let (service_account_id, service_account_name) = if service_account {
-            match sqlx::query_as::<_, (String, String)>(
-                "SELECT id, name FROM service_accounts WHERE workspace_id = ? AND lower(name) = lower(?) AND disabled_at IS NULL",
-            )
-            .bind(workspace_id.to_string())
-            .bind(&name)
-            .fetch_optional(&mut *transaction)
-            .await?
-            {
-                Some((id, account_name)) => (
-                    Some(id.parse().map_err(|_| ApiTokenError::InvalidIdentifier)?),
-                    Some(account_name),
-                ),
+            let existing: Option<(String, String)> = service_accounts::Entity::find()
+                .select_only()
+                .columns([service_accounts::Column::Id, service_accounts::Column::Name])
+                .filter(service_accounts::Column::WorkspaceId.eq(workspace_id.to_string()))
+                .filter(
+                    Func::lower(Expr::col(service_accounts::Column::Name))
+                        .eq(Func::lower(Expr::val(&name))),
+                )
+                .filter(service_accounts::Column::DisabledAt.is_null())
+                .into_tuple()
+                .one(&transaction)
+                .await?;
+            match existing {
+                Some((id, account_name)) => (Some(parse_id(&id)?), Some(account_name)),
                 None => {
                     let id = Id::new_v7();
-                    sqlx::query("INSERT INTO service_accounts (id, workspace_id, name, created_by, created_at) VALUES (?, ?, ?, ?, ?)")
-                        .bind(id.to_string()).bind(workspace_id.to_string()).bind(&name)
-                        .bind(actor_id.to_string()).bind(now.as_millis()).execute(&mut *transaction).await?;
+                    service_accounts::Entity::insert(service_accounts::ActiveModel {
+                        id: Set(id.to_string()),
+                        workspace_id: Set(workspace_id.to_string()),
+                        name: Set(name.clone()),
+                        created_by: Set(actor_id.to_string()),
+                        created_at: Set(now.as_millis()),
+                        disabled_at: NotSet,
+                    })
+                    .exec_without_returning(&transaction)
+                    .await?;
                     (Some(id), Some(name.clone()))
                 }
             }
@@ -143,19 +206,34 @@ impl ApiTokenRepository {
         let token = format!("orb_{}", generate_opaque_token());
         let hash: [u8; 32] = Sha256::digest(token.as_bytes()).into();
         let prefix: String = token.chars().take(12).collect();
-        sqlx::query("INSERT INTO api_tokens (id, workspace_id, project_id, name, token_hash, token_prefix, can_read, can_write, created_by, created_at, service_account_id, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
-            .bind(id.to_string()).bind(workspace_id.to_string()).bind(project_ids[0].to_string()).bind(&name).bind(hash.to_vec()).bind(&prefix)
-            .bind(i64::from(can_read)).bind(i64::from(can_write)).bind(actor_id.to_string()).bind(now.as_millis()).bind(service_account_id.map(|id| id.to_string())).bind(expires_at.map(TimestampMillis::as_millis))
-            .execute(&mut *transaction).await?;
-        for project_id in &project_ids {
-            sqlx::query("INSERT INTO api_token_projects (token_id, project_id) VALUES (?, ?)")
-                .bind(id.to_string())
-                .bind(project_id.to_string())
-                .execute(&mut *transaction)
-                .await?;
-        }
-        audit::record(
-            &mut transaction,
+        api_tokens::Entity::insert(api_tokens::ActiveModel {
+            id: Set(id.to_string()),
+            workspace_id: Set(workspace_id.to_string()),
+            project_id: Set(Some(project_ids[0].to_string())),
+            name: Set(name.clone()),
+            token_hash: Set(hash.to_vec()),
+            token_prefix: Set(prefix.clone()),
+            can_read: Set(i64::from(can_read)),
+            can_write: Set(i64::from(can_write)),
+            created_by: Set(actor_id.to_string()),
+            created_at: Set(now.as_millis()),
+            last_used_at: NotSet,
+            revoked_at: NotSet,
+            service_account_id: Set(service_account_id.map(|id| id.to_string())),
+            expires_at: Set(expires_at.map(TimestampMillis::as_millis)),
+        })
+        .exec_without_returning(&transaction)
+        .await?;
+        api_token_projects::Entity::insert_many(project_ids.iter().map(|project_id| {
+            api_token_projects::ActiveModel {
+                token_id: Set(id.to_string()),
+                project_id: Set(project_id.to_string()),
+            }
+        }))
+        .exec_without_returning(&transaction)
+        .await?;
+        audit::record_orm(
+            &transaction,
             workspace_id,
             Some(actor_id),
             "api_token.create",
@@ -193,24 +271,77 @@ impl ApiTokenRepository {
         now: TimestampMillis,
     ) -> Result<ApiTokenPrincipal, ApiTokenError> {
         let hash: [u8; 32] = Sha256::digest(token.as_bytes()).into();
-        let row = sqlx::query(
-            "SELECT api_tokens.id, api_tokens.workspace_id, api_tokens.created_by, api_tokens.service_account_id, api_tokens.can_read, api_tokens.can_write \
-             FROM api_tokens JOIN workspaces ON workspaces.id = api_tokens.workspace_id \
-             LEFT JOIN users ON users.id = api_tokens.created_by AND users.suspended_at IS NULL \
-             LEFT JOIN memberships ON memberships.workspace_id = api_tokens.workspace_id AND memberships.user_id = api_tokens.created_by \
-             LEFT JOIN service_accounts ON service_accounts.id = api_tokens.service_account_id AND service_accounts.workspace_id = api_tokens.workspace_id AND service_accounts.disabled_at IS NULL \
-             WHERE api_tokens.token_hash = ? AND api_tokens.revoked_at IS NULL AND workspaces.deleted_at IS NULL \
-             AND (api_tokens.expires_at IS NULL OR api_tokens.expires_at > ?) \
-             AND ((api_tokens.service_account_id IS NOT NULL AND service_accounts.id IS NOT NULL) \
-               OR (api_tokens.service_account_id IS NULL AND users.id IS NOT NULL AND memberships.id IS NOT NULL))",
-        )
-        .bind(hash.to_vec())
-        .bind(now.as_millis())
-        .fetch_optional(self.database.pool())
-        .await?
-        .ok_or(ApiTokenError::NotFound)?;
-        let can_read = row.get::<i64, _>("can_read") != 0;
-        let can_write = row.get::<i64, _>("can_write") != 0;
+        let (id, workspace_id, created_by, service_account_id, can_read, can_write): (
+            String,
+            String,
+            String,
+            Option<String>,
+            i64,
+            i64,
+        ) = api_tokens::Entity::find()
+            .select_only()
+            .columns([
+                api_tokens::Column::Id,
+                api_tokens::Column::WorkspaceId,
+                api_tokens::Column::CreatedBy,
+                api_tokens::Column::ServiceAccountId,
+                api_tokens::Column::CanRead,
+                api_tokens::Column::CanWrite,
+            ])
+            .join(JoinType::InnerJoin, api_tokens::Relation::Workspace.def())
+            .join(
+                JoinType::LeftJoin,
+                api_tokens::Relation::Creator.def().on_condition(|_, _| {
+                    Condition::all().add(users::Column::SuspendedAt.is_null())
+                }),
+            )
+            .join(
+                JoinType::LeftJoin,
+                api_tokens::Relation::CreatorMembership.def(),
+            )
+            .join(
+                JoinType::LeftJoin,
+                api_tokens::Relation::ServiceAccount
+                    .def()
+                    .on_condition(|_, _| {
+                        Condition::all()
+                            .add(
+                                Expr::col((
+                                    service_accounts::Entity,
+                                    service_accounts::Column::WorkspaceId,
+                                ))
+                                .equals((api_tokens::Entity, api_tokens::Column::WorkspaceId)),
+                            )
+                            .add(service_accounts::Column::DisabledAt.is_null())
+                    }),
+            )
+            .filter(api_tokens::Column::TokenHash.eq(hash.to_vec()))
+            .filter(api_tokens::Column::RevokedAt.is_null())
+            .filter(workspaces::Column::DeletedAt.is_null())
+            .filter(
+                Condition::any()
+                    .add(api_tokens::Column::ExpiresAt.is_null())
+                    .add(api_tokens::Column::ExpiresAt.gt(now.as_millis())),
+            )
+            .filter(
+                Condition::any()
+                    .add(
+                        Condition::all()
+                            .add(api_tokens::Column::ServiceAccountId.is_not_null())
+                            .add(service_accounts::Column::Id.is_not_null()),
+                    )
+                    .add(
+                        Condition::all()
+                            .add(api_tokens::Column::ServiceAccountId.is_null())
+                            .add(users::Column::Id.is_not_null())
+                            .add(memberships::Column::Id.is_not_null()),
+                    ),
+            )
+            .into_tuple()
+            .one(&self.connection)
+            .await?
+            .ok_or(ApiTokenError::NotFound)?;
+        let (can_read, can_write) = (can_read != 0, can_write != 0);
         let allowed = match required_scope {
             ApiTokenScope::Read => can_read,
             ApiTokenScope::Write => can_write,
@@ -218,30 +349,18 @@ impl ApiTokenRepository {
         if !allowed {
             return Err(ApiTokenError::Forbidden);
         }
-        let token_id: Id = row
-            .get::<String, _>("id")
-            .parse()
-            .map_err(|_| ApiTokenError::InvalidIdentifier)?;
-        let workspace_id = row
-            .get::<String, _>("workspace_id")
-            .parse()
-            .map_err(|_| ApiTokenError::InvalidIdentifier)?;
+        let token_id = parse_id(&id)?;
+        let workspace_id = parse_id(&workspace_id)?;
         let project_ids = self.project_ids(token_id).await?;
         if project_ids.is_empty() {
             return Err(ApiTokenError::NotFound);
         }
-        let creator_id = row
-            .get::<String, _>("created_by")
-            .parse()
-            .map_err(|_| ApiTokenError::InvalidIdentifier)?;
-        let service_account_id = row
-            .get::<Option<String>, _>("service_account_id")
-            .map(|value| value.parse().map_err(|_| ApiTokenError::InvalidIdentifier))
-            .transpose()?;
-        sqlx::query("UPDATE api_tokens SET last_used_at = ? WHERE id = ?")
-            .bind(now.as_millis())
-            .bind(token_id.to_string())
-            .execute(self.database.pool())
+        let creator_id = parse_id(&created_by)?;
+        let service_account_id = service_account_id.as_deref().map(parse_id).transpose()?;
+        api_tokens::Entity::update_many()
+            .col_expr(api_tokens::Column::LastUsedAt, Expr::val(now.as_millis()))
+            .filter(api_tokens::Column::Id.eq(token_id.to_string()))
+            .exec(&self.connection)
             .await?;
         Ok(ApiTokenPrincipal {
             token_id,
@@ -261,16 +380,21 @@ impl ApiTokenRepository {
     }
 
     async fn project_ids(&self, token_id: Id) -> Result<Vec<Id>, ApiTokenError> {
-        let values = sqlx::query_scalar::<_, String>(
-            "SELECT api_token_projects.project_id FROM api_token_projects JOIN projects ON projects.id = api_token_projects.project_id WHERE api_token_projects.token_id = ? AND projects.deleted_at IS NULL ORDER BY projects.created_at, projects.id",
-        )
-        .bind(token_id.to_string())
-        .fetch_all(self.database.pool())
-        .await?;
-        values
-            .into_iter()
-            .map(|value| value.parse().map_err(|_| ApiTokenError::InvalidIdentifier))
-            .collect()
+        let values: Vec<String> = api_token_projects::Entity::find()
+            .select_only()
+            .column(api_token_projects::Column::ProjectId)
+            .join(
+                JoinType::InnerJoin,
+                api_token_projects::Relation::Project.def(),
+            )
+            .filter(api_token_projects::Column::TokenId.eq(token_id.to_string()))
+            .filter(projects::Column::DeletedAt.is_null())
+            .order_by_asc(projects::Column::CreatedAt)
+            .order_by_asc(projects::Column::Id)
+            .into_tuple()
+            .all(&self.connection)
+            .await?;
+        values.iter().map(|value| parse_id(value)).collect()
     }
 
     pub async fn revoke(
@@ -281,15 +405,20 @@ impl ApiTokenRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<(), ApiTokenError> {
-        let mut transaction = self.database.immediate_transaction().await?;
-        require_manager_in(&mut transaction, workspace_id, actor_id).await?;
-        let result = sqlx::query("UPDATE api_tokens SET revoked_at = ? WHERE id = ? AND workspace_id = ? AND revoked_at IS NULL")
-            .bind(now.as_millis()).bind(token_id.to_string()).bind(workspace_id.to_string()).execute(&mut *transaction).await?;
-        if result.rows_affected() == 0 {
+        let transaction = orm_write_transaction(&self.connection).await?;
+        require_manager(&transaction, workspace_id, actor_id).await?;
+        let result = api_tokens::Entity::update_many()
+            .col_expr(api_tokens::Column::RevokedAt, Expr::val(now.as_millis()))
+            .filter(api_tokens::Column::Id.eq(token_id.to_string()))
+            .filter(api_tokens::Column::WorkspaceId.eq(workspace_id.to_string()))
+            .filter(api_tokens::Column::RevokedAt.is_null())
+            .exec(&transaction)
+            .await?;
+        if result.rows_affected == 0 {
             return Err(ApiTokenError::NotFound);
         }
-        audit::record(
-            &mut transaction,
+        audit::record_orm(
+            &transaction,
             workspace_id,
             Some(actor_id),
             "api_token.revoke",
@@ -304,23 +433,14 @@ impl ApiTokenRepository {
         transaction.commit().await?;
         Ok(())
     }
-
-    async fn require_manager(&self, workspace_id: Id, actor_id: Id) -> Result<(), ApiTokenError> {
-        require_token_manager(
-            membership::actor(self.database.pool(), workspace_id, actor_id).await?,
-        )
-    }
 }
 
-async fn require_manager_in(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+async fn require_manager(
+    connection: &impl ConnectionTrait,
     workspace_id: Id,
     actor_id: Id,
 ) -> Result<(), ApiTokenError> {
-    require_token_manager(membership::actor(&mut **transaction, workspace_id, actor_id).await?)
-}
-
-fn require_token_manager(actor: Option<Actor>) -> Result<(), ApiTokenError> {
+    let actor = membership::actor_orm(connection, workspace_id, actor_id).await?;
     if actor
         .ok_or(ApiTokenError::NotFound)?
         .can(Permission::ApiTokensManage)
@@ -332,17 +452,16 @@ fn require_token_manager(actor: Option<Actor>) -> Result<(), ApiTokenError> {
 }
 
 async fn require_active_project(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    connection: &impl ConnectionTrait,
     workspace_id: Id,
     project_id: Id,
 ) -> Result<(), ApiTokenError> {
-    let exists = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM projects WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
-    )
-    .bind(project_id.to_string())
-    .bind(workspace_id.to_string())
-    .fetch_one(&mut **transaction)
-    .await?
+    let exists = projects::Entity::find()
+        .filter(projects::Column::Id.eq(project_id.to_string()))
+        .filter(projects::Column::WorkspaceId.eq(workspace_id.to_string()))
+        .filter(projects::Column::DeletedAt.is_null())
+        .count(connection)
+        .await?
         != 0;
     if exists {
         Ok(())
@@ -351,38 +470,27 @@ async fn require_active_project(
     }
 }
 
-fn parse_id(row: &sqlx::sqlite::SqliteRow, column: &str) -> Result<Id, ApiTokenError> {
-    row.get::<String, _>(column)
-        .parse()
-        .map_err(|_| ApiTokenError::InvalidIdentifier)
+fn parse_id(value: &str) -> Result<Id, ApiTokenError> {
+    value.parse().map_err(|_| ApiTokenError::InvalidIdentifier)
 }
 
-fn decode(
-    row: sqlx::sqlite::SqliteRow,
-    project_ids: Vec<Id>,
-) -> Result<ApiTokenRecord, ApiTokenError> {
-    let id = parse_id(&row, "id")?;
-    let can_read = row.get::<i64, _>("can_read") != 0;
-    let can_write = row.get::<i64, _>("can_write") != 0;
+fn decode(row: ListRow, project_ids: Vec<Id>) -> Result<ApiTokenRecord, ApiTokenError> {
     Ok(ApiTokenRecord {
-        id,
-        name: row.get("name"),
-        token_prefix: row.get("token_prefix"),
-        scopes: scopes(can_read, can_write),
-        project_id: parse_id(&row, "project_id")?,
+        id: parse_id(&row.id)?,
+        name: row.name,
+        token_prefix: row.token_prefix,
+        scopes: scopes(row.can_read != 0, row.can_write != 0),
+        project_id: parse_id(row.project_id.as_deref().unwrap_or_default())?,
         project_ids,
         service_account_id: row
-            .get::<Option<String>, _>("service_account_id")
-            .map(|value| value.parse().map_err(|_| ApiTokenError::InvalidIdentifier))
+            .service_account_id
+            .as_deref()
+            .map(parse_id)
             .transpose()?,
-        service_account_name: row.get("service_account_name"),
-        expires_at: row
-            .get::<Option<i64>, _>("expires_at")
-            .map(TimestampMillis::from_millis),
-        created_at: TimestampMillis::from_millis(row.get("created_at")),
-        last_used_at: row
-            .get::<Option<i64>, _>("last_used_at")
-            .map(TimestampMillis::from_millis),
+        service_account_name: row.service_account_name,
+        expires_at: row.expires_at.map(TimestampMillis::from_millis),
+        created_at: TimestampMillis::from_millis(row.created_at),
+        last_used_at: row.last_used_at.map(TimestampMillis::from_millis),
     })
 }
 

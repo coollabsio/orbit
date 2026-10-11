@@ -193,7 +193,7 @@ impl Fixture {
         assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
     }
 
-    async fn count(&self, sql: &str) -> i64 {
+    async fn count(&self, sql: &'static str) -> i64 {
         sqlx::query_scalar(sql)
             .fetch_one(self.database.pool())
             .await
@@ -205,7 +205,7 @@ impl Fixture {
         let now = TimestampMillis::now();
         sqlx::query(
             "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) \
-             VALUES (?, ?, ?, 'Member', 'unused', ?, ?)",
+             VALUES ($1, $2, $3, 'Member', 'unused', $4, $5)",
         )
         .bind(id.to_string())
         .bind(email)
@@ -217,7 +217,7 @@ impl Fixture {
         .unwrap();
         sqlx::query(
             "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
-             VALUES (?, ?, ?, 'member', 0, ?, ?)",
+             VALUES ($1, $2, $3, 'member', 0, $4, $5)",
         )
         .bind(Id::new_v7().to_string())
         .bind(workspace_id)
@@ -497,7 +497,7 @@ async fn files_follow_page_visibility_workspace_and_trash() {
     );
     let (status, _) = fixture.upload(&owner, id_of(&private), "t.png", PNG).await;
     assert_eq!(status, StatusCode::NOT_FOUND);
-    let version: i64 = sqlx::query_scalar("SELECT version FROM pages WHERE id = ?")
+    let version: i64 = sqlx::query_scalar("SELECT version FROM pages WHERE id = $1")
         .bind(id_of(&private))
         .fetch_one(fixture.database.pool())
         .await
@@ -534,7 +534,7 @@ async fn purged_pages_release_their_blobs_for_reconciliation() {
 
     let workspaces = WorkspaceRepository::new((*fixture.database).clone());
     let expire = |page: &Value| {
-        sqlx::query("UPDATE pages SET deleted_at = ? WHERE id = ?")
+        sqlx::query("UPDATE pages SET deleted_at = $1 WHERE id = $2")
             .bind(TimestampMillis::now().as_millis() - RETENTION_MILLIS - 1_000)
             .bind(id_of(page).to_owned())
     };
@@ -566,7 +566,7 @@ async fn purged_pages_release_their_blobs_for_reconciliation() {
 
     // Purging the workspace removes the remaining rows and blobs without tripping the
     // page_files -> attachment_blobs RESTRICT.
-    sqlx::query("UPDATE workspaces SET deleted_at = ? WHERE id = ?")
+    sqlx::query("UPDATE workspaces SET deleted_at = $1 WHERE id = $2")
         .bind(TimestampMillis::now().as_millis() - RETENTION_MILLIS - 1_000)
         .bind(&fixture.workspace_id)
         .execute(fixture.database.pool())
@@ -583,12 +583,15 @@ async fn purged_pages_release_their_blobs_for_reconciliation() {
         fixture.count("SELECT COUNT(*) FROM attachment_blobs").await,
         0
     );
-    assert_eq!(
-        fixture
-            .count("SELECT COUNT(*) FROM pragma_foreign_key_check")
-            .await,
-        0
-    );
+    // Postgres enforces foreign keys on every statement; SQLite needs the explicit check.
+    if !orbit_platform::testing_postgres() {
+        assert_eq!(
+            fixture
+                .count("SELECT COUNT(*) FROM pragma_foreign_key_check")
+                .await,
+            0
+        );
+    }
 }
 
 #[tokio::test]
@@ -787,7 +790,7 @@ async fn duplicates_share_files_and_point_at_their_own_copies() {
         2
     );
     assert_eq!(fixture.store.blobs().await.unwrap().len(), blobs);
-    let (child_copy,): (String,) = sqlx::query_as("SELECT id FROM pages WHERE parent_id = ?")
+    let (child_copy,): (String,) = sqlx::query_as("SELECT id FROM pages WHERE parent_id = $1")
         .bind(id_of(&copy))
         .fetch_one(fixture.database.pool())
         .await

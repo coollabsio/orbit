@@ -6,13 +6,13 @@ use orbit_domain::{Actor, MembershipDenied, Permission, Policy, WorkspaceDefault
 use orbit_platform::{
     AttachmentMutationCoordinator, BLOB_REFERENCE_COUNT, BlobStore, BlobStoreError, Database, Id,
     IssuedSession, Job, JobError, JobKind, JobKindRegistrationError, JobStore, LocalBlobStore,
-    RecurringSchedule, ScheduleError, Scheduler, TimestampMillis, Worker, WorkerConfig,
+    RecurringSchedule, Row, ScheduleError, Scheduler, TimestampMillis, Worker, WorkerConfig,
     WorkerError, generate_opaque_token, normalize_email,
 };
 use serde::Serialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use sqlx::{Row, Sqlite, Transaction};
+use sqlx::{Any, Transaction};
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use utoipa::ToSchema;
@@ -246,7 +246,7 @@ impl WorkspaceRepository {
         let rows = sqlx::query(
             "SELECT workspaces.id, workspaces.name, workspaces.version, workspaces.deleted_at, \
              memberships.role FROM workspaces JOIN memberships ON memberships.workspace_id = workspaces.id \
-             WHERE memberships.user_id = ? AND workspaces.deleted_at IS NULL ORDER BY workspaces.id",
+             WHERE memberships.user_id = $1 AND workspaces.deleted_at IS NULL ORDER BY workspaces.id",
         )
         .bind(user_id.to_string())
         .fetch_all(self.database.pool())
@@ -258,8 +258,8 @@ impl WorkspaceRepository {
         let rows = sqlx::query(
             "SELECT workspaces.id, workspaces.name, workspaces.version, workspaces.deleted_at, \
              memberships.role FROM workspaces JOIN memberships ON memberships.workspace_id = workspaces.id \
-             WHERE memberships.user_id = ? AND memberships.role = 'owner' AND workspaces.deleted_at IS NOT NULL \
-             AND workspaces.deleted_at > ? \
+             WHERE memberships.user_id = $1 AND memberships.role = 'owner' AND workspaces.deleted_at IS NOT NULL \
+             AND workspaces.deleted_at > $2 \
              ORDER BY workspaces.id DESC",
         )
         .bind(user_id.to_string())
@@ -281,7 +281,7 @@ impl WorkspaceRepository {
         let mut transaction = self.database.immediate_transaction().await?;
         sqlx::query(
             "INSERT INTO workspaces (id, name, version, owner_membership_id, created_at, updated_at) \
-             VALUES (?, ?, 0, ?, ?, ?)",
+             VALUES ($1, $2, 0, $3, $4, $5)",
         )
         .bind(id.to_string())
         .bind(&defaults.workspace.name)
@@ -292,7 +292,7 @@ impl WorkspaceRepository {
         .await?;
         sqlx::query(
             "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
-             VALUES (?, ?, ?, 'owner', 0, ?, ?)",
+             VALUES ($1, $2, $3, 'owner', 0, $4, $5)",
         )
         .bind(defaults.owner.id.to_string())
         .bind(id.to_string())
@@ -336,7 +336,7 @@ impl WorkspaceRepository {
         let row = sqlx::query(
             "SELECT workspaces.id, workspaces.name, workspaces.version, workspaces.deleted_at, memberships.role \
              FROM workspaces JOIN memberships ON memberships.workspace_id = workspaces.id \
-             WHERE workspaces.id = ? AND memberships.user_id = ? AND workspaces.deleted_at IS NULL",
+             WHERE workspaces.id = $1 AND memberships.user_id = $2 AND workspaces.deleted_at IS NULL",
         )
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
@@ -375,7 +375,7 @@ impl WorkspaceRepository {
             return Err(WorkspaceError::Forbidden);
         }
         let current_version = sqlx::query_scalar::<_, i64>(
-            "SELECT version FROM workspaces WHERE id = ? AND deleted_at IS NULL",
+            "SELECT version FROM workspaces WHERE id = $1 AND deleted_at IS NULL",
         )
         .bind(workspace_id.to_string())
         .fetch_one(&mut *transaction)
@@ -386,8 +386,8 @@ impl WorkspaceRepository {
             return Err(WorkspaceError::VersionConflict { current_version });
         }
         sqlx::query(
-            "UPDATE workspaces SET name = ?, version = version + 1, updated_at = ? \
-             WHERE id = ? AND deleted_at IS NULL AND version = ?",
+            "UPDATE workspaces SET name = $1, version = version + 1, updated_at = $2 \
+             WHERE id = $3 AND deleted_at IS NULL AND version = $4",
         )
         .bind(&name)
         .bind(now.as_millis())
@@ -435,8 +435,8 @@ impl WorkspaceRepository {
              FROM memberships \
              JOIN users ON users.id = memberships.user_id \
              LEFT JOIN user_avatars ON user_avatars.user_id = memberships.user_id \
-             WHERE memberships.workspace_id = ? \
-             AND (? IS NULL OR memberships.id > ?) ORDER BY memberships.id LIMIT ?",
+             WHERE memberships.workspace_id = $1 \
+             AND ($2 IS NULL OR memberships.id > $3) ORDER BY memberships.id LIMIT $4",
         )
         .bind(workspace_id.to_string())
         .bind(cursor.map(|id| id.to_string()))
@@ -459,8 +459,8 @@ impl WorkspaceRepository {
             "SELECT users.title, users.pronouns, users.timezone, users.bio, users.phone, \
              user_notes.body AS note \
              FROM memberships JOIN users ON users.id = memberships.user_id \
-             LEFT JOIN user_notes ON user_notes.subject_id = users.id AND user_notes.author_id = ? \
-             WHERE memberships.workspace_id = ? AND memberships.user_id = ?",
+             LEFT JOIN user_notes ON user_notes.subject_id = users.id AND user_notes.author_id = $1 \
+             WHERE memberships.workspace_id = $2 AND memberships.user_id = $3",
         )
         .bind(actor_id.to_string())
         .bind(workspace_id.to_string())
@@ -493,7 +493,7 @@ impl WorkspaceRepository {
         require_actor(&mut *transaction, workspace_id, actor_id).await?;
         require_actor(&mut *transaction, workspace_id, user_id).await?;
         if body.is_empty() {
-            sqlx::query("DELETE FROM user_notes WHERE author_id = ? AND subject_id = ?")
+            sqlx::query("DELETE FROM user_notes WHERE author_id = $1 AND subject_id = $2")
                 .bind(actor_id.to_string())
                 .bind(user_id.to_string())
                 .execute(&mut *transaction)
@@ -501,7 +501,7 @@ impl WorkspaceRepository {
         } else {
             sqlx::query(
                 "INSERT INTO user_notes (author_id, subject_id, body, updated_at) \
-                 VALUES (?, ?, ?, ?) ON CONFLICT (author_id, subject_id) DO UPDATE SET \
+                 VALUES ($1, $2, $3, $4) ON CONFLICT (author_id, subject_id) DO UPDATE SET \
                  body = excluded.body, updated_at = excluded.updated_at",
             )
             .bind(actor_id.to_string())
@@ -529,8 +529,8 @@ impl WorkspaceRepository {
         }
         let rows = sqlx::query(
             "SELECT id, workspace_id, email, role, delivery, expires_at, accepted_at, revoked_at, \
-             replaced_at, created_at FROM workspace_invitations WHERE workspace_id = ? \
-             AND (? IS NULL OR id > ?) ORDER BY id LIMIT ?",
+             replaced_at, created_at FROM workspace_invitations WHERE workspace_id = $1 \
+             AND ($2 IS NULL OR id > $3) ORDER BY id LIMIT $4",
         )
         .bind(workspace_id.to_string())
         .bind(cursor.map(|id| id.to_string()))
@@ -583,7 +583,7 @@ impl WorkspaceRepository {
         }
         let already_member = sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM memberships JOIN users ON users.id = memberships.user_id \
-             WHERE memberships.workspace_id = ? AND users.normalized_email = ?",
+             WHERE memberships.workspace_id = $1 AND users.normalized_email = $2",
         )
         .bind(workspace_id.to_string())
         .bind(&normalized_email)
@@ -594,8 +594,8 @@ impl WorkspaceRepository {
             return Err(WorkspaceError::Conflict);
         }
         sqlx::query(
-            "UPDATE workspace_invitations SET replaced_at = ? WHERE workspace_id = ? \
-             AND normalized_email = ? AND accepted_at IS NULL AND revoked_at IS NULL AND replaced_at IS NULL",
+            "UPDATE workspace_invitations SET replaced_at = $1 WHERE workspace_id = $2 \
+             AND normalized_email = $3 AND accepted_at IS NULL AND revoked_at IS NULL AND replaced_at IS NULL",
         )
         .bind(now.as_millis())
         .bind(workspace_id.to_string())
@@ -604,7 +604,7 @@ impl WorkspaceRepository {
         .await?;
         sqlx::query(
             "INSERT INTO workspace_invitations (id, workspace_id, email, normalized_email, role, \
-             delivery, token_hash, invited_by, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             delivery, token_hash, invited_by, expires_at, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
         )
         .bind(id.to_string())
         .bind(workspace_id.to_string())
@@ -685,8 +685,8 @@ impl WorkspaceRepository {
             Err(error) => return Err(error),
         }
         let changed = sqlx::query(
-            "UPDATE workspace_invitations SET revoked_at = ? WHERE id = ? AND workspace_id = ? \
-             AND accepted_at IS NULL AND revoked_at IS NULL AND replaced_at IS NULL AND expires_at > ?",
+            "UPDATE workspace_invitations SET revoked_at = $1 WHERE id = $2 AND workspace_id = $3 \
+             AND accepted_at IS NULL AND revoked_at IS NULL AND replaced_at IS NULL AND expires_at > $4",
         )
         .bind(now.as_millis())
         .bind(invitation_id.to_string())
@@ -727,7 +727,7 @@ impl WorkspaceRepository {
         let mut transaction = self.database.immediate_transaction().await?;
         let row = sqlx::query(
             "SELECT id, workspace_id, normalized_email, role, delivery, expires_at, accepted_at, \
-             revoked_at, replaced_at FROM workspace_invitations WHERE token_hash = ?",
+             revoked_at, replaced_at FROM workspace_invitations WHERE token_hash = $1",
         )
         .bind(hash.to_vec())
         .fetch_optional(&mut *transaction)
@@ -791,7 +791,7 @@ impl WorkspaceRepository {
         let role = row.get::<String, _>("role");
         let delivery = row.get::<String, _>("delivery");
         let existing = sqlx::query_scalar::<_, String>(
-            "SELECT id FROM memberships WHERE workspace_id = ? AND user_id = ?",
+            "SELECT id FROM memberships WHERE workspace_id = $1 AND user_id = $2",
         )
         .bind(workspace_id.to_string())
         .bind(user_id.to_string())
@@ -803,7 +803,7 @@ impl WorkspaceRepository {
             let id = Id::new_v7();
             sqlx::query(
                 "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
-                 VALUES (?, ?, ?, ?, 0, ?, ?)",
+                 VALUES ($1, $2, $3, $4, 0, $5, $6)",
             )
             .bind(id.to_string())
             .bind(workspace_id.to_string())
@@ -817,7 +817,7 @@ impl WorkspaceRepository {
             (id, true)
         };
         sqlx::query(
-            "UPDATE workspace_invitations SET accepted_at = ? WHERE id = ? AND workspace_id = ?",
+            "UPDATE workspace_invitations SET accepted_at = $1 WHERE id = $2 AND workspace_id = $3",
         )
         .bind(now.as_millis())
         .bind(invitation_id.to_string())
@@ -827,7 +827,7 @@ impl WorkspaceRepository {
         let email_verified = delivery == "smtp";
         if email_verified {
             sqlx::query(
-                "UPDATE users SET email_verified_at = COALESCE(email_verified_at, ?) WHERE id = ?",
+                "UPDATE users SET email_verified_at = COALESCE(email_verified_at, $1) WHERE id = $2",
             )
             .bind(now.as_millis())
             .bind(user_id.to_string())
@@ -878,7 +878,7 @@ impl WorkspaceRepository {
         let mut transaction = self.database.immediate_transaction().await?;
         let row = sqlx::query(
             "SELECT id, workspace_id, normalized_email, role, delivery, expires_at, accepted_at, \
-             revoked_at, replaced_at FROM workspace_invitations WHERE token_hash = ?",
+             revoked_at, replaced_at FROM workspace_invitations WHERE token_hash = $1",
         )
         .bind(hash.to_vec())
         .fetch_optional(&mut *transaction)
@@ -940,7 +940,7 @@ impl WorkspaceRepository {
             return Err(WorkspaceError::EmailMismatch);
         }
         let existing =
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE normalized_email = ?")
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE normalized_email = $1")
                 .bind(&normalized_email)
                 .fetch_one(&mut *transaction)
                 .await?
@@ -952,7 +952,7 @@ impl WorkspaceRepository {
         let delivery = row.get::<String, _>("delivery");
         sqlx::query(
             "INSERT INTO users (id, email, normalized_email, display_name, password_hash, \
-             email_verified_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+             email_verified_at, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
         )
         .bind(user_id.to_string())
         .bind(email)
@@ -966,7 +966,7 @@ impl WorkspaceRepository {
         .await?;
         sqlx::query(
             "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, 0, ?, ?)",
+             VALUES ($1, $2, $3, $4, 0, $5, $6)",
         )
         .bind(membership_id.to_string())
         .bind(workspace_id.to_string())
@@ -978,7 +978,7 @@ impl WorkspaceRepository {
         .await?;
         join_public_channels(&mut transaction, workspace_id, user_id, now).await?;
         sqlx::query(
-            "UPDATE workspace_invitations SET accepted_at = ? WHERE id = ? AND workspace_id = ?",
+            "UPDATE workspace_invitations SET accepted_at = $1 WHERE id = $2 AND workspace_id = $3",
         )
         .bind(now.as_millis())
         .bind(invitation_id.to_string())
@@ -987,7 +987,7 @@ impl WorkspaceRepository {
         .await?;
         sqlx::query(
             "INSERT INTO sessions (id, token_hash, user_id, created_at, last_activity_at, \
-             idle_expires_at, absolute_expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+             idle_expires_at, absolute_expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
         )
         .bind(session_id.to_string())
         .bind(token_hash(&session_token).to_vec())
@@ -1037,7 +1037,7 @@ impl WorkspaceRepository {
             "SELECT invitations.email, workspaces.name AS workspace_name \
              FROM workspace_invitations AS invitations \
              JOIN workspaces ON workspaces.id = invitations.workspace_id \
-             WHERE invitations.token_hash = ? AND invitations.expires_at > ? \
+             WHERE invitations.token_hash = $1 AND invitations.expires_at > $2 \
              AND invitations.accepted_at IS NULL AND invitations.revoked_at IS NULL \
              AND invitations.replaced_at IS NULL AND workspaces.deleted_at IS NULL",
         )
@@ -1061,7 +1061,7 @@ impl WorkspaceRepository {
     ) -> Result<(), WorkspaceError> {
         let row = sqlx::query(
             "SELECT id, workspace_id, normalized_email, expires_at, accepted_at, revoked_at, replaced_at \
-             FROM workspace_invitations WHERE token_hash = ?",
+             FROM workspace_invitations WHERE token_hash = $1",
         )
         .bind(token_hash(token).to_vec())
         .fetch_optional(self.database.pool())
@@ -1100,7 +1100,7 @@ impl WorkspaceRepository {
             return Err(WorkspaceError::EmailMismatch);
         }
         let existing =
-            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE normalized_email = ?")
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE normalized_email = $1")
                 .bind(normalized_email)
                 .fetch_one(self.database.pool())
                 .await?;
@@ -1144,9 +1144,9 @@ impl WorkspaceRepository {
         let bucket = now.as_millis() - now.as_millis().rem_euclid(BUCKET_MILLIS);
         sqlx::query(
             "INSERT INTO security_probe_summaries (kind, bucket_started_at, attempt_count, last_attempt_at) \
-             VALUES ('invitation.registration_invalid', ?, 1, ?) \
+             VALUES ('invitation.registration_invalid', $1, 1, $2) \
              ON CONFLICT(kind, bucket_started_at) DO UPDATE SET \
-             attempt_count = attempt_count + 1, last_attempt_at = excluded.last_attempt_at",
+             attempt_count = security_probe_summaries.attempt_count + 1, last_attempt_at = excluded.last_attempt_at",
         )
         .bind(bucket)
         .bind(now.as_millis())
@@ -1210,8 +1210,8 @@ impl WorkspaceRepository {
             return Err(denied.into());
         }
         sqlx::query(
-            "UPDATE memberships SET role = ?, version = version + 1, updated_at = ? \
-             WHERE id = ? AND workspace_id = ? AND version = ?",
+            "UPDATE memberships SET role = $1, version = version + 1, updated_at = $2 \
+             WHERE id = $3 AND workspace_id = $4 AND version = $5",
         )
         .bind(role_name(role))
         .bind(now.as_millis())
@@ -1300,7 +1300,7 @@ impl WorkspaceRepository {
             transaction.commit().await?;
             return Err(denied.into());
         }
-        sqlx::query("DELETE FROM memberships WHERE id = ? AND workspace_id = ? AND version = ?")
+        sqlx::query("DELETE FROM memberships WHERE id = $1 AND workspace_id = $2 AND version = $3")
             .bind(membership_id.to_string())
             .bind(workspace_id.to_string())
             .bind(expected_version as i64)
@@ -1354,7 +1354,7 @@ impl WorkspaceRepository {
             return Err(WorkspaceError::Forbidden);
         }
         let workspace_version = sqlx::query_scalar::<_, i64>(
-            "SELECT version FROM workspaces WHERE id = ? AND deleted_at IS NULL",
+            "SELECT version FROM workspaces WHERE id = $1 AND deleted_at IS NULL",
         )
         .bind(workspace_id.to_string())
         .fetch_one(&mut *transaction)
@@ -1377,7 +1377,7 @@ impl WorkspaceRepository {
             return Ok(());
         }
         sqlx::query(
-            "UPDATE workspaces SET owner_membership_id = ?, updated_at = ? WHERE id = ? AND version = ?",
+            "UPDATE workspaces SET owner_membership_id = $1, updated_at = $2 WHERE id = $3 AND version = $4",
         )
             .bind(membership_id.to_string())
             .bind(now.as_millis())
@@ -1386,7 +1386,7 @@ impl WorkspaceRepository {
             .execute(&mut *transaction)
             .await?;
         sqlx::query(
-            "UPDATE workspaces SET version = version + 1, updated_at = ? WHERE id = ? AND version = ?",
+            "UPDATE workspaces SET version = version + 1, updated_at = $1 WHERE id = $2 AND version = $3",
         )
         .bind(now.as_millis())
         .bind(workspace_id.to_string())
@@ -1470,7 +1470,7 @@ impl WorkspaceRepository {
             return Err(WorkspaceError::Forbidden);
         }
         let current_version =
-            sqlx::query_scalar::<_, i64>("SELECT version FROM workspaces WHERE id = ?")
+            sqlx::query_scalar::<_, i64>("SELECT version FROM workspaces WHERE id = $1")
                 .bind(workspace_id.to_string())
                 .fetch_one(&mut *transaction)
                 .await?;
@@ -1481,7 +1481,7 @@ impl WorkspaceRepository {
         }
         if !deleted {
             let deleted_at = sqlx::query_scalar::<_, i64>(
-                "SELECT deleted_at FROM workspaces WHERE id = ? AND deleted_at IS NOT NULL",
+                "SELECT deleted_at FROM workspaces WHERE id = $1 AND deleted_at IS NOT NULL",
             )
             .bind(workspace_id.to_string())
             .fetch_one(&mut *transaction)
@@ -1496,8 +1496,8 @@ impl WorkspaceRepository {
         }
         let changed = if deleted {
             sqlx::query(
-                "UPDATE workspaces SET deleted_at = ?, version = version + 1, updated_at = ? \
-                 WHERE id = ? AND deleted_at IS NULL AND version = ?",
+                "UPDATE workspaces SET deleted_at = $1, version = version + 1, updated_at = $2 \
+                 WHERE id = $3 AND deleted_at IS NULL AND version = $4",
             )
             .bind(now.as_millis())
             .bind(now.as_millis())
@@ -1508,8 +1508,8 @@ impl WorkspaceRepository {
             .rows_affected()
         } else {
             sqlx::query(
-                "UPDATE workspaces SET deleted_at = NULL, version = version + 1, updated_at = ? \
-                 WHERE id = ? AND deleted_at IS NOT NULL AND version = ?",
+                "UPDATE workspaces SET deleted_at = NULL, version = version + 1, updated_at = $1 \
+                 WHERE id = $2 AND deleted_at IS NOT NULL AND version = $3",
             )
             .bind(now.as_millis())
             .bind(workspace_id.to_string())
@@ -1703,12 +1703,12 @@ impl WorkspaceRepository {
     ) -> Result<MaintenanceSummary, WorkspaceError> {
         let mut transaction = self.database.immediate_transaction().await?;
         // Chat files that were uploaded and never sent with a message.
-        sqlx::query("DELETE FROM chat_message_files WHERE message_id IS NULL AND created_at <= ?")
+        sqlx::query("DELETE FROM chat_message_files WHERE message_id IS NULL AND created_at <= $1")
             .bind(now.as_millis().saturating_sub(24 * 60 * 60 * 1000))
             .execute(&mut *transaction)
             .await?;
         let expired = sqlx::query_scalar::<_, String>(
-            "SELECT id FROM workspaces WHERE deleted_at IS NOT NULL AND deleted_at <= ? \
+            "SELECT id FROM workspaces WHERE deleted_at IS NOT NULL AND deleted_at <= $1 \
              ORDER BY deleted_at, id",
         )
         .bind(
@@ -1724,7 +1724,7 @@ impl WorkspaceRepository {
         let task_ids = sqlx::query_scalar::<_, String>(
             "SELECT tasks.id FROM tasks LEFT JOIN projects ON projects.id = tasks.project_id \
              JOIN workspaces ON workspaces.id = tasks.workspace_id \
-             WHERE workspaces.deleted_at IS NULL AND (tasks.deleted_at <= ? OR projects.deleted_at <= ?) \
+             WHERE workspaces.deleted_at IS NULL AND (tasks.deleted_at <= $1 OR projects.deleted_at <= $2) \
              ORDER BY tasks.id",
         )
         .bind(
@@ -1741,13 +1741,13 @@ impl WorkspaceRepository {
             let blobs = sqlx::query(
                 "SELECT DISTINCT attachment_blobs.id, attachment_blobs.storage_key \
                  FROM attachment_references JOIN attachment_blobs ON attachment_blobs.id = attachment_references.blob_id \
-                 WHERE attachment_references.task_id = ?",
+                 WHERE attachment_references.task_id = $1",
             )
             .bind(&task_id)
             .fetch_all(&mut *transaction)
             .await?;
             attachment_references_purged +=
-                sqlx::query("DELETE FROM attachment_references WHERE task_id = ?")
+                sqlx::query("DELETE FROM attachment_references WHERE task_id = $1")
                     .bind(&task_id)
                     .execute(&mut *transaction)
                     .await?
@@ -1758,7 +1758,7 @@ impl WorkspaceRepository {
                     TaskError::Unavailable(error) => WorkspaceError::Unavailable(error),
                     _ => WorkspaceError::Conflict,
                 })?;
-            sqlx::query("DELETE FROM tasks WHERE id = ?")
+            sqlx::query("DELETE FROM tasks WHERE id = $1")
                 .bind(&task_id)
                 .execute(&mut *transaction)
                 .await?;
@@ -1771,8 +1771,9 @@ impl WorkspaceRepository {
                     .await?;
                 if references == 0 {
                     sqlx::query(
-                        "INSERT OR IGNORE INTO attachment_file_deletions \
-                         (id, path_kind, path, created_at) VALUES (?, 'blob', ?, ?)",
+                        "INSERT INTO attachment_file_deletions \
+                         (id, path_kind, path, created_at) VALUES ($1, 'blob', $2, $3) \
+                         ON CONFLICT DO NOTHING",
                     )
                     .bind(Id::new_v7().to_string())
                     .bind(blob.get::<String, _>("storage_key"))
@@ -1780,7 +1781,7 @@ impl WorkspaceRepository {
                     .execute(&mut *transaction)
                     .await?;
                     attachment_blobs_purged +=
-                        sqlx::query("DELETE FROM attachment_blobs WHERE id = ?")
+                        sqlx::query("DELETE FROM attachment_blobs WHERE id = $1")
                             .bind(blob_id)
                             .execute(&mut *transaction)
                             .await?
@@ -1791,7 +1792,7 @@ impl WorkspaceRepository {
         // A trashed subtree shares one deleted_at, so it expires together; pages.parent_id is
         // ON DELETE SET NULL, so the delete order inside the batch does not matter.
         sqlx::query(
-            "DELETE FROM pages WHERE deleted_at <= ? AND workspace_id IN \
+            "DELETE FROM pages WHERE deleted_at <= $1 AND workspace_id IN \
              (SELECT id FROM workspaces WHERE deleted_at IS NULL)",
         )
         .bind(
@@ -1803,7 +1804,7 @@ impl WorkspaceRepository {
         // Page history: all of the last 30 days, then one per day up to a year, newest 20 always.
         page_versions::thin_versions(&mut transaction, now).await?;
         sqlx::query(
-            "DELETE FROM projects WHERE deleted_at <= ? AND workspace_id IN \
+            "DELETE FROM projects WHERE deleted_at <= $1 AND workspace_id IN \
              (SELECT id FROM workspaces WHERE deleted_at IS NULL)",
         )
         .bind(
@@ -1814,18 +1815,18 @@ impl WorkspaceRepository {
         .await?;
         for workspace_id in expired {
             let blob_rows =
-                sqlx::query("SELECT id, storage_key FROM attachment_blobs WHERE workspace_id = ?")
+                sqlx::query("SELECT id, storage_key FROM attachment_blobs WHERE workspace_id = $1")
                     .bind(&workspace_id)
                     .fetch_all(&mut *transaction)
                     .await?;
             let pending_paths = sqlx::query_scalar::<_, String>(
-                "SELECT temporary_path FROM pending_uploads WHERE workspace_id = ?",
+                "SELECT temporary_path FROM pending_uploads WHERE workspace_id = $1",
             )
             .bind(&workspace_id)
             .fetch_all(&mut *transaction)
             .await?;
             attachment_references_purged +=
-                sqlx::query("DELETE FROM attachment_references WHERE workspace_id = ?")
+                sqlx::query("DELETE FROM attachment_references WHERE workspace_id = $1")
                     .bind(&workspace_id)
                     .execute(&mut *transaction)
                     .await?
@@ -1833,12 +1834,13 @@ impl WorkspaceRepository {
             // Page files and chat files hold their blobs with ON DELETE RESTRICT, so they go
             // before the blobs.
             for table in ["page_files", "chat_message_files"] {
-                attachment_references_purged +=
-                    sqlx::query(&format!("DELETE FROM {table} WHERE workspace_id = ?"))
-                        .bind(&workspace_id)
-                        .execute(&mut *transaction)
-                        .await?
-                        .rows_affected();
+                attachment_references_purged += sqlx::query(sqlx::AssertSqlSafe(format!(
+                    "DELETE FROM {table} WHERE workspace_id = $1"
+                )))
+                .bind(&workspace_id)
+                .execute(&mut *transaction)
+                .await?
+                .rows_affected();
             }
             for row in blob_rows {
                 let blob_id: String = row.get("id");
@@ -1849,8 +1851,9 @@ impl WorkspaceRepository {
                     .await?;
                 if references == 0 {
                     sqlx::query(
-                        "INSERT OR IGNORE INTO attachment_file_deletions \
-                         (id, path_kind, path, created_at) VALUES (?, 'blob', ?, ?)",
+                        "INSERT INTO attachment_file_deletions \
+                         (id, path_kind, path, created_at) VALUES ($1, 'blob', $2, $3) \
+                         ON CONFLICT DO NOTHING",
                     )
                     .bind(Id::new_v7().to_string())
                     .bind(row.get::<String, _>("storage_key"))
@@ -1858,7 +1861,7 @@ impl WorkspaceRepository {
                     .execute(&mut *transaction)
                     .await?;
                     attachment_blobs_purged +=
-                        sqlx::query("DELETE FROM attachment_blobs WHERE id = ?")
+                        sqlx::query("DELETE FROM attachment_blobs WHERE id = $1")
                             .bind(blob_id)
                             .execute(&mut *transaction)
                             .await?
@@ -1867,8 +1870,9 @@ impl WorkspaceRepository {
             }
             for path in pending_paths {
                 sqlx::query(
-                    "INSERT OR IGNORE INTO attachment_file_deletions \
-                     (id, path_kind, path, created_at) VALUES (?, 'temporary', ?, ?)",
+                    "INSERT INTO attachment_file_deletions \
+                     (id, path_kind, path, created_at) VALUES ($1, 'temporary', $2, $3) \
+                     ON CONFLICT DO NOTHING",
                 )
                 .bind(Id::new_v7().to_string())
                 .bind(path)
@@ -1877,50 +1881,50 @@ impl WorkspaceRepository {
                 .await?;
             }
             pending_uploads_purged +=
-                sqlx::query("DELETE FROM pending_uploads WHERE workspace_id = ?")
+                sqlx::query("DELETE FROM pending_uploads WHERE workspace_id = $1")
                     .bind(&workspace_id)
                     .execute(&mut *transaction)
                     .await?
                     .rows_affected();
             // Tasks go before the workspace cascade: tasks.status_id is ON DELETE RESTRICT, and
             // SQLite may cascade into task_statuses first (it was rebuilt after tasks in 0021).
-            sqlx::query("DELETE FROM tasks WHERE workspace_id = ?")
+            sqlx::query("DELETE FROM tasks WHERE workspace_id = $1")
                 .bind(&workspace_id)
                 .execute(&mut *transaction)
                 .await?;
             // Pages before teamspaces (pages.teamspace_id cascades), teamspaces before the
             // workspace, so no cascade order is left to SQLite.
-            sqlx::query("DELETE FROM pages WHERE workspace_id = ?")
+            sqlx::query("DELETE FROM pages WHERE workspace_id = $1")
                 .bind(&workspace_id)
                 .execute(&mut *transaction)
                 .await?;
-            sqlx::query("DELETE FROM teamspaces WHERE workspace_id = ?")
+            sqlx::query("DELETE FROM teamspaces WHERE workspace_id = $1")
                 .bind(&workspace_id)
                 .execute(&mut *transaction)
                 .await?;
-            workspaces_purged += sqlx::query("DELETE FROM workspaces WHERE id = ?")
+            workspaces_purged += sqlx::query("DELETE FROM workspaces WHERE id = $1")
                 .bind(workspace_id)
                 .execute(&mut *transaction)
                 .await?
                 .rows_affected();
         }
-        sqlx::query("DELETE FROM outbox_events WHERE created_at < ?")
+        sqlx::query("DELETE FROM outbox_events WHERE created_at < $1")
             .bind(now.as_millis() - 7 * 24 * 60 * 60 * 1000)
             .execute(&mut *transaction)
             .await?;
-        let audit_events_purged = sqlx::query("DELETE FROM audit_events WHERE occurred_at < ?")
+        let audit_events_purged = sqlx::query("DELETE FROM audit_events WHERE occurred_at < $1")
             .bind(now.as_millis().saturating_sub(AUDIT_RETENTION_MILLIS))
             .execute(&mut *transaction)
             .await?
             .rows_affected();
-        sqlx::query("DELETE FROM security_probe_summaries WHERE last_attempt_at < ?")
+        sqlx::query("DELETE FROM security_probe_summaries WHERE last_attempt_at < $1")
             .bind(now.as_millis().saturating_sub(AUDIT_RETENTION_MILLIS))
             .execute(&mut *transaction)
             .await?;
         sqlx::query(
             "INSERT INTO maintenance_summaries (id, kind, workspaces_purged, audit_events_purged, \
              attachment_references_purged, attachment_blobs_purged, pending_uploads_purged, files_purged, occurred_at) \
-             VALUES (?, 'workspace.retention', ?, ?, ?, ?, ?, 0, ?)",
+             VALUES ($1, 'workspace.retention', $2, $3, $4, $5, $6, 0, $7)",
         )
         .bind(Id::new_v7().to_string())
         .bind(workspaces_purged as i64)
@@ -1958,7 +1962,7 @@ impl WorkspaceRepository {
             match row.get::<String, _>("path_kind").as_str() {
                 "blob" => {
                     let live: i64 = sqlx::query_scalar(
-                        "SELECT COUNT(*) FROM attachment_blobs WHERE storage_key = ?",
+                        "SELECT COUNT(*) FROM attachment_blobs WHERE storage_key = $1",
                     )
                     .bind(&path)
                     .fetch_one(&mut *transaction)
@@ -1969,7 +1973,7 @@ impl WorkspaceRepository {
                 }
                 "temporary" => {
                     let live: i64 = sqlx::query_scalar(
-                        "SELECT COUNT(*) FROM pending_uploads WHERE temporary_path = ? \
+                        "SELECT COUNT(*) FROM pending_uploads WHERE temporary_path = $1 \
                          AND state IN ('receiving', 'staged')",
                     )
                     .bind(&path)
@@ -1981,7 +1985,7 @@ impl WorkspaceRepository {
                 }
                 _ => continue,
             }
-            purged += sqlx::query("DELETE FROM attachment_file_deletions WHERE id = ?")
+            purged += sqlx::query("DELETE FROM attachment_file_deletions WHERE id = $1")
                 .bind(id)
                 .execute(&mut *transaction)
                 .await?
@@ -1990,7 +1994,7 @@ impl WorkspaceRepository {
         }
         if purged != 0 {
             sqlx::query(
-                "UPDATE maintenance_summaries SET files_purged = files_purged + ? \
+                "UPDATE maintenance_summaries SET files_purged = files_purged + $1 \
                  WHERE id = (SELECT id FROM maintenance_summaries WHERE kind = 'workspace.retention' \
                  ORDER BY occurred_at DESC, id DESC LIMIT 1)",
             )
@@ -2003,13 +2007,13 @@ impl WorkspaceRepository {
 }
 
 async fn insert_default_project(
-    transaction: &mut Transaction<'_, Sqlite>,
+    transaction: &mut Transaction<'_, Any>,
     defaults: &WorkspaceDefaults,
     now: TimestampMillis,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "INSERT INTO projects (id, workspace_id, name, project_key, color, version, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
     )
     .bind(defaults.project.id.to_string())
     .bind(defaults.workspace.id.to_string())
@@ -2024,7 +2028,7 @@ async fn insert_default_project(
     for status in &defaults.statuses {
         sqlx::query(
             "INSERT INTO task_statuses (id, workspace_id, project_id, name, description, color, \
-             category, position, version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             category, position, version, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
         )
         .bind(status.id.to_string())
         .bind(status.workspace_id.to_string())
@@ -2082,7 +2086,7 @@ fn page_size(limit: usize) -> usize {
     limit.clamp(1, 100)
 }
 
-fn workspace_from_row(row: sqlx::sqlite::SqliteRow) -> Result<WorkspaceRecord, WorkspaceError> {
+fn workspace_from_row(row: sqlx::any::AnyRow) -> Result<WorkspaceRecord, WorkspaceError> {
     let role = parse_role(&row.get::<String, _>("role"))?;
     Ok(WorkspaceRecord {
         id: parse_id(row.get("id"))?,
@@ -2097,10 +2101,7 @@ fn workspace_from_row(row: sqlx::sqlite::SqliteRow) -> Result<WorkspaceRecord, W
     })
 }
 
-fn member_from_row(
-    row: sqlx::sqlite::SqliteRow,
-    actor: Actor,
-) -> Result<MemberRecord, WorkspaceError> {
+fn member_from_row(row: sqlx::any::AnyRow, actor: Actor) -> Result<MemberRecord, WorkspaceError> {
     let user_id = parse_id(row.get("user_id"))?;
     let role = parse_role(&row.get::<String, _>("role"))?;
     Ok(MemberRecord {
@@ -2125,7 +2126,7 @@ fn member_from_row(
 }
 
 fn invitation_from_row(
-    row: sqlx::sqlite::SqliteRow,
+    row: sqlx::any::AnyRow,
     now: TimestampMillis,
 ) -> Result<InvitationRecord, WorkspaceError> {
     let expires_at = TimestampMillis::from_millis(row.get("expires_at"));
@@ -2159,7 +2160,7 @@ pub(super) async fn require_actor<'e, E>(
     actor_id: Id,
 ) -> Result<Actor, WorkspaceError>
 where
-    E: sqlx::Executor<'e, Database = Sqlite>,
+    E: sqlx::Executor<'e, Database = Any>,
 {
     membership::actor(executor, workspace_id, actor_id)
         .await?
@@ -2167,7 +2168,7 @@ where
 }
 
 pub(super) async fn require_permission(
-    transaction: &mut Transaction<'_, Sqlite>,
+    transaction: &mut Transaction<'_, Any>,
     workspace_id: Id,
     actor_id: Id,
     permission: Permission,
@@ -2197,12 +2198,12 @@ struct TargetMembership {
 }
 
 async fn target_membership(
-    transaction: &mut Transaction<'_, Sqlite>,
+    transaction: &mut Transaction<'_, Any>,
     workspace_id: Id,
     membership_id: Id,
 ) -> Result<TargetMembership, WorkspaceError> {
     let row = sqlx::query(
-        "SELECT user_id, role, version FROM memberships WHERE id = ? AND workspace_id = ?",
+        "SELECT user_id, role, version FROM memberships WHERE id = $1 AND workspace_id = $2",
     )
     .bind(membership_id.to_string())
     .bind(workspace_id.to_string())

@@ -335,7 +335,7 @@ async fn an_admin_resets_another_users_two_factor() {
     let now = TimestampMillis::now();
     sqlx::query(
         "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) \
-         VALUES (?, 'member@example.com', 'member@example.com', 'Member', 'unused', ?, ?)",
+         VALUES ($1, 'member@example.com', 'member@example.com', 'Member', 'unused', $2, $3)",
     )
     .bind(member.to_string())
     .bind(now.as_millis())

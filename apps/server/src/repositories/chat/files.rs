@@ -4,13 +4,14 @@
 //! of the message attaches it. From then on it is readable by everyone who can read the
 //! conversation.
 
+use orbit_platform::Row;
 use orbit_platform::{AuthorizedAttachment, BlobDownload, Id, StagedUpload, UploadError};
-use sqlx::sqlite::SqliteRow;
-use sqlx::{Row, SqliteConnection};
+use sqlx::AnyConnection;
+use sqlx::any::AnyRow;
 
 use super::{
     ChatError, ChatFileRecord, ChatRepository, MESSAGE_SELECT, MessageRecord, hydrate, id_list,
-    load_access, load_actor, parse_id,
+    in_ids, load_access, load_actor, parse_id,
 };
 
 /// Files of one message.
@@ -21,7 +22,7 @@ const MAX_DIMENSION: u32 = 100_000;
 const FILE_COLUMNS: &str =
     "id, workspace_id, message_id, file_name, mime_type, size_bytes, width, height";
 
-fn file_from_row(row: &SqliteRow) -> Result<ChatFileRecord, ChatError> {
+fn file_from_row(row: &AnyRow) -> Result<ChatFileRecord, ChatError> {
     let id = parse_id(row.get("id"))?;
     let workspace_id = parse_id(row.get("workspace_id"))?;
     Ok(ChatFileRecord {
@@ -37,13 +38,14 @@ fn file_from_row(row: &SqliteRow) -> Result<ChatFileRecord, ChatError> {
 
 /// Puts the files of each message into its record: one query for the whole list.
 pub(super) async fn load_files(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     messages: &mut [MessageRecord],
 ) -> Result<(), ChatError> {
-    let rows = sqlx::query(&format!(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT {FILE_COLUMNS} FROM chat_message_files \
-         WHERE message_id IN (SELECT value FROM json_each(?)) ORDER BY created_at, id"
-    ))
+         WHERE message_id {} ORDER BY created_at, id",
+        in_ids(&*conn, 1)
+    )))
     .bind(id_list(messages.iter().map(|message| message.id)))
     .fetch_all(&mut *conn)
     .await?;
@@ -59,18 +61,19 @@ pub(super) async fn load_files(
 /// Attaches uploaded files to a new message. Each must be the author's own upload in the
 /// conversation's workspace that no message has yet.
 pub(super) async fn attach_files(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     message: &mut MessageRecord,
     file_ids: &[Id],
 ) -> Result<(), ChatError> {
     if file_ids.is_empty() {
         return Ok(());
     }
-    let attached = sqlx::query(
-        "UPDATE chat_message_files SET message_id = ?, conversation_id = ? \
-         WHERE id IN (SELECT value FROM json_each(?)) AND uploaded_by = ? AND message_id IS NULL \
-         AND workspace_id = (SELECT workspace_id FROM chat_conversations WHERE id = ?)",
-    )
+    let attached = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "UPDATE chat_message_files SET message_id = $1, conversation_id = $2 \
+         WHERE id {} AND uploaded_by = $4 AND message_id IS NULL \
+         AND workspace_id = (SELECT workspace_id FROM chat_conversations WHERE id = $5)",
+        in_ids(&*conn, 3)
+    )))
     .bind(message.id.to_string())
     .bind(message.conversation_id.to_string())
     .bind(id_list(file_ids.iter().copied()))
@@ -90,7 +93,7 @@ pub(super) async fn attach_files(
 /// stay when the original goes. The forwarder is their uploader. Both messages are in one
 /// workspace, and a message has at most [`MAX_MESSAGE_FILES`] files, so the copy has too.
 pub(super) async fn copy_files(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     source: &MessageRecord,
     message: &mut MessageRecord,
 ) -> Result<(), ChatError> {
@@ -102,8 +105,8 @@ pub(super) async fn copy_files(
         sqlx::query(
             "INSERT INTO chat_message_files (id, workspace_id, message_id, conversation_id, blob_id, \
              file_name, mime_type, size_bytes, width, height, uploaded_by, created_at) \
-             SELECT ?, workspace_id, ?, ?, blob_id, file_name, mime_type, size_bytes, width, height, \
-             ?, ? FROM chat_message_files WHERE id = ? AND message_id = ?",
+             SELECT $1, workspace_id, $2, $3, blob_id, file_name, mime_type, size_bytes, width, height, \
+             $4, $5 FROM chat_message_files WHERE id = $6 AND message_id = $7",
         )
         .bind(Id::new_v7().to_string())
         .bind(message.id.to_string())
@@ -153,7 +156,7 @@ impl ChatRepository {
         let size = i64::try_from(upload.size_bytes).map_err(|_| UploadError::SizeOverflow)?;
         sqlx::query(
             "INSERT INTO chat_message_files (id, workspace_id, blob_id, file_name, mime_type, size_bytes, \
-             width, height, uploaded_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             width, height, uploaded_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
         )
         .bind(id.to_string())
         .bind(workspace_id.to_string())
@@ -161,8 +164,8 @@ impl ChatRepository {
         .bind(&upload.display_name)
         .bind(&upload.detected_media_type)
         .bind(size)
-        .bind(dimension(width))
-        .bind(dimension(height))
+        .bind(dimension(width).map(i64::from))
+        .bind(dimension(height).map(i64::from))
         .bind(actor_id.to_string())
         .bind(now.as_millis())
         .execute(&mut *tx)
@@ -194,9 +197,9 @@ impl ChatRepository {
                     "SELECT b.storage_key, f.mime_type, f.file_name FROM chat_message_files f \
                      JOIN attachment_blobs b ON b.id = f.blob_id AND b.workspace_id = f.workspace_id \
                      JOIN workspaces w ON w.id = f.workspace_id AND w.deleted_at IS NULL \
-                     JOIN memberships me ON me.workspace_id = f.workspace_id AND me.user_id = ? \
+                     JOIN memberships me ON me.workspace_id = f.workspace_id AND me.user_id = $1 \
                      LEFT JOIN chat_conversations c ON c.id = f.conversation_id \
-                     WHERE f.id = ? AND f.workspace_id = ? AND ( \
+                     WHERE f.id = $2 AND f.workspace_id = $3 AND ( \
                          (f.message_id IS NULL AND f.uploaded_by = me.user_id) \
                          OR c.kind = 'public' \
                          OR EXISTS (SELECT 1 FROM chat_members cm \
@@ -230,10 +233,10 @@ impl ChatRepository {
     ) -> Result<Vec<MessageRecord>, ChatError> {
         let mut tx = self.database.pool().begin().await?;
         load_access(&mut tx, workspace_id, actor_id, conversation_id).await?;
-        let rows = sqlx::query(&format!(
+        let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
             "{MESSAGE_SELECT} WHERE m.id IN (SELECT DISTINCT message_id FROM chat_message_files \
-             WHERE conversation_id = ? ORDER BY message_id DESC LIMIT ?) ORDER BY m.id DESC"
-        ))
+             WHERE conversation_id = $1 ORDER BY message_id DESC LIMIT $2) ORDER BY m.id DESC"
+        )))
         .bind(conversation_id.to_string())
         .bind(LIST_LIMIT)
         .fetch_all(&mut *tx)

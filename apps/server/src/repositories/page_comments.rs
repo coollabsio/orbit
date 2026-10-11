@@ -13,14 +13,14 @@
 
 use std::collections::{BTreeSet, HashMap};
 
-use orbit_platform::{Database, Id, TimestampMillis};
+use orbit_platform::{Database, Flag, Id, Row, TimestampMillis};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
-use sqlx::{Row, Sqlite, Transaction};
+use sqlx::{Any, Transaction};
 use thiserror::Error;
 use utoipa::ToSchema;
 
-use super::pages::VISIBLE;
+use super::pages::visible;
 use crate::audit::{self, AuditOutcome};
 use crate::collab::sanitize::normalize_link_href;
 
@@ -327,7 +327,7 @@ impl PageCommentRepository {
         let thread_id = Id::new_v7();
         sqlx::query(
             "INSERT INTO page_threads (id, workspace_id, page_id, created_by, quote, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
         )
         .bind(thread_id.to_string())
         .bind(workspace_id.to_string())
@@ -408,8 +408,8 @@ impl PageCommentRepository {
         let body_json =
             serde_json::to_string(&body.blocks).map_err(|_| PageCommentError::Corrupt)?;
         sqlx::query(
-            "UPDATE page_comments SET body_json = ?, body_text = ?, version = version + 1, \
-             updated_at = ?, edited_at = ? WHERE id = ?",
+            "UPDATE page_comments SET body_json = $1, body_text = $2, version = version + 1, \
+             updated_at = $3, edited_at = $4 WHERE id = $5",
         )
         .bind(body_json)
         .bind(&body.text)
@@ -455,29 +455,29 @@ impl PageCommentRepository {
         require_own_comment(&mut tx, thread_id, comment_id, actor_id).await?;
         sqlx::query(
             "UPDATE page_comments SET body_json = '[]', body_text = '', version = version + 1, \
-             updated_at = ?, deleted_at = ? WHERE id = ?",
+             updated_at = $1, deleted_at = $2 WHERE id = $3",
         )
         .bind(now.as_millis())
         .bind(now.as_millis())
         .bind(comment_id.to_string())
         .execute(&mut *tx)
         .await?;
-        sqlx::query("DELETE FROM page_comment_mentions WHERE comment_id = ?")
+        sqlx::query("DELETE FROM page_comment_mentions WHERE comment_id = $1")
             .bind(comment_id.to_string())
             .execute(&mut *tx)
             .await?;
-        sqlx::query("DELETE FROM notifications WHERE page_comment_id = ?")
+        sqlx::query("DELETE FROM notifications WHERE page_comment_id = $1")
             .bind(comment_id.to_string())
             .execute(&mut *tx)
             .await?;
         let live: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM page_comments WHERE thread_id = ? AND deleted_at IS NULL",
+            "SELECT COUNT(*) FROM page_comments WHERE thread_id = $1 AND deleted_at IS NULL",
         )
         .bind(thread_id.to_string())
         .fetch_one(&mut *tx)
         .await?;
         if live == 0 {
-            sqlx::query("DELETE FROM page_threads WHERE id = ?")
+            sqlx::query("DELETE FROM page_threads WHERE id = $1")
                 .bind(thread_id.to_string())
                 .execute(&mut *tx)
                 .await?;
@@ -515,7 +515,7 @@ impl PageCommentRepository {
         if created_by != actor_id {
             return Err(PageCommentError::Forbidden);
         }
-        sqlx::query("DELETE FROM page_threads WHERE id = ?")
+        sqlx::query("DELETE FROM page_threads WHERE id = $1")
             .bind(thread_id.to_string())
             .execute(&mut *tx)
             .await?;
@@ -551,8 +551,8 @@ impl PageCommentRepository {
         require_thread(&mut tx, page_id, thread_id).await?;
         let changed = if resolved {
             sqlx::query(
-                "UPDATE page_threads SET resolved_at = MAX(?, created_at), resolved_by = ?, \
-                 version = version + 1, updated_at = ? WHERE id = ? AND resolved_at IS NULL",
+                "UPDATE page_threads SET resolved_at = CASE WHEN $1 > created_at THEN $1 ELSE created_at END, resolved_by = $2, \
+                 version = version + 1, updated_at = $3 WHERE id = $4 AND resolved_at IS NULL",
             )
             .bind(now.as_millis())
             .bind(actor_id.to_string())
@@ -563,7 +563,7 @@ impl PageCommentRepository {
         } else {
             sqlx::query(
                 "UPDATE page_threads SET resolved_at = NULL, resolved_by = NULL, \
-                 version = version + 1, updated_at = ? WHERE id = ? AND resolved_at IS NOT NULL",
+                 version = version + 1, updated_at = $1 WHERE id = $2 AND resolved_at IS NOT NULL",
             )
             .bind(now.as_millis())
             .bind(thread_id.to_string())
@@ -603,18 +603,19 @@ struct VisiblePage {
 }
 
 async fn visible_page(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     page_id: Id,
     actor_id: Id,
 ) -> Result<VisiblePage, PageCommentError> {
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT pages.owner_id AS owner_id FROM pages \
          JOIN workspaces ON workspaces.id = pages.workspace_id \
-         JOIN memberships ON memberships.workspace_id = pages.workspace_id AND memberships.user_id = ? \
-         WHERE pages.id = ? AND pages.workspace_id = ? AND pages.deleted_at IS NULL \
-         AND workspaces.deleted_at IS NULL AND {VISIBLE}"
-    ))
+         JOIN memberships ON memberships.workspace_id = pages.workspace_id AND memberships.user_id = $1 \
+         WHERE pages.id = $2 AND pages.workspace_id = $3 AND pages.deleted_at IS NULL \
+         AND workspaces.deleted_at IS NULL AND {visible}",
+        visible = visible(4)
+    )))
     .bind(actor_id.to_string())
     .bind(page_id.to_string())
     .bind(workspace_id.to_string())
@@ -631,12 +632,12 @@ async fn visible_page(
 
 /// The thread's creator, when the thread belongs to the page.
 async fn require_thread(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     page_id: Id,
     thread_id: Id,
 ) -> Result<Id, PageCommentError> {
     let created_by: Option<String> =
-        sqlx::query_scalar("SELECT created_by FROM page_threads WHERE id = ? AND page_id = ?")
+        sqlx::query_scalar("SELECT created_by FROM page_threads WHERE id = $1 AND page_id = $2")
             .bind(thread_id.to_string())
             .bind(page_id.to_string())
             .fetch_optional(&mut **tx)
@@ -645,13 +646,13 @@ async fn require_thread(
 }
 
 async fn require_own_comment(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     thread_id: Id,
     comment_id: Id,
     actor_id: Id,
 ) -> Result<(), PageCommentError> {
     let author: Option<String> = sqlx::query_scalar(
-        "SELECT author_id FROM page_comments WHERE id = ? AND thread_id = ? AND deleted_at IS NULL",
+        "SELECT author_id FROM page_comments WHERE id = $1 AND thread_id = $2 AND deleted_at IS NULL",
     )
     .bind(comment_id.to_string())
     .bind(thread_id.to_string())
@@ -665,11 +666,11 @@ async fn require_own_comment(
 }
 
 async fn touch_thread(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     thread_id: Id,
     now: TimestampMillis,
 ) -> Result<(), PageCommentError> {
-    sqlx::query("UPDATE page_threads SET version = version + 1, updated_at = ? WHERE id = ?")
+    sqlx::query("UPDATE page_threads SET version = version + 1, updated_at = $1 WHERE id = $2")
         .bind(now.as_millis())
         .bind(thread_id.to_string())
         .execute(&mut **tx)
@@ -678,7 +679,7 @@ async fn touch_thread(
 }
 
 async fn insert_comment(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     page: &VisiblePage,
     thread_id: Id,
     actor_id: Id,
@@ -689,7 +690,7 @@ async fn insert_comment(
     let body_json = serde_json::to_string(&body.blocks).map_err(|_| PageCommentError::Corrupt)?;
     sqlx::query(
         "INSERT INTO page_comments (id, workspace_id, page_id, thread_id, author_id, body_json, \
-         body_text, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         body_text, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
     )
     .bind(comment_id.to_string())
     .bind(page.workspace_id.to_string())
@@ -709,7 +710,7 @@ async fn insert_comment(
 /// Members of the workspace who can see the page, out of `candidates`: every active member for a
 /// teamspace page, only the owner for a private page.
 async fn can_see(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     page: &VisiblePage,
     candidates: &[Id],
 ) -> Result<Vec<Id>, PageCommentError> {
@@ -718,9 +719,9 @@ async fn can_see(
         if page.owner_id.is_some_and(|owner| owner != *user_id) {
             continue;
         }
-        let member: bool = sqlx::query_scalar(
+        let Flag(member) = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM memberships JOIN users ON users.id = memberships.user_id \
-             WHERE memberships.workspace_id = ? AND memberships.user_id = ? AND users.suspended_at IS NULL)",
+             WHERE memberships.workspace_id = $1 AND memberships.user_id = $2 AND users.suspended_at IS NULL)",
         )
         .bind(page.workspace_id.to_string())
         .bind(user_id.to_string())
@@ -735,7 +736,7 @@ async fn can_see(
 
 /// Stores the comment's visible mentions and notifies the ones it did not mention before.
 async fn replace_mentions(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     page: &VisiblePage,
     thread_id: Id,
     comment_id: Id,
@@ -744,7 +745,7 @@ async fn replace_mentions(
     now: TimestampMillis,
 ) -> Result<(), PageCommentError> {
     let previous: BTreeSet<Id> = sqlx::query_scalar::<_, String>(
-        "SELECT user_id FROM page_comment_mentions WHERE comment_id = ?",
+        "SELECT user_id FROM page_comment_mentions WHERE comment_id = $1",
     )
     .bind(comment_id.to_string())
     .fetch_all(&mut **tx)
@@ -753,12 +754,12 @@ async fn replace_mentions(
     .map(parse)
     .collect::<Result<_, _>>()?;
     let mentioned = can_see(tx, page, &body.mentions).await?;
-    sqlx::query("DELETE FROM page_comment_mentions WHERE comment_id = ?")
+    sqlx::query("DELETE FROM page_comment_mentions WHERE comment_id = $1")
         .bind(comment_id.to_string())
         .execute(&mut **tx)
         .await?;
     for user_id in &mentioned {
-        sqlx::query("INSERT INTO page_comment_mentions (comment_id, user_id) VALUES (?, ?)")
+        sqlx::query("INSERT INTO page_comment_mentions (comment_id, user_id) VALUES ($1, $2)")
             .bind(comment_id.to_string())
             .bind(user_id.to_string())
             .execute(&mut **tx)
@@ -769,10 +770,11 @@ async fn replace_mentions(
         .filter(|id| **id != actor_id && !previous.contains(id))
     {
         sqlx::query(
-            "INSERT OR IGNORE INTO notifications \
+            "INSERT INTO notifications \
              (id, workspace_id, recipient_user_id, actor_user_id, kind, page_id, page_thread_id, \
               page_comment_id, dedupe_key, created_at) \
-             VALUES (?, ?, ?, ?, 'page_comment_mentioned', ?, ?, ?, ?, ?)",
+             VALUES ($1, $2, $3, $4, 'page_comment_mentioned', $5, $6, $7, $8, $9) \
+             ON CONFLICT DO NOTHING",
         )
         .bind(Id::new_v7().to_string())
         .bind(page.workspace_id.to_string())
@@ -794,7 +796,7 @@ async fn replace_mentions(
 
 #[allow(clippy::too_many_arguments)]
 async fn record(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     page: &VisiblePage,
     actor_id: Id,
     action: &str,
@@ -820,7 +822,7 @@ async fn record(
 }
 
 async fn load_thread(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     page_id: Id,
     thread_id: Id,
 ) -> Result<PageThread, PageCommentError> {
@@ -832,12 +834,13 @@ async fn load_thread(
 }
 
 async fn load_comment(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     page_id: Id,
     comment_id: Id,
 ) -> Result<PageComment, PageCommentError> {
-    let sql = format!("{COMMENT_SELECT} WHERE page_comments.id = ? AND page_comments.page_id = ?");
-    let row = sqlx::query(&sql)
+    let sql =
+        format!("{COMMENT_SELECT} WHERE page_comments.id = $1 AND page_comments.page_id = $2");
+    let row = sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(comment_id.to_string())
         .bind(page_id.to_string())
         .fetch_optional(&mut **tx)
@@ -854,31 +857,31 @@ const COMMENT_SELECT: &str = "SELECT page_comments.id AS id, page_comments.threa
      page_comments.deleted_at AS deleted_at FROM page_comments";
 
 async fn load_threads(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     page_id: Id,
     only: Option<Id>,
 ) -> Result<Vec<PageThread>, PageCommentError> {
     let only = only.map(|id| id.to_string());
     let thread_sql = format!(
         "SELECT id, page_id, created_by, quote, resolved_at, resolved_by, version, created_at, \
-         updated_at FROM page_threads WHERE page_id = ?{} ORDER BY created_at, id",
-        if only.is_some() { " AND id = ?" } else { "" }
+         updated_at FROM page_threads WHERE page_id = $1{} ORDER BY created_at, id",
+        if only.is_some() { " AND id = $2" } else { "" }
     );
-    let mut query = sqlx::query(&thread_sql).bind(page_id.to_string());
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(thread_sql)).bind(page_id.to_string());
     if let Some(thread_id) = &only {
         query = query.bind(thread_id);
     }
     let threads = query.fetch_all(&mut **tx).await?;
     let comment_sql = format!(
-        "{COMMENT_SELECT} WHERE page_comments.page_id = ?{} \
+        "{COMMENT_SELECT} WHERE page_comments.page_id = $1{} \
          ORDER BY page_comments.created_at, page_comments.id",
         if only.is_some() {
-            " AND page_comments.thread_id = ?"
+            " AND page_comments.thread_id = $2"
         } else {
             ""
         }
     );
-    let mut query = sqlx::query(&comment_sql).bind(page_id.to_string());
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(comment_sql)).bind(page_id.to_string());
     if let Some(thread_id) = &only {
         query = query.bind(thread_id);
     }
@@ -916,14 +919,14 @@ async fn load_threads(
 
 /// Mentions of the page's comments (or of one comment), by comment.
 async fn mentions_of(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     page_id: Id,
     comment_id: Option<Id>,
 ) -> Result<HashMap<Id, Vec<Id>>, PageCommentError> {
     let rows = sqlx::query_as::<_, (String, String)>(
         "SELECT page_comment_mentions.comment_id, page_comment_mentions.user_id \
          FROM page_comment_mentions JOIN page_comments ON page_comments.id = page_comment_mentions.comment_id \
-         WHERE page_comments.page_id = ? AND (? IS NULL OR page_comments.id = ?) \
+         WHERE page_comments.page_id = $1 AND ($2 IS NULL OR page_comments.id = $3) \
          ORDER BY page_comment_mentions.comment_id, page_comment_mentions.user_id",
     )
     .bind(page_id.to_string())
@@ -941,7 +944,7 @@ async fn mentions_of(
 }
 
 fn comment_from_row(
-    row: sqlx::sqlite::SqliteRow,
+    row: sqlx::any::AnyRow,
     mentions: &HashMap<Id, Vec<Id>>,
 ) -> Result<PageComment, PageCommentError> {
     let id = parse(row.get("id"))?;

@@ -1,10 +1,9 @@
 use orbit_domain::Actor;
 use orbit_platform::{
-    AuthorizedAttachment, BlobDownload, Database, Id, NewAttachmentReference, StagedUpload,
-    TimestampMillis, UploadError, UploadService,
+    AuthorizedAttachment, Backend, BlobDownload, Database, Id, NewAttachmentReference, Row,
+    StagedUpload, TimestampMillis, UploadError, UploadService,
 };
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 use thiserror::Error;
 
 use crate::audit::{self, AuditOutcome};
@@ -102,7 +101,7 @@ impl AttachmentRepository {
     ) -> Result<(), AttachmentRepositoryError> {
         self.authorize_task(session, workspace_id, task_id).await?;
         let exists: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM task_comments WHERE id = ? AND workspace_id = ? AND task_id = ?",
+            "SELECT COUNT(*) FROM task_comments WHERE id = $1 AND workspace_id = $2 AND task_id = $3",
         )
         .bind(comment_id.to_string())
         .bind(workspace_id.to_string())
@@ -163,7 +162,7 @@ impl AttachmentRepository {
         }
         if let Some(comment_id) = comment_id {
             let exists: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM task_comments WHERE id = ? AND workspace_id = ? AND task_id = ?",
+                "SELECT COUNT(*) FROM task_comments WHERE id = $1 AND workspace_id = $2 AND task_id = $3",
             )
             .bind(comment_id.to_string())
             .bind(workspace_id.to_string())
@@ -177,9 +176,9 @@ impl AttachmentRepository {
         let rows = if let Some((created_at, id)) = after {
             sqlx::query(
                 "SELECT id, workspace_id, task_id, comment_id, owner_id, display_name, media_type, \
-                 byte_size, created_at FROM attachment_references WHERE workspace_id = ? AND task_id = ? \
-                 AND comment_id IS ? AND (created_at > ? OR (created_at = ? AND id > ?)) \
-                 ORDER BY created_at, id LIMIT ?",
+                 byte_size, created_at FROM attachment_references WHERE workspace_id = $1 AND task_id = $2 \
+                 AND comment_id IS NOT DISTINCT FROM $3 AND (created_at > $4 OR (created_at = $5 AND id > $6)) \
+                 ORDER BY created_at, id LIMIT $7",
             )
             .bind(workspace_id.to_string())
             .bind(task_id.to_string())
@@ -193,8 +192,8 @@ impl AttachmentRepository {
         } else {
             sqlx::query(
                 "SELECT id, workspace_id, task_id, comment_id, owner_id, display_name, media_type, \
-                 byte_size, created_at FROM attachment_references WHERE workspace_id = ? AND task_id = ? \
-                 AND comment_id IS ? ORDER BY created_at, id LIMIT ?",
+                 byte_size, created_at FROM attachment_references WHERE workspace_id = $1 AND task_id = $2 \
+                 AND comment_id IS NOT DISTINCT FROM $3 ORDER BY created_at, id LIMIT $4",
             )
             .bind(workspace_id.to_string())
             .bind(task_id.to_string())
@@ -257,8 +256,8 @@ impl AttachmentRepository {
                 .await?;
         }
         let row = sqlx::query(
-            "SELECT blob_id FROM attachment_references WHERE id = ? AND workspace_id = ? \
-             AND task_id = ? AND comment_id IS ?",
+            "SELECT blob_id FROM attachment_references WHERE id = $1 AND workspace_id = $2 \
+             AND task_id = $3 AND comment_id IS NOT DISTINCT FROM $4",
         )
         .bind(attachment_id.to_string())
         .bind(workspace_id.to_string())
@@ -268,23 +267,32 @@ impl AttachmentRepository {
         .await?
         .ok_or(AttachmentRepositoryError::NotFound)?;
         let blob_id: String = row.try_get("blob_id")?;
-        sqlx::query("DELETE FROM attachment_references WHERE id = ?")
+        sqlx::query("DELETE FROM attachment_references WHERE id = $1")
             .bind(attachment_id.to_string())
             .execute(&mut *transaction)
             .await?;
-        sqlx::query(
-            "UPDATE attachment_blobs SET quarantine_until = MAX(quarantine_until, ?) \
-             WHERE id = ? AND NOT EXISTS (SELECT 1 FROM attachment_references WHERE blob_id = ?) \
-             AND NOT EXISTS (SELECT 1 FROM page_files WHERE blob_id = ?) \
-             AND NOT EXISTS (SELECT 1 FROM chat_message_files WHERE blob_id = ?)",
-        )
-        .bind(now.as_millis().saturating_add(DAY_MILLIS))
-        .bind(&blob_id)
-        .bind(&blob_id)
-        .bind(&blob_id)
-        .bind(&blob_id)
-        .execute(&mut *transaction)
-        .await?;
+        let quarantine = match self.database.backend() {
+            Backend::Sqlite => {
+                "UPDATE attachment_blobs SET quarantine_until = MAX(quarantine_until, $1) \
+                 WHERE id = $2 AND NOT EXISTS (SELECT 1 FROM attachment_references WHERE blob_id = $3) \
+                 AND NOT EXISTS (SELECT 1 FROM page_files WHERE blob_id = $4) \
+                 AND NOT EXISTS (SELECT 1 FROM chat_message_files WHERE blob_id = $5)"
+            }
+            Backend::Postgres => {
+                "UPDATE attachment_blobs SET quarantine_until = GREATEST(quarantine_until, $1) \
+                 WHERE id = $2 AND NOT EXISTS (SELECT 1 FROM attachment_references WHERE blob_id = $3) \
+                 AND NOT EXISTS (SELECT 1 FROM page_files WHERE blob_id = $4) \
+                 AND NOT EXISTS (SELECT 1 FROM chat_message_files WHERE blob_id = $5)"
+            }
+        };
+        sqlx::query(quarantine)
+            .bind(now.as_millis().saturating_add(DAY_MILLIS))
+            .bind(&blob_id)
+            .bind(&blob_id)
+            .bind(&blob_id)
+            .bind(&blob_id)
+            .execute(&mut *transaction)
+            .await?;
         audit::record(
             &mut transaction,
             workspace_id,
@@ -355,12 +363,12 @@ impl AttachmentRepository {
              JOIN projects ON projects.id = tasks.project_id \
              JOIN workspaces ON workspaces.id = tasks.workspace_id \
              JOIN memberships ON memberships.workspace_id = tasks.workspace_id \
-             AND memberships.user_id = ? JOIN users ON users.id = memberships.user_id \
-             JOIN sessions ON sessions.id = ? AND sessions.user_id = users.id \
-             WHERE attachment_references.id = ? AND attachment_references.workspace_id = ? \
-             AND attachment_references.task_id = ? AND attachment_references.comment_id IS ? \
-             AND sessions.revoked_at IS NULL AND sessions.idle_expires_at > ? \
-             AND sessions.absolute_expires_at > ? AND tasks.deleted_at IS NULL \
+             AND memberships.user_id = $1 JOIN users ON users.id = memberships.user_id \
+             JOIN sessions ON sessions.id = $2 AND sessions.user_id = users.id \
+             WHERE attachment_references.id = $3 AND attachment_references.workspace_id = $4 \
+             AND attachment_references.task_id = $5 AND attachment_references.comment_id IS NOT DISTINCT FROM $6 \
+             AND sessions.revoked_at IS NULL AND sessions.idle_expires_at > $7 \
+             AND sessions.absolute_expires_at > $8 AND tasks.deleted_at IS NULL \
              AND projects.deleted_at IS NULL AND workspaces.deleted_at IS NULL \
              AND users.suspended_at IS NULL",
         )
@@ -442,12 +450,16 @@ impl AttachmentRepository {
         }
         let finalization = self.uploads.begin_finalization().await;
         let mut transaction = self.database.immediate_transaction().await?;
-        let now_millis: i64 = sqlx::query_scalar(
-            "SELECT CAST(strftime('%s', 'now') AS INTEGER) * 1000 \
-             + CAST(substr(strftime('%f', 'now'), 4, 3) AS INTEGER)",
-        )
-        .fetch_one(&mut *transaction)
-        .await?;
+        let now_query = match self.database.backend() {
+            Backend::Sqlite => {
+                "SELECT CAST(strftime('%s', 'now') AS INTEGER) * 1000 \
+                 + CAST(substr(strftime('%f', 'now'), 4, 3) AS INTEGER)"
+            }
+            Backend::Postgres => "SELECT (EXTRACT(EPOCH FROM clock_timestamp()) * 1000)::BIGINT",
+        };
+        let now_millis: i64 = sqlx::query_scalar(now_query)
+            .fetch_one(&mut *transaction)
+            .await?;
         let now = TimestampMillis::from_millis(now_millis);
         let access = task_access(
             &mut *transaction,
@@ -469,7 +481,7 @@ impl AttachmentRepository {
             let id = Id::new_v7();
             sqlx::query(
                 "INSERT INTO task_comments (id, workspace_id, task_id, author_id, parent_id, body, \
-                 version, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, '', 0, ?, ?)",
+                 version, created_at, updated_at) VALUES ($1, $2, $3, $4, NULL, '', 0, $5, $6)",
             )
             .bind(id.to_string())
             .bind(workspace_id.to_string())
@@ -540,16 +552,16 @@ async fn task_access<'e, E>(
     now_millis: i64,
 ) -> Result<i64, sqlx::Error>
 where
-    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+    E: sqlx::Executor<'e, Database = sqlx::Any>,
 {
     sqlx::query_scalar(
         "SELECT COUNT(*) FROM sessions JOIN users ON users.id = sessions.user_id \
-         JOIN memberships ON memberships.user_id = users.id AND memberships.workspace_id = ? \
-         JOIN tasks ON tasks.workspace_id = memberships.workspace_id AND tasks.id = ? \
+         JOIN memberships ON memberships.user_id = users.id AND memberships.workspace_id = $1 \
+         JOIN tasks ON tasks.workspace_id = memberships.workspace_id AND tasks.id = $2 \
          JOIN projects ON projects.id = tasks.project_id \
          JOIN workspaces ON workspaces.id = tasks.workspace_id \
-         WHERE sessions.id = ? AND sessions.user_id = ? AND sessions.revoked_at IS NULL \
-         AND sessions.idle_expires_at > ? AND sessions.absolute_expires_at > ? \
+         WHERE sessions.id = $3 AND sessions.user_id = $4 AND sessions.revoked_at IS NULL \
+         AND sessions.idle_expires_at > $5 AND sessions.absolute_expires_at > $6 \
          AND users.suspended_at IS NULL AND tasks.deleted_at IS NULL \
          AND projects.deleted_at IS NULL AND workspaces.deleted_at IS NULL",
     )
@@ -566,7 +578,7 @@ where
 /// A comment's attachments are part of the comment, so adding or removing one follows the
 /// comment's edit rule. Reading them stays open to every member.
 async fn require_comment_editor(
-    connection: &mut sqlx::SqliteConnection,
+    connection: &mut sqlx::AnyConnection,
     session: &AuthenticatedSession,
     workspace_id: Id,
     task_id: Id,
@@ -576,7 +588,7 @@ async fn require_comment_editor(
         .await?
         .ok_or(AttachmentRepositoryError::NotFound)?;
     let author_id = sqlx::query_scalar::<_, String>(
-        "SELECT author_id FROM task_comments WHERE id = ? AND workspace_id = ? AND task_id = ?",
+        "SELECT author_id FROM task_comments WHERE id = $1 AND workspace_id = $2 AND task_id = $3",
     )
     .bind(comment_id.to_string())
     .bind(workspace_id.to_string())
@@ -629,7 +641,7 @@ fn encode_cursor(cursor: &AttachmentCursor) -> Result<String, AttachmentReposito
 }
 
 fn attachment_from_row(
-    row: sqlx::sqlite::SqliteRow,
+    row: sqlx::any::AnyRow,
 ) -> Result<CreatedAttachment, AttachmentRepositoryError> {
     Ok(CreatedAttachment {
         id: parse_db_id(row.try_get("id")?)?,

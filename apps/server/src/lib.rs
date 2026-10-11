@@ -4,6 +4,7 @@ pub mod audit;
 pub mod auth_routes;
 pub mod chat_routes;
 pub mod collab;
+pub mod entities;
 pub mod export;
 pub mod export_routes;
 pub mod image_compression;

@@ -244,7 +244,7 @@ async fn teamspaces_are_listed_created_and_renamed_with_a_derived_default() {
     let actions = sqlx::query_as::<_, (String, String, i64)>(
         "SELECT audit_events.action, audit_events.resource_type, \
          (SELECT COUNT(*) FROM outbox_events WHERE outbox_events.id = audit_events.id AND outbox_events.topic = 'workspace.changed') \
-         FROM audit_events WHERE workspace_id = ? AND resource_type = 'teamspace' AND resource_id IN (?, ?) \
+         FROM audit_events WHERE workspace_id = $1 AND resource_type = 'teamspace' AND resource_id IN ($2, $3) \
          ORDER BY occurred_at, id",
     )
     .bind(&fixture.workspace_id)
@@ -292,7 +292,7 @@ async fn members_manage_teamspaces_but_only_owners_and_admins_delete_them() {
     assert_eq!(problem["code"], "workspace_action_forbidden");
     assert_eq!(fixture.list().await.len(), 2);
 
-    sqlx::query("UPDATE memberships SET role = 'admin' WHERE user_id = ?")
+    sqlx::query("UPDATE memberships SET role = 'admin' WHERE user_id = $1")
         .bind(member_id.to_string())
         .execute(fixture.database.pool())
         .await
@@ -534,7 +534,7 @@ async fn members_reorder_teamspaces_and_the_top_one_becomes_the_default() {
     assert_eq!(problem["code"], "validation_failed");
 
     let moves: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM audit_events WHERE workspace_id = ? AND action = 'teamspace.moved' AND resource_id = ?",
+        "SELECT COUNT(*) FROM audit_events WHERE workspace_id = $1 AND action = 'teamspace.moved' AND resource_id = $2",
     )
     .bind(&fixture.workspace_id)
     .bind(id_of(&ops))
@@ -633,7 +633,7 @@ async fn add_member(fixture: &Fixture, workspace_id: &str, email: &str) -> (Id, 
     let now = TimestampMillis::now();
     sqlx::query(
         "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) \
-         VALUES (?, ?, ?, 'Member', 'unused', ?, ?)",
+         VALUES ($1, $2, $3, 'Member', 'unused', $4, $5)",
     )
     .bind(id.to_string())
     .bind(email)
@@ -645,7 +645,7 @@ async fn add_member(fixture: &Fixture, workspace_id: &str, email: &str) -> (Id, 
     .unwrap();
     sqlx::query(
         "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
-         VALUES (?, ?, ?, 'member', 0, ?, ?)",
+         VALUES ($1, $2, $3, 'member', 0, $4, $5)",
     )
     .bind(Id::new_v7().to_string())
     .bind(workspace_id)

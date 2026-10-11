@@ -7,6 +7,11 @@
 - A new migration also needs: its entry in `crates/platform/src/db/migrate.rs` (else every query on the new table returns 500), `SUPPORTED_SCHEMA_VERSION` in `crates/platform/src/backup.rs` (restore refuses newer snapshots), and the version number in `crates/platform/tests/{database,backup}.rs` and `apps/server/tests/app_smoke.rs`. A new route also needs the path and operation counts in `apps/server/tests/openapi_contract.rs` and `just api`.
 - A rebuilt table becomes the *newest* FK child, and SQLite runs parent-delete cascades newest-child first. A `RESTRICT` reference to the rebuilt table (e.g. `tasks.status_id`) can then block a cascade that used to work. Hard deletes must delete the restricting children explicitly first.
 
+## Two database backends (SQLite + Postgres, seaorm-spike)
+- All SQL goes through sqlx `Any`: write `$1, $2, …` (SQLite binds them by number too), import `orbit_platform::Row` (not `sqlx::Row`) so 0/1 flags decode as `bool`, decode boolean scalars as `Flag`, bind `i64` (never `bool`/`u32`), and build dynamic SQL with `SqlBuilder`. SQLite silently ignores extra bound values, so clashing `$N` numbers in `format!`-glued fragments only fail on Postgres.
+- A new SQLite migration also needs its change in the Postgres schema (`apps/server/migrations/postgres/`).
+- Run the whole suite on Postgres with `ORBIT_TEST_POSTGRES_URL=postgres://orbit:orbit@127.0.0.1:15432/orbit`; each test database maps from its SQLite path.
+
 ## SQLite 3.46.0 (bundled by sqlx 0.8) FTS5 integrity false positive
 - `PRAGMA integrity_check` reports "malformed inverted index for FTS5 table …" after a row of an FTS5 table is UPDATEd twice
   (or after `'rebuild'`), although queries are right and FTS5's own `INSERT INTO t(t) VALUES('integrity-check')` passes

@@ -2,9 +2,9 @@
 //! server, object storage (S3) and automatic backups. One row (`instance_settings.id = 1`, created by migration
 //! 0042).
 
+use orbit_platform::Row;
 use orbit_platform::{Database, Id, TimestampMillis};
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 use thiserror::Error;
 use utoipa::ToSchema;
 
@@ -192,7 +192,7 @@ impl InstanceSettingsRepository {
             }
         }
         sqlx::query(
-            "UPDATE instance_settings SET registration_open = ?, updated_at = ? WHERE id = 1",
+            "UPDATE instance_settings SET registration_open = $1, updated_at = $2 WHERE id = 1",
         )
         .bind(i64::from(open))
         .bind(now.as_millis())
@@ -239,8 +239,8 @@ impl InstanceSettingsRepository {
             PasswordChange::Set(sealed) => Some(sealed),
         };
         sqlx::query(
-            "UPDATE instance_settings SET smtp_host = ?, smtp_port = ?, smtp_security = ?, smtp_username = ?, \
-             smtp_password = ?, smtp_from_address = ?, smtp_from_name = ?, updated_at = ? WHERE id = 1",
+            "UPDATE instance_settings SET smtp_host = $1, smtp_port = $2, smtp_security = $3, smtp_username = $4, \
+             smtp_password = $5, smtp_from_address = $6, smtp_from_name = $7, updated_at = $8 WHERE id = 1",
         )
         .bind(&smtp.host)
         .bind(i64::from(smtp.port))
@@ -278,7 +278,7 @@ impl InstanceSettingsRepository {
         sqlx::query(
             "UPDATE instance_settings SET smtp_host = NULL, smtp_port = NULL, smtp_security = NULL, \
              smtp_username = NULL, smtp_password = NULL, smtp_from_address = NULL, smtp_from_name = NULL, \
-             registration_open = 0, updated_at = ? WHERE id = 1",
+             registration_open = 0, updated_at = $1 WHERE id = 1",
         )
         .bind(now.as_millis())
         .execute(&mut *transaction)
@@ -344,8 +344,8 @@ impl InstanceSettingsRepository {
     ) -> Result<(), sqlx::Error> {
         let mut transaction = self.database.immediate_transaction().await?;
         sqlx::query(
-            "UPDATE instance_settings SET s3_endpoint = ?, s3_region = ?, s3_bucket = ?, s3_prefix = ?, \
-             s3_access_key_id = ?, s3_secret_access_key = ?, s3_path_style = ?, updated_at = ? WHERE id = 1",
+            "UPDATE instance_settings SET s3_endpoint = $1, s3_region = $2, s3_bucket = $3, s3_prefix = $4, \
+             s3_access_key_id = $5, s3_secret_access_key = $6, s3_path_style = $7, updated_at = $8 WHERE id = 1",
         )
         .bind(&s3.endpoint)
         .bind(&s3.region)
@@ -383,7 +383,7 @@ impl InstanceSettingsRepository {
         sqlx::query(
             "UPDATE instance_settings SET s3_endpoint = NULL, s3_region = NULL, s3_bucket = NULL, s3_prefix = '', \
              s3_access_key_id = NULL, s3_secret_access_key = NULL, s3_path_style = 0, attachments_in_s3 = 0, \
-             backups_in_s3 = 0, updated_at = ? WHERE id = 1",
+             backups_in_s3 = 0, updated_at = $1 WHERE id = 1",
         )
         .bind(now.as_millis())
         .execute(&mut *transaction)
@@ -425,8 +425,8 @@ impl InstanceSettingsRepository {
             }
         }
         sqlx::query(
-            "UPDATE instance_settings SET attachments_in_s3 = ?, backups_in_s3 = ?, backup_schedule = ?, \
-             updated_at = ? WHERE id = 1",
+            "UPDATE instance_settings SET attachments_in_s3 = $1, backups_in_s3 = $2, backup_schedule = $3, \
+             updated_at = $4 WHERE id = 1",
         )
         .bind(i64::from(attachments_in_s3))
         .bind(i64::from(backups_in_s3))

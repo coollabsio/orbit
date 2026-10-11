@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 
 use orbit_domain::{Actor, Permission};
-use orbit_platform::{Id, TimestampMillis};
-use sqlx::{Row, SqliteConnection};
+use orbit_platform::{Flag, Id, Row, TimestampMillis};
+use sqlx::AnyConnection;
 
 use super::messages::add_system_row;
 use super::state::emit_state;
@@ -12,7 +12,7 @@ use super::{
     Access, CONVERSATION_COLUMNS, CategoryRecord, ChatError, ChatEvent, ChatRepository,
     ConversationKind, ConversationRecord, Events, MessageKind, NotifyLevel, Written,
     conversation_from_row, conversation_record, current_conversation_record, finish, id_list,
-    load_access, load_actor, parse_id, workspace_member_ids,
+    in_ids, json_values, load_access, load_actor, parse_id, workspace_member_ids,
 };
 
 const NAME_MAX_CHARS: usize = 80;
@@ -50,17 +50,17 @@ impl ChatRepository {
         workspace_id: Id,
         actor_id: Id,
     ) -> Result<Vec<ConversationRecord>, ChatError> {
-        const VISIBLE: &str = "c.workspace_id = ? AND c.archived_at IS NULL \
+        const VISIBLE: &str = "c.workspace_id = $1 AND c.archived_at IS NULL \
              AND (c.kind = 'public' OR EXISTS (SELECT 1 FROM chat_members \
-                  WHERE chat_members.conversation_id = c.id AND chat_members.user_id = ?))";
+                  WHERE chat_members.conversation_id = c.id AND chat_members.user_id = $2))";
         let mut tx = self.database.pool().begin().await?;
         load_actor(&mut tx, workspace_id, actor_id).await?;
         let mut members: HashMap<Id, Vec<Id>> = HashMap::new();
-        for row in sqlx::query(&format!(
+        for row in sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT cm.conversation_id, cm.user_id FROM chat_members cm \
              JOIN chat_conversations c ON c.id = cm.conversation_id WHERE {VISIBLE} \
              ORDER BY cm.joined_at, cm.user_id"
-        ))
+        )))
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
         .fetch_all(&mut *tx)
@@ -71,10 +71,10 @@ impl ChatRepository {
                 .or_default()
                 .push(parse_id(row.get("user_id"))?);
         }
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT {CONVERSATION_COLUMNS} FROM chat_conversations c WHERE {VISIBLE} \
              ORDER BY c.created_at, c.id"
-        ))
+        )))
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
         .fetch_all(&mut *tx)
@@ -134,7 +134,7 @@ impl ChatRepository {
         let position = next_position(&mut tx, workspace_id, input.category_id).await?;
         sqlx::query(
             "INSERT INTO chat_conversations (id, workspace_id, kind, name, topic, category_id, position, \
-             created_by, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             created_by, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
         )
         .bind(id.to_string())
         .bind(workspace_id.to_string())
@@ -197,8 +197,8 @@ impl ChatRepository {
             next_position(&mut tx, workspace_id, category_id).await?
         };
         sqlx::query(
-            "UPDATE chat_conversations SET name = ?, topic = ?, kind = ?, category_id = ?, position = ?, \
-             updated_at = ? WHERE id = ?",
+            "UPDATE chat_conversations SET name = $1, topic = $2, kind = $3, category_id = $4, position = $5, \
+             updated_at = $6 WHERE id = $7",
         )
         .bind(name)
         .bind(topic)
@@ -254,7 +254,7 @@ impl ChatRepository {
             ));
         }
         sqlx::query(
-            "UPDATE chat_conversations SET archived_at = COALESCE(archived_at, ?), updated_at = ? WHERE id = ?",
+            "UPDATE chat_conversations SET archived_at = COALESCE(archived_at, $1), updated_at = $2 WHERE id = $3",
         )
         .bind(now.as_millis())
         .bind(now.as_millis())
@@ -418,7 +418,7 @@ impl ChatRepository {
         let mut tx = self.database.immediate_transaction().await?;
         load_actor(&mut tx, workspace_id, actor_id).await?;
         let existing: Option<String> = sqlx::query_scalar(
-            "SELECT id FROM chat_conversations WHERE workspace_id = ? AND dm_key = ?",
+            "SELECT id FROM chat_conversations WHERE workspace_id = $1 AND dm_key = $2",
         )
         .bind(workspace_id.to_string())
         .bind(&dm_key)
@@ -428,7 +428,7 @@ impl ChatRepository {
             let id = parse_id(existing)?;
             // A member who left the workspace and came back lost the row; put it back.
             let present: i64 =
-                sqlx::query_scalar("SELECT COUNT(*) FROM chat_members WHERE conversation_id = ?")
+                sqlx::query_scalar("SELECT COUNT(*) FROM chat_members WHERE conversation_id = $1")
                     .bind(id.to_string())
                     .fetch_one(&mut *tx)
                     .await?;
@@ -449,7 +449,7 @@ impl ChatRepository {
         let id = Id::new_v7();
         sqlx::query(
             "INSERT INTO chat_conversations (id, workspace_id, kind, dm_key, created_by, created_at, updated_at) \
-             VALUES (?, ?, 'dm', ?, ?, ?, ?)",
+             VALUES ($1, $2, 'dm', $3, $4, $5, $6)",
         )
         .bind(id.to_string())
         .bind(workspace_id.to_string())
@@ -478,7 +478,7 @@ impl ChatRepository {
         let id = Id::new_v7();
         sqlx::query(
             "INSERT INTO chat_categories (id, workspace_id, name, position, created_at, updated_at) \
-             SELECT ?, ?, ?, COALESCE(MAX(position) + 1, 0), ?, ? FROM chat_categories WHERE workspace_id = ?",
+             SELECT $1, $2, $3, COALESCE(MAX(position) + 1, 0), $4, $5 FROM chat_categories WHERE workspace_id = $6",
         )
         .bind(id.to_string())
         .bind(workspace_id.to_string())
@@ -504,7 +504,7 @@ impl ChatRepository {
         let mut tx = self.database.immediate_transaction().await?;
         require_manager(load_actor(&mut tx, workspace_id, actor_id).await?)?;
         sqlx::query(
-            "UPDATE chat_categories SET name = ?, updated_at = ? WHERE id = ? AND workspace_id = ?",
+            "UPDATE chat_categories SET name = $1, updated_at = $2 WHERE id = $3 AND workspace_id = $4",
         )
         .bind(name)
         .bind(now.as_millis())
@@ -527,7 +527,7 @@ impl ChatRepository {
         require_manager(load_actor(&mut tx, workspace_id, actor_id).await?)?;
         require_category(&mut tx, workspace_id, Some(category_id)).await?;
         let channels = sqlx::query(
-            "SELECT id, archived_at FROM chat_conversations WHERE workspace_id = ? AND category_id = ? \
+            "SELECT id, archived_at FROM chat_conversations WHERE workspace_id = $1 AND category_id = $2 \
              ORDER BY position, id",
         )
         .bind(workspace_id.to_string())
@@ -539,7 +539,7 @@ impl ChatRepository {
         for row in channels {
             let id = parse_id(row.get("id"))?;
             sqlx::query(
-                "UPDATE chat_conversations SET category_id = NULL, position = ? WHERE id = ?",
+                "UPDATE chat_conversations SET category_id = NULL, position = $1 WHERE id = $2",
             )
             .bind(position)
             .bind(id.to_string())
@@ -557,7 +557,7 @@ impl ChatRepository {
                 );
             }
         }
-        sqlx::query("DELETE FROM chat_categories WHERE id = ? AND workspace_id = ?")
+        sqlx::query("DELETE FROM chat_categories WHERE id = $1 AND workspace_id = $2")
             .bind(category_id.to_string())
             .bind(workspace_id.to_string())
             .execute(&mut *tx)
@@ -584,7 +584,7 @@ impl ChatRepository {
             return Ok(Events::default().written(()));
         }
         let mut order = sqlx::query(
-            "SELECT id FROM chat_categories WHERE workspace_id = ? AND id <> ? ORDER BY position, id",
+            "SELECT id FROM chat_categories WHERE workspace_id = $1 AND id <> $2 ORDER BY position, id",
         )
         .bind(workspace_id.to_string())
         .bind(category_id.to_string())
@@ -599,7 +599,7 @@ impl ChatRepository {
             .unwrap_or(order.len());
         order.insert(at, category_id);
         for (position, id) in (0_i64..).zip(order) {
-            sqlx::query("UPDATE chat_categories SET position = ? WHERE id = ?")
+            sqlx::query("UPDATE chat_categories SET position = $1 WHERE id = $2")
                 .bind(position)
                 .bind(id.to_string())
                 .execute(&mut *tx)
@@ -634,8 +634,8 @@ impl ChatRepository {
             return Ok(Events::default().written(()));
         }
         let siblings = sqlx::query(
-            "SELECT id, position FROM chat_conversations WHERE workspace_id = ? AND kind <> 'dm' \
-             AND archived_at IS NULL AND category_id IS ? AND id <> ? ORDER BY position, id",
+            "SELECT id, position FROM chat_conversations WHERE workspace_id = $1 AND kind <> 'dm' \
+             AND archived_at IS NULL AND category_id IS NOT DISTINCT FROM $2 AND id <> $3 ORDER BY position, id",
         )
         .bind(workspace_id.to_string())
         .bind(category_id.map(|id| id.to_string()))
@@ -657,7 +657,7 @@ impl ChatRepository {
             if old == position {
                 continue;
             }
-            sqlx::query("UPDATE chat_conversations SET position = ?, category_id = CASE WHEN id = ? THEN ? ELSE category_id END WHERE id = ?")
+            sqlx::query("UPDATE chat_conversations SET position = $1, category_id = CASE WHEN id = $2 THEN $3 ELSE category_id END WHERE id = $4")
                 .bind(position)
                 .bind(conversation_id.to_string())
                 .bind(category_id.map(|id| id.to_string()))
@@ -739,13 +739,13 @@ fn require_leavable(access: &Access) -> Result<(), ChatError> {
 
 /// Two live channels of a workspace cannot share a name.
 async fn require_free_name(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     workspace_id: Id,
     name: &str,
     except: Option<Id>,
 ) -> Result<(), ChatError> {
     let taken: Option<String> = sqlx::query_scalar(
-        "SELECT id FROM chat_conversations WHERE workspace_id = ? AND name = ? AND kind <> 'dm' \
+        "SELECT id FROM chat_conversations WHERE workspace_id = $1 AND name = $2 AND kind <> 'dm' \
          AND archived_at IS NULL",
     )
     .bind(workspace_id.to_string())
@@ -761,15 +761,15 @@ async fn require_free_name(
 }
 
 async fn require_category(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     workspace_id: Id,
     category_id: Option<Id>,
 ) -> Result<(), ChatError> {
     let Some(category_id) = category_id else {
         return Ok(());
     };
-    let exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM chat_categories WHERE id = ? AND workspace_id = ?)",
+    let Flag(exists) = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM chat_categories WHERE id = $1 AND workspace_id = $2)",
     )
     .bind(category_id.to_string())
     .bind(workspace_id.to_string())
@@ -784,14 +784,14 @@ async fn require_category(
 
 /// Every id must be a member of the workspace. `user_ids` has no duplicates.
 async fn require_workspace_members(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     workspace_id: Id,
     user_ids: &[Id],
 ) -> Result<(), ChatError> {
-    let found: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM memberships WHERE workspace_id = ? \
-         AND user_id IN (SELECT value FROM json_each(?))",
-    )
+    let found: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT COUNT(*) FROM memberships WHERE workspace_id = $1 AND user_id {}",
+        in_ids(&*conn, 2)
+    )))
     .bind(workspace_id.to_string())
     .bind(id_list(user_ids.iter().copied()))
     .fetch_one(&mut *conn)
@@ -805,13 +805,13 @@ async fn require_workspace_members(
 
 /// The position after the last channel of a category (or of the channels without one).
 async fn next_position(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     workspace_id: Id,
     category_id: Option<Id>,
 ) -> Result<i64, ChatError> {
     Ok(sqlx::query_scalar(
         "SELECT COALESCE(MAX(position) + 1, 0) FROM chat_conversations \
-         WHERE workspace_id = ? AND kind <> 'dm' AND category_id IS ?",
+         WHERE workspace_id = $1 AND kind <> 'dm' AND category_id IS NOT DISTINCT FROM $2",
     )
     .bind(workspace_id.to_string())
     .bind(category_id.map(|id| id.to_string()))
@@ -821,7 +821,7 @@ async fn next_position(
 
 /// Adds members who start with everything read. Members that are in already stay as they are.
 async fn add_members(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     conversation_id: Id,
     user_ids: &[Id],
     notify: NotifyLevel,
@@ -830,15 +830,16 @@ async fn add_members(
     if user_ids.is_empty() {
         return Ok(());
     }
-    sqlx::query(
+    sqlx::query(sqlx::AssertSqlSafe(format!(
         "INSERT INTO chat_members (conversation_id, user_id, workspace_id, notify, \
          last_read_message_id, read_count, joined_at) \
-         SELECT c.id, users.value, c.workspace_id, ?, \
+         SELECT c.id, users.value, c.workspace_id, $1, \
                 (SELECT id FROM chat_messages WHERE conversation_id = c.id ORDER BY id DESC LIMIT 1), \
-                c.message_count, ? \
-         FROM chat_conversations c, json_each(?) AS users WHERE c.id = ? \
+                c.message_count, $2 \
+         FROM chat_conversations c, {} WHERE c.id = $4 \
          ON CONFLICT (conversation_id, user_id) DO NOTHING",
-    )
+        json_values(&*conn, 3, "users")
+    )))
     .bind(notify.as_str())
     .bind(now.as_millis())
     .bind(id_list(user_ids.iter().copied()))
@@ -850,7 +851,7 @@ async fn add_members(
 
 /// The events of a new conversation: the conversation, and each member's state in it.
 async fn created_events(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     workspace_id: Id,
     conversation_id: Id,
     members: &[Id],
@@ -864,7 +865,7 @@ async fn created_events(
 
 /// The conversation as it is now, as an event for everyone who can read it.
 async fn changed(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     workspace_id: Id,
     conversation_id: Id,
 ) -> Result<(Events, ConversationRecord), ChatError> {
@@ -882,7 +883,7 @@ async fn changed(
 /// Takes `user_id` out of a channel, with a `leave` row. A private channel is gone for that
 /// member, so its thread states go too.
 async fn remove_from(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     access: &Access,
     user_id: Id,
 ) -> Result<Events, ChatError> {
@@ -895,7 +896,7 @@ async fn remove_from(
         TimestampMillis::now(),
     )
     .await?;
-    sqlx::query("DELETE FROM chat_members WHERE conversation_id = ? AND user_id = ?")
+    sqlx::query("DELETE FROM chat_members WHERE conversation_id = $1 AND user_id = $2")
         .bind(conversation.id.to_string())
         .bind(user_id.to_string())
         .execute(&mut *conn)
@@ -903,7 +904,7 @@ async fn remove_from(
     let (mut events, _) = changed(conn, conversation.workspace_id, conversation.id).await?;
     events.conversation(conversation.id, ChatEvent::MessageCreated { message: row });
     if conversation.kind != ConversationKind::Public {
-        sqlx::query("DELETE FROM chat_thread_members WHERE conversation_id = ? AND user_id = ?")
+        sqlx::query("DELETE FROM chat_thread_members WHERE conversation_id = $1 AND user_id = $2")
             .bind(conversation.id.to_string())
             .bind(user_id.to_string())
             .execute(&mut *conn)
@@ -919,11 +920,11 @@ async fn remove_from(
 }
 
 async fn categories(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     workspace_id: Id,
 ) -> Result<Vec<CategoryRecord>, ChatError> {
     sqlx::query(
-        "SELECT id, name, position FROM chat_categories WHERE workspace_id = ? ORDER BY position, id",
+        "SELECT id, name, position FROM chat_categories WHERE workspace_id = $1 ORDER BY position, id",
     )
     .bind(workspace_id.to_string())
     .fetch_all(&mut *conn)
@@ -941,7 +942,7 @@ async fn categories(
 
 /// The category list as an event for the workspace, and the category that changed.
 async fn category_changed(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     workspace_id: Id,
     category_id: Id,
 ) -> Result<(Events, CategoryRecord), ChatError> {

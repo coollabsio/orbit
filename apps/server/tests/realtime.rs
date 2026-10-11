@@ -24,7 +24,7 @@ async fn successful_workspace_writes_have_transactional_ordered_notifications() 
     }
     tx.commit().await.unwrap();
     let sequences: Vec<i64> = sqlx::query_scalar(
-        "SELECT sequence FROM outbox_events WHERE workspace_id = ? ORDER BY sequence",
+        "SELECT sequence FROM outbox_events WHERE workspace_id = $1 ORDER BY sequence",
     )
     .bind(workspace.to_string())
     .fetch_all(db.pool())
@@ -200,7 +200,7 @@ async fn subscription_requires_current_session_and_workspace_membership() {
             .unwrap()
     );
     assert!(!authorized(&db, Id::new_v7(), session.id).await.unwrap());
-    sqlx::query("UPDATE users SET suspended_at=? WHERE id=?")
+    sqlx::query("UPDATE users SET suspended_at=$1 WHERE id=$2")
         .bind(now.as_millis())
         .bind(setup.user_id.to_string())
         .execute(db.pool())
@@ -211,12 +211,12 @@ async fn subscription_requires_current_session_and_workspace_membership() {
             .await
             .unwrap()
     );
-    sqlx::query("UPDATE users SET suspended_at=NULL WHERE id=?")
+    sqlx::query("UPDATE users SET suspended_at=NULL WHERE id=$1")
         .bind(setup.user_id.to_string())
         .execute(db.pool())
         .await
         .unwrap();
-    sqlx::query("UPDATE sessions SET revoked_at=? WHERE id=?")
+    sqlx::query("UPDATE sessions SET revoked_at=$1 WHERE id=$2")
         .bind(now.as_millis())
         .bind(session.id.to_string())
         .execute(db.pool())

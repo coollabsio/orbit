@@ -144,7 +144,7 @@ async fn create_task(
     title: &str,
 ) -> Id {
     let status: String = sqlx::query_scalar(
-        "SELECT id FROM task_statuses WHERE project_id = ? ORDER BY position LIMIT 1",
+        "SELECT id FROM task_statuses WHERE project_id = $1 ORDER BY position LIMIT 1",
     )
     .bind(project.to_string())
     .fetch_one(database.pool())
@@ -210,7 +210,7 @@ async fn rpc(app: &axum::Router, token: &str, method: &str, params: Value) -> Va
 #[tokio::test]
 async fn task_reads_are_filtered_before_pagination_and_hide_related_projects() {
     let fixture = Fixture::new().await;
-    sqlx::query("UPDATE tasks SET parent_task_id = ? WHERE id = ?")
+    sqlx::query("UPDATE tasks SET parent_task_id = $1 WHERE id = $2")
         .bind(fixture.other_task.to_string())
         .bind(fixture.task.to_string())
         .execute(fixture.database.pool())
@@ -254,7 +254,7 @@ async fn task_reads_are_filtered_before_pagination_and_hide_related_projects() {
         (fixture.other_project, fixture.other_task),
     ] {
         let (key, number): (String, i64) = sqlx::query_as(
-            "SELECT projects.project_key, tasks.number FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = ?",
+            "SELECT projects.project_key, tasks.number FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = $1",
         )
         .bind(task.to_string())
         .fetch_one(fixture.database.pool())
@@ -397,7 +397,7 @@ async fn bearer_credentials_are_required_and_checked_on_every_request() {
 #[tokio::test]
 async fn removed_membership_and_expired_tokens_stop_access() {
     let fixture = Fixture::new().await;
-    sqlx::query("UPDATE api_tokens SET expires_at = 1 WHERE id = ?")
+    sqlx::query("UPDATE api_tokens SET expires_at = 1 WHERE id = $1")
         .bind(fixture.token_id.to_string())
         .execute(fixture.database.pool())
         .await
@@ -409,7 +409,7 @@ async fn removed_membership_and_expired_tokens_stop_access() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-    sqlx::query("UPDATE api_tokens SET expires_at = NULL WHERE id = ?")
+    sqlx::query("UPDATE api_tokens SET expires_at = NULL WHERE id = $1")
         .bind(fixture.token_id.to_string())
         .execute(fixture.database.pool())
         .await
@@ -417,19 +417,19 @@ async fn removed_membership_and_expired_tokens_stop_access() {
     // Transfer ownership before removing the original owner's membership.
     let new_owner = Id::new_v7();
     let membership = Id::new_v7();
-    sqlx::query("INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) SELECT ?, 'new-owner@example.com', 'new-owner@example.com', 'New owner', password_hash, created_at, updated_at FROM users WHERE id = ?")
+    sqlx::query("INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) SELECT $1, 'new-owner@example.com', 'new-owner@example.com', 'New owner', password_hash, created_at, updated_at FROM users WHERE id = $2")
         .bind(new_owner.to_string()).bind(fixture.user.to_string())
         .execute(fixture.database.pool()).await.unwrap();
-    sqlx::query("INSERT INTO memberships (id, workspace_id, user_id, role, created_at, updated_at) VALUES (?, ?, ?, 'admin', 1, 1)")
+    sqlx::query("INSERT INTO memberships (id, workspace_id, user_id, role, created_at, updated_at) VALUES ($1, $2, $3, 'admin', 1, 1)")
         .bind(membership.to_string()).bind(fixture.workspace.to_string()).bind(new_owner.to_string())
         .execute(fixture.database.pool()).await.unwrap();
-    sqlx::query("UPDATE workspaces SET owner_membership_id = ? WHERE id = ?")
+    sqlx::query("UPDATE workspaces SET owner_membership_id = $1 WHERE id = $2")
         .bind(membership.to_string())
         .bind(fixture.workspace.to_string())
         .execute(fixture.database.pool())
         .await
         .unwrap();
-    sqlx::query("DELETE FROM memberships WHERE workspace_id = ? AND user_id = ?")
+    sqlx::query("DELETE FROM memberships WHERE workspace_id = $1 AND user_id = $2")
         .bind(fixture.workspace.to_string())
         .bind(fixture.user.to_string())
         .execute(fixture.database.pool())
@@ -551,7 +551,7 @@ async fn cross_workspace_and_deleted_resources_are_not_returned() {
         .await
         .unwrap();
     let other_project: String =
-        sqlx::query_scalar("SELECT id FROM projects WHERE workspace_id = ?")
+        sqlx::query_scalar("SELECT id FROM projects WHERE workspace_id = $1")
             .bind(other_workspace.id.to_string())
             .fetch_one(fixture.database.pool())
             .await
@@ -576,7 +576,7 @@ async fn cross_workspace_and_deleted_resources_are_not_returned() {
             .unwrap()
             .is_empty()
     );
-    sqlx::query("UPDATE tasks SET deleted_at = 1 WHERE id = ?")
+    sqlx::query("UPDATE tasks SET deleted_at = 1 WHERE id = $1")
         .bind(fixture.task.to_string())
         .execute(fixture.database.pool())
         .await
@@ -592,7 +592,7 @@ async fn cross_workspace_and_deleted_resources_are_not_returned() {
             .unwrap()
             .is_empty()
     );
-    sqlx::query("UPDATE projects SET deleted_at = 1 WHERE id = ?")
+    sqlx::query("UPDATE projects SET deleted_at = 1 WHERE id = $1")
         .bind(fixture.project.to_string())
         .execute(fixture.database.pool())
         .await

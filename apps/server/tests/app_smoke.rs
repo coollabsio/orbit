@@ -472,14 +472,16 @@ async fn installation_admin_can_create_an_online_backup() {
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
     let names: Vec<String> = archive.file_names().map(str::to_owned).collect();
     assert!(names.contains(&format!("{id}/manifest.json")));
-    assert!(names.contains(&format!("{id}/database.sqlite")));
+    // A Postgres snapshot holds the `COPY` rows of every table instead of the SQLite file.
+    let (database_file, header) = if orbit_platform::testing_postgres() {
+        (format!("{id}/database/users.copy"), &b""[..])
+    } else {
+        (format!("{id}/database.sqlite"), &b"SQLite format 3\0"[..])
+    };
     let mut database = Vec::new();
-    std::io::Read::read_to_end(
-        &mut archive.by_name(&format!("{id}/database.sqlite")).unwrap(),
-        &mut database,
-    )
-    .unwrap();
-    assert!(database.starts_with(b"SQLite format 3\0"));
+    std::io::Read::read_to_end(&mut archive.by_name(&database_file).unwrap(), &mut database)
+        .unwrap();
+    assert!(database.starts_with(header));
 
     let missing = app
         .router()
@@ -586,6 +588,9 @@ async fn malformed_critical_schedule_fails_before_serve() {
 
 #[tokio::test]
 async fn weekly_foreign_key_failure_stops_serving() {
+    if orbit_platform::testing_postgres() {
+        return; // Breaks a foreign key with an SQLite PRAGMA; Postgres cannot store such a row.
+    }
     let root = TempDir::new().unwrap();
     let config = app_config(&root);
     let app = App::build(config.clone()).await.unwrap();
@@ -596,7 +601,7 @@ async fn weekly_foreign_key_failure_stops_serving() {
         .unwrap();
     sqlx::query(
         "INSERT INTO sessions (id, token_hash, user_id, created_at, last_activity_at, \
-         idle_expires_at, absolute_expires_at) VALUES (?, zeroblob(32), ?, 1, 1, 2, 2)",
+         idle_expires_at, absolute_expires_at) VALUES ($1, zeroblob(32), $2, 1, 1, 2, 2)",
     )
     .bind(orbit_platform::Id::new_v7().to_string())
     .bind(orbit_platform::Id::new_v7().to_string())

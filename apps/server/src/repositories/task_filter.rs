@@ -4,11 +4,11 @@
 use std::collections::BTreeSet;
 use std::fmt;
 
+use orbit_platform::SqlBuilder;
 use orbit_platform::{Id, TimestampMillis};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
-use sqlx::{QueryBuilder, Sqlite};
 use utoipa::ToSchema;
 
 use super::sub_issues;
@@ -845,18 +845,14 @@ const LIVE_CHILD: &str = "SELECT 1 FROM tasks AS child \
 
 /// Appends ` AND (<compiled tree>)` to `query`. Every value is bound. The tree must already be
 /// validated; an unexpected node fails closed (`0 = 1`).
-pub fn push_filter(query: &mut QueryBuilder<'_, Sqlite>, group: &FilterGroup, ctx: &FilterContext) {
+pub fn push_filter(query: &mut SqlBuilder, group: &FilterGroup, ctx: &FilterContext) {
     query.push(" AND (");
     push_group(query, group, ctx);
     query.push(")");
 }
 
 /// Appends the `show_completed` restriction; `All` adds nothing.
-pub fn push_show_completed(
-    query: &mut QueryBuilder<'_, Sqlite>,
-    show: ShowCompleted,
-    now: TimestampMillis,
-) {
+pub fn push_show_completed(query: &mut SqlBuilder, show: ShowCompleted, now: TimestampMillis) {
     let window = match show {
         ShowCompleted::All => return,
         ShowCompleted::None => {
@@ -874,7 +870,7 @@ pub fn push_show_completed(
         .push(")");
 }
 
-fn push_group(query: &mut QueryBuilder<'_, Sqlite>, group: &FilterGroup, ctx: &FilterContext) {
+fn push_group(query: &mut SqlBuilder, group: &FilterGroup, ctx: &FilterContext) {
     if group.children.is_empty() {
         query.push("1 = 1");
         return;
@@ -896,11 +892,7 @@ fn push_group(query: &mut QueryBuilder<'_, Sqlite>, group: &FilterGroup, ctx: &F
     }
 }
 
-fn push_condition(
-    query: &mut QueryBuilder<'_, Sqlite>,
-    condition: &Condition,
-    ctx: &FilterContext,
-) {
+fn push_condition(query: &mut SqlBuilder, condition: &Condition, ctx: &FilterContext) {
     use FilterField as F;
     use FilterOperator as O;
     let negated = matches!(condition.operator, O::IsNot | O::Excludes);
@@ -998,7 +990,7 @@ fn values(value: &Value, ctx: &FilterContext, resolve_me: bool) -> Vec<String> {
 }
 
 /// Pushes `(?, ?, …)`.
-fn push_list(query: &mut QueryBuilder<'_, Sqlite>, values: Vec<String>) {
+fn push_list(query: &mut SqlBuilder, values: Vec<String>) {
     let mut list = query.separated(", ");
     list.push_unseparated("(");
     for value in values {
@@ -1008,7 +1000,7 @@ fn push_list(query: &mut QueryBuilder<'_, Sqlite>, values: Vec<String>) {
 }
 
 fn push_exists(
-    query: &mut QueryBuilder<'_, Sqlite>,
+    query: &mut SqlBuilder,
     negated: bool,
     subquery: &'static str,
     column_in: &'static str,
@@ -1027,7 +1019,7 @@ fn push_exists(
 }
 
 fn push_column_in(
-    query: &mut QueryBuilder<'_, Sqlite>,
+    query: &mut SqlBuilder,
     column: &'static str,
     negated: bool,
     values: Vec<String>,
@@ -1054,7 +1046,7 @@ fn push_column_in(
 /// `parent is [ids…, "none"]`, matched against the visible parent (the `parent` field): a task
 /// whose parent is hidden has parent `none`. The positive expression is never NULL (the EXISTS
 /// is false for a NULL parent), so `is_not [id]` keeps top-level tasks.
-fn push_parent(query: &mut QueryBuilder<'_, Sqlite>, values: Vec<String>, negated: bool) {
+fn push_parent(query: &mut SqlBuilder, values: Vec<String>, negated: bool) {
     let none = values.iter().any(|value| value == "none");
     let ids: Vec<String> = values.into_iter().filter(|value| value != "none").collect();
     if !none && ids.is_empty() {
@@ -1081,7 +1073,7 @@ fn push_parent(query: &mut QueryBuilder<'_, Sqlite>, values: Vec<String>, negate
 }
 
 /// `sub_issues is [has|none]`: whether the task has live direct children.
-fn push_sub_issues(query: &mut QueryBuilder<'_, Sqlite>, values: Vec<String>) {
+fn push_sub_issues(query: &mut SqlBuilder, values: Vec<String>) {
     let has = values.iter().any(|value| value == "has");
     let none = values.iter().any(|value| value == "none");
     match (has, none) {
@@ -1100,7 +1092,7 @@ fn push_sub_issues(query: &mut QueryBuilder<'_, Sqlite>, values: Vec<String>) {
     }
 }
 
-fn push_all_labels(query: &mut QueryBuilder<'_, Sqlite>, values: Vec<String>) {
+fn push_all_labels(query: &mut SqlBuilder, values: Vec<String>) {
     if values.is_empty() {
         query.push("0 = 1");
         return;
@@ -1116,7 +1108,7 @@ fn push_all_labels(query: &mut QueryBuilder<'_, Sqlite>, values: Vec<String>) {
 
 /// Status values are `category:name` keys (names compared lower-cased and trimmed, like the
 /// web's `statusKeyOf`; SQLite `lower()` folds ASCII only) or bare status ids.
-fn push_status(query: &mut QueryBuilder<'_, Sqlite>, value: &Value, negated: bool) {
+fn push_status(query: &mut SqlBuilder, value: &Value, negated: bool) {
     let mut keys = BTreeSet::new();
     let mut ids = BTreeSet::new();
     for item in value
@@ -1162,7 +1154,7 @@ fn push_status(query: &mut QueryBuilder<'_, Sqlite>, value: &Value, negated: boo
 
 /// `before D`: `< D`; `after D`: `>= D + 1 day`; `between [a, b]`: `>= a AND < b + 1 day`.
 fn push_date(
-    query: &mut QueryBuilder<'_, Sqlite>,
+    query: &mut SqlBuilder,
     column: &'static str,
     condition: &Condition,
     now: TimestampMillis,
@@ -1210,7 +1202,7 @@ fn push_date(
     }
 }
 
-fn push_text(query: &mut QueryBuilder<'_, Sqlite>, value: &Value) {
+fn push_text(query: &mut SqlBuilder, value: &Value) {
     let Some(text) = value.as_str().filter(|text| !text.is_empty()) else {
         query.push("0 = 1");
         return;
@@ -1851,14 +1843,14 @@ mod tests {
 
 #[cfg(test)]
 mod sql_tests {
+    use orbit_platform::SqlBuilder;
     use serde_json::json;
-    use sqlx::{QueryBuilder, Sqlite};
 
     use super::*;
 
     fn compile(tree: Value) -> String {
         let group = parse_filter(&tree).unwrap();
-        let mut query = QueryBuilder::<Sqlite>::new("SELECT tasks.id FROM tasks WHERE 1 = 1");
+        let mut query = SqlBuilder::new("SELECT tasks.id FROM tasks WHERE 1 = 1");
         push_filter(
             &mut query,
             &group,
@@ -1867,7 +1859,7 @@ mod sql_tests {
                 now: TimestampMillis::from_millis(0),
             },
         );
-        query.sql().to_owned()
+        query.sql().as_str().to_owned()
     }
 
     #[test]
@@ -1878,7 +1870,7 @@ mod sql_tests {
         ] }));
         assert!(!sql.contains("1=1"), "{sql}");
         assert!(!sql.contains("it's"), "{sql}");
-        assert_eq!(sql.matches('?').count(), 3, "{sql}");
+        assert_eq!(sql.matches('$').count(), 3, "{sql}");
     }
 
     #[test]
@@ -1892,28 +1884,28 @@ mod sql_tests {
                 { "field": "priority", "operator": "is", "value": ["high"] },
                 { "op": "and", "children": [] }
             ] })),
-            "SELECT tasks.id FROM tasks WHERE 1 = 1 AND ((tasks.priority IN (?)) OR (1 = 1))"
+            "SELECT tasks.id FROM tasks WHERE 1 = 1 AND ((tasks.priority IN ($1)) OR (1 = 1))"
         );
     }
 
     #[test]
     fn show_completed_all_adds_nothing() {
-        let mut query = QueryBuilder::<Sqlite>::new("SELECT 1");
+        let mut query = SqlBuilder::new("SELECT 1");
         push_show_completed(
             &mut query,
             ShowCompleted::All,
             TimestampMillis::from_millis(0),
         );
-        assert_eq!(query.sql(), "SELECT 1");
+        assert_eq!(query.sql().as_str(), "SELECT 1");
         push_show_completed(
             &mut query,
             ShowCompleted::PastWeek,
             TimestampMillis::from_millis(0),
         );
         assert!(
-            query.sql().contains("tasks.completed_at >= ?"),
+            query.sql().as_str().contains("tasks.completed_at >= $1"),
             "{}",
-            query.sql()
+            query.sql().as_str()
         );
     }
 
@@ -1925,7 +1917,7 @@ mod sql_tests {
         let visible = sub_issues::has_visible_parent_sql("tasks.parent_task_id");
         assert!(
             sql.contains(&format!(
-                "NOT (NOT {visible} OR ({visible} AND tasks.parent_task_id IN (?)))"
+                "NOT (NOT {visible} OR ({visible} AND tasks.parent_task_id IN ($1)))"
             )),
             "{sql}"
         );

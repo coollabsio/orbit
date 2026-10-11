@@ -96,7 +96,7 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
     let retry = response_json(repeated_register).await;
     assert_ne!(retry["action"], manifest["action"]);
     let pending: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM github_app_registrations WHERE workspace_id = ?")
+        sqlx::query_scalar("SELECT COUNT(*) FROM github_app_registrations WHERE workspace_id = $1")
             .bind(fixture.workspace_id.to_string())
             .fetch_one(fixture.database.pool())
             .await
@@ -163,7 +163,7 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
 
     let secret = encrypt_for_test(&key, "hook-secret");
     let private_key = encrypt_for_test(&key, "private-key");
-    sqlx::query("INSERT INTO github_apps (workspace_id, app_id, slug, private_key_encrypted, webhook_secret_encrypted, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+    sqlx::query("INSERT INTO github_apps (workspace_id, app_id, slug, private_key_encrypted, webhook_secret_encrypted, created_at) VALUES ($1, $2, $3, $4, $5, $6)")
         .bind(fixture.workspace_id.to_string()).bind(77).bind("orbit-test")
         .bind(&private_key).bind(&secret).bind(TimestampMillis::now().as_millis())
         .execute(fixture.database.pool()).await.unwrap();
@@ -303,7 +303,7 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
         .await
         .unwrap();
     assert_eq!(second_link.status(), StatusCode::OK);
-    let connection_events: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM audit_events WHERE workspace_id = ? AND action = 'github.connection.updated'")
+    let connection_events: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM audit_events WHERE workspace_id = $1 AND action = 'github.connection.updated'")
         .bind(fixture.workspace_id.to_string()).fetch_one(fixture.database.pool()).await.unwrap();
     assert_eq!(connection_events, 2);
 
@@ -317,10 +317,10 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
             .status(),
         StatusCode::OK
     );
-    let task_id: String = sqlx::query_scalar("SELECT task_id FROM github_issue_links WHERE workspace_id = ? AND repository = 'acme/repo' AND issue_number = 12")
+    let task_id: String = sqlx::query_scalar("SELECT task_id FROM github_issue_links WHERE workspace_id = $1 AND repository = 'acme/repo' AND issue_number = 12")
         .bind(fixture.workspace_id.to_string()).fetch_one(fixture.database.pool()).await.unwrap();
     let service_account_id: String = sqlx::query_scalar(
-        "SELECT id FROM service_accounts WHERE workspace_id = ? AND name = 'GitHub'",
+        "SELECT id FROM service_accounts WHERE workspace_id = $1 AND name = 'GitHub'",
     )
     .bind(fixture.workspace_id.to_string())
     .fetch_one(fixture.database.pool())
@@ -344,14 +344,14 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
         Some("GitHub")
     );
     let (actor_id, metadata): (Option<String>, String) = sqlx::query_as(
-        "SELECT actor_id, metadata_json FROM audit_events WHERE resource_type = 'task' AND resource_id = ? AND action = 'task.created'",
+        "SELECT actor_id, metadata_json FROM audit_events WHERE resource_type = 'task' AND resource_id = $1 AND action = 'task.created'",
     ).bind(&task_id).fetch_one(fixture.database.pool()).await.unwrap();
     assert_eq!(actor_id, None);
     let metadata: Value = serde_json::from_str(&metadata).unwrap();
     assert_eq!(metadata["actor_service_account_id"], service_account_id);
     assert_eq!(metadata["actor_service_account_name"], "GitHub");
     let (label_actor, label_metadata): (Option<String>, String) = sqlx::query_as(
-        "SELECT audit_events.actor_id, audit_events.metadata_json FROM audit_events JOIN labels ON labels.id = audit_events.resource_id WHERE labels.workspace_id = ? AND labels.name = 'GitHub' AND audit_events.action = 'label.created'",
+        "SELECT audit_events.actor_id, audit_events.metadata_json FROM audit_events JOIN labels ON labels.id = audit_events.resource_id WHERE labels.workspace_id = $1 AND labels.name = 'GitHub' AND audit_events.action = 'label.created'",
     ).bind(fixture.workspace_id.to_string()).fetch_one(fixture.database.pool()).await.unwrap();
     assert_eq!(label_actor, None);
     let label_metadata: Value = serde_json::from_str(&label_metadata).unwrap();
@@ -359,26 +359,26 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
         label_metadata["actor_service_account_id"],
         service_account_id
     );
-    let task_project: String = sqlx::query_scalar("SELECT project_id FROM tasks WHERE id = ?")
+    let task_project: String = sqlx::query_scalar("SELECT project_id FROM tasks WHERE id = $1")
         .bind(&task_id)
         .fetch_one(fixture.database.pool())
         .await
         .unwrap();
     assert_eq!(task_project, fixture.project_id.to_string());
     // Simulate records written before GitHub used a service account.
-    sqlx::query("UPDATE tasks SET creator_service_account_id = NULL WHERE id = ?")
+    sqlx::query("UPDATE tasks SET creator_service_account_id = NULL WHERE id = $1")
         .bind(&task_id)
         .execute(fixture.database.pool())
         .await
         .unwrap();
-    sqlx::query("UPDATE audit_events SET actor_id = ?, metadata_json = '{}' WHERE resource_type = 'task' AND resource_id = ? AND action = 'task.created'")
+    sqlx::query("UPDATE audit_events SET actor_id = $1, metadata_json = '{}' WHERE resource_type = 'task' AND resource_id = $2 AND action = 'task.created'")
         .bind(fixture.user_id.to_string()).bind(&task_id)
         .execute(fixture.database.pool()).await.unwrap();
-    sqlx::query("INSERT INTO audit_events (id, workspace_id, actor_id, action, outcome, resource_type, resource_id, request_id, metadata_json, occurred_at) VALUES (?, ?, ?, 'github.work_item.link.updated', 'success', 'task', ?, 'old-github-webhook', '{}', ?)")
+    sqlx::query("INSERT INTO audit_events (id, workspace_id, actor_id, action, outcome, resource_type, resource_id, request_id, metadata_json, occurred_at) VALUES ($1, $2, $3, 'github.work_item.link.updated', 'success', 'task', $4, 'old-github-webhook', '{}', $5)")
         .bind(orbit_platform::Id::new_v7().to_string()).bind(fixture.workspace_id.to_string())
         .bind(fixture.user_id.to_string()).bind(&task_id).bind(TimestampMillis::now().as_millis())
         .execute(fixture.database.pool()).await.unwrap();
-    sqlx::query("INSERT INTO audit_events (id, workspace_id, actor_id, action, outcome, resource_type, resource_id, request_id, metadata_json, occurred_at) VALUES (?, ?, ?, 'task.restored', 'success', 'task', ?, 'user-restore', '{}', ?)")
+    sqlx::query("INSERT INTO audit_events (id, workspace_id, actor_id, action, outcome, resource_type, resource_id, request_id, metadata_json, occurred_at) VALUES ($1, $2, $3, 'task.restored', 'success', 'task', $4, 'user-restore', '{}', $5)")
         .bind(orbit_platform::Id::new_v7().to_string()).bind(fixture.workspace_id.to_string())
         .bind(fixture.user_id.to_string()).bind(&task_id).bind(TimestampMillis::now().as_millis())
         .execute(fixture.database.pool()).await.unwrap();
@@ -392,14 +392,14 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
         .await
         .unwrap();
     let repaired_creator: String =
-        sqlx::query_scalar("SELECT creator_service_account_id FROM tasks WHERE id = ?")
+        sqlx::query_scalar("SELECT creator_service_account_id FROM tasks WHERE id = $1")
             .bind(&task_id)
             .fetch_one(fixture.database.pool())
             .await
             .unwrap();
     assert_eq!(repaired_creator, service_account_id);
     let repaired_actor: Option<String> = sqlx::query_scalar(
-        "SELECT actor_id FROM audit_events WHERE resource_id = ? AND action = 'task.created'",
+        "SELECT actor_id FROM audit_events WHERE resource_id = $1 AND action = 'task.created'",
     )
     .bind(&task_id)
     .fetch_one(fixture.database.pool())
@@ -407,7 +407,7 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
     .unwrap();
     assert_eq!(repaired_actor, None);
     let restored_actor: String = sqlx::query_scalar(
-        "SELECT actor_id FROM audit_events WHERE resource_id = ? AND action = 'task.restored'",
+        "SELECT actor_id FROM audit_events WHERE resource_id = $1 AND action = 'task.restored'",
     )
     .bind(&task_id)
     .fetch_one(fixture.database.pool())
@@ -415,7 +415,7 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
     .unwrap();
     assert_eq!(restored_actor, fixture.user_id.to_string());
     let before_pause: i64 =
-        sqlx::query_scalar("SELECT sequence FROM realtime_sequences WHERE workspace_id = ?")
+        sqlx::query_scalar("SELECT sequence FROM realtime_sequences WHERE workspace_id = $1")
             .bind(fixture.workspace_id.to_string())
             .fetch_one(fixture.database.pool())
             .await
@@ -432,12 +432,12 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
         StatusCode::ACCEPTED
     );
     let paused: i64 =
-        sqlx::query_scalar("SELECT sync_paused FROM github_issue_links WHERE task_id = ?")
+        sqlx::query_scalar("SELECT sync_paused FROM github_issue_links WHERE task_id = $1")
             .bind(&task_id)
             .fetch_one(fixture.database.pool())
             .await
             .unwrap();
-    let title: String = sqlx::query_scalar("SELECT title FROM tasks WHERE id = ?")
+    let title: String = sqlx::query_scalar("SELECT title FROM tasks WHERE id = $1")
         .bind(&task_id)
         .fetch_one(fixture.database.pool())
         .await
@@ -445,7 +445,7 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
     assert_eq!(paused, 1);
     assert_eq!(title, "GitHub task");
     let after_pause: i64 =
-        sqlx::query_scalar("SELECT sequence FROM realtime_sequences WHERE workspace_id = ?")
+        sqlx::query_scalar("SELECT sequence FROM realtime_sequences WHERE workspace_id = $1")
             .bind(fixture.workspace_id.to_string())
             .fetch_one(fixture.database.pool())
             .await
@@ -468,9 +468,9 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
             .status(),
         StatusCode::OK
     );
-    let link: (String, i64) = sqlx::query_as("SELECT task_id, sync_paused FROM github_issue_links WHERE workspace_id = ? AND repository = 'acme/repo' AND issue_number = 12")
+    let link: (String, i64) = sqlx::query_as("SELECT task_id, sync_paused FROM github_issue_links WHERE workspace_id = $1 AND repository = 'acme/repo' AND issue_number = 12")
         .bind(fixture.workspace_id.to_string()).fetch_one(fixture.database.pool()).await.unwrap();
-    let title: String = sqlx::query_scalar("SELECT title FROM tasks WHERE id = ?")
+    let title: String = sqlx::query_scalar("SELECT title FROM tasks WHERE id = $1")
         .bind(&task_id)
         .fetch_one(fixture.database.pool())
         .await
@@ -478,14 +478,14 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
     assert_eq!(link, (task_id.clone(), 0));
     assert_eq!(title, "Updated after relabeling");
     let restored_creator: String =
-        sqlx::query_scalar("SELECT creator_service_account_id FROM tasks WHERE id = ?")
+        sqlx::query_scalar("SELECT creator_service_account_id FROM tasks WHERE id = $1")
             .bind(&task_id)
             .fetch_one(fixture.database.pool())
             .await
             .unwrap();
     assert_eq!(restored_creator, service_account_id);
     let legacy_activity: Vec<(Option<String>, String)> = sqlx::query_as(
-        "SELECT actor_id, metadata_json FROM audit_events WHERE resource_type = 'task' AND resource_id = ? AND action IN ('task.created', 'github.work_item.link.updated') ORDER BY action",
+        "SELECT actor_id, metadata_json FROM audit_events WHERE resource_type = 'task' AND resource_id = $1 AND action IN ('task.created', 'github.work_item.link.updated') ORDER BY action",
     ).bind(&task_id).fetch_all(fixture.database.pool()).await.unwrap();
     assert_eq!(legacy_activity.len(), 2);
     for (actor, metadata) in legacy_activity {
@@ -494,13 +494,13 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
         assert_eq!(metadata["actor_service_account_id"], service_account_id);
     }
     let (actor_id, metadata): (Option<String>, String) = sqlx::query_as(
-        "SELECT actor_id, metadata_json FROM audit_events WHERE resource_type = 'task' AND resource_id = ? AND action = 'task.updated' ORDER BY occurred_at DESC LIMIT 1",
+        "SELECT actor_id, metadata_json FROM audit_events WHERE resource_type = 'task' AND resource_id = $1 AND action = 'task.updated' ORDER BY occurred_at DESC LIMIT 1",
     ).bind(&task_id).fetch_one(fixture.database.pool()).await.unwrap();
     assert_eq!(actor_id, None);
     let metadata: Value = serde_json::from_str(&metadata).unwrap();
     assert_eq!(metadata["actor_service_account_id"], service_account_id);
     let (description, source_url): (String, Option<String>) =
-        sqlx::query_as("SELECT description, source_url FROM tasks WHERE id = ?")
+        sqlx::query_as("SELECT description, source_url FROM tasks WHERE id = $1")
             .bind(&task_id)
             .fetch_one(fixture.database.pool())
             .await
@@ -534,7 +534,7 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
         StatusCode::OK
     );
     let (link_actor, link_metadata): (Option<String>, String) = sqlx::query_as(
-        "SELECT actor_id, metadata_json FROM audit_events WHERE resource_type = 'task' AND resource_id = ? AND action = 'github.work_item.link.updated' ORDER BY occurred_at DESC LIMIT 1",
+        "SELECT actor_id, metadata_json FROM audit_events WHERE resource_type = 'task' AND resource_id = $1 AND action = 'github.work_item.link.updated' ORDER BY occurred_at DESC LIMIT 1",
     ).bind(&task_id).fetch_one(fixture.database.pool()).await.unwrap();
     assert_eq!(link_actor, None);
     let link_metadata: Value = serde_json::from_str(&link_metadata).unwrap();
@@ -570,7 +570,7 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
         StatusCode::ACCEPTED
     );
     let paused_while_deleted: i64 =
-        sqlx::query_scalar("SELECT sync_paused FROM github_issue_links WHERE task_id = ?")
+        sqlx::query_scalar("SELECT sync_paused FROM github_issue_links WHERE task_id = $1")
             .bind(&task_id)
             .fetch_one(fixture.database.pool())
             .await
@@ -607,7 +607,7 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
     .unwrap();
     assert_eq!(issue_task_count, 1);
     let restore_actor: (Option<String>, String) = sqlx::query_as(
-        "SELECT actor_id, metadata_json FROM audit_events WHERE resource_id = ? AND action = 'task.restored' ORDER BY occurred_at DESC LIMIT 1",
+        "SELECT actor_id, metadata_json FROM audit_events WHERE resource_id = $1 AND action = 'task.restored' ORDER BY occurred_at DESC LIMIT 1",
     ).bind(&task_id).fetch_one(fixture.database.pool()).await.unwrap();
     assert_eq!(restore_actor.0, None);
     assert_eq!(
@@ -625,7 +625,7 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
         StatusCode::ACCEPTED
     );
     let paused_after_restore: i64 =
-        sqlx::query_scalar("SELECT sync_paused FROM github_issue_links WHERE task_id = ?")
+        sqlx::query_scalar("SELECT sync_paused FROM github_issue_links WHERE task_id = $1")
             .bind(&task_id)
             .fetch_one(fixture.database.pool())
             .await
@@ -663,10 +663,10 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
             .status(),
         StatusCode::OK
     );
-    let second_task: String = sqlx::query_scalar("SELECT task_id FROM github_issue_links WHERE workspace_id = ? AND repository = 'acme/repo' AND issue_number = 13")
+    let second_task: String = sqlx::query_scalar("SELECT task_id FROM github_issue_links WHERE workspace_id = $1 AND repository = 'acme/repo' AND issue_number = 13")
         .bind(fixture.workspace_id.to_string()).fetch_one(fixture.database.pool()).await.unwrap();
     let second_task_project: String =
-        sqlx::query_scalar("SELECT project_id FROM tasks WHERE id = ?")
+        sqlx::query_scalar("SELECT project_id FROM tasks WHERE id = $1")
             .bind(&second_task)
             .fetch_one(fixture.database.pool())
             .await
@@ -712,20 +712,20 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
     assert_eq!(pr_link.2, "open");
     assert_ne!(pr_link.0, task_id);
     let pr_service_account_id: String =
-        sqlx::query_scalar("SELECT creator_service_account_id FROM tasks WHERE id = ?")
+        sqlx::query_scalar("SELECT creator_service_account_id FROM tasks WHERE id = $1")
             .bind(&pr_link.0)
             .fetch_one(fixture.database.pool())
             .await
             .unwrap();
     assert_eq!(pr_service_account_id, service_account_id);
     let (pr_actor, pr_metadata): (Option<String>, String) = sqlx::query_as(
-        "SELECT actor_id, metadata_json FROM audit_events WHERE resource_type = 'task' AND resource_id = ? AND action = 'task.created'",
+        "SELECT actor_id, metadata_json FROM audit_events WHERE resource_type = 'task' AND resource_id = $1 AND action = 'task.created'",
     ).bind(&pr_link.0).fetch_one(fixture.database.pool()).await.unwrap();
     assert_eq!(pr_actor, None);
     let pr_metadata: Value = serde_json::from_str(&pr_metadata).unwrap();
     assert_eq!(pr_metadata["actor_service_account_id"], service_account_id);
     let account_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM service_accounts WHERE workspace_id = ? AND lower(name) = 'github'",
+        "SELECT COUNT(*) FROM service_accounts WHERE workspace_id = $1 AND lower(name) = 'github'",
     )
     .bind(fixture.workspace_id.to_string())
     .fetch_one(fixture.database.pool())
@@ -733,11 +733,13 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
     .unwrap();
     assert_eq!(account_count, 1);
     let (pr_title, pr_body, pr_url, pr_project): (String, String, Option<String>, String) =
-        sqlx::query_as("SELECT title, description, source_url, project_id FROM tasks WHERE id = ?")
-            .bind(&pr_link.0)
-            .fetch_one(fixture.database.pool())
-            .await
-            .unwrap();
+        sqlx::query_as(
+            "SELECT title, description, source_url, project_id FROM tasks WHERE id = $1",
+        )
+        .bind(&pr_link.0)
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap();
     assert_eq!(
         (
             pr_title.as_str(),
@@ -764,7 +766,7 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
             .status(),
         StatusCode::OK
     );
-    let updated_title: String = sqlx::query_scalar("SELECT title FROM tasks WHERE id = ?")
+    let updated_title: String = sqlx::query_scalar("SELECT title FROM tasks WHERE id = $1")
         .bind(&pr_link.0)
         .fetch_one(fixture.database.pool())
         .await
@@ -783,7 +785,7 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
         StatusCode::ACCEPTED
     );
     let paused: i64 =
-        sqlx::query_scalar("SELECT sync_paused FROM github_issue_links WHERE task_id = ?")
+        sqlx::query_scalar("SELECT sync_paused FROM github_issue_links WHERE task_id = $1")
             .bind(&pr_link.0)
             .fetch_one(fixture.database.pool())
             .await
@@ -815,7 +817,7 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
             .status(),
         StatusCode::OK
     );
-    let merged_category: String = sqlx::query_scalar("SELECT category FROM task_statuses JOIN tasks ON tasks.status_id = task_statuses.id WHERE tasks.id = ?").bind(&pr_link.0).fetch_one(fixture.database.pool()).await.unwrap();
+    let merged_category: String = sqlx::query_scalar("SELECT category FROM task_statuses JOIN tasks ON tasks.status_id = task_statuses.id WHERE tasks.id = $1").bind(&pr_link.0).fetch_one(fixture.database.pool()).await.unwrap();
     assert_eq!(merged_category, "completed");
     let pr_task_id: orbit_platform::Id = pr_link.0.parse().unwrap();
     let current = repository
@@ -846,7 +848,7 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
         StatusCode::ACCEPTED
     );
     let paused: i64 =
-        sqlx::query_scalar("SELECT sync_paused FROM github_issue_links WHERE task_id = ?")
+        sqlx::query_scalar("SELECT sync_paused FROM github_issue_links WHERE task_id = $1")
             .bind(&pr_link.0)
             .fetch_one(fixture.database.pool())
             .await
@@ -915,7 +917,7 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
             .status(),
         StatusCode::OK
     );
-    let category: String = sqlx::query_scalar("SELECT category FROM task_statuses JOIN tasks ON tasks.status_id = task_statuses.id WHERE tasks.id = ?")
+    let category: String = sqlx::query_scalar("SELECT category FROM task_statuses JOIN tasks ON tasks.status_id = task_statuses.id WHERE tasks.id = $1")
         .bind(&unmerged_id).fetch_one(fixture.database.pool()).await.unwrap();
     assert_eq!(category, "cancelled");
     closed["action"] = json!("reopened");
@@ -928,7 +930,7 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
             .status(),
         StatusCode::OK
     );
-    let category: String = sqlx::query_scalar("SELECT category FROM task_statuses JOIN tasks ON tasks.status_id = task_statuses.id WHERE tasks.id = ?")
+    let category: String = sqlx::query_scalar("SELECT category FROM task_statuses JOIN tasks ON tasks.status_id = task_statuses.id WHERE tasks.id = $1")
         .bind(&unmerged_id).fetch_one(fixture.database.pool()).await.unwrap();
     assert_eq!(category, "unstarted");
     let removed = json!({"action":"removed","installation":{"id":1234,"account":{"login":"acme"}},"repositories_added":[],"repositories_removed":[{"full_name":"acme/repo"}]});
@@ -941,14 +943,14 @@ async fn database_github_app_routes_issues_without_orbit_tokens() {
         StatusCode::OK
     );
     let remaining: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM github_project_connections WHERE workspace_id = ?",
+        "SELECT COUNT(*) FROM github_project_connections WHERE workspace_id = $1",
     )
     .bind(fixture.workspace_id.to_string())
     .fetch_one(fixture.database.pool())
     .await
     .unwrap();
     assert_eq!(remaining, 0);
-    let installation_event: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM audit_events WHERE workspace_id = ? AND action = 'github.installation.updated'")
+    let installation_event: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM audit_events WHERE workspace_id = $1 AND action = 'github.installation.updated'")
         .bind(fixture.workspace_id.to_string()).fetch_one(fixture.database.pool()).await.unwrap();
     assert!(installation_event >= 2);
 }
@@ -1007,7 +1009,7 @@ async fn development_github_registration_uses_the_browser_https_origin() {
         "https://orbit-tunnel.example/api/v1/integrations/github/manifest/callback"
     );
     let saved_origin: String = sqlx::query_scalar(
-        "SELECT public_origin FROM github_app_registrations WHERE workspace_id = ?",
+        "SELECT public_origin FROM github_app_registrations WHERE workspace_id = $1",
     )
     .bind(fixture.workspace_id.to_string())
     .fetch_one(fixture.database.pool())
@@ -1038,7 +1040,7 @@ async fn members_read_github_settings_but_cannot_change_them() {
     let now = TimestampMillis::now();
     sqlx::query(
         "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) \
-         VALUES (?, 'member@example.com', 'member@example.com', 'Member', 'unused', ?, ?)",
+         VALUES ($1, 'member@example.com', 'member@example.com', 'Member', 'unused', $2, $3)",
     )
     .bind(member_id.to_string())
     .bind(now.as_millis())
@@ -1048,7 +1050,7 @@ async fn members_read_github_settings_but_cannot_change_them() {
     .unwrap();
     sqlx::query(
         "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
-         VALUES (?, ?, ?, 'member', 0, ?, ?)",
+         VALUES ($1, $2, $3, 'member', 0, $4, $5)",
     )
     .bind(orbit_platform::Id::new_v7().to_string())
     .bind(fixture.workspace_id.to_string())
@@ -1179,7 +1181,7 @@ async fn discord_events_create_one_labeled_task_and_retries_are_idempotent() {
         issued.api_token.service_account_id,
         rotated.api_token.service_account_id
     );
-    sqlx::query("UPDATE users SET suspended_at = ? WHERE id = ?")
+    sqlx::query("UPDATE users SET suspended_at = $1 WHERE id = $2")
         .bind(TimestampMillis::now().as_millis())
         .bind(fixture.user_id.to_string())
         .execute(fixture.database.pool())
@@ -1234,7 +1236,7 @@ async fn discord_events_create_one_labeled_task_and_retries_are_idempotent() {
     let repeated = response_json(repeated).await;
     assert_eq!(repeated["duplicate"], true);
     assert_eq!(repeated["task"]["id"], task_id);
-    let counts: (i64, i64, i64) = sqlx::query_as("SELECT (SELECT COUNT(*) FROM tasks WHERE id = ?), (SELECT COUNT(*) FROM integration_events WHERE external_event_id = 'discord-message-123'), (SELECT COUNT(*) FROM labels WHERE workspace_id = ? AND lower(name) = 'discord')")
+    let counts: (i64, i64, i64) = sqlx::query_as("SELECT (SELECT COUNT(*) FROM tasks WHERE id = $1), (SELECT COUNT(*) FROM integration_events WHERE external_event_id = 'discord-message-123'), (SELECT COUNT(*) FROM labels WHERE workspace_id = $2 AND lower(name) = 'discord')")
         .bind(&task_id).bind(fixture.workspace_id.to_string()).fetch_one(fixture.database.pool()).await.unwrap();
     assert_eq!(counts, (1, 1, 1));
 
@@ -1245,7 +1247,7 @@ async fn discord_events_create_one_labeled_task_and_retries_are_idempotent() {
         "integration_event_conflict"
     );
 
-    sqlx::query("UPDATE tasks SET deleted_at = ?, version = version + 1 WHERE id = ?")
+    sqlx::query("UPDATE tasks SET deleted_at = $1, version = version + 1 WHERE id = $2")
         .bind(TimestampMillis::now().as_millis())
         .bind(&task_id)
         .execute(fixture.database.pool())
@@ -1270,7 +1272,7 @@ async fn discord_events_create_one_labeled_task_and_retries_are_idempotent() {
 
     let replacement_id = recreated["task"]["id"].as_str().unwrap();
     let mapped_task_id: String = sqlx::query_scalar(
-        "SELECT task_id FROM integration_events WHERE workspace_id = ? AND provider = 'discord' AND external_event_id = 'discord-message-123'",
+        "SELECT task_id FROM integration_events WHERE workspace_id = $1 AND provider = 'discord' AND external_event_id = 'discord-message-123'",
     )
     .bind(fixture.workspace_id.to_string())
     .fetch_one(fixture.database.pool())
@@ -1279,7 +1281,7 @@ async fn discord_events_create_one_labeled_task_and_retries_are_idempotent() {
     assert_eq!(mapped_task_id, replacement_id);
 
     let (actor_id, metadata): (Option<String>, String) = sqlx::query_as(
-        "SELECT actor_id, metadata_json FROM audit_events WHERE resource_type = 'task' AND resource_id = ? AND action = 'task.created'",
+        "SELECT actor_id, metadata_json FROM audit_events WHERE resource_type = 'task' AND resource_id = $1 AND action = 'task.created'",
     )
     .bind(replacement_id)
     .fetch_one(fixture.database.pool())

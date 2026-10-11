@@ -15,6 +15,10 @@ database = "/var/lib/orbit/orbit.sqlite"
 attachments = "/var/lib/orbit/attachments"
 # Backups must be outside the live attachment directory.
 backups = "/var/backups/orbit"
+# Postgres instead of SQLite. It needs secrets.app_key (ORBIT__SECRETS__APP_KEY, base64 of 32 random
+# bytes) instead of an app.key file. To keep files and backups off this server, save an S3 bucket in
+# Admin → Storage and turn on attachments and backups in S3.
+# database_url = "postgres://orbit:password@db.internal:5432/orbit"
 
 [jobs]
 concurrency = 4

@@ -22,10 +22,10 @@ mod stickers;
 use std::collections::HashMap;
 
 use orbit_domain::Actor;
-use orbit_platform::{Database, Id, TimestampMillis, UploadError, UploadService};
+use orbit_platform::{Database, Flag, Id, Row, TimestampMillis, UploadError, UploadService};
 use serde::{Deserialize, Serialize};
-use sqlx::sqlite::SqliteRow;
-use sqlx::{Row, Sqlite, SqliteConnection, Transaction};
+use sqlx::any::AnyRow;
+use sqlx::{Any, AnyConnection, Transaction};
 use thiserror::Error;
 use utoipa::ToSchema;
 
@@ -551,7 +551,7 @@ impl Events {
 /// Commits a write. The audiences become user ids first, inside the transaction, so they are
 /// the readers of each conversation as this write left them.
 async fn finish<T>(
-    mut tx: Transaction<'_, Sqlite>,
+    mut tx: Transaction<'_, Any>,
     events: Events,
     value: T,
 ) -> Result<Written<T>, ChatError> {
@@ -565,8 +565,8 @@ async fn finish<T>(
                 let (public, users) = match members.get(&id) {
                     Some(readers) => readers,
                     None => {
-                        let public: Option<bool> = sqlx::query_scalar(
-                            "SELECT kind = 'public' FROM chat_conversations WHERE id = ?",
+                        let public: Option<Flag> = sqlx::query_scalar(
+                            "SELECT kind = 'public' FROM chat_conversations WHERE id = $1",
                         )
                         .bind(id.to_string())
                         .fetch_optional(&mut *tx)
@@ -574,7 +574,7 @@ async fn finish<T>(
                         let users = member_ids(&mut tx, id).await?;
                         members
                             .entry(id)
-                            .or_insert((public.unwrap_or(false), users))
+                            .or_insert((public.is_some_and(|flag| flag.0), users))
                     }
                 };
                 match audience {
@@ -635,9 +635,9 @@ struct Conversation {
 
 const CONVERSATION_COLUMNS: &str = "c.id, c.workspace_id, c.kind, c.name, c.topic, c.category_id, \
      c.position, c.is_default, c.archived_at, c.created_by, c.created_at, c.last_message_at, \
-     c.message_count, (c.kind = 'dm' AND instr(c.dm_key, ',') = 0) AS self_dm";
+     c.message_count, (c.kind = 'dm' AND c.dm_key NOT LIKE '%,%') AS self_dm";
 
-fn conversation_from_row(row: &SqliteRow) -> Result<Conversation, ChatError> {
+fn conversation_from_row(row: &AnyRow) -> Result<Conversation, ChatError> {
     Ok(Conversation {
         id: parse_id(row.get("id"))?,
         workspace_id: parse_id(row.get("workspace_id"))?,
@@ -688,7 +688,7 @@ impl Member {
 const MEMBER_COLUMNS: &str = "m.notify, m.favorite, m.last_read_message_id, m.read_count, \
      m.mention_count, m.broadcast_count";
 
-fn member_from_row(row: &SqliteRow) -> Result<Member, ChatError> {
+fn member_from_row(row: &AnyRow) -> Result<Member, ChatError> {
     Ok(Member {
         notify: NotifyLevel::from_db(row.get::<String, _>("notify").as_str())?,
         favorite: row.get("favorite"),
@@ -739,7 +739,7 @@ impl Access {
 
 /// Non-members of the workspace and trashed workspaces are `NotFound`.
 async fn load_actor(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     workspace_id: Id,
     user_id: Id,
 ) -> Result<Actor, ChatError> {
@@ -749,13 +749,13 @@ async fn load_actor(
 }
 
 async fn load_conversation(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     workspace_id: Id,
     conversation_id: Id,
 ) -> Result<Option<Conversation>, ChatError> {
-    sqlx::query(&format!(
-        "SELECT {CONVERSATION_COLUMNS} FROM chat_conversations c WHERE c.id = ? AND c.workspace_id = ?"
-    ))
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "SELECT {CONVERSATION_COLUMNS} FROM chat_conversations c WHERE c.id = $1 AND c.workspace_id = $2"
+    )))
     .bind(conversation_id.to_string())
     .bind(workspace_id.to_string())
     .fetch_optional(&mut *conn)
@@ -766,13 +766,13 @@ async fn load_conversation(
 }
 
 async fn load_member(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     conversation_id: Id,
     user_id: Id,
 ) -> Result<Option<Member>, ChatError> {
-    sqlx::query(&format!(
-        "SELECT {MEMBER_COLUMNS} FROM chat_members m WHERE m.conversation_id = ? AND m.user_id = ?"
-    ))
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "SELECT {MEMBER_COLUMNS} FROM chat_members m WHERE m.conversation_id = $1 AND m.user_id = $2"
+    )))
     .bind(conversation_id.to_string())
     .bind(user_id.to_string())
     .fetch_optional(&mut *conn)
@@ -784,7 +784,7 @@ async fn load_member(
 
 /// A private channel or DM that the caller is not in does not exist for the caller.
 async fn load_access(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     workspace_id: Id,
     user_id: Id,
     conversation_id: Id,
@@ -804,12 +804,9 @@ async fn load_access(
     })
 }
 
-async fn member_ids(
-    conn: &mut SqliteConnection,
-    conversation_id: Id,
-) -> Result<Vec<Id>, ChatError> {
+async fn member_ids(conn: &mut AnyConnection, conversation_id: Id) -> Result<Vec<Id>, ChatError> {
     sqlx::query_scalar::<_, String>(
-        "SELECT user_id FROM chat_members WHERE conversation_id = ? ORDER BY joined_at, user_id",
+        "SELECT user_id FROM chat_members WHERE conversation_id = $1 ORDER BY joined_at, user_id",
     )
     .bind(conversation_id.to_string())
     .fetch_all(&mut *conn)
@@ -824,7 +821,7 @@ async fn member_ids(
 /// `memberships` calls this in the same transaction, so a public channel always has every
 /// workspace member. Channels the member is in already stay as they are.
 pub async fn join_public_channels(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     workspace_id: Id,
     user_id: Id,
     now: TimestampMillis,
@@ -832,11 +829,11 @@ pub async fn join_public_channels(
     sqlx::query(
         "INSERT INTO chat_members (conversation_id, user_id, workspace_id, notify, \
          last_read_message_id, read_count, joined_at) \
-         SELECT c.id, ?, c.workspace_id, 'mentions', \
+         SELECT c.id, $1, c.workspace_id, 'mentions', \
                 (SELECT id FROM chat_messages WHERE conversation_id = c.id ORDER BY id DESC LIMIT 1), \
-                c.message_count, ? \
+                c.message_count, $2 \
          FROM chat_conversations c \
-         WHERE c.workspace_id = ? AND c.kind = 'public' AND c.archived_at IS NULL \
+         WHERE c.workspace_id = $3 AND c.kind = 'public' AND c.archived_at IS NULL \
          ON CONFLICT (conversation_id, user_id) DO NOTHING",
     )
     .bind(user_id.to_string())
@@ -849,11 +846,11 @@ pub async fn join_public_channels(
 
 /// Every member of the workspace.
 async fn workspace_member_ids(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     workspace_id: Id,
 ) -> Result<Vec<Id>, ChatError> {
     sqlx::query_scalar::<_, String>(
-        "SELECT user_id FROM memberships WHERE workspace_id = ? ORDER BY created_at, user_id",
+        "SELECT user_id FROM memberships WHERE workspace_id = $1 ORDER BY created_at, user_id",
     )
     .bind(workspace_id.to_string())
     .fetch_all(&mut *conn)
@@ -885,7 +882,7 @@ fn conversation_record(conversation: &Conversation, member_ids: Vec<Id>) -> Conv
 
 /// The conversation as it is now, with its members.
 async fn current_conversation_record(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     workspace_id: Id,
     conversation_id: Id,
 ) -> Result<ConversationRecord, ChatError> {
@@ -898,7 +895,7 @@ async fn current_conversation_record(
 
 /// The caller's state as it is now; `None` when the caller is not a member.
 async fn current_state(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     workspace_id: Id,
     conversation_id: Id,
     user_id: Id,
@@ -923,7 +920,7 @@ const MESSAGE_SELECT: &str = "SELECT m.id, m.conversation_id, m.thread_root_id, 
      LEFT JOIN chat_messages q ON q.id = m.reply_to_id AND q.deleted_at IS NULL \
      LEFT JOIN custom_stickers s ON s.id = m.sticker_id";
 
-fn message_from_row(row: &SqliteRow) -> Result<MessageRecord, ChatError> {
+fn message_from_row(row: &AnyRow) -> Result<MessageRecord, ChatError> {
     let body: String = row.get("body");
     let reply_user_ids: Vec<String> =
         serde_json::from_str(row.get::<String, _>("reply_user_ids").as_str())
@@ -1030,8 +1027,8 @@ fn message_from_row(row: &SqliteRow) -> Result<MessageRecord, ChatError> {
 
 /// Rows to records, with their reactions and files: two more queries for the whole list.
 async fn hydrate(
-    conn: &mut SqliteConnection,
-    rows: &[SqliteRow],
+    conn: &mut AnyConnection,
+    rows: &[AnyRow],
 ) -> Result<Vec<MessageRecord>, ChatError> {
     let mut messages = rows
         .iter()
@@ -1040,11 +1037,11 @@ async fn hydrate(
     if messages.is_empty() {
         return Ok(messages);
     }
-    let reactions = sqlx::query(
+    let reactions = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT message_id, emoji, user_id FROM chat_reactions \
-         WHERE message_id IN (SELECT value FROM json_each(?)) \
-         ORDER BY created_at, emoji, user_id",
-    )
+         WHERE message_id {} ORDER BY created_at, emoji, user_id",
+        in_ids(&*conn, 1)
+    )))
     .bind(id_list(messages.iter().map(|message| message.id)))
     .fetch_all(&mut *conn)
     .await?;
@@ -1072,19 +1069,21 @@ async fn hydrate(
 }
 
 async fn load_message(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     message_id: Id,
 ) -> Result<Option<MessageRecord>, ChatError> {
-    let rows = sqlx::query(&format!("{MESSAGE_SELECT} WHERE m.id = ?"))
-        .bind(message_id.to_string())
-        .fetch_all(&mut *conn)
-        .await?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "{MESSAGE_SELECT} WHERE m.id = $1"
+    )))
+    .bind(message_id.to_string())
+    .fetch_all(&mut *conn)
+    .await?;
     Ok(hydrate(conn, &rows).await?.pop())
 }
 
 /// A message together with the caller's access to its conversation.
 async fn load_message_access(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     workspace_id: Id,
     user_id: Id,
     message_id: Id,
@@ -1130,13 +1129,13 @@ impl ThreadMember {
 }
 
 async fn load_thread_member(
-    conn: &mut SqliteConnection,
+    conn: &mut AnyConnection,
     root_id: Id,
     user_id: Id,
 ) -> Result<Option<ThreadMember>, ChatError> {
     let row = sqlx::query(
         "SELECT following, last_read_reply_id, read_reply_count, mention_count \
-         FROM chat_thread_members WHERE root_id = ? AND user_id = ?",
+         FROM chat_thread_members WHERE root_id = $1 AND user_id = $2",
     )
     .bind(root_id.to_string())
     .bind(user_id.to_string())
@@ -1169,7 +1168,39 @@ fn mentioned_user_ids(body: &str) -> Vec<Id> {
     ids
 }
 
-/// A JSON array of ids, for `IN (SELECT value FROM json_each(?))`.
+/// Where SQL runs: the few queries that differ per backend branch on this.
+trait Dialect {
+    fn postgres(&self) -> bool;
+}
+
+impl Dialect for AnyConnection {
+    fn postgres(&self) -> bool {
+        self.backend_name() == "PostgreSQL"
+    }
+}
+
+impl Dialect for Database {
+    fn postgres(&self) -> bool {
+        self.backend() == orbit_platform::Backend::Postgres
+    }
+}
+
+/// The elements of a JSON array of strings bound as parameter `$n`, as a table `alias` with one
+/// `value` column.
+fn json_values(dialect: &impl Dialect, n: usize, alias: &str) -> String {
+    if dialect.postgres() {
+        format!("jsonb_array_elements_text(${n}::jsonb) AS {alias}(value)")
+    } else {
+        format!("json_each(${n}) AS {alias}")
+    }
+}
+
+/// `IN (…)` over the ids of an [`id_list`] bound as parameter `$n`.
+fn in_ids(dialect: &impl Dialect, n: usize) -> String {
+    format!("IN (SELECT value FROM {})", json_values(dialect, n, "ids"))
+}
+
+/// A JSON array of ids, for [`in_ids`].
 fn id_list(ids: impl IntoIterator<Item = Id>) -> String {
     let ids: Vec<String> = ids.into_iter().map(|id| id.to_string()).collect();
     serde_json::to_string(&ids).expect("a list of strings serializes")

@@ -218,7 +218,7 @@ async fn add_user(
     let pool = server.database.pool();
     sqlx::query(
         "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, 'unused', ?, ?)",
+         VALUES ($1, $2, $3, $4, 'unused', $5, $6)",
     )
     .bind(id.to_string())
     .bind(email)
@@ -232,7 +232,7 @@ async fn add_user(
     if let Some(workspace) = workspace {
         sqlx::query(
             "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
-             VALUES (?, ?, ?, 'member', 0, ?, ?)",
+             VALUES ($1, $2, $3, 'member', 0, $4, $5)",
         )
         .bind(Id::new_v7().to_string())
         .bind(workspace)
@@ -507,7 +507,7 @@ where
     }
 }
 
-async fn scalar_i64(server: &Server, sql: &str, page: &str) -> i64 {
+async fn scalar_i64(server: &Server, sql: &'static str, page: &str) -> i64 {
     sqlx::query_scalar(sql)
         .bind(page)
         .fetch_one(server.database.pool())
@@ -734,7 +734,7 @@ async fn edits_persist_compact_and_reload_after_eviction() {
     wait_until("compaction", || async {
         scalar_i64(
             &server,
-            "SELECT snapshot_seq FROM page_collab_docs WHERE page_id = ?",
+            "SELECT snapshot_seq FROM page_collab_docs WHERE page_id = $1",
             id,
         )
         .await
@@ -744,7 +744,7 @@ async fn edits_persist_compact_and_reload_after_eviction() {
     assert!(
         scalar_i64(
             &server,
-            "SELECT COUNT(*) FROM page_collab_updates WHERE page_id = ?",
+            "SELECT COUNT(*) FROM page_collab_updates WHERE page_id = $1",
             id
         )
         .await
@@ -756,7 +756,7 @@ async fn edits_persist_compact_and_reload_after_eviction() {
     assert_eq!(
         scalar_i64(
             &server,
-            "SELECT COUNT(*) FROM page_collab_updates WHERE page_id = ?",
+            "SELECT COUNT(*) FROM page_collab_updates WHERE page_id = $1",
             id
         )
         .await,
@@ -837,14 +837,14 @@ async fn projection_writes_content_search_and_history_without_bumping_the_versio
     let id = page["id"].as_str().unwrap();
     let version = page["version"].as_u64().unwrap();
     // The page is older than 10 minutes and has no versions: the next edit snapshots it.
-    sqlx::query("UPDATE pages SET created_at = created_at - 3600000 WHERE id = ?")
+    sqlx::query("UPDATE pages SET created_at = created_at - 3600000 WHERE id = $1")
         .bind(id)
         .execute(server.database.pool())
         .await
         .unwrap();
     let audits_before = scalar_i64(
         &server,
-        "SELECT COUNT(*) FROM audit_events WHERE resource_id = ? AND action = 'page.updated'",
+        "SELECT COUNT(*) FROM audit_events WHERE resource_id = $1 AND action = 'page.updated'",
         id,
     )
     .await;
@@ -902,7 +902,7 @@ async fn projection_writes_content_search_and_history_without_bumping_the_versio
     let audits = || async {
         scalar_i64(
             &server,
-            "SELECT COUNT(*) FROM audit_events WHERE resource_id = ? AND action = 'page.updated'",
+            "SELECT COUNT(*) FROM audit_events WHERE resource_id = $1 AND action = 'page.updated'",
             id,
         )
         .await
@@ -981,7 +981,7 @@ async fn restores_api_writes_and_imports_replace_the_document_live() {
     // A version to restore later.
     sqlx::query(
         "INSERT INTO page_versions (id, workspace_id, page_id, title, icon, content_json, kind, created_by, created_at) \
-         VALUES (?, ?, ?, 'Live', NULL, ?, 'auto', ?, 1)",
+         VALUES ($1, $2, $3, 'Live', NULL, $4, 'auto', $5, 1)",
     )
     .bind(Id::new_v7().to_string())
     .bind(&users.workspace)
@@ -1345,7 +1345,7 @@ async fn converter_changes_reset_the_document_under_a_new_epoch() {
     ))
     .await
     .unwrap();
-    sqlx::query("UPDATE page_collab_docs SET converter_version = 0 WHERE page_id = ?")
+    sqlx::query("UPDATE page_collab_docs SET converter_version = 0 WHERE page_id = $1")
         .bind(&id)
         .execute(database.pool())
         .await
@@ -1430,8 +1430,8 @@ impl Client {
 
 async fn page_mentions(server: &Server, page: &str, recipient: Id) -> i64 {
     sqlx::query_scalar(
-        "SELECT COUNT(*) FROM notifications WHERE kind = 'page_mentioned' AND page_id = ? \
-         AND recipient_user_id = ?",
+        "SELECT COUNT(*) FROM notifications WHERE kind = 'page_mentioned' AND page_id = $1 \
+         AND recipient_user_id = $2",
     )
     .bind(page)
     .bind(recipient.to_string())
@@ -1467,7 +1467,7 @@ async fn mentions_in_the_body_notify_members_who_can_see_the_page_once() {
         "Sam Suspended",
     )
     .await;
-    sqlx::query("UPDATE users SET suspended_at = 1 WHERE id = ?")
+    sqlx::query("UPDATE users SET suspended_at = 1 WHERE id = $1")
         .bind(suspended.to_string())
         .execute(server.database.pool())
         .await
@@ -1546,7 +1546,7 @@ async fn mentions_in_the_body_notify_members_who_can_see_the_page_once() {
     assert_eq!(page_mentions(&server, id, users.member_id).await, 1);
 
     // After the window a new mention notifies again.
-    sqlx::query("UPDATE notifications SET created_at = created_at - 660000 WHERE page_id = ?")
+    sqlx::query("UPDATE notifications SET created_at = created_at - 660000 WHERE page_id = $1")
         .bind(id)
         .execute(server.database.pool())
         .await
@@ -1574,7 +1574,7 @@ async fn mentions_in_the_body_notify_members_who_can_see_the_page_once() {
     })
     .await;
     let actor: String = sqlx::query_scalar(
-        "SELECT actor_user_id FROM notifications WHERE page_id = ? AND recipient_user_id = ?",
+        "SELECT actor_user_id FROM notifications WHERE page_id = $1 AND recipient_user_id = $2",
     )
     .bind(id)
     .bind(users.owner_id.to_string())
@@ -1641,7 +1641,7 @@ async fn rest_content_writes_notify_new_mentions_but_never_on_private_pages() {
     assert_eq!(page_mentions(&server, &id, users.owner_id).await, 1);
     assert_eq!(page_mentions(&server, &id, users.member_id).await, 0);
     let block: Option<String> = sqlx::query_scalar(
-        "SELECT page_block_id FROM notifications WHERE page_id = ? AND kind = 'page_mentioned'",
+        "SELECT page_block_id FROM notifications WHERE page_id = $1 AND kind = 'page_mentioned'",
     )
     .bind(&id)
     .fetch_one(server.database.pool())

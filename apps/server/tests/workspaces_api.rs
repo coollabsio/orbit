@@ -62,15 +62,15 @@ async fn invitation_preview_is_public_read_only_and_rejects_inactive_tokens() {
             .nth(1)
             .unwrap();
         if state == "expired" {
-            sqlx::query("UPDATE workspace_invitations SET expires_at = 0 WHERE id = ?")
+            sqlx::query("UPDATE workspace_invitations SET expires_at = 0 WHERE id = $1")
                 .bind(id)
                 .execute(database.pool())
                 .await
                 .unwrap();
         } else if state.ends_with("_at") {
-            sqlx::query(&format!(
-                "UPDATE workspace_invitations SET {state} = 1 WHERE id = ?"
-            ))
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "UPDATE workspace_invitations SET {state} = 1 WHERE id = $1"
+            )))
             .bind(id)
             .execute(database.pool())
             .await
@@ -372,7 +372,7 @@ async fn invitation_acceptance_enforces_identity_provenance_and_single_use() {
     assert_eq!(accepted["created"], true);
     assert_eq!(accepted["email_verified"], false);
     let verified: Option<i64> =
-        sqlx::query_scalar("SELECT email_verified_at FROM users WHERE id = ?")
+        sqlx::query_scalar("SELECT email_verified_at FROM users WHERE id = $1")
             .bind(member.0.to_string())
             .fetch_one(database.pool())
             .await
@@ -485,7 +485,7 @@ async fn owners_and_admins_manage_members_without_crossing_global_account_scope(
     let now = TimestampMillis::now();
     sqlx::query(
         "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
-         VALUES (?, ?, ?, 'member', 0, ?, ?)",
+         VALUES ($1, $2, $3, 'member', 0, $4, $5)",
     )
     .bind(existing_membership.to_string())
     .bind(&setup.0)
@@ -631,7 +631,7 @@ async fn owners_and_admins_manage_members_without_crossing_global_account_scope(
         .unwrap();
     assert_eq!(suspend.status(), StatusCode::NO_CONTENT);
     let active_sessions: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM sessions WHERE user_id = ? AND revoked_at IS NULL",
+        "SELECT COUNT(*) FROM sessions WHERE user_id = $1 AND revoked_at IS NULL",
     )
     .bind(member.0.to_string())
     .fetch_one(database.pool())
@@ -815,10 +815,14 @@ async fn invited_registration_rolls_back_account_membership_and_token_when_sessi
         .split("token=")
         .nth(1)
         .unwrap();
-    sqlx::query("CREATE TRIGGER fail_invited_session BEFORE INSERT ON sessions BEGIN SELECT RAISE(ABORT, 'fail'); END")
-        .execute(database.pool())
-        .await
-        .unwrap();
+    fail_inserts(
+        &database,
+        "fail_invited_session",
+        "sessions",
+        "1 = 1",
+        "fail",
+    )
+    .await;
     let failed = app
         .oneshot(json_request_without_cookie(
             "POST",
@@ -874,13 +878,13 @@ async fn ordinary_workspace_creation_installs_the_default_project_and_workflow()
         .as_str()
         .unwrap()
         .to_owned();
-    let projects: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projects WHERE workspace_id = ?")
+    let projects: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projects WHERE workspace_id = $1")
         .bind(&workspace_id)
         .fetch_one(database.pool())
         .await
         .unwrap();
     let statuses: Vec<String> = sqlx::query_scalar(
-        "SELECT name FROM task_statuses WHERE workspace_id = ? ORDER BY position",
+        "SELECT name FROM task_statuses WHERE workspace_id = $1 ORDER BY position",
     )
     .bind(&workspace_id)
     .fetch_all(database.pool())
@@ -943,7 +947,7 @@ async fn stale_workspace_versions_return_refresh_metadata_without_mutation() {
         stale["conflict"]["refresh"],
         format!("/api/v1/workspaces/{}", setup.0)
     );
-    let name: String = sqlx::query_scalar("SELECT name FROM workspaces WHERE id = ?")
+    let name: String = sqlx::query_scalar("SELECT name FROM workspaces WHERE id = $1")
         .bind(&setup.0)
         .fetch_one(database.pool())
         .await
@@ -1038,32 +1042,32 @@ async fn owner_constraint_and_durable_retention_bound_workspace_trash() {
     ));
 
     let owner_membership: String =
-        sqlx::query_scalar("SELECT owner_membership_id FROM workspaces WHERE id = ?")
+        sqlx::query_scalar("SELECT owner_membership_id FROM workspaces WHERE id = $1")
             .bind(&setup.0)
             .fetch_one(database.pool())
             .await
             .unwrap();
     assert!(
-        sqlx::query("DELETE FROM memberships WHERE id = ?")
+        sqlx::query("DELETE FROM memberships WHERE id = $1")
             .bind(&owner_membership)
             .execute(database.pool())
             .await
             .is_err()
     );
     assert!(
-        sqlx::query("UPDATE memberships SET role = 'admin' WHERE id = ?")
+        sqlx::query("UPDATE memberships SET role = 'admin' WHERE id = $1")
             .bind(&owner_membership)
             .execute(database.pool())
             .await
             .is_err()
     );
-    let owner_user: String = sqlx::query_scalar("SELECT user_id FROM memberships WHERE id = ?")
+    let owner_user: String = sqlx::query_scalar("SELECT user_id FROM memberships WHERE id = $1")
         .bind(&owner_membership)
         .fetch_one(database.pool())
         .await
         .unwrap();
     assert!(
-        sqlx::query("DELETE FROM users WHERE id = ?")
+        sqlx::query("DELETE FROM users WHERE id = $1")
             .bind(&owner_user)
             .execute(database.pool())
             .await
@@ -1081,7 +1085,7 @@ async fn owner_constraint_and_durable_retention_bound_workspace_trash() {
         .unwrap();
     assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
     let old = TimestampMillis::now().as_millis() - 31 * 24 * 60 * 60 * 1_000;
-    sqlx::query("UPDATE workspaces SET deleted_at = ? WHERE id = ?")
+    sqlx::query("UPDATE workspaces SET deleted_at = $1 WHERE id = $2")
         .bind(old)
         .bind(&setup.0)
         .execute(database.pool())
@@ -1097,7 +1101,7 @@ async fn owner_constraint_and_durable_retention_bound_workspace_trash() {
     std::fs::write(&temporary_path, b"x").unwrap();
     sqlx::query(
         "INSERT INTO attachment_blobs (id, workspace_id, sha256, byte_size, storage_key, created_at, quarantine_until) \
-         VALUES (?, ?, 'purge-sha', 1, ?, ?, ?)",
+         VALUES ($1, $2, 'purge-sha', 1, $3, $4, $5)",
     )
     .bind(blob_id.to_string())
     .bind(&setup.0)
@@ -1109,7 +1113,7 @@ async fn owner_constraint_and_durable_retention_bound_workspace_trash() {
     .unwrap();
     sqlx::query(
         "INSERT INTO attachment_references (id, workspace_id, task_id, owner_id, blob_id, display_name, media_type, byte_size, created_at) \
-         VALUES (?, ?, ?, ?, ?, 'purge.txt', 'text/plain', 1, ?)",
+         VALUES ($1, $2, $3, $4, $5, 'purge.txt', 'text/plain', 1, $6)",
     )
     .bind(Id::new_v7().to_string())
     .bind(&setup.0)
@@ -1122,7 +1126,7 @@ async fn owner_constraint_and_durable_retention_bound_workspace_trash() {
     .unwrap();
     sqlx::query(
         "INSERT INTO pending_uploads (id, workspace_id, user_id, temporary_path, original_name, media_type, byte_size, state, created_at, expires_at) \
-         VALUES (?, ?, ?, ?, 'pending.txt', 'text/plain', 1, 'staged', ?, ?)",
+         VALUES ($1, $2, $3, $4, 'pending.txt', 'text/plain', 1, 'staged', $5, $6)",
     )
     .bind(Id::new_v7().to_string())
     .bind(&setup.0)
@@ -1160,8 +1164,8 @@ async fn owner_constraint_and_durable_retention_bound_workspace_trash() {
     );
     sqlx::query(
         "INSERT INTO audit_events (id, workspace_id, actor_id, action, outcome, resource_type, \
-         request_id, metadata_json, occurred_at) VALUES (?, NULL, NULL, 'old.event', 'success', \
-         'installation', 'old', '{}', ?)",
+         request_id, metadata_json, occurred_at) VALUES ($1, NULL, NULL, 'old.event', 'success', \
+         'installation', 'old', '{}', $2)",
     )
     .bind(Id::new_v7().to_string())
     .bind(TimestampMillis::now().as_millis() - 366 * 24 * 60 * 60 * 1_000)
@@ -1209,10 +1213,11 @@ async fn owner_constraint_and_durable_retention_bound_workspace_trash() {
         "attachment_blobs",
         "pending_uploads",
     ] {
-        let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
-            .fetch_one(database.pool())
-            .await
-            .unwrap();
+        let count: i64 =
+            sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT COUNT(*) FROM {table}")))
+                .fetch_one(database.pool())
+                .await
+                .unwrap();
         assert_eq!(count, 0, "{table} was not purged");
     }
     assert_eq!(
@@ -1236,7 +1241,7 @@ async fn concurrent_ownership_transfers_leave_one_database_backed_owner() {
     let second = create_user(&database, &identity, "owner-b@example.com", "Owner B").await;
     let workspace_id: Id = setup.0.parse().unwrap();
     let actor_id: Id = sqlx::query_scalar::<_, String>(
-        "SELECT user_id FROM memberships WHERE workspace_id = ? AND role = 'owner'",
+        "SELECT user_id FROM memberships WHERE workspace_id = $1 AND role = 'owner'",
     )
     .bind(&setup.0)
     .fetch_one(database.pool())
@@ -1250,7 +1255,7 @@ async fn concurrent_ownership_transfers_leave_one_database_backed_owner() {
     for (membership_id, user_id) in [(first_membership, first.0), (second_membership, second.0)] {
         sqlx::query(
             "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
-             VALUES (?, ?, ?, 'admin', 0, ?, ?)",
+             VALUES ($1, $2, $3, 'admin', 0, $4, $5)",
         )
         .bind(membership_id.to_string())
         .bind(&setup.0)
@@ -1278,7 +1283,7 @@ async fn concurrent_ownership_transfers_leave_one_database_backed_owner() {
     );
     assert_eq!(usize::from(left.is_ok()) + usize::from(right.is_ok()), 1);
     let owners: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM memberships WHERE workspace_id = ? AND role = 'owner'",
+        "SELECT COUNT(*) FROM memberships WHERE workspace_id = $1 AND role = 'owner'",
     )
     .bind(&setup.0)
     .fetch_one(database.pool())
@@ -1286,7 +1291,7 @@ async fn concurrent_ownership_transfers_leave_one_database_backed_owner() {
     .unwrap();
     let linked_owner_role: String = sqlx::query_scalar(
         "SELECT memberships.role FROM workspaces JOIN memberships \
-         ON memberships.id = workspaces.owner_membership_id WHERE workspaces.id = ?",
+         ON memberships.id = workspaces.owner_membership_id WHERE workspaces.id = $1",
     )
     .bind(&setup.0)
     .fetch_one(database.pool())
@@ -1302,7 +1307,7 @@ async fn invitation_expiry_smtp_provenance_and_concurrent_resend_are_enforced() 
     let identity = Arc::new(IdentityRepository::new((*database).clone()));
     let setup = setup_owner(&identity).await;
     let owner_id: Id = sqlx::query_scalar::<_, String>(
-        "SELECT user_id FROM memberships WHERE workspace_id = ? AND role = 'owner'",
+        "SELECT user_id FROM memberships WHERE workspace_id = $1 AND role = 'owner'",
     )
     .bind(&setup.0)
     .fetch_one(database.pool())
@@ -1397,7 +1402,7 @@ async fn invitation_expiry_smtp_provenance_and_concurrent_resend_are_enforced() 
     let first = first.await.unwrap();
     let second = second.await.unwrap();
     let pending: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM workspace_invitations WHERE workspace_id = ? AND normalized_email = \
+        "SELECT COUNT(*) FROM workspace_invitations WHERE workspace_id = $1 AND normalized_email = \
          'resend@example.com' AND accepted_at IS NULL AND revoked_at IS NULL AND replaced_at IS NULL",
     )
     .bind(&setup.0)
@@ -1813,7 +1818,7 @@ async fn owner_pointer_cannot_reference_another_workspaces_membership_on_insert(
     let now = TimestampMillis::now().as_millis();
     sqlx::query(
         "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
-         VALUES (?, ?, ?, 'admin', 0, ?, ?)",
+         VALUES ($1, $2, $3, 'admin', 0, $4, $5)",
     )
     .bind(membership_id.to_string())
     .bind(&setup.0)
@@ -1826,7 +1831,7 @@ async fn owner_pointer_cannot_reference_another_workspaces_membership_on_insert(
 
     let result = sqlx::query(
         "INSERT INTO workspaces (id, name, version, owner_membership_id, created_at, updated_at) \
-         VALUES (?, 'Bypass', 0, ?, ?, ?)",
+         VALUES ($1, 'Bypass', 0, $2, $3, $4)",
     )
     .bind(Id::new_v7().to_string())
     .bind(membership_id.to_string())
@@ -1901,7 +1906,7 @@ async fn invalid_invitation_is_rejected_before_password_validation_and_is_summar
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
-            "SELECT SUM(attempt_count) FROM security_probe_summaries WHERE kind = 'invitation.registration_invalid'"
+            "SELECT CAST(SUM(attempt_count) AS BIGINT) FROM security_probe_summaries WHERE kind = 'invitation.registration_invalid'"
         )
         .fetch_one(database.pool())
         .await
@@ -1920,8 +1925,8 @@ async fn global_audit_export_follows_every_cursor_page() {
     for index in 0..125 {
         sqlx::query(
             "INSERT INTO audit_events (id, workspace_id, actor_id, action, outcome, resource_type, \
-             request_id, metadata_json, occurred_at) VALUES (?, NULL, NULL, 'export.test', 'success', \
-             'installation', ?, '{}', ?)",
+             request_id, metadata_json, occurred_at) VALUES ($1, NULL, NULL, 'export.test', 'success', \
+             'installation', $2, '{}', $3)",
         )
         .bind(Id::new_v7().to_string())
         .bind(format!("export-{index}"))
@@ -1963,10 +1968,10 @@ async fn global_audit_export_returns_before_reading_later_pages() {
     let owner_cookie = format!("__Host-orbit_session={}", setup.1);
     let now = TimestampMillis::now().as_millis();
     for index in 0..100 {
-        sqlx::query("INSERT INTO audit_events (id, action, outcome, resource_type, request_id, metadata_json, occurred_at) VALUES (?, 'stream.test', 'success', 'installation', ?, '{}', ?)")
+        sqlx::query("INSERT INTO audit_events (id, action, outcome, resource_type, request_id, metadata_json, occurred_at) VALUES ($1, 'stream.test', 'success', 'installation', $2, '{}', $3)")
             .bind(Id::new_v7().to_string()).bind(format!("stream-{index}")).bind(now + index).execute(database.pool()).await.unwrap();
     }
-    sqlx::query("INSERT INTO audit_events (id, action, outcome, resource_type, request_id, metadata_json, occurred_at) VALUES ('00000000-0000-0000-0000-000000000000', 'stream.test', 'success', 'installation', 'corrupt-tail', '{}', ?)")
+    sqlx::query("INSERT INTO audit_events (id, action, outcome, resource_type, request_id, metadata_json, occurred_at) VALUES ('00000000-0000-0000-0000-000000000000', 'stream.test', 'success', 'installation', 'corrupt-tail', '{}', $1)")
         .bind(now - 1).execute(database.pool()).await.unwrap();
     let app = workspace_router(WorkspaceState::new(
         identity,
@@ -2036,10 +2041,10 @@ async fn workspace_api_tokens_are_admin_only_and_revealed_once() {
     let identity = Arc::new(IdentityRepository::new((*database).clone()));
     let setup = setup_owner(&identity).await;
     let owner_cookie = format!("__Host-orbit_session={}", setup.1);
-    let project_id: String = sqlx::query_scalar("SELECT id FROM projects WHERE workspace_id = ? AND deleted_at IS NULL ORDER BY created_at LIMIT 1").bind(&setup.0).fetch_one(database.pool()).await.unwrap();
+    let project_id: String = sqlx::query_scalar("SELECT id FROM projects WHERE workspace_id = $1 AND deleted_at IS NULL ORDER BY created_at LIMIT 1").bind(&setup.0).fetch_one(database.pool()).await.unwrap();
     let member = create_user(&database, &identity, "token-member@example.com", "Member").await;
     let now = TimestampMillis::now().as_millis();
-    sqlx::query("INSERT INTO memberships (id, workspace_id, user_id, role, created_at, updated_at) VALUES (?, ?, ?, 'member', ?, ?)")
+    sqlx::query("INSERT INTO memberships (id, workspace_id, user_id, role, created_at, updated_at) VALUES ($1, $2, $3, 'member', $4, $5)")
         .bind(Id::new_v7().to_string()).bind(&setup.0).bind(member.0.to_string()).bind(now).bind(now)
         .execute(database.pool()).await.unwrap();
     let app = workspace_router(WorkspaceState::new(
@@ -2108,7 +2113,7 @@ async fn workspace_api_tokens_are_admin_only_and_revealed_once() {
     assert_eq!(created["service_account_name"], Value::Null);
     assert_eq!(created["expires_at"], Value::Null);
 
-    let stored: Vec<u8> = sqlx::query_scalar("SELECT token_hash FROM api_tokens WHERE id = ?")
+    let stored: Vec<u8> = sqlx::query_scalar("SELECT token_hash FROM api_tokens WHERE id = $1")
         .bind(token_id)
         .fetch_one(database.pool())
         .await
@@ -2168,7 +2173,7 @@ async fn retention_service_surfaces_worker_claim_failures() {
     sqlx::query(
         "INSERT INTO jobs (id, kind, payload_json, state, priority, attempt_count, max_attempts, \
          available_at, created_at, updated_at) \
-         VALUES ('invalid-job-id', 'workspace.retention', '{}', 'queued', 'normal', 0, 1, ?, ?, ?)",
+         VALUES ('invalid-job-id', 'workspace.retention', '{}', 'queued', 'normal', 0, 1, $1, $2, $3)",
     )
     .bind(i64::MIN)
     .bind(i64::MIN)
@@ -2296,7 +2301,7 @@ async fn create_user(
     let now = TimestampMillis::now();
     sqlx::query(
         "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) \
-         VALUES (?, ?, ?, ?, 'unused', ?, ?)",
+         VALUES ($1, $2, $3, $4, 'unused', $5, $6)",
     )
     .bind(id.to_string())
     .bind(email)
@@ -2401,4 +2406,27 @@ fn cookie_request(method: &str, uri: &str, cookie: &str) -> Request<Body> {
 
 async fn response_json(response: axum::response::Response) -> Value {
     serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()
+}
+
+/// Makes inserts into `table` that match `when` (an SQL condition on `NEW`) fail with `message`.
+async fn fail_inserts(
+    database: &orbit_platform::Database,
+    name: &str,
+    table: &str,
+    when: &str,
+    message: &str,
+) {
+    let sql = match database.backend() {
+        orbit_platform::Backend::Sqlite => format!(
+            "CREATE TRIGGER {name} BEFORE INSERT ON {table} WHEN {when} \
+             BEGIN SELECT RAISE(ABORT, '{message}'); END"
+        ),
+        orbit_platform::Backend::Postgres => format!(
+            "CREATE FUNCTION {name}_fn() RETURNS trigger LANGUAGE plpgsql AS $$ \
+             BEGIN RAISE EXCEPTION '{message}'; END $$; \
+             CREATE TRIGGER {name} BEFORE INSERT ON {table} FOR EACH ROW WHEN ({when}) \
+             EXECUTE FUNCTION {name}_fn()"
+        ),
+    };
+    database.execute(&sql).await.unwrap();
 }

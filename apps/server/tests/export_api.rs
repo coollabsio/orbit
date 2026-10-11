@@ -239,7 +239,7 @@ impl Fixture {
         let now = TimestampMillis::now();
         sqlx::query(
             "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) \
-             VALUES (?, ?, ?, 'Member', 'unused', ?, ?)",
+             VALUES ($1, $2, $3, 'Member', 'unused', $4, $5)",
         )
         .bind(id.to_string())
         .bind(email)
@@ -251,7 +251,7 @@ impl Fixture {
         .unwrap();
         sqlx::query(
             "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
-             VALUES (?, ?, ?, 'member', 0, ?, ?)",
+             VALUES ($1, $2, $3, 'member', 0, $4, $5)",
         )
         .bind(Id::new_v7().to_string())
         .bind(workspace_id)

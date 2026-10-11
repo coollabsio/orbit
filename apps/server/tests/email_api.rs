@@ -137,7 +137,7 @@ async fn only_the_root_user_saves_mail_settings_and_the_password_is_encrypted() 
     let root = Some(fixture.root_cookie.as_str());
 
     let member = Id::new_v7();
-    sqlx::query("INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) VALUES (?, 'm@example.com', 'm@example.com', 'M', 'x', 0, 0)")
+    sqlx::query("INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) VALUES ($1, 'm@example.com', 'm@example.com', 'M', 'x', 0, 0)")
         .bind(member.to_string())
         .execute(fixture.identity.database().pool())
         .await

@@ -18,3 +18,29 @@ pub mod teamspaces;
 pub mod two_factor;
 pub mod views;
 pub mod workspaces;
+
+/// Test helper: a trigger that makes `event` (e.g. `BEFORE INSERT`, `BEFORE UPDATE OF revoked_at`)
+/// on `table` fail with `message` for rows that match `when` (an SQL condition on `NEW`).
+#[cfg(test)]
+pub(crate) async fn fail_writes(
+    database: &orbit_platform::Database,
+    name: &str,
+    event: &str,
+    table: &str,
+    when: &str,
+    message: &str,
+) {
+    let sql = match database.backend() {
+        orbit_platform::Backend::Sqlite => format!(
+            "CREATE TRIGGER {name} {event} ON {table} WHEN {when} \
+             BEGIN SELECT RAISE(ABORT, '{message}'); END"
+        ),
+        orbit_platform::Backend::Postgres => format!(
+            "CREATE FUNCTION {name}_fn() RETURNS trigger LANGUAGE plpgsql AS $$ \
+             BEGIN RAISE EXCEPTION '{message}'; END $$; \
+             CREATE TRIGGER {name} {event} ON {table} FOR EACH ROW WHEN ({when}) \
+             EXECUTE FUNCTION {name}_fn()"
+        ),
+    };
+    database.execute(&sql).await.unwrap();
+}

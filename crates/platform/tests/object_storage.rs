@@ -211,6 +211,9 @@ async fn a_duplicate_upload_to_s3_refreshes_the_existing_object() {
 
 #[tokio::test]
 async fn backups_go_to_s3_and_restore_from_it() {
+    if orbit_platform::testing_postgres() {
+        return; // file snapshots are SQLite-only
+    }
     let root = tempfile::tempdir().unwrap();
     let database = Database::open(&DatabaseConfig::new(root.path().join("orbit.sqlite")))
         .await

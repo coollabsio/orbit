@@ -56,7 +56,7 @@ impl Fixture {
             .await
             .unwrap();
         let status_id: String = sqlx::query_scalar(
-            "SELECT id FROM task_statuses WHERE project_id = ? ORDER BY position LIMIT 1",
+            "SELECT id FROM task_statuses WHERE project_id = $1 ORDER BY position LIMIT 1",
         )
         .bind(setup.project_id.to_string())
         .fetch_one(database.pool())
@@ -101,7 +101,7 @@ async fn github_issue_link_reports_paused_sync_state() {
     let fixture = Fixture::new().await;
     let task = fixture.create_task("GitHub task").await;
     let task_id = task["id"].as_str().unwrap();
-    sqlx::query("INSERT INTO github_issue_links (workspace_id, repository, issue_number, task_id, sync_paused) VALUES (?, 'acme/repo', 12, ?, 1)")
+    sqlx::query("INSERT INTO github_issue_links (workspace_id, repository, issue_number, task_id, sync_paused) VALUES ($1, 'acme/repo', 12, $2, 1)")
         .bind(&fixture.workspace_id)
         .bind(task_id)
         .execute(fixture.database.pool())
@@ -128,7 +128,7 @@ async fn github_issue_link_reports_paused_sync_state() {
     assert_eq!(link[0]["state"], "paused");
     assert_eq!(link[0]["source"], true);
 
-    sqlx::query("UPDATE github_issue_links SET sync_paused = 0 WHERE task_id = ?")
+    sqlx::query("UPDATE github_issue_links SET sync_paused = 0 WHERE task_id = $1")
         .bind(task_id)
         .execute(fixture.database.pool())
         .await
@@ -154,7 +154,7 @@ async fn github_pull_task_reports_its_source_and_state() {
     let fixture = Fixture::new().await;
     let task = fixture.create_task("Pull request task").await;
     let task_id = task["id"].as_str().unwrap();
-    sqlx::query("INSERT INTO github_issue_links (workspace_id, repository, issue_number, task_id, kind, pull_state) VALUES (?, 'acme/repo', 8, ?, 'pull_request', 'merged')")
+    sqlx::query("INSERT INTO github_issue_links (workspace_id, repository, issue_number, task_id, kind, pull_state) VALUES ($1, 'acme/repo', 8, $2, 'pull_request', 'merged')")
         .bind(&fixture.workspace_id).bind(task_id).execute(fixture.database.pool()).await.unwrap();
     let path = format!(
         "/api/v1/workspaces/{}/tasks/{task_id}/github-links",
@@ -464,7 +464,7 @@ async fn project_creation_is_atomic_and_statuses_are_project_scoped() {
         .unwrap();
     assert_eq!(duplicate.status(), StatusCode::CONFLICT);
     let count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM projects WHERE workspace_id = ? AND project_key = 'PROD'",
+        "SELECT COUNT(*) FROM projects WHERE workspace_id = $1 AND project_key = 'PROD'",
     )
     .bind(&fixture.workspace_id)
     .fetch_one(fixture.database.pool())
@@ -949,7 +949,7 @@ async fn stale_versions_return_current_safe_records() {
 async fn assignment_requires_active_membership_and_foreign_ids_are_hidden() {
     let fixture = Fixture::new().await;
     let (member_id, _) = add_member(&fixture, "assignee@example.com").await;
-    sqlx::query("DELETE FROM memberships WHERE workspace_id = ? AND user_id = ?")
+    sqlx::query("DELETE FROM memberships WHERE workspace_id = $1 AND user_id = $2")
         .bind(&fixture.workspace_id)
         .bind(member_id.to_string())
         .execute(fixture.database.pool())
@@ -975,14 +975,14 @@ async fn assignment_requires_active_membership_and_foreign_ids_are_hidden() {
 
     let foreign = create_workspace(&fixture, "Foreign").await;
     let foreign_project: String = sqlx::query_scalar(
-        "SELECT id FROM projects WHERE workspace_id = ? AND deleted_at IS NULL LIMIT 1",
+        "SELECT id FROM projects WHERE workspace_id = $1 AND deleted_at IS NULL LIMIT 1",
     )
     .bind(&foreign)
     .fetch_one(fixture.database.pool())
     .await
     .unwrap();
     let foreign_status: String = sqlx::query_scalar(
-        "SELECT id FROM task_statuses WHERE project_id = ? ORDER BY position LIMIT 1",
+        "SELECT id FROM task_statuses WHERE project_id = $1 ORDER BY position LIMIT 1",
     )
     .bind(&foreign_project)
     .fetch_one(fixture.database.pool())
@@ -1027,14 +1027,14 @@ async fn removing_a_membership_removes_its_task_assignments() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::CREATED);
     let task = response_json(response).await;
-    sqlx::query("DELETE FROM memberships WHERE workspace_id = ? AND user_id = ?")
+    sqlx::query("DELETE FROM memberships WHERE workspace_id = $1 AND user_id = $2")
         .bind(&fixture.workspace_id)
         .bind(member_id.to_string())
         .execute(fixture.database.pool())
         .await
         .unwrap();
     let assignments: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM task_assignees WHERE task_id = ?")
+        sqlx::query_scalar("SELECT COUNT(*) FROM task_assignees WHERE task_id = $1")
             .bind(task["id"].as_str().unwrap())
             .fetch_one(fixture.database.pool())
             .await
@@ -1048,7 +1048,7 @@ async fn github_issue_task_text_is_read_only_but_other_fields_can_change() {
     let github_task = fixture.create_task("GitHub title").await;
     let ordinary_task = fixture.create_task("Orbit title").await;
     let github_id = github_task["id"].as_str().unwrap();
-    sqlx::query("INSERT INTO github_issue_links (workspace_id, repository, issue_number, task_id) VALUES (?, ?, ?, ?)")
+    sqlx::query("INSERT INTO github_issue_links (workspace_id, repository, issue_number, task_id) VALUES ($1, $2, $3, $4)")
         .bind(&fixture.workspace_id)
         .bind("owner/repo")
         .bind(7)
@@ -1102,7 +1102,7 @@ async fn github_issue_task_text_is_read_only_but_other_fields_can_change() {
         "github_content_read_only"
     );
 
-    let ordinary_priority: String = sqlx::query_scalar("SELECT priority FROM tasks WHERE id = ?")
+    let ordinary_priority: String = sqlx::query_scalar("SELECT priority FROM tasks WHERE id = $1")
         .bind(ordinary_task["id"].as_str().unwrap())
         .fetch_one(fixture.database.pool())
         .await
@@ -1128,7 +1128,7 @@ async fn github_issue_task_text_is_read_only_but_other_fields_can_change() {
     assert_eq!(changed["priority"], "high");
     assert_eq!(changed["title"], "GitHub title");
 
-    sqlx::query("INSERT INTO github_pull_links (workspace_id, repository, pull_number, task_id, title, url, state, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    sqlx::query("INSERT INTO github_pull_links (workspace_id, repository, pull_number, task_id, title, url, state, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)")
         .bind(&fixture.workspace_id)
         .bind("owner/repo")
         .bind(8)
@@ -1179,7 +1179,7 @@ async fn bulk_updates_and_reorders_are_atomic() {
         .await
         .unwrap();
     assert_eq!(failed.status(), StatusCode::CONFLICT);
-    let priority: String = sqlx::query_scalar("SELECT priority FROM tasks WHERE id = ?")
+    let priority: String = sqlx::query_scalar("SELECT priority FROM tasks WHERE id = $1")
         .bind(first["id"].as_str().unwrap())
         .fetch_one(fixture.database.pool())
         .await
@@ -1258,7 +1258,7 @@ async fn project_deletion_hides_children_and_trash_expires_after_thirty_days() {
         1
     );
 
-    sqlx::query("UPDATE projects SET deleted_at = ? WHERE id = ?")
+    sqlx::query("UPDATE projects SET deleted_at = $1 WHERE id = $2")
         .bind(TimestampMillis::now().as_millis() - 30 * 24 * 60 * 60 * 1_000)
         .bind(&fixture.project_id)
         .execute(fixture.database.pool())
@@ -1300,7 +1300,7 @@ async fn project_deletion_hides_children_and_trash_expires_after_thirty_days() {
 async fn durable_retention_purges_expired_projects_and_tasks() {
     let fixture = Fixture::new().await;
     let task = fixture.create_task("Purge child").await;
-    sqlx::query("UPDATE projects SET deleted_at = ? WHERE id = ?")
+    sqlx::query("UPDATE projects SET deleted_at = $1 WHERE id = $2")
         .bind(TimestampMillis::now().as_millis() - 31 * 24 * 60 * 60 * 1_000)
         .bind(&fixture.project_id)
         .execute(fixture.database.pool())
@@ -1310,12 +1310,12 @@ async fn durable_retention_purges_expired_projects_and_tasks() {
         .purge_retention(TimestampMillis::now())
         .await
         .unwrap();
-    let projects: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projects WHERE id = ?")
+    let projects: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projects WHERE id = $1")
         .bind(&fixture.project_id)
         .fetch_one(fixture.database.pool())
         .await
         .unwrap();
-    let tasks: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks WHERE id = ?")
+    let tasks: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks WHERE id = $1")
         .bind(task["id"].as_str().unwrap())
         .fetch_one(fixture.database.pool())
         .await
@@ -1327,7 +1327,7 @@ async fn durable_retention_purges_expired_projects_and_tasks() {
 async fn workspace_retention_cascades_through_task_records() {
     let fixture = Fixture::new().await;
     fixture.create_task("Workspace child").await;
-    sqlx::query("UPDATE workspaces SET deleted_at = ? WHERE id = ?")
+    sqlx::query("UPDATE workspaces SET deleted_at = $1 WHERE id = $2")
         .bind(TimestampMillis::now().as_millis() - 31 * 24 * 60 * 60 * 1_000)
         .bind(&fixture.workspace_id)
         .execute(fixture.database.pool())
@@ -1337,7 +1337,7 @@ async fn workspace_retention_cascades_through_task_records() {
         .purge_retention(TimestampMillis::now())
         .await
         .unwrap();
-    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks WHERE workspace_id = ?")
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks WHERE workspace_id = $1")
         .bind(&fixture.workspace_id)
         .fetch_one(fixture.database.pool())
         .await
@@ -1493,7 +1493,7 @@ async fn comments_are_scoped_versioned_and_hard_deleted() {
         .await
         .unwrap();
     assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
-    let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM task_comments WHERE id = ?")
+    let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM task_comments WHERE id = $1")
         .bind(comment["id"].as_str().unwrap())
         .fetch_one(fixture.database.pool())
         .await
@@ -1591,14 +1591,14 @@ async fn parent_side_scope_changes_are_rejected_by_the_database() {
     let fixture = Fixture::new().await;
     let foreign_workspace = create_workspace(&fixture, "Foreign scope").await;
     let foreign_project: String = sqlx::query_scalar(
-        "SELECT id FROM projects WHERE workspace_id = ? AND deleted_at IS NULL LIMIT 1",
+        "SELECT id FROM projects WHERE workspace_id = $1 AND deleted_at IS NULL LIMIT 1",
     )
     .bind(&foreign_workspace)
     .fetch_one(fixture.database.pool())
     .await
     .unwrap();
     let foreign_status: String = sqlx::query_scalar(
-        "SELECT id FROM task_statuses WHERE project_id = ? ORDER BY position LIMIT 1",
+        "SELECT id FROM task_statuses WHERE project_id = $1 ORDER BY position LIMIT 1",
     )
     .bind(&foreign_project)
     .fetch_one(fixture.database.pool())
@@ -1606,7 +1606,7 @@ async fn parent_side_scope_changes_are_rejected_by_the_database() {
     .unwrap();
     let (member_id, _) = add_member(&fixture, "scope-member@example.com").await;
     let membership_id: String =
-        sqlx::query_scalar("SELECT id FROM memberships WHERE workspace_id = ? AND user_id = ?")
+        sqlx::query_scalar("SELECT id FROM memberships WHERE workspace_id = $1 AND user_id = $2")
             .bind(&fixture.workspace_id)
             .bind(member_id.to_string())
             .fetch_one(fixture.database.pool())
@@ -1683,12 +1683,12 @@ async fn parent_side_scope_changes_are_rejected_by_the_database() {
 
     for (sql, first, second) in [
         (
-            "UPDATE projects SET workspace_id = ? WHERE id = ?",
+            "UPDATE projects SET workspace_id = $1 WHERE id = $2",
             foreign_workspace.as_str(),
             fixture.project_id.as_str(),
         ),
         (
-            "UPDATE task_statuses SET workspace_id = ?, project_id = ? WHERE id = ?",
+            "UPDATE task_statuses SET workspace_id = $1, project_id = $2 WHERE id = $3",
             foreign_workspace.as_str(),
             foreign_project.as_str(),
         ),
@@ -1711,7 +1711,7 @@ async fn parent_side_scope_changes_are_rejected_by_the_database() {
     }
     assert!(
         sqlx::query(
-            "UPDATE tasks SET workspace_id = ?, project_id = ?, status_id = ? WHERE id = ?"
+            "UPDATE tasks SET workspace_id = $1, project_id = $2, status_id = $3 WHERE id = $4"
         )
         .bind(&foreign_workspace)
         .bind(&foreign_project)
@@ -1722,7 +1722,7 @@ async fn parent_side_scope_changes_are_rejected_by_the_database() {
         .is_err()
     );
     assert!(
-        sqlx::query("UPDATE labels SET workspace_id = ? WHERE id = ?")
+        sqlx::query("UPDATE labels SET workspace_id = $1 WHERE id = $2")
             .bind(&foreign_workspace)
             .bind(label["id"].as_str().unwrap())
             .execute(fixture.database.pool())
@@ -1730,7 +1730,7 @@ async fn parent_side_scope_changes_are_rejected_by_the_database() {
             .is_err()
     );
     assert!(
-        sqlx::query("UPDATE memberships SET workspace_id = ? WHERE id = ?")
+        sqlx::query("UPDATE memberships SET workspace_id = $1 WHERE id = $2")
             .bind(&foreign_workspace)
             .bind(&membership_id)
             .execute(fixture.database.pool())
@@ -1738,7 +1738,7 @@ async fn parent_side_scope_changes_are_rejected_by_the_database() {
             .is_err()
     );
     assert!(
-        sqlx::query("UPDATE task_comments SET task_id = ? WHERE id = ?")
+        sqlx::query("UPDATE task_comments SET task_id = $1 WHERE id = $2")
             .bind(second_task["id"].as_str().unwrap())
             .bind(parent["id"].as_str().unwrap())
             .execute(fixture.database.pool())
@@ -1770,51 +1770,55 @@ async fn suspended_assignees_are_removed_from_reads_and_filters() {
             .unwrap(),
     )
     .await;
-    sqlx::query("UPDATE users SET suspended_at = ? WHERE id = ?")
+    sqlx::query("UPDATE users SET suspended_at = $1 WHERE id = $2")
         .bind(TimestampMillis::now().as_millis())
         .bind(member_id.to_string())
         .execute(fixture.database.pool())
         .await
         .unwrap();
 
-    let stored: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM task_assignees WHERE task_id = ?")
+    let stored: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM task_assignees WHERE task_id = $1")
         .bind(task["id"].as_str().unwrap())
         .fetch_one(fixture.database.pool())
         .await
         .unwrap();
     assert_eq!(stored, 0);
 
-    sqlx::query("UPDATE users SET suspended_at = NULL WHERE id = ?")
+    sqlx::query("UPDATE users SET suspended_at = NULL WHERE id = $1")
         .bind(member_id.to_string())
         .execute(fixture.database.pool())
         .await
         .unwrap();
     let membership_id: String =
-        sqlx::query_scalar("SELECT id FROM memberships WHERE workspace_id = ? AND user_id = ?")
+        sqlx::query_scalar("SELECT id FROM memberships WHERE workspace_id = $1 AND user_id = $2")
             .bind(&fixture.workspace_id)
             .bind(member_id.to_string())
             .fetch_one(fixture.database.pool())
             .await
             .unwrap();
-    sqlx::query("INSERT INTO task_assignees (task_id, membership_id, user_id) VALUES (?, ?, ?)")
+    sqlx::query("INSERT INTO task_assignees (task_id, membership_id, user_id) VALUES ($1, $2, $3)")
         .bind(task["id"].as_str().unwrap())
         .bind(membership_id)
         .bind(member_id.to_string())
         .execute(fixture.database.pool())
         .await
         .unwrap();
-    sqlx::query("DROP TRIGGER users_remove_task_assignments_on_suspend")
-        .execute(fixture.database.pool())
-        .await
-        .unwrap();
-    sqlx::query("UPDATE users SET suspended_at = ? WHERE id = ?")
+    sqlx::query(if orbit_platform::testing_postgres() {
+        "DROP TRIGGER users_remove_task_assignments_on_suspend ON users"
+    } else {
+        "DROP TRIGGER users_remove_task_assignments_on_suspend"
+    })
+    .execute(fixture.database.pool())
+    .await
+    .unwrap();
+    sqlx::query("UPDATE users SET suspended_at = $1 WHERE id = $2")
         .bind(TimestampMillis::now().as_millis())
         .bind(member_id.to_string())
         .execute(fixture.database.pool())
         .await
         .unwrap();
     let legacy_stored: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM task_assignees WHERE task_id = ?")
+        sqlx::query_scalar("SELECT COUNT(*) FROM task_assignees WHERE task_id = $1")
             .bind(task["id"].as_str().unwrap())
             .fetch_one(fixture.database.pool())
             .await
@@ -2054,7 +2058,7 @@ async fn status_patch_rejects_null_description_without_mutation_or_audit() {
     assert_eq!(unchanged["description"], "retained");
     assert_eq!(unchanged["version"], 0);
     let updates: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM audit_events WHERE action = 'status.updated' AND resource_id = ?",
+        "SELECT COUNT(*) FROM audit_events WHERE action = 'status.updated' AND resource_id = $1",
     )
     .bind(status_id)
     .fetch_one(fixture.database.pool())
@@ -2412,7 +2416,7 @@ async fn add_member(fixture: &Fixture, email: &str) -> (Id, String) {
     let now = TimestampMillis::now();
     sqlx::query(
         "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) \
-         VALUES (?, ?, ?, 'Member', 'unused', ?, ?)",
+         VALUES ($1, $2, $3, 'Member', 'unused', $4, $5)",
     )
     .bind(id.to_string())
     .bind(email)
@@ -2424,7 +2428,7 @@ async fn add_member(fixture: &Fixture, email: &str) -> (Id, String) {
     .unwrap();
     sqlx::query(
         "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
-         VALUES (?, ?, ?, 'member', 0, ?, ?)",
+         VALUES ($1, $2, $3, 'member', 0, $4, $5)",
     )
     .bind(membership_id.to_string())
     .bind(&fixture.workspace_id)
@@ -2593,7 +2597,7 @@ async fn due_views_skip_tasks_in_the_duplicate_status() {
     assert_eq!(before["items"].as_array().unwrap().len(), 1);
 
     let duplicate_status = status_id_by_category(&fixture, &fixture.project_id, "duplicate").await;
-    sqlx::query("UPDATE tasks SET status_id = ? WHERE id = ?")
+    sqlx::query("UPDATE tasks SET status_id = $1 WHERE id = $2")
         .bind(&duplicate_status)
         .bind(task["id"].as_str().unwrap())
         .execute(fixture.database.pool())
@@ -2728,7 +2732,7 @@ async fn moving_a_duplicate_to_another_status_removes_the_relation() {
     assert_eq!(moved["status_id"], done);
     assert_eq!(duplicate_target(&fixture, id_of(&task)).await, None);
     let unmarked: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM audit_events WHERE action = 'task.unmarked_duplicate' AND resource_id = ?",
+        "SELECT COUNT(*) FROM audit_events WHERE action = 'task.unmarked_duplicate' AND resource_id = $1",
     )
     .bind(id_of(&task))
     .fetch_one(fixture.database.pool())
@@ -2796,7 +2800,7 @@ async fn duplicates_never_chain_and_marking_a_canonical_repoints_its_duplicates(
     let second = fixture.create_task("Second").await;
     let third = fixture.create_task("Third").await;
     let todo: String =
-        sqlx::query_scalar("SELECT id FROM task_statuses WHERE project_id = ? AND name = 'Todo'")
+        sqlx::query_scalar("SELECT id FROM task_statuses WHERE project_id = $1 AND name = 'Todo'")
             .bind(&fixture.project_id)
             .fetch_one(fixture.database.pool())
             .await
@@ -2894,7 +2898,7 @@ async fn cross_project_duplicates_use_their_own_duplicate_status_and_follow_proj
         status_id_by_category(&fixture, &fixture.project_id, "duplicate").await
     );
     let metadata: String = sqlx::query_scalar(
-        "SELECT metadata_json FROM audit_events WHERE action = 'task.marked_duplicate' AND resource_id = ?",
+        "SELECT metadata_json FROM audit_events WHERE action = 'task.marked_duplicate' AND resource_id = $1",
     )
     .bind(id_of(&task))
     .fetch_one(fixture.database.pool())
@@ -3073,7 +3077,7 @@ async fn duplicate_edge_cases_stay_recoverable() {
     assert_eq!(untouched["status_id"], fixture.status_id);
 
     // A retention purge of the canonical leaves the duplicate recoverable.
-    sqlx::query("DELETE FROM tasks WHERE id = ?")
+    sqlx::query("DELETE FROM tasks WHERE id = $1")
         .bind(id_of(&canonical))
         .execute(fixture.database.pool())
         .await
@@ -3161,7 +3165,7 @@ async fn github_state_changes_move_duplicates_out_and_drop_the_relation() {
     let fixture = Fixture::new().await;
     let task = fixture.create_task("Synced issue").await;
     let canonical = fixture.create_task("Canonical issue").await;
-    sqlx::query("INSERT INTO github_issue_links (workspace_id, repository, issue_number, task_id, kind) VALUES (?, 'acme/repo', 12, ?, 'issue')")
+    sqlx::query("INSERT INTO github_issue_links (workspace_id, repository, issue_number, task_id, kind) VALUES ($1, 'acme/repo', 12, $2, 'issue')")
         .bind(&fixture.workspace_id)
         .bind(id_of(&task))
         .execute(fixture.database.pool())
@@ -3196,7 +3200,7 @@ async fn github_state_changes_move_duplicates_out_and_drop_the_relation() {
         .await
         .unwrap();
 
-    let category: String = sqlx::query_scalar("SELECT category FROM task_statuses JOIN tasks ON tasks.status_id = task_statuses.id WHERE tasks.id = ?")
+    let category: String = sqlx::query_scalar("SELECT category FROM task_statuses JOIN tasks ON tasks.status_id = task_statuses.id WHERE tasks.id = $1")
         .bind(id_of(&task))
         .fetch_one(fixture.database.pool())
         .await
@@ -3204,7 +3208,7 @@ async fn github_state_changes_move_duplicates_out_and_drop_the_relation() {
     assert_eq!(category, "completed");
     assert_eq!(duplicate_target(&fixture, id_of(&task)).await, None);
     let actor: Option<String> = sqlx::query_scalar(
-        "SELECT actor_id FROM audit_events WHERE action = 'task.unmarked_duplicate' AND resource_id = ?",
+        "SELECT actor_id FROM audit_events WHERE action = 'task.unmarked_duplicate' AND resource_id = $1",
     )
     .bind(id_of(&task))
     .fetch_one(fixture.database.pool())
@@ -3212,7 +3216,7 @@ async fn github_state_changes_move_duplicates_out_and_drop_the_relation() {
     .unwrap();
     assert_eq!(actor, None, "GitHub acts through its service account");
     let metadata: String = sqlx::query_scalar(
-        "SELECT metadata_json FROM audit_events WHERE action = 'task.unmarked_duplicate' AND resource_id = ?",
+        "SELECT metadata_json FROM audit_events WHERE action = 'task.unmarked_duplicate' AND resource_id = $1",
     )
     .bind(id_of(&task))
     .fetch_one(fixture.database.pool())
@@ -3308,7 +3312,7 @@ async fn blocked_flag_follows_open_blockers() {
     let fixture = Fixture::new().await;
     let blocker = fixture.create_task("Blocker").await;
     let blocked = fixture.create_task("Blocked").await;
-    sqlx::query("INSERT INTO task_relations (id, workspace_id, task_id, related_task_id, type, created_at) VALUES (?, ?, ?, ?, 'blocks', 0)")
+    sqlx::query("INSERT INTO task_relations (id, workspace_id, task_id, related_task_id, type, created_at) VALUES ($1, $2, $3, $4, 'blocks', 0)")
         .bind(Id::new_v7().to_string())
         .bind(&fixture.workspace_id)
         .bind(id_of(&blocker))
@@ -3459,7 +3463,7 @@ async fn blocked_by_is_normalised_and_related_pairs_are_ordered() {
     assert_eq!(created["direction"], "incoming");
     assert_eq!(created["task"]["id"], second["id"]);
     let stored: (String, String, String) =
-        sqlx::query_as("SELECT task_id, related_task_id, type FROM task_relations WHERE id = ?")
+        sqlx::query_as("SELECT task_id, related_task_id, type FROM task_relations WHERE id = $1")
             .bind(id_of(&created))
             .fetch_one(fixture.database.pool())
             .await
@@ -3483,7 +3487,7 @@ async fn blocked_by_is_normalised_and_related_pairs_are_ordered() {
     assert_eq!(status, StatusCode::CREATED);
     assert_eq!(related["type"], "related");
     let (low, high): (String, String) =
-        sqlx::query_as("SELECT task_id, related_task_id FROM task_relations WHERE id = ?")
+        sqlx::query_as("SELECT task_id, related_task_id FROM task_relations WHERE id = $1")
             .bind(id_of(&related))
             .fetch_one(fixture.database.pool())
             .await
@@ -3786,7 +3790,7 @@ async fn purging_a_canonical_task_moves_its_duplicates_out_of_the_duplicate_stat
     )
     .await;
     assert_eq!(status, StatusCode::OK);
-    sqlx::query("UPDATE tasks SET deleted_at = ? WHERE id = ?")
+    sqlx::query("UPDATE tasks SET deleted_at = $1 WHERE id = $2")
         .bind(TimestampMillis::now().as_millis() - 31 * 24 * 60 * 60 * 1_000)
         .bind(id_of(&canonical))
         .execute(fixture.database.pool())
@@ -3828,7 +3832,7 @@ async fn call(
 
 async fn status_id_by_category(fixture: &Fixture, project_id: &str, category: &str) -> String {
     sqlx::query_scalar(
-        "SELECT id FROM task_statuses WHERE project_id = ? AND category = ? ORDER BY position, id LIMIT 1",
+        "SELECT id FROM task_statuses WHERE project_id = $1 AND category = $2 ORDER BY position, id LIMIT 1",
     )
     .bind(project_id)
     .bind(category)
@@ -3850,7 +3854,7 @@ fn id_of(value: &Value) -> &str {
 
 async fn duplicate_target(fixture: &Fixture, task_id: &str) -> Option<String> {
     sqlx::query_scalar(
-        "SELECT related_task_id FROM task_relations WHERE task_id = ? AND type = 'duplicate'",
+        "SELECT related_task_id FROM task_relations WHERE task_id = $1 AND type = 'duplicate'",
     )
     .bind(task_id)
     .fetch_optional(fixture.database.pool())
@@ -3970,7 +3974,7 @@ async fn completed_at_follows_status_category_edits() {
 }
 
 async fn task_timestamps(fixture: &Fixture, task_id: &str) -> (Option<i64>, i64) {
-    sqlx::query_as("SELECT completed_at, updated_at FROM tasks WHERE id = ?")
+    sqlx::query_as("SELECT completed_at, updated_at FROM tasks WHERE id = $1")
         .bind(task_id)
         .fetch_one(fixture.database.pool())
         .await
@@ -4153,7 +4157,7 @@ fn filter_task(project: Id, status: Id, title: &str) -> CreateTask {
 
 async fn status_named(fixture: &Fixture, name: &str) -> Id {
     let id: String =
-        sqlx::query_scalar("SELECT id FROM task_statuses WHERE project_id = ? AND name = ?")
+        sqlx::query_scalar("SELECT id FROM task_statuses WHERE project_id = $1 AND name = $2")
             .bind(&fixture.project_id)
             .bind(name)
             .fetch_one(fixture.database.pool())
@@ -5027,7 +5031,7 @@ fn bulk_uri(fixture: &Fixture) -> String {
 }
 
 async fn project_key_of(fixture: &Fixture, project_id: &str) -> String {
-    sqlx::query_scalar("SELECT project_key FROM projects WHERE id = ?")
+    sqlx::query_scalar("SELECT project_key FROM projects WHERE id = $1")
         .bind(project_id)
         .fetch_one(fixture.database.pool())
         .await
@@ -5035,7 +5039,7 @@ async fn project_key_of(fixture: &Fixture, project_id: &str) -> String {
 }
 
 async fn parent_of(fixture: &Fixture, task_id: &str) -> Option<String> {
-    sqlx::query_scalar("SELECT parent_task_id FROM tasks WHERE id = ?")
+    sqlx::query_scalar("SELECT parent_task_id FROM tasks WHERE id = $1")
         .bind(task_id)
         .fetch_one(fixture.database.pool())
         .await
@@ -5076,7 +5080,7 @@ async fn sub_issue_parent_is_set_on_create_update_and_bulk() {
     let (status, _) = patch_current(&fixture, &other_id, json!({"title": "Other renamed"})).await;
     assert_eq!(status, StatusCode::OK);
     let changes: Vec<String> = sqlx::query_scalar(
-        "SELECT metadata_json FROM audit_events WHERE action = 'task.parent_changed' AND resource_id = ?",
+        "SELECT metadata_json FROM audit_events WHERE action = 'task.parent_changed' AND resource_id = $1",
     )
     .bind(&other_id)
     .fetch_all(fixture.database.pool())
@@ -5290,7 +5294,7 @@ async fn sub_issue_parent_rejects_cycles_and_invalid_parents() {
     );
 
     // The database refuses a self-parent even without the repository.
-    let error = sqlx::query("UPDATE tasks SET parent_task_id = id WHERE id = ?")
+    let error = sqlx::query("UPDATE tasks SET parent_task_id = id WHERE id = $1")
         .bind(id_of(&a))
         .execute(fixture.database.pool())
         .await
@@ -5468,7 +5472,7 @@ async fn sub_issue_delete_trashes_the_subtree_and_restore_returns_what_was_trash
     )
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
-    sqlx::query("UPDATE tasks SET deleted_at = deleted_at - 1000 WHERE id = ?")
+    sqlx::query("UPDATE tasks SET deleted_at = deleted_at - 1000 WHERE id = $1")
         .bind(id_of(&earlier))
         .execute(pool)
         .await
@@ -5483,7 +5487,7 @@ async fn sub_issue_delete_trashes_the_subtree_and_restore_returns_what_was_trash
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     let stamps: Vec<Option<i64>> =
-        sqlx::query_scalar("SELECT deleted_at FROM tasks WHERE id IN (?, ?, ?)")
+        sqlx::query_scalar("SELECT deleted_at FROM tasks WHERE id IN ($1, $2, $3)")
             .bind(id_of(&parent))
             .bind(id_of(&child))
             .bind(id_of(&grandchild))
@@ -5496,7 +5500,7 @@ async fn sub_issue_delete_trashes_the_subtree_and_restore_returns_what_was_trash
         "{stamps:?}"
     );
     let deleted_audits: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM audit_events WHERE action = 'task.deleted' AND resource_id IN (?, ?, ?)",
+        "SELECT COUNT(*) FROM audit_events WHERE action = 'task.deleted' AND resource_id IN ($1, $2, $3)",
     )
     .bind(id_of(&parent))
     .bind(id_of(&child))
@@ -5566,7 +5570,7 @@ async fn sub_issue_delete_trashes_the_subtree_and_restore_returns_what_was_trash
         id_of(&child)
     );
     let earlier_stamp: Option<i64> =
-        sqlx::query_scalar("SELECT deleted_at FROM tasks WHERE id = ?")
+        sqlx::query_scalar("SELECT deleted_at FROM tasks WHERE id = $1")
             .bind(id_of(&earlier))
             .fetch_one(pool)
             .await
@@ -5576,7 +5580,7 @@ async fn sub_issue_delete_trashes_the_subtree_and_restore_returns_what_was_trash
         "a child trashed earlier stays in the trash"
     );
     let restored_audits: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM audit_events WHERE action = 'task.restored' AND resource_id IN (?, ?, ?)",
+        "SELECT COUNT(*) FROM audit_events WHERE action = 'task.restored' AND resource_id IN ($1, $2, $3)",
     )
     .bind(id_of(&parent))
     .bind(id_of(&child))
@@ -5612,7 +5616,7 @@ async fn sub_issue_restored_without_its_trashed_parent_becomes_top_level() {
     assert_eq!(restored["parent_task_id"], Value::Null);
     assert_eq!(restored["parent"], Value::Null);
     let metadata: String = sqlx::query_scalar(
-        "SELECT metadata_json FROM audit_events WHERE action = 'task.parent_changed' AND resource_id = ?",
+        "SELECT metadata_json FROM audit_events WHERE action = 'task.parent_changed' AND resource_id = $1",
     )
     .bind(id_of(&child))
     .fetch_one(fixture.database.pool())
@@ -5651,7 +5655,7 @@ async fn sub_issue_retention_purges_trashed_subtrees_and_detaches_survivors() {
     )
     .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
-    sqlx::query("UPDATE tasks SET deleted_at = ? WHERE id IN (?, ?)")
+    sqlx::query("UPDATE tasks SET deleted_at = $1 WHERE id IN ($2, $3)")
         .bind(expired)
         .bind(id_of(&parent))
         .bind(id_of(&child))
@@ -5662,7 +5666,7 @@ async fn sub_issue_retention_purges_trashed_subtrees_and_detaches_survivors() {
     let old_project = create_project(&fixture, "OLD").await;
     let old_parent = create_task_in(&fixture, &old_project, "Old parent", None).await;
     let survivor = create_sub_issue(&fixture, "Survivor", Some(id_of(&old_parent))).await;
-    sqlx::query("UPDATE projects SET deleted_at = ? WHERE id = ?")
+    sqlx::query("UPDATE projects SET deleted_at = $1 WHERE id = $2")
         .bind(expired)
         .bind(&old_project)
         .execute(pool)
@@ -5674,7 +5678,7 @@ async fn sub_issue_retention_purges_trashed_subtrees_and_detaches_survivors() {
         .await
         .unwrap();
 
-    let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks WHERE id IN (?, ?, ?)")
+    let remaining: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tasks WHERE id IN ($1, $2, $3)")
         .bind(id_of(&parent))
         .bind(id_of(&child))
         .bind(id_of(&old_parent))
@@ -5683,15 +5687,18 @@ async fn sub_issue_retention_purges_trashed_subtrees_and_detaches_survivors() {
         .unwrap();
     assert_eq!(remaining, 0);
     assert_eq!(parent_of(&fixture, id_of(&survivor)).await, None);
-    let violations: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM pragma_foreign_key_check")
-        .fetch_one(pool)
-        .await
-        .unwrap();
-    assert_eq!(violations, 0);
+    // Postgres checks foreign keys itself; SQLite's check finds rows its cascades left behind.
+    if !orbit_platform::testing_postgres() {
+        let violations: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM pragma_foreign_key_check")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        assert_eq!(violations, 0);
+    }
 }
 
 async fn status_of(fixture: &Fixture, task_id: &str) -> String {
-    sqlx::query_scalar("SELECT status_id FROM tasks WHERE id = ?")
+    sqlx::query_scalar("SELECT status_id FROM tasks WHERE id = $1")
         .bind(task_id)
         .fetch_one(fixture.database.pool())
         .await
@@ -5700,7 +5707,7 @@ async fn status_of(fixture: &Fixture, task_id: &str) -> String {
 
 async fn auto_closed_metadata(fixture: &Fixture, task_id: &str) -> Value {
     let metadata: String = sqlx::query_scalar(
-        "SELECT metadata_json FROM audit_events WHERE action = 'task.auto_closed' AND resource_id = ?",
+        "SELECT metadata_json FROM audit_events WHERE action = 'task.auto_closed' AND resource_id = $1",
     )
     .bind(task_id)
     .fetch_one(fixture.database.pool())
@@ -5837,7 +5844,7 @@ async fn sub_issue_closing_every_child_closes_the_parent_chain() {
         id_of(&parent)
     );
     let actor: Option<String> = sqlx::query_scalar(
-        "SELECT actor_id FROM audit_events WHERE action = 'task.auto_closed' AND resource_id = ?",
+        "SELECT actor_id FROM audit_events WHERE action = 'task.auto_closed' AND resource_id = $1",
     )
     .bind(id_of(&parent))
     .fetch_one(fixture.database.pool())
@@ -5887,7 +5894,7 @@ async fn sub_issue_closing_a_parent_closes_open_descendants_with_their_own_proje
     let shipped = Id::new_v7().to_string();
     sqlx::query(
         "INSERT INTO task_statuses (id, workspace_id, project_id, name, description, color, category, position, version, created_at, updated_at) \
-         VALUES (?, ?, ?, 'Shipped', '', '#4cb782', 'completed', -1, 0, 0, 0)",
+         VALUES ($1, $2, $3, 'Shipped', '', '#4cb782', 'completed', -1, 0, 0, 0)",
     )
     .bind(&shipped)
     .bind(&fixture.workspace_id)
@@ -5946,7 +5953,7 @@ async fn sub_issue_closing_a_parent_closes_open_descendants_with_their_own_proje
 async fn sub_issue_automation_skips_tasks_whose_project_has_no_target_status() {
     let fixture = Fixture::new().await;
     let bare = create_project(&fixture, "NOS").await;
-    sqlx::query("DELETE FROM task_statuses WHERE project_id = ? AND category = 'completed'")
+    sqlx::query("DELETE FROM task_statuses WHERE project_id = $1 AND category = 'completed'")
         .bind(&bare)
         .execute(fixture.database.pool())
         .await
@@ -5981,7 +5988,7 @@ async fn sub_issue_automation_skips_tasks_whose_project_has_no_target_status() {
 async fn sub_issue_automation_follows_each_projects_flags() {
     let fixture = Fixture::new().await;
     sqlx::query(
-        "UPDATE projects SET auto_close_parent = 0, auto_close_sub_issues = 0 WHERE id = ?",
+        "UPDATE projects SET auto_close_parent = 0, auto_close_sub_issues = 0 WHERE id = $1",
     )
     .bind(&fixture.project_id)
     .execute(fixture.database.pool())
@@ -6248,7 +6255,7 @@ async fn sub_issue_created_closed_can_complete_its_parent() {
 
     // The parent's project flag still decides.
     let off = create_project(&fixture, "OFF").await;
-    sqlx::query("UPDATE projects SET auto_close_parent = 0 WHERE id = ?")
+    sqlx::query("UPDATE projects SET auto_close_parent = 0 WHERE id = $1")
         .bind(&off)
         .execute(fixture.database.pool())
         .await
@@ -6298,7 +6305,7 @@ async fn sub_issue_parent_change_audit_names_a_hidden_old_parents_project() {
         patch_current(&fixture, id_of(&child), json!({"parent_task_id": null})).await;
     assert_eq!(status, StatusCode::OK, "{detached}");
     let metadata: String = sqlx::query_scalar(
-        "SELECT metadata_json FROM audit_events WHERE action = 'task.parent_changed' AND resource_id = ?",
+        "SELECT metadata_json FROM audit_events WHERE action = 'task.parent_changed' AND resource_id = $1",
     )
     .bind(id_of(&child))
     .fetch_one(fixture.database.pool())
@@ -6310,7 +6317,7 @@ async fn sub_issue_parent_change_audit_names_a_hidden_old_parents_project() {
 }
 
 async fn link_github_issue(fixture: &Fixture, task_id: &str, number: i64) {
-    sqlx::query("INSERT INTO github_issue_links (workspace_id, repository, issue_number, task_id, kind) VALUES (?, 'acme/repo', ?, ?, 'issue')")
+    sqlx::query("INSERT INTO github_issue_links (workspace_id, repository, issue_number, task_id, kind) VALUES ($1, 'acme/repo', $2, $3, 'issue')")
         .bind(&fixture.workspace_id)
         .bind(number)
         .bind(task_id)
@@ -6354,7 +6361,7 @@ async fn sub_issue_github_sync_runs_the_automation_and_restores_top_level_under_
     assert_eq!(status_of(&fixture, id_of(&child)).await, done);
     assert_eq!(status_of(&fixture, id_of(&parent)).await, done);
     let (actor, metadata): (Option<String>, String) = sqlx::query_as(
-        "SELECT actor_id, metadata_json FROM audit_events WHERE action = 'task.auto_closed' AND resource_id = ?",
+        "SELECT actor_id, metadata_json FROM audit_events WHERE action = 'task.auto_closed' AND resource_id = $1",
     )
     .bind(id_of(&parent))
     .fetch_one(fixture.database.pool())
@@ -6398,7 +6405,7 @@ async fn sub_issue_github_sync_runs_the_automation_and_restores_top_level_under_
     let restored = fetch_task(&fixture, id_of(&trashed_child)).await;
     assert_eq!(restored["parent_task_id"], Value::Null);
     let (actor, metadata): (Option<String>, String) = sqlx::query_as(
-        "SELECT actor_id, metadata_json FROM audit_events WHERE action = 'task.parent_changed' AND resource_id = ?",
+        "SELECT actor_id, metadata_json FROM audit_events WHERE action = 'task.parent_changed' AND resource_id = $1",
     )
     .bind(id_of(&trashed_child))
     .fetch_one(fixture.database.pool())
@@ -6525,7 +6532,7 @@ async fn sub_issue_filters_and_hidden_display_select_by_hierarchy() {
 }
 
 async fn status_named_in(fixture: &Fixture, project_id: &str, name: &str) -> String {
-    sqlx::query_scalar("SELECT id FROM task_statuses WHERE project_id = ? AND name = ?")
+    sqlx::query_scalar("SELECT id FROM task_statuses WHERE project_id = $1 AND name = $2")
         .bind(project_id)
         .bind(name)
         .fetch_one(fixture.database.pool())
@@ -6542,7 +6549,7 @@ async fn task_numbers_count_per_project_and_are_never_reused() {
     assert_eq!(second["number"], 2);
 
     // A hard delete (retention purge) never frees the number.
-    sqlx::query("DELETE FROM tasks WHERE id = ?")
+    sqlx::query("DELETE FROM tasks WHERE id = $1")
         .bind(id_of(&second))
         .execute(fixture.database.pool())
         .await
@@ -6796,7 +6803,7 @@ async fn moving_a_task_between_projects_maps_its_status_and_renumbers_it() {
     assert_eq!(status, StatusCode::NOT_FOUND);
 
     // A task synced with a GitHub issue stays in its project.
-    sqlx::query("INSERT INTO github_issue_links (workspace_id, repository, issue_number, task_id) VALUES (?, 'acme/repo', 7, ?)")
+    sqlx::query("INSERT INTO github_issue_links (workspace_id, repository, issue_number, task_id) VALUES ($1, 'acme/repo', 7, $2)")
         .bind(&fixture.workspace_id)
         .bind(id_of(&stay))
         .execute(fixture.database.pool())

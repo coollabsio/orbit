@@ -1,8 +1,11 @@
 use sqlx::{query, query_scalar};
 use thiserror::Error;
 
-use crate::{Database, HealthCheck, HealthRegistry};
+use crate::{Backend, Database, HealthCheck, HealthRegistry};
 
+/// Runs SQLite's own checks of the database file. Postgres has no equivalent cheap enough to run
+/// here (it enforces foreign keys on every write, and page damage needs `amcheck`), so on Postgres
+/// `quick` only checks that the database answers and `full` adds nothing.
 #[derive(Clone, Debug)]
 pub struct IntegrityService {
     database: Database,
@@ -10,7 +13,7 @@ pub struct IntegrityService {
 
 #[derive(Debug, Error)]
 pub enum IntegrityError {
-    #[error("SQLite {check} failed: {details}")]
+    #[error("database {check} failed: {details}")]
     Failed {
         check: &'static str,
         details: String,
@@ -24,10 +27,24 @@ impl IntegrityService {
     }
 
     pub async fn quick(&self) -> Result<(), IntegrityError> {
-        self.run("quick_check").await
+        match self.database.backend() {
+            Backend::Sqlite => self.run("quick_check").await,
+            Backend::Postgres => self
+                .database
+                .scalar::<i64>("SELECT 1")
+                .await
+                .map(drop)
+                .map_err(|error| IntegrityError::Failed {
+                    check: "connection_check",
+                    details: error.to_string(),
+                }),
+        }
     }
 
     pub async fn full(&self) -> Result<(), IntegrityError> {
+        if self.database.backend() == Backend::Postgres {
+            return self.quick().await;
+        }
         self.integrity_check().await?;
         let violations = query("PRAGMA foreign_key_check")
             .fetch_all(self.database.pool())
@@ -75,7 +92,10 @@ impl IntegrityService {
                     let command = format!(
                         "INSERT INTO \"{schema}\".\"{table}\"(\"{table}\") VALUES ('integrity-check')"
                     );
-                    if let Err(error) = query(&command).execute(self.database.pool()).await {
+                    if let Err(error) = query(sqlx::AssertSqlSafe(command))
+                        .execute(self.database.pool())
+                        .await
+                    {
                         remaining.push(format!("{line} ({error})"));
                     }
                 }
@@ -93,7 +113,7 @@ impl IntegrityService {
 
     async fn run(&self, check: &'static str) -> Result<(), IntegrityError> {
         let query = format!("PRAGMA {check}");
-        let results: Vec<String> = query_scalar(&query)
+        let results: Vec<String> = query_scalar(sqlx::AssertSqlSafe(query))
             .fetch_all(self.database.pool())
             .await
             .map_err(|error| IntegrityError::Failed {

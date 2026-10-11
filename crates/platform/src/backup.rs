@@ -14,7 +14,12 @@ use tokio::sync::{OwnedRwLockReadGuard, RwLock};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use crate::{Database, DatabaseError, ObjectStorage, S3Bucket, S3Error, lock_database_ownership};
+use crate::{
+    Backend, Database, DatabaseError, MigrationRunner, ObjectStorage, S3Bucket, S3Error,
+    lock_database_ownership,
+};
+
+mod postgres;
 
 const DATABASE_FILE: &str = "database.sqlite";
 const MANIFEST_FILE: &str = "manifest.json";
@@ -48,6 +53,10 @@ pub struct BackupManifest {
     pub kind: BackupKind,
     pub schema_version: i64,
     pub application_version: String,
+    /// What the snapshot holds: an SQLite file, or the `COPY` rows of a Postgres database.
+    /// Manifests written before Postgres support have no such field and are SQLite.
+    #[serde(default)]
+    pub database: Backend,
     pub files: Vec<BackupFile>,
 }
 
@@ -147,6 +156,18 @@ pub enum BackupError {
     RestoreRollback { original: String, rollback: String },
     #[error("backup object storage failed: {0}")]
     ObjectStorage(#[from] S3Error),
+    #[error("Postgres backup failed: {0}")]
+    Postgres(#[source] sqlx::Error),
+    #[error("backup snapshot is invalid: {0}")]
+    InvalidSnapshot(String),
+    #[error(
+        "backup {id} is a {snapshot:?} snapshot and cannot be restored into a {database:?} database"
+    )]
+    WrongBackend {
+        id: String,
+        snapshot: Backend,
+        database: Backend,
+    },
 }
 
 impl BackupService {
@@ -301,6 +322,7 @@ impl BackupService {
         delete_remote_snapshot(&bucket, &snapshot).await
     }
 
+    /// Replaces the SQLite file at `database_path` with an SQLite snapshot.
     pub async fn restore(&self, id: &str, database_path: &Path) -> Result<(), BackupError> {
         self.restore_to(id, database_path, &self.attachment_root)
             .await
@@ -328,6 +350,13 @@ impl BackupService {
     {
         self.validate_layout()?;
         let snapshot = self.verify(id).await?;
+        if snapshot.manifest.database != Backend::Sqlite {
+            return Err(BackupError::WrongBackend {
+                id: snapshot.id,
+                snapshot: snapshot.manifest.database,
+                database: Backend::Sqlite,
+            });
+        }
         let database_path = canonicalize_future_path(database_path)?;
         let attachment_path = canonicalize_future_path(attachment_path)?;
         if database_path == attachment_path
@@ -458,6 +487,81 @@ impl BackupService {
         result
     }
 
+    /// Replaces every table of the Postgres `database` and the attachment directory with a
+    /// Postgres snapshot. `database` must be open (its ownership keeps a server from running).
+    pub async fn restore_postgres(&self, id: &str, database: &Database) -> Result<(), BackupError> {
+        self.validate_layout()?;
+        let snapshot = self.verify(id).await?;
+        let pool = match database.postgres_pool() {
+            Some(pool) if snapshot.manifest.database == Backend::Postgres => pool,
+            _ => {
+                return Err(BackupError::WrongBackend {
+                    id: snapshot.id,
+                    snapshot: snapshot.manifest.database,
+                    database: database.backend(),
+                });
+            }
+        };
+        let attachment_path = canonicalize_future_path(&self.attachment_root)?;
+        let attachment_parent = parent_directory(&attachment_path);
+        create_dir_all(attachment_parent)?;
+        let token = Uuid::now_v7();
+        let staged = attachment_parent.join(format!(".orbit-restore-new-attachments-{token}"));
+        let old = attachment_parent.join(format!(".orbit-restore-old-attachments-{token}"));
+
+        let result = async {
+            copy_directory(
+                &snapshot.path.join("attachments"),
+                &staged,
+                &snapshot.path,
+                None,
+            )?;
+            let runner = MigrationRunner::embedded(env!("CARGO_PKG_VERSION"));
+            let transaction = postgres::restore(
+                pool,
+                &snapshot.path.join(postgres::DATABASE_DIRECTORY),
+                snapshot.manifest.schema_version,
+                runner.postgres_migrations(),
+            )
+            .await?;
+            // The database commits last, so a failed switch leaves both as they were.
+            let old_moved = attachment_path.exists();
+            if old_moved {
+                fs::rename(&attachment_path, &old)
+                    .map_err(|source| io_error(&attachment_path, source))?;
+            }
+            let switched = fs::rename(&staged, &attachment_path)
+                .map_err(|source| io_error(&attachment_path, source));
+            let new_installed = switched.is_ok();
+            let committed = match switched {
+                Ok(()) => transaction.commit().await.map_err(BackupError::Postgres),
+                Err(error) => Err(error),
+            };
+            if let Err(original) = committed {
+                let mut rollback = Ok(());
+                if new_installed {
+                    rollback = remove_path_if_exists(&attachment_path);
+                }
+                if old_moved && rollback.is_ok() {
+                    rollback = fs::rename(&old, &attachment_path)
+                        .map_err(|source| io_error(&attachment_path, source));
+                }
+                return match rollback {
+                    Ok(()) => Err(original),
+                    Err(rollback) => Err(BackupError::RestoreRollback {
+                        original: original.to_string(),
+                        rollback: rollback.to_string(),
+                    }),
+                };
+            }
+            let _ = remove_path_if_exists(&old);
+            Ok(())
+        }
+        .await;
+        let _ = remove_path_if_exists(&staged);
+        result
+    }
+
     async fn create_kind(
         &self,
         database: &Database,
@@ -482,20 +586,43 @@ impl BackupService {
         let final_path = kind_root.join(&id);
         create_dir_all(&temporary)?;
 
-        let database_path = temporary.join(DATABASE_FILE);
-        if let Err(error) = online_backup(database, &database_path, &cancellation).await {
+        let database_path = match database.postgres_pool() {
+            None => temporary.join(DATABASE_FILE),
+            Some(_) => temporary.join(postgres::DATABASE_DIRECTORY),
+        };
+        let written = match database.postgres_pool() {
+            None => online_backup(database, &database_path, &cancellation).await,
+            Some(pool) => postgres::dump(pool, &database_path, &cancellation).await,
+        };
+        if let Err(error) = written {
             let _ = fs::remove_dir_all(&temporary);
             return Err(error);
         }
+        let backend = database.backend();
         let attachment_root = self.attachment_root.clone();
         tokio::task::spawn_blocking(move || {
             let result = (|| {
                 check_cancelled(&cancellation)?;
-                let mut files = vec![file_manifest_cancellable(
-                    &database_path,
-                    &temporary,
-                    &cancellation,
-                )?];
+                let mut files = Vec::new();
+                if database_path.is_dir() {
+                    let mut entries = fs::read_dir(&database_path)
+                        .and_then(Iterator::collect::<Result<Vec<_>, _>>)
+                        .map_err(|source| io_error(&database_path, source))?;
+                    entries.sort_by_key(fs::DirEntry::file_name);
+                    for entry in entries {
+                        files.push(file_manifest_cancellable(
+                            &entry.path(),
+                            &temporary,
+                            &cancellation,
+                        )?);
+                    }
+                } else {
+                    files.push(file_manifest_cancellable(
+                        &database_path,
+                        &temporary,
+                        &cancellation,
+                    )?);
+                }
                 copy_directory_cancellable(
                     &attachment_root,
                     &temporary.join("attachments"),
@@ -510,6 +637,7 @@ impl BackupService {
                     kind,
                     schema_version,
                     application_version: env!("CARGO_PKG_VERSION").to_owned(),
+                    database: backend,
                     files,
                 };
                 write_manifest(&temporary, &manifest)?;
@@ -710,7 +838,7 @@ async fn online_backup(
     tokio::select! {
         biased;
         () = cancellation.cancelled() => return Err(BackupError::Cancelled),
-        result = sqlx::query("VACUUM INTO ?").bind(destination).execute(database.pool()) => {
+        result = sqlx::query("VACUUM INTO $1").bind(destination).execute(database.pool()) => {
             result.map_err(|error| BackupError::OnlineBackup(error.to_string()))?;
         }
     }
@@ -1285,6 +1413,9 @@ mod tests {
 
     #[tokio::test]
     async fn late_restore_failure_rolls_back_the_database_and_attachments() {
+        if crate::testing_postgres() {
+            return; // file snapshots are SQLite-only
+        }
         let root = tempfile::tempdir().unwrap();
         let source_database =
             Database::open(&DatabaseConfig::new(root.path().join("source.sqlite")))

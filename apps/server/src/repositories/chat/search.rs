@@ -3,15 +3,15 @@
 //! paged by message id.
 
 use orbit_platform::Id;
+use orbit_platform::Row;
 use serde::Serialize;
-use sqlx::Row;
 use utoipa::ToSchema;
 
 use super::{
-    ChatError, ChatRepository, MESSAGE_SELECT, MessageRecord, hydrate, id_list, load_access,
-    load_actor, parse_id,
+    ChatError, ChatRepository, Dialect, MESSAGE_SELECT, MessageRecord, hydrate, id_list, in_ids,
+    load_access, load_actor, parse_id,
 };
-use crate::repositories::pages::{fts_query, split_marks};
+use crate::repositories::pages::{fts_query, pg_tsquery, split_marks};
 
 const PAGE_SIZE: usize = 20;
 
@@ -64,7 +64,12 @@ impl ChatRepository {
                 load_actor(&mut tx, workspace_id, actor_id).await?;
             }
         }
-        let expression = fts_query(&input.query);
+        let postgres = self.database.postgres();
+        let expression = if postgres {
+            pg_tsquery(&input.query)
+        } else {
+            fts_query(&input.query)
+        };
         let filtered =
             input.conversation_id.is_some() || input.author_id.is_some() || input.has_file;
         if expression.is_none() && !filtered {
@@ -74,42 +79,58 @@ impl ChatRepository {
             });
         }
 
-        let mut sql = String::from(if expression.is_some() {
-            "SELECT m.id, highlight(chat_search, 0, char(2), char(3)) AS marked FROM chat_search \
-             JOIN chat_messages m ON m.row_id = chat_search.rowid"
-        } else {
-            "SELECT m.id, m.body AS marked FROM chat_messages m"
-        });
+        // Placeholders follow the bind order: workspace, actor, [expression], [conversation],
+        // [author], [cursor], limit.
+        let mut next = 3;
+        let mut param = || {
+            next += 1;
+            format!("${}", next - 1)
+        };
+        let expression_param = expression.as_ref().map(|_| param());
+        let mut sql = match &expression_param {
+            Some(n) if postgres => format!(
+                "SELECT m.id, ts_headline('orbit_search', chat_search.body, to_tsquery('orbit_search', {n}), \
+                 'HighlightAll=true, StartSel=' || chr(2) || ', StopSel=' || chr(3)) AS marked \
+                 FROM chat_search JOIN chat_messages m ON m.row_id = chat_search.rowid"
+            ),
+            Some(_) => "SELECT m.id, highlight(chat_search, 0, char(2), char(3)) AS marked \
+                 FROM chat_search JOIN chat_messages m ON m.row_id = chat_search.rowid"
+                .to_owned(),
+            None => "SELECT m.id, m.body AS marked FROM chat_messages m".to_owned(),
+        };
         sql.push_str(
             " JOIN chat_conversations c ON c.id = m.conversation_id \
-             WHERE c.workspace_id = ? AND m.kind = 'message' AND m.deleted_at IS NULL \
+             WHERE c.workspace_id = $1 AND m.kind = 'message' AND m.deleted_at IS NULL \
              AND (c.kind = 'public' OR EXISTS (SELECT 1 FROM chat_members \
-                  WHERE chat_members.conversation_id = c.id AND chat_members.user_id = ?))",
+                  WHERE chat_members.conversation_id = c.id AND chat_members.user_id = $2))",
         );
-        for (present, condition) in [
-            (expression.is_some(), " AND chat_search MATCH ?"),
-            (
-                input.conversation_id.is_some(),
-                " AND m.conversation_id = ?",
-            ),
-            (input.author_id.is_some(), " AND m.author_id = ?"),
-            (
-                input.has_file,
-                " AND EXISTS (SELECT 1 FROM chat_message_files WHERE message_id = m.id)",
-            ),
-            (input.cursor.is_some(), " AND m.id < ?"),
-        ] {
-            if present {
-                sql.push_str(condition);
-            }
+        if let Some(n) = &expression_param {
+            sql.push_str(&if postgres {
+                format!(" AND chat_search.search_vector @@ to_tsquery('orbit_search', {n})")
+            } else {
+                format!(" AND chat_search MATCH {n}")
+            });
+        }
+        if input.conversation_id.is_some() {
+            sql.push_str(&format!(" AND m.conversation_id = {}", param()));
+        }
+        if input.author_id.is_some() {
+            sql.push_str(&format!(" AND m.author_id = {}", param()));
+        }
+        if input.has_file {
+            sql.push_str(" AND EXISTS (SELECT 1 FROM chat_message_files WHERE message_id = m.id)");
+        }
+        if input.cursor.is_some() {
+            sql.push_str(&format!(" AND m.id < {}", param()));
         }
         // `row_id` grows with the message id, and the index gives its matches in that order.
-        sql.push_str(if expression.is_some() {
-            " ORDER BY chat_search.rowid DESC LIMIT ?"
+        let limit = param();
+        sql.push_str(&if expression.is_some() {
+            format!(" ORDER BY chat_search.rowid DESC LIMIT {limit}")
         } else {
-            " ORDER BY m.id DESC LIMIT ?"
+            format!(" ORDER BY m.id DESC LIMIT {limit}")
         });
-        let mut query = sqlx::query(&sql)
+        let mut query = sqlx::query(sqlx::AssertSqlSafe(sql))
             .bind(workspace_id.to_string())
             .bind(actor_id.to_string());
         if let Some(expression) = &expression {
@@ -139,9 +160,10 @@ impl ChatRepository {
             };
             hits.push((parse_id(row.get("id"))?, ranges));
         }
-        let records = sqlx::query(&format!(
-            "{MESSAGE_SELECT} WHERE m.id IN (SELECT value FROM json_each(?))"
-        ))
+        let records = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "{MESSAGE_SELECT} WHERE m.id {}",
+            in_ids(&*tx, 1)
+        )))
         .bind(id_list(hits.iter().map(|(id, _)| *id)))
         .fetch_all(&mut *tx)
         .await?;

@@ -5,10 +5,11 @@
 
 use std::collections::HashMap;
 
-use orbit_platform::{Database, Id, TimestampMillis};
+use orbit_platform::Row;
+use orbit_platform::{Backend, Database, Flag, Id, TimestampMillis};
 use serde::Serialize;
 use serde_json::{Value, json};
-use sqlx::{Row, Sqlite, Transaction};
+use sqlx::{Any, Transaction};
 use thiserror::Error;
 use utoipa::ToSchema;
 
@@ -49,7 +50,18 @@ const SUMMARY_COLUMNS: &str = "pages.id AS id, pages.parent_id AS parent_id, pag
      pages.title AS title, pages.icon AS icon, pages.position AS position, pages.version AS version, \
      pages.updated_at AS updated_at";
 /// Teamspace pages plus the caller's private pages; binds the caller's user id.
-pub(super) const VISIBLE: &str = "(pages.teamspace_id IS NOT NULL OR pages.owner_id = ?)";
+/// `param` is the placeholder number of that bind in the final query.
+pub(super) fn visible(param: usize) -> String {
+    format!("(pages.teamspace_id IS NOT NULL OR pages.owner_id = ${param})")
+}
+
+/// `SELECT` of the strings in the JSON text array bound at placeholder `param`.
+pub(super) fn json_text_array(backend: Backend, param: usize) -> String {
+    match backend {
+        Backend::Sqlite => format!("SELECT value FROM json_each(${param})"),
+        Backend::Postgres => format!("SELECT jsonb_array_elements_text(${param}::jsonb)"),
+    }
+}
 
 /// Where a page lives. `Private` holds the owner's user id.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -391,13 +403,14 @@ impl PageRepository {
     /// caller's private space) and ordered `parent_id, position, id` within a space.
     pub async fn pages(&self, workspace_id: Id, actor_id: Id) -> Result<PageList, PageError> {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
-        let rows = sqlx::query(&format!(
+        let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT {SUMMARY_COLUMNS} FROM pages \
              LEFT JOIN teamspaces ON teamspaces.id = pages.teamspace_id \
-             WHERE pages.workspace_id = ? AND pages.deleted_at IS NULL AND {VISIBLE} \
+             WHERE pages.workspace_id = $1 AND pages.deleted_at IS NULL AND {visible} \
              ORDER BY pages.teamspace_id IS NULL, teamspaces.position, teamspaces.id, \
-             pages.parent_id, pages.position, pages.id"
-        ))
+             pages.parent_id NULLS FIRST, pages.position, pages.id",
+            visible = visible(2)
+        )))
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
         .fetch_all(self.database.pool())
@@ -421,10 +434,10 @@ impl PageRepository {
         if let Some(hub) = CollabHub::existing(&self.database) {
             hub.flush_page(page_id).await;
         }
-        let row = sqlx::query(&format!(
-            "SELECT {PAGE_COLUMNS} FROM pages WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL \
-             AND {VISIBLE}"
-        ))
+        let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT {PAGE_COLUMNS} FROM pages WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL \
+             AND {visible}", visible = visible(3)
+        )))
         .bind(page_id.to_string())
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
@@ -474,7 +487,7 @@ impl PageRepository {
         let position = index as i64;
         sqlx::query(
             "INSERT INTO pages (id, workspace_id, parent_id, teamspace_id, owner_id, title, icon, position, creator_id, updated_by, version, created_at, updated_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 0, $11, $12)",
         )
         .bind(id.to_string())
         .bind(workspace_id.to_string())
@@ -658,10 +671,10 @@ impl PageRepository {
             (current.updated_by, current.updated_at)
         };
         sqlx::query(
-            "UPDATE pages SET title = ?, icon = ?, cover_url = ?, cover_position = ?, \
-             content_json = COALESCE(?, content_json), content_text = COALESCE(?, content_text), \
-             full_width = ?, updated_by = ?, updated_at = ?, version = version + 1 \
-             WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND version = ?",
+            "UPDATE pages SET title = $1, icon = $2, cover_url = $3, cover_position = $4, \
+             content_json = COALESCE($5, content_json), content_text = COALESCE($6, content_text), \
+             full_width = $7, updated_by = $8, updated_at = $9, version = version + 1 \
+             WHERE id = $10 AND workspace_id = $11 AND deleted_at IS NULL AND version = $12",
         )
         .bind(&title)
         .bind(&icon)
@@ -669,7 +682,7 @@ impl PageRepository {
         .bind(&cover_position)
         .bind(content_json)
         .bind(text)
-        .bind(full_width)
+        .bind(i64::from(full_width))
         .bind(updated_by.to_string())
         .bind(updated_at.as_millis())
         .bind(page_id.to_string())
@@ -744,9 +757,9 @@ impl PageRepository {
         actor_id: Id,
     ) -> Result<(), PageError> {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
-        sqlx::query(&format!(
-            "SELECT 1 FROM pages WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND {VISIBLE}"
-        ))
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT 1 FROM pages WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL AND {visible}", visible = visible(3)
+        )))
         .bind(page_id.to_string())
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
@@ -809,9 +822,9 @@ impl PageRepository {
         let index = insert_index(Some(position), siblings.len());
         siblings.insert(index, page_id);
         sqlx::query(
-            "UPDATE pages SET parent_id = ?, teamspace_id = ?, owner_id = ?, position = ?, \
-             updated_by = ?, updated_at = ?, version = version + 1 \
-             WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL AND version = ?",
+            "UPDATE pages SET parent_id = $1, teamspace_id = $2, owner_id = $3, position = $4, \
+             updated_by = $5, updated_at = $6, version = version + 1 \
+             WHERE id = $7 AND workspace_id = $8 AND deleted_at IS NULL AND version = $9",
         )
         .bind(parent_id.map(|parent| parent.to_string()))
         .bind(space.teamspace_column())
@@ -873,13 +886,13 @@ impl PageRepository {
         check_version(expected_version, current.version, &current)?;
         sqlx::query(
             "WITH RECURSIVE subtree(id) AS ( \
-                 SELECT ? \
+                 SELECT $1 \
                  UNION ALL \
                  SELECT pages.id FROM pages JOIN subtree ON pages.parent_id = subtree.id \
                  WHERE pages.deleted_at IS NULL \
              ) \
-             UPDATE pages SET deleted_at = ?, trashed_with = ?, updated_by = ?, updated_at = ?, version = version + 1 \
-             WHERE workspace_id = ? AND deleted_at IS NULL AND id IN (SELECT id FROM subtree)",
+             UPDATE pages SET deleted_at = $2, trashed_with = $3, updated_by = $4, updated_at = $5, version = version + 1 \
+             WHERE workspace_id = $6 AND deleted_at IS NULL AND id IN (SELECT id FROM subtree)",
         )
         .bind(page_id.to_string())
         .bind(now.as_millis())
@@ -932,7 +945,7 @@ impl PageRepository {
         now: TimestampMillis,
     ) -> Result<(), PageError> {
         let trashed: Vec<String> = sqlx::query_scalar(
-            "SELECT id FROM pages WHERE workspace_id = ? AND trashed_with = ? AND deleted_at = ?",
+            "SELECT id FROM pages WHERE workspace_id = $1 AND trashed_with = $2 AND deleted_at = $3",
         )
         .bind(workspace_id.to_string())
         .bind(page_id.to_string())
@@ -944,10 +957,13 @@ impl PageRepository {
         hub.flush_workspace(workspace_id).await;
         let mut linking = std::collections::BTreeSet::new();
         for id in &trashed {
-            let rows: Vec<String> = sqlx::query_scalar(
-                "SELECT id FROM pages WHERE workspace_id = ? AND deleted_at IS NULL \
-                 AND instr(content_json, ?) > 0",
-            )
+            let contains = match self.database.backend() {
+                Backend::Sqlite => "instr(content_json, $2) > 0",
+                Backend::Postgres => "strpos(content_json, $2) > 0",
+            };
+            let rows: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT id FROM pages WHERE workspace_id = $1 AND deleted_at IS NULL AND {contains}"
+            )))
             .bind(workspace_id.to_string())
             .bind(format!("\"pageId\":\"{id}\""))
             .fetch_all(self.database.pool())
@@ -999,7 +1015,7 @@ impl PageRepository {
         }
         check_version(expected_version, current.version, &current)?;
         let batch: String =
-            sqlx::query_scalar("SELECT COALESCE(trashed_with, id) FROM pages WHERE id = ?")
+            sqlx::query_scalar("SELECT COALESCE(trashed_with, id) FROM pages WHERE id = $1")
                 .bind(page_id.to_string())
                 .fetch_one(&mut *tx)
                 .await?;
@@ -1018,13 +1034,13 @@ impl PageRepository {
         siblings.insert(index, page_id);
         sqlx::query(
             "WITH RECURSIVE subtree(id) AS ( \
-                 SELECT ? \
+                 SELECT $1 \
                  UNION ALL \
                  SELECT pages.id FROM pages JOIN subtree ON pages.parent_id = subtree.id \
-                 WHERE pages.deleted_at IS NOT NULL AND pages.trashed_with = ? \
+                 WHERE pages.deleted_at IS NOT NULL AND pages.trashed_with = $2 \
              ) \
-             UPDATE pages SET deleted_at = NULL, trashed_with = NULL, updated_by = ?, updated_at = ?, version = version + 1 \
-             WHERE workspace_id = ? AND deleted_at IS NOT NULL AND id IN (SELECT id FROM subtree)",
+             UPDATE pages SET deleted_at = NULL, trashed_with = NULL, updated_by = $3, updated_at = $4, version = version + 1 \
+             WHERE workspace_id = $5 AND deleted_at IS NOT NULL AND id IN (SELECT id FROM subtree)",
         )
         .bind(page_id.to_string())
         .bind(&batch)
@@ -1033,7 +1049,7 @@ impl PageRepository {
         .bind(workspace_id.to_string())
         .execute(&mut *tx)
         .await?;
-        sqlx::query("UPDATE pages SET parent_id = ?, position = ? WHERE id = ?")
+        sqlx::query("UPDATE pages SET parent_id = $1, position = $2 WHERE id = $3")
             .bind(parent_id.map(|parent| parent.to_string()))
             .bind(index as i64)
             .bind(page_id.to_string())
@@ -1073,11 +1089,11 @@ impl PageRepository {
         now: TimestampMillis,
     ) -> Result<PageTrash, PageError> {
         let actor = require_access(self.database.pool(), workspace_id, actor_id).await?;
-        let rows = sqlx::query(&format!(
+        let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT {SUMMARY_COLUMNS}, pages.deleted_at AS deleted_at FROM pages \
-             WHERE pages.workspace_id = ? AND pages.deleted_at > ? AND pages.trashed_with = pages.id \
-             AND {VISIBLE} ORDER BY pages.deleted_at DESC, pages.id DESC"
-        ))
+             WHERE pages.workspace_id = $1 AND pages.deleted_at > $2 AND pages.trashed_with = pages.id \
+             AND {visible} ORDER BY pages.deleted_at DESC, pages.id DESC", visible = visible(3)
+        )))
         .bind(workspace_id.to_string())
         .bind(now.as_millis().saturating_sub(TRASH_RETENTION_MILLIS))
         .bind(actor_id.to_string())
@@ -1122,10 +1138,11 @@ impl PageRepository {
     ) -> Result<(), PageError> {
         let mut tx = self.database.immediate_transaction().await?;
         let actor = require_access_tx(&mut tx, workspace_id, actor_id).await?;
-        let row = sqlx::query(&format!(
-            "SELECT deleted_at IS NOT NULL AND trashed_with IS id AS in_trash FROM pages \
-             WHERE id = ? AND workspace_id = ? AND {VISIBLE}"
-        ))
+        let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT deleted_at IS NOT NULL AND trashed_with IS NOT DISTINCT FROM id AS in_trash FROM pages \
+             WHERE id = $1 AND workspace_id = $2 AND {visible}",
+            visible = visible(3)
+        )))
         .bind(page_id.to_string())
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
@@ -1171,8 +1188,8 @@ impl PageRepository {
         let mut tx = self.database.immediate_transaction().await?;
         let actor = require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let roots = sqlx::query_scalar::<_, String>(
-            "SELECT id FROM pages WHERE workspace_id = ? AND deleted_at IS NOT NULL \
-             AND trashed_with = id AND (owner_id = ? OR (? AND teamspace_id IS NOT NULL)) \
+            "SELECT id FROM pages WHERE workspace_id = $1 AND deleted_at IS NOT NULL \
+             AND trashed_with = id AND (owner_id = $2 OR ($3 AND teamspace_id IS NOT NULL)) \
              ORDER BY deleted_at, id",
         )
         .bind(workspace_id.to_string())
@@ -1232,16 +1249,16 @@ impl PageRepository {
         let space = source.space(actor_id);
         let mut originals = vec![source];
         if include_children {
-            let rows = sqlx::query(&format!(
+            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "WITH RECURSIVE subtree(page_id, depth) AS ( \
-                     SELECT ?, 0 \
+                     SELECT $1, 0 \
                      UNION ALL \
                      SELECT pages.id, subtree.depth + 1 FROM pages \
                      JOIN subtree ON pages.parent_id = subtree.page_id WHERE pages.deleted_at IS NULL \
                  ) \
                  SELECT {PAGE_COLUMNS} FROM pages JOIN subtree ON subtree.page_id = pages.id \
                  WHERE subtree.depth > 0 ORDER BY subtree.depth, pages.parent_id, pages.position, pages.id"
-            ))
+            )))
             .bind(page_id.to_string())
             .fetch_all(&mut *tx)
             .await?;
@@ -1258,7 +1275,7 @@ impl PageRepository {
         for page in &originals {
             let rows = sqlx::query(
                 "SELECT id, blob_id, file_name, mime_type, size_bytes FROM page_files \
-                 WHERE page_id = ? AND workspace_id = ? ORDER BY created_at, id",
+                 WHERE page_id = $1 AND workspace_id = $2 ORDER BY created_at, id",
             )
             .bind(page.id.to_string())
             .bind(workspace_id.to_string())
@@ -1305,7 +1322,7 @@ impl PageRepository {
                 "INSERT INTO pages (id, workspace_id, parent_id, teamspace_id, owner_id, title, icon, \
                  cover_url, cover_position, content_json, content_text, position, creator_id, updated_by, \
                  version, created_at, updated_at, full_width) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)",
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 0, $15, $16, $17)",
             )
             .bind(id.to_string())
             .bind(workspace_id.to_string())
@@ -1323,7 +1340,7 @@ impl PageRepository {
             .bind(actor_id.to_string())
             .bind(now.as_millis())
             .bind(now.as_millis())
-            .bind(original.full_width)
+            .bind(i64::from(original.full_width))
             .execute(&mut *tx)
             .await?;
             audit::record(
@@ -1370,7 +1387,7 @@ impl PageRepository {
         for ((page, file), row) in file_rows {
             sqlx::query(
                 "INSERT INTO page_files (id, workspace_id, page_id, blob_id, file_name, mime_type, \
-                 size_bytes, uploaded_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                 size_bytes, uploaded_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
             )
             .bind(file.to_string())
             .bind(workspace_id.to_string())
@@ -1410,28 +1427,58 @@ impl PageRepository {
         query: &str,
     ) -> Result<PageSearch, PageError> {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
-        let Some(expression) = fts_query(query) else {
+        let postgres = self.database.backend() == Backend::Postgres;
+        let expression = if postgres {
+            pg_tsquery(query)
+        } else {
+            fts_query(query)
+        };
+        let Some(expression) = expression else {
             return Ok(PageSearch { items: Vec::new() });
         };
-        let rows = sqlx::query(&format!(
-            "SELECT pages.id AS id, pages.parent_id AS parent_id, pages.teamspace_id AS teamspace_id, \
+        let sql = if postgres {
+            format!(
+                "SELECT pages.id AS id, pages.parent_id AS parent_id, pages.teamspace_id AS teamspace_id, \
+                 pages.title AS title, pages.icon AS icon, \
+                 ts_headline('orbit_search', page_search.title, q.query, \
+                 'HighlightAll=true, StartSel=' || chr(2) || ', StopSel=' || chr(3)) AS marked_title, \
+                 ts_headline('orbit_search', page_search.body, q.query, \
+                 'MaxWords=' || $1 || ', MinWords=' || greatest($1 / 2, 1) \
+                 || ', ShortWord=0, StartSel=' || chr(2) || ', StopSel=' || chr(3)) AS marked_snippet, \
+                 page_search.body AS body \
+                 FROM page_search \
+                 CROSS JOIN LATERAL (SELECT to_tsquery('orbit_search', $2) AS query) AS q \
+                 JOIN page_search_rows ON page_search_rows.id = page_search.rowid \
+                 JOIN pages ON pages.id = page_search_rows.page_id \
+                 WHERE page_search.search_vector @@ q.query \
+                 AND pages.workspace_id = $3 AND pages.deleted_at IS NULL AND {visible} \
+                 ORDER BY ts_rank('{{0, 0, 0.1, 1}}', page_search.search_vector, q.query) DESC, \
+                 pages.updated_at DESC, pages.id DESC LIMIT $5",
+                visible = visible(4)
+            )
+        } else {
+            format!(
+                "SELECT pages.id AS id, pages.parent_id AS parent_id, pages.teamspace_id AS teamspace_id, \
              pages.title AS title, pages.icon AS icon, \
              highlight(page_search, 0, char(2), char(3)) AS marked_title, \
-             snippet(page_search, 1, char(2), char(3), '…', ?) AS marked_snippet \
+             snippet(page_search, 1, char(2), char(3), '…', $1) AS marked_snippet \
              FROM page_search \
              JOIN page_search_rows ON page_search_rows.id = page_search.rowid \
              JOIN pages ON pages.id = page_search_rows.page_id \
-             WHERE page_search MATCH ? AND pages.workspace_id = ? AND pages.deleted_at IS NULL \
-             AND {VISIBLE} \
-             ORDER BY bm25(page_search, 10.0, 1.0), pages.updated_at DESC, pages.id DESC LIMIT ?",
-        ))
-        .bind(SNIPPET_TOKENS)
-        .bind(&expression)
-        .bind(workspace_id.to_string())
-        .bind(actor_id.to_string())
-        .bind(SEARCH_LIMIT)
-        .fetch_all(self.database.pool())
-        .await?;
+             WHERE page_search MATCH $2 AND pages.workspace_id = $3 AND pages.deleted_at IS NULL \
+             AND {visible} \
+             ORDER BY bm25(page_search, 10.0, 1.0), pages.updated_at DESC, pages.id DESC LIMIT $5",
+                visible = visible(4)
+            )
+        };
+        let rows = sqlx::query(sqlx::AssertSqlSafe(sql))
+            .bind(SNIPPET_TOKENS)
+            .bind(&expression)
+            .bind(workspace_id.to_string())
+            .bind(actor_id.to_string())
+            .bind(SEARCH_LIMIT)
+            .fetch_all(self.database.pool())
+            .await?;
         let items = rows
             .into_iter()
             .map(|row| {
@@ -1439,8 +1486,11 @@ impl PageRepository {
                 let title: String = row.get("title");
                 let (marked_title, title_highlights) =
                     split_marks(&row.get::<String, _>("marked_title"));
-                let (snippet, snippet_highlights) =
-                    split_marks(&row.get::<String, _>("marked_snippet"));
+                let mut marked_snippet: String = row.get("marked_snippet");
+                if postgres {
+                    marked_snippet = with_ellipses(marked_snippet, &row.get::<String, _>("body"));
+                }
+                let (snippet, snippet_highlights) = split_marks(&marked_snippet);
                 Ok(PageSearchResult {
                     id: parse_id(row.get("id"))?,
                     parent_id: parse_optional_id(row.get("parent_id"))?,
@@ -1493,7 +1543,7 @@ impl PageRepository {
         if !order.contains(&page_id) {
             sqlx::query(
                 "INSERT INTO page_favorites (workspace_id, user_id, page_id, position, created_at) \
-                 VALUES (?, ?, ?, ?, ?)",
+                 VALUES ($1, $2, $3, $4, $5)",
             )
             .bind(workspace_id.to_string())
             .bind(actor_id.to_string())
@@ -1528,7 +1578,7 @@ impl PageRepository {
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         page_in_tx(&mut tx, workspace_id, page_id, actor_id, false).await?;
         let removed = sqlx::query(
-            "DELETE FROM page_favorites WHERE workspace_id = ? AND user_id = ? AND page_id = ?",
+            "DELETE FROM page_favorites WHERE workspace_id = $1 AND user_id = $2 AND page_id = $3",
         )
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
@@ -1616,8 +1666,8 @@ impl PageRepository {
             (None, None)
         };
         sqlx::query(
-            "UPDATE pages SET locked_at = ?, locked_by = ?, version = version + 1 \
-             WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL",
+            "UPDATE pages SET locked_at = $1, locked_by = $2, version = version + 1 \
+             WHERE id = $3 AND workspace_id = $4 AND deleted_at IS NULL",
         )
         .bind(locked_at.map(TimestampMillis::as_millis))
         .bind(locked_by.as_ref().map(|user| user.id.to_string()))
@@ -1667,8 +1717,10 @@ impl PageRepository {
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         page_in_tx(&mut tx, workspace_id, page_id, actor_id, false).await?;
         sqlx::query(
-            "INSERT INTO page_visits (workspace_id, user_id, page_id, visited_at) VALUES (?, ?, ?, ?) \
-             ON CONFLICT (user_id, page_id) DO UPDATE SET visited_at = MAX(visited_at, excluded.visited_at)",
+            "INSERT INTO page_visits (workspace_id, user_id, page_id, visited_at) VALUES ($1, $2, $3, $4) \
+             ON CONFLICT (user_id, page_id) DO UPDATE SET visited_at = CASE \
+             WHEN excluded.visited_at > page_visits.visited_at THEN excluded.visited_at \
+             ELSE page_visits.visited_at END",
         )
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
@@ -1678,9 +1730,9 @@ impl PageRepository {
         .await?;
         // Keep the newest few per member and workspace.
         sqlx::query(
-            "DELETE FROM page_visits WHERE workspace_id = ?1 AND user_id = ?2 AND page_id NOT IN ( \
-                 SELECT page_id FROM page_visits WHERE workspace_id = ?1 AND user_id = ?2 \
-                 ORDER BY visited_at DESC, page_id LIMIT ?3)",
+            "DELETE FROM page_visits WHERE workspace_id = $1 AND user_id = $2 AND page_id NOT IN ( \
+                 SELECT page_id FROM page_visits WHERE workspace_id = $1 AND user_id = $2 \
+                 ORDER BY visited_at DESC, page_id LIMIT $3)",
         )
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
@@ -1699,14 +1751,14 @@ impl PageRepository {
         limit: usize,
     ) -> Result<RecentPageList, PageError> {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
-        let rows = sqlx::query(&format!(
+        let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT pages.id AS id, pages.parent_id AS parent_id, pages.teamspace_id AS teamspace_id, \
              pages.title AS title, pages.icon AS icon, page_visits.visited_at AS visited_at \
              FROM page_visits JOIN pages ON pages.id = page_visits.page_id \
-             WHERE page_visits.workspace_id = ? AND page_visits.user_id = ? \
-             AND pages.workspace_id = page_visits.workspace_id AND pages.deleted_at IS NULL AND {VISIBLE} \
-             ORDER BY page_visits.visited_at DESC, pages.id LIMIT ?"
-        ))
+             WHERE page_visits.workspace_id = $1 AND page_visits.user_id = $2 \
+             AND pages.workspace_id = page_visits.workspace_id AND pages.deleted_at IS NULL AND {visible} \
+             ORDER BY page_visits.visited_at DESC, pages.id LIMIT $4", visible = visible(3)
+        )))
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
         .bind(actor_id.to_string())
@@ -1747,12 +1799,12 @@ fn favorite_list(ids: Vec<Id>) -> PageFavoriteList {
 
 /// Every favorite of the caller in the workspace (hidden ones too), in order.
 async fn favorite_order(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     actor_id: Id,
 ) -> Result<Vec<Id>, PageError> {
     sqlx::query_scalar::<_, String>(
-        "SELECT page_id FROM page_favorites WHERE workspace_id = ? AND user_id = ? \
+        "SELECT page_id FROM page_favorites WHERE workspace_id = $1 AND user_id = $2 \
          ORDER BY position, page_id",
     )
     .bind(workspace_id.to_string())
@@ -1766,17 +1818,18 @@ async fn favorite_order(
 
 /// The caller's favorites of live pages they can see, in order.
 async fn visible_favorite_ids(
-    connection: &mut sqlx::SqliteConnection,
+    connection: &mut sqlx::AnyConnection,
     workspace_id: Id,
     actor_id: Id,
 ) -> Result<Vec<Id>, PageError> {
-    sqlx::query_scalar::<_, String>(&format!(
+    sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
         "SELECT page_favorites.page_id FROM page_favorites \
          JOIN pages ON pages.id = page_favorites.page_id \
-         WHERE page_favorites.workspace_id = ? AND page_favorites.user_id = ? \
+         WHERE page_favorites.workspace_id = $1 AND page_favorites.user_id = $2 \
          AND pages.workspace_id = page_favorites.workspace_id AND pages.deleted_at IS NULL \
-         AND {VISIBLE} ORDER BY page_favorites.position, page_favorites.page_id"
-    ))
+         AND {visible} ORDER BY page_favorites.position, page_favorites.page_id",
+        visible = visible(3)
+    )))
     .bind(workspace_id.to_string())
     .bind(actor_id.to_string())
     .bind(actor_id.to_string())
@@ -1788,15 +1841,15 @@ async fn visible_favorite_ids(
 }
 
 async fn renumber_favorites(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     actor_id: Id,
     ids: &[Id],
 ) -> Result<(), PageError> {
     for (position, id) in ids.iter().enumerate() {
         let position = position as i64;
         sqlx::query(
-            "UPDATE page_favorites SET position = ? WHERE user_id = ? AND page_id = ? \
-             AND position <> ?",
+            "UPDATE page_favorites SET position = $1 WHERE user_id = $2 AND page_id = $3 \
+             AND position <> $4",
         )
         .bind(position)
         .bind(actor_id.to_string())
@@ -1888,6 +1941,54 @@ pub(crate) fn fts_query(input: &str) -> Option<String> {
     )
 }
 
+/// Postgres counterpart of [`fts_query`]: a `to_tsquery('orbit_search', …)` string. Every
+/// whitespace-separated term is split into alphanumeric runs like the unicode61 tokenizer; the
+/// runs of one term form a phrase, terms are ANDed, and the last run is a prefix. The pieces are
+/// purely alphanumeric, so they cannot inject tsquery syntax. `None` when nothing is searchable.
+pub(crate) fn pg_tsquery(input: &str) -> Option<String> {
+    let terms: Vec<Vec<String>> = input
+        .split_whitespace()
+        .map(|term| {
+            term.split(|c: char| !c.is_alphanumeric())
+                .filter(|part| !part.is_empty())
+                .map(str::to_lowercase)
+                .collect::<Vec<_>>()
+        })
+        .filter(|parts| !parts.is_empty())
+        .take(SEARCH_MAX_TERMS)
+        .collect();
+    let last = terms.len().checked_sub(1)?;
+    Some(
+        terms
+            .iter()
+            .enumerate()
+            .map(|(index, parts)| {
+                let phrase = parts.join(" <-> ");
+                if index == last {
+                    format!("{phrase}:*")
+                } else {
+                    phrase
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" & "),
+    )
+}
+
+/// Adds `…` where a Postgres `ts_headline` excerpt cuts `body`, like FTS5 `snippet()`.
+fn with_ellipses(marked: String, body: &str) -> String {
+    let plain: String = marked
+        .chars()
+        .filter(|c| !matches!(c, '\u{2}' | '\u{3}'))
+        .collect();
+    if plain.is_empty() {
+        return marked;
+    }
+    let start = if body.starts_with(&plain) { "" } else { "…" };
+    let end = if body.ends_with(&plain) { "" } else { "…" };
+    format!("{start}{marked}{end}")
+}
+
 /// Removes the highlight markers from FTS output and returns the plain text with the marked
 /// spans as UTF-16 ranges.
 pub(crate) fn split_marks(marked: &str) -> (String, Vec<TextRange>) {
@@ -1917,13 +2018,13 @@ pub(crate) fn split_marks(marked: &str) -> (String, Vec<TextRange>) {
 /// Hard-deletes the trashed page `root_id` and the pages trashed along with it; returns how many
 /// pages went. Sub-pages trashed on their own earlier keep their own trash entry (their
 /// `parent_id` is cleared by the foreign key), like restore treats them.
-async fn purge_batch(tx: &mut Transaction<'_, Sqlite>, root_id: Id) -> Result<u64, PageError> {
+async fn purge_batch(tx: &mut Transaction<'_, Any>, root_id: Id) -> Result<u64, PageError> {
     let ids = sqlx::query_scalar::<_, String>(
         "WITH RECURSIVE subtree(id) AS ( \
-             SELECT ? \
+             SELECT $1 \
              UNION ALL \
              SELECT pages.id FROM pages JOIN subtree ON pages.parent_id = subtree.id \
-             WHERE pages.deleted_at IS NOT NULL AND pages.trashed_with = ? \
+             WHERE pages.deleted_at IS NOT NULL AND pages.trashed_with = $2 \
          ) \
          SELECT id FROM subtree",
     )
@@ -1934,7 +2035,7 @@ async fn purge_batch(tx: &mut Transaction<'_, Sqlite>, root_id: Id) -> Result<u6
     let mut purged = 0;
     // Children first, so no row of the batch is left pointing at a deleted parent mid-way.
     for id in ids.iter().rev() {
-        purged += sqlx::query("DELETE FROM pages WHERE id = ? AND deleted_at IS NOT NULL")
+        purged += sqlx::query("DELETE FROM pages WHERE id = $1 AND deleted_at IS NOT NULL")
             .bind(id)
             .execute(&mut **tx)
             .await?
@@ -2041,15 +2142,15 @@ fn insert_index(position: Option<i64>, len: usize) -> usize {
 /// Live siblings in `space` under `parent_id` (the space's root when `None`), excluding
 /// `exclude`, in order.
 async fn sibling_ids(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     space: PageSpace,
     parent_id: Option<Id>,
     exclude: Id,
 ) -> Result<Vec<Id>, PageError> {
     sqlx::query_scalar::<_, String>(
-        "SELECT id FROM pages WHERE workspace_id = ? AND teamspace_id IS ? AND owner_id IS ? \
-         AND parent_id IS ? AND deleted_at IS NULL AND id <> ? ORDER BY position, id",
+        "SELECT id FROM pages WHERE workspace_id = $1 AND teamspace_id IS NOT DISTINCT FROM $2 \
+         AND owner_id IS NOT DISTINCT FROM $3 AND parent_id IS NOT DISTINCT FROM $4 AND deleted_at IS NULL AND id <> $5 ORDER BY position, id",
     )
     .bind(workspace_id.to_string())
     .bind(space.teamspace_column())
@@ -2063,10 +2164,10 @@ async fn sibling_ids(
     .collect()
 }
 
-async fn renumber(tx: &mut Transaction<'_, Sqlite>, ids: &[Id]) -> Result<(), PageError> {
+async fn renumber(tx: &mut Transaction<'_, Any>, ids: &[Id]) -> Result<(), PageError> {
     for (position, id) in ids.iter().enumerate() {
         let position = position as i64;
-        sqlx::query("UPDATE pages SET position = ? WHERE id = ? AND position <> ?")
+        sqlx::query("UPDATE pages SET position = $1 WHERE id = $2 AND position <> $3")
             .bind(position)
             .bind(id.to_string())
             .bind(position)
@@ -2078,36 +2179,38 @@ async fn renumber(tx: &mut Transaction<'_, Sqlite>, ids: &[Id]) -> Result<(), Pa
 
 /// True when `ancestor` is on the parent chain of `page_id`.
 async fn is_ancestor(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     ancestor: Id,
     page_id: Id,
 ) -> Result<bool, PageError> {
-    Ok(sqlx::query_scalar(
+    let Flag(found) = sqlx::query_scalar(
         "WITH RECURSIVE ancestors(id) AS ( \
-             SELECT parent_id FROM pages WHERE id = ? \
+             SELECT parent_id FROM pages WHERE id = $1 \
              UNION \
              SELECT pages.parent_id FROM pages JOIN ancestors ON pages.id = ancestors.id \
          ) \
-         SELECT EXISTS(SELECT 1 FROM ancestors WHERE id = ?)",
+         SELECT EXISTS(SELECT 1 FROM ancestors WHERE id = $2)",
     )
     .bind(page_id.to_string())
     .bind(ancestor.to_string())
     .fetch_one(&mut **tx)
-    .await?)
+    .await?;
+    Ok(found)
 }
 
 /// The space of a live page the caller can see; `None` when it is missing, trashed, or someone
 /// else's private page.
 async fn live_page_space(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     page_id: Id,
     actor_id: Id,
 ) -> Result<Option<PageSpace>, PageError> {
-    let row = sqlx::query(&format!(
-        "SELECT teamspace_id FROM pages WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL \
-         AND {VISIBLE}"
-    ))
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "SELECT teamspace_id FROM pages WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL \
+         AND {visible}",
+        visible = visible(3)
+    )))
     .bind(page_id.to_string())
     .bind(workspace_id.to_string())
     .bind(actor_id.to_string())
@@ -2126,7 +2229,7 @@ async fn live_page_space(
 /// request is invalid); at the root it takes the requested space, else `fallback`, else the
 /// workspace's default teamspace.
 async fn resolve_space(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     actor_id: Id,
     parent_id: Option<Id>,
@@ -2184,20 +2287,20 @@ async fn resolve_space(
 /// one depth level at a time so each row's parent is already in the new space when the
 /// `pages_parent_space_update` trigger checks it.
 async fn move_descendants(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     page_id: Id,
     space: PageSpace,
 ) -> Result<(), PageError> {
     for depth in 1_i64.. {
         let moved = sqlx::query(
             "WITH RECURSIVE subtree(id, depth) AS ( \
-                 SELECT ?, 0 \
+                 SELECT $1, 0 \
                  UNION ALL \
                  SELECT pages.id, subtree.depth + 1 FROM pages JOIN subtree ON pages.parent_id = subtree.id \
-                 WHERE subtree.depth < ? \
+                 WHERE subtree.depth < $2 \
              ) \
-             UPDATE pages SET teamspace_id = ?, owner_id = ? \
-             WHERE id IN (SELECT id FROM subtree WHERE depth = ?)",
+             UPDATE pages SET teamspace_id = $3, owner_id = $4 \
+             WHERE id IN (SELECT id FROM subtree WHERE depth = $5)",
         )
         .bind(page_id.to_string())
         .bind(depth)
@@ -2215,16 +2318,17 @@ async fn move_descendants(
 }
 
 pub(super) async fn page_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     page_id: Id,
     actor_id: Id,
     deleted: bool,
 ) -> Result<PageRecord, PageError> {
-    let row = sqlx::query(&format!(
-        "SELECT {PAGE_COLUMNS} FROM pages WHERE id = ? AND workspace_id = ? AND {VISIBLE} \
-         AND ((? = 1 AND deleted_at IS NOT NULL) OR (? = 0 AND deleted_at IS NULL))"
-    ))
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "SELECT {PAGE_COLUMNS} FROM pages WHERE id = $1 AND workspace_id = $2 AND {visible} \
+         AND (($4 = 1 AND deleted_at IS NOT NULL) OR ($5 = 0 AND deleted_at IS NULL))",
+        visible = visible(3)
+    )))
     .bind(page_id.to_string())
     .bind(workspace_id.to_string())
     .bind(actor_id.to_string())
@@ -2258,7 +2362,7 @@ impl PageRecord {
     }
 }
 
-fn page_from_row(row: sqlx::sqlite::SqliteRow) -> Result<PageRecord, PageError> {
+fn page_from_row(row: sqlx::any::AnyRow) -> Result<PageRecord, PageError> {
     let content: String = row.get("content_json");
     let teamspace_id = parse_optional_id(row.get("teamspace_id"))?;
     Ok(PageRecord {
@@ -2304,10 +2408,10 @@ fn page_from_row(row: sqlx::sqlite::SqliteRow) -> Result<PageRecord, PageError> 
 
 /// The user's id and display name.
 pub(super) async fn user_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     user_id: Id,
 ) -> Result<PageUser, PageError> {
-    let display_name: String = sqlx::query_scalar("SELECT display_name FROM users WHERE id = ?")
+    let display_name: String = sqlx::query_scalar("SELECT display_name FROM users WHERE id = $1")
         .bind(user_id.to_string())
         .fetch_optional(&mut **tx)
         .await?
@@ -2319,7 +2423,7 @@ pub(super) async fn user_in_tx(
 }
 
 /// The epoch reported for pages without a collaborative document yet.
-async fn collab_generation(tx: &mut Transaction<'_, Sqlite>) -> Result<String, PageError> {
+async fn collab_generation(tx: &mut Transaction<'_, Any>) -> Result<String, PageError> {
     Ok(
         sqlx::query_scalar("SELECT generation FROM page_collab_meta WHERE id = 1")
             .fetch_one(&mut **tx)
@@ -2329,18 +2433,20 @@ async fn collab_generation(tx: &mut Transaction<'_, Sqlite>) -> Result<String, P
 
 /// A page by id in any state (live or trashed), without a visibility check.
 pub(super) async fn page_by_id_in_tx(
-    tx: &mut Transaction<'_, Sqlite>,
+    tx: &mut Transaction<'_, Any>,
     page_id: Id,
 ) -> Result<Option<PageRecord>, PageError> {
-    sqlx::query(&format!("SELECT {PAGE_COLUMNS} FROM pages WHERE id = ?"))
-        .bind(page_id.to_string())
-        .fetch_optional(&mut **tx)
-        .await?
-        .map(page_from_row)
-        .transpose()
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "SELECT {PAGE_COLUMNS} FROM pages WHERE id = $1"
+    )))
+    .bind(page_id.to_string())
+    .fetch_optional(&mut **tx)
+    .await?
+    .map(page_from_row)
+    .transpose()
 }
 
-fn summary_from_row(row: sqlx::sqlite::SqliteRow) -> Result<PageSummary, PageError> {
+fn summary_from_row(row: sqlx::any::AnyRow) -> Result<PageSummary, PageError> {
     let teamspace_id = parse_optional_id(row.get("teamspace_id"))?;
     Ok(PageSummary {
         id: parse_id(row.get("id"))?,
@@ -2371,7 +2477,10 @@ fn parse_version(value: i64) -> Result<u64, PageError> {
 mod tests {
     use serde_json::json;
 
-    use super::{SEARCH_MAX_TERMS, TextRange, content_text, fts_query, split_marks};
+    use super::{
+        SEARCH_MAX_TERMS, TextRange, content_text, fts_query, pg_tsquery, split_marks,
+        with_ellipses,
+    };
 
     #[test]
     fn content_text_walks_blocks_in_document_order() {
@@ -2421,6 +2530,42 @@ mod tests {
             fts_query(&"w ".repeat(40)).unwrap().matches('"').count(),
             SEARCH_MAX_TERMS * 2
         );
+    }
+
+    #[test]
+    fn pg_tsqueries_split_words_like_unicode61_and_prefix_the_last() {
+        assert_eq!(
+            pg_tsquery("foo-bar laun"),
+            Some("foo <-> bar & laun:*".to_owned())
+        );
+        assert_eq!(
+            pg_tsquery("user@Example.com"),
+            Some("user <-> example <-> com:*".to_owned())
+        );
+        assert_eq!(
+            pg_tsquery("a\"b NEAR(x) title:foo !c"),
+            Some("a <-> b & near <-> x & title <-> foo & c:*".to_owned())
+        );
+        for blank in ["", "   ", "* - : \" ( ) % & | !", "🙂"] {
+            assert_eq!(pg_tsquery(blank), None, "{blank}");
+        }
+        assert_eq!(
+            pg_tsquery(&"w ".repeat(40)).unwrap().matches('w').count(),
+            SEARCH_MAX_TERMS
+        );
+    }
+
+    #[test]
+    fn excerpts_get_ellipses_where_they_cut_the_body() {
+        let body = "one two three four";
+        assert_eq!(
+            with_ellipses("two \u{2}three\u{3}".into(), body),
+            "…two \u{2}three\u{3}…"
+        );
+        assert_eq!(with_ellipses("one two".into(), body), "one two…");
+        assert_eq!(with_ellipses("three four".into(), body), "…three four");
+        assert_eq!(with_ellipses(body.into(), body), body);
+        assert_eq!(with_ellipses(String::new(), body), "");
     }
 
     #[test]

@@ -26,12 +26,13 @@ pub use backup::{
 };
 pub use config::{
     Config, ConfigError, ConfigOverride, ConfigSources, DataConfig, EnvironmentMode, HttpConfig,
-    JobsConfig, MetricsConfig, RateLimitConfig, Secret, UploadConfig,
+    JobsConfig, MetricsConfig, RateLimitConfig, Secret, UploadConfig, redact_database_url,
 };
 pub use db::{
-    Database, DatabaseConfig, DatabaseError, GuardedMigrationError, Migration, MigrationError,
-    MigrationRunner, PendingMigration, TestDatabase, TestDatabaseError, lock_database_ownership,
-    run_guarded_migrations,
+    Backend, Column, Database, DatabaseConfig, DatabaseError, Flag, GuardedMigrationError,
+    Migration, MigrationError, MigrationRunner, NotBool, PendingMigration, Row, Separated,
+    SqlBuilder, TestDatabase, TestDatabaseError, lock_database_ownership, orm_write_transaction,
+    run_guarded_migrations, testing_postgres,
 };
 pub use files::{
     AuthorizedAttachment, BLOB_REFERENCE_COUNT, BlobDownload, BlobFuture, BlobMoveStatus,

@@ -7,11 +7,10 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
-use orbit_platform::{Id, RequestId, TimestampMillis};
+use orbit_platform::{Id, RequestId, Row, TimestampMillis};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::Row;
 use utoipa::{IntoParams, ToSchema};
 
 use crate::auth_routes::{CookieMode, request_session};
@@ -1196,7 +1195,7 @@ pub(crate) async fn list_github_links(
         .get_task(workspace_id, task_id, actor_id)
         .await
         .map_err(|error| task_problem(error, instance.clone(), request_id.as_ref()))?;
-    let rows = sqlx::query("SELECT kind, repository || '#' || issue_number AS title, 'https://github.com/' || repository || CASE kind WHEN 'pull_request' THEN '/pull/' ELSE '/issues/' END || issue_number AS url, CASE WHEN sync_paused = 1 THEN 'paused' WHEN kind = 'pull_request' THEN pull_state ELSE 'active' END AS state, 1 AS source FROM github_issue_links WHERE workspace_id = ? AND task_id = ? UNION ALL SELECT 'pull_request' AS kind, title, url, state, 0 AS source FROM github_pull_links WHERE workspace_id = ? AND task_id = ? ORDER BY kind, title")
+    let rows = sqlx::query("SELECT kind, repository || '#' || issue_number AS title, 'https://github.com/' || repository || CASE kind WHEN 'pull_request' THEN '/pull/' ELSE '/issues/' END || issue_number AS url, CASE WHEN sync_paused = 1 THEN 'paused' WHEN kind = 'pull_request' THEN pull_state ELSE 'active' END AS state, 1 AS source FROM github_issue_links WHERE workspace_id = $1 AND task_id = $2 UNION ALL SELECT 'pull_request' AS kind, title, url, state, 0 AS source FROM github_pull_links WHERE workspace_id = $3 AND task_id = $4 ORDER BY kind, title")
         .bind(workspace_id.to_string()).bind(task_id.to_string())
         .bind(workspace_id.to_string()).bind(task_id.to_string())
         .fetch_all(state.tasks.database().pool()).await

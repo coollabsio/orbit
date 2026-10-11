@@ -380,3 +380,72 @@ fn notion_import_has_no_operator_settings() {
     );
     assert!(load_fixture("[notion]\nrequests_per_minute = 600", [], None).is_err());
 }
+
+#[test]
+fn postgres_database_url_comes_from_toml_or_environment_and_is_redacted() {
+    let from_toml = load_fixture(
+        &format!(
+            r#"
+        [data]
+        database_url = "postgres://orbit:hunter2@db.internal:5432/orbit"
+        {STATELESS}
+        "#
+        ),
+        [],
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        from_toml.data.database_url.as_deref(),
+        Some("postgres://orbit:hunter2@db.internal:5432/orbit")
+    );
+    assert!(!format!("{from_toml:?}").contains("hunter2"));
+    let database = orbit_platform::DatabaseConfig::for_data(&from_toml.data);
+    assert_eq!(database.path, from_toml.data.database);
+    assert_eq!(database.postgres_url, from_toml.data.database_url);
+    assert!(!format!("{database:?}").contains("hunter2"));
+    assert_eq!(
+        orbit_platform::redact_database_url("postgres://orbit:hunter2@db.internal/orbit"),
+        "postgres://orbit:REDACTED@db.internal/orbit"
+    );
+
+    let from_environment = load_fixture(
+        STATELESS,
+        [(
+            "ORBIT__DATA__DATABASE_URL",
+            "postgresql://orbit@127.0.0.1/orbit",
+        )],
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        from_environment.data.database_url.as_deref(),
+        Some("postgresql://orbit@127.0.0.1/orbit")
+    );
+    assert_eq!(load_fixture("", [], None).unwrap().data.database_url, None);
+    assert!(
+        load_fixture(
+            STATELESS,
+            [("ORBIT__DATA__DATABASE_URL", "mysql://x")],
+            None
+        )
+        .is_err()
+    );
+}
+
+/// What a Postgres configuration needs besides the URL: the key for saved secrets, so a replaced server can
+/// still read them.
+const STATELESS: &str = r#"
+[secrets]
+app_key = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+"#;
+
+#[test]
+fn postgres_needs_a_configured_app_key() {
+    let postgres = ("ORBIT__DATA__DATABASE_URL", "postgres://orbit@db/orbit");
+    assert!(load_fixture(STATELESS, [postgres], None).is_ok());
+    let error = load_fixture("", [postgres], None).unwrap_err().to_string();
+    assert!(error.contains("secrets.app_key"), "{error}");
+    // SQLite creates app.key beside its database file instead.
+    assert!(load_fixture("", [], None).is_ok());
+}

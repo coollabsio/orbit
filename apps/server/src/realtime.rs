@@ -13,7 +13,7 @@ use axum::{
     response::Response,
     routing::get,
 };
-use orbit_platform::{Database, Id, TimestampMillis};
+use orbit_platform::{Database, Flag, Id, TimestampMillis};
 use serde::Deserialize;
 
 const RETENTION_MS: i64 = 7 * 24 * 60 * 60 * 1000;
@@ -57,8 +57,9 @@ pub async fn authorized(
     workspace: Id,
     session: Id,
 ) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM sessions s JOIN users u ON u.id=s.user_id JOIN memberships m ON m.user_id=u.id JOIN workspaces w ON w.id=m.workspace_id WHERE s.id=? AND w.id=? AND s.revoked_at IS NULL AND u.suspended_at IS NULL AND w.deleted_at IS NULL AND s.idle_expires_at>? AND s.absolute_expires_at>?)")
-        .bind(session.to_string()).bind(workspace.to_string()).bind(TimestampMillis::now().as_millis()).bind(TimestampMillis::now().as_millis()).fetch_one(database.pool()).await
+    let Flag(found) = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM sessions s JOIN users u ON u.id=s.user_id JOIN memberships m ON m.user_id=u.id JOIN workspaces w ON w.id=m.workspace_id WHERE s.id=$1 AND w.id=$2 AND s.revoked_at IS NULL AND u.suspended_at IS NULL AND w.deleted_at IS NULL AND s.idle_expires_at>$3 AND s.absolute_expires_at>$4)")
+        .bind(session.to_string()).bind(workspace.to_string()).bind(TimestampMillis::now().as_millis()).bind(TimestampMillis::now().as_millis()).fetch_one(database.pool()).await?;
+    Ok(found)
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -81,13 +82,13 @@ pub async fn replay(
     // One snapshot prevents a writer racing cursor validation and replay.
     let mut tx = database.pool().begin().await?;
     let latest: i64 = sqlx::query_scalar(
-        "SELECT COALESCE((SELECT sequence FROM realtime_sequences WHERE workspace_id=?),0)",
+        "SELECT COALESCE((SELECT sequence FROM realtime_sequences WHERE workspace_id=$1),0)",
     )
     .bind(workspace.to_string())
     .fetch_one(&mut *tx)
     .await?;
     let oldest: Option<i64> = sqlx::query_scalar(
-        "SELECT MIN(sequence) FROM outbox_events WHERE workspace_id=? AND created_at>=?",
+        "SELECT MIN(sequence) FROM outbox_events WHERE workspace_id=$1 AND created_at>=$2",
     )
     .bind(workspace.to_string())
     .bind(TimestampMillis::now().as_millis() - RETENTION_MS)
@@ -99,11 +100,12 @@ pub async fn replay(
     let (workspaces_changed, profile_changed, views_only) = if valid && after != Some(latest) {
         // LEFT JOIN: an event without its audit row counts as "not a view change"
         let (workspace, profile, views): (i64, i64, i64) = sqlx::query_as(
-            "SELECT COALESCE(MAX(a.resource_type IN ('workspace', 'membership')), 0), \
-                    COALESCE(MAX(a.resource_type = 'user'), 0), \
-                    COALESCE(MIN(COALESCE(a.resource_type = 'saved_view', 0)), 0) \
+            "SELECT COALESCE(MAX(CASE WHEN a.resource_type IN ('workspace', 'membership') \
+                                      THEN 1 ELSE 0 END), 0), \
+                    COALESCE(MAX(CASE WHEN a.resource_type = 'user' THEN 1 ELSE 0 END), 0), \
+                    COALESCE(MIN(CASE WHEN a.resource_type = 'saved_view' THEN 1 ELSE 0 END), 0) \
              FROM outbox_events e LEFT JOIN audit_events a ON a.id = e.id \
-             WHERE e.scope = ? AND e.sequence > ? AND e.sequence <= ?",
+             WHERE e.scope = $1 AND e.sequence > $2 AND e.sequence <= $3",
         )
         .bind(workspace.to_string())
         .bind(after.unwrap_or_default())

@@ -20,10 +20,9 @@ use std::time::Duration;
 
 use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
-use orbit_platform::{Database, Id, TimestampMillis};
+use orbit_platform::{Database, Id, Row, TimestampMillis};
 use p256::SecretKey;
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 use tokio::sync::OnceCell;
 use tokio_util::sync::CancellationToken;
 use utoipa::ToSchema;
@@ -337,7 +336,8 @@ impl PushService {
             .get_or_try_init(|| async {
                 let fresh = SecretKey::random(&mut rand_core::OsRng);
                 sqlx::query(
-                    "INSERT OR IGNORE INTO push_keys (id, private_key, created_at) VALUES (1, ?, ?)",
+                    "INSERT INTO push_keys (id, private_key, created_at) VALUES (1, $1, $2) \
+                     ON CONFLICT DO NOTHING",
                 )
                 .bind(fresh.to_bytes().as_slice())
                 .bind(TimestampMillis::now().as_millis())
@@ -370,7 +370,7 @@ impl PushService {
         user_id: Id,
     ) -> Result<Vec<PushSubscriptionRecord>, sqlx::Error> {
         let rows = sqlx::query(
-            "SELECT id, endpoint, label, created_at FROM push_subscriptions WHERE user_id = ? \
+            "SELECT id, endpoint, label, created_at FROM push_subscriptions WHERE user_id = $1 \
              ORDER BY id",
         )
         .bind(user_id.to_string())
@@ -408,7 +408,7 @@ impl PushService {
         let mut tx = self.database.pool().begin().await?;
         let row = sqlx::query(
             "INSERT INTO push_subscriptions (id, user_id, session_id, endpoint, p256dh, auth, label, created_at) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (endpoint) DO UPDATE SET \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (endpoint) DO UPDATE SET \
              user_id = excluded.user_id, session_id = excluded.session_id, p256dh = excluded.p256dh, \
              auth = excluded.auth, label = excluded.label RETURNING id, created_at",
         )
@@ -425,9 +425,9 @@ impl PushService {
         let id: String = row.get("id");
         // The oldest ones above the limit go; never the one that subscribed now.
         sqlx::query(
-            "DELETE FROM push_subscriptions WHERE user_id = ?1 AND id NOT IN ( \
-             SELECT id FROM push_subscriptions WHERE user_id = ?1 \
-             ORDER BY id = ?2 DESC, created_at DESC, id DESC LIMIT ?3)",
+            "DELETE FROM push_subscriptions WHERE user_id = $1 AND id NOT IN ( \
+             SELECT id FROM push_subscriptions WHERE user_id = $1 \
+             ORDER BY id = $2 DESC, created_at DESC, id DESC LIMIT $3)",
         )
         .bind(user_id.to_string())
         .bind(&id)
@@ -447,7 +447,7 @@ impl PushService {
 
     /// Removes one of the user's subscriptions; nothing happens when it is not theirs.
     pub async fn unsubscribe(&self, user_id: Id, id: &str) -> Result<(), sqlx::Error> {
-        sqlx::query("DELETE FROM push_subscriptions WHERE id = ? AND user_id = ?")
+        sqlx::query("DELETE FROM push_subscriptions WHERE id = $1 AND user_id = $2")
             .bind(id)
             .bind(user_id.to_string())
             .execute(self.database.pool())
@@ -458,7 +458,7 @@ impl PushService {
     pub async fn prefs(&self, user_id: Id) -> Result<NotificationPrefs, sqlx::Error> {
         let row = sqlx::query(
             "SELECT direct_messages, chat_mentions, thread_replies, channel_messages, task_assigned, \
-             mentions FROM notification_prefs WHERE user_id = ?",
+             mentions FROM notification_prefs WHERE user_id = $1",
         )
         .bind(user_id.to_string())
         .fetch_optional(self.database.pool())
@@ -485,19 +485,19 @@ impl PushService {
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
             "INSERT INTO notification_prefs (user_id, direct_messages, chat_mentions, thread_replies, \
-             channel_messages, task_assigned, mentions, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) \
+             channel_messages, task_assigned, mentions, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
              ON CONFLICT (user_id) DO UPDATE SET direct_messages = excluded.direct_messages, \
              chat_mentions = excluded.chat_mentions, thread_replies = excluded.thread_replies, \
              channel_messages = excluded.channel_messages, task_assigned = excluded.task_assigned, \
              mentions = excluded.mentions, updated_at = excluded.updated_at",
         )
         .bind(user_id.to_string())
-        .bind(prefs.direct_messages)
-        .bind(prefs.chat_mentions)
-        .bind(prefs.thread_replies)
-        .bind(prefs.channel_messages)
-        .bind(prefs.task_assigned)
-        .bind(prefs.mentions)
+        .bind(i64::from(prefs.direct_messages))
+        .bind(i64::from(prefs.chat_mentions))
+        .bind(i64::from(prefs.thread_replies))
+        .bind(i64::from(prefs.channel_messages))
+        .bind(i64::from(prefs.task_assigned))
+        .bind(i64::from(prefs.mentions))
         .bind(now.as_millis())
         .execute(self.database.pool())
         .await?;
@@ -507,13 +507,13 @@ impl PushService {
     /// Whether the user wants to be notified of this kind of event now: it is on in their
     /// preferences and they did not set "do not disturb".
     async fn wanted(&self, user_id: Id, kind: PushKind) -> Result<bool, sqlx::Error> {
-        let row = sqlx::query(&format!(
+        let row = sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT COALESCE(prefs.{}, 1) AS wanted, COALESCE(status.presence, 'online') AS presence \
              FROM users LEFT JOIN notification_prefs AS prefs ON prefs.user_id = users.id \
              LEFT JOIN user_status AS status ON status.user_id = users.id \
-             WHERE users.id = ? AND users.suspended_at IS NULL",
+             WHERE users.id = $1 AND users.suspended_at IS NULL",
             kind.column()
-        ))
+        )))
         .bind(user_id.to_string())
         .fetch_optional(self.database.pool())
         .await?;
@@ -556,8 +556,8 @@ impl PushService {
         let rows = sqlx::query(
             "SELECT push.id, push.endpoint, push.p256dh, push.auth FROM push_subscriptions AS push \
              JOIN sessions ON sessions.id = push.session_id \
-             WHERE push.user_id = ? AND sessions.revoked_at IS NULL \
-             AND sessions.idle_expires_at > ? AND sessions.absolute_expires_at > ?",
+             WHERE push.user_id = $1 AND sessions.revoked_at IS NULL \
+             AND sessions.idle_expires_at > $2 AND sessions.absolute_expires_at > $3",
         )
         .bind(user_id.to_string())
         .bind(now)
@@ -605,14 +605,14 @@ impl PushService {
                 Ok(()) => {
                     sent += 1;
                     sqlx::query(
-                        "UPDATE push_subscriptions SET failures = 0 WHERE id = ? AND failures > 0",
+                        "UPDATE push_subscriptions SET failures = 0 WHERE id = $1 AND failures > 0",
                     )
                     .bind(id)
                     .execute(self.database.pool())
                     .await?;
                 }
                 Err(SendError::Gone) => {
-                    sqlx::query("DELETE FROM push_subscriptions WHERE id = ?")
+                    sqlx::query("DELETE FROM push_subscriptions WHERE id = $1")
                         .bind(id)
                         .execute(self.database.pool())
                         .await?;
@@ -623,12 +623,12 @@ impl PushService {
                 Err(SendError::Failed(reason) | SendError::Busy(reason)) => {
                     tracing::warn!(reason, "push not sent");
                     sqlx::query(
-                        "UPDATE push_subscriptions SET failures = failures + 1 WHERE id = ?",
+                        "UPDATE push_subscriptions SET failures = failures + 1 WHERE id = $1",
                     )
                     .bind(&id)
                     .execute(self.database.pool())
                     .await?;
-                    sqlx::query("DELETE FROM push_subscriptions WHERE id = ? AND failures >= ?")
+                    sqlx::query("DELETE FROM push_subscriptions WHERE id = $1 AND failures >= $2")
                         .bind(&id)
                         .bind(MAX_FAILURES)
                         .execute(self.database.pool())
@@ -657,9 +657,9 @@ impl PushService {
         let Some(conversation) = sqlx::query(
             "SELECT chat_conversations.kind, chat_conversations.name, chat_conversations.workspace_id, \
              users.display_name AS author, user_avatars.updated_at AS avatar_updated_at \
-             FROM chat_conversations JOIN users ON users.id = ? \
+             FROM chat_conversations JOIN users ON users.id = $1 \
              LEFT JOIN user_avatars ON user_avatars.user_id = users.id \
-             WHERE chat_conversations.id = ?",
+             WHERE chat_conversations.id = $2",
         )
         .bind(message.author_id.to_string())
         .bind(message.conversation_id.to_string())
@@ -675,11 +675,11 @@ impl PushService {
         let members = sqlx::query(
             "SELECT members.user_id, members.notify, \
              EXISTS (SELECT 1 FROM chat_message_mentions AS mentions \
-               WHERE mentions.message_id = ?1 AND mentions.user_id = members.user_id) AS mentioned, \
+               WHERE mentions.message_id = $1 AND mentions.user_id = members.user_id) AS mentioned, \
              EXISTS (SELECT 1 FROM chat_thread_members AS threads \
-               WHERE threads.root_id = ?2 AND threads.user_id = members.user_id \
+               WHERE threads.root_id = $2 AND threads.user_id = members.user_id \
                AND threads.following = 1) AS following \
-             FROM chat_members AS members WHERE members.conversation_id = ?3 AND members.user_id <> ?4",
+             FROM chat_members AS members WHERE members.conversation_id = $3 AND members.user_id <> $4",
         )
         .bind(message.id.to_string())
         .bind(message.thread_root_id.map(|id| id.to_string()))
@@ -722,10 +722,9 @@ impl PushService {
             let kind = chat_kind(ChatAudience {
                 dm,
                 notify: &member.get::<String, _>("notify"),
-                mentioned: member.get::<i64, _>("mentioned") == 1
-                    || (!dm && !thread_only && broadcast),
+                mentioned: member.get::<bool, _>("mentioned") || (!dm && !thread_only && broadcast),
                 thread_only,
-                following: member.get::<i64, _>("following") == 1,
+                following: member.get::<bool, _>("following"),
             });
             if let Some(kind) = kind {
                 let notice = Notice {
@@ -759,7 +758,7 @@ impl PushService {
         let mentioned: HashMap<String, String> = if message.body.contains("<@") {
             sqlx::query(
                 "SELECT users.id, users.display_name FROM chat_message_mentions AS mentions \
-                 JOIN users ON users.id = mentions.user_id WHERE mentions.message_id = ?",
+                 JOIN users ON users.id = mentions.user_id WHERE mentions.message_id = $1",
             )
             .bind(message.id.to_string())
             .fetch_all(self.database.pool())
@@ -791,7 +790,7 @@ impl PushService {
                     if !channels.contains_key(id) && channels.len() < CHANNEL_LOOKUPS {
                         let name: Option<String> = sqlx::query_scalar(
                             "SELECT name FROM chat_conversations \
-                             WHERE id = ? AND workspace_id = ? AND kind = 'public'",
+                             WHERE id = $1 AND workspace_id = $2 AND kind = 'public'",
                         )
                         .bind(id)
                         .bind(workspace_id)
@@ -844,7 +843,7 @@ impl PushService {
         for row in &rows {
             let id: String = row.get("id");
             // Marked first: a notification is pushed at most once, also when the push fails.
-            sqlx::query("UPDATE notifications SET pushed_at = ? WHERE id = ?")
+            sqlx::query("UPDATE notifications SET pushed_at = $1 WHERE id = $2")
                 .bind(TimestampMillis::now().as_millis())
                 .bind(&id)
                 .execute(self.database.pool())

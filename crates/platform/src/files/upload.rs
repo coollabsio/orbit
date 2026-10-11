@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use sha2::{Digest, Sha256};
-use sqlx::{Row, Sqlite, Transaction};
+use sqlx::{Any, Row, Transaction};
 use thiserror::Error;
 use tokio::fs;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
@@ -20,12 +20,12 @@ const SNIFF_BYTES: usize = 8 * 1024;
 /// References to one blob (bind its id twice): task/comment attachments, docs page files, chat
 /// files, profile pictures, custom emoji and stickers. The second parameter is used for all of the
 /// newer tables.
-pub const BLOB_REFERENCE_COUNT: &str = "SELECT (SELECT COUNT(*) FROM attachment_references WHERE blob_id = ?1) \
-     + (SELECT COUNT(*) FROM page_files WHERE blob_id = ?2) \
-     + (SELECT COUNT(*) FROM chat_message_files WHERE blob_id = ?2) \
-     + (SELECT COUNT(*) FROM user_avatars WHERE blob_id = ?2) \
-     + (SELECT COUNT(*) FROM custom_emoji WHERE blob_id = ?2) \
-     + (SELECT COUNT(*) FROM custom_stickers WHERE blob_id = ?2)";
+pub const BLOB_REFERENCE_COUNT: &str = "SELECT (SELECT COUNT(*) FROM attachment_references WHERE blob_id = $1) \
+     + (SELECT COUNT(*) FROM page_files WHERE blob_id = $2) \
+     + (SELECT COUNT(*) FROM chat_message_files WHERE blob_id = $2) \
+     + (SELECT COUNT(*) FROM user_avatars WHERE blob_id = $2) \
+     + (SELECT COUNT(*) FROM custom_emoji WHERE blob_id = $2) \
+     + (SELECT COUNT(*) FROM custom_stickers WHERE blob_id = $2)";
 /// Every table that references blobs by `blob_id`.
 const BLOB_REFERENCE_TABLES: [&str; 6] = [
     "attachment_references",
@@ -214,7 +214,7 @@ pub struct UploadService {
 impl UploadFinalization<'_> {
     pub async fn finalize_in_transaction(
         &self,
-        transaction: &mut Transaction<'_, Sqlite>,
+        transaction: &mut Transaction<'_, Any>,
         upload: &StagedUpload,
         attachment: NewAttachmentReference,
         now: TimestampMillis,
@@ -227,7 +227,7 @@ impl UploadFinalization<'_> {
             "INSERT INTO attachment_references (\
                 id, workspace_id, task_id, comment_id, owner_id, blob_id, display_name, media_type,\
                 byte_size, created_at\
-             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
         )
         .bind(attachment.id.to_string())
         .bind(upload.workspace_id.to_string())
@@ -254,16 +254,16 @@ impl UploadFinalization<'_> {
     /// page file) in the same transaction, or the blob becomes reclaimable after quarantine.
     pub async fn finalize_blob_in_transaction(
         &self,
-        transaction: &mut Transaction<'_, Sqlite>,
+        transaction: &mut Transaction<'_, Any>,
         upload: &StagedUpload,
         now: TimestampMillis,
     ) -> Result<FinalizedBlob, UploadError> {
         let size_i64 = i64::try_from(upload.size_bytes).map_err(|_| UploadError::SizeOverflow)?;
         let valid: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM pending_uploads \
-             WHERE id = ? AND workspace_id = ? AND user_id = ? AND temporary_path = ? \
-               AND original_name = ? AND media_type = ? AND byte_size = ? AND sha256 = ? \
-               AND state = 'staged' AND expires_at > ?",
+             WHERE id = $1 AND workspace_id = $2 AND user_id = $3 AND temporary_path = $4 \
+               AND original_name = $5 AND media_type = $6 AND byte_size = $7 AND sha256 = $8 \
+               AND state = 'staged' AND expires_at > $9",
         )
         .bind(upload.id.to_string())
         .bind(upload.workspace_id.to_string())
@@ -289,9 +289,9 @@ impl UploadFinalization<'_> {
         let blob = record_blob(transaction, upload, &stored.storage_key, now).await?;
 
         let updated = sqlx::query(
-            "UPDATE pending_uploads SET state = 'complete', completed_at = ? \
-             WHERE id = ? AND workspace_id = ? AND user_id = ? AND state = 'staged' \
-               AND sha256 = ? AND byte_size = ?",
+            "UPDATE pending_uploads SET state = 'complete', completed_at = $1 \
+             WHERE id = $2 AND workspace_id = $3 AND user_id = $4 AND state = 'staged' \
+               AND sha256 = $5 AND byte_size = $6",
         )
         .bind(now.as_millis())
         .bind(upload.id.to_string())
@@ -313,7 +313,7 @@ impl UploadFinalization<'_> {
     /// the same transaction.
     pub async fn finalize_bytes_in_transaction(
         &self,
-        transaction: &mut Transaction<'_, Sqlite>,
+        transaction: &mut Transaction<'_, Any>,
         workspace_id: Id,
         bytes: &[u8],
         now: TimestampMillis,
@@ -325,7 +325,7 @@ impl UploadFinalization<'_> {
 
 /// Adds the `attachment_blobs` row of an installed blob, or finds the row of the same bytes.
 async fn record_blob(
-    transaction: &mut Transaction<'_, Sqlite>,
+    transaction: &mut Transaction<'_, Any>,
     upload: &StagedUpload,
     storage_key: &str,
     now: TimestampMillis,
@@ -333,9 +333,9 @@ async fn record_blob(
     let size_i64 = i64::try_from(upload.size_bytes).map_err(|_| UploadError::SizeOverflow)?;
     let quarantine_until = now.as_millis().saturating_add(QUARANTINE_MILLIS);
     sqlx::query(
-        "INSERT OR IGNORE INTO attachment_blobs (\
+        "INSERT INTO attachment_blobs (\
             id, workspace_id, sha256, byte_size, storage_key, created_at, quarantine_until\
-         ) VALUES (?, ?, ?, ?, ?, ?, ?)",
+         ) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT DO NOTHING",
     )
     .bind(Id::new_v7().to_string())
     .bind(upload.workspace_id.to_string())
@@ -349,7 +349,7 @@ async fn record_blob(
 
     let row = sqlx::query(
         "SELECT id, storage_key, quarantine_until FROM attachment_blobs \
-         WHERE workspace_id = ? AND sha256 = ? AND byte_size = ?",
+         WHERE workspace_id = $1 AND sha256 = $2 AND byte_size = $3",
     )
     .bind(upload.workspace_id.to_string())
     .bind(&upload.sha256)
@@ -490,7 +490,7 @@ impl UploadService {
                 "INSERT INTO pending_uploads (\
                     id, workspace_id, user_id, temporary_path, original_name, media_type,\
                     byte_size, sha256, state, created_at, expires_at\
-                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'staged', ?, ?)",
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'staged', $9, $10)",
             )
             .bind(id.to_string())
             .bind(workspace_id.to_string())
@@ -557,8 +557,8 @@ impl UploadService {
         let _mutation = self.mutations.begin().await;
         self.store.delete_temporary(&upload.temporary_path).await?;
         sqlx::query(
-            "UPDATE pending_uploads SET state = 'failed' WHERE id = ? AND workspace_id = ? \
-             AND user_id = ? AND state = 'staged'",
+            "UPDATE pending_uploads SET state = 'failed' WHERE id = $1 AND workspace_id = $2 \
+             AND user_id = $3 AND state = 'staged'",
         )
         .bind(upload.id.to_string())
         .bind(upload.workspace_id.to_string())
@@ -596,7 +596,7 @@ impl UploadService {
         let _operation = self.operations.lock().await;
         let _mutation = self.mutations.begin().await;
         let Some(row) = sqlx::query(
-            "SELECT workspace_id FROM attachment_blobs WHERE id = ? AND storage_key = ?",
+            "SELECT workspace_id FROM attachment_blobs WHERE id = $1 AND storage_key = $2",
         )
         .bind(blob_id)
         .bind(expected_key)
@@ -610,7 +610,7 @@ impl UploadService {
         let size_bytes = u64::try_from(bytes.len()).map_err(|_| UploadError::SizeOverflow)?;
         let size_i64 = i64::try_from(size_bytes).map_err(|_| UploadError::SizeOverflow)?;
         let duplicate: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM attachment_blobs WHERE workspace_id = ? AND sha256 = ? AND byte_size = ?",
+            "SELECT COUNT(*) FROM attachment_blobs WHERE workspace_id = $1 AND sha256 = $2 AND byte_size = $3",
         )
         .bind(&workspace_id)
         .bind(&sha256)
@@ -630,7 +630,7 @@ impl UploadService {
         let updated = async {
             let mut transaction = self.database.immediate_transaction().await?;
             sqlx::query(
-                "UPDATE attachment_blobs SET sha256 = ?, byte_size = ?, storage_key = ? WHERE id = ?",
+                "UPDATE attachment_blobs SET sha256 = $1, byte_size = $2, storage_key = $3 WHERE id = $4",
             )
             .bind(&sha256)
             .bind(size_i64)
@@ -644,15 +644,15 @@ impl UploadService {
                 ("chat_message_files", "file_name", "mime_type", "size_bytes"),
             ] {
                 let references =
-                    sqlx::query(&format!("SELECT id, {name} AS name FROM {table} WHERE blob_id = ?"))
+                    sqlx::query(sqlx::AssertSqlSafe(format!("SELECT id, {name} AS name FROM {table} WHERE blob_id = $1")))
                         .bind(blob_id)
                         .fetch_all(&mut *transaction)
                         .await?;
                 for reference in references {
                     let old_name: String = reference.try_get("name")?;
-                    sqlx::query(&format!(
-                        "UPDATE {table} SET {name} = ?, {media} = ?, {size} = ? WHERE id = ?"
-                    ))
+                    sqlx::query(sqlx::AssertSqlSafe(format!(
+                        "UPDATE {table} SET {name} = $1, {media} = $2, {size} = $3 WHERE id = $4"
+                    )))
                     .bind(with_extension(&old_name, extension))
                     .bind(media_type)
                     .bind(size_i64)
@@ -662,7 +662,7 @@ impl UploadService {
                 }
             }
             for table in ["user_avatars", "custom_emoji", "custom_stickers"] {
-                sqlx::query(&format!("UPDATE {table} SET mime_type = ? WHERE blob_id = ?"))
+                sqlx::query(sqlx::AssertSqlSafe(format!("UPDATE {table} SET mime_type = $1 WHERE blob_id = $2")))
                     .bind(media_type)
                     .bind(blob_id)
                     .execute(&mut *transaction)
@@ -716,14 +716,16 @@ impl UploadService {
 
         // Fail closed: without every reference table, no blob can be proven unreferenced.
         for table in BLOB_REFERENCE_TABLES {
-            sqlx::query(&format!("SELECT blob_id FROM {table} WHERE 0"))
-                .fetch_all(self.database.pool())
-                .await?;
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "SELECT blob_id FROM {table} WHERE 1 = 0"
+            )))
+            .fetch_all(self.database.pool())
+            .await?;
         }
 
         let expired = sqlx::query(
             "SELECT id, temporary_path FROM pending_uploads \
-             WHERE state IN ('receiving', 'staged') AND expires_at <= ?",
+             WHERE state IN ('receiving', 'staged') AND expires_at <= $1",
         )
         .bind(now_millis)
         .fetch_all(self.database.pool())
@@ -734,7 +736,7 @@ impl UploadService {
             self.store.delete_temporary(&path).await?;
             result.expired_uploads += sqlx::query(
                 "UPDATE pending_uploads SET state = 'failed' \
-                 WHERE id = ? AND state IN ('receiving', 'staged')",
+                 WHERE id = $1 AND state IN ('receiving', 'staged')",
             )
             .bind(id)
             .execute(self.database.pool())
@@ -750,11 +752,12 @@ impl UploadService {
             .into_iter()
             .map(|object| (object.storage_key.clone(), object))
             .collect();
-        let quarantined =
-            sqlx::query("SELECT id, storage_key FROM attachment_blobs WHERE quarantine_until <= ?")
-                .bind(now_millis)
-                .fetch_all(self.database.pool())
-                .await?;
+        let quarantined = sqlx::query(
+            "SELECT id, storage_key FROM attachment_blobs WHERE quarantine_until <= $1",
+        )
+        .bind(now_millis)
+        .fetch_all(self.database.pool())
+        .await?;
         for row in quarantined {
             let id: String = row.try_get("id")?;
             let storage_key: String = row.try_get("storage_key")?;
@@ -777,7 +780,7 @@ impl UploadService {
                 }
                 self.store.release(&storage_key).await?;
                 result.deleted_blobs += sqlx::query(
-                    "DELETE FROM attachment_blobs WHERE id = ? AND quarantine_until <= ?",
+                    "DELETE FROM attachment_blobs WHERE id = $1 AND quarantine_until <= $2",
                 )
                 .bind(&id)
                 .bind(now_millis)
@@ -796,7 +799,7 @@ impl UploadService {
             }
             let mut transaction = self.database.immediate_transaction().await?;
             let tracked: i64 =
-                sqlx::query_scalar("SELECT COUNT(*) FROM attachment_blobs WHERE storage_key = ?")
+                sqlx::query_scalar("SELECT COUNT(*) FROM attachment_blobs WHERE storage_key = $1")
                     .bind(&object.storage_key)
                     .fetch_one(&mut *transaction)
                     .await?;

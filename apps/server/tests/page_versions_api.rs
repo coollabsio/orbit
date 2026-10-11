@@ -132,7 +132,7 @@ impl Fixture {
     /// `(kind, title, body text)` of the stored versions, newest first.
     async fn versions(&self, page_id: &str) -> Vec<(String, String, String)> {
         let rows: Vec<(String, String, String)> = sqlx::query_as(
-            "SELECT kind, title, content_json FROM page_versions WHERE page_id = ? \
+            "SELECT kind, title, content_json FROM page_versions WHERE page_id = $1 \
              ORDER BY created_at DESC, id DESC",
         )
         .bind(page_id)
@@ -151,7 +151,7 @@ impl Fixture {
         let id = Id::new_v7().to_string();
         sqlx::query(
             "INSERT INTO page_versions (id, workspace_id, page_id, title, icon, content_json, kind, \
-             created_by, created_at) VALUES (?, ?, ?, ?, NULL, ?, 'auto', ?, ?)",
+             created_by, created_at) VALUES ($1, $2, $3, $4, NULL, $5, 'auto', $6, $7)",
         )
         .bind(&id)
         .bind(&self.workspace_id)
@@ -168,7 +168,7 @@ impl Fixture {
 
     /// Moves the page's creation an hour back, so its first real edit may snapshot.
     async fn backdate(&self, page_id: &str) {
-        sqlx::query("UPDATE pages SET created_at = created_at - ? WHERE id = ?")
+        sqlx::query("UPDATE pages SET created_at = created_at - $1 WHERE id = $2")
             .bind(60 * MINUTE)
             .bind(page_id)
             .execute(self.database.pool())
@@ -273,7 +273,7 @@ async fn edits_store_the_previous_state_at_most_every_ten_minutes() {
         version("auto", "Plan", "five")
     );
     let (icon, created_by): (Option<String>, String) = sqlx::query_as(
-        "SELECT icon, created_by FROM page_versions WHERE page_id = ? ORDER BY created_at DESC LIMIT 1",
+        "SELECT icon, created_by FROM page_versions WHERE page_id = $1 ORDER BY created_at DESC LIMIT 1",
     )
     .bind(id)
     .fetch_one(fixture.database.pool())
@@ -396,16 +396,21 @@ async fn versions_are_listed_read_and_restored_through_the_api() {
         ]
     );
     // Search follows the restored text.
-    let text: String = sqlx::query_scalar("SELECT content_text FROM pages WHERE id = ?")
+    let text: String = sqlx::query_scalar("SELECT content_text FROM pages WHERE id = $1")
         .bind(&id)
         .fetch_one(fixture.database.pool())
         .await
         .unwrap();
     assert_eq!(text, "First");
-    let audited: i64 = sqlx::query_scalar(
+    let version_id_of = if orbit_platform::testing_postgres() {
+        "(metadata_json::jsonb ->> 'version_id')"
+    } else {
+        "json_extract(metadata_json, '$.version_id')"
+    };
+    let audited: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT COUNT(*) FROM audit_events WHERE action = 'page.restored_version' \
-         AND resource_id = ? AND json_extract(metadata_json, '$.version_id') = ?",
-    )
+         AND resource_id = $1 AND {version_id_of} = $2"
+    )))
     .bind(&id)
     .bind(&version_id)
     .fetch_one(fixture.database.pool())
@@ -663,7 +668,7 @@ async fn duplicates_start_without_history_and_purges_take_it_along() {
             None,
         )
         .await;
-    let version: i64 = sqlx::query_scalar("SELECT version FROM pages WHERE id = ?")
+    let version: i64 = sqlx::query_scalar("SELECT version FROM pages WHERE id = $1")
         .bind(id)
         .fetch_one(fixture.database.pool())
         .await
@@ -679,7 +684,7 @@ async fn duplicates_start_without_history_and_purges_take_it_along() {
         )
         .await;
     assert_eq!(status, StatusCode::NO_CONTENT);
-    let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM page_versions WHERE page_id = ?")
+    let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM page_versions WHERE page_id = $1")
         .bind(id)
         .fetch_one(fixture.database.pool())
         .await
@@ -722,7 +727,7 @@ async fn retention_keeps_a_month_then_one_per_day_for_a_year_and_the_newest_twen
         .unwrap();
 
     let busy_rows: Vec<(String, i64)> = sqlx::query_as(
-        "SELECT title, created_at FROM page_versions WHERE page_id = ? ORDER BY created_at DESC",
+        "SELECT title, created_at FROM page_versions WHERE page_id = $1 ORDER BY created_at DESC",
     )
     .bind(id_of(&busy))
     .fetch_all(fixture.database.pool())
@@ -747,7 +752,7 @@ async fn retention_keeps_a_month_then_one_per_day_for_a_year_and_the_newest_twen
     assert_eq!(older.len(), 335);
 
     let quiet_left: i64 =
-        sqlx::query_scalar("SELECT COUNT(*) FROM page_versions WHERE page_id = ?")
+        sqlx::query_scalar("SELECT COUNT(*) FROM page_versions WHERE page_id = $1")
             .bind(id_of(&quiet))
             .fetch_one(fixture.database.pool())
             .await
@@ -789,7 +794,7 @@ async fn add_member(fixture: &Fixture, workspace_id: &str, email: &str) -> (Id, 
     let now = TimestampMillis::now();
     sqlx::query(
         "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) \
-         VALUES (?, ?, ?, 'Member', 'unused', ?, ?)",
+         VALUES ($1, $2, $3, 'Member', 'unused', $4, $5)",
     )
     .bind(id.to_string())
     .bind(email)
@@ -801,7 +806,7 @@ async fn add_member(fixture: &Fixture, workspace_id: &str, email: &str) -> (Id, 
     .unwrap();
     sqlx::query(
         "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
-         VALUES (?, ?, ?, 'member', 0, ?, ?)",
+         VALUES ($1, $2, $3, 'member', 0, $4, $5)",
     )
     .bind(Id::new_v7().to_string())
     .bind(workspace_id)

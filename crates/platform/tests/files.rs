@@ -796,7 +796,7 @@ async fn reconciliation_inventories_blobs_once_without_holding_the_database_writ
         std::time::Duration::from_millis(100),
         fixture
             .database
-            .execute("UPDATE pending_uploads SET state = state WHERE 0"),
+            .execute("UPDATE pending_uploads SET state = state WHERE 1 = 0"),
     )
     .await;
     inventory_resume.add_permits(1);
@@ -1248,7 +1248,7 @@ async fn replace_blob_keeps_the_blob_id_and_updates_its_references() {
 
     assert!(replaced);
     let (storage_key, size): (String, i64) =
-        sqlx::query_as("SELECT storage_key, byte_size FROM attachment_blobs WHERE id = ?")
+        sqlx::query_as("SELECT storage_key, byte_size FROM attachment_blobs WHERE id = $1")
             .bind(blob.id.to_string())
             .fetch_one(fixture.database.pool())
             .await
@@ -1258,7 +1258,7 @@ async fn replace_blob_keeps_the_blob_id_and_updates_its_references() {
     assert_eq!(fixture.service.read_blob(&storage_key).await.unwrap(), webp);
     assert!(!fixture.store.path(&blob.storage_key).unwrap().exists());
     let reference: (String, String, i64) = sqlx::query_as(
-        "SELECT display_name, media_type, byte_size FROM attachment_references WHERE blob_id = ?",
+        "SELECT display_name, media_type, byte_size FROM attachment_references WHERE blob_id = $1",
     )
     .bind(blob.id.to_string())
     .fetch_one(fixture.database.pool())

@@ -10,9 +10,10 @@ use clap::{Parser, Subcommand};
 use std::sync::Arc;
 
 use orbit_platform::{
-    AttachmentMutationCoordinator, BackupService, Config, ConfigOverride, ConfigSources, Database,
-    DatabaseConfig, DatabaseError, EnvironmentMode, LocalBlobStore, MigrationRunner,
-    TimestampMillis, UploadLimits, UploadService, lock_database_ownership, run_guarded_migrations,
+    AttachmentMutationCoordinator, BackupService, Config, ConfigOverride, ConfigSources,
+    DataConfig, Database, DatabaseConfig, DatabaseError, EnvironmentMode, LocalBlobStore,
+    MigrationRunner, TimestampMillis, UploadLimits, UploadService, lock_database_ownership,
+    run_guarded_migrations,
 };
 use orbit_server::app::App;
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
@@ -290,7 +291,7 @@ async fn shutdown_signal() {
 
 async fn setup_token(cli: &Cli, command: &SetupTokenCommand) -> Result<String, CliError> {
     let config = effective_config(cli)?;
-    let database = open_database(&config.data.database).await?;
+    let database = open_database(&config.data).await?;
     migrate_implicitly(&config, &database).await?;
     let repository = IdentityRepository::new(database);
     let now = TimestampMillis::now();
@@ -328,7 +329,7 @@ async fn migrate(cli: &Cli, command: &MigrateCommand) -> Result<String, CliError
     let config = effective_config(cli)?;
     let (reset, seed, yes) = match command {
         MigrateCommand::Status => {
-            let database = open_database(&config.data.database).await?;
+            let database = open_database(&config.data).await?;
             let runner = MigrationRunner::embedded(env!("CARGO_PKG_VERSION"));
             let pending = runner.pending(&database).await.map_err(operation)?;
             return Ok(if pending.is_empty() {
@@ -355,10 +356,10 @@ async fn migrate(cli: &Cli, command: &MigrateCommand) -> Result<String, CliError
         ));
     }
     if reset {
-        reset_data(&config)?;
+        reset_data(&config).await?;
     }
 
-    let database = open_database(&config.data.database).await?;
+    let database = open_database(&config.data).await?;
     let runner = MigrationRunner::embedded(env!("CARGO_PKG_VERSION"));
     let count = run_guarded_migrations(&config, &database, &runner)
         .await
@@ -378,7 +379,7 @@ async fn backup(cli: &Cli, command: &BackupCommand) -> Result<String, CliError> 
         .with_object_storage(storage);
     match command {
         BackupCommand::Create => {
-            let database = open_database(&config.data.database).await?;
+            let database = open_database(&config.data).await?;
             let snapshot = service.create(&database).await.map_err(operation)?;
             Ok(snapshot.id)
         }
@@ -412,10 +413,19 @@ async fn backup(cli: &Cli, command: &BackupCommand) -> Result<String, CliError> 
             Ok(format!("backup {id} verified"))
         }
         BackupCommand::Restore { id } => {
-            service
-                .restore(id, &config.data.database)
-                .await
-                .map_err(operation)?;
+            if config.data.database_url.is_some() {
+                // Opening takes the ownership lock, so a serving Orbit blocks the restore.
+                let database = open_database(&config.data).await?;
+                service
+                    .restore_postgres(id, &database)
+                    .await
+                    .map_err(operation)?;
+            } else {
+                service
+                    .restore(id, &config.data.database)
+                    .await
+                    .map_err(operation)?;
+            }
             Ok(format!("backup {id} restored"))
         }
     }
@@ -423,7 +433,7 @@ async fn backup(cli: &Cli, command: &BackupCommand) -> Result<String, CliError> 
 
 async fn attachments(cli: &Cli, command: &AttachmentsCommand) -> Result<String, CliError> {
     let config = effective_config(cli)?;
-    let database = Database::open(&DatabaseConfig::new(&config.data.database))
+    let database = Database::open(&DatabaseConfig::for_data(&config.data))
         .await
         .map_err(|error| match error {
             DatabaseError::AlreadyOwned { .. } => CliError::Operation(
@@ -458,16 +468,34 @@ async fn reset(cli: &Cli, yes: bool) -> Result<String, CliError> {
     }
     let config = effective_config(cli)?;
     require_development(&config)?;
-    reset_data(&config)?;
+    reset_data(&config).await?;
 
-    let database = open_database(&config.data.database).await?;
+    let database = open_database(&config.data).await?;
     migrate_implicitly(&config, &database).await?;
     Ok("database reset complete".to_owned())
 }
 
-fn reset_data(config: &Config) -> Result<(), CliError> {
+async fn reset_data(config: &Config) -> Result<(), CliError> {
     validate_reset_paths(config)?;
-    let path = &config.data.database;
+    if config.data.database_url.is_some() {
+        // Opening the database takes its ownership lock, so a serving Orbit blocks the reset.
+        open_database(&config.data)
+            .await?
+            .execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+            .await
+            .map_err(operation)?;
+    } else {
+        reset_sqlite_file(&config.data.database)?;
+    }
+    match fs::remove_dir_all(&config.data.attachments) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(operation(error)),
+    }
+    Ok(())
+}
+
+fn reset_sqlite_file(path: &Path) -> Result<(), CliError> {
     fs::create_dir_all(parent_directory(path)).map_err(operation)?;
     let _ownership_lock = lock_database_ownership(path).map_err(|error| match error {
         DatabaseError::AlreadyOwned { .. } => CliError::Operation(format!(
@@ -483,26 +511,20 @@ fn reset_data(config: &Config) -> Result<(), CliError> {
     database_file.set_len(0).map_err(operation)?;
     database_file.sync_all().map_err(operation)?;
     remove_sidecars(path)?;
-    drop(database_file);
-    match fs::remove_dir_all(&config.data.attachments) {
-        Ok(()) => {}
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(operation(error)),
-    }
     Ok(())
 }
 
 async fn seed(cli: &Cli) -> Result<String, CliError> {
     let config = effective_config(cli)?;
     require_development(&config)?;
-    let database = open_database(&config.data.database).await?;
+    let database = open_database(&config.data).await?;
     migrate_implicitly(&config, &database).await?;
     install_seed_data(database).await
 }
 
 async fn root(cli: &Cli, command: &RootCommand) -> Result<String, CliError> {
     let config = effective_config(cli)?;
-    let database = open_database(&config.data.database).await?;
+    let database = open_database(&config.data).await?;
     migrate_implicitly(&config, &database).await?;
     let repository = IdentityRepository::new(database);
     match command {
@@ -529,7 +551,7 @@ async fn root(cli: &Cli, command: &RootCommand) -> Result<String, CliError> {
 
 async fn recovery_link(cli: &Cli, email: &str, origin: Option<&str>) -> Result<String, CliError> {
     let config = effective_config(cli)?;
-    let database = open_database(&config.data.database).await?;
+    let database = open_database(&config.data).await?;
     migrate_implicitly(&config, &database).await?;
     let repository = IdentityRepository::new(database);
     let identity = repository
@@ -590,7 +612,7 @@ async fn seed_chat(
     };
 
     let general: Option<String> = sqlx::query_scalar(
-        "SELECT id FROM chat_conversations WHERE workspace_id = ? AND is_default = 1 \
+        "SELECT id FROM chat_conversations WHERE workspace_id = $1 AND is_default = 1 \
          AND message_count = 0",
     )
     .bind(workspace_id.to_string())
@@ -794,7 +816,7 @@ async fn install_seed_data(database: Database) -> Result<String, CliError> {
                 let user_id = orbit_platform::Id::new_v7();
                 sqlx::query(
                     "INSERT INTO users (id, email, normalized_email, display_name, password_hash, \
-                     installation_admin, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
+                     installation_admin, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, 1, $6, $7)",
                 )
                 .bind(user_id.to_string())
                 .bind(EMAIL)
@@ -814,7 +836,7 @@ async fn install_seed_data(database: Database) -> Result<String, CliError> {
         Some(setup) => setup.workspace_id,
         None => {
             let workspace = sqlx::query_scalar::<_, String>(
-                "SELECT workspace_id FROM memberships WHERE user_id = ? ORDER BY created_at LIMIT 1",
+                "SELECT workspace_id FROM memberships WHERE user_id = $1 ORDER BY created_at LIMIT 1",
             )
             .bind(user_id.to_string())
             .fetch_optional(database.pool())
@@ -840,7 +862,7 @@ async fn install_seed_data(database: Database) -> Result<String, CliError> {
     let project_id = match setup.as_ref() {
         Some(setup) => setup.project_id,
         None => sqlx::query_scalar::<_, String>(
-            "SELECT id FROM projects WHERE workspace_id = ? ORDER BY created_at LIMIT 1",
+            "SELECT id FROM projects WHERE workspace_id = $1 ORDER BY created_at LIMIT 1",
         )
         .bind(workspace_id.to_string())
         .fetch_one(database.pool())
@@ -859,7 +881,7 @@ async fn install_seed_data(database: Database) -> Result<String, CliError> {
             let member_id = orbit_platform::Id::new_v7();
             sqlx::query(
                 "INSERT INTO users (id, email, normalized_email, display_name, password_hash, \
-                 installation_admin, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 0, ?, ?)",
+                 installation_admin, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, 0, $6, $7)",
             )
             .bind(member_id.to_string())
             .bind(SECOND_EMAIL)
@@ -875,9 +897,9 @@ async fn install_seed_data(database: Database) -> Result<String, CliError> {
         }
     };
     sqlx::query(
-        "INSERT OR IGNORE INTO memberships \
+        "INSERT INTO memberships \
          (id, workspace_id, user_id, role, created_at, updated_at) \
-         VALUES (?, ?, ?, 'member', ?, ?)",
+         VALUES ($1, $2, $3, 'member', $4, $5) ON CONFLICT DO NOTHING",
     )
     .bind(orbit_platform::Id::new_v7().to_string())
     .bind(workspace_id.to_string())
@@ -898,7 +920,7 @@ async fn install_seed_data(database: Database) -> Result<String, CliError> {
     let already_seeded: i64 = sqlx::query_scalar(
         "SELECT COUNT(*) FROM tasks \
          JOIN audit_events ON audit_events.resource_id = tasks.id \
-         WHERE tasks.workspace_id = ? AND audit_events.action = 'task.created' \
+         WHERE tasks.workspace_id = $1 AND audit_events.action = 'task.created' \
          AND audit_events.resource_type = 'task' AND audit_events.request_id = 'development-seed'",
     )
     .bind(workspace_id.to_string())
@@ -908,7 +930,7 @@ async fn install_seed_data(database: Database) -> Result<String, CliError> {
     seed_chat(&database, workspace_id, user_id, member_id).await?;
     if already_seeded == 0 {
         let status_id: String = sqlx::query_scalar(
-            "SELECT id FROM task_statuses WHERE project_id = ? ORDER BY position LIMIT 1",
+            "SELECT id FROM task_statuses WHERE project_id = $1 ORDER BY position LIMIT 1",
         )
         .bind(project_id.to_string())
         .fetch_one(database.pool())
@@ -984,8 +1006,8 @@ fn apply_path_overrides(cli: &Cli, config: &mut Config) {
     }
 }
 
-async fn open_database(path: &Path) -> Result<Database, CliError> {
-    Database::open(&DatabaseConfig::new(path))
+async fn open_database(data: &DataConfig) -> Result<Database, CliError> {
+    Database::open(&DatabaseConfig::for_data(data))
         .await
         .map_err(operation)
 }
@@ -1098,6 +1120,18 @@ pub fn redacted_config(config: &Config) -> String {
         config.rate_limits.upload_per_minute,
         config.rate_limits.general_per_minute,
     );
+    if let Some(url) = &config.data.database_url {
+        let at = output
+            .find("\nattachments = ")
+            .expect("the [data] section is written above");
+        output.insert_str(
+            at,
+            &format!(
+                "\ndatabase_url = \"{}\"",
+                orbit_platform::redact_database_url(url)
+            ),
+        );
+    }
     output.push_str("\n\n[metrics]\n");
     if let Some(listen) = config.metrics.listen {
         output.push_str(&format!("listen = \"{listen}\""));
@@ -1134,7 +1168,7 @@ mod tests {
     use clap::Parser;
     use orbit_platform::{
         BackupService, Config, ConfigOverride, ConfigSources, Database, DatabaseConfig,
-        EnvironmentMode, Migration, MigrationRunner, TimestampMillis,
+        EnvironmentMode, Id, Migration, MigrationRunner, TimestampMillis,
     };
     use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
 
@@ -1680,7 +1714,7 @@ mod tests {
                 .unwrap();
         sqlx::query(
             "UPDATE tasks SET title = 'Edited task title', description = 'Edited description', \
-             priority = 'urgent', position = 47, status_id = ?",
+             priority = 'urgent', position = 47, status_id = $1",
         )
         .bind(edited_status)
         .execute(prepared.pool())
@@ -1772,7 +1806,7 @@ mod tests {
                 .valid
         );
         assert_eq!(
-            sqlx::query_scalar::<_, String>("SELECT role FROM memberships WHERE user_id = ?")
+            sqlx::query_scalar::<_, String>("SELECT role FROM memberships WHERE user_id = $1")
                 .bind(member.id.to_string())
                 .fetch_one(database.pool())
                 .await
@@ -1875,7 +1909,7 @@ mod tests {
             2
         );
         assert_eq!(
-            sqlx::query_scalar::<_, String>("SELECT name FROM workspaces WHERE id = ?")
+            sqlx::query_scalar::<_, String>("SELECT name FROM workspaces WHERE id = $1")
                 .bind(original.workspace_id.to_string())
                 .fetch_one(database.pool())
                 .await
@@ -2043,6 +2077,97 @@ mod tests {
                 b"keep backup"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn backup_restore_replaces_a_postgres_database() {
+        use sqlx::Connection;
+
+        let Ok(server) = std::env::var("ORBIT_TEST_POSTGRES_URL") else {
+            return; // Needs a Postgres server.
+        };
+        let name = format!(
+            "orbit_cli_restore_{}",
+            Id::new_v7().to_string().replace('-', "")
+        );
+        let mut admin = sqlx::PgConnection::connect(&server).await.unwrap();
+        sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+            "CREATE DATABASE {name} TEMPLATE template0 ENCODING 'UTF8' \
+             LOCALE_PROVIDER builtin BUILTIN_LOCALE 'C.UTF-8' LOCALE 'C.UTF-8'"
+        )))
+        .execute(&mut admin)
+        .await
+        .unwrap();
+        let mut url = url::Url::parse(&server).unwrap();
+        url.set_path(&name);
+        let root = tempfile::TempDir::new().unwrap();
+        let config_path = root.path().join("orbit.toml");
+        fs::write(
+            &config_path,
+            format!(
+                "environment = \"development\"\n[data]\ndatabase_url = \"{url}\"\n\
+                 database = \"{}\"\nattachments = \"{}\"\nbackups = \"{}\"\n\
+                 [secrets]\napp_key = \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=\"\n",
+                root.path().join("orbit.sqlite").display(),
+                root.path().join("attachments").display(),
+                root.path().join("backups").display(),
+            ),
+        )
+        .unwrap();
+        let config = super::effective_config(
+            &Cli::try_parse_from(["orbit", "--config", config_path.to_str().unwrap(), "serve"])
+                .unwrap(),
+        )
+        .unwrap();
+
+        let database = Database::open(&DatabaseConfig::for_data(&config.data))
+            .await
+            .unwrap();
+        MigrationRunner::embedded(env!("CARGO_PKG_VERSION"))
+            .run(&database)
+            .await
+            .unwrap();
+        database
+            .execute("INSERT INTO installation_state (id, initialized) VALUES (1, 1)")
+            .await
+            .unwrap();
+        let backup = BackupService::new(&config.data.backups, &config.data.attachments)
+            .create(&database)
+            .await
+            .unwrap();
+        database
+            .execute("DELETE FROM installation_state")
+            .await
+            .unwrap();
+        drop(database);
+
+        let restored = run(Cli::try_parse_from([
+            "orbit",
+            "--config",
+            config_path.to_str().unwrap(),
+            "backup",
+            "restore",
+            &backup.id,
+        ])
+        .unwrap())
+        .await;
+
+        let database = Database::open(&DatabaseConfig::for_data(&config.data))
+            .await
+            .unwrap();
+        let initialized: i64 = database
+            .scalar("SELECT initialized FROM installation_state WHERE id = 1")
+            .await
+            .unwrap();
+        drop(database);
+        sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+            "DROP DATABASE {name} WITH (FORCE)"
+        )))
+        .execute(&mut admin)
+        .await
+        .unwrap();
+        assert_eq!(restored.unwrap(), format!("backup {} restored", backup.id));
+        assert_eq!(initialized, 1);
     }
 
     #[tokio::test]
