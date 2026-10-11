@@ -160,7 +160,8 @@ export default function MarkdownEditor({ value, members, ariaLabel, className, c
         sideMenu={false}
         // the text sits flush with the title and the read view: no gutter for a side menu
         // BlockNote's stylesheet is unlayered, so the `!` is what beats its own font (Inter, 16px)
-        className="[&_.bn-editor]:px-0! [&_.bn-default-styles]:[font-family:inherit]! [&_.bn-default-styles]:text-[13px]! [&_.bn-default-styles]:leading-5!"
+        // No block padding and the line height of the read view: the text does not move when the editor opens.
+        className="[&_.bn-editor]:px-0! [&_.bn-default-styles]:[font-family:inherit]! [&_.bn-default-styles]:text-[13px]! [&_.bn-default-styles]:leading-5! [&_.bn-block-outer]:leading-5! [&_.bn-block-content]:py-0!"
         onChange={() => onChange(blocksToMarkdown(editor))}
       >
         <SuggestionMenuController triggerCharacter="/" getItems={async (query) => slashItems(editor, compact, query)} />

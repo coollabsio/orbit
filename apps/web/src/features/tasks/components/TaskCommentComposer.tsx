@@ -124,7 +124,7 @@ export function TaskCommentComposer({ placeholder, pending, progress, error, mem
       ) : (
         <Suspense fallback={<div className={cn('min-h-8', compact ? 'flex-1' : 'basis-full')} />}>
           {/* BlockNote's own placeholder needs an injected <style>, which the production CSP blocks */}
-          {body ? null : <span aria-hidden="true" className={cn('pointer-events-none absolute text-[13px] leading-5 text-muted-foreground', compact ? 'top-[7px] left-0' : 'top-[13px] left-3')}>{placeholder}</span>}
+          {body ? null : <span aria-hidden="true" className={cn('pointer-events-none absolute text-[13px] leading-5 text-muted-foreground', compact ? 'top-1 left-0' : 'top-2.5 left-3')}>{placeholder}</span>}
           <MarkdownEditor
             key={editorKey}
             value={body}
