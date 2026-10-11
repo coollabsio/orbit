@@ -2,6 +2,7 @@ import '@blocknote/shadcn/style.css'
 
 import { useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { BlockNoteEditor } from '@blocknote/core'
+import { en } from '@blocknote/core/locales'
 import { filterSuggestionItems } from '@blocknote/core/extensions'
 import { getDefaultReactSlashMenuItems, SuggestionMenuController, useCreateBlockNote, type DefaultReactSuggestionItem } from '@blocknote/react'
 import { UserAvatar } from '@/components/common/UserAvatar'
@@ -46,6 +47,10 @@ export interface MarkdownEditorProps {
   uploadImage?: (file: File) => Promise<string>
 }
 
+// No placeholder text of BlockNote: it comes through a runtime <style>, which the production CSP blocks, so it would
+// show on the dev server only (and over the caller's own placeholder).
+const dictionary = { ...en, placeholders: Object.fromEntries(Object.keys(en.placeholders).map((key) => [key, ''])) as typeof en.placeholders }
+
 /** The slash menu: the blocks of the schema, and a Mermaid diagram after the code block. */
 function slashItems(editor: MarkdownEditorInstance, compact: boolean, query: string): DefaultReactSuggestionItem[] {
   const items = getDefaultReactSlashMenuItems(editor).flatMap((item) => {
@@ -81,6 +86,7 @@ export default function MarkdownEditor({ value, members, ariaLabel, className, c
     uploadFile: uploadImage ? (file: File) => upload.current!(file) : undefined,
     // Tiptap would inject a <style> tag, which the production CSP (`style-src 'self'`) blocks; the rules are in index.css.
     _tiptapOptions: { injectCSS: false },
+    dictionary,
   })
   const root = useRef<HTMLDivElement>(null)
   // the caret goes to the end of the text, as in the plain field
@@ -111,10 +117,15 @@ export default function MarkdownEditor({ value, members, ariaLabel, className, c
         }
       }}
       onBlur={(event) => {
-        const next = event.relatedTarget as Element | null
+        const inside = (element: Element | null) =>
+          element !== null && (root.current?.contains(element) === true || element.closest('.bn-root, [role=menu], [role=listbox], [role=dialog]') !== null)
         // the editor's menus and toolbars are outside this element
-        if (next && (root.current?.contains(next) || next.closest('.bn-root, [role=menu], [role=listbox], [role=dialog]'))) return
-        onBlur?.()
+        if (inside(event.relatedTarget as Element | null)) return
+        // Asked again after the event: React's StrictMode (the dev server) mounts the editor two times, and the first
+        // one loses the focus when it goes. The focus is then in the second one, and the person did not leave.
+        window.setTimeout(() => {
+          if (root.current && !inside(document.activeElement)) onBlur?.()
+        })
       }}
       onPasteCapture={(event) => {
         const files = clipboardFiles(event)

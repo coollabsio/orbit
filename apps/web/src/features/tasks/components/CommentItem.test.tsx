@@ -85,6 +85,7 @@ test('edit mode opens the rich editor, and closing it with no edit saves nothing
     await waitFor(() => { if (editors() !== 1) throw new Error('the editor did not open') })
     expect(view.queryAllByRole('button', { name: 'Copy text' })).toHaveLength(0)
     // the editor would write `-` bullets: that is not an edit
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
     fireEvent.blur(view.container.querySelector('[data-slot="markdown-editor"]')!)
     await waitFor(() => { if (editors() !== 0) throw new Error('the editor is still open') })
     expect(requests).toBe(0)

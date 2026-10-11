@@ -1,3 +1,4 @@
+import { StrictMode } from 'react'
 import { expect, mock, test } from 'bun:test'
 import { fireEvent, render, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -187,6 +188,7 @@ test('a description that is opened and closed with no edit is not saved', async 
   // the editor would write this text with other spelling (`*` bullets, a padded table): that is not an edit
   const { view, onUpdate, editors } = await openRichEditor('* one\n* two\n\n| a   | b |\n| --- | --- |\n| 1 | 2 |')
   expect(editors()).toBe(1)
+  if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
   fireEvent.blur(view.container.querySelector('[data-slot="markdown-editor"]')!)
   await waitFor(() => { if (editors() !== 0) throw new Error('the editor is still open') })
   expect(onUpdate).not.toHaveBeenCalled()
@@ -241,6 +243,7 @@ test('an edit in the rich editor is saved as markdown when the editor closes', a
   // BlockNote reports the change after the transaction
   await new Promise((resolve) => setTimeout(resolve, 20))
   expect(onUpdate).not.toHaveBeenCalled()
+  if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
   fireEvent.blur(view.container.querySelector('[data-slot="markdown-editor"]')!)
   await waitFor(() => { if (editors() !== 0) throw new Error('the editor is still open') })
   expect(onUpdate).toHaveBeenCalledTimes(1)
@@ -253,5 +256,17 @@ test('Escape after an edit in the rich editor saves nothing', async () => {
   await new Promise((resolve) => setTimeout(resolve, 20))
   fireEvent.keyDown(view.container.querySelector('[data-slot="markdown-editor"]')!, { key: 'Escape' })
   await waitFor(() => { if (editors() !== 0) throw new Error('the editor is still open') })
+  expect(onUpdate).not.toHaveBeenCalled()
+})
+
+test('the rich editor stays open under StrictMode, which mounts it two times (the dev server)', async () => {
+  const onUpdate = mock(() => {})
+  const view = render(<StrictMode><TaskTextFields task={richTask('Some text')} members={[]} onUpdate={onUpdate} /></StrictMode>)
+  fireEvent.click(view.getByRole('textbox', { name: 'Description' }))
+  const editors = () => view.container.querySelectorAll('[data-slot="markdown-editor"]').length
+  await waitFor(() => { if (editors() !== 1) throw new Error('the editor did not open') })
+  // after the blur of the first mount had its time
+  await new Promise((resolve) => setTimeout(resolve, 50))
+  expect(editors()).toBe(1)
   expect(onUpdate).not.toHaveBeenCalled()
 })
