@@ -2,13 +2,13 @@
 
 ## Product and milestone status
 
-Orbit is a self-hosted workspace application with a Rust server and a React web client. Milestone one persists identity, sessions, workspaces, memberships, invitations, projects, workflow statuses, labels, tasks, comments, attachments, trash, and audit records in SQLite.
+Orbit is a self-hosted workspace application with a Rust server and a React web client. Milestone one persists identity, sessions, workspaces, memberships, invitations, projects, workflow statuses, labels, tasks, comments, attachments, trash, and audit records in SQLite (default) or Postgres.
 
 The production binary embeds the matching Vite build. It serves the SPA and `/api/v1` from one HTTP listener. Operators terminate HTTPS at a reverse proxy.
 
 ## Persistent and mock-backed routes
 
-These routes use the production API and SQLite:
+These routes use the production API and the database:
 
 - `/setup`, `/login`, `/recovery`, and `/accept-invitation`
 - `/tasks`, `/tasks/:taskId`, task trash, and project workflow settings
@@ -35,12 +35,12 @@ browser
       -> embedded SPA
       -> /api/v1 routes
       -> /health/live and /health/ready
-      -> SQLite in WAL mode
+      -> SQLite in WAL mode, or Postgres
       -> local attachment storage
       -> local verified backups
 ```
 
-One Orbit process owns a database file. The process validates configuration, runs guarded migrations and a quick integrity check, verifies writable storage and the embedded client contract, then binds HTTP. Retention and attachment reconciliation services start with the server and stop after HTTP begins graceful shutdown. Backups are started manually.
+One Orbit process owns the database (a SQLite file, or a Postgres database through an advisory lock). The process validates configuration, runs guarded migrations and a quick integrity check, verifies writable storage and the embedded client contract, then binds HTTP. Retention and attachment reconciliation services start with the server and stop after HTTP begins graceful shutdown. Backups are started manually.
 
 ## Repository layout
 

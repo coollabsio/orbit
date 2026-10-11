@@ -46,29 +46,3 @@ where
         .and_then(WorkspaceRole::parse)
         .map(|role| Actor { user_id, role }))
 }
-
-/// As `actor`, on any SeaORM connection or transaction (spike: used by `api_tokens`).
-pub(crate) async fn actor_orm(
-    connection: &impl sea_orm::ConnectionTrait,
-    workspace_id: Id,
-    user_id: Id,
-) -> Result<Option<Actor>, sea_orm::DbErr> {
-    use sea_orm::{ColumnTrait, EntityTrait, JoinType, QueryFilter, QuerySelect, RelationTrait};
-
-    use crate::entities::{memberships, workspaces};
-
-    let role: Option<String> = memberships::Entity::find()
-        .select_only()
-        .column(memberships::Column::Role)
-        .join(JoinType::InnerJoin, memberships::Relation::Workspace.def())
-        .filter(memberships::Column::WorkspaceId.eq(workspace_id.to_string()))
-        .filter(memberships::Column::UserId.eq(user_id.to_string()))
-        .filter(workspaces::Column::DeletedAt.is_null())
-        .into_tuple()
-        .one(connection)
-        .await?;
-    Ok(role
-        .as_deref()
-        .and_then(WorkspaceRole::parse)
-        .map(|role| Actor { user_id, role }))
-}

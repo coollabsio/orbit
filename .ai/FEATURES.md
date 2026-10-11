@@ -220,7 +220,8 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
   200 chars). Live, visible pages of the workspace only; ranked by `bm25` with title ×10. Results carry `snippet` (plain text,
   ~24 words, `…` where cut; the body start for title-only hits), `snippet_highlights` and `title_highlights` as
   `TextRange { start, end }` in UTF-16 code units (JS string indices, end exclusive); the UI renders them as `<strong>`
-  text nodes (no HTML).
+  text nodes (no HTML). On Postgres, `page_search` is a table with a `tsvector` column in the `orbit_search` text search
+  configuration (unaccent + simple), ranked by `ts_rank` with titles weighted 10x.
 - Notion import (`pages/NotionImportPane.tsx`, `components/NotionImportChooser.tsx`, `api/notionImports.ts`,
   `notionImport/selection.ts`; server `notion/import.rs`, routes `/imports/notion`): Documents header "…" → "Import from
   Notion" opens `/docs/import`, a pane next to the tree like Trash. Steps follow the import's status at

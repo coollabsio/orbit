@@ -15,7 +15,7 @@ use fs2::FileExt;
 use sha2::{Digest, Sha256};
 use sqlx::any::AnyPoolOptions;
 use sqlx::postgres::{PgConnectOptions, PgConnection, PgPool, PgPoolOptions};
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection, SqliteJournalMode};
 use sqlx::{AnyPool, Connection, Decode, Transaction, Type};
 use thiserror::Error;
 
@@ -64,28 +64,6 @@ pub enum Backend {
     #[default]
     Sqlite,
     Postgres,
-}
-
-/// Starts a write transaction on any SeaORM backend, serialized like
-/// `Database::immediate_transaction`: `BEGIN IMMEDIATE` on SQLite, and on Postgres the same
-/// transaction-scoped advisory lock that every other writer takes.
-pub async fn orm_write_transaction(
-    connection: &sea_orm::DatabaseConnection,
-) -> Result<sea_orm::DatabaseTransaction, sea_orm::DbErr> {
-    use sea_orm::{
-        ConnectionTrait, DbBackend, SqliteTransactionMode, TransactionOptions, TransactionTrait,
-    };
-
-    let transaction = connection
-        .begin_with_options(TransactionOptions {
-            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
-            ..TransactionOptions::default()
-        })
-        .await?;
-    if connection.get_database_backend() == DbBackend::Postgres {
-        transaction.execute_unprepared(POSTGRES_WRITE_LOCK).await?;
-    }
-    Ok(transaction)
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -144,8 +122,6 @@ pub struct Database {
 struct DatabaseInner {
     pool: AnyPool,
     backend: Backend,
-    /// SeaORM view of the database, on a separate native pool: the two never share a transaction.
-    orm: sea_orm::DatabaseConnection,
     /// The native pool of a Postgres database, for `COPY` (backups), which the Any driver lacks.
     postgres: Option<PgPool>,
     path: PathBuf,
@@ -323,14 +299,14 @@ impl Database {
             .foreign_keys(true)
             .journal_mode(SqliteJournalMode::Wal)
             .busy_timeout(config.busy_timeout);
-        let orm_pool = SqlitePoolOptions::new()
-            .max_connections(config.max_connections)
-            .connect_with(options)
+        // The Any driver only takes a URL. A native connection creates the file and switches it to
+        // WAL (a persistent mode); the per-connection settings are applied after connecting.
+        SqliteConnection::connect_with(&options)
+            .await
+            .map_err(open_error)?
+            .close()
             .await
             .map_err(open_error)?;
-
-        // The Any driver only takes a URL. The native pool above already switched the file to
-        // WAL (a persistent mode); the per-connection settings are applied after connecting.
         let absolute =
             fs::canonicalize(&config.path).map_err(|source| DatabaseError::OpenOwnershipLock {
                 path: config.path.clone(),
@@ -358,7 +334,6 @@ impl Database {
             inner: Arc::new(DatabaseInner {
                 pool,
                 backend: Backend::Sqlite,
-                orm: sea_orm::SqlxSqliteConnector::from_sqlx_sqlite_pool(orm_pool),
                 postgres: None,
                 path: config.path.clone(),
                 _ownership: Ownership::File {
@@ -412,7 +387,7 @@ impl Database {
             });
         }
 
-        let orm_pool = PgPoolOptions::new()
+        let postgres = PgPoolOptions::new()
             .max_connections(config.max_connections)
             .connect_with(options)
             .await
@@ -427,8 +402,7 @@ impl Database {
             inner: Arc::new(DatabaseInner {
                 pool,
                 backend: Backend::Postgres,
-                postgres: Some(orm_pool.clone()),
-                orm: sea_orm::SqlxPostgresConnector::from_sqlx_postgres_pool(orm_pool),
+                postgres: Some(postgres),
                 path: config.path.clone(),
                 _ownership: Ownership::Postgres {
                     _connection: Mutex::new(connection),
@@ -473,8 +447,8 @@ impl Database {
     }
 
     /// A write transaction. Writers run one at a time on both backends: SQLite takes the write
-    /// lock with `BEGIN IMMEDIATE`, Postgres a transaction-scoped advisory lock (also taken by
-    /// [`orm_write_transaction`]), so read-then-write logic sees no concurrent writer.
+    /// lock with `BEGIN IMMEDIATE`, Postgres a transaction-scoped advisory lock, so
+    /// read-then-write logic sees no concurrent writer.
     pub async fn immediate_transaction(&self) -> Result<Transaction<'_, sqlx::Any>, sqlx::Error> {
         match self.inner.backend {
             Backend::Sqlite => self.inner.pool.begin_with("BEGIN IMMEDIATE").await,
@@ -509,10 +483,6 @@ impl Database {
 
     pub(crate) fn postgres_pool(&self) -> Option<&PgPool> {
         self.inner.postgres.as_ref()
-    }
-
-    pub fn orm(&self) -> &sea_orm::DatabaseConnection {
-        &self.inner.orm
     }
 
     /// The database's extension of type `T`, created by `init` on first use. Extensions live as

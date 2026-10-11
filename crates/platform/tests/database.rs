@@ -2110,29 +2110,15 @@ async fn write_transactions_are_serialized() {
         let transaction = second.immediate_transaction().await.unwrap();
         transaction.commit().await.unwrap();
     });
-    let orm = database.clone();
-    let mut orm_waiting = tokio::spawn(async move {
-        let transaction = orbit_platform::orm_write_transaction(orm.orm())
-            .await
-            .unwrap();
-        transaction.commit().await.unwrap();
-    });
     assert!(
         tokio::time::timeout(Duration::from_millis(200), &mut waiting)
             .await
             .is_err(),
         "a second writer started while the first was open"
     );
-    assert!(
-        tokio::time::timeout(Duration::from_millis(200), &mut orm_waiting)
-            .await
-            .is_err(),
-        "a SeaORM writer started while the first was open"
-    );
 
     first.commit().await.unwrap();
     waiting.await.unwrap();
-    orm_waiting.await.unwrap();
 }
 
 #[tokio::test]

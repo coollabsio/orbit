@@ -1,13 +1,8 @@
-//! The SeaORM `ApiTokenRepository` on the migrated schema: SQLite by default, Postgres when
+//! The `ApiTokenRepository` on the migrated schema: SQLite by default, Postgres when
 //! `ORBIT_TEST_POSTGRES_URL` is set (see `TestDatabase`).
 
-use orbit_platform::{Id, TestDatabase, TimestampMillis};
-use orbit_server::entities::{
-    api_token_projects, audit_events, memberships, projects, users, workspaces,
-};
+use orbit_platform::{Database, Id, TestDatabase, TimestampMillis};
 use orbit_server::repositories::api_tokens::{ApiTokenError, ApiTokenRepository, ApiTokenScope};
-use sea_orm::ActiveValue::{NotSet, Set};
-use sea_orm::{DatabaseConnection, EntityTrait, PaginatorTrait, TransactionTrait};
 
 struct Seed {
     owner: Id,
@@ -17,7 +12,7 @@ struct Seed {
     foreign_project: Id,
 }
 
-async fn seed(connection: &DatabaseConnection, now: i64) -> Seed {
+async fn seed(database: &Database, now: i64) -> Seed {
     let seed = Seed {
         owner: Id::new_v7(),
         outsider: Id::new_v7(),
@@ -26,56 +21,30 @@ async fn seed(connection: &DatabaseConnection, now: i64) -> Seed {
         foreign_project: Id::new_v7(),
     };
     let foreign_workspace = Id::new_v7();
+    let mut sql = String::new();
     for (id, email) in [
         (seed.owner, "owner@example.com"),
         (seed.outsider, "outsider@example.com"),
     ] {
-        users::Entity::insert(users::ActiveModel {
-            id: Set(id.to_string()),
-            email: Set(email.into()),
-            normalized_email: Set(email.into()),
-            display_name: Set(email.into()),
-            password_hash: Set("x".into()),
-            suspended_at: NotSet,
-            created_at: Set(now),
-            updated_at: Set(now),
-        })
-        .exec_without_returning(connection)
-        .await
-        .unwrap();
+        sql.push_str(&format!(
+            "INSERT INTO users (id, email, normalized_email, display_name, password_hash, \
+             created_at, updated_at) VALUES ('{id}', '{email}', '{email}', '{email}', 'x', {now}, {now});"
+        ));
     }
     // A workspace and its owner membership reference each other (deferred foreign key), so both
     // go in one transaction.
-    let transaction = connection.begin().await.unwrap();
     for (workspace, owner, name) in [
         (seed.workspace, seed.owner, "Orbit"),
         (foreign_workspace, seed.outsider, "Other"),
     ] {
-        let membership = Id::new_v7().to_string();
-        workspaces::Entity::insert(workspaces::ActiveModel {
-            id: Set(workspace.to_string()),
-            name: Set(name.into()),
-            owner_membership_id: Set(Some(membership.clone())),
-            deleted_at: NotSet,
-            created_at: Set(now),
-            updated_at: Set(now),
-        })
-        .exec_without_returning(&transaction)
-        .await
-        .unwrap();
-        memberships::Entity::insert(memberships::ActiveModel {
-            id: Set(membership),
-            workspace_id: Set(workspace.to_string()),
-            user_id: Set(owner.to_string()),
-            role: Set("owner".into()),
-            created_at: Set(now),
-            updated_at: Set(now),
-        })
-        .exec_without_returning(&transaction)
-        .await
-        .unwrap();
+        let membership = Id::new_v7();
+        sql.push_str(&format!(
+            "INSERT INTO workspaces (id, name, owner_membership_id, created_at, updated_at) \
+             VALUES ('{workspace}', '{name}', '{membership}', {now}, {now}); \
+             INSERT INTO memberships (id, workspace_id, user_id, role, created_at, updated_at) \
+             VALUES ('{membership}', '{workspace}', '{owner}', 'owner', {now}, {now});"
+        ));
     }
-    transaction.commit().await.unwrap();
     for (offset, (id, workspace, key)) in [
         (seed.projects[0], seed.workspace, "ONE"),
         (seed.projects[1], seed.workspace, "TWO"),
@@ -84,28 +53,26 @@ async fn seed(connection: &DatabaseConnection, now: i64) -> Seed {
     .into_iter()
     .enumerate()
     {
-        projects::Entity::insert(projects::ActiveModel {
-            id: Set(id.to_string()),
-            workspace_id: Set(workspace.to_string()),
-            name: Set(key.into()),
-            project_key: Set(key.into()),
-            color: Set("#ff0000".into()),
-            deleted_at: NotSet,
-            created_at: Set(now + offset as i64),
-            updated_at: Set(now),
-        })
-        .exec_without_returning(connection)
+        sql.push_str(&format!(
+            "INSERT INTO projects (id, workspace_id, name, project_key, color, created_at, updated_at) \
+             VALUES ('{id}', '{workspace}', '{key}', '{key}', '#ff0000', {}, {now});",
+            now + offset as i64
+        ));
+    }
+    let mut transaction = database.immediate_transaction().await.unwrap();
+    sqlx::raw_sql(sqlx::AssertSqlSafe(sql))
+        .execute(&mut *transaction)
         .await
         .unwrap();
-    }
+    transaction.commit().await.unwrap();
     seed
 }
 
 /// Create, list, authenticate and revoke tokens; the expected results are the same on every backend.
-async fn scenario(connection: DatabaseConnection) {
+async fn scenario(database: &Database) {
     let now = TimestampMillis::now();
-    let seed = seed(&connection, now.as_millis()).await;
-    let tokens = ApiTokenRepository::with_connection(connection.clone());
+    let seed = seed(database, now.as_millis()).await;
+    let tokens = ApiTokenRepository::new(database.clone());
 
     let reader = tokens
         .create(
@@ -232,21 +199,21 @@ async fn scenario(connection: DatabaseConnection) {
         Err(ApiTokenError::NotFound)
     ));
     assert_eq!(
-        audit_events::Entity::find()
-            .count(&connection)
+        database
+            .scalar::<i64>("SELECT COUNT(*) FROM audit_events")
             .await
             .unwrap(),
         4
     );
 
     // The schema trigger refuses a project from another workspace on both backends.
-    let refused = api_token_projects::Entity::insert(api_token_projects::ActiveModel {
-        token_id: Set(bot.api_token.id.to_string()),
-        project_id: Set(seed.foreign_project.to_string()),
-    })
-    .exec_without_returning(&connection)
-    .await
-    .unwrap_err();
+    let refused = database
+        .execute(&format!(
+            "INSERT INTO api_token_projects (token_id, project_id) VALUES ('{}', '{}')",
+            bot.api_token.id, seed.foreign_project
+        ))
+        .await
+        .unwrap_err();
     assert!(
         refused
             .to_string()
@@ -256,7 +223,7 @@ async fn scenario(connection: DatabaseConnection) {
 }
 
 #[tokio::test]
-async fn api_tokens_through_the_orm() {
+async fn api_tokens_on_the_configured_backend() {
     let database = TestDatabase::new().await.unwrap();
-    scenario(database.orm().clone()).await;
+    scenario(&database).await;
 }

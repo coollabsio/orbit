@@ -105,6 +105,8 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Backup, restore, schema migration, and integrity-check procedures are part of the product design.
 - Database-facing application boundaries should not gratuitously depend on SQLite-specific behavior when a future PostgreSQL implementation is plausible.
 
+**Update 2026-10-11:** Postgres is now supported next to SQLite (`data.database_url`); SQLite stays the default. See `AGENTS.md` and `docs/operations.md`.
+
 ### D-006: Allow one running application instance per database
 
 **Decision:** Support exactly one live Orbit server instance for each SQLite database in the initial deployment model.
@@ -121,6 +123,8 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - In-process coordination is allowed where durable recovery is still preserved.
 - Operational failover means stopping or losing the old instance before starting another against the same database.
 - Horizontal scaling is not an initial requirement.
+
+**Update 2026-10-11:** still true on Postgres: an advisory lock allows one server process per database.
 
 ### D-007: Provide a durable SQLite-backed job system
 
@@ -142,6 +146,8 @@ This is not yet an implementation specification. Unresolved areas remain explici
 - Handlers must tolerate at-least-once execution and therefore be idempotent where side effects matter.
 - Initial coordination can use one job claimant with bounded concurrent execution.
 - The application API should enqueue typed jobs without exposing queue-table details to domain code.
+
+**Update 2026-10-11:** the same job table also runs on Postgres; claims stay serialized by the write lock of `immediate_transaction()`.
 
 ### D-008: Support multiple workspaces in each installation
 

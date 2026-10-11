@@ -129,41 +129,6 @@ async fn record_scoped(
     Ok(())
 }
 
-/// As `record`, inside a SeaORM transaction on any backend (spike: used by `api_tokens`).
-#[allow(clippy::too_many_arguments)]
-pub async fn record_orm(
-    connection: &impl sea_orm::ConnectionTrait,
-    workspace_id: Id,
-    actor_id: Option<Id>,
-    action: &str,
-    outcome: AuditOutcome,
-    resource_type: &str,
-    resource_id: Option<Id>,
-    request_id: &str,
-    metadata: Value,
-    now: TimestampMillis,
-) -> Result<(), sea_orm::DbErr> {
-    use sea_orm::{ActiveValue::Set, EntityTrait};
-
-    use crate::entities::audit_events;
-
-    audit_events::Entity::insert(audit_events::ActiveModel {
-        id: Set(Id::new_v7().to_string()),
-        workspace_id: Set(Some(workspace_id.to_string())),
-        actor_id: Set(actor_id.map(|id| id.to_string())),
-        action: Set(action.to_owned()),
-        outcome: Set(outcome.as_str().to_owned()),
-        resource_type: Set(resource_type.to_owned()),
-        resource_id: Set(resource_id.map(|id| id.to_string())),
-        request_id: Set(bounded_text(request_id, 128)),
-        metadata_json: Set(bounded_metadata(metadata)),
-        occurred_at: Set(now.as_millis()),
-    })
-    .exec_without_returning(connection)
-    .await?;
-    Ok(())
-}
-
 pub async fn list(
     database: &Database,
     workspace_id: Id,

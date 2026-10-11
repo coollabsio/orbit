@@ -31,8 +31,8 @@ pub use config::{
 pub use db::{
     Backend, Column, Database, DatabaseConfig, DatabaseError, Flag, GuardedMigrationError,
     Migration, MigrationError, MigrationRunner, NotBool, PendingMigration, Row, Separated,
-    SqlBuilder, TestDatabase, TestDatabaseError, lock_database_ownership, orm_write_transaction,
-    run_guarded_migrations, testing_postgres,
+    SqlBuilder, TestDatabase, TestDatabaseError, lock_database_ownership, run_guarded_migrations,
+    testing_postgres,
 };
 pub use files::{
     AuthorizedAttachment, BLOB_REFERENCE_COUNT, BlobDownload, BlobFuture, BlobMoveStatus,

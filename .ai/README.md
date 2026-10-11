@@ -13,7 +13,7 @@ This directory is the fast-start guide for a new maintainer and their AI agent. 
 
 ## Current status in one paragraph
 
-Orbit now ships a Rust, Axum, SQLx, and SQLite foundation with persistent setup, authentication, workspaces, tasks, comments, attachments, trash, audit, backups, and operations. The matching React build is embedded in one production binary. Docs, mail, chat, DMs, inbox, profile, and home summaries remain explicitly mock-backed while their later backend milestones are planned.
+Orbit now ships a Rust, Axum, SQLx, and SQLite (or Postgres; see [`AGENTS.md`](../AGENTS.md)) foundation with persistent setup, authentication, workspaces, tasks, comments, attachments, trash, audit, backups, and operations. The matching React build is embedded in one production binary. Docs, mail, chat, DMs, inbox, profile, and home summaries remain explicitly mock-backed while their later backend milestones are planned.
 
 ## First commands
 

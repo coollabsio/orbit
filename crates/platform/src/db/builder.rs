@@ -1,8 +1,8 @@
 use std::fmt::{Display, Write};
 
 use sqlx::any::AnyArguments;
-use sqlx::query::{Query, QueryAs, QueryScalar};
-use sqlx::{Any, Arguments, Encode, FromRow, SqlSafeStr, SqlStr, Type};
+use sqlx::query::Query;
+use sqlx::{Any, Arguments, Encode, SqlSafeStr, SqlStr, Type};
 
 /// Builds a query with bound values for both backends, like `sqlx::QueryBuilder`, but writes the
 /// placeholders as `$1, $2, …`: SQLite binds them by number too, while the Any driver's own
@@ -58,20 +58,6 @@ impl SqlBuilder {
     /// The query with the bound values; the builder is left with none.
     pub fn build(&mut self) -> Query<'_, Any, AnyArguments> {
         sqlx::query_with(self.sql(), std::mem::take(&mut self.arguments))
-    }
-
-    pub fn build_query_as<'q, T>(&'q mut self) -> QueryAs<'q, Any, T, AnyArguments>
-    where
-        T: for<'r> FromRow<'r, sqlx::any::AnyRow>,
-    {
-        sqlx::query_as_with(self.sql(), std::mem::take(&mut self.arguments))
-    }
-
-    pub fn build_query_scalar<'q, T>(&'q mut self) -> QueryScalar<'q, Any, T, AnyArguments>
-    where
-        (T,): for<'r> FromRow<'r, sqlx::any::AnyRow>,
-    {
-        sqlx::query_scalar_with(self.sql(), std::mem::take(&mut self.arguments))
     }
 }
 
@@ -160,11 +146,7 @@ mod tests {
             versions.push_bind(version);
         }
         query.push(")");
-        let count: i64 = query
-            .build_query_scalar()
-            .fetch_one(database.pool())
-            .await
-            .unwrap();
-        assert!(count >= 1);
+        let row = query.build().fetch_one(database.pool()).await.unwrap();
+        assert!(row.get::<i64, _>(0) >= 1);
     }
 }

@@ -4,11 +4,11 @@
 
 The Cargo workspace has three crates with one-way dependencies:
 
-- `crates/platform` owns reusable infrastructure such as configuration, SQLite setup, migrations, jobs, backup, files, HTTP policy, health, identifiers, and timestamps.
+- `crates/platform` owns reusable infrastructure such as configuration, SQLite and Postgres setup, migrations, jobs, backup, files, HTTP policy, health, identifiers, and timestamps.
 - `crates/orbit` owns domain rules and ports. It does not depend on Axum or SQLx.
-- `apps/server` owns SQLx repositories, Axum route adapters, application wiring, the CLI, and the production binary.
+- `apps/server` owns repositories (plain SQL on the sqlx `Any` driver), Axum route adapters, application wiring, the CLI, and the production binary.
 
-`App::build(Config)` in `apps/server/src/app.rs` is the startup boundary. It validates configuration, opens and locks SQLite, creates any required pre-migration backup, runs migrations, performs `quick_check`, checks storage, initializes auth and the one-time setup URL, verifies the embedded frontend contract, then builds the router. `orbit serve` binds only after this returns.
+`App::build(Config)` in `apps/server/src/app.rs` is the startup boundary. It validates configuration, opens and locks the database (SQLite file lock or Postgres advisory lock), creates any required pre-migration backup, runs migrations, performs a quick integrity check (`quick_check` on SQLite, a connection check on Postgres), checks storage, initializes auth and the one-time setup URL, verifies the embedded frontend contract, then builds the router. `orbit serve` binds only after this returns.
 
 `router.rs` merges independent auth, workspace, task, and attachment routers. It also adds liveness, readiness, embedded assets, SPA fallback, and the common Tower platform layer. Unknown `/api/*` paths return RFC 9457 Problem Details. Only non-API browser routes receive `index.html`.
 
@@ -21,6 +21,7 @@ On shutdown, the HTTP server stops accepting new connections and drains active r
 ## Persistence and security
 
 - SQLite uses WAL, foreign keys, a busy timeout, and one process ownership lock.
+- Postgres (`data.database_url`) uses an advisory ownership lock, and `immediate_transaction()` serializes writers with a transaction-scoped advisory lock. Rules for portable SQL are in [`AGENTS.md`](../AGENTS.md).
 - Repositories own explicit SQL and workspace scoping. HTTP handlers do not issue feature SQL.
 - Major mutations use record versions and return conflict metadata.
 - Session cookies are host-only, HTTP-only, SameSite Lax, and Secure in production.
@@ -28,7 +29,7 @@ On shutdown, the HTTP server stops accepting new connections and drains active r
 - Forwarded transport, client address, and request IDs are trusted only from configured proxy networks.
 - All API failures use Problem Details with stable codes and correlated request IDs.
 - Attachments stream through bounded request handling and a local blob-store abstraction.
-- Backups include SQLite, attachment files, checksums, and schema metadata.
+- Backups include the database (the SQLite file, or one `COPY` file per Postgres table), attachment files, checksums, and schema metadata.
 
 ## Frontend data boundaries
 

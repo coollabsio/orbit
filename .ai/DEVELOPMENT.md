@@ -32,6 +32,8 @@ ORBIT_ENV=development ORBIT__ENVIRONMENT=development cargo run -p orbit-server -
   serve --listen 127.0.0.1:8080 --origin http://127.0.0.1:8888
 ```
 
+To develop on Postgres, put `ORBIT__DATA__DATABASE_URL` and `ORBIT__SECRETS__APP_KEY` in `.env.local` (see [`AGENTS.md`](../AGENTS.md) for the required database locale). `just dev` loads that file; `just db-reset` and `just seed` do not, so export the variables first.
+
 ## Verification commands
 
 ```bash
@@ -48,6 +50,7 @@ Direct commands remain supported:
 cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+ORBIT_TEST_POSTGRES_URL=postgres://orbit:orbit@127.0.0.1:15432/orbit cargo test --workspace  # same suite on Postgres
 cd apps/web && bun run lint && bun run test && bun run build
 ```
 
@@ -131,11 +134,11 @@ Restore procedure:
 1. Stop Orbit. Restore refuses a database owned by a running process.
 2. Copy the current data directory somewhere safe.
 3. Run `orbit --config config/orbit.toml backup verify <backup-id>`.
-4. Run `orbit --config config/orbit.toml backup restore <backup-id>`.
+4. Run `orbit --config config/orbit.toml backup restore <backup-id>`. A snapshot restores only into the same kind of database (SQLite or Postgres) it came from.
 5. Run `orbit --config config/orbit.toml migrate status`.
 6. Start Orbit and check `/health/ready` before sending traffic.
 
-Weekly full database integrity checks use a durable schedule. Backups are created manually from Settings or the backup CLI while Orbit is stopped. Upload and retention file mutations share the in-process backup pause. Orbit retains up to 24 snapshots from the last day, plus 7 daily and 4 weekly snapshot buckets when enough manual snapshots exist. Operators must copy backups off-host and protect their permissions.
+Weekly full database integrity checks use a durable schedule (on Postgres this check only tests the connection). Backups are created manually from Settings or the backup CLI while Orbit is stopped. Upload and retention file mutations share the in-process backup pause. Orbit retains up to 24 snapshots from the last day, plus 7 daily and 4 weekly snapshot buckets when enough manual snapshots exist. Operators must copy backups off-host and protect their permissions.
 
 ## Invitations, recovery, and SMTP status
 
@@ -154,6 +157,6 @@ Share that URL through an authenticated channel. Do not put it in logs or ticket
 ## Health and shutdown
 
 - `GET /health/live` proves the event loop responds.
-- `GET /health/ready` checks migrations, SQLite integrity, writable storage, scheduler tables, and critical config.
+- `GET /health/ready` checks migrations, database integrity (SQLite `quick_check`, Postgres connection check), writable storage, scheduler tables, and critical config.
 - The optional private metrics listener exposes bounded, identifier-free Prometheus counters at `GET /metrics`.
 - Send SIGINT or SIGTERM through the container runtime. Orbit stops accepting HTTP and stops new job claims immediately, then gives the combined HTTP and worker drain 30 seconds to finish.

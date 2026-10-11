@@ -15,7 +15,7 @@ Orbit deliberately binds last. Read the first error and keep the process stopped
 
 ## Integrity or readiness fails
 
-`/health/ready` returns 503 when a required check fails. Orbit also runs a durable weekly full SQLite integrity and foreign-key check. A failed or interrupted full check stops normal HTTP traffic and exits the process; an unfinished integrity job forces another full check before a restart can bind. Remove the instance from proxy traffic and preserve the current data directory.
+`/health/ready` returns 503 when a required check fails. Orbit also runs a durable weekly full SQLite integrity and foreign-key check (on Postgres it only checks the connection). A failed or interrupted full check stops normal HTTP traffic and exits the process; an unfinished integrity job forces another full check before a restart can bind. Remove the instance from proxy traffic and preserve the current data directory.
 
 Do not attempt automatic repair. Verify a known-good backup, restore it with the documented stopped-server procedure, and retain the damaged copy for investigation. `/health/live` may remain 200 because it reports process liveness, not data safety.
 
@@ -64,7 +64,7 @@ Orbit sends email only for invitations, open-registration sign-up links and pass
 
 Registration is closed after setup: people join only by invitation. The root user can turn on **Open registration** in **Admin → Settings** once a mail server is saved. A new person then enters their email, opens the emailed link (60 minutes, one use) and chooses a name and password. Removing the mail server closes registration.
 
-Saved secrets (the SMTP password, GitHub App keys, Notion import tokens) are encrypted with the app key. Set `secrets.app_key` (base64 of 32 random bytes, for example `openssl rand -base64 32`) to manage it yourself; otherwise Orbit creates `app.key` beside the database on first start (mode 600). Keep that file with your backups: a restored database without it cannot read its saved secrets, and the root user must enter them again.
+Saved secrets (the SMTP password, GitHub App keys, Notion import tokens) are encrypted with the app key. Set `secrets.app_key` (base64 of 32 random bytes, for example `openssl rand -base64 32`) to manage it yourself; otherwise, on SQLite, Orbit creates `app.key` beside the database on first start (mode 600); Postgres requires `secrets.app_key`. Keep that file with your backups: a restored database without it cannot read its saved secrets, and the root user must enter them again.
 
 ## Postgres
 

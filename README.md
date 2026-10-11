@@ -28,9 +28,9 @@ Orbit is licensed under the [Apache License 2.0](LICENSE).
 ### How it works
 
 Orbit is one binary. A Rust server serves the API and the embedded React web
-application from one HTTP listener. Data is kept in SQLite. Attachments can be
-kept on local disk or in S3-compatible storage. Orbit can make scheduled,
-verified backups. Put a reverse proxy in front of Orbit for HTTPS.
+application from one HTTP listener. Data is kept in SQLite (default) or
+Postgres. Attachments can be kept on local disk or in S3-compatible storage.
+Orbit can make scheduled, verified backups. Put a reverse proxy in front of Orbit for HTTPS.
 
 ### Development
 
