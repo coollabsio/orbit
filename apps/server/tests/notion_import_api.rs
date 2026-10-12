@@ -1774,12 +1774,20 @@ async fn an_exhausted_job_fails_the_import_when_its_last_attempt_ends() {
         import["error"].as_str().unwrap().contains("503"),
         "{import}"
     );
-    let live: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM jobs WHERE kind = 'notion.import' AND state IN ('queued', 'running')",
-    )
-    .fetch_one(harness.database.pool())
-    .await
-    .unwrap();
+    // The handler fails the import before it returns; the worker records the dead job after.
+    let mut live = -1_i64;
+    for _ in 0..500 {
+        live = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM jobs WHERE kind = 'notion.import' AND state IN ('queued', 'running')",
+        )
+        .fetch_one(harness.database.pool())
+        .await
+        .unwrap();
+        if live == 0 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
     assert_eq!(live, 0);
     shutdown.cancel();
     running.await.unwrap().unwrap();
