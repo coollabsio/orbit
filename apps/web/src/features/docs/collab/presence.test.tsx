@@ -1,24 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 import { act, fireEvent, render, renderHook } from '@testing-library/react'
 import * as Y from 'yjs'
+import { ProfilePopoverContext, type ProfileAction } from '@/components/common/profilePopover'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { FakeProvider } from '@/test/fakeCollab'
-import { COLLAB_COLORS, collabColor } from './palette'
 import { collaboratorsOf, useCollaborators, type Collaborator } from './presence'
 import { PresenceAvatars } from './PresenceAvatars'
 
-const person = (id: string, name = id, color = '#2563eb') => ({ user: { id, name, color } })
-
-describe('collabColor', () => {
-  test('mirrors the server hash (hub.rs user_color) over the 8-color palette', () => {
-    // Values computed with the Rust algorithm: hash = hash * 31 + byte (wrapping u32), then % 8.
-    expect(collabColor('01a0d778-64cb-7422-a4df-c7eae799677f')).toBe('#db2777')
-    expect(collabColor('00000000-0000-7000-8000-000000000001')).toBe('#9333ea')
-    expect(collabColor('')).toBe(COLLAB_COLORS[0])
-    // Long ids wrap around 32 bits instead of losing precision.
-    expect(COLLAB_COLORS).toContain(collabColor('x'.repeat(500)) as (typeof COLLAB_COLORS)[number])
-  })
-})
+const person = (id: string, name = id, color = '#2563eb', cursor: unknown = null) => ({ user: { id, name, color }, cursor })
 
 describe('collaboratorsOf', () => {
   test('dedupes by user id, hides the local client and the own user, keeps first-seen order', () => {
@@ -26,13 +15,13 @@ describe('collaboratorsOf', () => {
       [1, person('me', 'Me')],
       [2, person('ada', 'Ada', '#e11d48')],
       [3, person('bob', 'Bob')],
-      [4, person('ada', 'Ada (tab 2)')],
+      [4, person('ada', 'Ada (tab 2)', '#e11d48', { anchor: {}, head: {} })], // editing in another tab
       [5, person('me', 'Me (other tab)')],
       [6, { cursor: null }], // not stamped by the server yet
     ])
     expect(collaboratorsOf(states, 1, 'me')).toEqual([
-      { id: 'ada', name: 'Ada', color: '#e11d48' },
-      { id: 'bob', name: 'Bob', color: '#2563eb' },
+      { id: 'ada', name: 'Ada', color: '#e11d48', editing: true },
+      { id: 'bob', name: 'Bob', color: '#2563eb', editing: false },
     ])
     // Without a known user id only the local client is hidden.
     expect(collaboratorsOf(states, 1, null).map((item) => item.id)).toEqual(['ada', 'bob', 'me'])
@@ -59,7 +48,7 @@ describe('collaboratorsOf', () => {
 
 describe('PresenceAvatars', () => {
   const people = (count: number): Collaborator[] =>
-    Array.from({ length: count }, (_, index) => ({ id: `u${index}`, name: `User ${index} Name`, color: COLLAB_COLORS[index % 8] }))
+    Array.from({ length: count }, (_, index) => ({ id: `u${index}`, name: `User ${index} Name`, color: '#2563eb', editing: index % 2 === 0 }))
 
   test('nothing while alone', () => {
     const view = render(<PresenceAvatars people={[]} />)
@@ -80,9 +69,31 @@ describe('PresenceAvatars', () => {
     expect((avatars[0].querySelector('[data-slot="avatar-fallback"]') as HTMLElement).style.backgroundColor).toBeTruthy()
     const more = view.getByText('+2')
     expect(more.getAttribute('aria-label')).toBe('2 more: User 4 Name, User 5 Name')
-    // Hover/focus shows the names.
-    fireEvent.focus(avatars[1])
+    // Hover/focus shows the name and whether they edit or only view.
+    fireEvent.focus(avatars[1].parentElement!)
     expect(await view.findByText('User 1 Name')).toBeTruthy()
+    expect(view.getByText('Viewing')).toBeTruthy()
+  })
+
+  test('a click opens the profile; for someone editing it offers "Go to cursor"', () => {
+    const opened: { userId: string; action?: ProfileAction }[] = []
+    const control = { open: (userId: string, _anchor: HTMLElement, options: { action?: ProfileAction }) => void opened.push({ userId, action: options.action }), prefetch: () => {} }
+    const revealed: string[] = []
+    const view = render(
+      <ProfilePopoverContext value={control}>
+        <TooltipProvider>
+          <PresenceAvatars people={people(2)} onReveal={(person) => revealed.push(person.id)} />
+        </TooltipProvider>
+      </ProfilePopoverContext>,
+    )
+    fireEvent.click(view.getByRole('button', { name: 'Open profile of User 0 Name' }))
+    fireEvent.click(view.getByRole('button', { name: 'Open profile of User 1 Name' }))
+    expect(opened.map((item) => [item.userId, item.action?.label])).toEqual([
+      ['u0', 'Go to cursor'],
+      ['u1', undefined], // only viewing: no caret to go to
+    ])
+    opened[0].action!.run()
+    expect(revealed).toEqual(['u0'])
   })
 
   test('exactly four people: no overflow counter', () => {

@@ -24,6 +24,8 @@ import { Spinner } from '@/components/ui/spinner'
 import type { Attachment } from '@/lib/attachmentLib'
 import { useTheme } from '@/lib/themeContext'
 import { cn } from 'cn'
+import { collabBlockPresence } from '../collab/blockPresence'
+import { renderCollabCursor } from '../collab/cursor'
 import { ImageZoomButton } from './ImageZoomButton'
 import { internalPageLinkId, isSafeLinkHref, toEditorContent, toStoredContent } from './content'
 import { insertPageBlock } from './pageBlockCommands'
@@ -55,7 +57,7 @@ export interface PageEditorCollab {
   provider: { awareness?: Awareness }
   fragment: Y.XmlFragment
   /** Local caret owner (the server stamps the session's user for everyone else). */
-  user: { name: string; color: string }
+  user: { id?: string; name: string; color: string }
 }
 
 /** Comments on the page (collaborative editors only): threads anchored to text through BlockNote's comment marks. */
@@ -227,8 +229,17 @@ function PageEditorInner({
         // withCollaboration also swaps the undo history for Yjs' (only local edits are undone).
         withCollaboration({
           ...options,
-          extensions: [commentsExtension],
-          collaboration: { provider: collab.provider, fragment: collab.fragment, user: collab.user, showCursorLabels: 'activity' },
+          extensions: [
+            commentsExtension,
+            ...(collab.provider.awareness ? [collabBlockPresence({ awareness: collab.provider.awareness, selfId: collab.user.id })] : []),
+          ],
+          collaboration: {
+            provider: collab.provider,
+            fragment: collab.fragment,
+            user: collab.user,
+            showCursorLabels: 'activity',
+            renderCursor: renderCollabCursor,
+          },
         })
       : {
           ...options,

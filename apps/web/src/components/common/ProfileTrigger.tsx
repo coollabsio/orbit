@@ -1,6 +1,6 @@
 import { cloneElement, use, type FocusEvent, type HTMLAttributes, type KeyboardEvent, type MouseEvent, type PointerEvent, type ReactElement, type ReactNode, type Ref } from 'react'
 import { cn } from 'cn'
-import { ProfilePopoverContext, PROFILE_TRIGGER_ATTRIBUTE } from './profilePopover'
+import { ProfilePopoverContext, PROFILE_TRIGGER_ATTRIBUTE, type ProfileAction } from './profilePopover'
 
 /** A touch that stays down this long is the long press of the row (the message action sheet), not a tap. */
 const LONG_PRESS = 450
@@ -26,6 +26,8 @@ interface ProfileTriggerProps extends Omit<ElementProps, 'children'> {
   tabIndex?: number
   /** The trigger is part of a sentence (a mention): it keeps its text as its name and is not a tab stop. */
   inText?: boolean
+  /** An extra button in the popover for what the trigger is about. */
+  action?: ProfileAction
   children?: ReactNode
 }
 
@@ -39,7 +41,7 @@ function withChildren(element: ReactElement<ElementProps>, props: ElementProps, 
  * shell, so a list can have hundreds of these. The click does not reach a row around it. Other props (a tooltip's, a
  * ref) go on to the element.
  */
-export function ProfileTrigger({ userId, name, kind = 'name', inText = false, render, tabIndex, className, children, ...rest }: ProfileTriggerProps) {
+export function ProfileTrigger({ userId, name, kind = 'name', inText = false, action, render, tabIndex, className, children, ...rest }: ProfileTriggerProps) {
   const control = use(ProfilePopoverContext)
 
   if (!control || !userId) {
@@ -83,7 +85,7 @@ export function ProfileTrigger({ userId, name, kind = 'name', inText = false, re
       const selection = window.getSelection()
       if (selection && !selection.isCollapsed && selection.containsNode(event.currentTarget, true)) return
       // a click without a pointer (`detail` 0) is Enter or Space on a button
-      control.open(userId, event.currentTarget, { name, instant: event.detail === 0 })
+      control.open(userId, event.currentTarget, { name, instant: event.detail === 0, action })
     },
     onKeyDown: (event: KeyboardEvent<HTMLElement>) => {
       rest.onKeyDown?.(event)
@@ -92,7 +94,7 @@ export function ProfileTrigger({ userId, name, kind = 'name', inText = false, re
       event.stopPropagation()
       if (nativeButton) return
       event.preventDefault()
-      control.open(userId, event.currentTarget, { name, instant: true })
+      control.open(userId, event.currentTarget, { name, instant: true, action })
     },
   }
 

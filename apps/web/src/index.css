@@ -427,6 +427,66 @@
 }
 
 /*
+ * Co-editing. Carets (collab/cursor.ts): BlockNote's flag, made a little larger and rounder; it shows while the person
+ * types or moves and on hover. Block markers (collab/blockPresence.ts): initials in the right margin of the block each
+ * other person is in, in their cursor color. The page scroller pads the text column by only 24px, so the marker hangs
+ * from that edge and a "+n" pill grows left. The page-editor slot outranks BlockNote's stylesheet, which loads later.
+ */
+[data-slot='page-editor'] .bn-editor .bn-collaboration-cursor__base[data-active] .bn-collaboration-cursor__label {
+  top: -1.3rem;
+  padding: 0.125rem 0.375rem;
+  border-radius: 4px 4px 4px 0;
+  font-size: 11px;
+  line-height: 1rem;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.16);
+}
+
+[data-slot='page-editor'] .bn-editor .bn-block-outer[data-collab-presence] {
+  position: relative;
+}
+
+[data-slot='page-editor'] .bn-editor .bn-block-outer[data-collab-presence]::after {
+  content: attr(data-collab-presence);
+  position: absolute;
+  top: 5px;
+  right: -22px;
+  display: flex;
+  min-width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--collab-color);
+  color: var(--collab-ink);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  [data-slot='page-editor'] .bn-editor .bn-block-outer[data-collab-presence]::after {
+    animation: collab-presence-enter 150ms var(--ease-out);
+  }
+}
+
+@keyframes collab-presence-enter {
+  from {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+}
+
+@media print {
+  html[data-print-doc] [data-print-root] .bn-block-outer[data-collab-presence]::after {
+    display: none !important;
+  }
+}
+
+/*
  * Tiptap's base ProseMirror stylesheet, copied verbatim from @tiptap/core 3.31.3 (`style` in dist/index.js, used by
  * createStyleTag). PageEditor sets `_tiptapOptions.injectCSS: false` because the production CSP (`style-src 'self'`)
  * blocks the <style> tag Tiptap would inject. Re-check this block when upgrading @tiptap/core.

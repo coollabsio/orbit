@@ -5,12 +5,27 @@ import type { Awareness } from 'y-protocols/awareness'
 export interface Collaborator {
   id: string
   name: string
+  /** Their cursor color on this page (the server gives everyone on a page a different one). */
   color: string
+  /** One of their tabs has the editor focused (it publishes a cursor); otherwise they are only viewing. */
+  editing: boolean
+  /** Profile picture, filled in from the member list by the caller. */
+  avatarUrl?: string | null
+}
+
+/** Up to two initials of a name ("Ada Lovelace" -> "AL"). */
+export function initials(name: string): string {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]!.toUpperCase())
+    .join('')
 }
 
 /**
- * Other people on the page: one entry per user id (several tabs count once), without the local client and without
- * the current user's other tabs. States without a server-stamped id (not yet seen by the server) are skipped.
+ * Other people on the page: one entry per user id (several tabs count once; editing if any tab is), without the
+ * local client and without the current user's other tabs. States without a server-stamped id (not yet seen by the server) are skipped.
  * Order: first seen, i.e. by awareness client order, which is stable while people stay.
  */
 export function collaboratorsOf(
@@ -22,19 +37,25 @@ export function collaboratorsOf(
   for (const [clientId, state] of states) {
     if (clientId === localClientId) continue
     const user = state?.user as Partial<Collaborator> | undefined
-    if (!user || typeof user.id !== 'string' || !user.id) continue
-    if (user.id === selfUserId || seen.has(user.id)) continue
+    if (!user || typeof user.id !== 'string' || !user.id || user.id === selfUserId) continue
+    const editing = state.cursor != null
+    const known = seen.get(user.id)
+    if (known) {
+      if (editing && !known.editing) seen.set(user.id, { ...known, editing })
+      continue
+    }
     seen.set(user.id, {
       id: user.id,
       name: typeof user.name === 'string' && user.name.trim() ? user.name : 'Someone',
       color: typeof user.color === 'string' ? user.color : '#737373',
+      editing,
     })
   }
   return [...seen.values()]
 }
 
 function sameList(a: Collaborator[], b: Collaborator[]): boolean {
-  return a.length === b.length && a.every((item, index) => item.id === b[index].id && item.name === b[index].name && item.color === b[index].color)
+  return a.length === b.length && a.every((item, index) => item.id === b[index].id && item.name === b[index].name && item.color === b[index].color && item.editing === b[index].editing)
 }
 
 const NOBODY: Collaborator[] = []

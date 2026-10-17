@@ -48,7 +48,7 @@ import { lastEditedLabel, useLastEdited } from '@/features/docs/lastEdited'
 import { useRestorePageVersion } from '@/features/docs/api/pageVersions'
 import { useCurrentUser } from '@/features/auth/api'
 import { PageAutosaver, type AutosaveState, type PagePatch } from '@/features/docs/autosave'
-import { collabColor } from '@/features/docs/collab/palette'
+import { revealCollabCursor } from '@/features/docs/collab/cursor'
 import { useCollaborators } from '@/features/docs/collab/presence'
 import { PresenceAvatars } from '@/features/docs/collab/PresenceAvatars'
 import { collabStatusLabel, type CollabProblem, type CollabSession, type CollabState } from '@/features/docs/collab/session'
@@ -197,9 +197,10 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
   useEffect(() => {
     if (linkedThread) setCommentsFilter(linkedThread.resolved ? 'resolved' : 'open')
   }, [linkedThread])
-  // Only the local awareness entry: the server stamps every peer's name and color from their session.
+  // Only the local awareness entry: the server stamps every peer's name and color (unique on the page) from their
+  // session, so the color here is a placeholder. The id hides the user's own other tabs from the block markers.
   const collabUser = useMemo(
-    () => ({ name: me.data?.display_name ?? 'Me', color: collabColor(me.data?.id ?? '') }),
+    () => ({ id: me.data?.id, name: me.data?.display_name ?? 'Me', color: '#737373' }),
     [me.data?.display_name, me.data?.id],
   )
   /** Bumped after a 4409 reset (or "Reload page" on a sync error): drops the local document and reconnects. */
@@ -350,7 +351,11 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
   useEffect(() => {
     sessionRef.current = collab.session
   }, [collab.session])
-  const people = useCollaborators(collab.connection?.provider.awareness ?? null, selfId)
+  const collaborators = useCollaborators(collab.connection?.provider.awareness ?? null, selfId)
+  const people = useMemo(() => {
+    const avatars = new Map(membersQuery.data?.map((member) => [member.id, member.avatarUrl]))
+    return collaborators.map((person) => ({ ...person, avatarUrl: avatars.get(person.id) }))
+  }, [collaborators, membersQuery.data])
   const lastEdited = useLastEdited(
     page,
     collab.connection,
@@ -640,7 +645,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
           >
             {lastEditedLabel(lastEdited.edit, selfId, lastEdited.now)}
           </span>
-          <PresenceAvatars people={people} />
+          <PresenceAvatars people={people} onReveal={(person) => revealCollabCursor(document, person.id)} />
           <span
             className={cn(
               'flex items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground/70',

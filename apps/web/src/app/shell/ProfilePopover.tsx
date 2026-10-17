@@ -4,7 +4,7 @@ import { useLocation, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { Clock, Envelope, Phone, ShieldUser } from 'reicon-react'
 import { statusLabel } from '@/components/common/memberStatus'
-import { ProfilePopoverContext, PROFILE_TRIGGER_ATTRIBUTE, type ProfilePopoverControl } from '@/components/common/profilePopover'
+import { ProfilePopoverContext, PROFILE_TRIGGER_ATTRIBUTE, type ProfileAction, type ProfilePopoverControl } from '@/components/common/profilePopover'
 import { StatusMark } from '@/components/common/StatusMark'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { Button } from '@/components/ui/button'
@@ -29,6 +29,7 @@ interface ProfileTarget {
   name: string
   anchor: HTMLElement
   instant: boolean
+  action?: ProfileAction
 }
 
 /**
@@ -45,9 +46,9 @@ export function ProfilePopoverProvider({ children }: { children: ReactNode }) {
   // Stable for the life of a workspace: hundreds of triggers read this context.
   const control = useMemo<ProfilePopoverControl>(
     () => ({
-      open(userId, element, { name, instant }) {
+      open(userId, element, { name, instant, action }) {
         anchor.current = element
-        setTarget((current) => (current?.open && current.anchor === element ? { ...current, open: false } : { open: true, userId, name, anchor: element, instant }))
+        setTarget((current) => (current?.open && current.anchor === element ? { ...current, open: false } : { open: true, userId, name, anchor: element, instant, action }))
       },
       prefetch(userId) {
         void queryClient.prefetchQuery(memberProfileQueryOptions(workspaceId, userId))
@@ -104,7 +105,7 @@ export function ProfilePopoverProvider({ children }: { children: ReactNode }) {
             data-comment-popup=""
             className="w-[300px] max-w-[calc(100vw-16px)] gap-0 p-0"
           >
-            <ProfileCard key={target.userId} userId={target.userId} name={target.name} onClose={close} />
+            <ProfileCard key={target.userId} userId={target.userId} name={target.name} action={target.action} onClose={close} />
           </PopoverContent>
         ) : null}
       </Popover>
@@ -139,7 +140,7 @@ function DetailRow({ icon, children }: { icon: ReactNode; children: ReactNode })
   )
 }
 
-function ProfileCard({ userId, name, onClose }: { userId: string; name: string; onClose: () => void }) {
+function ProfileCard({ userId, name, action, onClose }: { userId: string; name: string; action?: ProfileAction; onClose: () => void }) {
   const workspaceId = useWorkspace().workspace.id
   const navigate = useNavigate()
   const me = useCurrentUser().data
@@ -228,7 +229,20 @@ function ProfileCard({ userId, name, onClose }: { userId: string; name: string; 
           Edit profile
         </Button>
       ) : (
-        <MessageAction userId={userId} name={member.name} onDone={onClose} />
+        <div className="flex gap-2 *:flex-1">
+          {action ? (
+            <Button
+              variant="outline"
+              onClick={() => {
+                onClose()
+                action.run()
+              }}
+            >
+              {action.label}
+            </Button>
+          ) : null}
+          <MessageAction userId={userId} name={member.name} onDone={onClose} />
+        </div>
       )}
 
       {!own && profileQuery.data ? <ProfileNote workspaceId={workspaceId} userId={userId} name={member.name} saved={profileQuery.data.note ?? ''} /> : null}

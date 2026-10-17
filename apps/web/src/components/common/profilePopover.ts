@@ -1,5 +1,11 @@
 import { createContext } from 'react'
 
+/** An extra button in the profile popover for what the trigger is about (docs: "Go to cursor"). */
+export interface ProfileAction {
+  label: string
+  run: () => void
+}
+
 /**
  * What a `ProfileTrigger` needs of the one profile popover of the app. The shell provides it (`app/shell/ProfilePopover`),
  * because the popover reads features and nothing under `components/` may.
@@ -8,8 +14,9 @@ export interface ProfilePopoverControl {
   /**
    * Shows the profile of `userId` beside `anchor`. While the popover shows somebody else it moves there; a second
    * call with the anchor it is open on closes it. `instant`: opened from the keyboard, so without the entrance motion.
+   * `action`: an extra button beside "Message"; the popover closes when it runs.
    */
-  open: (userId: string, anchor: HTMLElement, options: { name: string; instant: boolean }) => void
+  open: (userId: string, anchor: HTMLElement, options: { name: string; instant: boolean; action?: ProfileAction }) => void
   /** Loads what the popover shows, so that it opens with its content. */
   prefetch: (userId: string) => void
 }

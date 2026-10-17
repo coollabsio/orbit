@@ -3,6 +3,8 @@ import { CollabConnectContext, type CollabTarget } from './connection'
 import { CollabSession, type CollabConnection, type CollabProblem, type CollabState } from './session'
 
 export interface CollabUser {
+  /** The signed-in user (undefined while loading). */
+  id?: string
   name: string
   color: string
 }

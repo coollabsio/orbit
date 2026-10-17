@@ -184,7 +184,8 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
 - Remote metadata updates (realtime refresh, other tabs) apply title/icon/cover when there are no unsaved local edits;
   metadata-only changes (e.g. a move) just advance the version. Content never comes from the page query after mount.
 - Real-time co-editing, web (`features/docs/collab/`: `session.ts` state machine, `connection.ts` socket factory +
-  `CollabConnectContext` for tests, `useCollabSession.ts`, `presence.ts`, `PresenceAvatars.tsx`, `palette.ts`; test fake
+  `CollabConnectContext` for tests, `useCollabSession.ts`, `presence.ts`, `PresenceAvatars.tsx`, `cursor.ts`,
+  `blockPresence.ts`; test fake
   `src/test/fakeCollab.ts`): DocEditor opens one Y.Doc + y-websocket provider per page/epoch (yjs + y-websocket load on
   demand, `disableBc`, backoff ≤ 5 s) and mounts `PageEditor` with `collab` (`withCollaboration`, no `initialContent`,
   Yjs undo, caret labels `showCursorLabels: 'activity'`) only after the first sync; both are destroyed on page switch.
@@ -197,9 +198,13 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
   y-websocket retries. Handshakes refused before the upgrade (HTTP 401/404 arrive as 1006) trigger a throttled REST
   check of the page after 2 failures (404 → leave like a trash, 401 → login). `beforeunload` warns only while
   disconnected with local edits typed offline or within 3 s before the drop (and for unsaved title edits).
-  Presence: avatars (max 4 + "+n", tooltips, `aria-label` "Also here: …") from awareness, deduped by the server-stamped
-  user id, without the own user (other tabs included); colors = `collabColor(user id)`, the same hash and 8 colors as
-  `hub.rs::user_color`, so avatar and caret match. Restore from history, Notion import and REST content PATCH arrive
+  Presence: avatars (max 4 + "+n", `aria-label` "Also here: …") from awareness, deduped by the server-stamped user id,
+  without the own user (other tabs included). Colors come from the server (`hub.rs::room_color`): everyone on a page gets
+  a different one of 9 while one is free (their usual, id-hashed color if nobody has it), all tabs of a user share it,
+  and avatar ring, caret and marker use it. A full ring means editing (a tab publishes a cursor), a faint ring viewing;
+  hover shows "Name · Editing/Viewing", a click opens the shell profile popover, with "Go to cursor" (scroll + name
+  flag, `revealCollabCursor`) for someone editing. Carets carry `data-collab-user` (`renderCollabCursor`); each block
+  holding someone else's caret gets a right-margin marker with initials (+n) in their color (`collabBlockPresence`). Restore from history, Notion import and REST content PATCH arrive
   live through Y; the history pane's restore only applies the returned title/icon (+ toast, list refresh).
   E2E: `target/orbit-smoke/collab.mjs [base] [label]` (two users, REST PATCH live, typing both ways with latency,
   presence colors, reload, restore both ways, trash notice, CSP/console check; `COLLAB_DB` backdates the test page so a

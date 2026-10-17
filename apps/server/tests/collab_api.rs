@@ -681,6 +681,18 @@ async fn two_clients_converge_and_share_awareness() {
             .await,
         "the sender gets its own state back"
     );
+    // Two people on one page never share a cursor color.
+    b.set_awareness(1, json!({"cursor": null})).await;
+    let b_id = b.doc.client_id().get();
+    assert!(
+        a.pump(Duration::from_secs(5), |client, _| client
+            .awareness
+            .contains_key(&b_id))
+            .await
+    );
+    let b_state: Value = serde_json::from_str(&a.awareness[&b_id]).unwrap();
+    assert_eq!(b_state["user"]["id"], users.member_id.to_string());
+    assert_ne!(b_state["user"]["color"], state["user"]["color"]);
     // B cannot speak for A's client id.
     let mut clients = HashMap::new();
     clients.insert(

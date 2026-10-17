@@ -100,9 +100,12 @@ const MEMORY_FACTOR: usize = 17;
 const MAX_AWARENESS_CLIENTS_PER_CONNECTION: usize = 4;
 /// Largest awareness state (cursor, user) accepted.
 const MAX_AWARENESS_STATE_BYTES: usize = 16 * 1024;
-/// Cursor colors (readable on dark and light backgrounds), picked by user id.
-const USER_COLORS: [&str; 8] = [
-    "#e11d48", "#db2777", "#9333ea", "#2563eb", "#0891b2", "#059669", "#ca8a04", "#ea580c",
+/// Cursor colors (Tailwind 600: readable on dark and light backgrounds). Each page gives every
+/// person their own while one is free (see [`room_color`]); neighbours differ in hue, so the
+/// next free color is easy to tell apart too.
+const USER_COLORS: [&str; 9] = [
+    "#e11d48", "#2563eb", "#d97706", "#7c3aed", "#059669", "#ea580c", "#0891b2", "#c026d3",
+    "#65a30d",
 ];
 
 #[derive(Debug, Error)]
@@ -167,6 +170,10 @@ pub(crate) struct RoomState {
     connections: usize,
     /// Awareness client id -> owning connection.
     awareness_owners: HashMap<u64, u64>,
+    /// Connection -> its user, for connections that published awareness (they hold a color).
+    color_holders: HashMap<u64, Id>,
+    /// User -> index into [`USER_COLORS`], while one of their connections is in the room.
+    user_colors: HashMap<Id, usize>,
 }
 
 impl RoomState {
@@ -194,6 +201,8 @@ impl RoomState {
             state_bytes: 0,
             connections: 0,
             awareness_owners: HashMap::new(),
+            color_holders: HashMap::new(),
+            user_colors: HashMap::new(),
         }
     }
 
@@ -970,6 +979,14 @@ impl CollabHub {
                 });
             }
         }
+        if state.color_holders.remove(&connection).is_some()
+            && !state
+                .color_holders
+                .values()
+                .any(|user| *user == peer.user_id)
+        {
+            state.user_colors.remove(&peer.user_id);
+        }
         state.connections = state.connections.saturating_sub(1);
         room.connections.store(state.connections, Ordering::Relaxed);
         if state.connections == 0 {
@@ -1443,7 +1460,7 @@ fn accept_awareness(
         value["user"] = serde_json::json!({
             "id": peer.user_id.to_string(),
             "name": peer.name,
-            "color": user_color(peer.user_id),
+            "color": room_color(state, connection, peer.user_id),
         });
         owned_clients.insert(id);
         state.awareness_owners.insert(id, connection);
@@ -1458,13 +1475,31 @@ fn accept_awareness(
     (!accepted.clients.is_empty()).then_some(accepted)
 }
 
-/// A stable cursor color for the user (one of eight).
-#[must_use]
-pub fn user_color(user_id: Id) -> &'static str {
+/// The user's cursor color on this page: their usual color (picked by id, so it stays the same
+/// across visits) unless someone else in the room has it, then the next free one. Several tabs of
+/// one user share a color; it is freed when their last connection leaves.
+fn room_color(state: &mut RoomState, connection: u64, user_id: Id) -> &'static str {
+    state.color_holders.insert(connection, user_id);
+    let slot = if let Some(slot) = state.user_colors.get(&user_id) {
+        *slot
+    } else {
+        let start = color_slot(user_id);
+        let slot = (0..USER_COLORS.len())
+            .map(|step| (start + step) % USER_COLORS.len())
+            .find(|slot| !state.user_colors.values().any(|taken| taken == slot))
+            .unwrap_or(start);
+        state.user_colors.insert(user_id, slot);
+        slot
+    };
+    USER_COLORS[slot]
+}
+
+/// The user's usual color slot: `hash * 31 + byte` over the id's text.
+fn color_slot(user_id: Id) -> usize {
     let hash = user_id.to_string().bytes().fold(0_u32, |hash, byte| {
         hash.wrapping_mul(31).wrapping_add(u32::from(byte))
     });
-    USER_COLORS[hash as usize % USER_COLORS.len()]
+    hash as usize % USER_COLORS.len()
 }
 
 fn parse_id(value: String) -> Result<Id, CollabError> {
@@ -1528,4 +1563,41 @@ async fn compact_log(
         .execute(&mut **tx)
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn people_on_a_page_get_different_colors_until_the_palette_runs_out() {
+        let first = Id::new_v7();
+        // A second user whose usual color is the same as the first one's.
+        let clash = std::iter::repeat_with(Id::new_v7)
+            .find(|id| color_slot(*id) == color_slot(first))
+            .unwrap();
+        let mut state = RoomState::new();
+        let a = room_color(&mut state, 1, first);
+        assert_eq!(
+            a,
+            USER_COLORS[color_slot(first)],
+            "the usual color while it is free"
+        );
+        assert_eq!(
+            room_color(&mut state, 2, first),
+            a,
+            "tabs of one user share a color"
+        );
+        let b = room_color(&mut state, 3, clash);
+        assert_ne!(a, b);
+        let others: Vec<&str> = (0..USER_COLORS.len() - 2)
+            .map(|index| room_color(&mut state, 10 + index as u64, Id::new_v7()))
+            .collect();
+        let mut all: Vec<&str> = [a, b].into_iter().chain(others).collect();
+        all.sort_unstable();
+        all.dedup();
+        assert_eq!(all.len(), USER_COLORS.len(), "every color is used once");
+        // The palette is full: a tenth person shares a color instead of failing.
+        assert!(USER_COLORS.contains(&room_color(&mut state, 99, Id::new_v7())));
+    }
 }
