@@ -1,16 +1,19 @@
 import { toast } from 'sonner'
-import { useEffect, useRef, useState } from 'react'
+import { Suspense, useMemo, useRef, useState } from 'react'
 import { Copy, Edit as Pencil, Trash as Trash2 } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
 import { Kbd } from '@/components/ui/kbd'
-import { Textarea } from '@/components/ui/textarea'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { ConfirmDeleteModal } from '@/components/common/ConfirmDeleteModal'
 import { Attachments } from '@/components/common/Attachments'
-import type { MentionToken } from '@/lib/mentions'
-import { renderMarkdownBlocks } from '@/lib/markdown'
+import { contentEquals } from '@/features/docs/editor/content'
+import { uploadInlineFile } from '@/features/tasks/api/inlineFiles'
+import { isEmptyRichText } from '@/features/tasks/lib/richText'
+// Type-only import: erased at build time, so the BlockNote chunk stays lazy.
+import type { PageEditorHandle } from '@/features/docs/editor/PageEditor'
+import { EditorFallback, PageEditor } from './lazyEditor'
 import type { TaskComment, TaskViewState } from '@/features/tasks/api/models'
 import { useDeleteTaskComment, useUpdateTaskComment } from '@/features/tasks/api/tasks'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
@@ -21,24 +24,29 @@ interface CommentItemProps {
   state: TaskViewState
   taskId: string
   comment: TaskComment
-  mentionTokens: MentionToken[]
   reply?: boolean
 }
 
 /** A task comment with author, timestamp, body, and a compact hover action row. */
-export function CommentItem({ state, taskId, comment, mentionTokens, reply }: CommentItemProps) {
+export function CommentItem({ state, taskId, comment, reply }: CommentItemProps) {
   const { workspace } = useWorkspace()
   const updateComment = useUpdateTaskComment(workspace.id, taskId)
   const deleteComment = useDeleteTaskComment(workspace.id, taskId)
   const [editing, setEditing] = useState(false)
-  const [editText, setEditText] = useState('')
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const editorRef = useRef<PageEditorHandle>(null)
   const author = state.users.find((u) => u.id === comment.authorId)
   const name = author?.name ?? 'Someone'
+  const mentions = useMemo(() => ({ members: state.users, candidates: state.users.filter((user) => !user.suspended), privatePage: false }), [state.users])
+  const fileScope = useMemo(() => ({ workspaceId: workspace.id, taskId }), [workspace.id, taskId])
+  const hasBody = comment.bodyJson ? !isEmptyRichText(comment.bodyJson) : comment.body.trim() !== ''
 
   const commitEdit = () => {
-    const trimmed = editText.trim()
-    if (trimmed && trimmed !== comment.body) updateComment.mutate({ commentId: comment.id, body: trimmed, version: comment.version })
+    const content = editorRef.current?.getContent() ?? []
+    // an emptied comment is deleted, not saved
+    if (!isEmptyRichText(content) && !contentEquals(content, comment.bodyJson)) {
+      updateComment.mutate({ commentId: comment.id, bodyJson: content, version: comment.version })
+    }
     setEditing(false)
   }
 
@@ -78,10 +86,7 @@ export function CommentItem({ state, taskId, comment, mentionTokens, reply }: Co
                       size="icon-sm"
                       className="size-6 text-muted-foreground/70"
                       aria-label="Edit comment"
-                      onClick={() => {
-                        setEditText(comment.body)
-                        setEditing(true)
-                      }}
+                      onClick={() => setEditing(true)}
                     >
                       <Pencil className="size-3.5" />
                     </Button>
@@ -97,13 +102,37 @@ export function CommentItem({ state, taskId, comment, mentionTokens, reply }: Co
               </div>
             ) : null}
           </div>
+          {editing || hasBody ? (
+            <div data-realtime-safe={editing ? '' : undefined} className={cn('text-[13px] leading-[19px] text-foreground [overflow-wrap:anywhere]', editing ? 'mt-1.5 rounded-md border px-2 py-1' : 'mt-0.5')}>
+              <Suspense fallback={<EditorFallback />}>
+                <PageEditor
+                  // a saved edit brings a new version: start from the stored content again
+                  key={`${comment.id}:${comment.version}:${editing}`}
+                  ref={editorRef}
+                  pageId={`comment:${comment.id}`}
+                  profile="task"
+                  fileScope={fileScope}
+                  initialContent={comment.bodyJson ?? undefined}
+                  initialMarkdown={comment.body}
+                  editable={editing}
+                  submitShortcut={editing ? commitEdit : undefined}
+                  onEscape={editing ? () => setEditing(false) : undefined}
+                  uploadFile={editing ? (file) => uploadInlineFile(workspace.id, taskId, file) : undefined}
+                  mentions={mentions}
+                  className="-mx-[54px] max-[899px]:mx-0"
+                />
+              </Suspense>
+            </div>
+          ) : null}
           {editing ? (
-            <EditingTextarea value={editText} onChange={setEditText} onCommit={commitEdit} onCancel={() => setEditing(false)} />
-          ) : comment.body.trim() ? (
-            <div className="mt-0.5 text-[13px] leading-[19px] font-normal text-foreground [overflow-wrap:anywhere]">{renderMarkdownBlocks(comment.body, comment.id, mentionTokens)}</div>
+            <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+              <span><Kbd className="h-4 text-[11px]">escape</Kbd> to <b className="text-foreground">cancel</b> · <Kbd className="h-4 text-[11px]">⌘ enter</Kbd> to <b className="text-foreground">save</b></span>
+              <Button variant="ghost" size="xs" className="ml-auto" onClick={() => setEditing(false)}>Cancel</Button>
+              <Button size="xs" onClick={commitEdit}>Save</Button>
+            </div>
           ) : null}
           {comment.attachments && comment.attachments.length > 0 ? (
-            <Attachments attachments={comment.attachments} hasTextContent={!!comment.body.trim()} />
+            <Attachments attachments={comment.attachments} hasTextContent={hasBody} />
           ) : null}
         </div>
       </article>
@@ -122,55 +151,5 @@ export function CommentItem({ state, taskId, comment, mentionTokens, reply }: Co
       {updateComment.isError ? <p role="alert" className="text-xs text-destructive">Comment update failed. <Button variant="ghost" onClick={() => updateComment.variables && updateComment.mutate(updateComment.variables)}>Retry</Button></p> : null}
       {deleteComment.isError ? <p role="alert" className="text-xs text-destructive">Comment deletion failed. <Button variant="ghost" onClick={() => deleteComment.variables && deleteComment.mutate(deleteComment.variables)}>Retry</Button></p> : null}
     </>
-  )
-}
-
-function EditingTextarea({
-  value,
-  onChange,
-  onCommit,
-  onCancel,
-}: {
-  value: string
-  onChange: (value: string) => void
-  onCommit: () => void
-  onCancel: () => void
-}) {
-  const ref = useRef<HTMLTextAreaElement>(null)
-
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    el.focus()
-    el.setSelectionRange(el.value.length, el.value.length)
-    el.style.height = 'auto'
-    el.style.height = `${el.scrollHeight}px`
-  }, [])
-
-  return (
-    <div className="mt-1.5">
-      <Textarea
-        ref={ref}
-        className="field-sizing-fixed min-h-[52px] resize-y text-[13px] leading-5 md:text-[13px]"
-        value={value}
-        rows={2}
-        aria-label="Edit comment"
-        onChange={(e) => {
-          onChange(e.target.value)
-          e.target.style.height = 'auto'
-          e.target.style.height = `${e.target.scrollHeight}px`
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault()
-            onCommit()
-          }
-          if (e.key === 'Escape') onCancel()
-        }}
-      />
-      <div className="mt-1 text-[11px] text-muted-foreground">
-        <Kbd className="h-4 text-[11px]">escape</Kbd> to <b className="text-foreground">cancel</b> · <Kbd className="h-4 text-[11px]">enter</Kbd> to <b className="text-foreground">save</b>
-      </div>
-    </div>
   )
 }

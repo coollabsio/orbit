@@ -1,46 +1,14 @@
 import { expect, mock, test } from 'bun:test'
-import { fireEvent, render } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
+import { render } from '@testing-library/react'
 import { TaskCommentComposer } from './TaskCommentComposer'
-import { NO_MEMBER_ABILITIES } from '@/features/workspaces/models'
 
-test('comment writes announce progress and keep a visible retry after failure', () => {
-  const view = render(<TaskCommentComposer placeholder="Reply" pending={false} progress={50} error="Upload failed." onSend={mock(async () => {})} />)
-  fireEvent.change(view.getByPlaceholderText('Reply'), { target: { value: 'Keep this draft' } })
-
-  expect(view.getByRole('alert').textContent).toContain('Upload failed.')
-  expect(view.getByRole('status').textContent).toContain('50%')
-  expect(view.getByRole('button', { name: 'Retry' })).toBeTruthy()
-})
-
-test('at-mentions resolve to workspace member ids', async () => {
-  const sent: Array<{ body: string; ids: string[] }> = []
-  const view = render(<TaskCommentComposer placeholder="Reply" pending={false} members={[{
-    id: 'user-2', membershipId: 'm2', name: 'Ada', handle: 'ada', email: 'ada@orbit.test',
-    role: 'Member', color: '#000', title: '', roleIds: [], can: NO_MEMBER_ABILITIES, version: 1,
-  }]} onSend={async (body, _files, mentionedUserIds) => { sent.push({ body, ids: mentionedUserIds }) }} />)
-  await userEvent.type(view.getByPlaceholderText('Reply'), 'Hey @')
-  fireEvent.mouseDown(await view.findByRole('button', { name: '@Ada' }))
-  fireEvent.click(view.getByRole('button', { name: 'Send' }))
-  expect(sent[0]?.ids).toEqual(['user-2'])
-  expect(sent[0]?.body).toContain('@Ada')
-})
-
-test('Enter adds a new line and only the Send button sends', async () => {
+test('Send stays disabled for an empty comment and a failed send keeps a Retry', () => {
   const onSend = mock(async () => {})
-  const view = render(<TaskCommentComposer placeholder="Reply" pending={false} onSend={onSend} />)
-  const field = view.getByPlaceholderText('Reply') as HTMLTextAreaElement
-  await userEvent.type(field, 'First{Enter}Second')
+  const view = render(<TaskCommentComposer workspaceId="workspace-1" taskId="task-1" pending={false} members={[]} onSend={onSend} />)
+  expect((view.getByRole('button', { name: 'Send' }) as HTMLButtonElement).disabled).toBe(true)
 
+  view.rerender(<TaskCommentComposer workspaceId="workspace-1" taskId="task-1" pending={false} members={[]} error="Comment failed." onSend={onSend} />)
+  expect(view.getByRole('alert').textContent).toContain('Comment failed.')
+  expect(view.getByRole('button', { name: 'Retry' })).toBeTruthy()
   expect(onSend).not.toHaveBeenCalled()
-  expect(field.value).toBe('First\nSecond')
-})
-
-test('a second click while sending does not send the comment again', async () => {
-  const onSend = mock(() => new Promise<void>(() => {}))
-  const view = render(<TaskCommentComposer placeholder="Reply" pending={false} onSend={onSend} />)
-  await userEvent.type(view.getByPlaceholderText('Reply'), 'Once')
-  await userEvent.dblClick(view.getByRole('button', { name: 'Send' }))
-
-  expect(onSend).toHaveBeenCalledTimes(1)
 })

@@ -51,6 +51,8 @@ export interface PageEditorHandle {
   /** Current document as sanitized JSON (same shape `onChange` receives). */
   getContent: () => unknown[]
   focus: () => void
+  /** Adds blocks at the end (files picked outside the editor). */
+  appendBlocks: (blocks: unknown[]) => void
 }
 
 /** Real-time co-editing: the document lives in `fragment` (already synced with the server) instead of `initialContent`. */
@@ -322,6 +324,10 @@ function PageEditorInner({
     () => ({
       getContent: () => toStoredContent(editor.document, fileScope),
       focus: () => editor.focus(),
+      appendBlocks: (blocks) => {
+        const last = editor.document.at(-1)
+        if (last) editor.insertBlocks(blocks as never, last, 'after')
+      },
     }),
     [editor, fileScope],
   )

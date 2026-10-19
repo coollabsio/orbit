@@ -1,5 +1,5 @@
 import { useCommand } from '@/shortcuts/useCommand'
-import { lazy, Suspense, useRef, useState } from 'react'
+import { Suspense, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Calendar, ChevronRight, Hierarchy2, Paperclip2 as Paperclip, Tag, User as UserIcon, Xmark as X } from 'reicon-react'
 import { apiClient } from '@/api/client'
@@ -25,10 +25,8 @@ import { DatePicker } from '@/components/common/DatePicker'
 import { UserAvatar, UserAvatarStack } from '@/components/common/UserAvatar'
 import { uploadInlineFile } from '@/features/tasks/api/inlineFiles'
 import { isEmptyRichText } from '@/features/tasks/lib/richText'
-import { loadPageEditor } from '@/features/docs/editor/loadPageEditor'
 // Type-only import: erased at build time, so the BlockNote chunk stays lazy.
 import type { PageEditorHandle } from '@/features/docs/editor/PageEditor'
-import { Spinner } from '@/components/ui/spinner'
 import { useMembers } from '@/features/workspaces/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useLabels } from '@/features/tasks/api/labels'
@@ -38,6 +36,7 @@ import { useCreateTask } from '@/features/tasks/api/tasks'
 import { dueDateLabel, matchingLabelIds, PRIORITY_LABEL, PRIORITY_ORDER, projectStatuses, statusKeyOf } from '@/features/tasks/taskMeta'
 import { resolveStatusId } from '@/features/tasks/tasksLib'
 import { ADD_RELATION_OPTIONS, type RelationKind } from '@/features/tasks/relationsLib'
+import { EditorFallback, fileBlock, PageEditor } from './lazyEditor'
 import { PriorityIcon } from './PriorityIcon'
 import { LabelPicker } from './TaskLabels'
 import { TaskPickerDialog } from './TaskPickerDialog'
@@ -50,13 +49,6 @@ const RELATION_OPTIONS = ADD_RELATION_OPTIONS.filter((option) => option.kind !==
 const RELATION_LABEL: Record<RelationKind, string> = { blocks: 'Blocks', blocked_by: 'Blocked by', related: 'Related to', duplicate: 'Duplicate of' }
 
 type PendingRelation = { kind: Exclude<RelationKind, 'duplicate'>; task: Task }
-
-const PageEditor = lazy(() => loadPageEditor().then((module) => ({ default: module.PageEditor })))
-
-/** An image or file block for a file uploaded after the task was created. */
-function fileBlock(file: File, url: string) {
-  return { type: file.type.startsWith('image/') ? 'image' : 'file', props: { url, name: file.name } }
-}
 
 interface NewTaskDialogProps {
   /** Starting properties (the page's filter, a group header). Unknown or missing ones fall back to the first project and its default status. */
@@ -298,7 +290,7 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
                   attach(event.dataTransfer.files)
                 }}
               >
-                <Suspense fallback={<div className="flex justify-center py-4"><Spinner className="text-muted-foreground" /></div>}>
+                <Suspense fallback={<EditorFallback />}>
                   <PageEditor
                     key={descriptionKey}
                     ref={descriptionRef}

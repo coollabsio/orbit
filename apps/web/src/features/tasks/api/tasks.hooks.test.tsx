@@ -74,32 +74,22 @@ test('task attachment hook reconciles partial success and retries only remaining
   expect(view.result.current.progress).toBe(100)
 })
 
-test('comment attachment retry resumes the created comment instead of duplicating it', async () => {
-  let calls = 0
-  let commentCreates = 0
+test('a comment is sent as BlockNote blocks with its parent', async () => {
+  const bodies: unknown[] = []
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const request = input as Request
-    calls += 1
-    if (request.url.endsWith('/comments')) {
-      commentCreates += 1
-      return Response.json({
-        id: 'comment-1', workspace_id: 'workspace-1', task_id: 'task-1', author_id: 'user-1',
-        body: 'Persist once', can_edit: true, can_delete: true,
-        created_at: '2026-09-05T10:00:00Z', updated_at: '2026-09-05T10:00:00Z', version: 0,
-      }, { status: 201 })
-    }
-    return calls === 3 ? failure() : Response.json(attachment, { status: 201 })
+    bodies.push(await request.json())
+    return Response.json({
+      id: 'comment-1', workspace_id: 'workspace-1', task_id: 'task-1', author_id: 'user-1', body: 'Hi\n', body_json: [],
+      can_edit: true, can_delete: true, created_at: '2026-09-05T10:00:00Z', updated_at: '2026-09-05T10:00:00Z', version: 0,
+    }, { status: 201 })
   }) as unknown as typeof fetch
   const view = renderHook(() => useCreateTaskComment('workspace-1', 'task-1'), { wrapper })
-  const input = { body: 'Persist once', files: [new File(['a'], 'a.txt'), new File(['b'], 'b.txt')] }
+  const bodyJson = [{ type: 'paragraph', content: [{ type: 'text', text: 'Hi', styles: {} }] }]
 
-  await act(async () => { await view.result.current.mutateAsync(input).catch(() => undefined) })
-  expect(view.result.current.remainingCount).toBe(1)
-  await act(async () => { await view.result.current.mutateAsync(input) })
+  await act(async () => { await view.result.current.mutateAsync({ bodyJson, parentId: 'comment-0' }) })
 
-  expect(commentCreates).toBe(1)
-  expect(calls).toBe(4)
-  expect(view.result.current.progress).toBe(100)
+  expect(bodies).toEqual([{ body_json: bodyJson, parent_id: 'comment-0' }])
 })
 
 test('oversized bulk operation makes zero requests and leaves every cache unchanged', async () => {

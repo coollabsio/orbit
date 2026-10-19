@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react'
+import { Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react'
 import { useNavigate } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -6,22 +6,19 @@ import { apiClient, UNAUTHORIZED_EVENT } from '@/api/client'
 import { getTask } from '@/api/generated/sdk.gen'
 import { queryKeys } from '@/api/queryKeys'
 import { Button } from '@/components/ui/button'
-import { Spinner } from '@/components/ui/spinner'
 import { useCurrentUser } from '@/features/auth/api'
 import { revealCollabCursor } from '@/features/docs/collab/cursor'
 import { useCollaborators } from '@/features/docs/collab/presence'
 import { PresenceAvatars } from '@/features/docs/collab/PresenceAvatars'
 import { collabProblemAction, collabStatusLabel, type CollabProblem, type CollabSession } from '@/features/docs/collab/session'
 import { useCollabSession } from '@/features/docs/collab/useCollabSession'
-import { loadPageEditor } from '@/features/docs/editor/loadPageEditor'
 import { pageMentionCandidates } from '@/features/docs/editor/pageMentions'
 import { useMembers } from '@/features/workspaces/api'
 import type { Task } from '@/features/tasks/api/models'
 import { uploadInlineFile } from '@/features/tasks/api/inlineFiles'
+import { EditorFallback, PageEditor } from './lazyEditor'
 // Type-only imports: erased at build time, so the BlockNote chunk stays lazy.
 import type { PageEditorHandle } from '@/features/docs/editor/PageEditor'
-
-const PageEditor = lazy(() => loadPageEditor().then((module) => ({ default: module.PageEditor })))
 
 export interface TaskDescriptionHandle {
   focus: () => void
@@ -29,11 +26,7 @@ export interface TaskDescriptionHandle {
 
 type Notice = 'too-large' | 'protocol' | null
 
-const editorSpinner = (
-  <div className="flex justify-center py-6">
-    <Spinner className="text-muted-foreground" />
-  </div>
-)
+const editorSpinner = <EditorFallback />
 
 /**
  * The task description, co-edited live like a docs page (`/tasks/{id}/collab`). Until the first sync it shows the

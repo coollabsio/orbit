@@ -38,7 +38,7 @@ function state(overrides: Partial<TaskViewState> = {}): TaskViewState {
 }
 
 test('comment header keeps author name and timestamp as separate text', () => {
-  const view = render(<CommentItem state={state()} taskId="task-1" comment={comment()} mentionTokens={[]} />, { wrapper: wrapper() })
+  const view = render(<CommentItem state={state()} taskId="task-1" comment={comment()} />, { wrapper: wrapper() })
 
   expect(view.getByText('Orbit Developers')).toBeTruthy()
   expect(view.getByText('just now')).toBeTruthy()
@@ -46,7 +46,7 @@ test('comment header keeps author name and timestamp as separate text', () => {
 })
 
 test('author comments expose compact copy, edit, and delete actions', () => {
-  const view = render(<CommentItem state={state()} taskId="task-1" comment={comment()} mentionTokens={[]} />, { wrapper: wrapper() })
+  const view = render(<CommentItem state={state()} taskId="task-1" comment={comment()} />, { wrapper: wrapper() })
 
   expect(view.getByRole('button', { name: 'Copy text' })).toBeTruthy()
   expect(view.getByRole('button', { name: 'Edit comment' })).toBeTruthy()
@@ -55,7 +55,7 @@ test('author comments expose compact copy, edit, and delete actions', () => {
 
 test('a comment the server marks as delete-only shows Delete without Edit', () => {
   const view = render(
-    <CommentItem state={state({ currentUserId: 'user-2' })} taskId="task-1" comment={comment({ canEdit: false })} mentionTokens={[]} />,
+    <CommentItem state={state({ currentUserId: 'user-2' })} taskId="task-1" comment={comment({ canEdit: false })} />,
     { wrapper: wrapper() },
   )
 
@@ -65,7 +65,7 @@ test('a comment the server marks as delete-only shows Delete without Edit', () =
 
 test('a comment the caller may not change offers only Copy', () => {
   const view = render(
-    <CommentItem state={state({ currentUserId: 'user-2' })} taskId="task-1" comment={comment({ canEdit: false, canDelete: false })} mentionTokens={[]} />,
+    <CommentItem state={state({ currentUserId: 'user-2' })} taskId="task-1" comment={comment({ canEdit: false, canDelete: false })} />,
     { wrapper: wrapper() },
   )
 
@@ -74,12 +74,12 @@ test('a comment the caller may not change offers only Copy', () => {
   expect(view.queryByRole('button', { name: 'Delete comment' })).toBeNull()
 })
 
-test('edit mode replaces the body with a save/cancel textarea', () => {
-  const view = render(<CommentItem state={state()} taskId="task-1" comment={comment()} mentionTokens={[]} />, { wrapper: wrapper() })
+test('edit mode offers save and cancel and hides the other actions until it ends', () => {
+  const view = render(<CommentItem state={state()} taskId="task-1" comment={comment()} />, { wrapper: wrapper() })
 
   fireEvent.click(view.getByRole('button', { name: 'Edit comment' }))
-  expect(view.getByLabelText('Edit comment')).toBeTruthy()
-  expect(view.getByText('escape').tagName).toBe('KBD')
-  expect(view.getByText('cancel')).toBeTruthy()
+  expect(view.getByRole('button', { name: 'Save' })).toBeTruthy()
   expect(view.queryByRole('button', { name: 'Copy text' })).toBeNull()
+  fireEvent.click(view.getByRole('button', { name: 'Cancel' }))
+  expect(view.getByRole('button', { name: 'Copy text' })).toBeTruthy()
 })
