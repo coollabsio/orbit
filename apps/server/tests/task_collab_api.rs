@@ -462,3 +462,27 @@ async fn live_mention_notifies_after_projection() {
     .await;
     server.stop().await;
 }
+
+#[tokio::test]
+async fn mentions_in_a_new_task_description_notify() {
+    let root = TempDir::new().unwrap();
+    let server = Server::start(&root, fast_config()).await;
+    let users = setup(&server).await;
+    let base = create_task(&server, &users, "").await;
+    let (status, task) = server
+        .api(
+            &users.owner,
+            "POST",
+            &format!("/api/v1/workspaces/{}/tasks", users.workspace),
+            Some(json!({
+                "project_id": base["project_id"],
+                "status_id": base["status_id"],
+                "title": "Mentions",
+                "description_json": mention_paragraph(users.member_id, "Mia Member", "Ask "),
+            })),
+        )
+        .await;
+    assert_eq!(status, 201, "{task}");
+    assert_eq!(description_mentions(&server, users.member_id).await, 1);
+    server.stop().await;
+}
