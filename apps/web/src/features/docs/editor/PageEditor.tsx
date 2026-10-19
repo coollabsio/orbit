@@ -372,7 +372,8 @@ function PageEditorInner({
   /** Cmd/Ctrl+Enter and Escape for fields that submit or cancel (comments, the new task dialog). */
   const onKeyDownCapture = (event: KeyboardEvent<HTMLDivElement>) => {
     const { submitShortcut: submit, onEscape: escape } = keysRef.current
-    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && submit) {
+    // with Shift it is the page's own shortcut (the new task dialog's "create and add another")
+    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.shiftKey && submit) {
       event.preventDefault()
       event.stopPropagation()
       submit()
