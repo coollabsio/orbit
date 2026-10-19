@@ -857,6 +857,7 @@ async fn collab_socket(
         state.cookie_mode,
         state.identity.database(),
         &workspace,
+        crate::collab::DocKind::Page,
         &page,
         query,
         &headers,

@@ -1,4 +1,5 @@
-//! Real-time co-editing of docs pages (design: `.ai/docs-next/coediting-design.md`).
+//! Real-time co-editing of docs pages and task descriptions (design:
+//! `.ai/docs-next/coediting-design.md`).
 //!
 //! - [`hub`]: one in-memory Yjs document ("room") per open page, y-sync fan-out, awareness,
 //!   write-behind persistence (update log + compaction), the JSON projection into
@@ -12,11 +13,16 @@
 
 pub mod blocknote;
 mod hub;
+mod kind_page;
 pub mod markdown_import;
 pub mod sanitize;
 pub mod socket;
 
+use std::borrow::Cow;
+use std::fmt;
+
 use orbit_platform::Id;
+use serde::{Deserialize, Serialize};
 
 pub(crate) use hub::CollabMessage;
 pub use hub::{CollabConfig, CollabError, CollabHub, CollabLock, CollabWrite};
@@ -54,10 +60,56 @@ pub mod close {
 pub const PROTOCOL_VERSION: &str = "1";
 
 /// What a collaborative document belongs to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum DocKind {
     Page,
     Task,
+}
+
+impl DocKind {
+    /// SQL written against the page tables (`page_collab_docs`, `page_collab_updates`,
+    /// `page_id`), for this kind's tables. Both table pairs have the same columns.
+    pub(crate) fn sql(self, page_sql: &'static str) -> sqlx::AssertSqlSafe<Cow<'static, str>> {
+        sqlx::AssertSqlSafe(match self {
+            Self::Page => Cow::Borrowed(page_sql),
+            Self::Task => Cow::Owned(
+                page_sql
+                    .replace("page_collab_docs", "task_collab_docs")
+                    .replace("page_collab_updates", "task_collab_updates")
+                    .replace("page_id", "task_id"),
+            ),
+        })
+    }
+}
+
+/// One collaborative document: its kind and the id of its page or task.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct DocKey {
+    pub kind: DocKind,
+    pub id: Id,
+}
+
+impl DocKey {
+    #[must_use]
+    pub fn page(id: Id) -> Self {
+        Self { kind: DocKind::Page, id }
+    }
+
+    #[must_use]
+    pub fn task(id: Id) -> Self {
+        Self { kind: DocKind::Task, id }
+    }
+}
+
+impl fmt::Display for DocKey {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let kind = match self.kind {
+            DocKind::Page => "page",
+            DocKind::Task => "task",
+        };
+        write!(formatter, "{kind}:{}", self.id)
+    }
 }
 
 /// The content policy of one document: a task keeps only its own attachment URLs and has no
