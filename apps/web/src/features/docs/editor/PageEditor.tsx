@@ -1,9 +1,10 @@
 import { useCommand } from '@/shortcuts/useCommand'
 import '@blocknote/shadcn/style.css'
 
-import { use, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type Ref } from 'react'
+import { use, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, useSyncExternalStore, type KeyboardEvent, type MouseEvent, type Ref } from 'react'
 import { createPortal } from 'react-dom'
 import { QueryClientContext, type QueryClient } from '@tanstack/react-query'
+import { SuggestionMenu } from '@blocknote/core'
 import { CommentsExtension } from '@blocknote/core/comments'
 import { en } from '@blocknote/core/locales'
 import { withCollaboration } from '@blocknote/core/yjs'
@@ -27,11 +28,11 @@ import { cn } from 'cn'
 import { collabBlockPresence } from '../collab/blockPresence'
 import { renderCollabCursor } from '../collab/cursor'
 import { ImageZoomButton } from './ImageZoomButton'
-import { internalPageLinkId, isSafeLinkHref, toEditorContent, toStoredContent } from './content'
+import { internalPageLinkId, isSafeLinkHref, toEditorContent, toStoredContent, type FileScope } from './content'
 import { insertPageBlock } from './pageBlockCommands'
 import { PageEditorContext, type PageEditorContextValue, type PageRef } from './pageEditorContext'
-import { EDITOR_BLOCK_TYPES, pageEditorSchema, type PageEditorInstance } from './schema'
-import { getPageSlashMenuItems } from './slashMenu'
+import { EDITOR_BLOCK_TYPES, pageEditorSchema, TASK_EDITOR_BLOCK_TYPES, taskEditorSchema, type PageEditorInstance } from './schema'
+import { getPageSlashMenuItems, getTaskSlashMenuItems } from './slashMenu'
 import { PageMentionMenu } from './MentionMenu'
 import { PageMentionNamesContext, type PageMentionOptions } from './pageMentions'
 import { ThemedBlockNoteView } from './ThemedBlockNoteView'
@@ -95,9 +96,24 @@ const floatingThreadOptions = {
 
 const FORMER_MEMBER = 'Former member'
 
+/**
+ * `page`: a docs page (sub-page cards, page files, comments). `task`: a task description or comment — no page
+ * blocks, files are the task's attachments (`fileScope`), no comments.
+ */
+export type EditorProfile = 'page' | 'task'
+
 export interface PageEditorProps {
   /** The editor is recreated (fresh document + undo history) whenever this changes. */
   pageId: string
+  profile?: EditorProfile
+  /** The task whose attachments image/file blocks may show (task profile). */
+  fileScope?: FileScope
+  /** Cmd/Ctrl+Enter (send a comment, create a task). */
+  submitShortcut?: () => void
+  /** Escape while no menu is open (cancel an edit). */
+  onEscape?: () => void
+  /** Hint shown while the document is empty (task profile). */
+  placeholder?: 'description' | 'comment'
   /** `Page.content` from the API, read once per `pageId`. Ignored with `collab` (the Y document is the content). */
   initialContent?: unknown[]
   /** Bind to a collaborative document. Fixed per editor instance: key the editor to switch documents. */
@@ -105,12 +121,14 @@ export interface PageEditorProps {
   editable: boolean
   /** Called on every edit with the full sanitized document (read-only previews and tests; collab needs none). */
   onChange?: (content: unknown[]) => void
-  resolvePage: (pageId: string) => PageRef | null
-  onOpenPage: (pageId: string) => void
-  /** Creates a child page of `pageId`; resolves to the new page id (reject/throw to abort). */
-  onCreateSubpage: () => Promise<string>
-  /** Lets the user pick an existing page; resolves to its id, or null when cancelled. */
-  onPickPage: () => Promise<string | null>
+  /** Page cards and links (page profile; the task profile has no page blocks). */
+  resolvePage?: (pageId: string) => PageRef | null
+  /** Opens an in-app `/docs/<id>` link; without it the link navigates like any link. */
+  onOpenPage?: (pageId: string) => void
+  /** Creates a child page of `pageId`; resolves to the new page id (reject/throw to abort). Page profile only. */
+  onCreateSubpage?: () => Promise<string>
+  /** Lets the user pick an existing page; resolves to its id, or null when cancelled. Page profile only. */
+  onPickPage?: () => Promise<string | null>
   /**
    * Uploads a file for an image/file block (slash menu, file panel, paste, drop) and resolves to its URL.
    * Reject to abort; the caller reports the error. Without it the editor offers no uploads.
@@ -130,15 +148,24 @@ export function PageEditor(props: PageEditorProps) {
   return <PageEditorInner key={props.pageId} {...props} />
 }
 
+const noPage = () => null
+const noPicker = () => Promise.resolve(null)
+const noSubpage = () => Promise.reject(new Error('sub-pages are not available here'))
+
 function PageEditorInner({
+  profile = 'page',
+  fileScope,
+  submitShortcut,
+  onEscape,
+  placeholder,
   initialContent,
   collab,
   editable,
   onChange,
-  resolvePage,
+  resolvePage = noPage,
   onOpenPage,
-  onCreateSubpage,
-  onPickPage,
+  onCreateSubpage = noSubpage,
+  onPickPage = noPicker,
   uploadFile,
   comments,
   mentions,
@@ -177,9 +204,11 @@ function PageEditorInner({
   const threadsSettled = useSyncExternalStore(threadStore.subscribeSettled, threadStore.isSettled)
   const names = useMemo(() => new Map((comments?.members ?? []).map((member) => [member.id, member.name])), [comments?.members])
   const membersById = useMemo(() => new Map((comments?.members ?? []).map((member) => [member.id, member])), [comments?.members])
+  const task = profile === 'task'
   const mounted = useRef(true)
   const uploadRef = useRef(uploadFile)
   const openPageRef = useRef(onOpenPage)
+  const keysRef = useRef({ submitShortcut, onEscape })
   const mentionsRef = useRef(mentions)
   useEffect(() => {
     mentionsRef.current = mentions
@@ -192,10 +221,12 @@ function PageEditorInner({
   useEffect(() => {
     uploadRef.current = uploadFile
     openPageRef.current = onOpenPage
-  }, [uploadFile, onOpenPage])
+    keysRef.current = { submitShortcut, onEscape }
+  }, [uploadFile, onOpenPage, submitShortcut, onEscape])
 
   const options = {
-    schema: pageEditorSchema,
+    // The task schema is the page schema minus `page`; one editor type serves both (no task code inserts pages).
+    schema: task ? (taskEditorSchema as unknown as typeof pageEditorSchema) : pageEditorSchema,
     links: {
       isValidLink: isSafeLinkHref,
       // Edit mode: BlockNote calls this instead of `window.open`. In-app page links are handled by the click
@@ -230,7 +261,8 @@ function PageEditorInner({
         withCollaboration({
           ...options,
           extensions: [
-            commentsExtension,
+            // Task documents carry no comment marks, so they need no comments extension.
+            ...(task ? [] : [commentsExtension]),
             ...(collab.provider.awareness ? [collabBlockPresence({ awareness: collab.provider.awareness, selfId: collab.user.id })] : []),
           ],
           collaboration: {
@@ -244,7 +276,7 @@ function PageEditorInner({
       : {
           ...options,
           // `[]` (new page) becomes undefined → BlockNote starts with one empty paragraph.
-          initialContent: toEditorContent(initialContent ?? [], EDITOR_BLOCK_TYPES) as never,
+          initialContent: toEditorContent(initialContent ?? [], task ? TASK_EDITOR_BLOCK_TYPES : EDITOR_BLOCK_TYPES, fileScope) as never,
         },
   )
 
@@ -281,13 +313,13 @@ function PageEditorInner({
   useImperativeHandle(
     ref,
     () => ({
-      getContent: () => toStoredContent(editor.document),
+      getContent: () => toStoredContent(editor.document, fileScope),
       focus: () => editor.focus(),
     }),
-    [editor],
+    [editor, fileScope],
   )
 
-  const context = useMemo<PageEditorContextValue>(() => ({ resolvePage, onOpenPage }), [resolvePage, onOpenPage])
+  const context = useMemo<PageEditorContextValue>(() => ({ resolvePage, onOpenPage: onOpenPage ?? (() => {}) }), [resolvePage, onOpenPage])
 
   const slashActions = {
     onSubpage: () => {
@@ -296,7 +328,7 @@ function PageEditorInner({
         (pageId) => {
           if (!mounted.current) return
           insertPageBlock(editor, anchorId, pageId)
-          onOpenPage(pageId)
+          onOpenPage?.(pageId)
         },
         () => {
           // Creation failed; the caller reports the error. Nothing to insert.
@@ -318,9 +350,24 @@ function PageEditorInner({
   const onClickCapture = (event: MouseEvent<HTMLDivElement>) => {
     const anchor = linkAnchor(event.target)
     const pageId = internalPageLinkId(anchor?.getAttribute('href'))
-    if (!pageId || event.button !== 0 || opensNewTab(event.nativeEvent)) return
+    const openPage = openPageRef.current
+    if (!pageId || !openPage || event.button !== 0 || opensNewTab(event.nativeEvent)) return
     event.preventDefault()
-    openPageRef.current(pageId)
+    openPage(pageId)
+  }
+
+  /** Cmd/Ctrl+Enter and Escape for fields that submit or cancel (comments, the new task dialog). */
+  const onKeyDownCapture = (event: KeyboardEvent<HTMLDivElement>) => {
+    const { submitShortcut: submit, onEscape: escape } = keysRef.current
+    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && submit) {
+      event.preventDefault()
+      event.stopPropagation()
+      submit()
+    } else if (event.key === 'Escape' && escape && !editor.getExtension(SuggestionMenu)?.shown()) {
+      event.preventDefault()
+      event.stopPropagation()
+      escape()
+    }
   }
 
   if (collab && !threadsSettled) {
@@ -334,7 +381,7 @@ function PageEditorInner({
   return (
     <PageEditorContext value={context}>
       <PageMentionNamesContext value={mentionNames}>
-      <div className="contents" onClickCapture={onClickCapture}>
+      <div className="contents" onClickCapture={onClickCapture} onKeyDownCapture={onKeyDownCapture}>
         <ThemedBlockNoteView
           editor={editor}
           editable={editable}
@@ -386,20 +433,27 @@ function PageEditorInner({
             // scroll the rest sideways, and use slightly smaller buttons so more fit.
             'max-[900px]:[&_.bn-formatting-toolbar]:max-w-[calc(100vw-16px)]! max-[900px]:[&_.bn-formatting-toolbar]:gap-0! max-[900px]:[&_.bn-formatting-toolbar]:overscroll-x-contain max-[900px]:[&_.bn-formatting-toolbar]:[scrollbar-width:none]',
             'max-[900px]:[&_.bn-formatting-toolbar>button]:h-8! max-[900px]:[&_.bn-formatting-toolbar>button]:min-w-8! max-[900px]:[&_.bn-formatting-toolbar>button]:shrink-0! max-[900px]:[&_.bn-formatting-toolbar>button]:px-0!',
+            // Task fields: their hint while the whole document is empty.
+            placeholder &&
+              '[&>.bn-editor[contenteditable=true]_.bn-block-content[data-is-only-empty-block]:has(.ProseMirror-trailingBreak:only-child)]:after:text-muted-foreground! [&>.bn-editor[contenteditable=true]_.bn-block-content[data-is-only-empty-block]:has(.ProseMirror-trailingBreak:only-child)]:after:not-italic!',
+            placeholder === 'description' &&
+              "[&>.bn-editor[contenteditable=true]_.bn-block-content[data-is-only-empty-block]:has(.ProseMirror-trailingBreak:only-child)]:after:content-['Add_description…']!",
+            placeholder === 'comment' &&
+              "[&>.bn-editor[contenteditable=true]_.bn-block-content[data-is-only-empty-block]:has(.ProseMirror-trailingBreak:only-child)]:after:content-['Leave_a_comment…_Use_@_to_mention']!",
             className,
           )}
           slashMenu={false}
           formattingToolbar={false}
           comments={false}
-          onChange={onChange ? (changed) => onChange(toStoredContent(changed.document)) : undefined}
+          onChange={onChange ? (changed) => onChange(toStoredContent(changed.document, fileScope)) : undefined}
         >
           <SuggestionMenuController
             triggerCharacter="/"
-            getItems={async (query) => getPageSlashMenuItems(editor, slashActions, query)}
+            getItems={async (query) => (task ? getTaskSlashMenuItems(editor, query) : getPageSlashMenuItems(editor, slashActions, query))}
           />
           <FormattingToolbarController formattingToolbar={formattingToolbar} />
           <PageMentionMenu editor={editor} options={() => mentionsRef.current} />
-          {collab ? (
+          {collab && !task ? (
             <MentionNamesContext value={names}>
               <MentionCandidatesContext value={comments?.mentionable ?? []}>
                 <CommentMembersContext value={membersById}>

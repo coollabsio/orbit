@@ -115,3 +115,10 @@ export function getPageSlashMenuItems(editor: PageEditorInstance, actions: PageS
   const merged = mergeSlashItems(insertAfterKey(defaults, 'code_block', mermaidSlashItem(editor)), pageSlashItems(actions))
   return preferTitleMatches(filterSuggestionItems(merged, query), query)
 }
+
+/** Slash menu items for task descriptions and comments: the page items without Sub-page and Link a page. */
+export function getTaskSlashMenuItems(editor: PageEditorInstance, query: string): DefaultReactSuggestionItem[] {
+  const defaults = insertAfterKey(getDefaultReactSlashMenuItems(editor), 'quote', calloutSlashItem(editor))
+  const merged = insertAfterKey(defaults, 'code_block', mermaidSlashItem(editor))
+  return preferTitleMatches(filterSuggestionItems(merged, query), query)
+}

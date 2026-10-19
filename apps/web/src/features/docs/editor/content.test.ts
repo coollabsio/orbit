@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { contentEquals, internalPageLinkId, isPageFileUrl, isSafeFileUrl, isSafeLinkHref, normalizeLinkHref, toEditorContent, toStoredContent } from './content'
+import { contentEquals, internalPageLinkId, isPageFileUrl, isSafeFileUrl, isSafeLinkHref, isTaskAttachmentUrl, normalizeLinkHref, taskAttachmentUrl, toEditorContent, toStoredContent } from './content'
 
 const TYPES = new Set(['paragraph', 'heading', 'table', 'page'])
 const NUL = String.fromCharCode(0)
@@ -154,5 +154,32 @@ describe('file block URLs', () => {
       expect(blocks[1].props?.url).toBe('')
       expect(blocks[2].children?.[0].props.url).toBe('')
     }
+  })
+})
+
+describe('task attachment urls', () => {
+  const ws = '0199a0b0-0000-7000-8000-000000000001'
+  const task = '0199a0b0-0000-7000-8000-000000000002'
+  const file = '0199a0b0-0000-7000-8000-000000000003'
+  const scope = { workspaceId: ws, taskId: task }
+
+  test('taskAttachmentUrl is the download path', () => {
+    expect(taskAttachmentUrl(ws, task, file)).toBe(`/api/v1/workspaces/${ws}/tasks/${task}/attachments/${file}/download`)
+  })
+
+  test('only the own task attachment is safe for a task', () => {
+    expect(isTaskAttachmentUrl(taskAttachmentUrl(ws, task, file), scope)).toBe(true)
+    expect(isTaskAttachmentUrl(taskAttachmentUrl(ws, file, file), scope)).toBe(false)
+    expect(isTaskAttachmentUrl(`/api/v1/workspaces/${ws}/pages/${task}/files/${file}`, scope)).toBe(false)
+    expect(isSafeFileUrl(taskAttachmentUrl(ws, task, file), scope)).toBe(true)
+    expect(isSafeFileUrl(`/api/v1/workspaces/${ws}/pages/${task}/files/${file}`, scope)).toBe(false)
+  })
+
+  test('task content keeps its own attachments when loaded and stored', () => {
+    const url = taskAttachmentUrl(ws, task, file)
+    const blocks = [{ type: 'image', props: { url } }]
+    expect(toEditorContent(blocks, new Set(['image']), scope)?.[0]).toEqual({ type: 'image', props: { url } })
+    expect(toStoredContent(blocks, scope)[0]).toEqual({ type: 'image', props: { url } })
+    expect(toStoredContent(blocks)[0]).toEqual({ type: 'image', props: { url: '' } })
   })
 })

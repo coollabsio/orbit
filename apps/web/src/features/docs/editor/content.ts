@@ -52,13 +52,35 @@ export function isPageFileUrl(url: unknown): url is string {
   return typeof url === 'string' && PAGE_FILE_PATH.test(url)
 }
 
-/**
- * URL policy for image/file blocks: an uploaded page file, an absolute http(s) URL (embedded by link), or empty
- * (a block still waiting for its upload). Everything else (javascript:, data:, other paths) is dropped.
- */
-export function isSafeFileUrl(url: unknown): url is string {
+/** The task whose attachments a task description or comment may show (instead of page files). */
+export interface FileScope {
+  workspaceId: string
+  taskId: string
+}
+
+/** The download path of a task attachment, what inline images and files in task text point at. */
+export function taskAttachmentUrl(workspaceId: string, taskId: string, attachmentId: string): string {
+  return `/api/v1/workspaces/${workspaceId}/tasks/${taskId}/attachments/${attachmentId}/download`
+}
+
+const TASK_ATTACHMENT_PATH = new RegExp(`^/api/v1/workspaces/(${UUID})/tasks/(${UUID})/attachments/${UUID}/download$`)
+
+/** True for an attachment download path of exactly the scope's task (the server keeps no others). */
+export function isTaskAttachmentUrl(url: unknown, scope: FileScope): url is string {
   if (typeof url !== 'string') return false
-  if (url === '' || PAGE_FILE_PATH.test(url)) return true
+  const match = TASK_ATTACHMENT_PATH.exec(url)
+  return match !== null && match[1] === scope.workspaceId && match[2] === scope.taskId
+}
+
+/**
+ * URL policy for image/file blocks: an uploaded page file (with a `scope`: the task's own attachment), an
+ * absolute http(s) URL (embedded by link), or empty (a block still waiting for its upload). Everything else
+ * (javascript:, data:, other paths) is dropped.
+ */
+export function isSafeFileUrl(url: unknown, scope?: FileScope): url is string {
+  if (typeof url !== 'string') return false
+  const ownFile = scope ? isTaskAttachmentUrl(url, scope) : PAGE_FILE_PATH.test(url)
+  if (url === '' || ownFile) return true
   const cleaned = url.replace(URL_NOISE, '')
   return cleaned === url && /^https?:\/\/[^/\\]/i.test(url)
 }
@@ -98,14 +120,14 @@ function sanitizeLinks(value: unknown): unknown {
 }
 
 /** Blanks unsafe `props.url` values of image/file blocks anywhere in the tree (the block stays, empty). */
-function sanitizeFileBlocks(blocks: unknown[]): unknown[] {
+function sanitizeFileBlocks(blocks: unknown[], scope?: FileScope): unknown[] {
   return blocks.map((block) => {
     if (!isRecord(block)) return block
     let next = block
-    if (typeof block.type === 'string' && FILE_BLOCKS.has(block.type) && isRecord(block.props) && !isSafeFileUrl(block.props.url)) {
+    if (typeof block.type === 'string' && FILE_BLOCKS.has(block.type) && isRecord(block.props) && !isSafeFileUrl(block.props.url, scope)) {
       next = { ...block, props: { ...block.props, url: '' } }
     }
-    return Array.isArray(next.children) ? { ...next, children: sanitizeFileBlocks(next.children) } : next
+    return Array.isArray(next.children) ? { ...next, children: sanitizeFileBlocks(next.children, scope) } : next
   })
 }
 
@@ -125,15 +147,15 @@ function keepKnownBlocks(blocks: unknown[], allowedTypes: ReadonlySet<string>): 
  * non-arrays and unknown block types are dropped, links are sanitized, and an empty document becomes
  * `undefined` so BlockNote creates its single empty paragraph (it throws on `[]`).
  */
-export function toEditorContent(content: unknown, allowedTypes: ReadonlySet<string>): Record<string, unknown>[] | undefined {
+export function toEditorContent(content: unknown, allowedTypes: ReadonlySet<string>, scope?: FileScope): Record<string, unknown>[] | undefined {
   if (!Array.isArray(content)) return undefined
-  const blocks = sanitizeFileBlocks(sanitizeLinks(keepKnownBlocks(content, allowedTypes)) as unknown[]) as Record<string, unknown>[]
+  const blocks = sanitizeFileBlocks(sanitizeLinks(keepKnownBlocks(content, allowedTypes)) as unknown[], scope) as Record<string, unknown>[]
   return blocks.length > 0 ? blocks : undefined
 }
 
 /** Sanitizes the editor document before it is handed to `onChange` (and therefore persisted). */
-export function toStoredContent(document: readonly unknown[]): unknown[] {
-  return sanitizeFileBlocks(sanitizeLinks(document) as unknown[])
+export function toStoredContent(document: readonly unknown[], scope?: FileScope): unknown[] {
+  return sanitizeFileBlocks(sanitizeLinks(document) as unknown[], scope)
 }
 
 function stableStringify(value: unknown): string {

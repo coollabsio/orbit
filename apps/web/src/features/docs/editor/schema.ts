@@ -62,6 +62,22 @@ export const pageEditorSchema = BlockNoteSchema.create({
   inlineContentSpecs: { ...defaultInlineContentSpecs, mention: pageMentionSpec },
 })
 
+/**
+ * Task descriptions and comments: the page editor's blocks without `page` (a link to a docs page is a plain link
+ * there). The server's converter shares the page schema; its task sanitizer drops `page` blocks.
+ */
+export const taskEditorSchema = BlockNoteSchema.create({
+  blockSpecs: {
+    ...baseBlockSpecs,
+    codeBlock: codeBlockSpec,
+    callout: calloutBlockSpec(),
+  },
+  inlineContentSpecs: { ...defaultInlineContentSpecs, mention: pageMentionSpec },
+})
+
+/** Every block type the task editor accepts. */
+export const TASK_EDITOR_BLOCK_TYPES: ReadonlySet<string> = new Set(Object.keys(taskEditorSchema.blockSchema))
+
 export type PageEditorSchema = typeof pageEditorSchema
 export type PageEditorInstance = BlockNoteEditor<
   PageEditorSchema['blockSchema'],
