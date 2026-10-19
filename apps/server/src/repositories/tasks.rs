@@ -13,6 +13,8 @@ use super::sub_issues::{self, AutoClosed};
 use super::task_filter::{self, FilterError, FilterGroup, ShowCompleted, SubIssuesDisplay};
 use super::task_relations::{self, RelationActor};
 use crate::audit::{self, AuditOutcome};
+use crate::collab::{CollabHub, DocKey};
+use crate::export::markdown::{KeepLinks, blocks_to_markdown};
 
 const TRASH_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
 
@@ -81,7 +83,14 @@ pub struct TaskRecord {
     /// `ENG-12`. Reassigned when the task moves to another project; never reused.
     pub number: i64,
     pub title: String,
+    /// Markdown copy of `description_json` (search, MCP, GitHub, API clients).
     pub description: String,
+    /// BlockNote blocks, the description's source; null for a task written before rich text
+    /// (only `description` exists then).
+    #[schema(required = true, value_type = Option<Vec<Object>>)]
+    pub description_json: Option<Vec<Value>>,
+    /// Epoch of the description's co-editing document (`/tasks/{id}/collab?epoch=`).
+    pub collab_epoch: String,
     pub source_url: Option<String>,
     pub priority: String,
     pub position: i64,
@@ -699,6 +708,8 @@ impl TaskRepository {
         )
         .await?;
         tx.commit().await?;
+        // Open task descriptions re-check access (closed while the task is in the trash).
+        CollabHub::revalidate_database(&self.database, Some(workspace_id));
         Ok(())
     }
 
@@ -1363,6 +1374,10 @@ impl TaskRepository {
         actor_id: Id,
     ) -> Result<TaskRecord, TaskError> {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
+        // Edits of an open description reach `description_json` within seconds; reads see them now.
+        if let Some(hub) = CollabHub::existing(&self.database) {
+            hub.flush(DocKey::task(task_id)).await;
+        }
         let sql = format!(
             "SELECT {} FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = $1 AND tasks.workspace_id = $2 \
              AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL",
@@ -2061,6 +2076,8 @@ impl TaskRepository {
                 .await?;
         }
         tx.commit().await?;
+        // Open task descriptions re-check access (closed while the task is in the trash).
+        CollabHub::revalidate_database(&self.database, Some(workspace_id));
         Ok(())
     }
 
@@ -2145,6 +2162,8 @@ impl TaskRepository {
         }
         let task = task_in_tx(&mut tx, workspace_id, task_id, false).await?;
         tx.commit().await?;
+        // Open task descriptions re-check access (closed while the task is in the trash).
+        CollabHub::revalidate_database(&self.database, Some(workspace_id));
         Ok(task)
     }
 
@@ -3338,6 +3357,66 @@ fn updated_fields(update: &TaskUpdate, before: &TaskRecord, after: &TaskRecord) 
 }
 
 #[allow(clippy::too_many_arguments)]
+/// The markdown copy of a description is cut to this many characters.
+const DESCRIPTION_MAX_CHARS: usize = 100_000;
+
+/// Writes a co-edited description: `description_json` and its markdown copy, without a version
+/// bump (title, status and the other fields keep their version check). With `audit`, records
+/// `task.updated` (which also tells other clients to refresh). Returns whether anything changed.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn project_task_description(
+    tx: &mut Transaction<'_, Any>,
+    task_id: Id,
+    workspace_id: Id,
+    blocks: &[Value],
+    editor: Option<Id>,
+    audit: bool,
+    request_id: &str,
+    now: TimestampMillis,
+) -> Result<bool, TaskError> {
+    let stored: Option<String> = sqlx::query_scalar(
+        "SELECT description_json FROM tasks WHERE id = $1 AND workspace_id = $2",
+    )
+    .bind(task_id.to_string())
+    .bind(workspace_id.to_string())
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(TaskError::NotFound)?;
+    let before: Option<Vec<Value>> = stored.and_then(|json| serde_json::from_str(&json).ok());
+    if before.as_deref() == Some(blocks) {
+        return Ok(false);
+    }
+    let markdown: String = blocks_to_markdown(blocks, &KeepLinks)
+        .chars()
+        .take(DESCRIPTION_MAX_CHARS)
+        .collect();
+    sqlx::query(
+        "UPDATE tasks SET description_json = $1, description = $2, updated_at = $3 WHERE id = $4",
+    )
+    .bind(Value::Array(blocks.to_vec()).to_string())
+    .bind(&markdown)
+    .bind(now.as_millis())
+    .bind(task_id.to_string())
+    .execute(&mut **tx)
+    .await?;
+    if audit && let Some(editor) = editor {
+        audit::record(
+            tx,
+            workspace_id,
+            Some(editor),
+            "task.updated",
+            AuditOutcome::Success,
+            "task",
+            Some(task_id),
+            request_id,
+            json!({ "changes": { "description": true } }),
+            now,
+        )
+        .await?;
+    }
+    Ok(true)
+}
+
 pub(super) async fn record_mutation(
     tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
@@ -3655,7 +3734,10 @@ pub(super) fn connection_backend(connection: &sqlx::AnyConnection) -> Backend {
 fn task_columns(backend: Backend) -> String {
     format!(
         "tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.number, tasks.title, \
-         tasks.description, tasks.source_url, tasks.priority, tasks.position, tasks.creator_id, \
+         tasks.description, tasks.description_json, \
+         COALESCE((SELECT epoch FROM task_collab_docs WHERE task_collab_docs.task_id = tasks.id), \
+         (SELECT generation FROM page_collab_meta WHERE page_collab_meta.id = 1), '') AS collab_epoch, \
+         tasks.source_url, tasks.priority, tasks.position, tasks.creator_id, \
          tasks.creator_service_account_id, \
          (SELECT name FROM service_accounts WHERE id = tasks.creator_service_account_id) AS creator_service_account_name, \
          tasks.due_start_at, tasks.due_at, tasks.version, tasks.deleted_at, tasks.created_at, tasks.updated_at, \
@@ -3734,6 +3816,10 @@ fn task_record_from_row(
         number: row.get::<Option<i64>, _>("number").unwrap_or_default(),
         title: row.get("title"),
         description: row.get("description"),
+        description_json: row
+            .get::<Option<String>, _>("description_json")
+            .and_then(|json| serde_json::from_str(&json).ok()),
+        collab_epoch: row.get("collab_epoch"),
         source_url: row.get("source_url"),
         priority: row.get("priority"),
         position: row.get("position"),

@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use axum::extract::{Extension, FromRequest, FromRequestParts, Path, Query, Request, State};
+use axum::extract::{
+    Extension, FromRequest, FromRequestParts, Path, Query, Request, State, WebSocketUpgrade,
+};
 use axum::http::header::CONTENT_TYPE;
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
@@ -124,6 +126,10 @@ pub fn task_router(state: TaskState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/tasks/{task_id}",
             get(get_task).patch(update_task).delete(delete_task),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/collab",
+            get(collab_socket),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/activity",
@@ -1167,6 +1173,28 @@ fn task_order(order_by: OrderBy, direction: OrderDirection) -> (TaskSort, SortOr
         (_, OrderDirection::Desc) => SortOrder::Desc,
     };
     (sort, order)
+}
+
+/// The description's co-editing socket (see [`crate::collab::socket`]).
+async fn collab_socket(
+    State(state): State<TaskState>,
+    Path((workspace, task)): Path<(String, String)>,
+    Query(query): Query<crate::collab::socket::CollabQuery>,
+    headers: HeaderMap,
+    upgrade: WebSocketUpgrade,
+) -> Response {
+    crate::collab::socket::upgrade(
+        &state.identity,
+        state.cookie_mode,
+        state.identity.database(),
+        &workspace,
+        crate::collab::DocKind::Task,
+        &task,
+        query,
+        &headers,
+        upgrade,
+    )
+    .await
 }
 
 /// `task_id` is the task UUID or its identifier, e.g. `ENG-12` (case-insensitive).

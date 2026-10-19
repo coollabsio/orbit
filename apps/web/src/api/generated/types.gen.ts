@@ -2171,12 +2171,26 @@ export type PageTaskRecord = {
          * True while at least one live task that is not completed, cancelled or a duplicate blocks it.
          */
         blocked: boolean;
+        /**
+         * Epoch of the description's co-editing document (`/tasks/{id}/collab?epoch=`).
+         */
+        collab_epoch: string;
         created_at: string;
         creator_id?: string | null;
         creator_service_account_id?: string | null;
         creator_service_account_name?: string | null;
         deleted_at?: string | null;
+        /**
+         * Markdown copy of `description_json` (search, MCP, GitHub, API clients).
+         */
         description: string;
+        /**
+         * BlockNote blocks, the description's source; null for a task written before rich text
+         * (only `description` exists then).
+         */
+        description_json: Array<{
+            [key: string]: unknown;
+        }> | null;
         due_at?: string | null;
         due_start_at?: string | null;
         duplicate_of: null | TaskRef;
@@ -2883,12 +2897,26 @@ export type TaskRecord = {
      * True while at least one live task that is not completed, cancelled or a duplicate blocks it.
      */
     blocked: boolean;
+    /**
+     * Epoch of the description's co-editing document (`/tasks/{id}/collab?epoch=`).
+     */
+    collab_epoch: string;
     created_at: string;
     creator_id?: string | null;
     creator_service_account_id?: string | null;
     creator_service_account_name?: string | null;
     deleted_at?: string | null;
+    /**
+     * Markdown copy of `description_json` (search, MCP, GitHub, API clients).
+     */
     description: string;
+    /**
+     * BlockNote blocks, the description's source; null for a task written before rich text
+     * (only `description` exists then).
+     */
+    description_json: Array<{
+        [key: string]: unknown;
+    }> | null;
     due_at?: string | null;
     due_start_at?: string | null;
     duplicate_of: null | TaskRef;

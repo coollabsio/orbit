@@ -41,7 +41,7 @@ use yrs::{ClientID, ReadTxn, StateVector, Transact, Update, WriteTxn};
 use super::blocknote::{self, FRAGMENT};
 use super::close;
 use super::sanitize::{repair_document_for, sanitize_blocks_for};
-use super::{DocKey, DocKind, LinkPolicy, kind_page};
+use super::{DocKey, DocKind, LinkPolicy, kind_page, kind_task};
 use crate::cluster::{Cluster, Message as ClusterMessage};
 
 /// Limits and timings of the co-editing hub.
@@ -729,7 +729,7 @@ impl CollabHub {
         let kind = room.key.kind;
         let (workspace_id, locked) = match kind {
             DocKind::Page => kind_page::meta(pool, room.key.id).await?,
-            DocKind::Task => None,
+            DocKind::Task => kind_task::meta(pool, room.key.id).await?,
         }
         .ok_or(CollabError::NotFound)?;
         let _ = room.workspace_id.set(workspace_id);
@@ -893,7 +893,10 @@ impl CollabHub {
     async fn content(&self, room: &Room) -> Result<Vec<Value>, CollabError> {
         match room.key.kind {
             DocKind::Page => kind_page::content(&self.inner.pool, room.key.id).await,
-            DocKind::Task => Err(CollabError::NotFound),
+            DocKind::Task => {
+                let workspace_id = *room.workspace_id.get().ok_or(CollabError::NotFound)?;
+                kind_task::content(&self.inner.pool, room.key.id, workspace_id).await
+            }
         }
     }
 
@@ -979,7 +982,18 @@ impl CollabHub {
                         kind_page::project(&mut tx, key.id, blocks, state.last_editor, audit, now)
                             .await?
                     }
-                    DocKind::Task => return Err(CollabError::NotFound),
+                    DocKind::Task => {
+                        kind_task::project(
+                            &mut tx,
+                            key.id,
+                            workspace_id,
+                            blocks,
+                            state.last_editor,
+                            audit,
+                            now,
+                        )
+                        .await?
+                    }
                 };
                 audited = changed && audit;
                 sqlx::query(key.kind.sql(

@@ -37582,6 +37582,8 @@
                 "number",
                 "title",
                 "description",
+                "description_json",
+                "collab_epoch",
                 "priority",
                 "position",
                 "assignee_ids",
@@ -37617,6 +37619,10 @@
                   "type": "boolean",
                   "description": "True while at least one live task that is not completed, cancelled or a duplicate blocks it."
                 },
+                "collab_epoch": {
+                  "type": "string",
+                  "description": "Epoch of the description's co-editing document (`/tasks/{id}/collab?epoch=`)."
+                },
                 "created_at": {
                   "type": "string",
                   "format": "date-time"
@@ -37647,7 +37653,18 @@
                   "format": "date-time"
                 },
                 "description": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Markdown copy of `description_json` (search, MCP, GitHub, API clients)."
+                },
+                "description_json": {
+                  "type": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "type": "object"
+                  },
+                  "description": "BlockNote blocks, the description's source; null for a task written before rich text\n(only `description` exists then)."
                 },
                 "due_at": {
                   "type": [
@@ -39483,6 +39500,8 @@
           "number",
           "title",
           "description",
+          "description_json",
+          "collab_epoch",
           "priority",
           "position",
           "assignee_ids",
@@ -39518,6 +39537,10 @@
             "type": "boolean",
             "description": "True while at least one live task that is not completed, cancelled or a duplicate blocks it."
           },
+          "collab_epoch": {
+            "type": "string",
+            "description": "Epoch of the description's co-editing document (`/tasks/{id}/collab?epoch=`)."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"
@@ -39548,7 +39571,18 @@
             "format": "date-time"
           },
           "description": {
-            "type": "string"
+            "type": "string",
+            "description": "Markdown copy of `description_json` (search, MCP, GitHub, API clients)."
+          },
+          "description_json": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object"
+            },
+            "description": "BlockNote blocks, the description's source; null for a task written before rich text\n(only `description` exists then)."
           },
           "due_at": {
             "type": [

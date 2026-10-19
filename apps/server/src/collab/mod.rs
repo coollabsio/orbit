@@ -14,6 +14,7 @@
 pub mod blocknote;
 mod hub;
 mod kind_page;
+pub(crate) mod kind_task;
 pub mod markdown_import;
 pub mod sanitize;
 pub mod socket;

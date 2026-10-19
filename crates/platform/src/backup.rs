@@ -1389,6 +1389,17 @@ async fn rotate_collab_epochs(database: &Path) -> Result<(), BackupError> {
                 .execute(&mut connection)
                 .await?;
         }
+        // Task descriptions are co-edited since schema 52; older snapshots have no table yet.
+        let tasks: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'task_collab_docs')",
+        )
+        .fetch_one(&mut connection)
+        .await?;
+        if tasks {
+            sqlx::query("UPDATE task_collab_docs SET epoch = lower(hex(randomblob(16)))")
+                .execute(&mut connection)
+                .await?;
+        }
         Ok::<(), sqlx::Error>(())
     }
     .await;

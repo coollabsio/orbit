@@ -192,7 +192,8 @@ pub(super) async fn restore(
     // document gets a new epoch and they reset instead of pushing them back.
     sqlx::raw_sql(
         "UPDATE page_collab_meta SET generation = md5(random()::text); \
-         UPDATE page_collab_docs SET epoch = md5(random()::text);",
+         UPDATE page_collab_docs SET epoch = md5(random()::text); \
+         UPDATE task_collab_docs SET epoch = md5(random()::text);",
     )
     .execute(&mut *transaction)
     .await
