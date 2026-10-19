@@ -31,7 +31,7 @@ import { ImageZoomButton } from './ImageZoomButton'
 import { internalPageLinkId, isSafeLinkHref, toEditorContent, toStoredContent, type FileScope } from './content'
 import { insertPageBlock } from './pageBlockCommands'
 import { PageEditorContext, type PageEditorContextValue, type PageRef } from './pageEditorContext'
-import { EDITOR_BLOCK_TYPES, pageEditorSchema, TASK_EDITOR_BLOCK_TYPES, taskEditorSchema, type PageEditorInstance } from './schema'
+import { EDITOR_BLOCK_TYPES, markdownToTaskBlocks, pageEditorSchema, TASK_EDITOR_BLOCK_TYPES, taskEditorSchema, type PageEditorInstance } from './schema'
 import { getPageSlashMenuItems, getTaskSlashMenuItems } from './slashMenu'
 import { PageMentionMenu } from './MentionMenu'
 import { PageMentionNamesContext, type PageMentionOptions } from './pageMentions'
@@ -116,6 +116,8 @@ export interface PageEditorProps {
   placeholder?: 'description' | 'comment'
   /** `Page.content` from the API, read once per `pageId`. Ignored with `collab` (the Y document is the content). */
   initialContent?: unknown[]
+  /** Without `initialContent`: markdown to start from (task text written before rich text). */
+  initialMarkdown?: string
   /** Bind to a collaborative document. Fixed per editor instance: key the editor to switch documents. */
   collab?: PageEditorCollab
   editable: boolean
@@ -159,6 +161,7 @@ function PageEditorInner({
   onEscape,
   placeholder,
   initialContent,
+  initialMarkdown,
   collab,
   editable,
   onChange,
@@ -276,7 +279,11 @@ function PageEditorInner({
       : {
           ...options,
           // `[]` (new page) becomes undefined → BlockNote starts with one empty paragraph.
-          initialContent: toEditorContent(initialContent ?? [], task ? TASK_EDITOR_BLOCK_TYPES : EDITOR_BLOCK_TYPES, fileScope) as never,
+          initialContent: toEditorContent(
+            initialContent ?? (initialMarkdown ? markdownToTaskBlocks(initialMarkdown) : []),
+            task ? TASK_EDITOR_BLOCK_TYPES : EDITOR_BLOCK_TYPES,
+            fileScope,
+          ) as never,
         },
   )
 

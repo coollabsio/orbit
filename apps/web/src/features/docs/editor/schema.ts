@@ -1,4 +1,4 @@
-import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs, type BlockNoteEditor } from '@blocknote/core'
+import { BlockNoteEditor as BlockNoteEditorClass, BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs, type BlockNoteEditor } from '@blocknote/core'
 import { createReactBlockSpec } from '@blocknote/react'
 import { codeBlockSpec } from './codeBlock'
 import { CALLOUT_DEFAULT_BACKGROUND, CALLOUT_DEFAULT_EMOJI, CalloutExternalView, CalloutView } from './CalloutBlock'
@@ -77,6 +77,14 @@ export const taskEditorSchema = BlockNoteSchema.create({
 
 /** Every block type the task editor accepts. */
 export const TASK_EDITOR_BLOCK_TYPES: ReadonlySet<string> = new Set(Object.keys(taskEditorSchema.blockSchema))
+
+let markdownParser: BlockNoteEditor<typeof taskEditorSchema.blockSchema, typeof taskEditorSchema.inlineContentSchema, typeof taskEditorSchema.styleSchema> | null = null
+
+/** Blocks for task text that exists only as markdown (written before rich text); `@Name` stays text. */
+export function markdownToTaskBlocks(markdown: string): unknown[] {
+  markdownParser ??= BlockNoteEditorClass.create({ schema: taskEditorSchema, _tiptapOptions: { injectCSS: false } })
+  return markdownParser.tryParseMarkdownToBlocks(markdown)
+}
 
 export type PageEditorSchema = typeof pageEditorSchema
 export type PageEditorInstance = BlockNoteEditor<
