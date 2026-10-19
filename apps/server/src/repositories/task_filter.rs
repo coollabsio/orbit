@@ -25,6 +25,7 @@ pub const MAX_TEXT_CHARS: usize = 200;
 pub const MAX_OFFSET_DAYS: i64 = 3_650;
 
 const MAX_STATUS_NAME_CHARS: usize = 200;
+const MAX_LABEL_NAME_CHARS: usize = 100;
 const DAY_MS: i64 = 86_400_000;
 const STATUS_CATEGORIES: [&str; 5] = [
     "unstarted",
@@ -571,7 +572,8 @@ fn validate_values(field: FilterField, value: &Value, path: &str) -> Result<(), 
             FilterField::StatusCategory => STATUS_CATEGORIES.contains(&text),
             FilterField::Priority => PRIORITIES.contains(&text),
             FilterField::Assignee | FilterField::Creator => text == "me" || is_id(text),
-            FilterField::Label | FilterField::Project => is_id(text),
+            FilterField::Label => valid_label_value(text),
+            FilterField::Project => is_id(text),
             FilterField::DueDate
             | FilterField::CreatedAt
             | FilterField::UpdatedAt
@@ -588,6 +590,11 @@ fn validate_values(field: FilterField, value: &Value, path: &str) -> Result<(), 
 
 fn is_id(value: &str) -> bool {
     value.parse::<Id>().is_ok()
+}
+
+/// A label key (its name) or a label id (views saved before labels were per project).
+fn valid_label_value(value: &str) -> bool {
+    !value.trim().is_empty() && value.chars().count() <= MAX_LABEL_NAME_CHARS
 }
 
 /// A `category:name` status key, or a bare status id (legacy `GET /tasks?status_id=`).
@@ -922,14 +929,10 @@ fn push_condition(query: &mut SqlBuilder, condition: &Condition, ctx: &FilterCon
         (F::Creator, O::Is | O::IsNot) => {
             push_column_in(query, "tasks.creator_id", negated, values(value, ctx, true));
         }
-        (F::Label, O::IncludesAny | O::Excludes) => push_exists(
-            query,
-            negated,
-            TASK_LABEL,
-            " AND task_labels.label_id IN ",
-            values(value, ctx, false),
-        ),
-        (F::Label, O::IncludesAll) => push_all_labels(query, values(value, ctx, false)),
+        (F::Label, O::IncludesAny | O::Excludes) => {
+            push_labels(query, values(value, ctx, false), false, negated);
+        }
+        (F::Label, O::IncludesAll) => push_labels(query, values(value, ctx, false), true, false),
         (F::Label, O::IsEmpty) => {
             query.push("NOT EXISTS (").push(TASK_LABEL).push(")");
         }
@@ -1092,18 +1095,39 @@ fn push_sub_issues(query: &mut SqlBuilder, values: Vec<String>) {
     }
 }
 
-fn push_all_labels(query: &mut SqlBuilder, values: Vec<String>) {
+/// Labels belong to one project, so label conditions match by name (trimmed, case-insensitive)
+/// and find the same name in every project. A value is a label key (the name, as the web's
+/// `labelKeyOf`) or a label id that stands for its name, as in views saved before labels were
+/// per project. `all` needs every value on the task, else any one.
+fn push_labels(query: &mut SqlBuilder, values: Vec<String>, all: bool, negated: bool) {
     if values.is_empty() {
-        query.push("0 = 1");
+        query.push(if negated { "1 = 1" } else { "0 = 1" });
         return;
     }
-    let count = i64::try_from(values.len()).unwrap_or(i64::MAX);
-    query.push(
-        "(SELECT COUNT(DISTINCT task_labels.label_id) FROM task_labels \
-         WHERE task_labels.task_id = tasks.id AND task_labels.label_id IN ",
-    );
-    push_list(query, values);
-    query.push(") = ").push_bind(count);
+    query.push(if negated { "NOT (" } else { "(" });
+    for (index, value) in values.into_iter().enumerate() {
+        if index > 0 {
+            query.push(if all { " AND " } else { " OR " });
+        }
+        query.push(
+            "EXISTS (SELECT 1 FROM task_labels JOIN labels ON labels.id = task_labels.label_id \
+             WHERE task_labels.task_id = tasks.id AND lower(trim(labels.name)) = ",
+        );
+        if value.parse::<Id>().is_ok() {
+            // An unknown id has no name, so it matches nothing.
+            query
+                .push(
+                    "(SELECT lower(trim(selected.name)) FROM labels AS selected \
+                     WHERE selected.workspace_id = tasks.workspace_id AND selected.id = ",
+                )
+                .push_bind(value)
+                .push(")");
+        } else {
+            query.push("lower(").push_bind(value).push(")");
+        }
+        query.push(")");
+    }
+    query.push(")");
 }
 
 /// Status values are `category:name` keys (names compared lower-cased and trimmed, like the
@@ -1344,7 +1368,7 @@ mod tests {
         assert_eq!(
             path_of(tree(vec![
                 ok.clone(),
-                json!({ "op": "or", "children": [condition("label", "includes_any", json!(["nope"]))] }),
+                json!({ "op": "or", "children": [condition("project", "is", json!(["nope"]))] }),
             ])),
             "filter.children[1].children[0].value[0]"
         );
@@ -1485,10 +1509,14 @@ mod tests {
             ),
             (
                 condition(
-                    "label",
-                    "includes_any",
+                    "project",
+                    "is",
                     json!(["0190F5B4-7C1E-7A3B-8C4D-5E6F7A8B9C0D"]),
                 ),
+                "filter.children[0].value[0]",
+            ),
+            (
+                condition("label", "includes_any", json!(["  "])),
                 "filter.children[0].value[0]",
             ),
             (

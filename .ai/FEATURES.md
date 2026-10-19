@@ -45,6 +45,7 @@ Core files: `TasksPage.tsx`, `components/TaskList.tsx`, `components/TaskBoard.ts
 - Description attachments support paste, drop, file selection, image lightbox, compact file chips, and removal.
 - Task comments reuse the chat composer, mentions, channel suggestions, markdown, emoji, and attachments.
 - Projects, workflows, labels, tasks, comments, and task attachments persist in SQLite.
+- Labels belong to one project (Project settings → Labels); a task takes only its project's labels. Moving a task keeps the labels whose name the target project also has. Views across projects merge same-named labels: label filters store the label key (the name) and the server matches it case-insensitively in every project (an id saved before migration 0051 stands for its name and becomes a key when the filter is edited); group-by-label, filter pickers and bulk label menus show one entry per name. Views across projects show no labels of trashed projects.
 - Writes include the observed record version. Stale writes restore the server record and expose a conflict prompt.
 - Bulk and reorder requests are one atomic request of at most 100 items. Empty unchanged choices are local no-ops.
 - Task and project trash have server-backed restore flows and 30-day retention.

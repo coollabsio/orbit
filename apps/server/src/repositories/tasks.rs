@@ -60,6 +60,8 @@ pub struct LabelRecord {
     pub id: Id,
     #[schema(value_type = String)]
     pub workspace_id: Id,
+    #[schema(value_type = String)]
+    pub project_id: Id,
     pub name: String,
     pub color: String,
     pub version: u64,
@@ -1057,20 +1059,44 @@ impl TaskRepository {
         Ok(result)
     }
 
+    /// The labels of one project, or with `project_id` `None` the labels of every live project
+    /// (for views across projects).
     pub async fn labels(
         &self,
         workspace_id: Id,
+        project_id: Option<Id>,
         actor_id: Id,
         cursor: Option<&str>,
         limit: usize,
     ) -> Result<Page<LabelRecord>, TaskError> {
-        require_access(self.database.pool(), workspace_id, actor_id).await?;
-        let fingerprint = format!("labels:{workspace_id}");
+        let fingerprint = match project_id {
+            Some(project_id) => {
+                require_project(self.database.pool(), workspace_id, project_id, actor_id).await?;
+                format!("labels:{workspace_id}:{project_id}")
+            }
+            None => {
+                require_access(self.database.pool(), workspace_id, actor_id).await?;
+                format!("labels:{workspace_id}")
+            }
+        };
         let after = cursor_pair(cursor, &fingerprint)?;
         let mut query = SqlBuilder::new(
-            "SELECT id, workspace_id, name, color, version FROM labels WHERE workspace_id = ",
+            "SELECT id, workspace_id, project_id, name, color, version FROM labels WHERE workspace_id = ",
         );
         query.push_bind(workspace_id.to_string());
+        match project_id {
+            Some(project_id) => {
+                query
+                    .push(" AND project_id = ")
+                    .push_bind(project_id.to_string());
+            }
+            None => {
+                query.push(
+                    " AND project_id IN (SELECT id FROM projects WHERE workspace_id = labels.workspace_id \
+                     AND deleted_at IS NULL)",
+                );
+            }
+        }
         if let Some((name, id)) = after {
             query
                 .push(" AND (name > ")
@@ -1101,6 +1127,7 @@ impl TaskRepository {
     pub async fn create_label(
         &self,
         workspace_id: Id,
+        project_id: Id,
         actor_id: Id,
         name: String,
         color: String,
@@ -1109,8 +1136,8 @@ impl TaskRepository {
     ) -> Result<LabelRecord, TaskError> {
         let id = Id::new_v7();
         let mut tx = self.database.immediate_transaction().await?;
-        require_access_tx(&mut tx, workspace_id, actor_id).await?;
-        let inserted = sqlx::query("INSERT INTO labels (id, workspace_id, name, color, version, created_at, updated_at) VALUES ($1, $2, $3, $4, 0, $5, $6)").bind(id.to_string()).bind(workspace_id.to_string()).bind(&name).bind(&color).bind(now.as_millis()).bind(now.as_millis()).execute(&mut *tx).await;
+        require_project_tx(&mut tx, workspace_id, project_id, actor_id).await?;
+        let inserted = sqlx::query("INSERT INTO labels (id, workspace_id, project_id, name, color, version, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, 0, $6, $7)").bind(id.to_string()).bind(workspace_id.to_string()).bind(project_id.to_string()).bind(&name).bind(&color).bind(now.as_millis()).bind(now.as_millis()).execute(&mut *tx).await;
         if is_unique_violation(&inserted) {
             return Err(TaskError::Conflict);
         }
@@ -1130,6 +1157,7 @@ impl TaskRepository {
         Ok(LabelRecord {
             id,
             workspace_id,
+            project_id,
             name,
             color,
             version: 0,
@@ -1140,6 +1168,7 @@ impl TaskRepository {
     pub async fn update_label(
         &self,
         workspace_id: Id,
+        project_id: Id,
         label_id: Id,
         actor_id: Id,
         name: String,
@@ -1149,8 +1178,8 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<LabelRecord, TaskError> {
         let mut tx = self.database.immediate_transaction().await?;
-        require_access_tx(&mut tx, workspace_id, actor_id).await?;
-        let current = label_in_tx(&mut tx, workspace_id, label_id).await?;
+        require_project_tx(&mut tx, workspace_id, project_id, actor_id).await?;
+        let current = label_in_tx(&mut tx, workspace_id, project_id, label_id).await?;
         check_version(expected_version, current.version, &current)?;
         let updated = sqlx::query("UPDATE labels SET name = $1, color = $2, version = version + 1, updated_at = $3 WHERE id = $4 AND workspace_id = $5 AND version = $6").bind(&name).bind(&color).bind(now.as_millis()).bind(label_id.to_string()).bind(workspace_id.to_string()).bind(expected_version as i64).execute(&mut *tx).await;
         if is_unique_violation(&updated) {
@@ -1177,9 +1206,11 @@ impl TaskRepository {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn delete_label(
         &self,
         workspace_id: Id,
+        project_id: Id,
         label_id: Id,
         actor_id: Id,
         expected_version: u64,
@@ -1187,13 +1218,10 @@ impl TaskRepository {
         now: TimestampMillis,
     ) -> Result<(), TaskError> {
         let mut tx = self.database.immediate_transaction().await?;
-        require_access_tx(&mut tx, workspace_id, actor_id).await?;
-        let current = label_in_tx(&mut tx, workspace_id, label_id).await?;
+        require_project_tx(&mut tx, workspace_id, project_id, actor_id).await?;
+        let current = label_in_tx(&mut tx, workspace_id, project_id, label_id).await?;
         check_version(expected_version, current.version, &current)?;
-        sqlx::query("DELETE FROM task_labels WHERE label_id = $1")
-            .bind(label_id.to_string())
-            .execute(&mut *tx)
-            .await?;
+        // task_labels rows go with the label (ON DELETE CASCADE).
         sqlx::query("DELETE FROM labels WHERE id = $1 AND workspace_id = $2 AND version = $3")
             .bind(label_id.to_string())
             .bind(workspace_id.to_string())
@@ -1377,7 +1405,7 @@ impl TaskRepository {
             return Err(TaskError::Invalid { field: "status_id" });
         }
         validate_assignees(&mut tx, workspace_id, &input.assignee_ids).await?;
-        validate_labels(&mut tx, workspace_id, &input.label_ids).await?;
+        validate_labels(&mut tx, workspace_id, input.project_id, &input.label_ids).await?;
         if let Some(parent_id) = input.parent_task_id {
             sub_issues::validate_parent_in_tx(&mut tx, workspace_id, None, parent_id).await?;
         }
@@ -1646,13 +1674,13 @@ impl TaskRepository {
             .bind(status_category)
             .fetch_optional(&mut *tx).await?.ok_or(TaskError::NotFound)?;
         let label_id = if let Some(id) = sqlx::query_scalar::<_, String>(
-            "SELECT id FROM labels WHERE workspace_id = $1 AND lower(name) = 'github' ORDER BY id LIMIT 1",
-        ).bind(workspace_id.to_string()).fetch_optional(&mut *tx).await? {
+            "SELECT id FROM labels WHERE workspace_id = $1 AND project_id = $2 AND lower(name) = 'github' ORDER BY id LIMIT 1",
+        ).bind(workspace_id.to_string()).bind(issue.project_id.to_string()).fetch_optional(&mut *tx).await? {
             id
         } else {
             let id = Id::new_v7();
-            sqlx::query("INSERT INTO labels (id, workspace_id, name, color, version, created_at, updated_at) VALUES ($1, $2, 'GitHub', '#6e7681', 0, $3, $4)")
-                .bind(id.to_string()).bind(workspace_id.to_string()).bind(now.as_millis()).bind(now.as_millis()).execute(&mut *tx).await?;
+            sqlx::query("INSERT INTO labels (id, workspace_id, project_id, name, color, version, created_at, updated_at) VALUES ($1, $2, $3, 'GitHub', '#6e7681', 0, $4, $5)")
+                .bind(id.to_string()).bind(workspace_id.to_string()).bind(issue.project_id.to_string()).bind(now.as_millis()).bind(now.as_millis()).execute(&mut *tx).await?;
             record_principal_mutation(&mut tx, workspace_id, actor_id,
                 Some((service_account_id, &service_account_name)),
                 "label.created", "label", id, request_id, now).await?;
@@ -1752,17 +1780,18 @@ impl TaskRepository {
                 .ok_or(TaskError::NotFound)?;
 
         let existing_label = sqlx::query_scalar::<_, String>(
-            "SELECT id FROM labels WHERE workspace_id = $1 AND lower(name) = 'discord' ORDER BY id LIMIT 1",
+            "SELECT id FROM labels WHERE workspace_id = $1 AND project_id = $2 AND lower(name) = 'discord' ORDER BY id LIMIT 1",
         )
         .bind(workspace_id.to_string())
+        .bind(input.project_id.to_string())
         .fetch_optional(&mut *tx)
         .await?;
         let label_id = if let Some(id) = existing_label {
             parse_id(id)?
         } else {
             let id = Id::new_v7();
-            sqlx::query("INSERT INTO labels (id, workspace_id, name, color, version, created_at, updated_at) VALUES ($1, $2, 'Discord', '#5865F2', 0, $3, $4)")
-                .bind(id.to_string()).bind(workspace_id.to_string()).bind(now.as_millis()).bind(now.as_millis()).execute(&mut *tx).await?;
+            sqlx::query("INSERT INTO labels (id, workspace_id, project_id, name, color, version, created_at, updated_at) VALUES ($1, $2, $3, 'Discord', '#5865F2', 0, $4, $5)")
+                .bind(id.to_string()).bind(workspace_id.to_string()).bind(input.project_id.to_string()).bind(now.as_millis()).bind(now.as_millis()).execute(&mut *tx).await?;
             record_principal_mutation(
                 &mut tx,
                 workspace_id,
@@ -2555,9 +2584,17 @@ pub(super) async fn update_task_in_tx(
     if let Some(assignees) = &update.changes.assignee_ids {
         validate_assignees(tx, workspace_id, assignees).await?;
     }
-    if let Some(labels) = &update.changes.label_ids {
-        validate_labels(tx, workspace_id, labels).await?;
-    }
+    // A moved task keeps the labels whose name the target project also has.
+    let label_ids = match &update.changes.label_ids {
+        Some(labels) => {
+            validate_labels(tx, workspace_id, project_id, labels).await?;
+            Some(labels.clone())
+        }
+        None if moves_project && !current.label_ids.is_empty() => {
+            Some(matching_labels_in_tx(tx, &current.label_ids, project_id).await?)
+        }
+        None => None,
+    };
     let parent_task_id = match update.changes.parent_task_id {
         Some(Some(parent_id)) if Some(parent_id) != current.parent_task_id => {
             sub_issues::validate_parent_in_tx(tx, workspace_id, Some(update.id), parent_id).await?;
@@ -2715,7 +2752,7 @@ pub(super) async fn update_task_in_tx(
         )
         .await?;
     }
-    if let Some(labels) = &update.changes.label_ids {
+    if let Some(labels) = &label_ids {
         replace_labels(tx, update.id, labels).await?;
     }
     Ok(())
@@ -3003,6 +3040,34 @@ async fn matching_status_in_tx(
     .ok_or(TaskError::NotFound)
 }
 
+/// The labels of `project_id` with the same name (case-insensitive) as one of `label_ids`.
+async fn matching_labels_in_tx(
+    tx: &mut Transaction<'_, Any>,
+    label_ids: &[Id],
+    project_id: Id,
+) -> Result<Vec<Id>, TaskError> {
+    let mut query = SqlBuilder::new(
+        "SELECT DISTINCT target.id FROM labels AS target JOIN labels AS source \
+         ON lower(source.name) = lower(target.name) AND source.workspace_id = target.workspace_id \
+         WHERE target.project_id = ",
+    );
+    query
+        .push_bind(project_id.to_string())
+        .push(" AND source.id IN (");
+    let mut list = query.separated(", ");
+    for id in label_ids {
+        list.push_bind(id.to_string());
+    }
+    list.push_unseparated(") ORDER BY target.id");
+    query
+        .build()
+        .fetch_all(&mut **tx)
+        .await?
+        .into_iter()
+        .map(|row| parse_id(row.get::<String, _>("id")))
+        .collect()
+}
+
 async fn validate_project_status(
     tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
@@ -3113,9 +3178,11 @@ async fn notify_users(
     Ok(())
 }
 
+/// Every label must belong to the task's project.
 async fn validate_labels(
     tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
+    project_id: Id,
     ids: &[Id],
 ) -> Result<(), TaskError> {
     let mut unique = ids.to_vec();
@@ -3125,12 +3192,14 @@ async fn validate_labels(
         return Err(TaskError::Invalid { field: "label_ids" });
     }
     for id in ids {
-        let exists: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM labels WHERE workspace_id = $1 AND id = $2")
-                .bind(workspace_id.to_string())
-                .bind(id.to_string())
-                .fetch_one(&mut **tx)
-                .await?;
+        let exists: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM labels WHERE workspace_id = $1 AND project_id = $2 AND id = $3",
+        )
+        .bind(workspace_id.to_string())
+        .bind(project_id.to_string())
+        .bind(id.to_string())
+        .fetch_one(&mut **tx)
+        .await?;
         if exists != 1 {
             return Err(TaskError::Invalid { field: "label_ids" });
         }
@@ -3390,10 +3459,11 @@ async fn status_in_tx(
 async fn label_in_tx(
     tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
+    project_id: Id,
     label_id: Id,
 ) -> Result<LabelRecord, TaskError> {
-    let row = sqlx::query("SELECT id, workspace_id, name, color, version FROM labels WHERE id = $1 AND workspace_id = $2")
-        .bind(label_id.to_string()).bind(workspace_id.to_string()).fetch_optional(&mut **tx).await?.ok_or(TaskError::NotFound)?;
+    let row = sqlx::query("SELECT id, workspace_id, project_id, name, color, version FROM labels WHERE id = $1 AND workspace_id = $2 AND project_id = $3")
+        .bind(label_id.to_string()).bind(workspace_id.to_string()).bind(project_id.to_string()).fetch_optional(&mut **tx).await?.ok_or(TaskError::NotFound)?;
     label_from_row(row)
 }
 
@@ -3468,6 +3538,7 @@ fn label_from_row(row: sqlx::any::AnyRow) -> Result<LabelRecord, TaskError> {
     Ok(LabelRecord {
         id: parse_id(row.get("id"))?,
         workspace_id: parse_id(row.get("workspace_id"))?,
+        project_id: parse_id(row.get("project_id"))?,
         name: row.get("name"),
         color: row.get("color"),
         version: parse_version(row.get("version"))?,

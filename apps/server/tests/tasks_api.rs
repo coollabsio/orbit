@@ -497,7 +497,10 @@ async fn members_can_crud_all_task_area_resources_and_unknown_fields_are_rejecte
         .clone()
         .oneshot(json_request(
             "POST",
-            &format!("/api/v1/workspaces/{}/labels", fixture.workspace_id),
+            &format!(
+                "/api/v1/workspaces/{}/projects/{}/labels",
+                fixture.workspace_id, fixture.project_id
+            ),
             &member_cookie,
             json!({"name":"bug", "color":"#ff0000"}),
         ))
@@ -615,8 +618,9 @@ async fn members_can_crud_all_task_area_resources_and_unknown_fields_are_rejecte
         .oneshot(cookie_request(
             "DELETE",
             &format!(
-                "/api/v1/workspaces/{}/labels/{}?expected_version=0",
+                "/api/v1/workspaces/{}/projects/{}/labels/{}?expected_version=0",
                 fixture.workspace_id,
+                fixture.project_id,
                 label["id"].as_str().unwrap()
             ),
             &member_cookie,
@@ -1618,7 +1622,10 @@ async fn parent_side_scope_changes_are_rejected_by_the_database() {
             .clone()
             .oneshot(json_request(
                 "POST",
-                &format!("/api/v1/workspaces/{}/labels", fixture.workspace_id),
+                &format!(
+                    "/api/v1/workspaces/{}/projects/{}/labels",
+                    fixture.workspace_id, fixture.project_id
+                ),
                 &fixture.owner_cookie,
                 json!({"name":"scope", "color":"#112233"}),
             ))
@@ -3992,7 +3999,10 @@ async fn legacy_list_parameters_keep_their_results() {
     let (status, label) = call(
         &fixture,
         "POST",
-        &format!("/api/v1/workspaces/{}/labels", fixture.workspace_id),
+        &format!(
+            "/api/v1/workspaces/{}/projects/{}/labels",
+            fixture.workspace_id, fixture.project_id
+        ),
         Some(json!({"name": "bug", "color": "#ff0000"})),
     )
     .await;
@@ -4189,6 +4199,7 @@ async fn filter_data() -> FilterData {
     let bug = repo
         .create_label(
             workspace,
+            project,
             owner,
             "bug".to_owned(),
             "#ff0000".to_owned(),
@@ -4201,6 +4212,7 @@ async fn filter_data() -> FilterData {
     let ui = repo
         .create_label(
             workspace,
+            project,
             owner,
             "ui".to_owned(),
             "#00ff00".to_owned(),
@@ -6826,4 +6838,174 @@ async fn moving_a_task_between_projects_maps_its_status_and_renumbers_it() {
     )
     .await;
     assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn labels_belong_to_one_project() {
+    let fixture = Fixture::new().await;
+    let other = create_project(&fixture, "LBL").await;
+    let other_status = status_id_by_category(&fixture, &other, "unstarted").await;
+    let labels_uri = |project: &str| {
+        format!(
+            "/api/v1/workspaces/{}/projects/{project}/labels",
+            fixture.workspace_id
+        )
+    };
+    let label = |project: String, name: &'static str| {
+        let fixture = &fixture;
+        let uri = labels_uri(&project);
+        async move {
+            let (status, label) = call(
+                fixture,
+                "POST",
+                &uri,
+                Some(json!({"name": name, "color": "#ff0000"})),
+            )
+            .await;
+            assert_eq!(status, StatusCode::CREATED);
+            assert_eq!(label["project_id"], project);
+            id_of(&label).to_owned()
+        }
+    };
+    let bug = label(fixture.project_id.clone(), "Bug").await;
+    let docs = label(fixture.project_id.clone(), "Docs").await;
+    let other_bug = label(other.clone(), "bug").await;
+
+    // A name is unique within a project; each project lists only its own labels.
+    let (status, _) = call(
+        &fixture,
+        "POST",
+        &labels_uri(&fixture.project_id),
+        Some(json!({"name": "Bug", "color": "#00ff00"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (_, listed) = call(&fixture, "GET", &labels_uri(&other), None).await;
+    assert_eq!(listed["items"].as_array().unwrap().len(), 1);
+    assert_eq!(id_of(&listed["items"][0]), other_bug);
+    let (_, all) = call(
+        &fixture,
+        "GET",
+        &format!("/api/v1/workspaces/{}/labels", fixture.workspace_id),
+        None,
+    )
+    .await;
+    assert_eq!(all["items"].as_array().unwrap().len(), 3);
+    let (status, _) = call(
+        &fixture,
+        "DELETE",
+        &format!("{}/{bug}?expected_version=0", labels_uri(&other)),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // A task takes only the labels of its project.
+    let tasks_uri = format!("/api/v1/workspaces/{}/tasks", fixture.workspace_id);
+    let (status, _) = call(
+        &fixture,
+        "POST",
+        &tasks_uri,
+        Some(json!({"project_id": other, "status_id": other_status, "title": "Wrong", "label_ids": [bug]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let mut created = Vec::new();
+    for (title, labels) in [("Moved", json!([bug, docs])), ("Stays", json!([bug]))] {
+        let (status, task) = call(
+            &fixture,
+            "POST",
+            &tasks_uri,
+            Some(json!({"project_id": fixture.project_id, "status_id": fixture.status_id, "title": title, "label_ids": labels})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CREATED);
+        created.push(task);
+    }
+
+    // A moved task keeps the labels whose name the target project has (case-insensitive).
+    let (status, moved) = call(
+        &fixture,
+        "PATCH",
+        &task_uri(&fixture, id_of(&created[0])),
+        Some(json!({"expected_version": created[0]["version"], "project_id": other})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(moved["label_ids"], json!([other_bug]));
+
+    // Label filters match by name, so one project's label finds the same name everywhere.
+    let label_query = |operator: &str, labels: Value| {
+        query_body(
+            json!({"op": "and", "children": [{"field": "label", "operator": operator, "value": labels}]}),
+            "title",
+            "asc",
+            "all",
+        )
+    };
+    let (status, any) = call(
+        &fixture,
+        "POST",
+        &query_uri(&fixture),
+        Some(label_query("includes_any", json!([bug]))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(query_titles(&any), ["Moved", "Stays"]);
+    let (_, both) = call(
+        &fixture,
+        "POST",
+        &query_uri(&fixture),
+        Some(label_query("includes_all", json!([other_bug, bug]))),
+    )
+    .await;
+    assert_eq!(query_titles(&both), ["Moved", "Stays"]);
+    let (_, excluded) = call(
+        &fixture,
+        "POST",
+        &query_uri(&fixture),
+        Some(label_query("excludes", json!([other_bug]))),
+    )
+    .await;
+    assert_eq!(query_titles(&excluded), Vec::<String>::new());
+    // Views also store label keys (the name), which match case-insensitively.
+    let (_, keyed) = call(
+        &fixture,
+        "POST",
+        &query_uri(&fixture),
+        Some(label_query("includes_all", json!(["BUG", bug]))),
+    )
+    .await;
+    assert_eq!(query_titles(&keyed), ["Moved", "Stays"]);
+    let (_, unknown) = call(
+        &fixture,
+        "POST",
+        &query_uri(&fixture),
+        Some(label_query("includes_all", json!(["bug", "nothing"]))),
+    )
+    .await;
+    assert_eq!(query_titles(&unknown), Vec::<String>::new());
+
+    // Views across projects see no labels of trashed projects.
+    let trashed = create_project(&fixture, "TRS").await;
+    label(trashed.clone(), "Old").await;
+    let (status, _) = call(
+        &fixture,
+        "DELETE",
+        &format!(
+            "/api/v1/workspaces/{}/projects/{trashed}?expected_version=0",
+            fixture.workspace_id
+        ),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, all) = call(
+        &fixture,
+        "GET",
+        &format!("/api/v1/workspaces/{}/labels", fixture.workspace_id),
+        None,
+    )
+    .await;
+    assert_eq!(all["items"].as_array().unwrap().len(), 3);
 }

@@ -36,7 +36,7 @@ test('F opens the filter menu without animation and adds a label chip', async ()
   expect(document.querySelector('[data-slot="popover-content"]')?.hasAttribute('data-instant')).toBe(true)
   await userEvent.click(await view.findByRole('option', { name: 'Label' }))
   await userEvent.click(await view.findByRole('option', { name: 'Bug' }))
-  expect(readFilter(view)).toEqual({ op: 'and', children: [{ field: 'label', operator: 'includes_any', value: ['label-bug'] }] })
+  expect(readFilter(view)).toEqual({ op: 'and', children: [{ field: 'label', operator: 'includes_any', value: ['bug'] }] })
   const chip = view.container.querySelector('[data-filter-chip="label"]')
   expect(chip?.textContent).toContain('Label')
   expect(chip?.textContent).toContain('includes')
@@ -55,7 +55,8 @@ test('chips switch operators, re-edit values, and remove instantly', async () =>
 
   fireEvent.click(view.getByRole('button', { name: /^Label values/ }))
   await userEvent.click(await view.findByRole('option', { name: 'UI' }))
-  expect(readFilter(view).children[0]).toEqual({ field: 'label', operator: 'excludes', value: ['label-bug', 'label-ui'] })
+  // editing the values saves keys: the saved id of Bug becomes its key
+  expect(readFilter(view).children[0]).toEqual({ field: 'label', operator: 'excludes', value: ['bug', 'ui'] })
   expect(chip()?.textContent).toContain('Bug, UI')
 
   await userEvent.keyboard('{Escape}')
@@ -134,7 +135,7 @@ test('unticking a just-added value restores an OR root exactly', async () => {
   fireEvent.click(view.getByRole('button', { name: 'Filter tasks' }))
   await userEvent.click(await view.findByRole('option', { name: 'Label' }))
   await userEvent.click(await view.findByRole('option', { name: 'Bug' }))
-  expect(readFilter(view)).toEqual({ op: 'and', children: [nested, { field: 'label', operator: 'includes_any', value: ['label-bug'] }] })
+  expect(readFilter(view)).toEqual({ op: 'and', children: [nested, { field: 'label', operator: 'includes_any', value: ['bug'] }] })
   await userEvent.click(await view.findByRole('option', { name: 'Bug' }))
   expect(readFilter(view)).toEqual(nested)
 })

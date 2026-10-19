@@ -1,5 +1,6 @@
-import type { BulkItem } from '@/api/generated/types.gen'
+import type { BulkItem, LabelRecord } from '@/api/generated/types.gen'
 import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
+import { labelKeyOf, labelRepresentatives, projectLabels } from '@/features/tasks/taskMeta'
 import { resolveStatusId } from '@/features/tasks/tasksLib'
 
 /** A status change by status key: each task takes the matching status of its own project; tasks already there are left out. */
@@ -29,10 +30,32 @@ export function assignUpdates(tasks: Task[], userId: string): BulkItem[] {
   return tasks.filter((task) => !task.assigneeIds.includes(userId)).map((task) => ({ id: task.id, expected_version: task.version, assignee_ids: [...task.assigneeIds, userId] }))
 }
 
-/** Every task has the label → remove from all; otherwise add to the tasks that miss it. */
-export function labelToggleUpdates(tasks: Task[], labelId: string): BulkItem[] {
-  const everyone = tasks.every((task) => task.labels.includes(labelId))
-  return tasks.map((task) => ({
+/** One label per name among the labels of the tasks' projects, for a menu that labels them all at once. */
+export function labelChoices(tasks: Task[], labels: LabelRecord[]): LabelRecord[] {
+  const projectIds = new Set(tasks.map((task) => task.projectId))
+  return labelRepresentatives(labels.filter((label) => projectIds.has(label.project_id))).labels
+}
+
+/** Each task with the label of its own project that has `label`'s name; tasks whose project has none are left out. */
+function labelTargets(tasks: Task[], labels: LabelRecord[], label: LabelRecord) {
+  const key = labelKeyOf(label)
+  return tasks.flatMap((task) => {
+    const own = projectLabels(labels, task.projectId).find((candidate) => labelKeyOf(candidate) === key)
+    return own ? [{ task, labelId: own.id }] : []
+  })
+}
+
+/** Every task that can take the label (by name) has it. */
+export function everyTaskHasLabel(tasks: Task[], labels: LabelRecord[], label: LabelRecord): boolean {
+  const targets = labelTargets(tasks, labels, label)
+  return targets.length > 0 && targets.every(({ task, labelId }) => task.labels.includes(labelId))
+}
+
+/** Every task has the label (by name, in its own project) → remove from all; otherwise add to the tasks that miss it. */
+export function labelToggleUpdates(tasks: Task[], labels: LabelRecord[], label: LabelRecord): BulkItem[] {
+  const targets = labelTargets(tasks, labels, label)
+  const everyone = everyTaskHasLabel(tasks, labels, label)
+  return targets.map(({ task, labelId }) => ({
     id: task.id,
     expected_version: task.version,
     label_ids: everyone ? task.labels.filter((id) => id !== labelId) : Array.from(new Set([...task.labels, labelId])),

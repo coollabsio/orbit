@@ -22,7 +22,6 @@ import { AdminUsersPage } from '@/features/admin/pages/AdminUsersPage'
 import { GeneralPage } from '@/features/settings/pages/GeneralPage'
 import { GithubPage } from '@/features/settings/pages/GithubPage'
 import { EmojiPage } from '@/features/settings/pages/EmojiPage'
-import { LabelsPage } from '@/features/settings/pages/LabelsPage'
 import { DangerZonePage } from '@/features/settings/pages/DangerZonePage'
 import { MembersPage } from '@/features/settings/pages/MembersPage'
 import { SecurityPage } from '@/features/settings/pages/SecurityPage'
@@ -124,7 +123,8 @@ export default function App() {
               </Route>
               <Route path="settings" element={<SettingsLayout />}>
                 <Route index element={<GeneralPage />} />
-                <Route path="labels" element={<LabelsPage />} />
+                {/* labels belong to a project now: each project's settings has them */}
+                <Route path="labels" element={<Navigate to="/tasks" replace />} />
                 <Route path="emoji" element={<EmojiPage />} />
                 <Route path="stickers" element={<StickersPage />} />
                 <Route path="github" element={<GithubPage />} />

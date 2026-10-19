@@ -13,7 +13,7 @@ const member = (id: string, name: string): User => ({
   id, membershipId: `membership-${id}`, name, handle: id, email: `${id}@orbit.test`, role: 'Member',
   color: '#888888', title: '', roleIds: [], can: NO_MEMBER_ABILITIES, version: 1,
 })
-const label = (id: string, name: string): LabelRecord => ({ id, name, color: '#888888', version: 1, workspace_id: 'workspace-1' })
+const label = (id: string, name: string): LabelRecord => ({ id, name, color: '#888888', version: 1, workspace_id: 'workspace-1', project_id: 'p1' })
 const project = (id: string, name: string): ProjectRecord => ({
   id, name, key: name.slice(0, 3).toUpperCase(), color: '#888888', created_at: '', updated_at: '', version: 1, workspace_id: 'workspace-1',
   auto_close_parent: true, auto_close_sub_issues: true,
@@ -181,4 +181,22 @@ test('multi-value, negative, nested, OR-rooted and unknown conditions give no de
   expect(createDefaultsFromFilter(ignored, target('p1'), tuesdayEvening)).toEqual({ project_id: 'p1' })
   expect(createDefaultsFromFilter({ op: 'or', children: [{ field: 'priority', operator: 'is', value: ['urgent'] }] }, target('p1'), tuesdayEvening)).toEqual({ project_id: 'p1' })
   expect(createDefaultsFromFilter(effectiveFilter(emptyFilter(), { preset: 'mine' }), { ...target('p1'), currentUserId: '' }, tuesdayEvening)).toEqual({ project_id: 'p1' })
+})
+
+test('same-named labels of different projects share one group, keyed by the oldest label', () => {
+  const labels = [label('label-bug', 'Bug'), { ...label('label-z-bug', 'bug'), project_id: 'p2' }, { ...label('label-docs', 'Docs'), project_id: 'p2' }]
+  const tasks = [task('a', { labels: ['label-bug'] }), task('b', { projectId: 'p2', labels: ['label-z-bug', 'label-docs'] })]
+  expect(summary(groupTasks(tasks, 'label', { ...ctx, labels }))).toEqual([
+    ['label:label-bug', 'Bug', ['a', 'b']],
+    ['label:label-docs', 'Docs', ['b']],
+  ])
+})
+
+test('label drops swap the labels of the task own project by name, or refuse when it has none', () => {
+  const labels = [label('label-bug', 'Bug'), label('label-ui', 'UI'), { ...label('label-z-bug', 'Bug'), project_id: 'p2' }]
+  const other = task('b', { projectId: 'p2', labels: [] })
+  expect(dropUpdate(other, 'label', null, 'label-bug', { ...ctx, labels })).toEqual({ taskId: 'b', patch: { expected_version: 2, label_ids: ['label-z-bug'] } })
+  expect(dropUpdate(other, 'label', null, 'label-ui', { ...ctx, labels })).toEqual({ error: 'No matching label in Alpha' })
+  const own = task('a', { labels: ['label-bug'] })
+  expect(dropUpdate(own, 'label', 'label-bug', null, { ...ctx, labels })).toEqual({ taskId: 'a', patch: { expected_version: 2, label_ids: [] } })
 })

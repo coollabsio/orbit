@@ -1,5 +1,5 @@
 import { Navigate, NavLink, Outlet } from 'react-router'
-import { ArchiveBox, ClipboardText, CloudConnection, SecurityUser, Driver, Key, Keyboard, Link2, Lock, Notification as Bell, Tag, Setting2 as Settings, ShieldTick as ShieldCheck, SmileCircle, Sticker, Danger as TriangleAlert, Trash as Trash2, User, People as Users } from 'reicon-react'
+import { ArchiveBox, ClipboardText, CloudConnection, SecurityUser, Driver, Key, Keyboard, Link2, Lock, Notification as Bell, Setting2 as Settings, ShieldTick as ShieldCheck, SmileCircle, Sticker, Danger as TriangleAlert, Trash as Trash2, User, People as Users } from 'reicon-react'
 import { cn } from 'cn'
 import { buttonVariants } from '@/components/ui/button'
 import { Pane, PaneHeader, PaneTitle } from '@/components/common/Pane'
@@ -22,7 +22,6 @@ const SECTIONS: { label: string; items: NavItem[] }[] = [
     items: [
       { to: '/settings', label: 'General', icon: Settings, end: true },
       { to: '/settings/api-tokens', label: 'API tokens', icon: Key, permission: 'api_tokens.manage' },
-      { to: '/settings/labels', label: 'Labels', icon: Tag },
       { to: '/settings/emoji', label: 'Emoji', icon: SmileCircle, permission: 'chat.manage' },
       { to: '/settings/stickers', label: 'Stickers', icon: Sticker, permission: 'chat.manage' },
       { to: '/settings/github', label: 'GitHub', icon: Link2 },

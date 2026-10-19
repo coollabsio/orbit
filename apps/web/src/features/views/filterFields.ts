@@ -17,7 +17,7 @@ import {
 } from 'reicon-react'
 import type { LabelRecord, ProjectRecord } from '@/api/generated/types.gen'
 import type { TaskPriority, TaskStatusDef } from '@/features/tasks/api/models'
-import { CATEGORY_LABEL, CATEGORY_ORDER, PRIORITY_LABEL, PRIORITY_ORDER, sortStatuses, statusKeyOf } from '@/features/tasks/taskMeta'
+import { CATEGORY_LABEL, CATEGORY_ORDER, labelKeyOf, labelRepresentatives, PRIORITY_LABEL, projectLabels, PRIORITY_ORDER, sortStatuses, statusKeyOf } from '@/features/tasks/taskMeta'
 import type { User } from '@/features/workspaces/models'
 import type { Condition, DateValue, FilterField, FilterOperator, TaskPreset } from './viewState'
 
@@ -27,7 +27,10 @@ export type TaskFilterRef = { identifier: string; title: string }
 export type FilterOptions = {
   statuses: TaskStatusDef[]
   members: User[]
+  /** Every label; ids in saved filters resolve against all of them. */
   labels: LabelRecord[]
+  /** A project page lists only this project's labels. */
+  projectId?: string | null
   projects: ProjectRecord[]
   currentUserId: string
   /** Parent filter values → task (null: deleted or trashed). Filled by `useFilterTaskRefs`. */
@@ -126,7 +129,8 @@ export function valueOptions(field: FilterField, options: FilterOptions): ValueO
       ]
     }
     case 'label':
-      return [...options.labels].sort(byName).map((item): ValueOption => ({ value: item.id, label: item.name, glyph: { kind: 'dot', color: item.color } }))
+      // a label value is its key (the name): the server matches it in every project
+      return labelRepresentatives(options.projectId ? projectLabels(options.labels, options.projectId) : options.labels).labels.map((item): ValueOption => ({ value: labelKeyOf(item), label: item.name, glyph: { kind: 'dot', color: item.color } }))
     case 'priority':
       return PRIORITY_ORDER.map((priority): ValueOption => ({ value: priority, label: PRIORITY_LABEL[priority], glyph: { kind: 'priority', priority } }))
     case 'project':
@@ -145,6 +149,17 @@ export function listValue(condition: Condition): string[] {
   return Array.isArray(condition.value) ? condition.value.filter((value): value is string => typeof value === 'string') : []
 }
 
+/**
+ * The list values as the pickers show them. A label id (views saved before labels were per project) reads as its
+ * label's key, so it shows the label and editing the condition saves the key instead.
+ */
+export function chosenValues(condition: Condition, options: FilterOptions): string[] {
+  const values = listValue(condition)
+  if (condition.field !== 'label') return values
+  const keys = new Map(options.labels.map((label) => [label.id, labelKeyOf(label)]))
+  return [...new Set(values.map((value) => keys.get(value) ?? value))]
+}
+
 /** A member picked by ID rather than from the list, e.g. your own ID written by the legacy migration instead of `me`. */
 function memberByIdOption(value: string, options: FilterOptions): ValueOption | undefined {
   const person = options.members.find((candidate) => candidate.id === value)
@@ -155,7 +170,7 @@ function memberByIdOption(value: string, options: FilterOptions): ValueOption | 
 export function selectedOptions(condition: Condition, options: FilterOptions): ValueOption[] {
   if (FIELD_META[condition.field].kind !== 'list') return []
   const known = new Map(valueOptions(condition.field, options).map((option) => [option.value, option]))
-  return listValue(condition).flatMap((value): ValueOption[] => {
+  return chosenValues(condition, options).flatMap((value): ValueOption[] => {
     const option = known.get(value) ?? memberByIdOption(value, options)
     return option ? [option] : []
   })
@@ -169,7 +184,7 @@ export function unlistedOptions(condition: Condition, options: FilterOptions): V
   const meta = FIELD_META[condition.field]
   if (meta.kind !== 'list') return []
   const listed = new Set(valueOptions(condition.field, options).map((option) => option.value))
-  return listValue(condition)
+  return chosenValues(condition, options)
     .filter((value) => !listed.has(value))
     .map((value) => memberByIdOption(value, options) ?? { value, label: `Unknown ${meta.label.toLowerCase()}`, glyph: { kind: 'dot', color: 'var(--muted-foreground)' } })
 }
@@ -250,7 +265,7 @@ export function valueSummary(condition: Condition, options: FilterOptions): stri
     const values = listValue(condition)
     return values.length > 2 ? `${values.length} tasks` : values.map((value) => taskValueLabel(value, options)).join(', ')
   }
-  const values = listValue(condition)
+  const values = chosenValues(condition, options)
   if (values.length > 2) return `${values.length} ${meta.plural}`
   const known = new Map(selectedOptions(condition, options).map((option) => [option.value, option.label]))
   return values.map((value) => known.get(value) ?? `Unknown ${meta.label.toLowerCase()}`).join(', ')

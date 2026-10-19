@@ -14,6 +14,7 @@ import { EmptyState } from '@/components/common/EmptyState'
 import { Pane, PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { InfoTip } from '@/components/common/InfoTip'
 import { UnsavedBar } from '@/components/common/UnsavedBar'
+import { ProjectLabelsCard } from '@/features/tasks/components/ProjectLabelsCard'
 import { TaskStatusIcon } from '@/features/tasks/components/TaskStatusIcon'
 import { CATEGORY_LABEL, CATEGORY_ORDER, PROJECT_COLORS, STATUS_COLORS, defaultStatusOf, projectStatuses } from '@/features/tasks/taskMeta'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
@@ -247,6 +248,8 @@ export function ProjectSettingsPage() {
                 {reorderStatuses.isError ? <p role="alert" className="text-destructive">Status reorder failed. <Button variant="ghost" onClick={() => reorderStatuses.variables && reorderStatuses.mutate(reorderStatuses.variables)}>Retry</Button></p> : null}
                 {statusesSaving ? <p role="status">Saving statuses…</p> : null}
               </SettingsCard>
+
+              <ProjectLabelsCard projectId={project.id} />
 
               <ProjectGithubCard workspaceId={workspace.id} projectId={project.id} onPendingChange={setGithubPending} />
 

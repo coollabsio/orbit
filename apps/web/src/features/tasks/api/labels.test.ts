@@ -9,8 +9,8 @@ test('workspace labels include unused records with their real names and colors',
       requested = request.url
       const cursor = new URL(request.url).searchParams.get('cursor')
       return Response.json(cursor
-        ? { items: [{ id: 'unused', workspace_id: 'workspace-1', name: 'Needs review', color: '#123456', version: 0 }], next_cursor: null }
-        : { items: [{ id: 'used', workspace_id: 'workspace-1', name: 'Bug', color: '#ff0000', version: 0 }], next_cursor: 'next' })
+        ? { items: [{ id: 'unused', workspace_id: 'workspace-1', project_id: 'project-1', name: 'Needs review', color: '#123456', version: 0 }], next_cursor: null }
+        : { items: [{ id: 'used', workspace_id: 'workspace-1', project_id: 'project-1', name: 'Bug', color: '#ff0000', version: 0 }], next_cursor: 'next' })
     },
   })
 

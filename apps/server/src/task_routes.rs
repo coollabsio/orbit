@@ -92,12 +92,13 @@ pub fn task_router(state: TaskState) -> Router {
             "/api/v1/workspaces/{workspace_id}/projects/{project_id}/statuses/{status_id}",
             patch(update_status).delete(delete_status),
         )
+        .route("/api/v1/workspaces/{workspace_id}/labels", get(list_labels))
         .route(
-            "/api/v1/workspaces/{workspace_id}/labels",
-            get(list_labels).post(create_label),
+            "/api/v1/workspaces/{workspace_id}/projects/{project_id}/labels",
+            get(list_project_labels).post(create_label),
         )
         .route(
-            "/api/v1/workspaces/{workspace_id}/labels/{label_id}",
+            "/api/v1/workspaces/{workspace_id}/projects/{project_id}/labels/{label_id}",
             patch(update_label).delete(delete_label),
         )
         .route(
@@ -699,6 +700,7 @@ struct LabelUpdateBody {
     expected_version: u64,
 }
 
+/// The labels of every project, for views across projects.
 #[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/labels", params(PageQuery, ("workspace_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::tasks::LabelRecord>)))]
 async fn list_labels(
     State(state): State<TaskState>,
@@ -712,29 +714,63 @@ async fn list_labels(
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
     state
         .tasks
-        .labels(workspace_id, actor_id, page.cursor.as_deref(), page.limit)
+        .labels(
+            workspace_id,
+            None,
+            actor_id,
+            page.cursor.as_deref(),
+            page.limit,
+        )
         .await
         .map(Json)
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
-#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/labels", params(("workspace_id" = String, Path)), request_body = LabelBody, responses((status = 201, body = crate::repositories::tasks::LabelRecord)))]
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/labels", params(PageQuery, ("workspace_id" = String, Path), ("project_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::tasks::LabelRecord>)))]
+async fn list_project_labels(
+    State(state): State<TaskState>,
+    Path((workspace, project)): Path<(String, String)>,
+    ApiQuery(page): ApiQuery<PageQuery>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<Page<crate::repositories::tasks::LabelRecord>>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/projects/{project}/labels");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let project_id = parse_id(&project, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .labels(
+            workspace_id,
+            Some(project_id),
+            actor_id,
+            page.cursor.as_deref(),
+            page.limit,
+        )
+        .await
+        .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/labels", params(("workspace_id" = String, Path), ("project_id" = String, Path)), request_body = LabelBody, responses((status = 201, body = crate::repositories::tasks::LabelRecord)))]
 async fn create_label(
     State(state): State<TaskState>,
-    Path(workspace): Path<String>,
+    Path((workspace, project)): Path<(String, String)>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
     ApiJson(body): ApiJson<LabelBody>,
 ) -> Result<Response, ApiError> {
-    let instance = format!("/api/v1/workspaces/{workspace}/labels");
+    let instance = format!("/api/v1/workspaces/{workspace}/projects/{project}/labels");
     let (workspace_id, actor_id) =
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let project_id = parse_id(&project, &instance, request_id.as_ref())?;
     let name = text(body.name, 100, 100, "name", &instance, request_id.as_ref())?;
     let color = color(body.color, &instance, request_id.as_ref())?;
     state
         .tasks
         .create_label(
             workspace_id,
+            project_id,
             actor_id,
             name,
             color,
@@ -746,17 +782,18 @@ async fn create_label(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
-#[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}/labels/{label_id}", params(("workspace_id" = String, Path), ("label_id" = String, Path)), request_body = LabelUpdateBody, responses((status = 200, body = crate::repositories::tasks::LabelRecord)))]
+#[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/labels/{label_id}", params(("workspace_id" = String, Path), ("project_id" = String, Path), ("label_id" = String, Path)), request_body = LabelUpdateBody, responses((status = 200, body = crate::repositories::tasks::LabelRecord)))]
 async fn update_label(
     State(state): State<TaskState>,
-    Path((workspace, label)): Path<(String, String)>,
+    Path((workspace, project, label)): Path<(String, String, String)>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
     ApiJson(body): ApiJson<LabelUpdateBody>,
 ) -> Result<Json<crate::repositories::tasks::LabelRecord>, ApiError> {
-    let instance = format!("/api/v1/workspaces/{workspace}/labels/{label}");
+    let instance = format!("/api/v1/workspaces/{workspace}/projects/{project}/labels/{label}");
     let (workspace_id, actor_id) =
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let project_id = parse_id(&project, &instance, request_id.as_ref())?;
     let label_id = parse_id(&label, &instance, request_id.as_ref())?;
     let name = text(body.name, 100, 100, "name", &instance, request_id.as_ref())?;
     let color = color(body.color, &instance, request_id.as_ref())?;
@@ -764,6 +801,7 @@ async fn update_label(
         .tasks
         .update_label(
             workspace_id,
+            project_id,
             label_id,
             actor_id,
             name,
@@ -777,22 +815,24 @@ async fn update_label(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
-#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/labels/{label_id}", params(MutationQuery, ("workspace_id" = String, Path), ("label_id" = String, Path)), responses((status = 204)))]
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/labels/{label_id}", params(MutationQuery, ("workspace_id" = String, Path), ("project_id" = String, Path), ("label_id" = String, Path)), responses((status = 204)))]
 async fn delete_label(
     State(state): State<TaskState>,
-    Path((workspace, label)): Path<(String, String)>,
+    Path((workspace, project, label)): Path<(String, String, String)>,
     ApiQuery(query): ApiQuery<MutationQuery>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
 ) -> Result<StatusCode, ApiError> {
-    let instance = format!("/api/v1/workspaces/{workspace}/labels/{label}");
+    let instance = format!("/api/v1/workspaces/{workspace}/projects/{project}/labels/{label}");
     let (workspace_id, actor_id) =
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let project_id = parse_id(&project, &instance, request_id.as_ref())?;
     let label_id = parse_id(&label, &instance, request_id.as_ref())?;
     state
         .tasks
         .delete_label(
             workspace_id,
+            project_id,
             label_id,
             actor_id,
             query.expected_version,

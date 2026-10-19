@@ -1,7 +1,7 @@
 import { useCommand } from '@/shortcuts/useCommand'
 import { useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Calendar, ChevronRight, Hierarchy2, Paperclip2 as Paperclip, User as UserIcon, Xmark as X } from 'reicon-react'
+import { Calendar, ChevronRight, Hierarchy2, Paperclip2 as Paperclip, Tag, User as UserIcon, Xmark as X } from 'reicon-react'
 import { apiClient } from '@/api/client'
 import { createTaskRelation, uploadTaskAttachments } from '@/api/generated/sdk.gen'
 import { Button } from '@/components/ui/button'
@@ -32,11 +32,11 @@ import { useLabels } from '@/features/tasks/api/labels'
 import { taskIdentifier, type Task, type TaskPriority } from '@/features/tasks/api/models'
 import { useAllStatuses, useProjects } from '@/features/tasks/api/projects'
 import { useCreateTask } from '@/features/tasks/api/tasks'
-import { dueDateLabel, PRIORITY_LABEL, PRIORITY_ORDER, projectStatuses, statusKeyOf } from '@/features/tasks/taskMeta'
+import { dueDateLabel, matchingLabelIds, PRIORITY_LABEL, PRIORITY_ORDER, projectStatuses, statusKeyOf } from '@/features/tasks/taskMeta'
 import { resolveStatusId } from '@/features/tasks/tasksLib'
 import { ADD_RELATION_OPTIONS, type RelationKind } from '@/features/tasks/relationsLib'
 import { PriorityIcon } from './PriorityIcon'
-import { TaskLabels } from './TaskLabels'
+import { LabelPicker } from './TaskLabels'
 import { TaskPickerDialog } from './TaskPickerDialog'
 import { AddRelationMenu } from './TaskRelations'
 import { TaskStatusIcon } from './TaskStatusIcon'
@@ -68,7 +68,8 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
   const projects = useProjects(workspace.id).data ?? []
   const statuses = useAllStatuses(workspace.id, projects).data
   const members = useMembers(workspace.id).data ?? []
-  const labels = useLabels(workspace.id).data ?? []
+  const labelsQuery = useLabels(workspace.id)
+  const labels = labelsQuery.data ?? []
   const createTask = useCreateTask(workspace.id)
   const [open, setOpen] = useState(true)
   const [title, setTitle] = useState(initialTitle)
@@ -106,6 +107,9 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
   const status = statusOptions.find((option) => option.id === draft.statusId)
     ?? statusOptions.find((option) => option.id === (project ? resolveStatusId(statuses, project.id, null) : undefined))
     ?? statusOptions[0]
+  // labels follow by name into another project, like a task that moves; the server checks them until they load
+  const labelIds = project && labelsQuery.isSuccess ? matchingLabelIds(labels, draft.labelIds, project.id) : draft.labelIds
+  const chosenLabels = labels.filter((label) => labelIds.includes(label.id)).sort((a, b) => a.name.localeCompare(b.name))
   const assignees = members.filter((member) => draft.assigneeIds.includes(member.id))
   const busy = createTask.isPending || uploading
   const canCreate = title.trim() !== '' && project !== undefined && status !== undefined && !busy
@@ -128,7 +132,7 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
         status_id: status.id,
         priority: draft.priority,
         assignee_ids: draft.assigneeIds,
-        label_ids: draft.labelIds,
+        label_ids: labelIds,
         due_at: draft.dueAt,
         due_start_at: draft.dueStartAt,
         parent_task_id: draft.parent?.id ?? null,
@@ -325,7 +329,6 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
             </div>
           </div>
 
-          <TaskLabels workspaceId={workspace.id} labelIds={draft.labelIds} labels={labels} onChange={(labelIds) => setDraft((current) => ({ ...current, labelIds }))} />
           <div className="flex flex-wrap items-center gap-1.5">
             <DropdownMenu>
               <DropdownMenuTrigger
@@ -407,6 +410,30 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
                 })}
               </DropdownMenuContent>
             </DropdownMenu>
+            <LabelPicker
+              workspaceId={workspace.id}
+              projectId={project?.id ?? ''}
+              labelIds={labelIds}
+              labels={labels}
+              onChange={(labelIds) => setDraft((current) => ({ ...current, labelIds }))}
+              trigger={
+                <Button type="button" variant="outline" size="sm" className="max-w-56 font-normal" aria-label="Labels">
+                  {chosenLabels.length > 0 ? (
+                    <>
+                      <span aria-hidden="true" className="flex -space-x-0.5">
+                        {chosenLabels.map((label) => <ColorDot key={label.id} color={label.color} className="ring-2 ring-background" />)}
+                      </span>
+                      <span className="truncate">{chosenLabels.map((label) => label.name).join(', ')}</span>
+                    </>
+                  ) : (
+                    <>
+                      <Tag aria-hidden="true" className="text-muted-foreground" />
+                      Labels
+                    </>
+                  )}
+                </Button>
+              }
+            />
             <Popover open={dueDateOpen} onOpenChange={setDueDateOpen}>
               <PopoverTrigger
                 render={

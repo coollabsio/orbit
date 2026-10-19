@@ -74,7 +74,7 @@ async fn github_schema_is_in_one_draft_migration() {
         db.scalar::<i64>("SELECT MAX(version) FROM schema_migrations")
             .await
             .unwrap(),
-        50
+        51
     );
     assert_eq!(
         db.scalar::<i64>("SELECT COUNT(*) FROM pragma_table_info('github_issue_links') WHERE name IN ('kind', 'pull_state', 'sync_paused')")
@@ -211,7 +211,7 @@ async fn rejects_a_schema_newer_than_the_binary() {
         error,
         MigrationError::SchemaNewer {
             database_version: 999,
-            binary_version: 50
+            binary_version: 51
         }
     ));
 }
@@ -2373,4 +2373,147 @@ async fn a_lost_postgres_ownership_connection_is_reported() {
 
     drop(database);
     drop_database(&mut admin, &name).await;
+}
+
+#[tokio::test]
+async fn project_labels_migration_copies_labels_into_every_project() {
+    let directory = tempfile::tempdir().unwrap();
+    let db = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
+        .await
+        .unwrap();
+    MigrationRunner::embedded_through("test", 50)
+        .run(&db)
+        .await
+        .unwrap();
+    let [
+        user,
+        workspace,
+        owner,
+        first,
+        second,
+        trashed,
+        first_status,
+        second_status,
+        bug,
+        unused,
+    ] = std::array::from_fn::<Id, 10, _>(|_| Id::new_v7());
+    let [first_task, second_task] = std::array::from_fn::<Id, 2, _>(|_| Id::new_v7());
+    db.execute(&format!(
+        "BEGIN;
+         INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at)
+         VALUES ('{user}', 'owner@example.com', 'owner@example.com', 'Owner', 'x', 1, 1);
+         INSERT INTO workspaces (id, name, owner_membership_id, created_at, updated_at)
+         VALUES ('{workspace}', 'W', '{owner}', 1, 1);
+         INSERT INTO memberships (id, workspace_id, user_id, role, created_at, updated_at)
+         VALUES ('{owner}', '{workspace}', '{user}', 'owner', 1, 1);
+         INSERT INTO projects (id, workspace_id, name, project_key, color, deleted_at, created_at, updated_at)
+         VALUES ('{first}', '{workspace}', 'First', 'ONE', '#111111', NULL, 1, 1),
+                ('{second}', '{workspace}', 'Second', 'TWO', '#222222', NULL, 2, 2),
+                ('{trashed}', '{workspace}', 'Trashed', 'OLD', '#333333', 5, 0, 0);
+         INSERT INTO task_statuses (id, workspace_id, project_id, name, description, color, category, position, created_at, updated_at)
+         VALUES ('{first_status}', '{workspace}', '{first}', 'Todo', '', '#000000', 'unstarted', 0, 1, 1),
+                ('{second_status}', '{workspace}', '{second}', 'Todo', '', '#000000', 'unstarted', 0, 1, 1);
+         INSERT INTO labels (id, workspace_id, name, color, created_at, updated_at)
+         VALUES ('{bug}', '{workspace}', 'Bug', '#ff0000', 1, 1),
+                ('{unused}', '{workspace}', 'Unused', '#00ff00', 1, 1);
+         INSERT INTO tasks (id, workspace_id, project_id, status_id, title, creator_id, created_at, updated_at)
+         VALUES ('{first_task}', '{workspace}', '{first}', '{first_status}', 'A', '{user}', 1, 1),
+                ('{second_task}', '{workspace}', '{second}', '{second_status}', 'B', '{user}', 1, 1);
+         INSERT INTO task_labels (task_id, label_id)
+         VALUES ('{first_task}', '{bug}'), ('{second_task}', '{bug}');
+         COMMIT;"
+    ))
+    .await
+    .unwrap();
+
+    MigrationRunner::embedded("test").run(&db).await.unwrap();
+
+    // Each label is in every project, trashed ones too; the oldest live project keeps the id
+    // (the trashed one is older).
+    let count = |sql: String| {
+        let db = &db;
+        async move { db.scalar::<i64>(&sql).await.unwrap() }
+    };
+    assert_eq!(count("SELECT COUNT(*) FROM labels".into()).await, 6);
+    for project in [first, second, trashed] {
+        assert_eq!(
+            count(format!(
+                "SELECT COUNT(*) FROM labels WHERE project_id = '{project}' AND name IN ('Bug', 'Unused')"
+            ))
+            .await,
+            2
+        );
+    }
+    assert_eq!(
+        db.scalar::<String>(&format!("SELECT project_id FROM labels WHERE id = '{bug}'"))
+            .await
+            .unwrap(),
+        first.to_string()
+    );
+    // Each task keeps its label: the copy in its own project.
+    assert_eq!(
+        db.scalar::<String>(&format!(
+            "SELECT label_id FROM task_labels WHERE task_id = '{first_task}'"
+        ))
+        .await
+        .unwrap(),
+        bug.to_string()
+    );
+    let second_bug = db
+        .scalar::<String>(&format!(
+            "SELECT label_id FROM task_labels JOIN labels ON labels.id = task_labels.label_id \
+             WHERE task_id = '{second_task}' AND labels.project_id = '{second}' AND labels.name = 'Bug'"
+        ))
+        .await
+        .unwrap();
+    assert!(second_bug.parse::<Id>().is_ok(), "{second_bug}");
+
+    // A task takes only labels of its own project, and a name is unique within a project.
+    let error = db
+        .execute(&format!(
+            "INSERT INTO task_labels (task_id, label_id) VALUES ('{first_task}', '{second_bug}')"
+        ))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("task label must belong to the task project"),
+        "{error}"
+    );
+    assert!(
+        db.execute(&format!(
+            "INSERT INTO labels (id, workspace_id, project_id, name, color, created_at, updated_at) \
+             VALUES ('{}', '{workspace}', '{first}', 'Bug', '#ff0000', 1, 1)",
+            Id::new_v7()
+        ))
+        .await
+        .is_err()
+    );
+    assert!(
+        db.execute(&format!(
+            "UPDATE labels SET project_id = '{second}' WHERE id = '{unused}'"
+        ))
+        .await
+        .is_err()
+    );
+
+    // A deleted label leaves its tasks, and a purged project (tasks first, as the retention
+    // purge does) takes its labels along.
+    db.execute(&format!("DELETE FROM labels WHERE id = '{bug}'"))
+        .await
+        .unwrap();
+    assert_eq!(
+        count(format!(
+            "SELECT COUNT(*) FROM task_labels WHERE task_id = '{first_task}'"
+        ))
+        .await,
+        0
+    );
+    db.execute(&format!(
+        "DELETE FROM tasks WHERE id = '{second_task}'; DELETE FROM projects WHERE id = '{second}'"
+    ))
+    .await
+    .unwrap();
+    assert_eq!(count("SELECT COUNT(*) FROM labels".into()).await, 3);
+    assert_eq!(count("SELECT COUNT(*) FROM task_labels".into()).await, 0);
 }

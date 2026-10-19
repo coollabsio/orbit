@@ -8,7 +8,7 @@ import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { SettingsRow } from '@/features/settings/components/SettingsParts'
 import { useCreateLabel, useDeleteLabel, useLabels, useUpdateLabel } from '@/features/tasks/api/labels'
 import { LABEL_COLORS, LabelColorPicker, LabelPill } from '@/features/tasks/components/TaskLabels'
-
+import { projectLabels } from '@/features/tasks/taskMeta'
 
 function LabelForm({ initial, submitLabel, pending, onSubmit, onCancel }: { initial?: LabelRecord; submitLabel: string; pending: boolean; onSubmit: (name: string, color: string) => Promise<void>; onCancel?: () => void }) {
   const [name, setName] = useState(initial?.name ?? '')
@@ -37,30 +37,31 @@ function LabelForm({ initial, submitLabel, pending, onSubmit, onCancel }: { init
   )
 }
 
-export function LabelsPage() {
+/** The project's labels: create, rename, recolor and delete. Other projects keep their own. */
+export function ProjectLabelsCard({ projectId }: { projectId: string }) {
   const { workspace } = useWorkspace()
   const labels = useLabels(workspace.id)
   const createLabel = useCreateLabel(workspace.id)
   const updateLabel = useUpdateLabel(workspace.id)
   const deleteLabel = useDeleteLabel(workspace.id)
   const [editingId, setEditingId] = useState<string>()
-  const sorted = [...(labels.data ?? [])].sort((a, b) => a.name.localeCompare(b.name))
+  const sorted = projectLabels(labels.data ?? [], projectId).sort((a, b) => a.name.localeCompare(b.name))
 
   const remove = async (label: LabelRecord) => {
-    if (!await confirmAction({ title: `Delete ${label.name}?`, description: 'The label is removed from all tasks. You cannot undo this.', confirmLabel: 'Delete', danger: true })) return
+    if (!await confirmAction({ title: `Delete ${label.name}?`, description: 'The label is removed from all tasks of this project. You cannot undo this.', confirmLabel: 'Delete', danger: true })) return
     deleteLabel.mutate(label)
   }
 
-  return <>
-    <SettingsCard title="Create label" description="Labels are shared by all projects in this workspace.">
-      <LabelForm submitLabel="Create label" pending={createLabel.isPending} onSubmit={async (name, color) => { await createLabel.mutateAsync({ name, color }) }} />
-      {createLabel.isError ? <p className="mt-2 text-xs text-destructive" role="alert">The label could not be created.</p> : null}
-    </SettingsCard>
-    <SettingsCard title="Labels" description="Rename, recolor or delete workspace labels." flush>
+  return (
+    <SettingsCard title="Labels" description="Labels for the tasks of this project. Each project has its own." flush>
       <div className="flex flex-col divide-y">
+        <SettingsRow>
+          <LabelForm submitLabel="Create label" pending={createLabel.isPending} onSubmit={async (name, color) => { await createLabel.mutateAsync({ projectId, name, color }) }} />
+        </SettingsRow>
+        {createLabel.isError ? <SettingsRow className="text-xs text-destructive" role="alert">The label could not be created.</SettingsRow> : null}
         {labels.isPending ? <SettingsRow>Loading labels…</SettingsRow> : null}
         {labels.isError ? <SettingsRow role="alert">Labels could not be loaded.</SettingsRow> : null}
-        {labels.data?.length === 0 ? <SettingsRow>No labels yet.</SettingsRow> : null}
+        {labels.isSuccess && sorted.length === 0 ? <SettingsRow>No labels yet.</SettingsRow> : null}
         {sorted.map((label) => editingId === label.id
           ? <SettingsRow key={label.id}>
               <LabelForm initial={label} submitLabel="Save" pending={updateLabel.isPending} onCancel={() => setEditingId(undefined)} onSubmit={async (name, color) => { await updateLabel.mutateAsync({ label, name, color }); setEditingId(undefined) }} />
@@ -74,5 +75,5 @@ export function LabelsPage() {
         {deleteLabel.isError ? <SettingsRow className="text-xs text-destructive" role="alert">The label could not be deleted.</SettingsRow> : null}
       </div>
     </SettingsCard>
-  </>
+  )
 }

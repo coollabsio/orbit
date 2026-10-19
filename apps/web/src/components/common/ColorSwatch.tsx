@@ -25,8 +25,10 @@ const colorSwatchVariants = cva(
 function ColorSwatch({ color, size, className, style, title, ...props }: Omit<ComponentProps<typeof Button>, 'size' | 'color'> & VariantProps<typeof colorSwatchVariants> & { color: string | null }) {
   return (
     <Tip label={title}>
+      {/* ghost: the default variant's depth edge would draw a primary-coloured rim under every swatch */}
       <Button
         type="button"
+        variant="ghost"
         size="icon"
         className={cn(colorSwatchVariants({ size }), color === null && 'border border-dashed border-muted-foreground bg-transparent hover:bg-transparent', className)}
         style={color === null ? style : { ...style, backgroundColor: color }}

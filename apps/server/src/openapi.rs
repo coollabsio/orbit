@@ -123,6 +123,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::task_routes::delete_status,
         crate::task_routes::reorder_statuses,
         crate::task_routes::list_labels,
+        crate::task_routes::list_project_labels,
         crate::task_routes::create_label,
         crate::task_routes::update_label,
         crate::task_routes::delete_label,
@@ -742,6 +743,7 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "delete_status"
             | "reorder_statuses"
             | "list_labels"
+            | "list_project_labels"
             | "create_label"
             | "update_label"
             | "delete_label"
@@ -865,6 +867,7 @@ fn task_operation(operation_id: &str) -> bool {
             | "delete_status"
             | "reorder_statuses"
             | "list_labels"
+            | "list_project_labels"
             | "create_label"
             | "update_label"
             | "delete_label"
@@ -896,6 +899,7 @@ fn task_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
             | "list_project_trash"
             | "list_statuses"
             | "list_labels"
+            | "list_project_labels"
             | "list_tasks"
             | "query_tasks"
             | "list_task_trash"

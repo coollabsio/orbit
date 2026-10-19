@@ -1130,6 +1130,7 @@ export type LabelRecord = {
     color: string;
     id: string;
     name: string;
+    project_id: string;
     version: number;
     workspace_id: string;
 };
@@ -2040,6 +2041,7 @@ export type PageLabelRecord = {
         color: string;
         id: string;
         name: string;
+        project_id: string;
         version: number;
         workspace_id: string;
     }>;
@@ -10950,192 +10952,6 @@ export type ListLabelsResponses = {
 
 export type ListLabelsResponse = ListLabelsResponses[keyof ListLabelsResponses];
 
-export type CreateLabelData = {
-    body: LabelBody;
-    headers?: {
-        /**
-         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
-         */
-        'X-Orbit-Contract'?: string;
-    };
-    path: {
-        workspace_id: string;
-    };
-    query?: never;
-    url: '/api/v1/workspaces/{workspace_id}/labels';
-};
-
-export type CreateLabelErrors = {
-    /**
-     * invalid_proxy_headers, invalid_request
-     */
-    400: TaskProblem;
-    /**
-     * authentication_required
-     */
-    401: TaskProblem;
-    /**
-     * origin_forbidden
-     */
-    403: TaskProblem;
-    /**
-     * task_resource_not_found
-     */
-    404: TaskProblem;
-    /**
-     * contract_mismatch, task_conflict
-     */
-    409: TaskProblem;
-    /**
-     * request_too_large
-     */
-    413: TaskProblem;
-    /**
-     * validation_failed
-     */
-    422: TaskProblem;
-    /**
-     * internal_error
-     */
-    500: TaskProblem;
-    /**
-     * internal_error or another documented stable code
-     */
-    default: TaskProblem;
-};
-
-export type CreateLabelError = CreateLabelErrors[keyof CreateLabelErrors];
-
-export type CreateLabelResponses = {
-    201: LabelRecord;
-};
-
-export type CreateLabelResponse = CreateLabelResponses[keyof CreateLabelResponses];
-
-export type DeleteLabelData = {
-    body?: never;
-    headers?: {
-        /**
-         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
-         */
-        'X-Orbit-Contract'?: string;
-    };
-    path: {
-        workspace_id: string;
-        label_id: string;
-    };
-    query: {
-        expected_version: number;
-    };
-    url: '/api/v1/workspaces/{workspace_id}/labels/{label_id}';
-};
-
-export type DeleteLabelErrors = {
-    /**
-     * invalid_proxy_headers, invalid_request
-     */
-    400: TaskProblem;
-    /**
-     * authentication_required
-     */
-    401: TaskProblem;
-    /**
-     * origin_forbidden
-     */
-    403: TaskProblem;
-    /**
-     * task_resource_not_found
-     */
-    404: TaskProblem;
-    /**
-     * contract_mismatch, task_conflict, conflict
-     */
-    409: TaskProblem;
-    /**
-     * request_too_large
-     */
-    413: TaskProblem;
-    /**
-     * internal_error
-     */
-    500: TaskProblem;
-    /**
-     * internal_error or another documented stable code
-     */
-    default: TaskProblem;
-};
-
-export type DeleteLabelError = DeleteLabelErrors[keyof DeleteLabelErrors];
-
-export type DeleteLabelResponses = {
-    204: void;
-};
-
-export type DeleteLabelResponse = DeleteLabelResponses[keyof DeleteLabelResponses];
-
-export type UpdateLabelData = {
-    body: LabelUpdateBody;
-    headers?: {
-        /**
-         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
-         */
-        'X-Orbit-Contract'?: string;
-    };
-    path: {
-        workspace_id: string;
-        label_id: string;
-    };
-    query?: never;
-    url: '/api/v1/workspaces/{workspace_id}/labels/{label_id}';
-};
-
-export type UpdateLabelErrors = {
-    /**
-     * invalid_proxy_headers, invalid_request
-     */
-    400: TaskProblem;
-    /**
-     * authentication_required
-     */
-    401: TaskProblem;
-    /**
-     * origin_forbidden
-     */
-    403: TaskProblem;
-    /**
-     * task_resource_not_found
-     */
-    404: TaskProblem;
-    /**
-     * contract_mismatch, task_conflict, conflict
-     */
-    409: TaskProblem;
-    /**
-     * request_too_large
-     */
-    413: TaskProblem;
-    /**
-     * validation_failed
-     */
-    422: TaskProblem;
-    /**
-     * internal_error
-     */
-    500: TaskProblem;
-    /**
-     * internal_error or another documented stable code
-     */
-    default: TaskProblem;
-};
-
-export type UpdateLabelError = UpdateLabelErrors[keyof UpdateLabelErrors];
-
-export type UpdateLabelResponses = {
-    200: LabelRecord;
-};
-
-export type UpdateLabelResponse = UpdateLabelResponses[keyof UpdateLabelResponses];
-
 export type ListMembersData = {
     body?: never;
     headers?: {
@@ -14076,6 +13892,253 @@ export type SaveGithubProjectConnectionResponses = {
 };
 
 export type SaveGithubProjectConnectionResponse = SaveGithubProjectConnectionResponses[keyof SaveGithubProjectConnectionResponses];
+
+export type ListProjectLabelsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: {
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/labels';
+};
+
+export type ListProjectLabelsErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request, invalid_cursor
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListProjectLabelsError = ListProjectLabelsErrors[keyof ListProjectLabelsErrors];
+
+export type ListProjectLabelsResponses = {
+    200: PageLabelRecord;
+};
+
+export type ListProjectLabelsResponse = ListProjectLabelsResponses[keyof ListProjectLabelsResponses];
+
+export type CreateLabelData = {
+    body: LabelBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/labels';
+};
+
+export type CreateLabelErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateLabelError = CreateLabelErrors[keyof CreateLabelErrors];
+
+export type CreateLabelResponses = {
+    201: LabelRecord;
+};
+
+export type CreateLabelResponse = CreateLabelResponses[keyof CreateLabelResponses];
+
+export type DeleteLabelData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+        label_id: string;
+    };
+    query: {
+        expected_version: number;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/labels/{label_id}';
+};
+
+export type DeleteLabelErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type DeleteLabelError = DeleteLabelErrors[keyof DeleteLabelErrors];
+
+export type DeleteLabelResponses = {
+    204: void;
+};
+
+export type DeleteLabelResponse = DeleteLabelResponses[keyof DeleteLabelResponses];
+
+export type UpdateLabelData = {
+    body: LabelUpdateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+        label_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/labels/{label_id}';
+};
+
+export type UpdateLabelErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_conflict, conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type UpdateLabelError = UpdateLabelErrors[keyof UpdateLabelErrors];
+
+export type UpdateLabelResponses = {
+    200: LabelRecord;
+};
+
+export type UpdateLabelResponse = UpdateLabelResponses[keyof UpdateLabelResponses];
 
 export type RestoreProjectData = {
     body: RestoreBody;

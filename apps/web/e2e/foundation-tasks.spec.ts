@@ -99,7 +99,8 @@ async function revokeAnotherOwnerSession(page: Page, browser: Browser) {
 async function createTaskWithAttachment(page: Page) {
   const workspaces = await api<Array<{ id: string; name: string }>>(page, '/api/v1/workspaces')
   const workspaceId = workspaces.find((workspace) => workspace.name === 'Foundation')!.id
-  await api(page, `/api/v1/workspaces/${workspaceId}/labels`, 'POST', { name: 'Unused label', color: '#123456' })
+  const projects = await api<{ items: Array<{ id: string }> }>(page, `/api/v1/workspaces/${workspaceId}/projects`)
+  await api(page, `/api/v1/workspaces/${workspaceId}/projects/${projects.items[0]!.id}/labels`, 'POST', { name: 'Unused label', color: '#123456' })
   await page.goto('/tasks')
   await page.getByRole('button', { name: 'New task' }).click()
   const title = page.getByRole('dialog').getByLabel('Task title')
@@ -125,7 +126,7 @@ async function createTaskWithAttachment(page: Page) {
   await expect(priority).toContainText('Urgent')
 
   await page.getByRole('button', { name: 'Add label' }).click()
-  await page.getByRole('button', { name: 'Unused label' }).click()
+  await page.getByRole('option', { name: 'Unused label' }).click()
   await expect(page.locator('.tasks-label-pill').filter({ hasText: 'Unused label' })).toBeVisible()
 
   const status = page.locator('.tasks-side-group').first().getByRole('button').first()

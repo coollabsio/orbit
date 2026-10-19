@@ -26,10 +26,11 @@ test('list values toggle as a searchable multi-select', async () => {
   const view = render(<Harness initial={{ field: 'label', operator: 'includes_any', value: [] }} />)
   await userEvent.click(view.getByRole('option', { name: 'Bug' }))
   await userEvent.click(view.getByRole('option', { name: 'UI' }))
-  expect(read(view).value).toEqual(['label-bug', 'label-ui'])
+  // a label value is its key (the name), so it finds that label in every project
+  expect(read(view).value).toEqual(['bug', 'ui'])
   expect(view.getByRole('option', { name: 'Bug' }).getAttribute('aria-checked')).toBe('true')
   await userEvent.click(view.getByRole('option', { name: 'Bug' }))
-  expect(read(view).value).toEqual(['label-ui'])
+  expect(read(view).value).toEqual(['ui'])
   await userEvent.type(view.getByRole('combobox', { name: 'Search labels' }), 'doc')
   expect(view.queryAllByRole('option', { name: 'UI' }).length).toBe(0)
   expect(view.getByRole('option', { name: 'Docs' })).toBeTruthy()
@@ -73,12 +74,13 @@ test('a selected member missing from the list, like your own ID from a migrated 
   expect(read(view).value).toEqual([])
 })
 
-test('an unknown selected value shows as a checked row that can be cleared', async () => {
+test('an unknown selected value shows as a checked row that can be cleared; a saved label id reads as its label', async () => {
   const view = render(<Harness initial={{ field: 'label', operator: 'includes_any', value: ['label-gone', 'label-bug'] }} />)
   const unknown = view.getByRole('option', { name: 'Unknown label' })
   expect(unknown.getAttribute('aria-checked')).toBe('true')
+  expect(view.getByRole('option', { name: 'Bug' }).getAttribute('aria-checked')).toBe('true')
   await userEvent.click(unknown)
-  expect(read(view).value).toEqual(['label-bug'])
+  expect(read(view).value).toEqual(['bug'])
   expect(view.queryAllByRole('option', { name: 'Unknown label' }).length).toBe(0)
 })
 
@@ -91,7 +93,7 @@ test('a condition stops at 100 values: other rows are disabled until one is clea
   expect(ui.getAttribute('title')).toBe('Up to 100 values per filter')
   await userEvent.click(ui)
   expect(read(view).value).toHaveLength(100)
-  expect((read(view).value as string[]).includes('label-ui')).toBeFalse()
+  expect((read(view).value as string[]).includes('ui')).toBeFalse()
 
   // a selected row stays enabled, and clearing it frees a slot
   const bug = view.getByRole('option', { name: 'Bug' })
@@ -99,7 +101,7 @@ test('a condition stops at 100 values: other rows are disabled until one is clea
   await userEvent.click(bug)
   expect(view.getByRole('option', { name: 'UI' }).getAttribute('aria-disabled')).toBe('false')
   await userEvent.click(view.getByRole('option', { name: 'UI' }))
-  expect((read(view).value as string[]).includes('label-ui')).toBeTrue()
+  expect((read(view).value as string[]).includes('ui')).toBeTrue()
 })
 
 const originalFetch = globalThis.fetch

@@ -21,7 +21,7 @@ import {
 import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
 import { useProjects } from '@/features/tasks/api/projects'
 import { useBulkTasks } from '@/features/tasks/api/tasks'
-import { assignUpdates, assigneeToggleUpdates, dueUpdates, labelToggleUpdates, priorityUpdates, statusUpdates } from '@/features/tasks/bulkUpdates'
+import { assignUpdates, assigneeToggleUpdates, dueUpdates, everyTaskHasLabel, labelChoices, labelToggleUpdates, priorityUpdates, statusUpdates } from '@/features/tasks/bulkUpdates'
 import { pickerTitle } from '@/features/tasks/relationsLib'
 import { parentPickerTitle } from '@/features/tasks/subIssuesLib'
 import { PRIORITY_LABEL, PRIORITY_ORDER } from '@/features/tasks/taskMeta'
@@ -95,6 +95,7 @@ export function TaskContextMenu({ tasks, users, labels, statuses, groupContext, 
 
   // the live tasks, so that a second choice in an open submenu sends the current versions
   const targets = tasks.filter((task) => ids.includes(task.id))
+  const labelOptions = labelChoices(targets, labels)
   const [first] = targets
   const scope = targets.length === 1 ? first.identifier : targets.length
   const mutate = (updates: BulkItem[]) => {
@@ -196,7 +197,7 @@ export function TaskContextMenu({ tasks, users, labels, statuses, groupContext, 
               {targets.some((task) => task.dueAt) ? <ContextMenuItem onClick={() => setDue(null, null)}>Remove due date</ContextMenuItem> : null}
             </ContextMenuSubContent>
           </ContextMenuSub>
-          {labels.length > 0 ? (
+          {labelOptions.length > 0 ? (
             <ContextMenuSub>
               <ContextMenuSubTrigger>
                 <Tag aria-hidden />
@@ -204,8 +205,8 @@ export function TaskContextMenu({ tasks, users, labels, statuses, groupContext, 
                 <ContextMenuShortcut><Shortcut id="task.setLabels" /></ContextMenuShortcut>
               </ContextMenuSubTrigger>
               <ContextMenuSubContent className="min-w-45">
-                {labels.map((label) => (
-                  <ContextMenuCheckboxItem key={label.id} checked={targets.every((task) => task.labels.includes(label.id))} onCheckedChange={() => mutate(labelToggleUpdates(targets, label.id))}>
+                {labelOptions.map((label) => (
+                  <ContextMenuCheckboxItem key={label.id} checked={everyTaskHasLabel(targets, labels, label)} onCheckedChange={() => mutate(labelToggleUpdates(targets, labels, label))}>
                     <LabelPill label={label} />
                   </ContextMenuCheckboxItem>
                 ))}

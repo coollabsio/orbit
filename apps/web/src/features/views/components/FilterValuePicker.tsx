@@ -2,18 +2,18 @@ import { useState, type ComponentProps } from 'react'
 import { cn } from 'cn'
 import { format, parseISO } from 'date-fns'
 import type { DateRange } from 'react-day-picker'
-import { Check } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { Calendar } from '@/components/ui/calendar'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import { UserAvatar } from '@/components/common/UserAvatar'
+import { CheckMark } from '@/components/common/CheckMark'
 import { ColorDot } from '@/components/common/ColorDot'
 import { PriorityIcon } from '@/features/tasks/components/PriorityIcon'
 import { TaskStatusIcon } from '@/features/tasks/components/TaskStatusIcon'
 import { useTaskCandidates } from '@/features/tasks/useTaskCandidates'
-import { FIELD_META, MAX_FILTER_VALUES, NO_PARENT, isDateValue, listValue, taskValueLabel, unlistedOptions, valueOptions, type FilterOptions, type Glyph } from '../filterFields'
+import { FIELD_META, MAX_FILTER_VALUES, NO_PARENT, chosenValues, isDateValue, listValue, taskValueLabel, unlistedOptions, valueOptions, type FilterOptions, type Glyph } from '../filterFields'
 import type { Condition, DateValue } from '../viewState'
 
 export interface FilterValuePickerProps {
@@ -53,22 +53,8 @@ export function ValueGlyph({ glyph, size = 14 }: { glyph: Glyph; size?: number }
 
 const VALUES_FULL_TITLE = `Up to ${MAX_FILTER_VALUES} values per filter`
 
-/** Checkbox look for a multi-select command row; the row itself carries `aria-checked`. */
-function CheckMark({ checked }: { checked: boolean }) {
-  return (
-    <span
-      aria-hidden="true"
-      data-slot="check-mark"
-      data-checked={checked || undefined}
-      className="flex size-3.5 shrink-0 items-center justify-center rounded-[4px] border border-input text-primary-foreground transition-colors duration-150 data-checked:border-primary data-checked:bg-primary"
-    >
-      {checked ? <Check className="size-2.5" /> : null}
-    </span>
-  )
-}
-
 function ListValue({ condition, options, onChange }: FilterValuePickerProps) {
-  const selected = listValue(condition)
+  const selected = chosenValues(condition, options)
   const meta = FIELD_META[condition.field]
   const full = selected.length >= MAX_FILTER_VALUES
   const toggle = (value: string) => {

@@ -28,6 +28,7 @@ export function labelsQueryOptions(workspaceId: string, client: ApiClient = apiC
   }
 }
 
+/** The workspace's labels of every project; scope them with `projectLabels` where a task's project is known. */
 export function useLabels(workspaceId: string) {
   return useQuery(labelsQueryOptions(workspaceId))
 }
@@ -35,10 +36,10 @@ export function useLabels(workspaceId: string) {
 export function useCreateLabel(workspaceId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async (body: LabelBody) => {
+    mutationFn: async ({ projectId, ...body }: LabelBody & { projectId: string }) => {
       const { data } = await createLabel({
         client: apiClient,
-        path: { workspace_id: workspaceId },
+        path: { workspace_id: workspaceId, project_id: projectId },
         body,
         throwOnError: true,
       })
@@ -60,7 +61,7 @@ export function useUpdateLabel(workspaceId: string) {
     mutationFn: async ({ label, name, color }: { label: LabelRecord; name: string; color: string }) => {
       const { data } = await updateLabel({
         client: apiClient,
-        path: { workspace_id: workspaceId, label_id: label.id },
+        path: { workspace_id: workspaceId, project_id: label.project_id, label_id: label.id },
         body: { name, color, expected_version: label.version },
         throwOnError: true,
       })
@@ -76,7 +77,7 @@ export function useDeleteLabel(workspaceId: string) {
   return useMutation({
     mutationFn: (label: LabelRecord) => deleteLabel({
       client: apiClient,
-      path: { workspace_id: workspaceId, label_id: label.id },
+      path: { workspace_id: workspaceId, project_id: label.project_id, label_id: label.id },
       query: { expected_version: label.version },
       throwOnError: true,
     }),

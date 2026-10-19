@@ -1,15 +1,29 @@
-import { useState } from 'react'
-import { Add as Plus, Xmark as X } from 'reicon-react'
+import { useState, type CSSProperties, type ReactElement } from 'react'
+import { useNavigate } from 'react-router'
+import { Add as Plus, Setting2 as Settings } from 'reicon-react'
 import type { LabelRecord } from '@/api/generated/types.gen'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Command, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from '@/components/ui/command'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useCreateLabel } from '@/features/tasks/api/labels'
+import { labelKeyOf, projectLabels } from '@/features/tasks/taskMeta'
+import { CheckMark } from '@/components/common/CheckMark'
 import { ColorDot } from '@/components/common/ColorDot'
-import { ColorSwatch } from '@/components/common/ColorSwatch'
 
-export const LABEL_COLORS = ['#8b5cf6', '#0ea5e9', '#22c55e', '#eab308', '#f97316', '#ef4444', '#ec4899', '#64748b']
+/** The label palette: soft tones (the status colours' family) that read on light and dark, each with a name to say. */
+const LABEL_PALETTE = [
+  { name: 'Indigo', color: '#5e6ad2' },
+  { name: 'Teal', color: '#26b5ce' },
+  { name: 'Green', color: '#4cb782' },
+  { name: 'Yellow', color: '#f2c94c' },
+  { name: 'Orange', color: '#f2994a' },
+  { name: 'Red', color: '#eb5757' },
+  { name: 'Pink', color: '#e17bbd' },
+  { name: 'Violet', color: '#a78bfa' },
+  { name: 'Grey', color: '#8b8f98' },
+]
+
+export const LABEL_COLORS = LABEL_PALETTE.map((swatch) => swatch.color)
 
 /** A label as an outline badge with its colour dot; `children` go after the name (e.g. a remove button). */
 export function LabelPill({ label, className, children }: { label: Pick<LabelRecord, 'name' | 'color'>; className?: string; children?: React.ReactNode }) {
@@ -22,63 +36,119 @@ export function LabelPill({ label, className, children }: { label: Pick<LabelRec
   )
 }
 
-/** The label palette as a row of small swatches. A colour outside it (e.g. a GitHub label's) presses none. */
+/**
+ * The label palette as a radio group of small swatches. The chosen one wears a ring in its own colour, offset by a
+ * transparent gap, so it reads on any surface. A colour outside the palette (e.g. a GitHub label's) checks none.
+ */
 export function LabelColorPicker({ value, onChange }: { value: string; onChange: (color: string) => void }) {
   return (
-    <div role="group" aria-label="Label color" className="flex flex-wrap gap-1.5">
-      {LABEL_COLORS.map((color) => (
-        <ColorSwatch key={color} size="xs" color={color} aria-label={`Color ${color}`} aria-pressed={value === color} onClick={() => onChange(color)} />
+    <div role="radiogroup" aria-label="Label color" className="flex flex-wrap items-center gap-1.5">
+      {LABEL_PALETTE.map((swatch) => (
+        <button
+          key={swatch.color}
+          type="button"
+          role="radio"
+          aria-checked={value === swatch.color}
+          aria-label={swatch.name}
+          title={swatch.name}
+          style={{ '--swatch': swatch.color } as CSSProperties}
+          className="size-4 shrink-0 cursor-pointer rounded-full bg-(--swatch) shadow-[inset_0_0_0_1px_rgb(0_0_0/0.18)] outline-offset-2 outline-(--swatch) transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] focus-visible:outline-2 active:scale-90 aria-checked:outline-[1.5px] aria-checked:outline-solid motion-safe:hover:scale-115 motion-reduce:transition-none"
+          onClick={() => onChange(swatch.color)}
+        />
       ))}
     </div>
   )
 }
 
-export function TaskLabels({ workspaceId, labelIds, labels, onChange }: { workspaceId: string; labelIds: string[]; labels: LabelRecord[]; onChange: (ids: string[]) => void }) {
-  const selected = labels.filter((label) => labelIds.includes(label.id))
+/** The palette colour the project uses least, so new labels stay apart without a choice. */
+function nextLabelColor(labels: LabelRecord[]): string {
+  const uses = (color: string) => labels.filter((label) => label.color === color).length
+  return LABEL_COLORS.reduce((best, color) => (uses(color) < uses(best) ? color : best))
+}
+
+/**
+ * Picks a task's labels from its project, like the label filter: a search, then one row per label with a checkbox.
+ * The task's labels come first (in the order they had when the picker opened, so rows do not jump while toggling). A
+ * name the search does not find becomes a "Create" row, so Enter creates and adds it, with a palette colour under it
+ * (preset to the one the project uses least). `editLink` adds "Edit labels", which opens the project settings to
+ * rename, recolour or delete (leave it off where leaving the page would lose a draft).
+ */
+export function LabelPicker({ workspaceId, projectId, labelIds, labels: allLabels, onChange, trigger, editLink = false }: { workspaceId: string; projectId: string; labelIds: string[]; labels: LabelRecord[]; onChange: (ids: string[]) => void; trigger: ReactElement; editLink?: boolean }) {
+  const navigate = useNavigate()
   const createLabel = useCreateLabel(workspaceId)
-  const [name, setName] = useState('')
-  const [color, setColor] = useState(LABEL_COLORS[0]!)
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault()
-    const trimmed = name.trim()
-    if (!trimmed || createLabel.isPending) return
-    const label = await createLabel.mutateAsync({ name: trimmed, color })
+  const [query, setQuery] = useState('')
+  const [pinned, setPinned] = useState<string[]>([])
+  const labels = projectLabels(allLabels, projectId).sort((a, b) => Number(pinned.includes(b.id)) - Number(pinned.includes(a.id)) || a.name.localeCompare(b.name))
+  const name = query.trim()
+  const exists = labels.some((label) => labelKeyOf(label) === labelKeyOf({ name }))
+  const [pickedColor, setPickedColor] = useState<string>()
+  const color = pickedColor ?? nextLabelColor(labels)
+  const toggle = (id: string) => onChange(labelIds.includes(id) ? labelIds.filter((item) => item !== id) : [...labelIds, id])
+  const create = async () => {
+    if (!name || exists || createLabel.isPending) return
+    const label = await createLabel.mutateAsync({ projectId, name, color })
     onChange(labelIds.includes(label.id) ? labelIds : [...labelIds, label.id])
-    setName('')
+    setQuery('')
+    setPickedColor(undefined)
   }
   return (
-    <div className="flex flex-wrap gap-1">
-      {selected.map((label) => (
-        <LabelPill key={label.id} label={label} className="pr-0.5">
-          <Button type="button" variant="ghost" size="icon-xs" className="size-4 rounded-full text-muted-foreground" aria-label={`Remove label ${label.name}`} onClick={() => onChange(labelIds.filter((id) => id !== label.id))}>
-            <X />
-          </Button>
-        </LabelPill>
-      ))}
-      <Popover>
-        <PopoverTrigger render={<Button variant="outline" size="xs" className="h-5 rounded-full border-dashed text-muted-foreground" aria-label="Add label"><Plus />{labelIds.length === 0 ? 'Add label' : null}</Button>} />
-        <PopoverContent align="start" className="max-h-(--available-height) w-auto min-w-45 gap-px overflow-y-auto overscroll-contain p-1">
-          <div className="px-2 py-1 text-[10px] font-semibold tracking-wide text-muted-foreground/70 uppercase">Labels</div>
-          {labels.length === 0 ? <div className="px-2.5 py-2 text-xs text-muted-foreground/70">No labels yet.</div> : null}
-          {labels.map((label) => {
-            const active = labelIds.includes(label.id)
-            return (
-              <Button variant="ghost" key={label.id} aria-label={label.name} className="group w-full justify-start font-normal data-selected:bg-muted" data-selected={active || undefined} aria-pressed={active} onClick={() => onChange(active ? labelIds.filter((id) => id !== label.id) : [...labelIds, label.id])}>
-                <LabelPill label={label} />
-                {active ? <X className="ml-auto size-3.5 shrink-0 text-muted-foreground/70 group-hover:text-foreground" aria-hidden="true" /> : null}
-              </Button>
-            )
-          })}
-          <form className="flex flex-col gap-2 border-t p-2" onSubmit={(event) => void submit(event)}>
-            <Input aria-label="New label name" placeholder="New label" value={name} onChange={(event) => setName(event.target.value)} />
-            <LabelColorPicker value={color} onChange={setColor} />
-            <Button type="submit" disabled={!name.trim() || createLabel.isPending}>
-              {createLabel.isPending ? 'Creating…' : 'Create label'}
-            </Button>
-            {createLabel.isError ? <p className="text-xs text-destructive" role="alert">Label could not be created.</p> : null}
-          </form>
-        </PopoverContent>
-      </Popover>
-    </div>
+    <Popover onOpenChange={(open) => {
+      if (open) setPinned(labelIds)
+      else { setQuery(''); setPickedColor(undefined); createLabel.reset() }
+    }}>
+      <PopoverTrigger render={trigger} />
+      <PopoverContent align="start" className="w-auto gap-0 p-0">
+        <Command label="Change labels" className="w-60">
+          <CommandInput autoFocus aria-label="Change labels" placeholder={labels.length > 0 ? 'Change labels…' : 'New label name…'} value={query} onValueChange={setQuery} />
+          <CommandList>
+            {labels.length === 0 && !name ? (
+              <p className="px-3 pt-2.5 pb-2 text-xs text-muted-foreground">This project has no labels yet. Type a name to create one.</p>
+            ) : null}
+            <CommandGroup>
+              {labels.map((label) => {
+                const checked = labelIds.includes(label.id)
+                return (
+                  <CommandItem key={label.id} value={label.id} keywords={[label.name]} aria-checked={checked} onSelect={() => toggle(label.id)}>
+                    <CheckMark checked={checked} />
+                    <ColorDot color={label.color} className="size-2" />
+                    <span className="min-w-0 flex-1 truncate">{label.name}</span>
+                  </CommandItem>
+                )
+              })}
+            </CommandGroup>
+            {/* cmdk hides a group whose rows all miss the search, so the always-shown rows get their own groups */}
+            {name && !exists ? (
+              <CommandGroup forceMount>
+                <CommandItem forceMount value={`create:${name}`} disabled={createLabel.isPending} onSelect={() => void create()}>
+                  <Plus className="size-3.5 text-muted-foreground" />
+                  <span className="shrink-0 text-muted-foreground">{createLabel.isPending ? 'Creating' : 'Create'}</span>
+                  {/* the label as it will look; it follows the colour picked below */}
+                  <LabelPill label={{ name, color }} className="min-w-0 truncate" />
+                </CommandItem>
+              </CommandGroup>
+            ) : null}
+            {/* outside the group, where cmdk's sorting does not move it; preventDefault keeps the focus in the search,
+                so Enter still creates after a colour is picked */}
+            {name && !exists ? (
+              <div className="px-3 pt-1 pb-2.5" onMouseDown={(event) => event.preventDefault()}>
+                <LabelColorPicker value={color} onChange={setPickedColor} />
+              </div>
+            ) : null}
+            {createLabel.isError ? <p className="px-3 pb-2 text-xs text-destructive" role="alert">The label could not be created. Try again.</p> : null}
+          </CommandList>
+          {editLink ? (
+            <>
+              <CommandSeparator />
+              <CommandGroup forceMount>
+                <CommandItem forceMount value="edit-labels" className="text-muted-foreground" onSelect={() => navigate(`/tasks/projects/${projectId}/settings`)}>
+                  <Settings className="size-3.5" />
+                  Edit labels
+                </CommandItem>
+              </CommandGroup>
+            </>
+          ) : null}
+        </Command>
+      </PopoverContent>
+    </Popover>
   )
 }

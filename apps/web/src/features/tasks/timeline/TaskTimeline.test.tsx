@@ -41,8 +41,8 @@ const statuses: TaskStatusDef[] = [
 const projects = [{ id: 'p1', name: 'Web', key: 'WEB', color: '#e0457b', version: 1 }] as Project[]
 
 const labels = [
-  { id: 'bug', name: 'Bug', color: '#eb5757', version: 1, workspace_id: 'ws' },
-  { id: 'ui', name: 'UI', color: '#26b5ce', version: 1, workspace_id: 'ws' },
+  { id: 'bug', name: 'Bug', color: '#eb5757', version: 1, workspace_id: 'ws', project_id: 'p1' },
+  { id: 'ui', name: 'UI', color: '#26b5ce', version: 1, workspace_id: 'ws', project_id: 'p1' },
 ]
 const context: GroupContext = { statuses, members: [], labels, projects, currentUserId: 'u1', showEmpty: false }
 

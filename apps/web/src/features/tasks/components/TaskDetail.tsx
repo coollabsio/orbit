@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from
 import { cn } from 'cn'
 import { useQueryClient } from '@tanstack/react-query'
 import { confirmAction } from '@/components/common/confirmAction'
-import { ArrowLeft, Calendar, Hierarchy2, Link2, Paperclip2 as Paperclip, TaskSquare as SquareCheck, User as UserIcon, Xmark as X } from 'reicon-react'
+import { Add as Plus, ArrowLeft, Calendar, Hierarchy2, Link2, Paperclip2 as Paperclip, Tag, TaskSquare as SquareCheck, User as UserIcon, Xmark as X } from 'reicon-react'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
@@ -25,7 +25,7 @@ import { EmptyState } from '@/components/common/EmptyState'
 import { Pane, PaneHeader } from '@/components/common/Pane'
 import { PriorityIcon } from './PriorityIcon'
 import { TaskStatusIcon } from './TaskStatusIcon'
-import { dueDateLabel, PRIORITY_LABEL, PRIORITY_ORDER, projectStatuses } from '@/features/tasks/taskMeta'
+import { dueDateLabel, PRIORITY_LABEL, PRIORITY_ORDER, projectLabels, projectStatuses } from '@/features/tasks/taskMeta'
 import { refIdentifier, type Project, type Task, type TaskViewState } from '@/features/tasks/api/models'
 import { cachedDescendantIds, type PageTaskRecord } from '@/features/tasks/api/optimistic'
 import { useProjects } from '@/features/tasks/api/projects'
@@ -47,7 +47,7 @@ import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { Attachments } from '@/components/common/Attachments'
 import { ActivityFeed } from './ActivityFeed'
 import { TaskCommentComposer } from './TaskCommentComposer'
-import { LabelPill, TaskLabels } from './TaskLabels'
+import { LabelPicker, LabelPill } from './TaskLabels'
 import { TaskTextFields } from './TaskTextFields'
 
 interface TaskDetailProps {
@@ -76,6 +76,7 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
   const githubPullRequests = githubLinks.data?.filter((link) => link.kind === 'pull_request' && !link.source) ?? []
   // the task is the GitHub issue or pull request it syncs from: the server refuses to move it to another project
   const githubIssueLinked = githubLinks.data?.some((link) => link.source) ?? false
+  const taskLabels = task ? projectLabels(state.labels, task.projectId).filter((label) => task.labels.includes(label.id)).sort((a, b) => a.name.localeCompare(b.name)) : []
   const moveToProject = useMoveToProject(workspace.id)
   const users = state.users
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -376,7 +377,26 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
             </PropertyGroup>
 
             <PropertyGroup title="Labels">
-              <TaskLabels workspaceId={workspace.id} labelIds={task.labels} labels={state.labels} onChange={(labelIds) => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, label_ids: labelIds } })} />
+              <LabelPicker
+                workspaceId={workspace.id}
+                projectId={task.projectId}
+                labelIds={task.labels}
+                labels={state.labels}
+                editLink
+                onChange={(labelIds) => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, label_ids: labelIds } })}
+                trigger={taskLabels.length === 0 ? (
+                  <PropertyButton className="text-muted-foreground" aria-label="Add label">
+                    <Tag className="size-3.5" aria-hidden="true" />
+                    Add label
+                  </PropertyButton>
+                ) : (
+                  // one control: the pills open the picker, where labels are also removed
+                  <button type="button" aria-label={`Labels: ${taskLabels.map((label) => label.name).join(', ')}`} className="-mx-1 flex max-w-full flex-wrap gap-1 rounded-md p-1 text-left outline-none hover:bg-muted/50 focus-visible:ring-3 focus-visible:ring-ring/50 aria-expanded:bg-muted/50">
+                    {taskLabels.map((label) => <LabelPill key={label.id} label={label} />)}
+                    <span aria-hidden="true" className="flex h-5 items-center px-0.5 text-muted-foreground"><Plus className="size-3.5" /></span>
+                  </button>
+                )}
+              />
             </PropertyGroup>
 
             <PropertyGroup title="Project">

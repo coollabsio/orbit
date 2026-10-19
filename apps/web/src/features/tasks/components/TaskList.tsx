@@ -22,7 +22,7 @@ import { PRIORITY_LABEL, PRIORITY_ORDER } from '@/features/tasks/taskMeta'
 import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
 import type { User } from '@/features/workspaces/models'
 import type { BulkItem, LabelRecord } from '@/api/generated/types.gen'
-import { assigneeToggleUpdates, dueUpdates, labelToggleUpdates, priorityUpdates, statusUpdates } from '@/features/tasks/bulkUpdates'
+import { assigneeToggleUpdates, dueUpdates, everyTaskHasLabel, labelChoices, labelToggleUpdates, priorityUpdates, statusUpdates } from '@/features/tasks/bulkUpdates'
 import { BulkTaskLimitError, MAX_BULK_TASK_UPDATES, useBulkTasks } from '@/features/tasks/api/tasks'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { DisclosureChevron, GroupIcon } from '@/features/views/components/GroupIcon'
@@ -456,7 +456,7 @@ function BulkBar({
   const bulkStatus = (key: string | null) => mutate(statusUpdates(tasks, statuses, key))
   const bulkPriority = (priority: Task['priority']) => mutate(priorityUpdates(tasks, priority))
   const bulkAssign = (userId: string) => mutate(assigneeToggleUpdates(tasks, userId))
-  const bulkLabel = (labelId: string) => mutate(labelToggleUpdates(tasks, labelId))
+  const bulkLabel = (label: LabelRecord) => mutate(labelToggleUpdates(tasks, labels, label))
 
   // the picker starts from the shared due range, or empty when the selection disagrees
   const [first] = tasks
@@ -538,14 +538,11 @@ function BulkBar({
         <DropdownMenu>
           <DropdownMenuTrigger render={<BulkAction icon={<Tag aria-hidden />} label="Labels" />} />
           <DropdownMenuContent side="top" align="end" className="w-auto min-w-45">
-            {labels.map((label) => {
-              const everyone = tasks.every((t) => t.labels.includes(label.id))
-              return (
-                <DropdownMenuCheckboxItem key={label.id} checked={everyone} onCheckedChange={() => bulkLabel(label.id)}>
-                  <LabelPill label={label} />
-                </DropdownMenuCheckboxItem>
-              )
-            })}
+            {labelChoices(tasks, labels).map((label) => (
+              <DropdownMenuCheckboxItem key={label.id} checked={everyTaskHasLabel(tasks, labels, label)} onCheckedChange={() => bulkLabel(label)}>
+                <LabelPill label={label} />
+              </DropdownMenuCheckboxItem>
+            ))}
           </DropdownMenuContent>
         </DropdownMenu>
         <Popover open={dueOpen} onOpenChange={toggleDue}>

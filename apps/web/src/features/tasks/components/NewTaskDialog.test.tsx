@@ -122,10 +122,10 @@ test('creating a label inside the dialog does not create the task', async () => 
   const view = render(<NewTaskDialog onClose={() => {}} onOpenTask={() => {}} />, { wrapper: Wrapper })
   await view.findByRole('button', { name: 'Status: Todo' })
   await userEvent.type(view.getByLabelText('Task title'), 'Has a title')
-  fireEvent.click(view.getByRole('button', { name: 'Add label' }))
-  const name = await view.findByLabelText('New label name') as HTMLInputElement
+  fireEvent.click(view.getByRole('button', { name: 'Labels' }))
+  const name = await view.findByRole('combobox', { name: 'Change labels' }) as HTMLInputElement
   await userEvent.type(name, 'bug{Enter}')
-  // the label form clears once its request has finished
+  // the search clears once the label exists
   await waitFor(() => expect(name.value).toBe(''))
   expect(created).toEqual([])
 })

@@ -176,7 +176,7 @@ describe('boardGrid', () => {
 })
 
 test('group accents come from the project, label or status colour, else muted', () => {
-  const withLabel: GroupContext = { ...ctx, labels: [{ id: 'bug', name: 'Bug', color: '#eb5757', version: 1, workspace_id: 'w' }] }
+  const withLabel: GroupContext = { ...ctx, labels: [{ id: 'bug', name: 'Bug', color: '#eb5757', version: 1, workspace_id: 'w', project_id: 'p1' }] }
   expect(groupAccent({ field: 'project', value: 'p2' }, withLabel)).toBe('#26b5ce')
   expect(groupAccent({ field: 'label', value: 'bug' }, withLabel)).toBe('#eb5757')
   expect(groupAccent({ field: 'status', value: 'unstarted:todo' }, withLabel)).toBe('#888')
@@ -187,7 +187,7 @@ test('group accents come from the project, label or status colour, else muted', 
 describe('ownGroupValues', () => {
   const labelled: GroupContext = {
     ...ctx,
-    labels: [{ id: 'ui', name: 'UI' }, { id: 'bug', name: 'Bug' }, { id: 'docs', name: 'Docs' }] as GroupContext['labels'],
+    labels: [{ id: 'ui', name: 'UI', project_id: 'p1' }, { id: 'bug', name: 'Bug', project_id: 'p1' }, { id: 'docs', name: 'Docs', project_id: 'p1' }] as GroupContext['labels'],
   }
 
   test('a nested row drags from its own groups, not its root\'s', () => {

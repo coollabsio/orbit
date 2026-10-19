@@ -24,7 +24,7 @@ function status(id: string, projectId: string, name: string, category: TaskStatu
 }
 
 function label(id: string, name: string, color: string): LabelRecord {
-  return { id, name, color, version: 1, workspace_id: 'alpha' }
+  return { id, name, color, version: 1, workspace_id: 'alpha', project_id: 'project-a' }
 }
 
 const LAUNCH: ProjectRecord = {

@@ -378,6 +378,11 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0050_auth_throttle.sql"),
                     false,
                 ),
+                Migration::new(
+                    51,
+                    include_str!("../../../../apps/server/migrations/0051_project_labels.sql"),
+                    false,
+                ),
             ],
         );
         runner.postgres = vec![
@@ -402,6 +407,11 @@ impl MigrationRunner {
             Migration::new(
                 50,
                 include_str!("../../../../apps/server/migrations/postgres/0050_auth_throttle.sql"),
+                false,
+            ),
+            Migration::new(
+                51,
+                include_str!("../../../../apps/server/migrations/postgres/0051_project_labels.sql"),
                 false,
             ),
         ];

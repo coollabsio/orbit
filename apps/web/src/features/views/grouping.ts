@@ -1,6 +1,6 @@
 import type { CreateTaskBody, LabelRecord, ProjectRecord, TaskUpdateBody } from '@/api/generated/types.gen'
 import type { Task, TaskPriority, TaskStatusDef } from '@/features/tasks/api/models'
-import { PRIORITY_LABEL, PRIORITY_ORDER, statusKeyOf } from '@/features/tasks/taskMeta'
+import { labelKeyOf, labelRepresentatives, PRIORITY_LABEL, PRIORITY_ORDER, projectLabels, statusKeyOf } from '@/features/tasks/taskMeta'
 import { statusGroups } from '@/features/tasks/tasksLib'
 import type { User } from '@/features/workspaces/models'
 import { isGroup, resolveDateValue, type Condition, type DateValue, type FilterGroup, type GroupBy } from '@/features/views/viewState'
@@ -29,8 +29,9 @@ function bucketsFor(groupBy: GroupBy, ctx: GroupContext): Bucket[] {
       const others = ctx.members.filter((member) => member.id !== ctx.currentUserId).sort(byName)
       return [...[...me, ...others].map((member): Bucket => ({ value: member.id, label: member.name })), { value: null, label: 'No assignee' }]
     }
+    // same-named labels of different projects share a group, keyed by their representative's id
     case 'label':
-      return [...[...ctx.labels].sort(byName).map((label): Bucket => ({ value: label.id, label: label.name })), { value: null, label: 'No label' }]
+      return [...labelRepresentatives(ctx.labels).labels.map((label): Bucket => ({ value: label.id, label: label.name })), { value: null, label: 'No label' }]
     case 'project':
       return [...ctx.projects].sort(byName).map((project): Bucket => ({ value: project.id, label: project.name }))
     case 'none':
@@ -38,8 +39,18 @@ function bucketsFor(groupBy: GroupBy, ctx: GroupContext): Bucket[] {
   }
 }
 
+type GroupKeys = { statusKeys: Map<string, string>; labelGroups: Map<string, string>; known: Set<string> }
+
+function groupKeys(buckets: Bucket[], ctx: GroupContext): GroupKeys {
+  return {
+    statusKeys: new Map(ctx.statuses.map((status) => [status.id, statusKeyOf(status)])),
+    labelGroups: labelRepresentatives(ctx.labels).representativeOf,
+    known: new Set(buckets.flatMap((bucket) => (bucket.value === null ? [] : [bucket.value]))),
+  }
+}
+
 /** Every group a task belongs to; unknown or inactive ids fall into the "No …" group. */
-function valuesOf(task: Task, groupBy: GroupBy, statusKeys: Map<string, string>, known: Set<string>): Array<string | null> {
+function valuesOf(task: Task, groupBy: GroupBy, { statusKeys, labelGroups, known }: GroupKeys): Array<string | null> {
   const present = (ids: string[]) => {
     const kept = [...new Set(ids)].filter((id) => known.has(id))
     return kept.length > 0 ? kept : [null]
@@ -54,7 +65,7 @@ function valuesOf(task: Task, groupBy: GroupBy, statusKeys: Map<string, string>,
     case 'assignee':
       return present(task.assigneeIds)
     case 'label':
-      return present(task.labels)
+      return present(task.labels.flatMap((id) => labelGroups.get(id) ?? []))
     case 'project':
       return [task.projectId]
     case 'none':
@@ -68,11 +79,10 @@ function valuesOf(task: Task, groupBy: GroupBy, statusKeys: Map<string, string>,
  */
 export function groupTasks(tasks: Task[], groupBy: GroupBy, ctx: GroupContext): TaskGroup[] {
   const buckets = bucketsFor(groupBy, ctx)
-  const known = new Set(buckets.flatMap((bucket) => (bucket.value === null ? [] : [bucket.value])))
-  const statusKeys = new Map(ctx.statuses.map((status) => [status.id, statusKeyOf(status)]))
+  const keys = groupKeys(buckets, ctx)
   const members = new Map<string | null, Task[]>(buckets.map((bucket) => [bucket.value, []]))
   for (const task of tasks) {
-    for (const value of valuesOf(task, groupBy, statusKeys, known)) members.get(value)?.push(task)
+    for (const value of valuesOf(task, groupBy, keys)) members.get(value)?.push(task)
   }
   return buckets
     .map((bucket): TaskGroup => ({
@@ -91,9 +101,7 @@ export function groupTasks(tasks: Task[], groupBy: GroupBy, ctx: GroupContext): 
  */
 export function taskGroupValue(task: Task, field: GroupBy, ctx: GroupContext, preferred: string | null): string | null {
   const buckets = bucketsFor(field, ctx)
-  const known = new Set(buckets.flatMap((bucket) => (bucket.value === null ? [] : [bucket.value])))
-  const statusKeys = new Map(ctx.statuses.map((status) => [status.id, statusKeyOf(status)]))
-  const values = valuesOf(task, field, statusKeys, known)
+  const values = valuesOf(task, field, groupKeys(buckets, ctx))
   if (values.includes(preferred)) return preferred
   return buckets.find((bucket) => values.includes(bucket.value))?.value ?? null
 }
@@ -121,8 +129,16 @@ export function dropUpdate(task: Task, field: GroupBy, from: string | null, to: 
       const next = swapValue(task.assigneeIds, from, to)
       return next ? update({ assignee_ids: next }) : null
     }
+    // groups are label names: the task swaps the labels of its own project with those names
     case 'label': {
-      const next = swapValue(task.labels, from, to)
+      const own = projectLabels(ctx.labels, task.projectId)
+      const ownWithKeyOf = (groupValue: string | null) => {
+        const group = ctx.labels.find((label) => label.id === groupValue)
+        return group ? own.find((label) => labelKeyOf(label) === labelKeyOf(group)) : undefined
+      }
+      const target = ownWithKeyOf(to)
+      if (to !== null && !target) return { error: `No matching label in ${ctx.projects.find((project) => project.id === task.projectId)?.name ?? 'this project'}` }
+      const next = swapValue(task.labels, ownWithKeyOf(from)?.id ?? null, target?.id ?? null)
       return next ? update({ label_ids: next }) : null
     }
     // Moving between projects maps the status and renumbers the task on the server (Move to project in the menus);
@@ -188,7 +204,11 @@ export function createDefaultsFromFilter(
         const values = condition.operator === 'includes_all' && Array.isArray(condition.value)
           ? condition.value
           : condition.operator === 'includes_any' ? [single(condition)] : []
-        const ids = values.filter((id): id is string => typeof id === 'string' && ctx.labels.some((label) => label.id === id))
+        // a value is a label key or (saved before labels were per project) a label id
+        const ids = values.flatMap((value) => {
+          const label = typeof value === 'string' ? ctx.labels.find((candidate) => candidate.id === value || labelKeyOf(candidate) === value) : undefined
+          return label ? [label.id] : []
+        })
         if (ids.length > 0) defaults.label_ids = [...new Set([...(defaults.label_ids ?? []), ...ids])]
         break
       }
