@@ -15342,7 +15342,12 @@ export type UploadTaskAttachmentsData = {
         workspace_id: string;
         task_id: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * `1`: a file placed in the description or a comment's text; attachment lists leave it out
+         */
+        inline?: string;
+    };
     url: '/api/v1/workspaces/{workspace_id}/tasks/{task_id}/attachments';
 };
 

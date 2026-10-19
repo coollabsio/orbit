@@ -27021,6 +27021,15 @@
             }
           },
           {
+            "name": "inline",
+            "in": "query",
+            "description": "`1`: a file placed in the description or a comment's text; attachment lists leave it out",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "X-Orbit-Contract",
             "in": "header",
             "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
