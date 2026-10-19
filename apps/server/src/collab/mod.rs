@@ -15,6 +15,8 @@ mod hub;
 pub mod sanitize;
 pub mod socket;
 
+use orbit_platform::Id;
+
 pub(crate) use hub::CollabMessage;
 pub use hub::{CollabConfig, CollabError, CollabHub, CollabLock, CollabWrite};
 
@@ -49,3 +51,19 @@ pub mod close {
 
 /// The only protocol version (`?v=1`): y-sync v1 frames as y-websocket 3 sends them.
 pub const PROTOCOL_VERSION: &str = "1";
+
+/// What a collaborative document belongs to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum DocKind {
+    Page,
+    Task,
+}
+
+/// The content policy of one document: a task keeps only its own attachment URLs and has no
+/// `page` blocks; a page keeps page files (any page) as before.
+#[derive(Clone, Copy, Debug)]
+pub struct LinkPolicy {
+    pub kind: DocKind,
+    pub workspace_id: Id,
+    pub doc_id: Id,
+}
