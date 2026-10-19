@@ -3,6 +3,7 @@ import * as Y from 'yjs'
 import { FakeProvider } from '@/test/fakeCollab'
 import { COLLAB_FRAGMENT } from './connection'
 import {
+  collabProblemAction,
   CollabSession,
   OFFLINE_AFTER_MS,
   PROBE_INTERVAL_MS,
@@ -239,5 +240,17 @@ describe('CollabSession', () => {
     const session = new CollabSession({ doc, provider, fragment: doc.getXmlFragment(COLLAB_FRAGMENT) })
     expect(session.state).toEqual({ status: 'live', problem: null, ready: true })
     session.destroy()
+  })
+})
+
+describe('collabProblemAction', () => {
+  test('maps every terminal problem to what the screen does', () => {
+    expect(collabProblemAction('gone')).toBe('leave')
+    expect(collabProblemAction('forbidden')).toBe('leave')
+    expect(collabProblemAction('session')).toBe('unauthorized')
+    expect(collabProblemAction('reset')).toBe('reopen')
+    expect(collabProblemAction('rate-limited')).toBe('rate-limited')
+    expect(collabProblemAction('too-large')).toBe('notice')
+    expect(collabProblemAction('protocol')).toBe('notice')
   })
 })
