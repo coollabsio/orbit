@@ -687,14 +687,36 @@ export type ChatWriteThreadStateRecord = {
 };
 
 export type CommentBody = {
-    body: string;
+    /**
+     * Markdown. Send `body_json` instead for rich text (exactly one of the two).
+     */
+    body?: string | null;
+    /**
+     * The comment as BlockNote blocks; its markdown copy becomes `body`, and its mention nodes
+     * decide who is notified (`mentioned_user_ids` is ignored).
+     */
+    body_json?: Array<{
+        [key: string]: unknown;
+    }> | null;
+    /**
+     * With a markdown `body`: the members to notify.
+     */
     mentioned_user_ids?: Array<string>;
     parent_id?: string | null;
 };
 
 export type CommentRecord = {
     author_id: string;
+    /**
+     * Markdown copy of `body_json`.
+     */
     body: string;
+    /**
+     * BlockNote blocks, the comment's source; null for a comment written before rich text.
+     */
+    body_json: Array<{
+        [key: string]: unknown;
+    }> | null;
     /**
      * Whether the caller may delete this comment.
      */
@@ -713,7 +735,16 @@ export type CommentRecord = {
 };
 
 export type CommentUpdateBody = {
-    body: string;
+    /**
+     * Markdown. Send `body_json` instead for rich text (exactly one of the two).
+     */
+    body?: string | null;
+    /**
+     * The comment as BlockNote blocks; members it newly mentions are notified.
+     */
+    body_json?: Array<{
+        [key: string]: unknown;
+    }> | null;
     expected_version: number;
 };
 
@@ -2012,7 +2043,16 @@ export type PageAuditEvent = {
 export type PageCommentRecord = {
     items: Array<{
         author_id: string;
+        /**
+         * Markdown copy of `body_json`.
+         */
         body: string;
+        /**
+         * BlockNote blocks, the comment's source; null for a comment written before rich text.
+         */
+        body_json: Array<{
+            [key: string]: unknown;
+        }> | null;
         /**
          * Whether the caller may delete this comment.
          */

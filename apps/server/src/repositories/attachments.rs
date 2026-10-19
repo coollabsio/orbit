@@ -511,6 +511,7 @@ impl AttachmentRepository {
                 author_id: session.user.id,
                 parent_id: None,
                 body: String::new(),
+                body_json: None,
                 can_edit: true,
                 can_delete: true,
                 version: 0,

@@ -24,7 +24,7 @@ use crate::repositories::task_filter::{
 };
 use crate::repositories::task_relations::{NewTaskRelationType, TaskRelationRecord};
 use crate::repositories::tasks::{
-    CreateTask, NotificationRecord, Page, ProjectAutomationPatch, SortOrder, TaskChanges,
+    CommentContent, CreateTask, NotificationRecord, Page, ProjectAutomationPatch, SortOrder, TaskChanges,
     TaskError, TaskFilter, TaskRecord, TaskRepository, TaskSort, TaskUpdate, normalize_project_key,
 };
 use crate::repositories::views::ViewRepository;
@@ -1676,8 +1676,14 @@ async fn list_task_trash(
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct CommentBody {
-    body: String,
+    /// Markdown. Send `body_json` instead for rich text (exactly one of the two).
+    body: Option<String>,
+    /// The comment as BlockNote blocks; its markdown copy becomes `body`, and its mention nodes
+    /// decide who is notified (`mentioned_user_ids` is ignored).
+    #[schema(value_type = Option<Vec<Object>>)]
+    body_json: Option<Vec<Value>>,
     parent_id: Option<String>,
+    /// With a markdown `body`: the members to notify.
     #[serde(default)]
     mentioned_user_ids: Vec<String>,
 }
@@ -1685,7 +1691,11 @@ struct CommentBody {
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct CommentUpdateBody {
-    body: String,
+    /// Markdown. Send `body_json` instead for rich text (exactly one of the two).
+    body: Option<String>,
+    /// The comment as BlockNote blocks; members it newly mentions are notified.
+    #[schema(value_type = Option<Vec<Object>>)]
+    body_json: Option<Vec<Value>>,
     expected_version: u64,
 }
 
@@ -1729,11 +1739,10 @@ async fn create_comment(
     let task_id = parse_id(&task, &instance, request_id.as_ref())?;
     let parent_id = optional_id(body.parent_id, &instance, request_id.as_ref())?;
     let mentioned_user_ids = parse_ids(body.mentioned_user_ids, &instance, request_id.as_ref())?;
-    let body = message(
+    let content = comment_content(
         body.body,
-        100_000,
-        100_000,
-        "body",
+        body.body_json,
+        mentioned_user_ids,
         &instance,
         request_id.as_ref(),
     )?;
@@ -1744,8 +1753,7 @@ async fn create_comment(
             task_id,
             actor_id,
             parent_id,
-            body,
-            mentioned_user_ids,
+            content,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )
@@ -1767,11 +1775,10 @@ async fn update_comment(
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
     let task_id = parse_id(&task, &instance, request_id.as_ref())?;
     let comment_id = parse_id(&comment, &instance, request_id.as_ref())?;
-    let body_text = message(
+    let content = comment_content(
         body.body,
-        100_000,
-        100_000,
-        "body",
+        body.body_json,
+        Vec::new(),
         &instance,
         request_id.as_ref(),
     )?;
@@ -1782,7 +1789,7 @@ async fn update_comment(
             task_id,
             comment_id,
             actor_id,
-            body_text,
+            content,
             body.expected_version,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
@@ -1905,9 +1912,33 @@ async fn read_all_notifications(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
-/// Serialized `description_json` may be at most this large (the markdown copy is cut to 100 000
-/// characters).
+/// Serialized `description_json` / `body_json` may be at most this large (the markdown copy is
+/// cut to 100 000 characters).
 const DESCRIPTION_JSON_MAX_BYTES: usize = 1_000_000;
+
+/// A comment's content: exactly one of markdown `body` (not blank) and `body_json`.
+fn comment_content(
+    body: Option<String>,
+    body_json: Option<Vec<Value>>,
+    mentioned_user_ids: Vec<Id>,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> Result<CommentContent, ApiError> {
+    match (body, body_json) {
+        (Some(body), None) => Ok(CommentContent::Markdown {
+            body: message(body, 100_000, 100_000, "body", instance, request_id)?,
+            mentioned_user_ids,
+        }),
+        (None, Some(blocks)) => {
+            let size = serde_json::to_string(&blocks).map_or(usize::MAX, |json| json.len());
+            if size > DESCRIPTION_JSON_MAX_BYTES {
+                return Err(validation("body_json", instance, request_id));
+            }
+            Ok(CommentContent::Blocks(blocks))
+        }
+        _ => Err(validation("body", instance, request_id)),
+    }
+}
 
 /// Checks `description_json`: at most [`DESCRIPTION_JSON_MAX_BYTES`], and not together with a
 /// markdown `description` (`with_markdown`).

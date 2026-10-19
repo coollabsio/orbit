@@ -33603,18 +33603,30 @@
       },
       "CommentBody": {
         "type": "object",
-        "required": [
-          "body"
-        ],
         "properties": {
           "body": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Markdown. Send `body_json` instead for rich text (exactly one of the two)."
+          },
+          "body_json": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object"
+            },
+            "description": "The comment as BlockNote blocks; its markdown copy becomes `body`, and its mention nodes\ndecide who is notified (`mentioned_user_ids` is ignored)."
           },
           "mentioned_user_ids": {
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "description": "With a markdown `body`: the members to notify."
           },
           "parent_id": {
             "type": [
@@ -33633,6 +33645,7 @@
           "task_id",
           "author_id",
           "body",
+          "body_json",
           "can_edit",
           "can_delete",
           "version",
@@ -33644,7 +33657,18 @@
             "type": "string"
           },
           "body": {
-            "type": "string"
+            "type": "string",
+            "description": "Markdown copy of `body_json`."
+          },
+          "body_json": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object"
+            },
+            "description": "BlockNote blocks, the comment's source; null for a comment written before rich text."
           },
           "can_delete": {
             "type": "boolean",
@@ -33687,12 +33711,25 @@
       "CommentUpdateBody": {
         "type": "object",
         "required": [
-          "body",
           "expected_version"
         ],
         "properties": {
           "body": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Markdown. Send `body_json` instead for rich text (exactly one of the two)."
+          },
+          "body_json": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object"
+            },
+            "description": "The comment as BlockNote blocks; members it newly mentions are notified."
           },
           "expected_version": {
             "type": "integer",
@@ -37072,6 +37109,7 @@
                 "task_id",
                 "author_id",
                 "body",
+                "body_json",
                 "can_edit",
                 "can_delete",
                 "version",
@@ -37083,7 +37121,18 @@
                   "type": "string"
                 },
                 "body": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Markdown copy of `body_json`."
+                },
+                "body_json": {
+                  "type": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "type": "object"
+                  },
+                  "description": "BlockNote blocks, the comment's source; null for a comment written before rich text."
                 },
                 "can_delete": {
                   "type": "boolean",
