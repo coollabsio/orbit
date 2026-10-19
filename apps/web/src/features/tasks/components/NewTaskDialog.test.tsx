@@ -26,7 +26,7 @@ const otherTask = {
 }
 
 /** Records the bodies of the create requests; each one answers with a new task. */
-function api(created: unknown[], uploads: string[] = [], relations: unknown[] = []) {
+function api(created: unknown[], uploads: string[] = [], relations: unknown[] = [], patches: unknown[] = []) {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const request = input as Request
     const url = new URL(request.url)
@@ -46,8 +46,12 @@ function api(created: unknown[], uploads: string[] = [], relations: unknown[] = 
     }
     if (request.method === 'POST' && url.pathname.endsWith('/labels')) return Response.json({ id: 'label-1', workspace_id: 'workspace-1', name: 'bug', color: '#8b5cf6', version: 1, created_at: '', updated_at: '' })
     if (request.method === 'POST' && url.pathname.endsWith('/attachments')) {
-      uploads.push(url.pathname)
-      return Response.json([])
+      uploads.push(`${url.pathname}${url.search}`)
+      return Response.json({ id: '0199a0b0-0000-7000-8000-0000000000f1' })
+    }
+    if (request.method === 'PATCH') {
+      patches.push(await request.json())
+      return Response.json({})
     }
     if (url.pathname.endsWith('/projects')) return Response.json({ items: [project], next_cursor: null })
     if (url.pathname.endsWith('/statuses')) return Response.json({ items: [status('doing', 'Doing', 'started', 0), status('todo', 'Todo', 'unstarted', 0)], next_cursor: null })
@@ -70,7 +74,7 @@ test('creates the task with the defaults and opens it', async () => {
   await userEvent.type(view.getByLabelText('Task title'), '  Fix login  ')
   await userEvent.click(view.getByRole('button', { name: 'Create task' }))
   await waitFor(() => expect(opened).toEqual(['task-0001']))
-  expect(created).toEqual([{ title: 'Fix login', description: '', project_id: 'project-1', status_id: 'todo', priority: 'high', assignee_ids: [], label_ids: [], due_at: null, due_start_at: null, parent_task_id: null }])
+  expect(created).toEqual([{ title: 'Fix login', project_id: 'project-1', status_id: 'todo', priority: 'high', assignee_ids: [], label_ids: [], due_at: null, due_start_at: null, parent_task_id: null }])
 })
 
 test('"Create more" keeps the dialog and the properties for the next task', async () => {
@@ -102,10 +106,11 @@ test('an empty title creates nothing', async () => {
   expect(created).toEqual([])
 })
 
-test('attached files upload to the task once it exists', async () => {
+test('attached files go into the description once the task exists', async () => {
   const created: unknown[] = []
   const uploads: string[] = []
-  api(created, uploads)
+  const patches: unknown[] = []
+  api(created, uploads, [], patches)
   const opened: string[] = []
   const view = render(<NewTaskDialog onClose={() => {}} onOpenTask={(task) => opened.push(task.id)} />, { wrapper: Wrapper })
   await view.findByRole('button', { name: 'Status: Todo' })
@@ -113,7 +118,14 @@ test('attached files upload to the task once it exists', async () => {
   await view.findByText('proof.txt')
   await userEvent.type(view.getByLabelText('Task title'), 'With a file{Control>}{Enter}{/Control}')
   await waitFor(() => expect(opened).toEqual(['task-0001']))
-  expect(uploads).toEqual(['/api/v1/workspaces/workspace-1/tasks/task-0001/attachments'])
+  expect(uploads).toEqual(['/api/v1/workspaces/workspace-1/tasks/task-0001/attachments?inline=1'])
+  expect(patches).toEqual([{
+    expected_version: 1,
+    description_json: [{
+      type: 'file',
+      props: { url: '/api/v1/workspaces/workspace-1/tasks/task-0001/attachments/0199a0b0-0000-7000-8000-0000000000f1/download', name: 'proof.txt' },
+    }],
+  }])
 })
 
 test('creating a label inside the dialog does not create the task', async () => {

@@ -5,14 +5,13 @@ import type { Task } from '@/features/tasks/api/models'
 import { LinkifiedText } from './LinkifiedText'
 
 /**
- * The title (and the new task dialog's fields) share one look whether read-only, previewed or edited, so switching
- * to the field never shifts the text. `md:` repeats the sizes because Input/Textarea set their own `md:text-sm`.
+ * The title shares one look whether read-only, previewed or edited, so switching to the field never shifts the
+ * text. `md:` repeats the sizes because Input sets its own `md:text-sm`.
  */
 export const taskTextVariants = cva('w-full border-0 bg-transparent p-0 text-foreground outline-none placeholder:text-muted-foreground', {
   variants: {
     field: {
       title: 'text-2xl leading-8 font-semibold max-[899px]:text-xl max-[899px]:leading-[26px] md:text-2xl md:max-[899px]:text-xl',
-      description: 'min-h-[60px] resize-none text-[13px] leading-5 [field-sizing:content] max-[899px]:min-h-12 max-[899px]:text-sm max-[899px]:leading-[22px] md:text-[13px] md:max-[899px]:text-sm',
     },
     mode: {
       read: 'whitespace-pre-wrap [overflow-wrap:anywhere]',
@@ -21,8 +20,6 @@ export const taskTextVariants = cva('w-full border-0 bg-transparent p-0 text-for
       edit: 'h-auto rounded-none focus-visible:ring-0 dark:bg-transparent',
     },
   },
-  // the Textarea is a flex box by default; the description field is a plain block
-  compoundVariants: [{ field: 'description', mode: 'edit', className: 'block' }],
 })
 
 export function TaskTextFields({

@@ -1,9 +1,9 @@
 import { useCommand } from '@/shortcuts/useCommand'
-import { useRef, useState } from 'react'
+import { lazy, Suspense, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Calendar, ChevronRight, Hierarchy2, Paperclip2 as Paperclip, Tag, User as UserIcon, Xmark as X } from 'reicon-react'
 import { apiClient } from '@/api/client'
-import { createTaskRelation, uploadTaskAttachments } from '@/api/generated/sdk.gen'
+import { createTaskRelation, updateTask } from '@/api/generated/sdk.gen'
 import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from '@/components/ui/dialog'
@@ -18,14 +18,17 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Switch } from '@/components/ui/switch'
-import { Textarea } from '@/components/ui/textarea'
 import { clipboardFiles } from '@/lib/attachmentLib'
-import { renderMarkdownBlocks } from '@/lib/markdown'
 import type { CreateTaskBody, TaskRecord } from '@/api/generated/types.gen'
 import { ColorDot } from '@/components/common/ColorDot'
 import { DatePicker } from '@/components/common/DatePicker'
 import { UserAvatar, UserAvatarStack } from '@/components/common/UserAvatar'
-import { uploadFiles } from '@/features/tasks/api/uploadQueue'
+import { uploadInlineFile } from '@/features/tasks/api/inlineFiles'
+import { isEmptyRichText } from '@/features/tasks/lib/richText'
+import { loadPageEditor } from '@/features/docs/editor/loadPageEditor'
+// Type-only import: erased at build time, so the BlockNote chunk stays lazy.
+import type { PageEditorHandle } from '@/features/docs/editor/PageEditor'
+import { Spinner } from '@/components/ui/spinner'
 import { useMembers } from '@/features/workspaces/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useLabels } from '@/features/tasks/api/labels'
@@ -40,7 +43,6 @@ import { LabelPicker } from './TaskLabels'
 import { TaskPickerDialog } from './TaskPickerDialog'
 import { AddRelationMenu } from './TaskRelations'
 import { TaskStatusIcon } from './TaskStatusIcon'
-import { EditablePreview, taskTextVariants } from './TaskTextFields'
 
 const CREATE_MORE_KEY = 'orbit:new_task_create_more'
 // a duplicate needs a Duplicate status, which a new task cannot have
@@ -48,6 +50,13 @@ const RELATION_OPTIONS = ADD_RELATION_OPTIONS.filter((option) => option.kind !==
 const RELATION_LABEL: Record<RelationKind, string> = { blocks: 'Blocks', blocked_by: 'Blocked by', related: 'Related to', duplicate: 'Duplicate of' }
 
 type PendingRelation = { kind: Exclude<RelationKind, 'duplicate'>; task: Task }
+
+const PageEditor = lazy(() => loadPageEditor().then((module) => ({ default: module.PageEditor })))
+
+/** An image or file block for a file uploaded after the task was created. */
+function fileBlock(file: File, url: string) {
+  return { type: file.type.startsWith('image/') ? 'image' : 'file', props: { url, name: file.name } }
+}
 
 interface NewTaskDialogProps {
   /** Starting properties (the page's filter, a group header). Unknown or missing ones fall back to the first project and its default status. */
@@ -73,7 +82,10 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
   const createTask = useCreateTask(workspace.id)
   const [open, setOpen] = useState(true)
   const [title, setTitle] = useState(initialTitle)
-  const [description, setDescription] = useState(initialDescription)
+  /** Whether the description says anything (the draft guard); the editor holds the text itself. */
+  const [hasDescription, setHasDescription] = useState(initialDescription.trim() !== '')
+  /** Bumped to start the next task of a batch with an empty description. */
+  const [descriptionKey, setDescriptionKey] = useState(0)
   const [draft, setDraft] = useState(() => ({
     projectId: defaults.project_id,
     statusId: defaults.status_id,
@@ -90,15 +102,13 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
   const [createMore, setCreateMore] = useState(() => window.localStorage.getItem(CREATE_MORE_KEY) === '1')
   const [created, setCreated] = useState<TaskRecord>()
   const [dueDateOpen, setDueDateOpen] = useState(false)
-  // like the task page: the description shows as rendered Markdown until it is edited
-  const [editingDescription, setEditingDescription] = useState(false)
   // files wait here and upload once the task exists
   const [files, setFiles] = useState<File[]>([])
   const [uploading, setUploading] = useState(false)
   const [dropOver, setDropOver] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const titleRef = useRef<HTMLInputElement>(null)
-  const descriptionRef = useRef<HTMLTextAreaElement>(null)
+  const descriptionRef = useRef<PageEditorHandle>(null)
 
   // projects and statuses can still load when the dialog opens outside Tasks, so the fallbacks are derived
   const project = projects.find((candidate) => candidate.id === draft.projectId) ?? projects[0]
@@ -125,9 +135,10 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
   const submit = async (more = createMore) => {
     if (!canCreate) return
     try {
+      const content = (descriptionRef.current?.getContent() ?? []) as Array<Record<string, unknown>>
       const task = await createTask.mutateAsync({
         title: title.trim(),
-        description: description.trim(),
+        ...(isEmptyRichText(content) ? {} : { description_json: content }),
         project_id: project.id,
         status_id: status.id,
         priority: draft.priority,
@@ -142,12 +153,16 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
         if (results.some((result) => result.status === 'rejected')) toast.error('The task was created, but some relations were not added.')
       }
       if (files.length > 0) {
+        // the files go into the description, after the text
         setUploading(true)
         try {
-          await uploadFiles(files, (file) => uploadTaskAttachments({ client: apiClient, path: { workspace_id: workspace.id, task_id: task.id }, body: { file }, throwOnError: true }), () => {})
+          const blocks: Array<Record<string, unknown>> = []
+          for (const file of files) blocks.push(fileBlock(file, await uploadInlineFile(workspace.id, task.id, file)))
+          const text = isEmptyRichText(content) ? [] : content
+          await updateTask({ client: apiClient, path: { workspace_id: workspace.id, task_id: task.id }, body: { expected_version: task.version, description_json: [...text, ...blocks] }, throwOnError: true })
         } catch {
           // the task exists; its page can take the files again
-          toast.error('The task was created, but some files were not attached.')
+          toast.error('The task was created, but some files were not added.')
         } finally {
           setUploading(false)
         }
@@ -156,8 +171,8 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
       // the properties stay for the next task of the batch
       setCreated(task)
       setTitle('')
-      setDescription('')
-      setEditingDescription(false)
+      setHasDescription(false)
+      setDescriptionKey((key) => key + 1)
       setFiles([])
       setRelations([])
       titleRef.current?.focus()
@@ -174,7 +189,7 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
       onOpenChange={(next, details) => {
         if (next) return
         // a request in flight must finish here, and a stray click beside the dialog must not drop a draft
-        if (busy || (details.reason === 'outside-press' && (title.trim() || description.trim() || files.length > 0))) details.cancel()
+        if (busy || (details.reason === 'outside-press' && (title.trim() || hasDescription || files.length > 0))) details.cancel()
         else setOpen(false)
       }}
       onOpenChangeComplete={(next) => {
@@ -243,7 +258,6 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
                 // Enter moves on to the description; Cmd/Ctrl+Enter creates (handled by the form)
                 if (event.key === 'Enter' && !event.metaKey && !event.ctrlKey) {
                   event.preventDefault()
-                  setEditingDescription(true)
                   descriptionRef.current?.focus()
                 }
               }}
@@ -266,31 +280,40 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
                 attach(event.dataTransfer.files)
               }}
             >
-              {editingDescription || !description ? (
-                <Textarea
-                  ref={descriptionRef}
-                  className={taskTextVariants({ field: 'description', mode: 'edit', className: 'min-h-20' })}
-                  data-keep-font-size=""
-                  value={description}
-                  placeholder="Add description… (paste or drop images and files)"
-                  aria-label="Description"
-                  autoFocus={editingDescription}
-                  readOnly={busy}
-                  onChange={(event) => setDescription(event.target.value)}
-                  onFocus={() => setEditingDescription(true)}
-                  onBlur={() => setEditingDescription(false)}
-                  onPaste={(event) => {
-                    const pasted = clipboardFiles(event)
-                    if (pasted.length === 0) return
-                    event.preventDefault()
-                    attach(pasted)
-                  }}
-                />
-              ) : (
-                <EditablePreview className={taskTextVariants({ field: 'description', mode: 'preview', className: 'min-h-20' })} ariaLabel="Description" onEdit={() => setEditingDescription(true)}>
-                  {renderMarkdownBlocks(description, 'new-task-description')}
-                </EditablePreview>
-              )}
+              {/* files dropped or pasted on the description wait as chips and go into it once the task exists */}
+              <div
+                className="min-h-20"
+                onPasteCapture={(event) => {
+                  const pasted = clipboardFiles(event)
+                  if (pasted.length === 0) return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  attach(pasted)
+                }}
+                onDropCapture={(event) => {
+                  if (!event.dataTransfer.types.includes('Files')) return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  setDropOver(false)
+                  attach(event.dataTransfer.files)
+                }}
+              >
+                <Suspense fallback={<div className="flex justify-center py-4"><Spinner className="text-muted-foreground" /></div>}>
+                  <PageEditor
+                    key={descriptionKey}
+                    ref={descriptionRef}
+                    pageId={`new-task:${descriptionKey}`}
+                    profile="task"
+                    placeholder="description"
+                    initialMarkdown={descriptionKey === 0 ? initialDescription : undefined}
+                    editable={!busy}
+                    onChange={(content) => setHasDescription(!isEmptyRichText(content))}
+                    submitShortcut={() => void submit()}
+                    mentions={{ members, candidates: members.filter((member) => !member.suspended), privatePage: false }}
+                    className="-mx-[54px] max-[899px]:mx-0"
+                  />
+                </Suspense>
+              </div>
               {files.length > 0 ? (
                 <div className="mt-2 flex flex-wrap gap-1">
                   {files.map((file, index) => (
