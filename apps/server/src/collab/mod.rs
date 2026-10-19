@@ -12,6 +12,7 @@
 
 pub mod blocknote;
 mod hub;
+pub mod markdown_import;
 pub mod sanitize;
 pub mod socket;
 
