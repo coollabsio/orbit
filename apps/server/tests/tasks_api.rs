@@ -4154,6 +4154,7 @@ fn filter_task(project: Id, status: Id, title: &str) -> CreateTask {
         status_id: status,
         title: title.to_owned(),
         description: String::new(),
+        description_json: None,
         source_url: None,
         priority: "none".to_owned(),
         position: None,
@@ -7066,4 +7067,88 @@ async fn labels_belong_to_one_project() {
     .await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(moved["label_ids"], json!([exact]));
+}
+
+#[tokio::test]
+async fn create_with_description_json_writes_markdown_copy() {
+    let fixture = Fixture::new().await;
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/v1/workspaces/{}/tasks", fixture.workspace_id),
+            &fixture.owner_cookie,
+            json!({
+                "project_id": fixture.project_id,
+                "status_id": fixture.status_id,
+                "title": "Rich",
+                "description_json": [
+                    {"type": "paragraph", "content": [{"type": "text", "text": "Hi", "styles": {"bold": true}}]}
+                ],
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let task = response_json(response).await;
+    assert_eq!(task["description"], "**Hi**\n");
+    assert_eq!(task["description_json"][0]["content"][0]["text"], "Hi");
+}
+
+#[tokio::test]
+async fn update_with_both_description_fields_is_rejected() {
+    let fixture = Fixture::new().await;
+    let task = fixture.create_task("Both").await;
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "PATCH",
+            &format!(
+                "/api/v1/workspaces/{}/tasks/{}",
+                fixture.workspace_id,
+                task["id"].as_str().unwrap()
+            ),
+            &fixture.owner_cookie,
+            json!({
+                "expected_version": task["version"],
+                "description": "a",
+                "description_json": [],
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn update_with_description_json_writes_markdown_copy() {
+    let fixture = Fixture::new().await;
+    let task = fixture.create_task("Json").await;
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "PATCH",
+            &format!(
+                "/api/v1/workspaces/{}/tasks/{}",
+                fixture.workspace_id,
+                task["id"].as_str().unwrap()
+            ),
+            &fixture.owner_cookie,
+            json!({
+                "expected_version": task["version"],
+                "description_json": [
+                    {"type": "heading", "props": {"level": 2}, "content": [{"type": "text", "text": "Plan", "styles": {}}]},
+                    {"type": "page", "props": {"pageId": "0199a0b0-0000-7000-8000-000000000001"}}
+                ],
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let task = response_json(response).await;
+    assert_eq!(task["description"], "## Plan\n");
+    assert_eq!(task["description_json"].as_array().unwrap().len(), 1, "no page blocks in tasks");
 }

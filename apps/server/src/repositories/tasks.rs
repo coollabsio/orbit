@@ -13,7 +13,10 @@ use super::sub_issues::{self, AutoClosed};
 use super::task_filter::{self, FilterError, FilterGroup, ShowCompleted, SubIssuesDisplay};
 use super::task_relations::{self, RelationActor};
 use crate::audit::{self, AuditOutcome};
-use crate::collab::{CollabHub, DocKey};
+use crate::collab::kind_task::members;
+use crate::collab::markdown_import::markdown_to_blocks;
+use crate::collab::sanitize::sanitize_blocks_for;
+use crate::collab::{CollabError, CollabHub, CollabWrite, DocKey, DocKind, LinkPolicy};
 use crate::export::markdown::{KeepLinks, blocks_to_markdown};
 
 const TRASH_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
@@ -230,7 +233,10 @@ pub struct CreateTask {
     pub project_id: Id,
     pub status_id: Id,
     pub title: String,
+    /// Markdown; ignored when `description_json` is set.
     pub description: String,
+    /// BlockNote blocks (the markdown copy is made from them).
+    pub description_json: Option<Vec<Value>>,
     pub source_url: Option<String>,
     pub priority: String,
     pub position: Option<i64>,
@@ -268,7 +274,10 @@ pub struct TaskChanges {
     pub project_id: Option<Id>,
     pub status_id: Option<Id>,
     pub title: Option<String>,
+    /// A new description as markdown (converted to blocks); at most one of the two is set.
     pub description: Option<String>,
+    /// A new description as BlockNote blocks.
+    pub description_json: Option<Vec<Value>>,
     pub source_url: Option<Option<String>>,
     pub priority: Option<String>,
     pub position: Option<i64>,
@@ -371,6 +380,23 @@ pub enum TaskError {
     ParentInvalid,
     #[error("task repository is unavailable")]
     Unavailable(#[from] sqlx::Error),
+}
+
+impl From<CollabError> for TaskError {
+    fn from(error: CollabError) -> Self {
+        match error {
+            CollabError::NotFound => Self::NotFound,
+            CollabError::Unavailable(error) => Self::Unavailable(error),
+            // An unreadable document, an overloaded hub or a reset by another server: retry.
+            other => Self::Unavailable(sqlx::Error::Protocol(other.to_string())),
+        }
+    }
+}
+
+impl TaskChanges {
+    fn changes_description(&self) -> bool {
+        self.description.is_some() || self.description_json.is_some()
+    }
 }
 
 impl From<FilterError> for TaskError {
@@ -1435,16 +1461,24 @@ impl TaskRepository {
             .fetch_one(&mut *tx)
             .await?,
         };
+        // A markdown description stays markdown until the description is first opened.
+        let (description, description_json) = match &input.description_json {
+            Some(blocks) => {
+                let (markdown, blocks) = description_from_blocks(workspace_id, id, blocks);
+                (markdown, Some(Value::Array(blocks).to_string()))
+            }
+            None => (input.description.clone(), None),
+        };
         sqlx::query(
-            "INSERT INTO tasks (id, workspace_id, project_id, status_id, title, description, source_url, priority, position, creator_id, due_start_at, due_at, parent_task_id, version, created_at, updated_at) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 0, $14, $15)",
+            "INSERT INTO tasks (id, workspace_id, project_id, status_id, title, description, source_url, priority, position, creator_id, due_start_at, due_at, parent_task_id, version, created_at, updated_at, description_json) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 0, $14, $15, $16)",
         )
         .bind(id.to_string())
         .bind(workspace_id.to_string())
         .bind(input.project_id.to_string())
         .bind(input.status_id.to_string())
         .bind(&input.title)
-        .bind(&input.description)
+        .bind(&description)
         .bind(&input.source_url)
         .bind(&input.priority)
         .bind(position)
@@ -1454,6 +1488,7 @@ impl TaskRepository {
         .bind(input.parent_task_id.map(|id| id.to_string()))
         .bind(now.as_millis())
         .bind(now.as_millis())
+        .bind(description_json)
         .execute(&mut *tx)
         .await?;
         replace_assignees(&mut tx, id, &input.assignee_ids).await?;
@@ -1508,6 +1543,23 @@ impl TaskRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<Id, TaskError> {
+        // A linked task's live description is replaced with the issue body in the transaction
+        // below; its room is locked first.
+        let linked: Option<String> = sqlx::query_scalar(
+            "SELECT task_id FROM github_issue_links WHERE workspace_id = $1 AND repository = $2 AND issue_number = $3",
+        )
+        .bind(workspace_id.to_string())
+        .bind(&issue.repository)
+        .bind(issue.number)
+        .fetch_optional(self.database.pool())
+        .await?;
+        let mut collab = match linked.map(parse_id).transpose()? {
+            Some(task_id) => Some((
+                task_id,
+                CollabHub::of(&self.database).write(DocKey::task(task_id)).await?,
+            )),
+            None => None,
+        };
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let (service_account_id, service_account_name) =
@@ -1573,6 +1625,26 @@ impl TaskRepository {
                 }
                 _ => None,
             };
+            let stored_description: String =
+                sqlx::query_scalar("SELECT description FROM tasks WHERE id = $1")
+                    .bind(task_id.to_string())
+                    .fetch_one(&mut *tx)
+                    .await?;
+            if stored_description != issue.description {
+                let members = members(&mut *tx, workspace_id).await?;
+                let blocks = sanitize_blocks_for(
+                    &markdown_to_blocks(&issue.description, &members),
+                    &task_policy(workspace_id, task_id),
+                );
+                sqlx::query("UPDATE tasks SET description_json = $1 WHERE id = $2")
+                    .bind(Value::Array(blocks.clone()).to_string())
+                    .bind(task_id.to_string())
+                    .execute(&mut *tx)
+                    .await?;
+                if let Some((_, collab)) = collab.as_mut().filter(|(id, _)| *id == task_id) {
+                    collab.replace(&mut tx, &blocks, actor_id, now).await?;
+                }
+            }
             let changed = sqlx::query(
                     "UPDATE tasks SET title = $1, description = $2, source_url = $3, status_id = $4, deleted_at = NULL, version = version + 1, updated_at = $5 WHERE id = $6 AND workspace_id = $7 AND (deleted_at IS NOT NULL OR title != $8 OR description != $9 OR source_url IS DISTINCT FROM $10 OR status_id != $11)",
                 ).bind(&issue.title).bind(&issue.description).bind(&issue_url).bind(&status_id).bind(now.as_millis())
@@ -1681,6 +1753,9 @@ impl TaskRepository {
                 .await?;
             }
             tx.commit().await?;
+            if let Some((_, collab)) = collab {
+                collab.commit();
+            }
             return Ok(task_id);
         }
         let status_id: String = sqlx::query_scalar(
@@ -1867,11 +1942,20 @@ impl TaskRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<TaskUpdateOutcome, TaskError> {
+        // The description's live document is replaced in the same transaction (room lock first).
+        let mut collab = match update.changes.changes_description() {
+            true => Some(CollabHub::of(&self.database).write(DocKey::task(update.id)).await?),
+            false => None,
+        };
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let before = sub_issues::snapshot_in_tx(&mut tx, update.id).await?;
         let task_before = task_in_tx(&mut tx, workspace_id, update.id, false).await?;
-        update_task_in_tx(&mut tx, workspace_id, actor_id, update, request_id, now).await?;
+        let blocks =
+            update_task_in_tx(&mut tx, workspace_id, actor_id, update, request_id, now).await?;
+        if let (Some(collab), Some(blocks)) = (collab.as_mut(), &blocks) {
+            collab.replace(&mut tx, blocks, actor_id, now).await?;
+        }
         let after = sub_issues::snapshot_in_tx(&mut tx, update.id).await?;
         let task_after = task_in_tx(&mut tx, workspace_id, update.id, false).await?;
         audit::record(
@@ -1909,6 +1993,9 @@ impl TaskRepository {
         // Re-read: the automation may have changed this task's sub-issue counts.
         let task = task_in_tx(&mut tx, workspace_id, update.id, false).await?;
         tx.commit().await?;
+        if let Some(collab) = collab {
+            collab.commit();
+        }
         Ok(TaskUpdateOutcome { task, auto_closed })
     }
 
@@ -1940,6 +2027,20 @@ impl TaskRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<BulkUpdateOutcome, TaskError> {
+        // Live descriptions are replaced in the same transaction; rooms are locked first, in id
+        // order (a BTreeMap), so two bulk writes never wait on each other's rooms.
+        let mut collabs: std::collections::BTreeMap<Id, CollabWrite> =
+            std::collections::BTreeMap::new();
+        let mut ids: Vec<Id> = updates
+            .iter()
+            .filter(|update| update.changes.changes_description())
+            .map(|update| update.id)
+            .collect();
+        ids.sort_unstable();
+        ids.dedup();
+        for id in ids {
+            collabs.insert(id, CollabHub::of(&self.database).write(DocKey::task(id)).await?);
+        }
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         // Each item's before/after pair brackets its own write only; the automation runs after
@@ -1947,7 +2048,11 @@ impl TaskRepository {
         let mut snapshots = Vec::with_capacity(updates.len());
         for update in updates {
             let before = sub_issues::snapshot_in_tx(&mut tx, update.id).await?;
-            update_task_in_tx(&mut tx, workspace_id, actor_id, update, request_id, now).await?;
+            let blocks =
+                update_task_in_tx(&mut tx, workspace_id, actor_id, update, request_id, now).await?;
+            if let (Some(collab), Some(blocks)) = (collabs.get_mut(&update.id), &blocks) {
+                collab.replace(&mut tx, blocks, actor_id, now).await?;
+            }
             let after = sub_issues::snapshot_in_tx(&mut tx, update.id).await?;
             snapshots.push(before.zip(after));
         }
@@ -1990,6 +2095,9 @@ impl TaskRepository {
             tasks.push(task_in_tx(&mut tx, workspace_id, update.id, false).await?);
         }
         tx.commit().await?;
+        for collab in collabs.into_values() {
+            collab.commit();
+        }
         Ok(BulkUpdateOutcome { tasks, auto_closed })
     }
 
@@ -2535,7 +2643,7 @@ pub(super) async fn update_task_in_tx(
     update: &TaskUpdate,
     request_id: &str,
     now: TimestampMillis,
-) -> Result<(), TaskError> {
+) -> Result<Option<Vec<Value>>, TaskError> {
     let current = task_in_tx(tx, workspace_id, update.id, false).await?;
     check_version(update.expected_version, current.version, &current)?;
     if update.changes.duplicate_of_id.is_some() && update.changes.status_id.is_some() {
@@ -2545,7 +2653,7 @@ pub(super) async fn update_task_in_tx(
     }
     let project_id = update.changes.project_id.unwrap_or(current.project_id);
     let moves_project = project_id != current.project_id;
-    let edits_content = update.changes.title.is_some() || update.changes.description.is_some();
+    let edits_content = update.changes.title.is_some() || update.changes.changes_description();
     if edits_content || moves_project {
         let Flag(linked) = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM github_issue_links WHERE workspace_id = $1 AND task_id = $2)",
@@ -2627,11 +2735,22 @@ pub(super) async fn update_task_in_tx(
         .title
         .clone()
         .unwrap_or(current.title.clone());
-    let description = update
-        .changes
-        .description
-        .clone()
-        .unwrap_or(current.description.clone());
+    // A new description: its blocks (for `description_json` and the live document) and markdown.
+    let new_description = match (&update.changes.description, &update.changes.description_json) {
+        (_, Some(blocks)) => Some(description_from_blocks(workspace_id, update.id, blocks)),
+        (Some(markdown), None) => {
+            let members = members(&mut **tx, workspace_id).await?;
+            let blocks = sanitize_blocks_for(
+                &markdown_to_blocks(markdown, &members),
+                &task_policy(workspace_id, update.id),
+            );
+            Some((markdown.clone(), blocks))
+        }
+        (None, None) => None,
+    };
+    let description = new_description
+        .as_ref()
+        .map_or_else(|| current.description.clone(), |(markdown, _)| markdown.clone());
     let source_url = update
         .changes
         .source_url
@@ -2774,7 +2893,15 @@ pub(super) async fn update_task_in_tx(
     if let Some(labels) = &label_ids {
         replace_labels(tx, update.id, labels).await?;
     }
-    Ok(())
+    let Some((_, blocks)) = new_description else {
+        return Ok(None);
+    };
+    sqlx::query("UPDATE tasks SET description_json = $1 WHERE id = $2")
+        .bind(Value::Array(blocks.clone()).to_string())
+        .bind(update.id.to_string())
+        .execute(&mut **tx)
+        .await?;
+    Ok(Some(blocks))
 }
 
 #[derive(Deserialize, Serialize)]
@@ -3360,6 +3487,29 @@ fn updated_fields(update: &TaskUpdate, before: &TaskRecord, after: &TaskRecord) 
 /// The markdown copy of a description is cut to this many characters.
 const DESCRIPTION_MAX_CHARS: usize = 100_000;
 
+/// The content policy of a task's description (its own attachments, no page blocks).
+fn task_policy(workspace_id: Id, task_id: Id) -> LinkPolicy {
+    LinkPolicy {
+        kind: DocKind::Task,
+        workspace_id,
+        doc_id: task_id,
+    }
+}
+
+/// The markdown of `blocks`, cut to [`DESCRIPTION_MAX_CHARS`].
+fn description_markdown(blocks: &[Value]) -> String {
+    blocks_to_markdown(blocks, &KeepLinks)
+        .chars()
+        .take(DESCRIPTION_MAX_CHARS)
+        .collect()
+}
+
+/// Blocks sent for a description: sanitized, with their markdown copy.
+fn description_from_blocks(workspace_id: Id, task_id: Id, blocks: &[Value]) -> (String, Vec<Value>) {
+    let blocks = sanitize_blocks_for(blocks, &task_policy(workspace_id, task_id));
+    (description_markdown(&blocks), blocks)
+}
+
 /// Writes a co-edited description: `description_json` and its markdown copy, without a version
 /// bump (title, status and the other fields keep their version check). With `audit`, records
 /// `task.updated` (which also tells other clients to refresh). Returns whether anything changed.
@@ -3386,10 +3536,7 @@ pub(crate) async fn project_task_description(
     if before.as_deref() == Some(blocks) {
         return Ok(false);
     }
-    let markdown: String = blocks_to_markdown(blocks, &KeepLinks)
-        .chars()
-        .take(DESCRIPTION_MAX_CHARS)
-        .collect();
+    let markdown = description_markdown(blocks);
     sqlx::query(
         "UPDATE tasks SET description_json = $1, description = $2, updated_at = $3 WHERE id = $4",
     )

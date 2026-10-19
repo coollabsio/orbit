@@ -34054,7 +34054,18 @@
             }
           },
           "description": {
-            "type": "string"
+            "type": "string",
+            "description": "Markdown. Send `description_json` instead for rich text (not both)."
+          },
+          "description_json": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object"
+            },
+            "description": "The description as BlockNote blocks; its markdown copy becomes `description`."
           },
           "due_at": {
             "type": [
@@ -39805,7 +39816,18 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Markdown. Send `description_json` instead for rich text (not both)."
+          },
+          "description_json": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object"
+            },
+            "description": "The description as BlockNote blocks; its markdown copy becomes `description`."
           },
           "due_at": {
             "type": [

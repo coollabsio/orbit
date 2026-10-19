@@ -902,8 +902,12 @@ struct CreateTaskBody {
     project_id: String,
     status_id: String,
     title: String,
+    /// Markdown. Send `description_json` instead for rich text (not both).
     #[serde(default)]
     description: String,
+    /// The description as BlockNote blocks; its markdown copy becomes `description`.
+    #[schema(value_type = Option<Vec<Object>>)]
+    description_json: Option<Vec<Value>>,
     source_url: Option<String>,
     #[serde(default = "default_priority")]
     priority: String,
@@ -927,7 +931,11 @@ struct TaskUpdateBody {
     project_id: Option<String>,
     status_id: Option<String>,
     title: Option<String>,
+    /// Markdown. Send `description_json` instead for rich text (not both).
     description: Option<String>,
+    /// The description as BlockNote blocks; its markdown copy becomes `description`.
+    #[schema(value_type = Option<Vec<Object>>)]
+    description_json: Option<Vec<Value>>,
     #[serde(default, deserialize_with = "deserialize_source_patch")]
     source_url: Option<Option<String>>,
     priority: Option<String>,
@@ -1401,6 +1409,7 @@ async fn create_task(
     let instance = format!("/api/v1/workspaces/{workspace}/tasks");
     let (workspace_id, actor_id) =
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let has_markdown = !body.description.is_empty();
     let input = CreateTask {
         project_id: parse_id(&body.project_id, &instance, request_id.as_ref())?,
         status_id: parse_id(&body.status_id, &instance, request_id.as_ref())?,
@@ -1417,6 +1426,12 @@ async fn create_task(
             100_000,
             100_000,
             "description",
+            &instance,
+            request_id.as_ref(),
+        )?,
+        description_json: description_json(
+            body.description_json,
+            has_markdown,
             &instance,
             request_id.as_ref(),
         )?,
@@ -1506,6 +1521,7 @@ async fn bulk_tasks(
                     status_id: item.status_id,
                     title: item.title,
                     description: item.description,
+                    description_json: None,
                     source_url: item.source_url,
                     priority: item.priority,
                     position: item.position,
@@ -1889,6 +1905,28 @@ async fn read_all_notifications(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+/// Serialized `description_json` may be at most this large (the markdown copy is cut to 100 000
+/// characters).
+const DESCRIPTION_JSON_MAX_BYTES: usize = 1_000_000;
+
+/// Checks `description_json`: at most [`DESCRIPTION_JSON_MAX_BYTES`], and not together with a
+/// markdown `description` (`with_markdown`).
+fn description_json(
+    blocks: Option<Vec<Value>>,
+    with_markdown: bool,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> Result<Option<Vec<Value>>, ApiError> {
+    let Some(blocks) = blocks else {
+        return Ok(None);
+    };
+    let size = serde_json::to_string(&blocks).map_or(usize::MAX, |json| json.len());
+    if with_markdown || size > DESCRIPTION_JSON_MAX_BYTES {
+        return Err(validation("description_json", instance, request_id));
+    }
+    Ok(Some(blocks))
+}
+
 fn task_update(
     id: String,
     body: TaskUpdateBody,
@@ -1905,6 +1943,12 @@ fn task_update(
                 .title
                 .map(|value| text(value, 500, 500, "title", instance, request_id))
                 .transpose()?,
+            description_json: description_json(
+                body.description_json,
+                body.description.is_some(),
+                instance,
+                request_id,
+            )?,
             description: body
                 .description
                 .map(|value| bounded(value, 100_000, 100_000, "description", instance, request_id))

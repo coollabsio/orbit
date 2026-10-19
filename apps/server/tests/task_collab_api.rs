@@ -1,7 +1,9 @@
 //! Live co-editing of task descriptions: the task room, its projection into `description_json` and
 //! the markdown copy, access, GitHub locks, and delete/restore while a room is open.
 
+use orbit_platform::{Id, TimestampMillis};
 use orbit_server::collab::blocknote::doc_to_blocks;
+use orbit_server::repositories::tasks::{GithubWorkItem, TaskRepository};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
@@ -235,5 +237,73 @@ async fn audit_at_most_once_per_interval() {
     )
     .await;
     assert_eq!(audits, 1);
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn rest_markdown_write_reaches_live_client() {
+    let root = TempDir::new().unwrap();
+    let server = Server::start(&root, fast_config()).await;
+    let users = setup(&server).await;
+    let task = create_task(&server, &users, "Start").await;
+    let id = task["id"].as_str().unwrap();
+
+    let mut client = open(&server, &users, &users.member, id).await;
+    let version = get_task(&server, &users, id).await["version"].clone();
+    let (status, body) = server
+        .api(
+            &users.owner,
+            "PATCH",
+            &format!("/api/v1/workspaces/{}/tasks/{id}", users.workspace),
+            Some(json!({"expected_version": version, "description": "New text"})),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    client.wait_text("New text").await;
+    let task = get_task(&server, &users, id).await;
+    assert_eq!(task["description"], "New text");
+    assert_eq!(task["description_json"][0]["content"][0]["text"], "New text");
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn github_sync_replaces_doc() {
+    let root = TempDir::new().unwrap();
+    let server = Server::start(&root, fast_config()).await;
+    let users = setup(&server).await;
+    let project_id: Id =
+        sqlx::query_scalar::<_, String>("SELECT id FROM projects WHERE workspace_id = $1")
+            .bind(&users.workspace)
+            .fetch_one(server.database.pool())
+            .await
+            .unwrap()
+            .parse()
+            .unwrap();
+    let workspace_id: Id = users.workspace.parse().unwrap();
+    let tasks = TaskRepository::new(server.database.clone());
+    let issue = |description: &str| GithubWorkItem {
+        repository: "owner/repo".to_owned(),
+        number: 7,
+        project_id,
+        title: "Issue".to_owned(),
+        description: description.to_owned(),
+        kind: "issue",
+        state: "open",
+        state_changed: false,
+    };
+    let id = tasks
+        .sync_github_work_item(workspace_id, users.owner_id, issue("First"), "sync-1", TimestampMillis::now())
+        .await
+        .unwrap()
+        .to_string();
+
+    let mut client = open(&server, &users, &users.owner, &id).await;
+    assert_eq!(client.text(), "First");
+    tasks
+        .sync_github_work_item(workspace_id, users.owner_id, issue("Second"), "sync-2", TimestampMillis::now())
+        .await
+        .unwrap();
+    client.wait_text("Second").await;
+    assert_eq!(get_task(&server, &users, &id).await["description"], "Second");
     server.stop().await;
 }

@@ -54,16 +54,16 @@ pub(super) async fn content(
 }
 
 /// The workspace's members as `(id, display name)`, for mentions in imported markdown.
-pub(crate) async fn members(
-    pool: &AnyPool,
-    workspace_id: Id,
-) -> Result<Vec<(Id, String)>, sqlx::Error> {
+pub(crate) async fn members<'e, E>(executor: E, workspace_id: Id) -> Result<Vec<(Id, String)>, sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = Any>,
+{
     let rows: Vec<(String, String)> = sqlx::query_as(
         "SELECT users.id, users.display_name FROM memberships \
          JOIN users ON users.id = memberships.user_id WHERE memberships.workspace_id = $1",
     )
     .bind(workspace_id.to_string())
-    .fetch_all(pool)
+    .fetch_all(executor)
     .await?;
     Ok(rows
         .into_iter()

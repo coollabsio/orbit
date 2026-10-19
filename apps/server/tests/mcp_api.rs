@@ -159,6 +159,7 @@ async fn create_task(
                 status_id: status.parse().unwrap(),
                 title: title.into(),
                 description: "Description".into(),
+                description_json: None,
                 source_url: None,
                 priority: "none".into(),
                 position: None,

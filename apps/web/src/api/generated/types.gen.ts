@@ -861,7 +861,16 @@ export type CreatePageThreadBody = {
 
 export type CreateTaskBody = {
     assignee_ids?: Array<string>;
+    /**
+     * Markdown. Send `description_json` instead for rich text (not both).
+     */
     description?: string;
+    /**
+     * The description as BlockNote blocks; its markdown copy becomes `description`.
+     */
+    description_json?: Array<{
+        [key: string]: unknown;
+    }> | null;
     due_at?: string | null;
     due_start_at?: string | null;
     label_ids?: Array<string>;
@@ -2995,7 +3004,16 @@ export type TaskRelationType = 'blocks' | 'related' | 'duplicate';
 
 export type TaskUpdateBody = {
     assignee_ids?: Array<string> | null;
+    /**
+     * Markdown. Send `description_json` instead for rich text (not both).
+     */
     description?: string | null;
+    /**
+     * The description as BlockNote blocks; its markdown copy becomes `description`.
+     */
+    description_json?: Array<{
+        [key: string]: unknown;
+    }> | null;
     due_at?: string | null;
     due_start_at?: string | null;
     /**
