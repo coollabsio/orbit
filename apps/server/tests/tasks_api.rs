@@ -7008,4 +7008,62 @@ async fn labels_belong_to_one_project() {
     )
     .await;
     assert_eq!(all["items"].as_array().unwrap().len(), 3);
+
+    // A stale label edit points the client at the project's labels.
+    let (status, conflict) = call(
+        &fixture,
+        "PATCH",
+        &format!("{}/{other_bug}", labels_uri(&other)),
+        Some(json!({"name": "bug", "color": "#ff0000", "expected_version": 9})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert!(
+        conflict["conflict"]["refresh"]
+            .as_str()
+            .unwrap()
+            .ends_with(&format!("/projects/{other}/labels")),
+        "{conflict}"
+    );
+
+    // A label id saved before labels were per project keeps the name it had then, so renaming
+    // the copy that kept it changes no view. Values are trimmed.
+    let legacy = Id::new_v7().to_string();
+    sqlx::query(
+        "INSERT INTO label_name_aliases (label_id, workspace_id, name) VALUES ($1, $2, 'BUG')",
+    )
+    .bind(&legacy)
+    .bind(&fixture.workspace_id)
+    .execute(fixture.database.pool())
+    .await
+    .unwrap();
+    for value in [json!([legacy]), json!(["  Bug "])] {
+        let (_, found) = call(
+            &fixture,
+            "POST",
+            &query_uri(&fixture),
+            Some(label_query("includes_any", value)),
+        )
+        .await;
+        assert_eq!(query_titles(&found), ["Moved", "Stays"]);
+    }
+
+    // A project with both "Bug" and "bug": a moved "Bug" takes the exact name only.
+    let exact = label(other.clone(), "Bug").await;
+    let (_, stays) = call(
+        &fixture,
+        "GET",
+        &task_uri(&fixture, id_of(&created[1])),
+        None,
+    )
+    .await;
+    let (status, moved) = call(
+        &fixture,
+        "PATCH",
+        &task_uri(&fixture, id_of(&created[1])),
+        Some(json!({"expected_version": stays["version"], "project_id": other})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(moved["label_ids"], json!([exact]));
 }

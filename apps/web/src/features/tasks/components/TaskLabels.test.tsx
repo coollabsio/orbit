@@ -77,7 +77,7 @@ test('a search that matches no label still shows the create row and "Edit labels
   fireEvent.click(view.getByRole('button', { name: 'Labels' }))
   await userEvent.type(await view.findByRole('combobox', { name: 'Change labels' }), 'Docs')
   expect(view.getByRole('option', { name: /Create/ }).textContent).toContain('Docs')
-  expect(view.getByRole('option', { name: /Edit labels/ })).toBeTruthy()
+  expect(view.getByRole('button', { name: 'Edit labels' })).toBeTruthy()
   expect(view.queryAllByRole('option', { name: 'Bug' })).toHaveLength(0)
 })
 
@@ -98,4 +98,39 @@ test('a colour picked under the create row is the new label colour, and Enter st
   await userEvent.type(search, '{Enter}')
   await waitFor(() => expect(onChange).toHaveBeenCalledWith(['label-new']))
   expect(body).toEqual({ name: 'Docs', color: '#4cb782' })
+})
+
+test('Enter picks the first matching label, not the create row; ids are not searched', async () => {
+  const requests: string[] = []
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    requests.push(String(input))
+    return Response.json({})
+  }) as typeof fetch
+  const onChange = mock(() => {})
+  const view = renderLabels({ labelIds: [], onChange })
+  fireEvent.click(view.getByRole('button', { name: 'Labels' }))
+  const search = await view.findByRole('combobox', { name: 'Change labels' })
+  // "bu" matches Bug and could also be a new label: the match comes first
+  await userEvent.type(search, 'bu{Enter}')
+  expect(onChange).toHaveBeenCalledWith(['label-used'])
+  expect(requests).toEqual([])
+  // every id contains "label", no name does
+  await userEvent.clear(search)
+  await userEvent.type(search, 'label-')
+  expect(view.queryAllByRole('option', { name: 'Bug' })).toHaveLength(0)
+})
+
+test('the arrow keys move the colour choice, one swatch is a Tab stop', async () => {
+  const view = renderLabels({ labelIds: [] })
+  fireEvent.click(view.getByRole('button', { name: 'Labels' }))
+  await userEvent.type(await view.findByRole('combobox', { name: 'Change labels' }), 'Docs')
+  const indigo = view.getByRole('radio', { name: 'Indigo' })
+  expect(indigo.getAttribute('aria-checked')).toBe('true')
+  expect(view.getAllByRole('radio').filter((radio) => radio.getAttribute('tabindex') === '0')).toHaveLength(1)
+  indigo.focus()
+  await userEvent.keyboard('{ArrowRight}')
+  expect(view.getByRole('radio', { name: 'Teal' }).getAttribute('aria-checked')).toBe('true')
+  expect(document.activeElement).toBe(view.getByRole('radio', { name: 'Teal' }))
+  await userEvent.keyboard('{ArrowLeft}{ArrowLeft}')
+  expect(view.getByRole('radio', { name: 'Grey' }).getAttribute('aria-checked')).toBe('true')
 })

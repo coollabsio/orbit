@@ -2470,8 +2470,14 @@ fn refresh_for_current(current: &Value) -> Option<String> {
         return Some(format!("/api/v1/workspaces/{workspace}/tasks/{id}"));
     }
     if let Some(project) = current.get("project_id").and_then(Value::as_str) {
+        // statuses and labels both belong to a project; only a status has a category
+        let list = if current.get("category").is_some() {
+            "statuses"
+        } else {
+            "labels"
+        };
         return Some(format!(
-            "/api/v1/workspaces/{workspace}/projects/{project}/statuses"
+            "/api/v1/workspaces/{workspace}/projects/{project}/{list}"
         ));
     }
     if current.get("key").is_some() {
@@ -2485,7 +2491,7 @@ fn refresh_for_current(current: &Value) -> Option<String> {
         };
         return Some(format!("/api/v1/workspaces/{workspace}/projects{suffix}"));
     }
-    Some(format!("/api/v1/workspaces/{workspace}/labels"))
+    None
 }
 
 impl IntoResponse for ApiError {

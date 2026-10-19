@@ -73,14 +73,20 @@ export function projectLabels(labels: LabelRecord[], projectId: string): LabelRe
 }
 
 /**
- * `labelIds` for a task in `projectId`: its own labels stay, and another project's label becomes the project's labels
- * with the same key (as when a task moves). A project can hold both "Bug" and "bug".
+ * `labelIds` for a task in `projectId`: its own labels stay, and another project's label becomes the project's label
+ * with the same key, as when a task moves. A project can hold both "Bug" and "bug": the exact name wins.
  */
 export function matchingLabelIds(labels: LabelRecord[], labelIds: string[], projectId: string): string[] {
   const own = projectLabels(labels, projectId)
   const kept = labelIds.filter((id) => own.some((label) => label.id === id))
-  const keys = new Set(labels.filter((label) => label.project_id !== projectId && labelIds.includes(label.id)).map(labelKeyOf))
-  return [...kept, ...own.filter((label) => !kept.includes(label.id) && keys.has(labelKeyOf(label))).map((label) => label.id)]
+  const mapped = labels
+    .filter((label) => label.project_id !== projectId && labelIds.includes(label.id))
+    .flatMap((foreign) => {
+      const same = own.filter((label) => labelKeyOf(label) === labelKeyOf(foreign))
+      const match = same.find((label) => label.name === foreign.name) ?? same[0]
+      return match ? [match.id] : []
+    })
+  return [...new Set([...kept, ...mapped])]
 }
 
 /**

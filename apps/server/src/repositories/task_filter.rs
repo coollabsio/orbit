@@ -1114,16 +1114,26 @@ fn push_labels(query: &mut SqlBuilder, values: Vec<String>, all: bool, negated: 
              WHERE task_labels.task_id = tasks.id AND lower(trim(labels.name)) = ",
         );
         if value.parse::<Id>().is_ok() {
-            // An unknown id has no name, so it matches nothing.
+            // An id from before labels were per project keeps the name it had then (its copy may
+            // be renamed or gone since); a newer one is read from its label. An unknown id has no
+            // name, so it matches nothing.
             query
                 .push(
-                    "(SELECT lower(trim(selected.name)) FROM labels AS selected \
+                    "COALESCE((SELECT lower(trim(alias.name)) FROM label_name_aliases AS alias \
+                     WHERE alias.workspace_id = tasks.workspace_id AND alias.label_id = ",
+                )
+                .push_bind(value.clone())
+                .push(
+                    "), (SELECT lower(trim(selected.name)) FROM labels AS selected \
                      WHERE selected.workspace_id = tasks.workspace_id AND selected.id = ",
                 )
                 .push_bind(value)
-                .push(")");
+                .push("))");
         } else {
-            query.push("lower(").push_bind(value).push(")");
+            query
+                .push("lower(trim(")
+                .push_bind(value.trim().to_owned())
+                .push("))");
         }
         query.push(")");
     }

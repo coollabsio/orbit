@@ -3040,16 +3040,17 @@ async fn matching_status_in_tx(
     .ok_or(TaskError::NotFound)
 }
 
-/// The labels of `project_id` with the same name (case-insensitive) as one of `label_ids`.
+/// For each of `label_ids`, the label of `project_id` with the same name (case-insensitive). A
+/// project can hold both "Bug" and "bug"; the exact name wins, then the oldest.
 async fn matching_labels_in_tx(
     tx: &mut Transaction<'_, Any>,
     label_ids: &[Id],
     project_id: Id,
 ) -> Result<Vec<Id>, TaskError> {
     let mut query = SqlBuilder::new(
-        "SELECT DISTINCT target.id FROM labels AS target JOIN labels AS source \
-         ON lower(source.name) = lower(target.name) AND source.workspace_id = target.workspace_id \
-         WHERE target.project_id = ",
+        "SELECT source.id AS source_id, target.id AS target_id FROM labels AS source \
+         JOIN labels AS target ON lower(trim(target.name)) = lower(trim(source.name)) \
+         AND target.workspace_id = source.workspace_id WHERE target.project_id = ",
     );
     query
         .push_bind(project_id.to_string())
@@ -3058,14 +3059,24 @@ async fn matching_labels_in_tx(
     for id in label_ids {
         list.push_bind(id.to_string());
     }
-    list.push_unseparated(") ORDER BY target.id");
-    query
-        .build()
-        .fetch_all(&mut **tx)
-        .await?
-        .into_iter()
-        .map(|row| parse_id(row.get::<String, _>("id")))
-        .collect()
+    list.push_unseparated(
+        ") ORDER BY source.id, CASE WHEN target.name = source.name THEN 0 ELSE 1 END, target.id",
+    );
+    let mut matched = Vec::new();
+    let mut last_source = None;
+    for row in query.build().fetch_all(&mut **tx).await? {
+        let source: String = row.get("source_id");
+        if last_source.as_ref() == Some(&source) {
+            continue;
+        }
+        last_source = Some(source);
+        let target = parse_id(row.get::<String, _>("target_id"))?;
+        if !matched.contains(&target) {
+            matched.push(target);
+        }
+    }
+    matched.sort_unstable();
+    Ok(matched)
 }
 
 async fn validate_project_status(

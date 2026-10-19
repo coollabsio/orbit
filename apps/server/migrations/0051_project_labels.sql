@@ -3,8 +3,9 @@
 -- Every workspace label is copied into every project of its workspace (soft-deleted projects
 -- too, so a restore keeps its labels). The copy in the workspace's oldest live project keeps
 -- the label id; the others get new ids. Each task_labels row moves to the copy in the task's
--- own project, so no task loses a label. Saved views keep the old ids: label filters read an
--- id as its name, so they still find every copy.
+-- own project, so no task loses a label. Saved views keep the old ids: label_name_aliases
+-- keeps each old id's name, and label filters read such an id as that name, so they find every
+-- copy even after the copy that kept the id is renamed, deleted or purged.
 --
 -- SQLite cannot change a UNIQUE constraint or add a NOT NULL reference, so labels and
 -- task_labels are rebuilt as in 0021: the rows are copied aside and the tables recreated under
@@ -14,6 +15,15 @@
 PRAGMA defer_foreign_keys = ON;
 
 CREATE TABLE labels_backup AS SELECT * FROM labels;
+
+CREATE TABLE label_name_aliases (
+    label_id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    name TEXT NOT NULL
+);
+
+INSERT INTO label_name_aliases (label_id, workspace_id, name)
+SELECT id, workspace_id, name FROM labels_backup;
 CREATE TABLE task_labels_backup AS SELECT * FROM task_labels;
 DROP TABLE task_labels;
 DROP TABLE labels;

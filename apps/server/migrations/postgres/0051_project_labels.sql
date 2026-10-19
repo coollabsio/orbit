@@ -3,7 +3,17 @@
 -- Every workspace label is copied into every project of its workspace (soft-deleted projects
 -- too). The copy in the workspace's oldest live project keeps the label id; the others get new ids.
 -- Each task_labels row moves to the copy in the task's own project. Saved views keep the old
--- ids: label filters read an id as its name, so they still find every copy.
+-- ids: label_name_aliases keeps each old id's name, and label filters read such an id as that
+-- name, so they find every copy even after the copy that kept the id is renamed or deleted.
+
+CREATE TABLE label_name_aliases (
+    label_id TEXT PRIMARY KEY,
+    workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+    name TEXT NOT NULL
+);
+
+INSERT INTO label_name_aliases (label_id, workspace_id, name)
+SELECT id, workspace_id, name FROM labels;
 
 -- Ids are canonical lowercase UUIDv7 from the current time, as in SQLite.
 CREATE TEMPORARY TABLE label_copies ON COMMIT DROP AS

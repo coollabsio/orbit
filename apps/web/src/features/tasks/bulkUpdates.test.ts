@@ -39,5 +39,6 @@ test('labels follow by name into another project', () => {
 test('a project with both "Bug" and "bug" keeps each one apart', () => {
   const both = [...labels, label('b-Bug', 'Bug', 'b')]
   expect(matchingLabelIds(both, ['b-bug'], 'b')).toEqual(['b-bug'])
-  expect(matchingLabelIds(both, ['a-bug'], 'b')).toEqual(['b-bug', 'b-Bug'])
+  // a-bug is named "Bug": the exact name wins over "bug"
+  expect(matchingLabelIds(both, ['a-bug'], 'b')).toEqual(['b-Bug'])
 })

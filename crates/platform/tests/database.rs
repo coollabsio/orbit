@@ -2435,6 +2435,19 @@ async fn project_labels_migration_copies_labels_into_every_project() {
         async move { db.scalar::<i64>(&sql).await.unwrap() }
     };
     assert_eq!(count("SELECT COUNT(*) FROM labels".into()).await, 6);
+    // Every old id keeps its name for the saved views that still hold it.
+    assert_eq!(
+        db.scalar::<String>(&format!(
+            "SELECT name FROM label_name_aliases WHERE label_id = '{bug}'"
+        ))
+        .await
+        .unwrap(),
+        "Bug"
+    );
+    assert_eq!(
+        count("SELECT COUNT(*) FROM label_name_aliases".into()).await,
+        2
+    );
     for project in [first, second, trashed] {
         assert_eq!(
             count(format!(

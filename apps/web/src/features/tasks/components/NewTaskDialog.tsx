@@ -417,7 +417,7 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
               labels={labels}
               onChange={(labelIds) => setDraft((current) => ({ ...current, labelIds }))}
               trigger={
-                <Button type="button" variant="outline" size="sm" className="max-w-56 font-normal" aria-label="Labels">
+                <Button type="button" variant="outline" size="sm" className="max-w-56 font-normal" disabled={!project} aria-label={chosenLabels.length > 0 ? `Labels: ${chosenLabels.map((label) => label.name).join(', ')}` : 'Labels'}>
                   {chosenLabels.length > 0 ? (
                     <>
                       <span aria-hidden="true" className="flex -space-x-0.5">
