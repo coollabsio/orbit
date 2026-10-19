@@ -16,3 +16,8 @@ function hasContent(value: unknown): boolean {
   if ((node.type === 'image' || node.type === 'file') && typeof props?.url === 'string' && props.url !== '') return true
   return ['content', 'children', 'rows', 'cells'].some((key) => hasContent(node[key]))
 }
+
+/** An image or file block for an uploaded file. */
+export function fileBlock(file: File, url: string) {
+  return { type: file.type.startsWith('image/') ? 'image' : 'file', props: { url, name: file.name } }
+}

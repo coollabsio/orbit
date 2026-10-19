@@ -449,7 +449,6 @@ async fn create_attachment_comment(
 }
 
 #[allow(clippy::too_many_arguments)]
-#[allow(clippy::too_many_arguments)]
 async fn upload_fields(
     state: &AttachmentState,
     request: Request,

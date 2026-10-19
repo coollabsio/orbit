@@ -16,9 +16,14 @@ use super::blocknote::{FRAGMENT, doc_to_blocks, new_doc, write_blocks};
 /// Converts markdown into BlockNote blocks; `members` are `(user id, display name)` pairs.
 #[must_use]
 pub fn markdown_to_blocks(markdown: &str, members: &[(Id, String)]) -> Vec<Value> {
-    let options = Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
+    let options =
+        Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
     let events: Vec<Event<'_>> = Parser::new_ext(markdown, options).collect();
-    let mut reader = Reader { events, index: 0, members };
+    let mut reader = Reader {
+        events,
+        index: 0,
+        members,
+    };
     let blocks = reader.blocks(None);
     if blocks.is_empty() {
         return blocks;
@@ -135,10 +140,19 @@ impl<'a> Reader<'a, '_> {
                 } else {
                     vec![text(code, &Map::new())]
                 };
-                out.push(block("codeBlock", json!({"language": language}), content, Vec::new()));
+                out.push(block(
+                    "codeBlock",
+                    json!({"language": language}),
+                    content,
+                    Vec::new(),
+                ));
             }
             Tag::List(start) => {
-                let kind = if start.is_some() { "numberedListItem" } else { "bulletListItem" };
+                let kind = if start.is_some() {
+                    "numberedListItem"
+                } else {
+                    "bulletListItem"
+                };
                 while let Some(event) = self.next() {
                     match event {
                         Event::End(TagEnd::List(_)) => break,
@@ -176,10 +190,7 @@ impl<'a> Reader<'a, '_> {
         let mut inline = Vec::new();
         let mut children = Vec::new();
         let mut has_content = false;
-        loop {
-            let Some(event) = self.events.get(self.index).cloned() else {
-                break;
-            };
+        while let Some(event) = self.events.get(self.index).cloned() {
             match event {
                 Event::End(TagEnd::Item) => {
                     self.index += 1;
@@ -256,10 +267,7 @@ impl<'a> Reader<'a, '_> {
         let mut out: Vec<Inline> = Vec::new();
         let mut styles = Map::new();
         let mut link: Option<(String, Vec<Value>)> = None;
-        loop {
-            let Some(event) = self.events.get(self.index).cloned() else {
-                break;
-            };
+        while let Some(event) = self.events.get(self.index).cloned() {
             if end == TagEnd::Item
                 && let Event::Start(tag) = &event
                 && is_block(tag)
@@ -310,7 +318,10 @@ impl<'a> Reader<'a, '_> {
                             _ => {}
                         }
                     }
-                    out.push(Inline::Image { url: dest_url.into_string(), alt });
+                    out.push(Inline::Image {
+                        url: dest_url.into_string(),
+                        alt,
+                    });
                     None
                 }
                 _ => None,
@@ -456,7 +467,12 @@ fn toggle(styles: &mut Map<String, Value>, style: &str, on: bool) -> Option<Valu
 }
 
 fn image(url: String, alt: String) -> Value {
-    block("image", json!({"url": url, "caption": alt}), Vec::new(), Vec::new())
+    block(
+        "image",
+        json!({"url": url, "caption": alt}),
+        Vec::new(),
+        Vec::new(),
+    )
 }
 
 fn content_of(block: &Value) -> Vec<Value> {
@@ -465,7 +481,12 @@ fn content_of(block: &Value) -> Vec<Value> {
 
 fn push_paragraph(out: &mut Vec<Value>, value: &str) {
     if !value.trim().is_empty() {
-        out.push(block("paragraph", json!({}), vec![text(value, &Map::new())], Vec::new()));
+        out.push(block(
+            "paragraph",
+            json!({}),
+            vec![text(value, &Map::new())],
+            Vec::new(),
+        ));
     }
 }
 

@@ -9,11 +9,11 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use super::membership;
+use super::page_mentions::mentioned_users;
 use super::sub_issues::{self, AutoClosed};
 use super::task_filter::{self, FilterError, FilterGroup, ShowCompleted, SubIssuesDisplay};
 use super::task_relations::{self, RelationActor};
 use crate::audit::{self, AuditOutcome};
-use super::page_mentions::mentioned_users;
 use crate::collab::kind_task::members;
 use crate::collab::markdown_import::markdown_to_blocks;
 use crate::collab::sanitize::sanitize_blocks_for;
@@ -1573,7 +1573,9 @@ impl TaskRepository {
         let mut collab = match linked.map(parse_id).transpose()? {
             Some(task_id) => Some((
                 task_id,
-                CollabHub::of(&self.database).write(DocKey::task(task_id)).await?,
+                CollabHub::of(&self.database)
+                    .write(DocKey::task(task_id))
+                    .await?,
             )),
             None => None,
         };
@@ -1961,7 +1963,11 @@ impl TaskRepository {
     ) -> Result<TaskUpdateOutcome, TaskError> {
         // The description's live document is replaced in the same transaction (room lock first).
         let mut collab = match update.changes.changes_description() {
-            true => Some(CollabHub::of(&self.database).write(DocKey::task(update.id)).await?),
+            true => Some(
+                CollabHub::of(&self.database)
+                    .write(DocKey::task(update.id))
+                    .await?,
+            ),
             false => None,
         };
         let mut tx = self.database.immediate_transaction().await?;
@@ -2056,7 +2062,12 @@ impl TaskRepository {
         ids.sort_unstable();
         ids.dedup();
         for id in ids {
-            collabs.insert(id, CollabHub::of(&self.database).write(DocKey::task(id)).await?);
+            collabs.insert(
+                id,
+                CollabHub::of(&self.database)
+                    .write(DocKey::task(id))
+                    .await?,
+            );
         }
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
@@ -2789,7 +2800,10 @@ pub(super) async fn update_task_in_tx(
         .clone()
         .unwrap_or(current.title.clone());
     // A new description: its blocks (for `description_json` and the live document) and markdown.
-    let new_description = match (&update.changes.description, &update.changes.description_json) {
+    let new_description = match (
+        &update.changes.description,
+        &update.changes.description_json,
+    ) {
         (_, Some(blocks)) => Some(description_from_blocks(workspace_id, update.id, blocks)),
         (Some(markdown), None) => {
             let members = members(&mut **tx, workspace_id).await?;
@@ -2801,9 +2815,10 @@ pub(super) async fn update_task_in_tx(
         }
         (None, None) => None,
     };
-    let description = new_description
-        .as_ref()
-        .map_or_else(|| current.description.clone(), |(markdown, _)| markdown.clone());
+    let description = new_description.as_ref().map_or_else(
+        || current.description.clone(),
+        |(markdown, _)| markdown.clone(),
+    );
     let source_url = update
         .changes
         .source_url
@@ -3542,7 +3557,6 @@ fn updated_fields(update: &TaskUpdate, before: &TaskRecord, after: &TaskRecord) 
     Value::Object(changes)
 }
 
-#[allow(clippy::too_many_arguments)]
 /// The markdown copy of a description is cut to this many characters.
 const DESCRIPTION_MAX_CHARS: usize = 100_000;
 
@@ -3564,7 +3578,11 @@ fn description_markdown(blocks: &[Value]) -> String {
 }
 
 /// Blocks sent for a description: sanitized, with their markdown copy.
-fn description_from_blocks(workspace_id: Id, task_id: Id, blocks: &[Value]) -> (String, Vec<Value>) {
+fn description_from_blocks(
+    workspace_id: Id,
+    task_id: Id,
+    blocks: &[Value],
+) -> (String, Vec<Value>) {
     let blocks = sanitize_blocks_for(blocks, &task_policy(workspace_id, task_id));
     (description_markdown(&blocks), blocks)
 }
@@ -3646,7 +3664,9 @@ fn has_content(value: &Value) -> bool {
                 Some("image" | "file") if url.is_some_and(|url| !url.is_empty()) => true,
                 _ => map
                     .iter()
-                    .filter(|(key, _)| matches!(key.as_str(), "content" | "children" | "rows" | "cells"))
+                    .filter(|(key, _)| {
+                        matches!(key.as_str(), "content" | "children" | "rows" | "cells")
+                    })
                     .any(|(_, child)| has_content(child)),
             }
         }
@@ -3720,9 +3740,12 @@ pub(crate) async fn project_task_description(
     if let Some(editor) = editor {
         let before = match stored {
             Some(blocks) => blocks,
-            None => imported_description(tx, workspace_id, &row.get::<String, _>("description")).await?,
+            None => {
+                imported_description(tx, workspace_id, &row.get::<String, _>("description")).await?
+            }
         };
-        notify_description_mentions(tx, workspace_id, task_id, &before, blocks, editor, now).await?;
+        notify_description_mentions(tx, workspace_id, task_id, &before, blocks, editor, now)
+            .await?;
     }
     let markdown = description_markdown(blocks);
     sqlx::query(
@@ -3752,6 +3775,7 @@ pub(crate) async fn project_task_description(
     Ok(true)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn record_mutation(
     tx: &mut Transaction<'_, Any>,
     workspace_id: Id,

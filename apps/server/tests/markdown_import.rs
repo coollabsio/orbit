@@ -24,7 +24,9 @@ fn texts(block: &Value) -> Vec<(String, Value)> {
                 item["content"][0]["text"].clone(),
             ),
             kind => (
-                item["text"].as_str().map_or_else(|| kind.to_owned(), str::to_owned),
+                item["text"]
+                    .as_str()
+                    .map_or_else(|| kind.to_owned(), str::to_owned),
                 item["styles"].clone(),
             ),
         })
@@ -37,11 +39,26 @@ fn paragraph_with_marks() {
     assert_eq!(blocks.len(), 1);
     assert_eq!(blocks[0]["type"], "paragraph");
     let parts = texts(&blocks[0]);
-    assert!(parts.contains(&("b".into(), json!({"bold": true}))), "{parts:?}");
-    assert!(parts.contains(&("i".into(), json!({"italic": true}))), "{parts:?}");
-    assert!(parts.contains(&("s".into(), json!({"strike": true}))), "{parts:?}");
-    assert!(parts.contains(&("code".into(), json!({"code": true}))), "{parts:?}");
-    assert!(parts.contains(&("link:https://x.dev".into(), json!("l"))), "{parts:?}");
+    assert!(
+        parts.contains(&("b".into(), json!({"bold": true}))),
+        "{parts:?}"
+    );
+    assert!(
+        parts.contains(&("i".into(), json!({"italic": true}))),
+        "{parts:?}"
+    );
+    assert!(
+        parts.contains(&("s".into(), json!({"strike": true}))),
+        "{parts:?}"
+    );
+    assert!(
+        parts.contains(&("code".into(), json!({"code": true}))),
+        "{parts:?}"
+    );
+    assert!(
+        parts.contains(&("link:https://x.dev".into(), json!("l"))),
+        "{parts:?}"
+    );
     assert_eq!(
         round_trip("**b** *i* ~~s~~ `code` [l](https://x.dev)"),
         "**b** *i* ~~s~~ `code` [l](https://x.dev)\n"
@@ -108,7 +125,10 @@ fn exact_mention() {
     let ada = Id::new_v7();
     let blocks = markdown_to_blocks(
         "hi @Ada Lovelace, see this",
-        &[(ada, "Ada Lovelace".to_owned()), (Id::new_v7(), "Ada".to_owned())],
+        &[
+            (ada, "Ada Lovelace".to_owned()),
+            (Id::new_v7(), "Ada".to_owned()),
+        ],
     );
     let content = blocks[0]["content"].as_array().unwrap();
     assert_eq!(content[0]["text"], "hi ");
@@ -122,9 +142,15 @@ fn exact_mention() {
 fn ambiguous_mention_stays_text() {
     let blocks = markdown_to_blocks(
         "hi @Ada",
-        &[(Id::new_v7(), "Ada".to_owned()), (Id::new_v7(), "Ada".to_owned())],
+        &[
+            (Id::new_v7(), "Ada".to_owned()),
+            (Id::new_v7(), "Ada".to_owned()),
+        ],
     );
-    assert_eq!(blocks[0]["content"], json!([{"type": "text", "text": "hi @Ada", "styles": {}}]));
+    assert_eq!(
+        blocks[0]["content"],
+        json!([{"type": "text", "text": "hi @Ada", "styles": {}}])
+    );
 }
 
 #[test]

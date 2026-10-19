@@ -12,8 +12,3 @@ export function EditorFallback() {
     </div>
   )
 }
-
-/** An image or file block for an uploaded file. */
-export function fileBlock(file: File, url: string) {
-  return { type: file.type.startsWith('image/') ? 'image' : 'file', props: { url, name: file.name } }
-}

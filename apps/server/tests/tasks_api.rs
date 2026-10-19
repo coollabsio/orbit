@@ -7150,7 +7150,11 @@ async fn update_with_description_json_writes_markdown_copy() {
     assert_eq!(response.status(), StatusCode::OK);
     let task = response_json(response).await;
     assert_eq!(task["description"], "## Plan\n");
-    assert_eq!(task["description_json"].as_array().unwrap().len(), 1, "no page blocks in tasks");
+    assert_eq!(
+        task["description_json"].as_array().unwrap().len(),
+        1,
+        "no page blocks in tasks"
+    );
 }
 
 async fn post_comment(fixture: &Fixture, task: &Value, body: Value) -> (StatusCode, Value) {
@@ -7207,7 +7211,11 @@ async fn comment_body_json_writes_markdown_and_mentions() {
     assert_eq!(comment["body"], "Hi @Member\n");
     assert_eq!(comment["body_json"][0]["content"][1]["type"], "mention");
     assert_eq!(comment_mentions(&fixture, member).await, 1);
-    assert_eq!(comment_mentions(&fixture, other).await, 0, "client ids are ignored");
+    assert_eq!(
+        comment_mentions(&fixture, other).await,
+        0,
+        "client ids are ignored"
+    );
 }
 
 #[tokio::test]
@@ -7227,7 +7235,10 @@ async fn image_only_comment_is_valid() {
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{comment}");
-    assert!(comment["body"].as_str().unwrap().contains("!["), "{comment}");
+    assert!(
+        comment["body"].as_str().unwrap().contains("!["),
+        "{comment}"
+    );
 }
 
 #[tokio::test]

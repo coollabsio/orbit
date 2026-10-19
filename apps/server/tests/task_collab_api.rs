@@ -92,8 +92,14 @@ async fn edit_projects_json_and_markdown() {
     client.type_text(0, "Hello ").await;
     let task = wait_description(&server, &users, id, "Hello Start\n").await;
     assert_eq!(task["description_json"][0]["type"], "paragraph");
-    assert_eq!(task["description_json"][0]["content"][0]["text"], "Hello Start");
-    assert_eq!(task["version"], version, "co-editing does not bump the version");
+    assert_eq!(
+        task["description_json"][0]["content"][0]["text"],
+        "Hello Start"
+    );
+    assert_eq!(
+        task["version"], version,
+        "co-editing does not bump the version"
+    );
     server.stop().await;
 }
 
@@ -262,7 +268,10 @@ async fn rest_markdown_write_reaches_live_client() {
     client.wait_text("New text").await;
     let task = get_task(&server, &users, id).await;
     assert_eq!(task["description"], "New text");
-    assert_eq!(task["description_json"][0]["content"][0]["text"], "New text");
+    assert_eq!(
+        task["description_json"][0]["content"][0]["text"],
+        "New text"
+    );
     server.stop().await;
 }
 
@@ -292,7 +301,13 @@ async fn github_sync_replaces_doc() {
         state_changed: false,
     };
     let id = tasks
-        .sync_github_work_item(workspace_id, users.owner_id, issue("First"), "sync-1", TimestampMillis::now())
+        .sync_github_work_item(
+            workspace_id,
+            users.owner_id,
+            issue("First"),
+            "sync-1",
+            TimestampMillis::now(),
+        )
         .await
         .unwrap()
         .to_string();
@@ -300,11 +315,20 @@ async fn github_sync_replaces_doc() {
     let mut client = open(&server, &users, &users.owner, &id).await;
     assert_eq!(client.text(), "First");
     tasks
-        .sync_github_work_item(workspace_id, users.owner_id, issue("Second"), "sync-2", TimestampMillis::now())
+        .sync_github_work_item(
+            workspace_id,
+            users.owner_id,
+            issue("Second"),
+            "sync-2",
+            TimestampMillis::now(),
+        )
         .await
         .unwrap();
     client.wait_text("Second").await;
-    assert_eq!(get_task(&server, &users, &id).await["description"], "Second");
+    assert_eq!(
+        get_task(&server, &users, &id).await["description"],
+        "Second"
+    );
     server.stop().await;
 }
 
@@ -418,9 +442,15 @@ async fn live_mention_notifies_after_projection() {
     client
         .edit(|_, txn| {
             let fragment = txn.get_xml_fragment(FRAGMENT).expect("fragment");
-            let Some(XmlOut::Element(group)) = fragment.get(txn, 0) else { panic!("group") };
-            let Some(XmlOut::Element(container)) = group.get(txn, 0) else { panic!("block") };
-            let Some(XmlOut::Element(paragraph)) = container.get(txn, 0) else { panic!("paragraph") };
+            let Some(XmlOut::Element(group)) = fragment.get(txn, 0) else {
+                panic!("group")
+            };
+            let Some(XmlOut::Element(container)) = group.get(txn, 0) else {
+                panic!("block")
+            };
+            let Some(XmlOut::Element(paragraph)) = container.get(txn, 0) else {
+                panic!("paragraph")
+            };
             let mention = paragraph.push_back(txn, XmlElementPrelim::empty("mention"));
             mention.insert_attribute(txn, "userId", member.as_str());
             mention.insert_attribute(txn, "name", "Mia Member");

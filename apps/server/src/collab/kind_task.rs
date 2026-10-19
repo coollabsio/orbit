@@ -50,11 +50,17 @@ pub(super) async fn content(
         return Ok(blocks);
     }
     let members = members(pool, workspace_id).await?;
-    Ok(markdown_to_blocks(&row.get::<String, _>("description"), &members))
+    Ok(markdown_to_blocks(
+        &row.get::<String, _>("description"),
+        &members,
+    ))
 }
 
 /// The workspace's members as `(id, display name)`, for mentions in imported markdown.
-pub(crate) async fn members<'e, E>(executor: E, workspace_id: Id) -> Result<Vec<(Id, String)>, sqlx::Error>
+pub(crate) async fn members<'e, E>(
+    executor: E,
+    workspace_id: Id,
+) -> Result<Vec<(Id, String)>, sqlx::Error>
 where
     E: sqlx::Executor<'e, Database = Any>,
 {

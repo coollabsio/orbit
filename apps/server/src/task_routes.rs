@@ -24,8 +24,9 @@ use crate::repositories::task_filter::{
 };
 use crate::repositories::task_relations::{NewTaskRelationType, TaskRelationRecord};
 use crate::repositories::tasks::{
-    CommentContent, CreateTask, NotificationRecord, Page, ProjectAutomationPatch, SortOrder, TaskChanges,
-    TaskError, TaskFilter, TaskRecord, TaskRepository, TaskSort, TaskUpdate, normalize_project_key,
+    CommentContent, CreateTask, NotificationRecord, Page, ProjectAutomationPatch, SortOrder,
+    TaskChanges, TaskError, TaskFilter, TaskRecord, TaskRepository, TaskSort, TaskUpdate,
+    normalize_project_key,
 };
 use crate::repositories::views::ViewRepository;
 

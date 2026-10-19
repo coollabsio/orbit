@@ -94,12 +94,18 @@ pub struct DocKey {
 impl DocKey {
     #[must_use]
     pub fn page(id: Id) -> Self {
-        Self { kind: DocKind::Page, id }
+        Self {
+            kind: DocKind::Page,
+            id,
+        }
     }
 
     #[must_use]
     pub fn task(id: Id) -> Self {
-        Self { kind: DocKind::Task, id }
+        Self {
+            kind: DocKind::Task,
+            id,
+        }
     }
 }
 

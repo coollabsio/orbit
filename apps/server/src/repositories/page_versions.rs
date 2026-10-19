@@ -236,7 +236,9 @@ impl PageRepository {
     ) -> Result<PageRecord, PageError> {
         // The live document's latest edits are projected first, so the `restore` version holds
         // them; the room stays locked until the replacement is broadcast.
-        let mut collab = CollabHub::of(&self.database).write(DocKey::page(page_id)).await?;
+        let mut collab = CollabHub::of(&self.database)
+            .write(DocKey::page(page_id))
+            .await?;
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let current = page_in_tx(&mut tx, workspace_id, page_id, actor_id, false).await?;

@@ -7,10 +7,10 @@ import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
 import type { PageMentionMember } from '@/features/docs/editor/pageMentions'
 import { uploadInlineFile } from '@/features/tasks/api/inlineFiles'
-import { isEmptyRichText } from '@/features/tasks/lib/richText'
+import { fileBlock, isEmptyRichText } from '@/features/tasks/lib/richText'
 // Type-only import: erased at build time, so the BlockNote chunk stays lazy.
 import type { PageEditorHandle } from '@/features/docs/editor/PageEditor'
-import { EditorFallback, fileBlock, PageEditor } from './lazyEditor'
+import { EditorFallback, PageEditor } from './lazyEditor'
 
 /**
  * A comment or reply field: rich text with @mentions, the slash menu and inline files (paste, drop, paperclip).

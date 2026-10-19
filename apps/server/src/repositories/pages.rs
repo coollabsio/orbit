@@ -615,7 +615,11 @@ impl PageRepository {
         let mut collab = match &changes.content {
             Some(_) => {
                 self.get_visible(workspace_id, page_id, actor_id).await?;
-                Some(CollabHub::of(&self.database).write(DocKey::page(page_id)).await?)
+                Some(
+                    CollabHub::of(&self.database)
+                        .write(DocKey::page(page_id))
+                        .await?,
+                )
             }
             None => None,
         };
@@ -1656,7 +1660,9 @@ impl PageRepository {
     ) -> Result<PageRecord, PageError> {
         self.get_visible(workspace_id, page_id, actor_id).await?;
         // The room is held across the transaction, so no update lands between commit and flag.
-        let room: CollabLock = CollabHub::of(&self.database).lock_change(DocKey::page(page_id)).await?;
+        let room: CollabLock = CollabHub::of(&self.database)
+            .lock_change(DocKey::page(page_id))
+            .await?;
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let current = page_in_tx(&mut tx, workspace_id, page_id, actor_id, false).await?;

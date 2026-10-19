@@ -1161,15 +1161,25 @@ async fn inline_upload_hidden_from_list_but_downloadable() {
         .unwrap();
     assert_eq!(inline.status(), StatusCode::CREATED);
     let inline = response_json(inline).await;
-    assert_eq!(fixture.upload("listed.png", PNG).await.status(), StatusCode::CREATED);
+    assert_eq!(
+        fixture.upload("listed.png", PNG).await.status(),
+        StatusCode::CREATED
+    );
 
     let listed = fixture
         .app
         .clone()
-        .oneshot(cookie_request("GET", &fixture.task_attachments(), &fixture.owner_cookie))
+        .oneshot(cookie_request(
+            "GET",
+            &fixture.task_attachments(),
+            &fixture.owner_cookie,
+        ))
         .await
         .unwrap();
-    let items = response_json(listed).await["items"].as_array().unwrap().clone();
+    let items = response_json(listed).await["items"]
+        .as_array()
+        .unwrap()
+        .clone();
     assert_eq!(items.len(), 1);
     assert_eq!(items[0]["display_name"], "listed.png");
 

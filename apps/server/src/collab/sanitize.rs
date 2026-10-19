@@ -686,7 +686,10 @@ mod tests {
     }
 
     fn attachment_url(workspace: Id, task: Id) -> String {
-        format!("/api/v1/workspaces/{workspace}/tasks/{task}/attachments/{}/download", Id::new_v7())
+        format!(
+            "/api/v1/workspaces/{workspace}/tasks/{task}/attachments/{}/download",
+            Id::new_v7()
+        )
     }
 
     fn image(url: &str) -> Value {
@@ -746,7 +749,10 @@ mod tests {
             workspace_id: Id::new_v7(),
             doc_id: Id::new_v7(),
         };
-        assert_eq!(sanitize_blocks_for(&blocks, &policy), sanitize_blocks(&blocks));
+        assert_eq!(
+            sanitize_blocks_for(&blocks, &policy),
+            sanitize_blocks(&blocks)
+        );
     }
 
     #[test]

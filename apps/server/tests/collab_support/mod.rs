@@ -353,9 +353,16 @@ impl Client {
             .await;
         assert_eq!(status, 200, "{resource}");
         let epoch = resource["collab_epoch"].as_str().unwrap().to_owned();
-        Self::open_doc_with(server, users, token, kind, id, &format!("v=1&epoch={epoch}"))
-            .await
-            .expect("synced")
+        Self::open_doc_with(
+            server,
+            users,
+            token,
+            kind,
+            id,
+            &format!("v=1&epoch={epoch}"),
+        )
+        .await
+        .expect("synced")
     }
 
     /// Connects and syncs; `Err(close code)` when the server closes first.

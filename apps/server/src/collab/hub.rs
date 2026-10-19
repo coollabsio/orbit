@@ -428,12 +428,13 @@ impl CollabHub {
         }
         let kind = room.key.kind;
         let page = room.key.id.to_string();
-        let row =
-            sqlx::query(kind.sql("SELECT snapshot_seq, epoch FROM page_collab_docs WHERE page_id = $1"))
-                .bind(&page)
-                .fetch_optional(&mut *connection)
-                .await?
-                .ok_or(CollabError::NotFound)?;
+        let row = sqlx::query(
+            kind.sql("SELECT snapshot_seq, epoch FROM page_collab_docs WHERE page_id = $1"),
+        )
+        .bind(&page)
+        .fetch_optional(&mut *connection)
+        .await?
+        .ok_or(CollabError::NotFound)?;
         if row.get::<String, _>("epoch") != state.epoch {
             return Err(CollabError::Reset);
         }
@@ -865,11 +866,15 @@ impl CollabHub {
         .bind(room.key.id.to_string())
         .execute(&mut *tx)
         .await?;
-        sqlx::query(room.key.kind.sql("DELETE FROM page_collab_updates WHERE page_id = $1 AND seq <= $2"))
-            .bind(room.key.id.to_string())
-            .bind(state.last_seq)
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query(
+            room.key
+                .kind
+                .sql("DELETE FROM page_collab_updates WHERE page_id = $1 AND seq <= $2"),
+        )
+        .bind(room.key.id.to_string())
+        .bind(state.last_seq)
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await?;
         state.epoch = epoch;
         state.projected_seq = state.last_seq;
@@ -956,7 +961,10 @@ impl CollabHub {
             }
         };
         let blocks = project.then(|| {
-            sanitize_blocks_for(&blocknote::doc_to_blocks(state.awareness.doc()), &room.policy())
+            sanitize_blocks_for(
+                &blocknote::doc_to_blocks(state.awareness.doc()),
+                &room.policy(),
+            )
         });
         let snapshot = compact.then(|| state.full_state());
         let result: Result<(i64, bool), CollabError> = async {
@@ -966,9 +974,10 @@ impl CollabHub {
             }
             let mut audited = false;
             if let Some(blocks) = &blocks {
-                let audited_at: Option<i64> = sqlx::query_scalar(key.kind.sql(
-                    "SELECT audited_at FROM page_collab_docs WHERE page_id = $1",
-                ))
+                let audited_at: Option<i64> = sqlx::query_scalar(
+                    key.kind
+                        .sql("SELECT audited_at FROM page_collab_docs WHERE page_id = $1"),
+                )
                 .bind(key.id.to_string())
                 .fetch_optional(&mut *tx)
                 .await?
@@ -1949,11 +1958,14 @@ async fn compact_log(
     .bind(key.id.to_string())
     .execute(&mut **tx)
     .await?;
-    sqlx::query(key.kind.sql("DELETE FROM page_collab_updates WHERE page_id = $1 AND seq <= $2"))
-        .bind(key.id.to_string())
-        .bind(seq)
-        .execute(&mut **tx)
-        .await?;
+    sqlx::query(
+        key.kind
+            .sql("DELETE FROM page_collab_updates WHERE page_id = $1 AND seq <= $2"),
+    )
+    .bind(key.id.to_string())
+    .bind(seq)
+    .execute(&mut **tx)
+    .await?;
     Ok(())
 }
 
