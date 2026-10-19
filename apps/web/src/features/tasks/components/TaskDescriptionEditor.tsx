@@ -63,9 +63,15 @@ export function TaskDescriptionEditor({
   const onProblem = (problem: CollabProblem) => {
     switch (collabProblemAction(problem)) {
       case 'leave':
-        // the task view shows the trashed or missing task once the refresh lands
+        // The task view shows the trashed or missing task once the refresh lands. A task that is back by then
+        // (restored, access returned) reconnects; one restored later opens a fresh editor with its view.
         setLost(true)
-        void refresh()
+        void refresh().then(async () => {
+          const { response } = await getTask({ client: apiClient, path: { workspace_id: workspaceId, task_id: task.id } })
+          if (!response?.ok) return
+          setLost(false)
+          setGeneration((current) => current + 1)
+        })
         break
       case 'unauthorized':
         window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
