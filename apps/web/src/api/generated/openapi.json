@@ -35618,7 +35618,7 @@
           },
           "kind": {
             "type": "string",
-            "description": "`task_assigned`, `comment_mentioned` (task comment), `page_comment_mentioned`,\n`page_mentioned` (an @mention in a page body) or `chat_mentioned` (a chat message)."
+            "description": "`task_assigned`, `comment_mentioned` (task comment), `description_mentioned` (task\ndescription), `page_comment_mentioned`, `page_mentioned` (an @mention in a page body) or\n`chat_mentioned` (a chat message)."
           },
           "page_block_id": {
             "type": [
@@ -37376,7 +37376,7 @@
                 },
                 "kind": {
                   "type": "string",
-                  "description": "`task_assigned`, `comment_mentioned` (task comment), `page_comment_mentioned`,\n`page_mentioned` (an @mention in a page body) or `chat_mentioned` (a chat message)."
+                  "description": "`task_assigned`, `comment_mentioned` (task comment), `description_mentioned` (task\ndescription), `page_comment_mentioned`, `page_mentioned` (an @mention in a page body) or\n`chat_mentioned` (a chat message)."
                 },
                 "page_block_id": {
                   "type": [

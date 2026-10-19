@@ -1415,8 +1415,9 @@ export type NotificationRecord = {
     created_at: string;
     id: string;
     /**
-     * `task_assigned`, `comment_mentioned` (task comment), `page_comment_mentioned`,
-     * `page_mentioned` (an @mention in a page body) or `chat_mentioned` (a chat message).
+     * `task_assigned`, `comment_mentioned` (task comment), `description_mentioned` (task
+     * description), `page_comment_mentioned`, `page_mentioned` (an @mention in a page body) or
+     * `chat_mentioned` (a chat message).
      */
     kind: string;
     /**
@@ -2105,8 +2106,9 @@ export type PageNotificationRecord = {
         created_at: string;
         id: string;
         /**
-         * `task_assigned`, `comment_mentioned` (task comment), `page_comment_mentioned`,
-         * `page_mentioned` (an @mention in a page body) or `chat_mentioned` (a chat message).
+         * `task_assigned`, `comment_mentioned` (task comment), `description_mentioned` (task
+         * description), `page_comment_mentioned`, `page_mentioned` (an @mention in a page body) or
+         * `chat_mentioned` (a chat message).
          */
         kind: string;
         /**

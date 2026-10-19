@@ -307,3 +307,128 @@ async fn github_sync_replaces_doc() {
     assert_eq!(get_task(&server, &users, &id).await["description"], "Second");
     server.stop().await;
 }
+
+async fn description_mentions(server: &Server, recipient: Id) -> i64 {
+    sqlx::query_scalar(
+        "SELECT COUNT(*) FROM notifications WHERE recipient_user_id = $1 AND kind = 'description_mentioned'",
+    )
+    .bind(recipient.to_string())
+    .fetch_one(server.database.pool())
+    .await
+    .unwrap()
+}
+
+fn mention_paragraph(user: Id, name: &str, text: &str) -> Value {
+    json!([{"type": "paragraph", "content": [
+        {"type": "text", "text": text, "styles": {}},
+        {"type": "mention", "props": {"userId": user.to_string(), "name": name}}
+    ]}])
+}
+
+#[tokio::test]
+async fn new_description_mention_notifies_once() {
+    let root = TempDir::new().unwrap();
+    let server = Server::start(&root, fast_config()).await;
+    let users = setup(&server).await;
+    let task = create_task(&server, &users, "Start").await;
+    let id = task["id"].as_str().unwrap();
+    let path = format!("/api/v1/workspaces/{}/tasks/{id}", users.workspace);
+
+    let (status, task) = server
+        .api(
+            &users.owner,
+            "PATCH",
+            &path,
+            Some(json!({
+                "expected_version": task["version"],
+                "description_json": mention_paragraph(users.member_id, "Mia Member", "Ask "),
+            })),
+        )
+        .await;
+    assert_eq!(status, 200, "{task}");
+    assert_eq!(description_mentions(&server, users.member_id).await, 1);
+    let (status, body) = server
+        .api(
+            &users.owner,
+            "PATCH",
+            &path,
+            Some(json!({
+                "expected_version": task["version"],
+                "description_json": mention_paragraph(users.member_id, "Mia Member", "Still ask "),
+            })),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(description_mentions(&server, users.member_id).await, 1);
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn self_mention_is_ignored() {
+    let root = TempDir::new().unwrap();
+    let server = Server::start(&root, fast_config()).await;
+    let users = setup(&server).await;
+    let task = create_task(&server, &users, "Start").await;
+    let id = task["id"].as_str().unwrap();
+    let (status, body) = server
+        .api(
+            &users.owner,
+            "PATCH",
+            &format!("/api/v1/workspaces/{}/tasks/{id}", users.workspace),
+            Some(json!({
+                "expected_version": task["version"],
+                "description_json": mention_paragraph(users.owner_id, "Olivia Owner", "Me "),
+            })),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(description_mentions(&server, users.owner_id).await, 0);
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn imported_mentions_do_not_notify_on_first_projection() {
+    let root = TempDir::new().unwrap();
+    let server = Server::start(&root, fast_config()).await;
+    let users = setup(&server).await;
+    let task = create_task(&server, &users, "Ask @Mia Member").await;
+    let id = task["id"].as_str().unwrap();
+
+    let mut client = open(&server, &users, &users.owner, id).await;
+    client.type_text(0, "Please ").await;
+    let task = wait_description(&server, &users, id, "Please Ask @Mia Member\n").await;
+    assert_eq!(task["description_json"][0]["content"][1]["type"], "mention");
+    assert_eq!(description_mentions(&server, users.member_id).await, 0);
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn live_mention_notifies_after_projection() {
+    use orbit_server::collab::blocknote::FRAGMENT;
+    use yrs::{ReadTxn, Xml, XmlElementPrelim, XmlFragment, XmlOut};
+
+    let root = TempDir::new().unwrap();
+    let server = Server::start(&root, fast_config()).await;
+    let users = setup(&server).await;
+    let task = create_task(&server, &users, "Start").await;
+    let id = task["id"].as_str().unwrap();
+
+    let mut client = open(&server, &users, &users.owner, id).await;
+    let member = users.member_id.to_string();
+    client
+        .edit(|_, txn| {
+            let fragment = txn.get_xml_fragment(FRAGMENT).expect("fragment");
+            let Some(XmlOut::Element(group)) = fragment.get(txn, 0) else { panic!("group") };
+            let Some(XmlOut::Element(container)) = group.get(txn, 0) else { panic!("block") };
+            let Some(XmlOut::Element(paragraph)) = container.get(txn, 0) else { panic!("paragraph") };
+            let mention = paragraph.push_back(txn, XmlElementPrelim::empty("mention"));
+            mention.insert_attribute(txn, "userId", member.as_str());
+            mention.insert_attribute(txn, "name", "Mia Member");
+        })
+        .await;
+    wait_until("the mention notification", || async {
+        description_mentions(&server, users.member_id).await == 1
+    })
+    .await;
+    server.stop().await;
+}

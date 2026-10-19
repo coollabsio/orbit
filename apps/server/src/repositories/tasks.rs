@@ -13,6 +13,7 @@ use super::sub_issues::{self, AutoClosed};
 use super::task_filter::{self, FilterError, FilterGroup, ShowCompleted, SubIssuesDisplay};
 use super::task_relations::{self, RelationActor};
 use crate::audit::{self, AuditOutcome};
+use super::page_mentions::mentioned_users;
 use crate::collab::kind_task::members;
 use crate::collab::markdown_import::markdown_to_blocks;
 use crate::collab::sanitize::sanitize_blocks_for;
@@ -191,8 +192,9 @@ pub struct NotificationRecord {
     pub recipient_user_id: Id,
     #[schema(value_type = String)]
     pub actor_user_id: Id,
-    /// `task_assigned`, `comment_mentioned` (task comment), `page_comment_mentioned`,
-    /// `page_mentioned` (an @mention in a page body) or `chat_mentioned` (a chat message).
+    /// `task_assigned`, `comment_mentioned` (task comment), `description_mentioned` (task
+    /// description), `page_comment_mentioned`, `page_mentioned` (an @mention in a page body) or
+    /// `chat_mentioned` (a chat message).
     pub kind: String,
     /// Set for task notifications.
     #[schema(value_type = Option<String>)]
@@ -2896,6 +2898,12 @@ pub(super) async fn update_task_in_tx(
     let Some((_, blocks)) = new_description else {
         return Ok(None);
     };
+    let before = match current.description_json.clone() {
+        Some(blocks) => blocks,
+        None => imported_description(tx, workspace_id, &current.description).await?,
+    };
+    notify_description_mentions(tx, workspace_id, update.id, &before, &blocks, actor_id, now)
+        .await?;
     sqlx::query("UPDATE tasks SET description_json = $1 WHERE id = $2")
         .bind(Value::Array(blocks.clone()).to_string())
         .bind(update.id.to_string())
@@ -3282,7 +3290,7 @@ async fn notify_users(
     request: NotificationRequest<'_>,
     now: TimestampMillis,
 ) -> Result<(), TaskError> {
-    let field = if request.kind == "comment_mentioned" {
+    let field = if matches!(request.kind, "comment_mentioned" | "description_mentioned") {
         "mentioned_user_ids"
     } else {
         "assignee_ids"
@@ -3510,6 +3518,65 @@ fn description_from_blocks(workspace_id: Id, task_id: Id, blocks: &[Value]) -> (
     (description_markdown(&blocks), blocks)
 }
 
+/// The blocks a description written before rich text has once it is opened (see
+/// [`crate::collab::kind_task::content`]).
+async fn imported_description(
+    tx: &mut Transaction<'_, Any>,
+    workspace_id: Id,
+    markdown: &str,
+) -> Result<Vec<Value>, TaskError> {
+    let members = members(&mut **tx, workspace_id).await?;
+    Ok(markdown_to_blocks(markdown, &members))
+}
+
+/// Notifies members mentioned in `after` but not in `before` (`description_mentioned`); the
+/// editor and people who left the workspace are skipped.
+async fn notify_description_mentions(
+    tx: &mut Transaction<'_, Any>,
+    workspace_id: Id,
+    task_id: Id,
+    before: &[Value],
+    after: &[Value],
+    editor: Id,
+    now: TimestampMillis,
+) -> Result<(), TaskError> {
+    let known = mentioned_users(before);
+    let mut recipients = Vec::new();
+    for user_id in mentioned_users(after)
+        .into_keys()
+        .filter(|id| *id != editor && !known.contains_key(id))
+    {
+        let Flag(member) = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM memberships JOIN users ON users.id = memberships.user_id \
+             WHERE memberships.workspace_id = $1 AND memberships.user_id = $2 \
+             AND users.suspended_at IS NULL)",
+        )
+        .bind(workspace_id.to_string())
+        .bind(user_id.to_string())
+        .fetch_one(&mut **tx)
+        .await?;
+        if member {
+            recipients.push(user_id);
+        }
+    }
+    if recipients.is_empty() {
+        return Ok(());
+    }
+    notify_users(
+        tx,
+        workspace_id,
+        editor,
+        NotificationRequest {
+            kind: "description_mentioned",
+            task_id,
+            comment_id: None,
+            recipients: &recipients,
+        },
+        now,
+    )
+    .await
+}
+
 /// Writes a co-edited description: `description_json` and its markdown copy, without a version
 /// bump (title, status and the other fields keep their version check). With `audit`, records
 /// `task.updated` (which also tells other clients to refresh). Returns whether anything changed.
@@ -3524,17 +3591,26 @@ pub(crate) async fn project_task_description(
     request_id: &str,
     now: TimestampMillis,
 ) -> Result<bool, TaskError> {
-    let stored: Option<String> = sqlx::query_scalar(
-        "SELECT description_json FROM tasks WHERE id = $1 AND workspace_id = $2",
+    let row = sqlx::query(
+        "SELECT description, description_json FROM tasks WHERE id = $1 AND workspace_id = $2",
     )
     .bind(task_id.to_string())
     .bind(workspace_id.to_string())
     .fetch_optional(&mut **tx)
     .await?
     .ok_or(TaskError::NotFound)?;
-    let before: Option<Vec<Value>> = stored.and_then(|json| serde_json::from_str(&json).ok());
-    if before.as_deref() == Some(blocks) {
+    let stored: Option<Vec<Value>> = row
+        .get::<Option<String>, _>("description_json")
+        .and_then(|json| serde_json::from_str(&json).ok());
+    if stored.as_deref() == Some(blocks) {
         return Ok(false);
+    }
+    if let Some(editor) = editor {
+        let before = match stored {
+            Some(blocks) => blocks,
+            None => imported_description(tx, workspace_id, &row.get::<String, _>("description")).await?,
+        };
+        notify_description_mentions(tx, workspace_id, task_id, &before, blocks, editor, now).await?;
     }
     let markdown = description_markdown(blocks);
     sqlx::query(

@@ -872,6 +872,11 @@ impl PushService {
                     format!("{actor} mentioned you in a comment"),
                     subject("task_title"),
                 ),
+                "description_mentioned" => (
+                    PushKind::Mentions,
+                    format!("{actor} mentioned you in a task"),
+                    subject("task_title"),
+                ),
                 "page_comment_mentioned" => (
                     PushKind::Mentions,
                     format!("{actor} mentioned you in a comment"),
