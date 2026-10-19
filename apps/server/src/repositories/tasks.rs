@@ -1486,7 +1486,9 @@ impl TaskRepository {
             }
             None => (input.description.clone(), None),
         };
-        let description_json = blocks.as_ref().map(|blocks| Value::Array(blocks.clone()).to_string());
+        let description_json = blocks
+            .as_ref()
+            .map(|blocks| Value::Array(blocks.clone()).to_string());
         sqlx::query(
             "INSERT INTO tasks (id, workspace_id, project_id, status_id, title, description, source_url, priority, position, creator_id, due_start_at, due_at, parent_task_id, version, created_at, updated_at, description_json) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 0, $14, $15, $16)",
@@ -1512,7 +1514,8 @@ impl TaskRepository {
         replace_assignees(&mut tx, id, &input.assignee_ids).await?;
         if let Some(blocks) = &blocks {
             // everyone the new description mentions is newly mentioned
-            notify_description_mentions(&mut tx, workspace_id, id, &[], blocks, actor_id, now).await?;
+            notify_description_mentions(&mut tx, workspace_id, id, &[], blocks, actor_id, now)
+                .await?;
         }
         replace_labels(&mut tx, id, &input.label_ids).await?;
         notify_users(
