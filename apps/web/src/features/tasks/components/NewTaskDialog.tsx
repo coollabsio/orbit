@@ -296,6 +296,8 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
                     ref={descriptionRef}
                     pageId={`new-task:${descriptionKey}`}
                     profile="task"
+                    // no task yet: images of other tasks in the workspace stay (by link); nothing uploads here
+                    fileScope={{ workspaceId: workspace.id, taskId: '' }}
                     placeholder="description"
                     initialMarkdown={descriptionKey === 0 ? initialDescription : undefined}
                     editable={!busy}

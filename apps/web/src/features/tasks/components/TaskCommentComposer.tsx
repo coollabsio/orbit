@@ -33,8 +33,20 @@ export function TaskCommentComposer({
   compact?: boolean
   onSend: (bodyJson: unknown[]) => Promise<unknown>
 }) {
-  const editorRef = useRef<PageEditorHandle>(null)
+  const editorRef = useRef<PageEditorHandle | null>(null)
   const input = useRef<HTMLInputElement>(null)
+  /** A reply field mounts its editor when it is first used (a thread list would mount one per thread). */
+  const [active, setActive] = useState(!compact)
+  const focusOnMount = useRef(false)
+  const setEditor = useCallback((handle: PageEditorHandle | null) => {
+    editorRef.current = handle
+    if (handle && focusOnMount.current) {
+      focusOnMount.current = false
+      handle.focus()
+    }
+  }, [])
+  /** Files still uploading: a send now would keep an empty image block. */
+  const [uploads, setUploads] = useState(0)
   /** Bumped after a send: a fresh, empty editor. */
   const [draftKey, setDraftKey] = useState(0)
   const [hasContent, setHasContent] = useState(false)
@@ -44,7 +56,7 @@ export function TaskCommentComposer({
 
   const send = async () => {
     const content = editorRef.current?.getContent() ?? []
-    if (sending.current || pending || isEmptyRichText(content)) return
+    if (sending.current || pending || uploads > 0 || isEmptyRichText(content)) return
     sending.current = true
     try {
       await onSend(content)
@@ -58,11 +70,14 @@ export function TaskCommentComposer({
   }
   const uploadFile = useCallback(
     async (file: File) => {
+      setUploads((count) => count + 1)
       try {
         return await uploadInlineFile(workspaceId, taskId, file)
       } catch (failure) {
         toast.error(`Could not upload “${file.name}”.`)
         throw failure
+      } finally {
+        setUploads((count) => count - 1)
       }
     },
     [workspaceId, taskId],
@@ -79,6 +94,21 @@ export function TaskCommentComposer({
   )
   const fileScope = useMemo(() => ({ workspaceId, taskId }), [workspaceId, taskId])
 
+  if (!active) {
+    return (
+      <button
+        type="button"
+        className="w-full cursor-text py-1 text-left text-[13px] text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        onClick={() => {
+          focusOnMount.current = true
+          setActive(true)
+        }}
+      >
+        Leave a reply…
+      </button>
+    )
+  }
+
   return (
     // one box holds the field and its actions; a reply (`compact`) sits inside its thread card
     <div data-realtime-safe="" className={cn('relative flex flex-wrap items-end', compact ? 'gap-x-1' : 'rounded-[10px] border bg-card transition-colors focus-within:border-ring')}>
@@ -86,7 +116,7 @@ export function TaskCommentComposer({
         <Suspense fallback={<EditorFallback />}>
           <PageEditor
             key={draftKey}
-            ref={editorRef}
+            ref={setEditor}
             pageId={`comment:${taskId}:${draftKey}`}
             profile="task"
             fileScope={fileScope}
@@ -119,7 +149,7 @@ export function TaskCommentComposer({
         {error ? (
           <Button type="button" size="sm" disabled={pending} onClick={() => void send()}>Retry</Button>
         ) : (
-          <Tip label={sendTitle}><Button type="button" size="icon-sm" className="rounded-full" aria-label={pending ? 'Sending…' : 'Send'} disabled={pending || !hasContent} onClick={() => void send()}><ArrowUp /></Button></Tip>
+          <Tip label={sendTitle}><Button type="button" size="icon-sm" className="rounded-full" aria-label={pending ? 'Sending…' : 'Send'} disabled={pending || !hasContent || uploads > 0} onClick={() => void send()}><ArrowUp /></Button></Tip>
         )}
       </div>
     </div>

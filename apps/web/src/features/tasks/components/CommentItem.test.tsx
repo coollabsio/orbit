@@ -1,6 +1,6 @@
 import { afterEach, expect, mock, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
@@ -122,4 +122,36 @@ test('an unchanged Save on an old attachment-only comment just closes the editor
 
   expect(view.queryByText('Delete comment?')).toBeNull()
   expect(view.getByRole('button', { name: 'Copy text' })).toBeTruthy()
+})
+
+/** Controls when the comment counts as near the screen. */
+function stubIntersections() {
+  const observers: Array<(entries: Array<{ isIntersecting: boolean }>) => void> = []
+  const original = globalThis.IntersectionObserver
+  globalThis.IntersectionObserver = class {
+    constructor(callback: (entries: Array<{ isIntersecting: boolean }>) => void) { observers.push(callback) }
+    observe() {}
+    disconnect() {}
+    unobserve() {}
+    takeRecords() { return [] }
+  } as unknown as typeof IntersectionObserver
+  return {
+    reveal: () => act(() => observers.forEach((callback) => callback([{ isIntersecting: true }]))),
+    restore: () => { globalThis.IntersectionObserver = original },
+  }
+}
+
+test('a comment away from the screen shows its text without an editor, and mounts the editor near the screen', async () => {
+  const io = stubIntersections()
+  try {
+    const view = render(<CommentItem state={state()} taskId="task-1" comment={comment({ body: 'Far **away**', bodyJson: null })} />, { wrapper: wrapper() })
+    expect(view.getByText('away').tagName).toBe('STRONG')
+    expect(view.container.querySelector('.bn-editor')).toBeNull()
+
+    io.reveal()
+
+    await waitFor(() => expect(view.container.querySelector('.bn-editor')).toBeTruthy(), { timeout: 4000 })
+  } finally {
+    io.restore()
+  }
 })

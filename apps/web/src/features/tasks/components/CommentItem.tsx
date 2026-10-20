@@ -11,6 +11,9 @@ import { Attachments } from '@/components/common/Attachments'
 import { contentEquals } from '@/features/docs/editor/content'
 import { uploadInlineFile } from '@/features/tasks/api/inlineFiles'
 import { commentSaveAction, isEmptyRichText } from '@/features/tasks/lib/richText'
+import { useNearViewport } from '@/features/tasks/lib/useNearViewport'
+import { renderMarkdownBlocks } from '@/lib/markdown'
+import { buildMentionTokens } from '@/lib/mentions'
 // Type-only import: erased at build time, so the BlockNote chunk stays lazy.
 import type { PageEditorHandle } from '@/features/docs/editor/PageEditor'
 import { EditorFallback, PageEditor } from './lazyEditor'
@@ -44,6 +47,8 @@ export function CommentItem({ state, taskId, comment, reply }: CommentItemProps)
   const name = author?.name ?? 'Someone'
   const mentions = useMemo(() => ({ members: state.users, candidates: state.users.filter((user) => !user.suspended), privatePage: false }), [state.users])
   const fileScope = useMemo(() => ({ workspaceId: workspace.id, taskId }), [workspace.id, taskId])
+  const [bodyRef, nearScreen] = useNearViewport<HTMLDivElement>()
+  const mentionTokens = useMemo(() => buildMentionTokens(state.users, []), [state.users])
   const hasBody = shown !== null || (comment.bodyJson ? !isEmptyRichText(comment.bodyJson) : comment.body.trim() !== '')
 
   const startEdit = () => {
@@ -57,6 +62,9 @@ export function CommentItem({ state, taskId, comment, reply }: CommentItemProps)
     if (action === 'confirm-delete') {
       setConfirmDelete(true)
       return
+    }
+    if (action === 'close' && changed && isEmptyRichText(content)) {
+      toast.info('The comment keeps its text. To remove it with its files, delete the comment.')
     }
     if (action === 'save') {
       setSaved({ version: comment.version, content })
@@ -118,7 +126,9 @@ export function CommentItem({ state, taskId, comment, reply }: CommentItemProps)
             ) : null}
           </div>
           {editing || hasBody ? (
-            <div data-realtime-safe={editing ? '' : undefined} className={cn('text-[13px] leading-[19px] text-foreground [overflow-wrap:anywhere]', editing ? 'mt-1.5 rounded-md border px-2 py-1' : 'mt-0.5')}>
+            <div ref={bodyRef} data-realtime-safe={editing ? '' : undefined} className={cn('text-[13px] leading-[19px] text-foreground [overflow-wrap:anywhere]', editing ? 'mt-1.5 rounded-md border px-2 py-1' : 'mt-0.5')}>
+              {/* far from the screen: the markdown copy (cheap); the editor mounts once the comment comes near */}
+              {!editing && !nearScreen ? renderMarkdownBlocks(comment.body, comment.id, mentionTokens) : (
               <Suspense fallback={<EditorFallback />}>
                 <PageEditor
                   // a saved edit brings a new version: start from the stored content again
@@ -139,6 +149,7 @@ export function CommentItem({ state, taskId, comment, reply }: CommentItemProps)
                   ariaLabel={editing ? 'Edit comment' : 'Comment'}
                 />
               </Suspense>
+              )}
             </div>
           ) : null}
           {editing ? (

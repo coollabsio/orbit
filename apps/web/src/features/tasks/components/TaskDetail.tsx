@@ -486,7 +486,7 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
           <div className="col-start-1 min-w-0 min-[900px]:mx-auto min-[900px]:w-full min-[900px]:max-w-[840px] min-[900px]:px-10 min-[900px]:pb-12">
             <ActivityFeed task={task} state={state} onOpenTask={onOpenTask} />
 
-            {/* the chat composer: markdown, @mentions, emoji, attachments (paste / drop / pick) */}
+            {/* the rich text comment field: blocks, @mentions, inline files (paste / drop / pick) */}
             <div className="mt-4 max-[899px]:mt-3">
               <TaskCommentComposer workspaceId={workspace.id} taskId={task.id} pending={createComment.isPending} error={createComment.isError ? 'Comment failed.' : undefined} members={users} onSend={(bodyJson) => createComment.mutateAsync({ bodyJson })} />
             </div>

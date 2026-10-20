@@ -56,9 +56,11 @@ Core files: `TasksPage.tsx`, `components/TaskList.tsx`, `components/TaskBoard.ts
   minutes, not while a mention is removed and added back).
 - Files pasted, dropped or picked into the description or a comment become image/file blocks; they are task
   attachments with `inline = 1`, left out of the attachment list (which shows only older attachments). Images and files
-  pasted from another task or a docs page are copied into the task (download, inline upload, the block points at the
-  copy), so they stay when the source goes to the trash; the server still accepts any task attachment URL of the
-  workspace (API writes). The new task
+  pasted into a task's description or comments from another task or a docs page are copied into the task (download,
+  inline upload, the block points at the copy), so they stay when the source goes to the trash. The new task dialog has
+  no task to upload to: images of other tasks stay as links, docs page images are dropped. The server accepts any task
+  attachment URL of the workspace (API writes). Comments mount their editors only near the screen (the markdown copy
+  shows until then), and reply fields when first used. The new task
   dialog keeps file chips and appends the files to the description after create.
 - Comments: Cmd/Ctrl+Enter sends; edits use the same editor (Cmd/Ctrl+Enter saves, Esc cancels; Save on an emptied
   comment asks to delete it; an unchanged Save sends nothing); the server reads mentions from the mention nodes and
