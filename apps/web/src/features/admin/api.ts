@@ -1,8 +1,8 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
-import { createBackup, createRecoveryLink, deleteBackup, getInstanceSettings, getJobLimits, saveJobLimits, listAdminUsers, listBackups, listGlobalAudit, removeS3, removeSmtp, resetTwoFactor, saveS3, saveStorageOptions, setInstanceAdmin, startImageCompression, saveSmtp, sendTestEmail, setAccountSuspension, setRegistration } from '@/api/generated/sdk.gen'
-import type { InstanceSettingsView, JobLimitsBody, S3Body, SmtpBody, StorageOptionsBody } from '@/api/generated/types.gen'
+import { createBackup, createRecoveryLink, deleteBackup, getInstanceSettings, getJobLimits, saveJobLimits, listAdminUsers, listBackups, listGlobalAudit, removeS3, removeSmtp, resetTwoFactor, saveLimits, saveS3, saveStorageOptions, setInstanceAdmin, startImageCompression, saveSmtp, sendTestEmail, setAccountSuspension, setRegistration } from '@/api/generated/sdk.gen'
+import type { InstanceSettingsView, JobLimitsBody, LimitsView, S3Body, SmtpBody, StorageOptionsBody } from '@/api/generated/types.gen'
 
 /** Accounts on this instance in cursor pages; `search` matches part of the name or email. Admins only. */
 export function useAdminUsers(search: string) {
@@ -190,6 +190,13 @@ export function useRemoveS3() {
 export function useSaveStorageOptions() {
   return useSettingsWrite(async (body: StorageOptionsBody) => {
     const { data } = await saveStorageOptions({ client: apiClient, throwOnError: true, body })
+    return data
+  })
+}
+
+export function useSaveLimits() {
+  return useSettingsWrite(async (body: LimitsView) => {
+    const { data } = await saveLimits({ client: apiClient, throwOnError: true, body })
     return data
   })
 }

@@ -193,7 +193,7 @@ pub async fn move_images_to_blobs(
                 continue;
             };
             let blob = finalization
-                .finalize_bytes_in_transaction(&mut transaction, scope, &bytes, now)
+                .finalize_unmetered_bytes_in_transaction(&mut transaction, scope, &bytes, now)
                 .await?;
             sqlx::query(sqlx::AssertSqlSafe(format!(
                 "UPDATE {table} SET bytes = NULL, blob_id = $1 WHERE {key} = $2"

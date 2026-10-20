@@ -390,7 +390,12 @@ impl MigrationRunner {
                 ),
                 Migration::new(
                     53,
-                    include_str!("../../../../apps/server/migrations/0053_job_limits.sql"),
+                    include_str!("../../../../apps/server/migrations/0053_tenant_limits.sql"),
+                    false,
+                ),
+                Migration::new(
+                    54,
+                    include_str!("../../../../apps/server/migrations/0054_job_limits.sql"),
                     false,
                 ),
             ],
@@ -431,7 +436,12 @@ impl MigrationRunner {
             ),
             Migration::new(
                 53,
-                include_str!("../../../../apps/server/migrations/postgres/0053_job_limits.sql"),
+                include_str!("../../../../apps/server/migrations/postgres/0053_tenant_limits.sql"),
+                false,
+            ),
+            Migration::new(
+                54,
+                include_str!("../../../../apps/server/migrations/postgres/0054_job_limits.sql"),
                 false,
             ),
         ];

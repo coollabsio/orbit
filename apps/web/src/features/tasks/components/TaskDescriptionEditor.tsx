@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { apiClient, UNAUTHORIZED_EVENT } from '@/api/client'
+import { storageQuotaDetail } from '@/api/problem'
 import { getTask } from '@/api/generated/sdk.gen'
 import { queryKeys } from '@/api/queryKeys'
 import { Button } from '@/components/ui/button'
@@ -125,7 +126,7 @@ export function TaskDescriptionEditor({
       try {
         return await uploadInlineFile(workspaceId, task.id, file)
       } catch (error) {
-        toast.error(`Could not upload “${file.name}”.`)
+        toast.error(storageQuotaDetail(error) ?? `Could not upload “${file.name}”.`)
         throw error
       }
     },

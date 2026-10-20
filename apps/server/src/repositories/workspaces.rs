@@ -6,8 +6,8 @@ use orbit_domain::{Actor, MembershipDenied, Permission, Policy, WorkspaceDefault
 use orbit_platform::{
     AttachmentMutationCoordinator, BLOB_REFERENCE_COUNT, BlobStore, BlobStoreError, Database, Id,
     IssuedSession, Job, JobError, JobKind, JobKindRegistrationError, JobStore, LocalBlobStore,
-    RecurringSchedule, Row, ScheduleError, Scheduler, TimestampMillis, Worker, WorkerConfig,
-    WorkerError, generate_opaque_token, normalize_email,
+    RecurringSchedule, Row, ScheduleError, Scheduler, TimestampMillis, WORKSPACE_STORAGE_USED,
+    Worker, WorkerConfig, WorkerError, generate_opaque_token, normalize_email,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -163,6 +163,16 @@ pub struct MaintenanceSummary {
     pub occurred_at: TimestampMillis,
 }
 
+/// How many bytes of files a workspace stores, and its quota.
+#[derive(Clone, Copy, Debug, Serialize, ToSchema)]
+pub struct WorkspaceStorage {
+    /// Each stored file once, however often it is attached. A deleted file stops counting about a day after its
+    /// last reference goes (trashed tasks, pages and messages keep their files until the trash is emptied).
+    pub used_bytes: u64,
+    /// `null` is unlimited.
+    pub quota_bytes: Option<u64>,
+}
+
 #[derive(Debug, Error)]
 pub enum WorkspaceError {
     #[error("workspace resource was not found")]
@@ -181,6 +191,8 @@ pub enum WorkspaceError {
     Conflict,
     #[error("stale version; current version is {current_version}")]
     VersionConflict { current_version: u64 },
+    #[error("the account already owns {limit} workspaces, the most the instance allows")]
+    OwnedWorkspaceLimit { limit: u32 },
     #[error("workspace repository is unavailable")]
     Unavailable(#[from] sqlx::Error),
     #[error("workspace attachment storage is unavailable")]
@@ -279,6 +291,7 @@ impl WorkspaceRepository {
         let defaults = WorkspaceDefaults::new(actor_id, name, "General");
         let id = defaults.workspace.id;
         let mut transaction = self.database.immediate_transaction().await?;
+        ensure_may_own_another(&mut transaction, actor_id).await?;
         sqlx::query(
             "INSERT INTO workspaces (id, name, version, owner_membership_id, created_at, updated_at) \
              VALUES ($1, $2, 0, $3, $4, $5)",
@@ -344,6 +357,27 @@ impl WorkspaceRepository {
         .await?
         .ok_or(WorkspaceError::NotFound)?;
         workspace_from_row(row)
+    }
+
+    pub async fn storage(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+    ) -> Result<WorkspaceStorage, WorkspaceError> {
+        self.get(workspace_id, actor_id).await?;
+        let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT ({WORKSPACE_STORAGE_USED}) AS used, workspace_storage_quota_bytes AS quota \
+             FROM instance_settings WHERE id = 1"
+        )))
+        .bind(workspace_id.to_string())
+        .fetch_one(self.database.pool())
+        .await?;
+        Ok(WorkspaceStorage {
+            used_bytes: u64::try_from(row.get::<i64, _>("used")).unwrap_or(0),
+            quota_bytes: u64::try_from(row.get::<i64, _>("quota"))
+                .ok()
+                .filter(|quota| *quota > 0),
+        })
     }
 
     pub async fn rename(
@@ -1376,6 +1410,7 @@ impl WorkspaceRepository {
         if target.user_id == actor_id {
             return Ok(());
         }
+        ensure_may_own_another(&mut transaction, target.user_id).await?;
         sqlx::query(
             "UPDATE workspaces SET owner_membership_id = $1, updated_at = $2 WHERE id = $3 AND version = $4",
         )
@@ -1493,6 +1528,15 @@ impl WorkspaceRepository {
             {
                 return Err(WorkspaceError::NotFound);
             }
+            let owner_id = sqlx::query_scalar::<_, String>(
+                "SELECT user_id FROM memberships WHERE workspace_id = $1 AND role = 'owner'",
+            )
+            .bind(workspace_id.to_string())
+            .fetch_one(&mut *transaction)
+            .await?
+            .parse()
+            .map_err(|_| WorkspaceError::Conflict)?;
+            ensure_may_own_another(&mut transaction, owner_id).await?;
         }
         let changed = if deleted {
             sqlx::query(
@@ -2076,6 +2120,32 @@ impl PageItem for InvitationRecord {
 
 fn page_size(limit: usize) -> usize {
     limit.clamp(1, 100)
+}
+
+/// Refuses to make `user_id` the owner of one more workspace when they already own (outside the trash) as many as
+/// `instance_settings.max_owned_workspaces` allows. Instance admins are not limited. Call it in the serialized
+/// write transaction that adds the ownership, so concurrent requests on any server see each other's workspaces.
+async fn ensure_may_own_another(
+    transaction: &mut Transaction<'_, Any>,
+    user_id: Id,
+) -> Result<(), WorkspaceError> {
+    let row = sqlx::query(
+        "SELECT max_owned_workspaces, \
+         (SELECT COUNT(*) FROM users WHERE id = $1 AND installation_admin = 1 AND suspended_at IS NULL) AS admin, \
+         (SELECT COUNT(*) FROM memberships JOIN workspaces ON workspaces.id = memberships.workspace_id \
+          WHERE memberships.user_id = $1 AND memberships.role = 'owner' AND workspaces.deleted_at IS NULL) AS owned \
+         FROM instance_settings WHERE id = 1",
+    )
+    .bind(user_id.to_string())
+    .fetch_one(&mut **transaction)
+    .await?;
+    let limit: i64 = row.get("max_owned_workspaces");
+    if limit > 0 && row.get::<i64, _>("admin") == 0 && row.get::<i64, _>("owned") >= limit {
+        return Err(WorkspaceError::OwnedWorkspaceLimit {
+            limit: u32::try_from(limit).unwrap_or(u32::MAX),
+        });
+    }
+    Ok(())
 }
 
 fn workspace_from_row(row: sqlx::any::AnyRow) -> Result<WorkspaceRecord, WorkspaceError> {

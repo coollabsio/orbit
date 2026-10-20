@@ -21,7 +21,7 @@ pub use upload::{
     AuthorizedAttachment, BLOB_REFERENCE_COUNT, BlobDownload, ContentDisposition, DownloadMetadata,
     FinalizedAttachment, FinalizedBlob, INLINE_IMAGE_TYPES, NewAttachmentReference,
     ReconcileResult, StagedUpload, UploadError, UploadFinalization, UploadLimitError, UploadLimits,
-    UploadService,
+    UploadService, WORKSPACE_STORAGE_USED,
 };
 
 pub type BlobFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, BlobStoreError>> + Send + 'a>>;

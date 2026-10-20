@@ -227,6 +227,9 @@ fn upload_problem(
         UploadError::FileTooLarge { .. } | UploadError::RequestTooLarge { .. } => {
             too_large(instance, request_id)
         }
+        UploadError::StorageQuotaExceeded { .. } => {
+            crate::attachment_routes::storage_quota_exceeded(instance, request_id)
+        }
         UploadError::InvalidDisplayName => ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "validation_failed",

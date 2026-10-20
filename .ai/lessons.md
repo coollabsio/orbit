@@ -50,6 +50,7 @@
 - Layer/nested two-tone card surfaces are a reference pattern, not Coolify. Coolify cards = one surface + one border.
 
 ## Tooling
+- `jean.json` gives every worktree the same run ports (18888 web, 18080 API, `--strictPort`), so a second worktree's run environment cannot start while another one runs, and port 18080 can also be taken by a local VM. Check who owns the port (`ss -ltnp`, `/proc/<pid>/cwd`) before you trust a page there. Without a working run environment, build the web app and let Playwright serve `dist/` and stub `/api` with `page.route` (no extra server process) (2026-10-20).
 - Never `git stash` to compare against `main`: other sessions edit this working tree at the same time, so the stash takes their work and `stash pop` fails on their new edits. Undo your change in place (or use `git show HEAD:path`) instead (2026-10-15).
 - The release image is static musl on Alpine with no OpenSSL. Pick pure-Rust crates (rustls, RustCrypto); `webauthn-rs` 0.5 needs OpenSSL, so Orbit pins the pure-Rust 0.6 line.
 - The user-run Vite dev server (port 8888) can serve a broken module graph after files are renamed (`.tsx`→`.ts`) mid-session — pages render blank with no console errors. Verify against `aubr build` + `aubx vite preview` before debugging app code, and report the dev server needs a restart instead of touching it.

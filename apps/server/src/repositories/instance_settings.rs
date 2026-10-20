@@ -1,6 +1,7 @@
 //! Settings of the whole instance that the root user changes in Admin: open registration, the outgoing mail
-//! server, object storage (S3) and automatic backups. One row (`instance_settings.id = 1`, created by migration
-//! 0042). Background job limits have a row for each changed job kind (`job_limits`).
+//! server, object storage (S3), automatic backups and the limits of a shared installation. One row
+//! (`instance_settings.id = 1`, created by migration 0042). Background job limits have a row for each changed job
+//! kind (`job_limits`).
 
 use orbit_platform::Row;
 use orbit_platform::{Database, Id, JobKind, JobLimits, TimestampMillis, load_limit_overrides};
@@ -111,6 +112,15 @@ pub enum StorageSettingsError {
     NotConfigured,
     #[error("instance settings are unavailable")]
     Unavailable(#[from] sqlx::Error),
+}
+
+/// Limits for a shared installation (Orbit Cloud). `None` is unlimited (stored as 0).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct InstanceLimits {
+    /// Workspaces (not in the trash) one account may own. Instance admins are not limited.
+    pub max_owned_workspaces: Option<u32>,
+    /// Bytes of files one workspace may store.
+    pub workspace_storage_quota_bytes: Option<u64>,
 }
 
 /// What a save does with the stored SMTP password.
@@ -310,6 +320,63 @@ impl InstanceSettingsRepository {
             None,
             request_id,
             serde_json::json!({}),
+            now,
+        )
+        .await?;
+        transaction.commit().await
+    }
+
+    pub async fn limits(&self) -> Result<InstanceLimits, sqlx::Error> {
+        let row = sqlx::query(
+            "SELECT max_owned_workspaces, workspace_storage_quota_bytes FROM instance_settings WHERE id = 1",
+        )
+        .fetch_one(self.database.pool())
+        .await?;
+        Ok(InstanceLimits {
+            max_owned_workspaces: u32::try_from(row.get::<i64, _>("max_owned_workspaces"))
+                .ok()
+                .filter(|limit| *limit > 0),
+            workspace_storage_quota_bytes: u64::try_from(
+                row.get::<i64, _>("workspace_storage_quota_bytes"),
+            )
+            .ok()
+            .filter(|limit| *limit > 0),
+        })
+    }
+
+    pub async fn save_limits(
+        &self,
+        actor_id: Id,
+        limits: InstanceLimits,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), sqlx::Error> {
+        let max_owned_workspaces = i64::from(limits.max_owned_workspaces.unwrap_or(0));
+        let storage_quota = limits
+            .workspace_storage_quota_bytes
+            .map_or(0, |bytes| i64::try_from(bytes).unwrap_or(i64::MAX));
+        let mut transaction = self.database.immediate_transaction().await?;
+        sqlx::query(
+            "UPDATE instance_settings SET max_owned_workspaces = $1, workspace_storage_quota_bytes = $2, \
+             updated_at = $3 WHERE id = 1",
+        )
+        .bind(max_owned_workspaces)
+        .bind(storage_quota)
+        .bind(now.as_millis())
+        .execute(&mut *transaction)
+        .await?;
+        audit::record_global(
+            &mut transaction,
+            Some(actor_id),
+            "instance.limits_updated",
+            AuditOutcome::Success,
+            "installation",
+            None,
+            request_id,
+            serde_json::json!({
+                "max_owned_workspaces": max_owned_workspaces,
+                "workspace_storage_quota_bytes": storage_quota,
+            }),
             now,
         )
         .await?;

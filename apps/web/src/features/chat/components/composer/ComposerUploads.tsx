@@ -48,7 +48,7 @@ export function ComposerUploads({
             </span>
           ) : (
             <span role="alert" className="flex shrink-0 items-center gap-1.5 text-destructive">
-              Upload failed.
+              {upload.storageFull ? 'The workspace storage is full.' : 'Upload failed.'}
               <Button variant="link" size="xs" className="h-6 px-0 text-destructive" onClick={() => onRetry(upload.id)}>
                 Try again
               </Button>

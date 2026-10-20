@@ -216,7 +216,7 @@ export interface SearchPage {
   cursor: string | null
 }
 
-export type ChatErrorCode = 'not_found' | 'forbidden' | 'too_long' | 'conflict' | 'upload_failed' | 'offline'
+export type ChatErrorCode = 'not_found' | 'forbidden' | 'too_long' | 'conflict' | 'upload_failed' | 'storage_full' | 'offline'
 
 export class ChatError extends Error {
   readonly code: ChatErrorCode
