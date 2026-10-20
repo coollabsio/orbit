@@ -105,9 +105,26 @@ A request, a live socket or a co-editing socket can go to any server; sticky ses
 | Live socket (chat, presence, typing) | Numbered events are in `live_events` (the newest 1000 for each workspace), so a client can reconnect to any server and get a replay. Signals and presence go through cluster messages. |
 | Co-editing | Each server has its own room for an open page; small updates and cursors go to the others at once. The update log is the truth: before a server writes, projects or compacts a document, it reads what the others logged, in the same serialized write transaction. |
 | Sign-in | 2FA and passkey steps are in `auth_pending`; failed sign-ins and registrations in `auth_throttle_emails` and `auth_throttle_ips`, so a lockout holds on every server. |
-| Jobs | Durable jobs are claimed in the database; a job kind's concurrency limit holds for all servers. Schedules are unique per job kind. Push notifications are claimed once. |
+| Jobs | Durable jobs are claimed in the database; a job kind's limits hold for all servers (see [Background job limits](#background-job-limits)). Schedules are unique per job kind. Push notifications are claimed once. |
 | Storage settings | A save in **Admin → Storage** tells the other servers; each also compares the saved settings every 5 s. |
 | One server at a time | Image compression takes a cluster-wide lock. A Notion import cancel checks the jobs table for a running import. |
+
+### Background job limits
+
+Two settings control how many background jobs run at the same time:
+
+- **Per server:** `jobs.concurrency` (`ORBIT__JOBS__CONCURRENCY`, default 4) is the number of jobs one server runs at the same time. It sets the size of the server, so it stays in the configuration file and a change needs a restart.
+- **Per job kind:** in **Admin → Background jobs**, the root user sets two limits for each job kind that customers start (Notion scans and Notion imports):
+  - **All servers:** the number of jobs of the kind that run at the same time on all servers together. Default: 2.
+  - **Per workspace:** the number of jobs of the kind that one workspace runs at the same time while a different workspace has a job of the kind waiting. Default: 1. When no other workspace waits, one workspace can use all the slots of the kind. Thus, one customer cannot stop the imports of the other customers.
+
+  An empty field means no limit. **Reset to defaults** puts the values from the code back in the form. Save to apply them.
+
+The limits are in the `job_limits` table. Each server reads the table each time it starts a job, so a change applies to all servers at the next job start. A restart is not necessary. A job that already runs continues. A saved value that is the same as the default removes the row of the kind, so a later change of the default in the code applies to it. Each save writes `instance.job_limits_updated` to the audit log. The API is `GET` and `PUT /api/v1/admin/jobs/limits` (root user only).
+
+The maintenance jobs (retention, integrity check, scheduled backup, Notion cleanup) always run one at a time. You cannot change their limit.
+
+A job counts against a limit until it ends or its lease expires (5 minutes without a heartbeat). If a server stops suddenly, its jobs hold their slots until their leases expire.
 
 ### Limits
 
