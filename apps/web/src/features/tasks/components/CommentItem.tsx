@@ -134,7 +134,7 @@ export function CommentItem({ state, taskId, comment, reply }: CommentItemProps)
                   onEscape={editing ? () => setEditing(false) : undefined}
                   uploadFile={editing ? (file) => uploadInlineFile(workspace.id, taskId, file) : undefined}
                   mentions={mentions}
-                  className="-mx-[54px] max-[899px]:mx-0"
+                  sideMenu={false}
                 />
               </Suspense>
             </div>

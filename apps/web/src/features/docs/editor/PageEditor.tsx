@@ -116,6 +116,11 @@ export interface PageEditorProps {
   onEscape?: () => void
   /** Hint shown while the document is empty (task profile). */
   placeholder?: 'description' | 'comment'
+  /**
+   * The block side menu (+ and drag handle) in a 54px gutter left of the text. Off for small fields (dialogs, comment
+   * cards), which have no room for the gutter: blocks start at the field's edge and `/` still inserts blocks.
+   */
+  sideMenu?: boolean
   /** `Page.content` from the API, read once per `pageId`. Ignored with `collab` (the Y document is the content). */
   initialContent?: unknown[]
   /** Without `initialContent`: markdown to start from (task text written before rich text). */
@@ -162,6 +167,7 @@ function PageEditorInner({
   submitShortcut,
   onEscape,
   placeholder,
+  sideMenu = true,
   initialContent,
   initialMarkdown,
   collab,
@@ -447,6 +453,8 @@ function PageEditorInner({
             // scroll the rest sideways, and use slightly smaller buttons so more fit.
             'max-[900px]:[&_.bn-formatting-toolbar]:max-w-[calc(100vw-16px)]! max-[900px]:[&_.bn-formatting-toolbar]:gap-0! max-[900px]:[&_.bn-formatting-toolbar]:overscroll-x-contain max-[900px]:[&_.bn-formatting-toolbar]:[scrollbar-width:none]',
             'max-[900px]:[&_.bn-formatting-toolbar>button]:h-8! max-[900px]:[&_.bn-formatting-toolbar>button]:min-w-8! max-[900px]:[&_.bn-formatting-toolbar>button]:shrink-0! max-[900px]:[&_.bn-formatting-toolbar>button]:px-0!',
+            // No side menu: no gutter for it either.
+            !sideMenu && '[&>.bn-editor]:px-0!',
             // Task fields: their hint while the whole document is empty.
             placeholder &&
               '[&>.bn-editor[contenteditable=true]_.bn-block-content[data-is-only-empty-block]:has(.ProseMirror-trailingBreak:only-child)]:after:text-muted-foreground! [&>.bn-editor[contenteditable=true]_.bn-block-content[data-is-only-empty-block]:has(.ProseMirror-trailingBreak:only-child)]:after:not-italic!',
@@ -456,6 +464,7 @@ function PageEditorInner({
               "[&>.bn-editor[contenteditable=true]_.bn-block-content[data-is-only-empty-block]:has(.ProseMirror-trailingBreak:only-child)]:after:content-['Leave_a_comment…_Use_@_to_mention']!",
             className,
           )}
+          sideMenu={sideMenu}
           slashMenu={false}
           formattingToolbar={false}
           comments={false}

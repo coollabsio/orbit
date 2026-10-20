@@ -302,7 +302,7 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
                     onChange={(content) => setHasDescription(!isEmptyRichText(content))}
                     submitShortcut={() => void submit()}
                     mentions={{ members, candidates: members.filter((member) => !member.suspended), privatePage: false }}
-                    className="-mx-[54px] max-[899px]:mx-0"
+                    sideMenu={false}
                   />
                 </Suspense>
               </div>

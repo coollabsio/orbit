@@ -96,7 +96,8 @@ export function TaskCommentComposer({
             submitShortcut={() => void send()}
             uploadFile={uploadFile}
             mentions={mentions}
-            className="-mx-[54px] text-[13px] max-[899px]:mx-0 [&_.bn-editor]:min-h-6"
+            sideMenu={false}
+            className="text-[13px] [&_.bn-editor]:min-h-6"
           />
         </Suspense>
       </div>
