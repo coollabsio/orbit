@@ -16,6 +16,9 @@
 ## Several servers on one Postgres database
 - Any process-local state (maps, locks, counters, caches, "running" flags, background loops) is per server. If it must hold for every server, keep it in the database (a serialized `immediate_transaction`, `Database::try_singleton`) or send it through `crate::cluster`. Test such changes with two `App`s on one database (`apps/server/tests/shared_postgres`), and prove the test fails without the fix.
 
+## Jean run environments share ports
+- `jean.json` gives every worktree the same ports (web 18888, API 18080), and `just dev` uses `--strictPort`. Before you trust a run environment, check who owns the ports (`ss -ltnp | grep -E ':18080|:18888'`, then `readlink /proc/<pid>/cwd`): another worktree's Vite server can answer on 18888 with its own code (2026-10-20).
+
 ## SQLite 3.46.0 (bundled by libsqlite3-sys 0.30) FTS5 integrity false positive
 - `PRAGMA integrity_check` reports "malformed inverted index for FTS5 table …" after a row of an FTS5 table is UPDATEd twice
   (or after `'rebuild'`), although queries are right and FTS5's own `INSERT INTO t(t) VALUES('integrity-check')` passes
