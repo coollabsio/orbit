@@ -116,6 +116,17 @@ A request, a live socket or a co-editing socket can go to any server; sticky ses
 - **A server that stops without a beat:** its members show as online for up to 20 s more.
 - **Page lock:** a lock or unlock closes the page's sockets on every server; an edit that another server receives in the same moment can still be saved.
 
+### Limits per account and workspace
+
+The root user sets two limits in **Admin → Settings → Limits**. They apply to every installation, also SQLite. Empty or 0 is unlimited. A lower limit refuses only new work: nothing that exists is removed.
+
+- **Workspaces per account** (default 10): how many workspaces one account may own, not counting workspaces in the trash. Creating a workspace, restoring one from the trash and transferring ownership to an account at the limit fail with 409 `workspace_limit_reached`. The root user and the instance admins are not limited.
+- **Storage per workspace** (default 5 GB): the bytes of files one workspace stores. This includes task and comment attachments, page and chat files, custom emoji and stickers. A file is counted once per workspace, however often it is attached. Profile pictures belong to the account and do not count. An upload that would go over the quota fails with 413 `storage_quota_exceeded` before Orbit stores the file. Members see the use and the quota in **Settings → General**.
+
+Both checks run in the serialized write transaction, so they hold for concurrent requests on every server. Orbit calculates storage use from the stored files (`attachment_blobs`), so existing data counts at once. A deleted file stops counting when Orbit removes it from storage: about a day after its last reference goes. Files of trashed tasks, pages and messages count until the trash is emptied or purged.
+
+5 GB is enough for a small team: it holds 200 files at the largest upload size (25 MB). With 10 workspaces per account, it limits one open-registration account to 50 GB. Raise the quota for customers who need more.
+
 ## Object storage (S3), backups and a lost server
 
 The root user saves an S3-compatible bucket (AWS S3, Cloudflare R2, MinIO, …) in **Admin → Storage**. Orbit writes, reads and deletes a test object before it saves the bucket. The secret key is encrypted with the app key. Then three settings apply:

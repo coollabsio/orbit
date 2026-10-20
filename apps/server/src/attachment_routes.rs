@@ -29,6 +29,7 @@ use crate::repositories::attachments::{
 use crate::repositories::identity::AuthenticatedSession;
 use crate::repositories::identity::IdentityRepository;
 use crate::repositories::tasks::CommentRecord;
+use crate::task_routes::ApiError;
 
 const RECONCILE_INTERVAL: Duration = Duration::from_secs(60 * 60);
 
@@ -993,6 +994,14 @@ impl AttachmentApiError {
                 instance,
                 request_id,
             ),
+            UploadError::StorageQuotaExceeded { .. } => Self::new(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "storage_quota_exceeded",
+                "Storage quota exceeded",
+                STORAGE_QUOTA_DETAIL,
+                instance,
+                request_id,
+            ),
             UploadError::InvalidDisplayName => Self::new(
                 StatusCode::UNPROCESSABLE_ENTITY,
                 "validation_failed",
@@ -1049,4 +1058,24 @@ impl IntoResponse for AttachmentApiError {
         );
         response
     }
+}
+
+const STORAGE_QUOTA_DETAIL: &str = "This file does not fit in the workspace's storage quota. Delete files you no \
+     longer need (files in the trash count until the trash is emptied), or ask the administrator of this Orbit for a \
+     higher quota.";
+
+/// 413 `storage_quota_exceeded`: the file would take the workspace over its storage quota. Settings show how much
+/// the workspace uses.
+pub(crate) fn storage_quota_exceeded(
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> ApiError {
+    ApiError::new(
+        StatusCode::PAYLOAD_TOO_LARGE,
+        "storage_quota_exceeded",
+        "Storage quota exceeded",
+        STORAGE_QUOTA_DETAIL,
+        instance,
+        request_id,
+    )
 }

@@ -41,7 +41,8 @@ pub use files::{
     FinalizedAttachment, FinalizedBlob, INLINE_IMAGE_TYPES, LocalBlobStore, NewAttachmentReference,
     ObjectStorage, ObjectStorageState, ReconcileResult, S3_DELETE_DELAY_MILLIS, S3Bucket, S3Config,
     S3Error, S3Object, StagedUpload, StoredObject, TieredBlobStore, UploadError,
-    UploadFinalization, UploadLimitError, UploadLimits, UploadService, start_fake_s3,
+    UploadFinalization, UploadLimitError, UploadLimits, UploadService, WORKSPACE_STORAGE_USED,
+    start_fake_s3,
 };
 pub use health::{HealthCheck, HealthCheckResult, HealthRegistry, ReadinessReport};
 pub use http::{

@@ -2430,3 +2430,191 @@ async fn fail_inserts(
     };
     database.execute(&sql).await.unwrap();
 }
+
+#[tokio::test]
+async fn an_account_owns_at_most_the_instance_limit_of_workspaces() {
+    let database = TestDatabase::new().await.unwrap();
+    let identity = Arc::new(IdentityRepository::new((*database).clone()));
+    // The root user (an instance admin) owns the setup workspace.
+    let (root_workspace, root_token) = setup_owner(&identity).await;
+    let root_cookie = format!("__Host-orbit_session={root_token}");
+    let app = workspace_router(WorkspaceState::new(
+        Arc::clone(&identity),
+        "https://orbit.test".to_owned(),
+        CookieMode::secure(),
+    ))
+    .layer(HttpPlatformLayer::new(OriginPolicy::new(
+        "https://orbit.test",
+    )));
+    assert_eq!(
+        database
+            .scalar::<i64>("SELECT max_owned_workspaces FROM instance_settings WHERE id = 1")
+            .await
+            .unwrap(),
+        10
+    );
+    let save_limits = |cookie: String, limits: Value| {
+        let app = app.clone();
+        async move {
+            app.oneshot(json_request(
+                "PUT",
+                "/api/v1/admin/settings/limits",
+                &cookie,
+                limits,
+            ))
+            .await
+            .unwrap()
+        }
+    };
+    let saved = save_limits(
+        root_cookie.clone(),
+        json!({"max_owned_workspaces": 3, "workspace_storage_quota_bytes": 0}),
+    )
+    .await;
+    assert_eq!(saved.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(saved).await["limits"],
+        json!({"max_owned_workspaces": 3, "workspace_storage_quota_bytes": null})
+    );
+    let (user_id, cookie) = create_user(&database, &identity, "tenant@example.com", "Tenant").await;
+    let refused = save_limits(cookie.clone(), json!({"max_owned_workspaces": null})).await;
+    assert_eq!(refused.status(), StatusCode::FORBIDDEN);
+    let create = |cookie: String, name: String| {
+        let app = app.clone();
+        async move {
+            app.oneshot(json_request(
+                "POST",
+                "/api/v1/workspaces",
+                &cookie,
+                json!({ "name": name }),
+            ))
+            .await
+            .unwrap()
+        }
+    };
+
+    // Concurrent requests cannot pass the limit together: the check runs in the serialized write.
+    let responses = futures_util::future::join_all(
+        (0..6).map(|index| create(cookie.clone(), format!("Tenant {index}"))),
+    )
+    .await;
+    let mut created = Vec::new();
+    for response in responses {
+        match response.status() {
+            StatusCode::CREATED => created.push(response_json(response).await),
+            StatusCode::CONFLICT => {
+                let problem = response_json(response).await;
+                assert_eq!(problem["code"], "workspace_limit_reached");
+                assert!(
+                    problem["detail"]
+                        .as_str()
+                        .unwrap()
+                        .contains("at most 3 workspaces")
+                );
+            }
+            status => panic!("unexpected {status}"),
+        }
+    }
+    assert_eq!(created.len(), 3);
+
+    // A workspace in the trash does not count, but restoring it needs a free place again.
+    let trashed = created[0]["id"].as_str().unwrap().to_owned();
+    let deleted = app
+        .clone()
+        .oneshot(cookie_request(
+            "DELETE",
+            &format!("/api/v1/workspaces/{trashed}?expected_version=0"),
+            &cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        create(cookie.clone(), "Replacement".to_owned())
+            .await
+            .status(),
+        StatusCode::CREATED
+    );
+    let restored = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/v1/workspaces/{trashed}/restore"),
+            &cookie,
+            json!({ "expected_version": 1 }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(restored.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        response_json(restored).await["code"],
+        "workspace_limit_reached"
+    );
+
+    // Ownership cannot be handed to an account at the limit.
+    let root_id: Id = sqlx::query_scalar::<_, String>(
+        "SELECT user_id FROM memberships WHERE workspace_id = $1 AND role = 'owner'",
+    )
+    .bind(&root_workspace)
+    .fetch_one(database.pool())
+    .await
+    .unwrap()
+    .parse()
+    .unwrap();
+    let membership_id = Id::new_v7();
+    let now = TimestampMillis::now();
+    sqlx::query(
+        "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
+         VALUES ($1, $2, $3, 'admin', 0, $4, $5)",
+    )
+    .bind(membership_id.to_string())
+    .bind(&root_workspace)
+    .bind(user_id.to_string())
+    .bind(now.as_millis())
+    .bind(now.as_millis())
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let transfer = WorkspaceRepository::new((*database).clone())
+        .transfer_ownership(
+            root_workspace.parse().unwrap(),
+            membership_id,
+            root_id,
+            0,
+            0,
+            "transfer",
+            now,
+        )
+        .await;
+    assert!(matches!(
+        transfer,
+        Err(
+            orbit_server::repositories::workspaces::WorkspaceError::OwnedWorkspaceLimit {
+                limit: 3
+            }
+        )
+    ));
+
+    // Instance admins are not limited.
+    for index in 0..4 {
+        assert_eq!(
+            create(root_cookie.clone(), format!("Root {index}"))
+                .await
+                .status(),
+            StatusCode::CREATED
+        );
+    }
+
+    // 0 is unlimited.
+    let saved = save_limits(root_cookie.clone(), json!({"max_owned_workspaces": 0})).await;
+    assert_eq!(
+        response_json(saved).await["limits"]["max_owned_workspaces"],
+        Value::Null
+    );
+    assert_eq!(
+        create(cookie.clone(), "Unlimited".to_owned())
+            .await
+            .status(),
+        StatusCode::CREATED
+    );
+}
