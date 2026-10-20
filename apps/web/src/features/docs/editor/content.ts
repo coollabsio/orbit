@@ -63,13 +63,13 @@ export function taskAttachmentUrl(workspaceId: string, taskId: string, attachmen
   return `/api/v1/workspaces/${workspaceId}/tasks/${taskId}/attachments/${attachmentId}/download`
 }
 
-const TASK_ATTACHMENT_PATH = new RegExp(`^/api/v1/workspaces/(${UUID})/tasks/(${UUID})/attachments/${UUID}/download$`)
+const TASK_ATTACHMENT_PATH = new RegExp(`^/api/v1/workspaces/(${UUID})/tasks/${UUID}/attachments/${UUID}/download$`)
 
-/** True for an attachment download path of exactly the scope's task (the server keeps no others). */
+/** True for an attachment download path of a task in the scope's workspace (text copied between tasks keeps its files). */
 export function isTaskAttachmentUrl(url: unknown, scope: FileScope): url is string {
   if (typeof url !== 'string') return false
   const match = TASK_ATTACHMENT_PATH.exec(url)
-  return match !== null && match[1] === scope.workspaceId && match[2] === scope.taskId
+  return match !== null && match[1] === scope.workspaceId
 }
 
 /**

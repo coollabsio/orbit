@@ -1,6 +1,6 @@
-import { expect, mock, test } from 'bun:test'
+import { afterEach, expect, mock, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render } from '@testing-library/react'
+import { fireEvent, render, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
@@ -82,4 +82,42 @@ test('edit mode offers save and cancel and hides the other actions until it ends
   expect(view.queryByRole('button', { name: 'Copy text' })).toBeNull()
   fireEvent.click(view.getByRole('button', { name: 'Cancel' }))
   expect(view.getByRole('button', { name: 'Copy text' })).toBeTruthy()
+})
+
+const originalFetch = globalThis.fetch
+afterEach(() => { globalThis.fetch = originalFetch })
+
+/** Opens the editor and waits until it has loaded the comment. */
+async function edit(view: ReturnType<typeof render>) {
+  fireEvent.click(view.getByRole('button', { name: 'Edit comment' }))
+  await waitFor(() => expect(view.container.querySelector('.bn-editor[contenteditable="true"]')).toBeTruthy(), { timeout: 4000 })
+}
+
+test('saving an unchanged comment sends nothing (an old comment is not marked edited)', async () => {
+  const requests: string[] = []
+  globalThis.fetch = (async (request: Request) => {
+    requests.push(request.method)
+    return Response.json({})
+  }) as unknown as typeof fetch
+  const view = render(<CommentItem state={state()} taskId="task-1" comment={comment({ body: 'hello', bodyJson: null })} />, { wrapper: wrapper() })
+  await edit(view)
+
+  fireEvent.click(view.getByRole('button', { name: 'Save' }))
+  // the mutation starts after a tick
+  await new Promise((resolve) => setTimeout(resolve, 50))
+
+  expect(requests.filter((method) => method === 'PATCH')).toEqual([])
+  expect(view.getByRole('button', { name: 'Copy text' })).toBeTruthy()
+})
+
+test('saving an emptied comment asks to delete it', async () => {
+  const view = render(
+    <CommentItem state={state()} taskId="task-1" comment={comment({ body: '', bodyJson: [{ type: 'paragraph', content: [] }] })} />,
+    { wrapper: wrapper() },
+  )
+  await edit(view)
+
+  fireEvent.click(view.getByRole('button', { name: 'Save' }))
+
+  expect(await view.findByText('Delete comment?')).toBeTruthy()
 })

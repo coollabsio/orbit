@@ -35,17 +35,31 @@ export function CommentItem({ state, taskId, comment, reply }: CommentItemProps)
   const [editing, setEditing] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const editorRef = useRef<PageEditorHandle>(null)
+  /** Whether the open edit changed anything (an old markdown comment is not rewritten by a plain Save). */
+  const dirty = useRef(false)
+  /** A saved edit shown until the server's new version arrives (no flash of the old text). */
+  const [saved, setSaved] = useState<{ version: number; content: unknown[] } | null>(null)
+  const shown = saved?.version === comment.version ? saved.content : null
   const author = state.users.find((u) => u.id === comment.authorId)
   const name = author?.name ?? 'Someone'
   const mentions = useMemo(() => ({ members: state.users, candidates: state.users.filter((user) => !user.suspended), privatePage: false }), [state.users])
   const fileScope = useMemo(() => ({ workspaceId: workspace.id, taskId }), [workspace.id, taskId])
-  const hasBody = comment.bodyJson ? !isEmptyRichText(comment.bodyJson) : comment.body.trim() !== ''
+  const hasBody = shown !== null || (comment.bodyJson ? !isEmptyRichText(comment.bodyJson) : comment.body.trim() !== '')
 
+  const startEdit = () => {
+    dirty.current = false
+    setEditing(true)
+  }
   const commitEdit = () => {
     const content = editorRef.current?.getContent() ?? []
-    // an emptied comment is deleted, not saved
-    if (!isEmptyRichText(content) && !contentEquals(content, comment.bodyJson)) {
-      updateComment.mutate({ commentId: comment.id, bodyJson: content, version: comment.version })
+    // a comment needs content: an emptied one is deleted (after a confirm), not saved
+    if (isEmptyRichText(content)) {
+      setConfirmDelete(true)
+      return
+    }
+    if (dirty.current && !contentEquals(content, shown ?? comment.bodyJson)) {
+      setSaved({ version: comment.version, content })
+      updateComment.mutate({ commentId: comment.id, bodyJson: content, version: comment.version }, { onError: () => setSaved(null) })
     }
     setEditing(false)
   }
@@ -86,7 +100,7 @@ export function CommentItem({ state, taskId, comment, reply }: CommentItemProps)
                       size="icon-sm"
                       className="size-6 text-muted-foreground/70"
                       aria-label="Edit comment"
-                      onClick={() => setEditing(true)}
+                      onClick={startEdit}
                     >
                       <Pencil className="size-3.5" />
                     </Button>
@@ -107,14 +121,15 @@ export function CommentItem({ state, taskId, comment, reply }: CommentItemProps)
               <Suspense fallback={<EditorFallback />}>
                 <PageEditor
                   // a saved edit brings a new version: start from the stored content again
-                  key={`${comment.id}:${comment.version}:${editing}`}
+                  key={`${comment.id}:${comment.version}:${editing}:${shown ? 'saved' : ''}`}
                   ref={editorRef}
                   pageId={`comment:${comment.id}`}
                   profile="task"
                   fileScope={fileScope}
-                  initialContent={comment.bodyJson ?? undefined}
+                  initialContent={shown ?? comment.bodyJson ?? undefined}
                   initialMarkdown={comment.body}
                   editable={editing}
+                  onChange={editing ? () => { dirty.current = true } : undefined}
                   submitShortcut={editing ? commitEdit : undefined}
                   onEscape={editing ? () => setEditing(false) : undefined}
                   uploadFile={editing ? (file) => uploadInlineFile(workspace.id, taskId, file) : undefined}

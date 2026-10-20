@@ -167,9 +167,11 @@ describe('task attachment urls', () => {
     expect(taskAttachmentUrl(ws, task, file)).toBe(`/api/v1/workspaces/${ws}/tasks/${task}/attachments/${file}/download`)
   })
 
-  test('only the own task attachment is safe for a task', () => {
+  test('attachments of tasks in the same workspace are safe for a task', () => {
     expect(isTaskAttachmentUrl(taskAttachmentUrl(ws, task, file), scope)).toBe(true)
-    expect(isTaskAttachmentUrl(taskAttachmentUrl(ws, file, file), scope)).toBe(false)
+    // copied from another task of the workspace
+    expect(isTaskAttachmentUrl(taskAttachmentUrl(ws, file, file), scope)).toBe(true)
+    expect(isTaskAttachmentUrl(taskAttachmentUrl(file, task, file), scope)).toBe(false)
     expect(isTaskAttachmentUrl(`/api/v1/workspaces/${ws}/pages/${task}/files/${file}`, scope)).toBe(false)
     expect(isSafeFileUrl(taskAttachmentUrl(ws, task, file), scope)).toBe(true)
     expect(isSafeFileUrl(`/api/v1/workspaces/${ws}/pages/${task}/files/${file}`, scope)).toBe(false)
