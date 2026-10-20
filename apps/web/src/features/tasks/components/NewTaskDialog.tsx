@@ -303,6 +303,7 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
                     submitShortcut={() => void submit()}
                     mentions={{ members, candidates: members.filter((member) => !member.suspended), privatePage: false }}
                     sideMenu={false}
+                    ariaLabel="New task description"
                   />
                 </Suspense>
               </div>

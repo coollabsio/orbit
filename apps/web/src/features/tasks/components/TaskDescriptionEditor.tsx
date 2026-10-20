@@ -58,6 +58,8 @@ export function TaskDescriptionEditor({
   /** The task went away while open (trash, access removed): read-only until the task view changes. */
   const [lost, setLost] = useState(false)
   const sessionRef = useRef<CollabSession | null>(null)
+  /** A check whether a lost task is back is running (one at a time). */
+  const checkingBack = useRef(false)
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: queryKeys.workspace(workspaceId) })
   const onProblem = (problem: CollabProblem) => {
@@ -66,12 +68,18 @@ export function TaskDescriptionEditor({
         // The task view shows the trashed or missing task once the refresh lands. A task that is back by then
         // (restored, access returned) reconnects; one restored later opens a fresh editor with its view.
         setLost(true)
-        void refresh().then(async () => {
-          const { response } = await getTask({ client: apiClient, path: { workspace_id: workspaceId, task_id: task.id } })
-          if (!response?.ok) return
-          setLost(false)
-          setGeneration((current) => current + 1)
-        })
+        if (checkingBack.current) break
+        checkingBack.current = true
+        void refresh()
+          .then(async () => {
+            const { response } = await getTask({ client: apiClient, path: { workspace_id: workspaceId, task_id: task.id } })
+            if (!response?.ok) return
+            setLost(false)
+            setGeneration((current) => current + 1)
+          })
+          .finally(() => {
+            checkingBack.current = false
+          })
         break
       case 'unauthorized':
         window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
@@ -152,6 +160,7 @@ export function TaskDescriptionEditor({
             profile="task"
             fileScope={fileScope}
             placeholder="description"
+            ariaLabel="Description"
             collab={{ provider: collab.connection.provider, fragment: collab.connection.fragment, user }}
             editable={!readOnly && !lost && status !== 'error'}
             onOpenPage={onOpenPage}

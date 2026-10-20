@@ -1,6 +1,5 @@
 import { confirmAction } from '@/components/common/confirmAction'
 import { keepPreviousData, queryOptions, useMutation, useInfiniteQuery, useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
-import { useRef, useState } from 'react'
 import { apiClient } from '@/api/client'
 import type { createApiClient } from '@/api/client'
 import { fetchAllPages } from '@/api/pagination'
@@ -26,7 +25,6 @@ import {
   restoreTask,
   updateComment,
   updateTask,
-  uploadTaskAttachments,
 } from '@/api/generated/sdk.gen'
 import type {
   BulkItem,
@@ -45,7 +43,6 @@ import { queryKeys } from '@/api/queryKeys'
 import { announceAutoClosed } from './autoClosed'
 import { isTaskVersionConflict } from './conflicts'
 import { findCachedTask, patchWorkspaceTask, reconcileWorkspaceTask, restoreWorkspaceTasks, snapshotTasks, type WorkspaceTaskSnapshot } from './optimistic'
-import { PartialUploadError, uploadFiles } from './uploadQueue'
 import { isTaskUuid, normalizeTaskParam, taskSlug } from '@/lib/taskLinks'
 import { loadFailed } from '@/lib/connection'
 
@@ -568,36 +565,6 @@ export function useDeleteTaskComment(workspaceId: string, taskId: string) {
     },
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.comments(workspaceId, taskId) }),
   })
-}
-
-export function useUploadTaskAttachments(workspaceId: string, taskId: string) {
-  const queryClient = useQueryClient()
-  const [progress, setProgress] = useState(0)
-  const [remainingCount, setRemainingCount] = useState(0)
-  const remaining = useRef<File[]>([])
-  const mutation = useMutation({
-    mutationFn: async (files: File[]) => {
-      setProgress(0)
-      setRemainingCount(files.length)
-      try {
-        await uploadFiles(
-          files,
-          (file) => uploadTaskAttachments({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId }, body: { file }, throwOnError: true }),
-          setProgress,
-        )
-      } catch (error) {
-        if (error instanceof PartialUploadError) {
-          remaining.current = error.remaining
-          setRemainingCount(error.remaining.length)
-        }
-        throw error
-      }
-      remaining.current = []
-      setRemainingCount(0)
-    },
-    onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.attachments(workspaceId, taskId) }),
-  })
-  return { ...mutation, progress, remainingCount, retry: () => mutation.mutate(remaining.current) }
 }
 
 export function useDeleteTaskAttachment(workspaceId: string, taskId: string) {

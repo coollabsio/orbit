@@ -63,7 +63,7 @@ export function taskAttachmentUrl(workspaceId: string, taskId: string, attachmen
   return `/api/v1/workspaces/${workspaceId}/tasks/${taskId}/attachments/${attachmentId}/download`
 }
 
-const TASK_ATTACHMENT_PATH = new RegExp(`^/api/v1/workspaces/(${UUID})/tasks/${UUID}/attachments/${UUID}/download$`)
+const TASK_ATTACHMENT_PATH = new RegExp(`^/api/v1/workspaces/(${UUID})/tasks/(${UUID})/attachments/${UUID}/download$`)
 
 /** True for an attachment download path of a task in the scope's workspace (text copied between tasks keeps its files). */
 export function isTaskAttachmentUrl(url: unknown, scope: FileScope): url is string {
@@ -176,3 +176,34 @@ function stableStringify(value: unknown): string {
 export function contentEquals(a: unknown, b: unknown): boolean {
   return stableStringify(a) === stableStringify(b)
 }
+
+export interface FileToCopy {
+  id: string
+  url: string
+  name: string
+}
+
+/**
+ * Image/file blocks a paste brought in (not in `before`) that show a file of another task or of a docs page. A task's
+ * text keeps its own copy of them, so they stay when the source is trashed (see `PageEditor`'s paste handler).
+ */
+export function pastedFilesToCopy(document: readonly unknown[], before: ReadonlySet<string>, scope: FileScope): FileToCopy[] {
+  const out: FileToCopy[] = []
+  const visit = (blocks: readonly unknown[]) => {
+    for (const block of blocks) {
+      if (!isRecord(block)) continue
+      const props = isRecord(block.props) ? block.props : {}
+      const url = props.url
+      const id = block.id
+      if (typeof id === 'string' && !before.has(id) && typeof block.type === 'string' && FILE_BLOCKS.has(block.type) && typeof url === 'string') {
+        const task = TASK_ATTACHMENT_PATH.exec(url)
+        const foreignTask = task !== null && task[1] === scope.workspaceId && task[2] !== scope.taskId
+        if (foreignTask || isPageFileUrl(url)) out.push({ id, url, name: typeof props.name === 'string' && props.name ? props.name : 'file' })
+      }
+      if (Array.isArray(block.children)) visit(block.children)
+    }
+  }
+  visit(document)
+  return out
+}
+

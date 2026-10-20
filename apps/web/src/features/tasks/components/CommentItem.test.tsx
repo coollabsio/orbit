@@ -110,14 +110,16 @@ test('saving an unchanged comment sends nothing (an old comment is not marked ed
   expect(view.getByRole('button', { name: 'Copy text' })).toBeTruthy()
 })
 
-test('saving an emptied comment asks to delete it', async () => {
+test('an unchanged Save on an old attachment-only comment just closes the editor', async () => {
+  const attachment = { id: 'a1', fileName: 'shot.png', mimeType: 'image/png', fileSize: 10, url: '/x' }
   const view = render(
-    <CommentItem state={state()} taskId="task-1" comment={comment({ body: '', bodyJson: [{ type: 'paragraph', content: [] }] })} />,
+    <CommentItem state={state()} taskId="task-1" comment={comment({ body: '', bodyJson: null, attachments: [attachment] })} />,
     { wrapper: wrapper() },
   )
   await edit(view)
 
   fireEvent.click(view.getByRole('button', { name: 'Save' }))
 
-  expect(await view.findByText('Delete comment?')).toBeTruthy()
+  expect(view.queryByText('Delete comment?')).toBeNull()
+  expect(view.getByRole('button', { name: 'Copy text' })).toBeTruthy()
 })

@@ -90,7 +90,8 @@ export function TaskCommentComposer({
             pageId={`comment:${taskId}:${draftKey}`}
             profile="task"
             fileScope={fileScope}
-            placeholder="comment"
+            placeholder={compact ? 'reply' : 'comment'}
+            ariaLabel={compact ? 'Reply' : 'Comment'}
             editable={!pending}
             onChange={(content) => setHasContent(!isEmptyRichText(content))}
             submitShortcut={() => void send()}

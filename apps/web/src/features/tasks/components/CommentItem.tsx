@@ -10,7 +10,7 @@ import { ConfirmDeleteModal } from '@/components/common/ConfirmDeleteModal'
 import { Attachments } from '@/components/common/Attachments'
 import { contentEquals } from '@/features/docs/editor/content'
 import { uploadInlineFile } from '@/features/tasks/api/inlineFiles'
-import { isEmptyRichText } from '@/features/tasks/lib/richText'
+import { commentSaveAction, isEmptyRichText } from '@/features/tasks/lib/richText'
 // Type-only import: erased at build time, so the BlockNote chunk stays lazy.
 import type { PageEditorHandle } from '@/features/docs/editor/PageEditor'
 import { EditorFallback, PageEditor } from './lazyEditor'
@@ -52,12 +52,13 @@ export function CommentItem({ state, taskId, comment, reply }: CommentItemProps)
   }
   const commitEdit = () => {
     const content = editorRef.current?.getContent() ?? []
-    // a comment needs content: an emptied one is deleted (after a confirm), not saved
-    if (isEmptyRichText(content)) {
+    const changed = dirty.current && !contentEquals(content, shown ?? comment.bodyJson)
+    const action = commentSaveAction({ content, changed, hasAttachments: (comment.attachments?.length ?? 0) > 0 })
+    if (action === 'confirm-delete') {
       setConfirmDelete(true)
       return
     }
-    if (dirty.current && !contentEquals(content, shown ?? comment.bodyJson)) {
+    if (action === 'save') {
       setSaved({ version: comment.version, content })
       updateComment.mutate({ commentId: comment.id, bodyJson: content, version: comment.version }, { onError: () => setSaved(null) })
     }
@@ -135,6 +136,7 @@ export function CommentItem({ state, taskId, comment, reply }: CommentItemProps)
                   uploadFile={editing ? (file) => uploadInlineFile(workspace.id, taskId, file) : undefined}
                   mentions={mentions}
                   sideMenu={false}
+                  ariaLabel={editing ? 'Edit comment' : 'Comment'}
                 />
               </Suspense>
             </div>

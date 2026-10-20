@@ -46,7 +46,8 @@ Core files: `TasksPage.tsx`, `components/TaskList.tsx`, `components/TaskBoard.ts
   (`PageEditor` `profile="task"`: no page blocks, no comments; slash menu with Callout and Mermaid; @mentions).
   `tasks.description_json` / `task_comments.body_json` hold the blocks; `description` / `body` keep a markdown copy
   (search, MCP, GitHub, API clients that send markdown, which the server converts: `collab/markdown_import.rs`).
-  NULL JSON is a row written before rich text; it is converted (and stored) when first opened or edited. Task lists
+  NULL JSON is a row written before rich text; it is converted (and stored) when first opened or edited. A task created
+  with markdown (API, MCP) is converted at once, so its mentions notify. Task lists
   leave `description_json` out (null); `GET /tasks/{id}` and write responses carry it.
 - The description is co-edited live like a docs page (`GET /tasks/{id}/collab`, `task_collab_docs` /
   `task_collab_updates`, the same hub keyed by `DocKey { Page | Task }`): cursors, presence avatars, a read-only
@@ -54,8 +55,10 @@ Core files: `TasksPage.tsx`, `components/TaskList.tsx`, `components/TaskBoard.ts
   live document. A GitHub-linked task is locked. Newly mentioned members get `description_mentioned` (again after 10
   minutes, not while a mention is removed and added back).
 - Files pasted, dropped or picked into the description or a comment become image/file blocks; they are task
-  attachments with `inline = 1`, left out of the attachment list (which shows only older attachments). Text copied
-  between tasks of a workspace keeps its files (any task attachment of the workspace is allowed). The new task
+  attachments with `inline = 1`, left out of the attachment list (which shows only older attachments). Images and files
+  pasted from another task or a docs page are copied into the task (download, inline upload, the block points at the
+  copy), so they stay when the source goes to the trash; the server still accepts any task attachment URL of the
+  workspace (API writes). The new task
   dialog keeps file chips and appends the files to the description after create.
 - Comments: Cmd/Ctrl+Enter sends; edits use the same editor (Cmd/Ctrl+Enter saves, Esc cancels; Save on an emptied
   comment asks to delete it; an unchanged Save sends nothing); the server reads mentions from the mention nodes and

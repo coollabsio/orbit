@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { contentEquals, internalPageLinkId, isPageFileUrl, isSafeFileUrl, isSafeLinkHref, isTaskAttachmentUrl, normalizeLinkHref, taskAttachmentUrl, toEditorContent, toStoredContent } from './content'
+import { contentEquals, internalPageLinkId, isPageFileUrl, isSafeFileUrl, isSafeLinkHref, isTaskAttachmentUrl, normalizeLinkHref, pastedFilesToCopy, taskAttachmentUrl, toEditorContent, toStoredContent } from './content'
 
 const TYPES = new Set(['paragraph', 'heading', 'table', 'page'])
 const NUL = String.fromCharCode(0)
@@ -183,5 +183,29 @@ describe('task attachment urls', () => {
     expect(toEditorContent(blocks, new Set(['image']), scope)?.[0]).toEqual({ type: 'image', props: { url } })
     expect(toStoredContent(blocks, scope)[0]).toEqual({ type: 'image', props: { url } })
     expect(toStoredContent(blocks)[0]).toEqual({ type: 'image', props: { url: '' } })
+  })
+})
+
+describe('pastedFilesToCopy', () => {
+  const ws = '0199a0b0-0000-7000-8000-000000000001'
+  const task = '0199a0b0-0000-7000-8000-000000000002'
+  const other = '0199a0b0-0000-7000-8000-000000000003'
+  const file = '0199a0b0-0000-7000-8000-000000000004'
+  const scope = { workspaceId: ws, taskId: task }
+  const block = (id: string, url: string, children: unknown[] = []) => ({ id, type: 'image', props: { url, name: 'shot.png' }, children })
+
+  test('files of another task or of a page are copied; own files, links and earlier blocks are not', () => {
+    const fromTask = taskAttachmentUrl(ws, other, file)
+    const fromPage = `/api/v1/workspaces/${ws}/pages/${other}/files/${file}`
+    const document = [
+      block('kept', taskAttachmentUrl(ws, other, file)),
+      block('own', taskAttachmentUrl(ws, task, file)),
+      block('web', 'https://example.com/a.png'),
+      { id: 'p', type: 'paragraph', children: [block('task', fromTask), block('page', fromPage)] },
+    ]
+    expect(pastedFilesToCopy(document, new Set(['kept']), scope)).toEqual([
+      { id: 'task', url: fromTask, name: 'shot.png' },
+      { id: 'page', url: fromPage, name: 'shot.png' },
+    ])
   })
 })

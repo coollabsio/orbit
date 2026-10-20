@@ -21,3 +21,14 @@ function hasContent(value: unknown): boolean {
 export function fileBlock(file: File, url: string) {
   return { type: file.type.startsWith('image/') ? 'image' : 'file', props: { url, name: file.name } }
 }
+
+/**
+ * What Save does in a comment's edit: `close` without a change (an old markdown comment is not rewritten), `save` an
+ * edit, and `confirm-delete` when the text was removed (a comment needs content). Removing the text of a comment that
+ * has files keeps the comment as it was.
+ */
+export function commentSaveAction({ content, changed, hasAttachments }: { content: readonly unknown[]; changed: boolean; hasAttachments: boolean }): 'close' | 'save' | 'confirm-delete' {
+  if (!changed) return 'close'
+  if (!isEmptyRichText(content)) return 'save'
+  return hasAttachments ? 'close' : 'confirm-delete'
+}

@@ -28,7 +28,7 @@ import { cn } from 'cn'
 import { collabBlockPresence } from '../collab/blockPresence'
 import { renderCollabCursor } from '../collab/cursor'
 import { ImageZoomButton } from './ImageZoomButton'
-import { internalPageLinkId, isSafeLinkHref, toEditorContent, toStoredContent, type FileScope } from './content'
+import { internalPageLinkId, isSafeLinkHref, pastedFilesToCopy, toEditorContent, toStoredContent, type FileScope, type FileToCopy } from './content'
 import { insertPageBlock } from './pageBlockCommands'
 import { PageEditorContext, type PageEditorContextValue, type PageRef } from './pageEditorContext'
 import { EDITOR_BLOCK_TYPES, markdownToTaskBlocks, pageEditorSchema, TASK_EDITOR_BLOCK_TYPES, taskEditorSchema, type PageEditorInstance } from './schema'
@@ -115,12 +115,14 @@ export interface PageEditorProps {
   /** Escape while no menu is open (cancel an edit). */
   onEscape?: () => void
   /** Hint shown while the document is empty (task profile). */
-  placeholder?: 'description' | 'comment'
+  placeholder?: 'description' | 'comment' | 'reply'
   /**
    * The block side menu (+ and drag handle) in a 54px gutter left of the text. Off for small fields (dialogs, comment
    * cards), which have no room for the gutter: blocks start at the field's edge and `/` still inserts blocks.
    */
   sideMenu?: boolean
+  /** The editable area's accessible name ("Description", "Comment"…); placeholders are CSS and are not announced. */
+  ariaLabel?: string
   /** `Page.content` from the API, read once per `pageId`. Ignored with `collab` (the Y document is the content). */
   initialContent?: unknown[]
   /** Without `initialContent`: markdown to start from (task text written before rich text). */
@@ -168,6 +170,7 @@ function PageEditorInner({
   onEscape,
   placeholder,
   sideMenu = true,
+  ariaLabel,
   initialContent,
   initialMarkdown,
   collab,
@@ -220,6 +223,7 @@ function PageEditorInner({
   const uploadRef = useRef(uploadFile)
   const openPageRef = useRef(onOpenPage)
   const keysRef = useRef({ submitShortcut, onEscape })
+  const fileScopeRef = useRef(fileScope)
   const mentionsRef = useRef(mentions)
   useEffect(() => {
     mentionsRef.current = mentions
@@ -233,7 +237,8 @@ function PageEditorInner({
     uploadRef.current = uploadFile
     openPageRef.current = onOpenPage
     keysRef.current = { submitShortcut, onEscape }
-  }, [uploadFile, onOpenPage, submitShortcut, onEscape])
+    fileScopeRef.current = fileScope
+  }, [uploadFile, onOpenPage, submitShortcut, onEscape, fileScope])
 
   const options = {
     // The task schema is the page schema minus `page`; one editor type serves both (no task code inserts pages).
@@ -253,9 +258,21 @@ function PageEditorInner({
     },
     // Whether uploads exist is fixed per editor; the latest callback is read through a ref.
     uploadFile: uploadFile ? (file: File) => uploadRef.current!(file) : undefined,
+    // Task text keeps its own copy of images and files pasted from another task or a docs page, so they stay when the
+    // source goes to the trash.
+    pasteHandler: ({ editor: target, defaultPasteHandler }: PasteContext) => {
+      const scope = fileScopeRef.current
+      const upload = uploadRef.current
+      if (!task || !scope || !upload) return defaultPasteHandler()
+      const before = new Set(blockIds(target.document))
+      const handled = defaultPasteHandler()
+      for (const copy of pastedFilesToCopy(target.document, before, scope)) void copyPastedFile(target, copy, upload)
+      return handled
+    },
     // Tiptap would inject its base stylesheet as a <style> tag, which the production CSP (`style-src 'self'`)
     // blocks. The same rules ship statically at the end of src/index.css instead.
     _tiptapOptions: { injectCSS: false },
+    domAttributes: ariaLabel ? { editor: { 'aria-label': ariaLabel } } : undefined,
     dictionary,
   }
   const commentsExtension = CommentsExtension({
@@ -462,6 +479,8 @@ function PageEditorInner({
               "[&>.bn-editor[contenteditable=true]_.bn-block-content[data-is-only-empty-block]:has(.ProseMirror-trailingBreak:only-child)]:after:content-['Add_description…']!",
             placeholder === 'comment' &&
               "[&>.bn-editor[contenteditable=true]_.bn-block-content[data-is-only-empty-block]:has(.ProseMirror-trailingBreak:only-child)]:after:content-['Leave_a_comment…_Use_@_to_mention']!",
+            placeholder === 'reply' &&
+              "[&>.bn-editor[contenteditable=true]_.bn-block-content[data-is-only-empty-block]:has(.ProseMirror-trailingBreak:only-child)]:after:content-['Leave_a_reply…']!",
             className,
           )}
           sideMenu={sideMenu}
@@ -504,6 +523,28 @@ function PageEditorInner({
       </PageMentionNamesContext>
     </PageEditorContext>
   )
+}
+
+interface PasteContext {
+  editor: PageEditorInstance
+  defaultPasteHandler: () => boolean | undefined
+}
+
+function blockIds(blocks: readonly { id: string; children: readonly unknown[] }[]): string[] {
+  return blocks.flatMap((block) => [block.id, ...blockIds(block.children as typeof blocks)])
+}
+
+/** Downloads a pasted file of another task or page, uploads it to this one and points the block at the copy. */
+async function copyPastedFile(editor: PageEditorInstance, copy: FileToCopy, upload: (file: File) => Promise<string>) {
+  try {
+    const response = await fetch(copy.url, { credentials: 'same-origin' })
+    if (!response.ok) return
+    const blob = await response.blob()
+    const url = await upload(new File([blob], copy.name, { type: blob.type }))
+    if (editor.getBlock(copy.id)) editor.updateBlock(copy.id, { props: { url } } as never)
+  } catch {
+    // the upload reports its own error; the block keeps the source's file
+  }
 }
 
 /** The latest comments props and editor, for the thread store's callbacks (the store outlives renders). */
