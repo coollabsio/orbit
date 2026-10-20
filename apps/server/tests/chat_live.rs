@@ -658,3 +658,24 @@ async fn servers_of_one_database_share_events_presence_and_replay() {
     two.stop().await;
     database.drop().await;
 }
+
+#[tokio::test]
+async fn a_server_that_stops_closes_live_sockets_with_service_restart() {
+    let (server, owner) = Server::start().await;
+    let (mut socket, _) = server.client(&owner).await;
+    server.shutdown.cancel();
+    let close = loop {
+        match tokio::time::timeout(Duration::from_secs(10), socket.next())
+            .await
+            .expect("the close frame comes before the server stops")
+        {
+            Some(Ok(Ws::Close(frame))) => break frame,
+            Some(Ok(_)) => {}
+            other => panic!("the socket ended without a close frame: {other:?}"),
+        }
+    };
+    let close = close.expect("a close code");
+    assert_eq!(u16::from(close.code), 1012);
+    assert_eq!(close.reason.as_str(), "server restarting");
+    server.task.await.unwrap();
+}

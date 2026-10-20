@@ -543,13 +543,25 @@ impl App {
                 }
             }
         };
-        if tokio::time::timeout(BACKGROUND_DRAIN, drain).await.is_err() {
+        let drained = tokio::time::timeout(BACKGROUND_DRAIN, drain).await.is_ok();
+        if !drained {
             abort_services(&mut services);
-            return Err(AppError::DrainTimeout);
         }
-        // Open documents: write and project every pending edit, close their sockets (1012).
-        if let Some(hub) = crate::collab::CollabHub::existing(&self.database) {
-            hub.shutdown().await;
+        // Also after a drain timeout. Open documents: write and project every pending edit, close
+        // their sockets (1012). Live sockets: close them (1012), so the clients reconnect at once.
+        let collab = async {
+            if let Some(hub) = crate::collab::CollabHub::existing(&self.database) {
+                hub.shutdown().await;
+            }
+        };
+        let live = async {
+            if let Some(hub) = crate::live::LiveHub::existing(&self.database) {
+                hub.shutdown().await;
+            }
+        };
+        tokio::join!(collab, live);
+        if !drained {
+            return Err(AppError::DrainTimeout);
         }
         http_result
             .expect("HTTP server result is recorded during drain")

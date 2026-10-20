@@ -90,6 +90,20 @@ test('an ended session does not reconnect', async () => {
   live.close()
 })
 
+test('a server restart reconnects without showing the drop', async () => {
+  const { live, sockets, log, reconnected } = setup()
+  sockets[0].frame({ type: 'hello', epoch: 'e1', seq: 3, presence: [] })
+  sockets[0].frame({ type: 'resync' })
+  sockets[0].onclose?.({ code: 1012 })
+  const second = await reconnected()
+  expect(second.url).toBe('ws://orbit/live?epoch=e1&after=3')
+  expect(log).toEqual(['connected', 'hello:', 'resync'])
+  // If the next try fails too, the user is told.
+  second.onclose?.({ code: 1006 })
+  expect(log.at(-1)).toBe('reconnecting')
+  live.close()
+})
+
 test('back online, a waiting socket reconnects at once', async () => {
   const sockets: FakeSocket[] = []
   // A long backoff: only the `online` event can bring the second socket within the test.
