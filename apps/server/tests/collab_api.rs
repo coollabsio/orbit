@@ -1327,3 +1327,44 @@ async fn a_compaction_keeps_what_another_server_logged() {
     assert_eq!(b.text(), expected);
     server.stop().await;
 }
+
+#[tokio::test]
+async fn a_page_write_past_the_memory_budget_is_busy() {
+    let root = TempDir::new().unwrap();
+    let config = CollabConfig {
+        memory_budget_bytes: 1,
+        ..fast_config()
+    };
+    let server = Server::start(&root, config).await;
+    let users = setup(&server).await;
+    let stored = create_page(
+        &server,
+        &users,
+        &users.owner,
+        json!({"title": "Stored"}),
+        "a",
+    )
+    .await;
+    let stored_id = stored["id"].as_str().unwrap();
+    let open = create_page(&server, &users, &users.owner, json!({"title": "Open"}), "b").await;
+    let open_id = open["id"].as_str().unwrap();
+
+    // `stored` gets a stored document, then its room goes; someone keeps `open` open
+    drop(Client::open(&server, &users, &users.owner, stored_id).await);
+    let hub = CollabHub::existing(&server.database).unwrap();
+    wait_until("the idle room to go", || async { hub.stats().0 == 0 }).await;
+    let _editor = Client::open(&server, &users, &users.owner, open_id).await;
+
+    let page = get_page(&server, &users, &users.owner, stored_id).await;
+    let (status, body) = server
+        .api(
+            &users.owner,
+            "PATCH",
+            &format!("/api/v1/workspaces/{}/pages/{stored_id}", users.workspace),
+            Some(json!({"expected_version": page["version"], "content": []})),
+        )
+        .await;
+    assert_eq!(status, 503, "{body}");
+    assert_eq!(body["code"], "page_busy");
+    server.stop().await;
+}

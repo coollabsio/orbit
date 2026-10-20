@@ -1056,6 +1056,17 @@ async fn github_webhook_from_database(
                 "This GitHub item is already linked to a task in another project.",
                 id,
             ),
+            // GitHub does not redeliver by itself; the delivery shows as failed and can be redelivered
+            TaskError::Busy => {
+                tracing::warn!("GitHub work item sync refused: the task's description is busy");
+                ApiError::new(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "task_busy",
+                    "Task busy",
+                    "The task's description is busy on the server. Redeliver the event in a moment.",
+                    id,
+                )
+            }
             _ => {
                 tracing::warn!(error = ?cause, "GitHub work item sync failed");
                 ApiError::internal(id)
@@ -1417,15 +1428,8 @@ fn task_problem(error: TaskError, request_id: Option<&RequestId>) -> ApiError {
             request_id,
         ),
         TaskError::Invalid { field } => validation(field, request_id),
-        // the sender (GitHub) delivers the event again later
-        TaskError::Busy => ApiError::new(
-            StatusCode::SERVICE_UNAVAILABLE,
-            "task_busy",
-            "Task busy",
-            "The task's description is busy on the server. Try again in a moment.",
-            request_id,
-        ),
         TaskError::Conflict
+        | TaskError::Busy
         | TaskError::GithubContentReadOnly
         | TaskError::GithubLinkedMove
         | TaskError::RestoreConflict { .. }

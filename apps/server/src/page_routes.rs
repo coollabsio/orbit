@@ -1081,6 +1081,14 @@ fn page_problem(
             instance,
             request_id,
         ),
+        PageError::Busy => ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "page_busy",
+            "Page busy",
+            "The page's content is busy on the server. Try again in a moment.",
+            instance,
+            request_id,
+        ),
         PageError::Corrupt | PageError::Unavailable(_) => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",

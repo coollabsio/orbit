@@ -357,6 +357,9 @@ pub enum PageError {
     Corrupt,
     #[error("page repository is unavailable")]
     Unavailable(#[from] sqlx::Error),
+    /// Co-editing is at its memory budget, or another server reset the document: try again.
+    #[error("the page's co-editing document is busy")]
+    Busy,
 }
 
 impl From<CollabError> for PageError {
@@ -364,15 +367,9 @@ impl From<CollabError> for PageError {
         match error {
             CollabError::NotFound => Self::NotFound,
             CollabError::Unavailable(error) => Self::Unavailable(error),
-            // memory budget: try again later
-            CollabError::Overloaded => {
-                Self::Unavailable(sqlx::Error::Protocol("co-editing is overloaded".to_owned()))
-            }
+            // the memory budget is full, or another server reset the document while this write waited
+            CollabError::Overloaded | CollabError::Reset => Self::Busy,
             CollabError::Corrupt(_) => Self::Corrupt,
-            // Another server reset the document while this write waited: try again.
-            CollabError::Reset => Self::Unavailable(sqlx::Error::Protocol(
-                "co-editing document was reset".to_owned(),
-            )),
         }
     }
 }
