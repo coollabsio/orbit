@@ -90,7 +90,7 @@ pub struct TaskRecord {
     /// Markdown copy of `description_json` (search, MCP, GitHub, API clients).
     pub description: String,
     /// BlockNote blocks, the description's source; null for a task written before rich text
-    /// (only `description` exists then).
+    /// (only `description` exists then) and in task lists (read the task for it).
     #[schema(required = true, value_type = Option<Vec<Object>>)]
     pub description_json: Option<Vec<Value>>,
     /// Epoch of the description's co-editing document (`/tasks/{id}/collab?epoch=`).
@@ -1316,7 +1316,7 @@ impl TaskRepository {
         let after = cursor_pair(cursor, &fingerprint)?;
         let mut query = SqlBuilder::new(format!(
             "SELECT {} FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.workspace_id = ",
-            task_columns(self.database.backend())
+            task_columns(self.database.backend(), false)
         ));
         query.push_bind(workspace_id.to_string());
         query.push(" AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL");
@@ -1424,7 +1424,7 @@ impl TaskRepository {
         let sql = format!(
             "SELECT {} FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = $1 AND tasks.workspace_id = $2 \
              AND tasks.deleted_at IS NULL AND projects.deleted_at IS NULL",
-            task_columns(self.database.backend())
+            task_columns(self.database.backend(), true)
         );
         let row = sqlx::query(sqlx::AssertSqlSafe(sql))
             .bind(task_id.to_string())
@@ -2324,7 +2324,7 @@ impl TaskRepository {
         let after = cursor_i64_pair(cursor, &fingerprint)?;
         let mut query = SqlBuilder::new(format!(
             "SELECT {} FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.workspace_id = ",
-            task_columns(self.database.backend())
+            task_columns(self.database.backend(), false)
         ));
         query
             .push_bind(workspace_id.to_string())
@@ -3392,11 +3392,15 @@ async fn notify_users(
         if exists != 1 {
             return Err(TaskError::Invalid { field });
         }
-        let dedupe_key = format!(
+        let mut dedupe_key = format!(
             "{workspace_id}:{recipient}:{}:{}",
             request.kind,
             request.comment_id.unwrap_or(request.task_id)
         );
+        if request.kind == "description_mentioned" {
+            // a description can mention someone again later (see `DESCRIPTION_MENTION_WINDOW_MS`)
+            dedupe_key.push_str(&format!(":{}", now.as_millis()));
+        }
         sqlx::query(
             "INSERT INTO notifications \
              (id, workspace_id, recipient_user_id, actor_user_id, kind, task_id, comment_id, dedupe_key, created_at) \
@@ -3565,6 +3569,10 @@ fn updated_fields(update: &TaskUpdate, before: &TaskRecord, after: &TaskRecord) 
     Value::Object(changes)
 }
 
+/// A member mentioned in a description again within this time (removed and added back while
+/// editing) is not notified again.
+const DESCRIPTION_MENTION_WINDOW_MS: i64 = 10 * 60 * 1000;
+
 /// The markdown copy of a description is cut to this many characters.
 const DESCRIPTION_MAX_CHARS: usize = 100_000;
 
@@ -3698,7 +3706,21 @@ async fn notify_description_mentions(
         .into_keys()
         .filter(|id| !known.contains_key(id))
         .collect();
-    let recipients = mentionable(tx, workspace_id, added, editor).await?;
+    let mut recipients = Vec::new();
+    for user_id in mentionable(tx, workspace_id, added, editor).await? {
+        let Flag(recent) = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM notifications WHERE task_id = $1 AND recipient_user_id = $2 \
+             AND kind = 'description_mentioned' AND created_at > $3)",
+        )
+        .bind(task_id.to_string())
+        .bind(user_id.to_string())
+        .bind(now.as_millis() - DESCRIPTION_MENTION_WINDOW_MS)
+        .fetch_one(&mut **tx)
+        .await?;
+        if !recent {
+            recipients.push(user_id);
+        }
+    }
     if recipients.is_empty() {
         return Ok(());
     }
@@ -3933,7 +3955,7 @@ pub(super) async fn task_in_tx(
     let sql = format!(
         "SELECT {} FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = $1 AND tasks.workspace_id = $2 \
          AND (($3 = 1 AND tasks.deleted_at IS NOT NULL) OR ($4 = 0 AND tasks.deleted_at IS NULL)) AND ($5 = 1 OR projects.deleted_at IS NULL)",
-        task_columns(connection_backend(tx))
+        task_columns(connection_backend(tx), true)
     );
     let row = sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(task_id.to_string())
@@ -4097,11 +4119,13 @@ pub(super) fn connection_backend(connection: &sqlx::AnyConnection) -> Backend {
     }
 }
 
-/// The column list every `TaskRecord` query selects (decoded by `task_record_from_row`).
-fn task_columns(backend: Backend) -> String {
+/// The column list every `TaskRecord` query selects (decoded by `task_record_from_row`). Lists leave
+/// `description_json` out (`rich = false`, null in the record): it is several times larger than the
+/// markdown and only the task view needs it.
+fn task_columns(backend: Backend, rich: bool) -> String {
     format!(
         "tasks.id, tasks.workspace_id, tasks.project_id, tasks.status_id, tasks.number, tasks.title, \
-         tasks.description, tasks.description_json, \
+         tasks.description, {} AS description_json, \
          COALESCE((SELECT epoch FROM task_collab_docs WHERE task_collab_docs.task_id = tasks.id), \
          (SELECT generation FROM page_collab_meta WHERE page_collab_meta.id = 1), '') AS collab_epoch, \
          tasks.source_url, tasks.priority, tasks.position, tasks.creator_id, \
@@ -4127,6 +4151,11 @@ fn task_columns(backend: Backend) -> String {
           WHERE child.parent_task_id = tasks.id AND child.deleted_at IS NULL \
           AND child_project.deleted_at IS NULL \
           AND child_status.category IN ('completed', 'cancelled', 'duplicate')) AS sub_issue_closed_count",
+        if rich {
+            "tasks.description_json"
+        } else {
+            "NULL"
+        },
         duplicate_of_subquery(backend, "tasks.id"),
         sub_issues::parent_subquery(backend, "tasks.parent_task_id")
     )

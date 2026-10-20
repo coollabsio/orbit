@@ -486,3 +486,74 @@ async fn mentions_in_a_new_task_description_notify() {
     assert_eq!(description_mentions(&server, users.member_id).await, 1);
     server.stop().await;
 }
+
+#[tokio::test]
+async fn a_mention_after_ten_minutes_notifies_again() {
+    let root = TempDir::new().unwrap();
+    let server = Server::start(&root, fast_config()).await;
+    let users = setup(&server).await;
+    let task = create_task(&server, &users, "Start").await;
+    let id = task["id"].as_str().unwrap();
+    let path = format!("/api/v1/workspaces/{}/tasks/{id}", users.workspace);
+    let mut version = task["version"].clone();
+    let mut write = async |blocks: Value| {
+        let (status, body) = server
+            .api(
+                &users.owner,
+                "PATCH",
+                &path,
+                Some(json!({"expected_version": version, "description_json": blocks})),
+            )
+            .await;
+        assert_eq!(status, 200, "{body}");
+        version = body["version"].clone();
+    };
+    let plain = json!([{"type": "paragraph", "content": [{"type": "text", "text": "No one", "styles": {}}]}]);
+
+    write(mention_paragraph(users.member_id, "Mia Member", "Ask ")).await;
+    write(plain.clone()).await;
+    write(mention_paragraph(users.member_id, "Mia Member", "Ask ")).await;
+    assert_eq!(
+        description_mentions(&server, users.member_id).await,
+        1,
+        "within ten minutes: one notification"
+    );
+
+    sqlx::query("UPDATE notifications SET created_at = created_at - 660000 WHERE kind = 'description_mentioned'")
+        .execute(server.database.pool())
+        .await
+        .unwrap();
+    write(plain).await;
+    write(mention_paragraph(users.member_id, "Mia Member", "Ask ")).await;
+    assert_eq!(description_mentions(&server, users.member_id).await, 2);
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn a_renamed_member_is_not_notified_for_an_old_mention() {
+    let root = TempDir::new().unwrap();
+    let server = Server::start(&root, fast_config()).await;
+    let users = setup(&server).await;
+    let task = create_task(&server, &users, "Ask @Mia Member").await;
+    let id = task["id"].as_str().unwrap();
+
+    // the first open converts the markdown, with the mention
+    let first = open(&server, &users, &users.owner, id).await;
+    drop(first);
+    sqlx::query("UPDATE users SET display_name = 'Mia Renamed' WHERE id = $1")
+        .bind(users.member_id.to_string())
+        .execute(server.database.pool())
+        .await
+        .unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let mut client = open(&server, &users, &users.owner, id).await;
+    client.type_text(0, "Please ").await;
+    wait_until("the projection", || async {
+        get_task(&server, &users, id).await["description"]
+            .as_str()
+            .is_some_and(|text| text.starts_with("Please"))
+    })
+    .await;
+    assert_eq!(description_mentions(&server, users.member_id).await, 0);
+    server.stop().await;
+}

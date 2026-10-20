@@ -2237,7 +2237,7 @@ export type PageTaskRecord = {
         description: string;
         /**
          * BlockNote blocks, the description's source; null for a task written before rich text
-         * (only `description` exists then).
+         * (only `description` exists then) and in task lists (read the task for it).
          */
         description_json: Array<{
             [key: string]: unknown;
@@ -2963,7 +2963,7 @@ export type TaskRecord = {
     description: string;
     /**
      * BlockNote blocks, the description's source; null for a task written before rich text
-     * (only `description` exists then).
+     * (only `description` exists then) and in task lists (read the task for it).
      */
     description_json: Array<{
         [key: string]: unknown;

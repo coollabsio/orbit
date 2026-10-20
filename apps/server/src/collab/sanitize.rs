@@ -148,16 +148,15 @@ fn is_page_file_path(url: &str) -> bool {
         if is_uuid(workspace, true) && is_uuid(page, true) && is_uuid(file, true))
 }
 
-/// `/api/v1/workspaces/<workspace>/tasks/<task>/attachments/<uuid>/download` of the policy's task.
+/// `/api/v1/workspaces/<workspace>/tasks/<task>/attachments/<uuid>/download` of a task in the policy's
+/// workspace (text copied between tasks keeps its files; every member may download them).
 fn is_task_attachment_path(url: &str, policy: &LinkPolicy) -> bool {
     let Some(rest) = url.strip_prefix("/api/v1/workspaces/") else {
         return false;
     };
     let parts: Vec<&str> = rest.split('/').collect();
     matches!(parts.as_slice(), [workspace, "tasks", task, "attachments", file, "download"]
-        if *workspace == policy.workspace_id.to_string()
-            && *task == policy.doc_id.to_string()
-            && is_uuid(file, true))
+        if *workspace == policy.workspace_id.to_string() && is_uuid(task, true) && is_uuid(file, true))
 }
 
 /// Image/file URL policy: empty (waiting for an upload), a page file, or an absolute http(s) URL.
@@ -705,9 +704,17 @@ mod tests {
     }
 
     #[test]
-    fn task_policy_blanks_other_task_attachment_url() {
+    fn task_policy_keeps_another_task_attachment_of_the_workspace() {
         let policy = task_policy();
         let url = attachment_url(policy.workspace_id, Id::new_v7());
+        let sanitized = sanitize_blocks_for(&[image(&url)], &policy);
+        assert_eq!(sanitized[0]["props"]["url"], url.as_str());
+    }
+
+    #[test]
+    fn task_policy_blanks_another_workspace_attachment() {
+        let policy = task_policy();
+        let url = attachment_url(Id::new_v7(), policy.doc_id);
         let sanitized = sanitize_blocks_for(&[image(&url)], &policy);
         assert_eq!(sanitized[0]["props"]["url"], "");
     }
@@ -763,7 +770,7 @@ mod tests {
 
         let policy = task_policy();
         let own = attachment_url(policy.workspace_id, policy.doc_id);
-        let foreign = attachment_url(policy.workspace_id, Id::new_v7());
+        let foreign = attachment_url(Id::new_v7(), policy.doc_id);
         let doc = new_doc(None);
         {
             let mut txn = doc.transact_mut();

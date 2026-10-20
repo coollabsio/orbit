@@ -7300,3 +7300,63 @@ async fn markdown_comment_body_still_works() {
     assert_eq!(comment["body"], "plain");
     assert_eq!(comment["body_json"][0]["content"][0]["text"], "plain");
 }
+
+#[tokio::test]
+async fn task_lists_leave_out_description_json() {
+    let fixture = Fixture::new().await;
+    let response = fixture
+        .app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &format!("/api/v1/workspaces/{}/tasks", fixture.workspace_id),
+            &fixture.owner_cookie,
+            json!({
+                "project_id": fixture.project_id,
+                "status_id": fixture.status_id,
+                "title": "Rich",
+                "description_json": [{"type": "paragraph", "content": [{"type": "text", "text": "Hi", "styles": {}}]}],
+            }),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let task = response_json(response).await;
+    let id = task["id"].as_str().unwrap();
+
+    let list = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request(
+            "GET",
+            &format!("/api/v1/workspaces/{}/tasks", fixture.workspace_id),
+            &fixture.owner_cookie,
+        ))
+        .await
+        .unwrap();
+    let list = response_json(list).await;
+    let item = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == id)
+        .unwrap()
+        .clone();
+    assert_eq!(item["description_json"], Value::Null);
+    assert_eq!(item["description"], "Hi\n");
+
+    let single = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request(
+            "GET",
+            &format!("/api/v1/workspaces/{}/tasks/{id}", fixture.workspace_id),
+            &fixture.owner_cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(
+        response_json(single).await["description_json"][0]["content"][0]["text"],
+        "Hi"
+    );
+}

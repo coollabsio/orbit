@@ -8,6 +8,8 @@ use sqlx::{Any, AnyPool, Transaction};
 
 use super::hub::CollabError;
 use super::markdown_import::markdown_to_blocks;
+use super::sanitize::sanitize_blocks_for;
+use super::{DocKind, LinkPolicy};
 use crate::repositories::tasks::{TaskError, project_task_description};
 
 /// The task's workspace and lock state; `None` when the task does not exist. A task linked to a
@@ -32,7 +34,8 @@ pub(super) async fn meta(pool: &AnyPool, id: Id) -> Result<Option<(Id, bool)>, C
 }
 
 /// The description's blocks: `description_json`, or the markdown of a task written before rich
-/// text, converted (mentions of the workspace's members included).
+/// text, converted (mentions of the workspace's members included). The conversion is stored, so
+/// later edits compare against the same blocks even when member names change.
 pub(super) async fn content(
     pool: &AnyPool,
     id: Id,
@@ -50,10 +53,23 @@ pub(super) async fn content(
         return Ok(blocks);
     }
     let members = members(pool, workspace_id).await?;
-    Ok(markdown_to_blocks(
-        &row.get::<String, _>("description"),
-        &members,
-    ))
+    let policy = LinkPolicy {
+        kind: DocKind::Task,
+        workspace_id,
+        doc_id: id,
+    };
+    let blocks = sanitize_blocks_for(
+        &markdown_to_blocks(&row.get::<String, _>("description"), &members),
+        &policy,
+    );
+    sqlx::query(
+        "UPDATE tasks SET description_json = $1 WHERE id = $2 AND description_json IS NULL",
+    )
+    .bind(Value::Array(blocks.clone()).to_string())
+    .bind(id.to_string())
+    .execute(pool)
+    .await?;
+    Ok(blocks)
 }
 
 /// The workspace's members as `(id, display name)`, for mentions in imported markdown.

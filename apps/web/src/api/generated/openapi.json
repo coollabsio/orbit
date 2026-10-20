@@ -37733,7 +37733,7 @@
                   "items": {
                     "type": "object"
                   },
-                  "description": "BlockNote blocks, the description's source; null for a task written before rich text\n(only `description` exists then)."
+                  "description": "BlockNote blocks, the description's source; null for a task written before rich text\n(only `description` exists then) and in task lists (read the task for it)."
                 },
                 "due_at": {
                   "type": [
@@ -39651,7 +39651,7 @@
             "items": {
               "type": "object"
             },
-            "description": "BlockNote blocks, the description's source; null for a task written before rich text\n(only `description` exists then)."
+            "description": "BlockNote blocks, the description's source; null for a task written before rich text\n(only `description` exists then) and in task lists (read the task for it)."
           },
           "due_at": {
             "type": [
