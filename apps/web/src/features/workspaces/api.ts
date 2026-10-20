@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { type QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient, type createApiClient } from '@/api/client'
 import { fetchAllPages } from '@/api/pagination'
 import { queryKeys } from '@/api/queryKeys'
@@ -271,15 +271,34 @@ export function useDeleteWorkspace(workspaceId: string) {
         throwOnError: true,
       })
     },
-    onSuccess: async () => {
-      await queryClient.cancelQueries({ queryKey: queryKeys.workspaces })
-      await queryClient.cancelQueries({ queryKey: queryKeys.workspace(workspaceId) })
-      queryClient.removeQueries({ queryKey: queryKeys.workspace(workspaceId) })
-      queryClient.setQueryData<WorkspaceRecord[]>(queryKeys.workspaces, (items) =>
-        items?.filter((item) => item.id !== workspaceId))
-      if (window.localStorage.getItem('orbit:selected_workspace') === workspaceId) {
-        window.localStorage.removeItem('orbit:selected_workspace')
-      }
-    },
+    onSuccess: () => forgetWorkspace(queryClient, workspaceId),
   })
+}
+
+/** Removes the caller's own membership. The workspace's owner must transfer ownership first. */
+export function useLeaveWorkspace(workspaceId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (membership: { membershipId: string; version: number }) => {
+      await removeMember({
+        client: apiClient,
+        path: { workspace_id: workspaceId, membership_id: membership.membershipId },
+        query: { expected_version: membership.version },
+        throwOnError: true,
+      })
+    },
+    onSuccess: () => forgetWorkspace(queryClient, workspaceId),
+  })
+}
+
+/** Drops a workspace the user no longer has (deleted, or left) from the cache and the saved selection. */
+async function forgetWorkspace(queryClient: QueryClient, workspaceId: string) {
+  await queryClient.cancelQueries({ queryKey: queryKeys.workspaces })
+  await queryClient.cancelQueries({ queryKey: queryKeys.workspace(workspaceId) })
+  queryClient.removeQueries({ queryKey: queryKeys.workspace(workspaceId) })
+  queryClient.setQueryData<WorkspaceRecord[]>(queryKeys.workspaces, (items) =>
+    items?.filter((item) => item.id !== workspaceId))
+  if (window.localStorage.getItem('orbit:selected_workspace') === workspaceId) {
+    window.localStorage.removeItem('orbit:selected_workspace')
+  }
 }

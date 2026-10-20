@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, useLocation } from 'react-router'
+import { queryKeys } from '@/api/queryKeys'
 import { WorkspaceProvider } from '@/features/workspaces/WorkspaceProvider'
 import { WorkspaceSwitcher } from './WorkspaceSwitcher'
 
@@ -14,6 +15,7 @@ function Location() {
 function setup() {
   window.localStorage.clear()
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
+  client.setQueryData(queryKeys.currentUser, { id: 'user-1', email: 'owner@orbit.test', display_name: 'Owner', installation_admin: false, root: false })
   client.setQueryData(['workspaces'], [
     { id: 'alpha', name: 'Alpha', role: 'owner', permissions: [], version: 1 },
     { id: 'beta', name: 'Beta', role: 'member', permissions: [], version: 1 },

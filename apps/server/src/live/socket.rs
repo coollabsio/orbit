@@ -6,7 +6,8 @@
 //! which the client cannot tell from a network failure. After it the connection is checked
 //! again every 15 seconds, so a removed member, a suspended account and an ended session lose
 //! it. Every heartbeat the server also sends a WebSocket ping, which a browser answers on its
-//! own: a connection that stays silent for more than two heartbeats is closed.
+//! own: a connection that stays silent for more than two heartbeats is closed. A server that
+//! stops closes every connection with 1012 (service restart); the client reconnects.
 //!
 //! The frames a client may send are `{"type":"typing","conversation_id":…,"thread_root_id":…}`
 //! and `{"type":"activity","idle":…,"away":…}`: `idle` when the tab has had no input for a while,
@@ -121,6 +122,8 @@ async fn serve(
     user_id: Id,
     resume: Resume,
 ) {
+    // Dropped at the end, after the close frame.
+    let _serving = state.hub.serving();
     let database = state.identity.database().clone();
     // A failed read shows the member as online; the next status change corrects it.
     let status = state
@@ -255,8 +258,10 @@ async fn run(
     let mut allowance = FRAMES_PER_SECOND;
     let mut second = Instant::now();
     let mut heard = tokio::time::Instant::now();
+    let stopping = state.hub.stopping();
     loop {
         tokio::select! {
+            () = stopping.cancelled() => return Some((close::RESTART, "server restarting")),
             frame = attached.frames.recv() => match frame {
                 // The hello or the replay had it.
                 Some(frame) if frame.seq.is_some_and(|seq| seq <= opening.newest) => {}

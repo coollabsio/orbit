@@ -34,7 +34,7 @@ tempfile = "3"
 thiserror = "2"
 totp-rs = { version = "6", default-features = false, features = ["std", "otpauth", "qr"] }
 tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "time"] }
-tokio-util = { version = "0.7", features = ["io"] }
+tokio-util = { version = "0.7", features = ["io", "rt"] }
 tokio-stream = "0.1"
 tower = { version = "0.5", features = ["util"] }
 tracing = "0.1"

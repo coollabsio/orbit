@@ -22,6 +22,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::AnyPool;
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, mpsc};
+use tokio_util::sync::CancellationToken;
+use tokio_util::task::{TaskTracker, task_tracker::TaskTrackerToken};
 
 use super::events::{self, NewEvent};
 use crate::cluster::{Cluster, Message};
@@ -38,6 +40,8 @@ pub(super) const HEARTBEAT: Duration = Duration::from_secs(25);
 /// How long after a connection was last heard from the user can still be at its tab: a little
 /// longer than one heartbeat.
 const HEARD_WINDOW: Duration = Duration::from_secs(35);
+/// How long a server that stops waits for its connections to send their close frames.
+const CLOSE_WAIT: Duration = Duration::from_secs(5);
 
 /// Who an event is for.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -131,6 +135,10 @@ struct Inner {
     next_connection: AtomicU64,
     offline_grace: Duration,
     heard_window: Duration,
+    /// Cancelled when the server stops: every connection closes with 1012.
+    stopping: CancellationToken,
+    /// The connections that are served, so a server that stops can wait for their close frames.
+    serving: TaskTracker,
 }
 
 /// Async locks by id that leave no entry behind once nobody holds or waits for them.
@@ -338,6 +346,8 @@ impl Inner {
             next_connection: AtomicU64::new(1),
             offline_grace,
             heard_window,
+            stopping: CancellationToken::new(),
+            serving: TaskTracker::new(),
         }
     }
 
@@ -620,6 +630,39 @@ impl LiveHub {
         Self {
             inner: database.extension(|| Inner::new(cluster, offline_grace, heard_window)),
             database: database.clone(),
+        }
+    }
+
+    /// The hub of this database, if anything made one.
+    #[must_use]
+    pub fn existing(database: &Database) -> Option<Self> {
+        database.existing_extension::<Inner>().map(|inner| Self {
+            inner,
+            database: database.clone(),
+        })
+    }
+
+    /// Cancelled when the server stops; the connection then closes with 1012.
+    pub(super) fn stopping(&self) -> CancellationToken {
+        self.inner.stopping.clone()
+    }
+
+    /// Held while a connection is served, until its close frame is sent.
+    pub(super) fn serving(&self) -> TaskTrackerToken {
+        self.inner.serving.token()
+    }
+
+    /// Server shutdown: closes every connection with 1012 (service restart), so the clients
+    /// reconnect at once to another server or to this one when it is back, and waits a moment
+    /// for the close frames to go out.
+    pub async fn shutdown(&self) {
+        self.inner.stopping.cancel();
+        self.inner.serving.close();
+        if tokio::time::timeout(CLOSE_WAIT, self.inner.serving.wait())
+            .await
+            .is_err()
+        {
+            tracing::warn!("live sockets did not close in time");
         }
     }
 

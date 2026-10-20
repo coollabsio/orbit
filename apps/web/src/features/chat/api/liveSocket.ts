@@ -48,6 +48,8 @@ export interface LiveSocket {
 
 /** The session ended or the user lost access: reconnecting cannot help. */
 const TERMINAL_CODES = new Set([4401, 4403])
+/** The server stops (a deploy): reconnect soon, without telling the user. */
+const RESTART = 1012
 
 /**
  * One connection to the workspace's live socket, kept open. After a drop it reconnects with the `epoch` and the number
@@ -82,7 +84,8 @@ export function openLiveSocket(options: LiveSocketOptions): LiveSocket {
     if (closed) return
     open = false
     const ended = TERMINAL_CODES.has(code)
-    options.onStatus(ended ? 'ended' : 'reconnecting')
+    // A restart stays quiet: the status changes only if the next try fails too.
+    if (code !== RESTART) options.onStatus(ended ? 'ended' : 'reconnecting')
     if (ended) return
     // 1x, 2x, 4x … 30x the base delay, with up to half of it added at random so tabs do not reconnect together.
     const delay = Math.min(retryMs * 2 ** attempt, retryMs * 30)

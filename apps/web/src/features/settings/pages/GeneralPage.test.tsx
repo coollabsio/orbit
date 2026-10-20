@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { MemoryRouter } from 'react-router'
 import { queryKeys } from '@/api/queryKeys'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { GeneralPage } from './GeneralPage'
@@ -17,9 +18,11 @@ function renderPage() {
   const workspace = testWorkspace('owner', { version: 7 })
   return render(
     <QueryClientProvider client={client}>
-      <WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}>
-        <GeneralPage />
-      </WorkspaceContext.Provider>
+      <MemoryRouter>
+        <WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}>
+          <GeneralPage />
+        </WorkspaceContext.Provider>
+      </MemoryRouter>
     </QueryClientProvider>,
   )
 }
