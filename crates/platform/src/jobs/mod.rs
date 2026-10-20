@@ -11,7 +11,7 @@ use serde_json::Value;
 use crate::{Id, TimestampMillis};
 
 pub use schedule::{CatchUpMode, CronSchedule, RecurringSchedule, ScheduleError, Scheduler};
-pub use store::{Claim, ClaimSelection, JobQueue, JobStore, JobStoreError};
+pub use store::{Claim, ClaimSelection, JobQueue, JobStore, JobStoreError, load_limit_overrides};
 pub use worker::{JobContext, Worker, WorkerConfig, WorkerConfigError, WorkerError};
 
 #[derive(Clone, Debug, Default)]
@@ -72,6 +72,15 @@ pub const DEFAULT_RETRY_DELAYS: [Duration; 7] = [
     Duration::from_secs(24 * 60 * 60),
 ];
 
+/// How many jobs of one kind may run at once. `None` is no limit.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct JobLimits {
+    /// On all servers of the database together.
+    pub concurrency: Option<u32>,
+    /// For one workspace, while another workspace has a job of the kind waiting.
+    pub workspace_concurrency: Option<u32>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct JobKind {
     name: String,
@@ -79,7 +88,7 @@ pub struct JobKind {
     max_attempts: u32,
     retry_delays: Vec<Duration>,
     lease: Duration,
-    concurrency_limit: Option<usize>,
+    limits: JobLimits,
 }
 
 impl JobKind {
@@ -91,7 +100,7 @@ impl JobKind {
             max_attempts: DEFAULT_MAX_ATTEMPTS,
             retry_delays: DEFAULT_RETRY_DELAYS.to_vec(),
             lease: DEFAULT_LEASE,
-            concurrency_limit: None,
+            limits: JobLimits::default(),
         }
     }
 
@@ -126,10 +135,23 @@ impl JobKind {
     }
 
     #[must_use]
-    pub fn with_concurrency_limit(mut self, limit: usize) -> Self {
+    pub fn with_concurrency_limit(mut self, limit: u32) -> Self {
         assert!(limit > 0, "job kind concurrency must be positive");
-        self.concurrency_limit = Some(limit);
+        self.limits.concurrency = Some(limit);
         self
+    }
+
+    #[must_use]
+    pub fn with_workspace_limit(mut self, limit: u32) -> Self {
+        assert!(limit > 0, "job kind workspace concurrency must be positive");
+        self.limits.workspace_concurrency = Some(limit);
+        self
+    }
+
+    /// The limits in code; a `job_limits` row replaces them.
+    #[must_use]
+    pub fn default_limits(&self) -> JobLimits {
+        self.limits
     }
 
     #[must_use]
@@ -171,10 +193,6 @@ impl JobKind {
 
     pub(crate) fn lease(&self) -> Duration {
         self.lease
-    }
-
-    pub(crate) fn concurrency_limit(&self) -> Option<usize> {
-        self.concurrency_limit
     }
 }
 

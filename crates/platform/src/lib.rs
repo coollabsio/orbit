@@ -51,9 +51,9 @@ pub use id::{Id, ParseIdError};
 pub use integrity::{IntegrityError, IntegrityService};
 pub use jobs::{
     CatchUpMode, Claim, ClaimSelection, CronSchedule, Job, JobContext, JobError, JobKind,
-    JobKindRegistrationError, JobKindRegistry, JobPriority, JobQueue, JobState, JobStore,
-    JobStoreError, RecurringSchedule, ScheduleError, Scheduler, Worker, WorkerConfig,
-    WorkerConfigError, WorkerError,
+    JobKindRegistrationError, JobKindRegistry, JobLimits, JobPriority, JobQueue, JobState,
+    JobStore, JobStoreError, RecurringSchedule, ScheduleError, Scheduler, Worker, WorkerConfig,
+    WorkerConfigError, WorkerError, load_limit_overrides,
 };
 pub use observability::{TracingFormat, init_tracing};
 pub use problem::{ConflictMetadata, Problem};

@@ -1,15 +1,17 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
 use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 use sqlx::any::AnyRow;
-use sqlx::{Any, Row, Transaction};
+use sqlx::{Any, Executor, Row, Transaction};
 use thiserror::Error;
 
 use super::{
-    Job, JobError, JobKind, JobKindRegistrationError, JobKindRegistry, JobPriority, JobState,
+    Job, JobError, JobKind, JobKindRegistrationError, JobKindRegistry, JobLimits, JobPriority,
+    JobState,
 };
-use crate::{Database, Id, ParseIdError, TimestampMillis};
+use crate::{Database, Flag, Id, ParseIdError, TimestampMillis};
 
 const DEAD_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
 
@@ -100,39 +102,9 @@ impl JobStore {
         now: TimestampMillis,
         selection: ClaimSelection,
     ) -> Result<Option<Claim>, JobStoreError> {
-        self.claim_excluding(now, selection, &[]).await
-    }
-
-    pub async fn database_now(&self) -> Result<TimestampMillis, JobStoreError> {
-        Ok(self.database.database_now().await?)
-    }
-
-    pub async fn claim_at_database_time(
-        &self,
-        selection: ClaimSelection,
-    ) -> Result<Option<Claim>, JobStoreError> {
-        let now = self.database_now().await?;
-        self.claim(now, selection).await
-    }
-
-    pub(crate) async fn claim_excluding_at_database_time(
-        &self,
-        selection: ClaimSelection,
-        excluded_kinds: &[String],
-    ) -> Result<Option<Claim>, JobStoreError> {
-        let now = self.database_now().await?;
-        self.claim_excluding(now, selection, excluded_kinds).await
-    }
-
-    pub(crate) async fn claim_excluding(
-        &self,
-        now: TimestampMillis,
-        selection: ClaimSelection,
-        excluded_kinds: &[String],
-    ) -> Result<Option<Claim>, JobStoreError> {
         let mut transaction = self.database.immediate_transaction().await?;
         let rows = sqlx::query(
-            "SELECT id, state, attempt_count, max_attempts, claim_token, kind FROM jobs \
+            "SELECT id, state, attempt_count, max_attempts, claim_token, kind, workspace_id FROM jobs \
              WHERE ((state = 'queued' AND available_at <= $1) \
                     OR (state = 'running' AND lease_expires_at <= $2)) \
                AND ($3 = 'any' OR ($4 = 'critical' AND priority = 'critical') \
@@ -147,29 +119,40 @@ impl JobStore {
         .bind(selection_name(selection))
         .fetch_all(&mut *transaction)
         .await?;
+        // Read on every claim, so a change in Admin reaches every server without a restart.
+        let overrides = load_limit_overrides(&mut *transaction).await?;
+        // A kind at its limit (no workspace) or a workspace at its limit, known for this claim.
+        let mut blocked = BTreeSet::<(String, Option<String>)>::new();
 
         for row in rows {
             let kind: String = row.try_get("kind")?;
-            if excluded_kinds.contains(&kind) {
+            let workspace_id: Option<String> = row.try_get("workspace_id")?;
+            if blocked.contains(&(kind.clone(), None))
+                || blocked.contains(&(kind.clone(), workspace_id.clone()))
+            {
                 continue;
             }
             let policy = self.kinds.resolve(&kind);
-            // The limit holds for every process of the database: the claim transaction is
-            // serialized, so it sees the jobs other processes run (this one's own are in
-            // `excluded_kinds`).
-            if let Some(limit) = policy.concurrency_limit() {
-                let running: i64 = sqlx::query_scalar(
-                    "SELECT COUNT(*) FROM jobs WHERE kind = $1 AND state = 'running' \
-                     AND lease_expires_at > $2 AND lease_owner != $3",
-                )
-                .bind(&kind)
-                .bind(now.as_millis())
-                .bind(&self.lease_owner)
-                .fetch_one(&mut *transaction)
-                .await?;
-                if usize::try_from(running).unwrap_or(usize::MAX) >= limit {
-                    continue;
-                }
+            let limits = overrides
+                .get(&kind)
+                .copied()
+                .unwrap_or_else(|| policy.default_limits());
+            // The claim transaction is serialized, so the counts include the jobs of every
+            // server of the database.
+            if let Some(limit) = limits.concurrency
+                && count_running(&mut transaction, &kind, None, now).await? >= i64::from(limit)
+            {
+                blocked.insert((kind, None));
+                continue;
+            }
+            if let (Some(limit), Some(workspace)) =
+                (limits.workspace_concurrency, workspace_id.as_deref())
+                && count_running(&mut transaction, &kind, Some(workspace), now).await?
+                    >= i64::from(limit)
+                && another_workspace_waits(&mut transaction, &kind, workspace, limit, now).await?
+            {
+                blocked.insert((kind, workspace_id));
+                continue;
             }
             if let Some(claim) = self
                 .claim_row(&mut transaction, &row, now, policy.lease())
@@ -182,6 +165,18 @@ impl JobStore {
 
         transaction.commit().await?;
         Ok(None)
+    }
+
+    pub async fn database_now(&self) -> Result<TimestampMillis, JobStoreError> {
+        Ok(self.database.database_now().await?)
+    }
+
+    pub async fn claim_at_database_time(
+        &self,
+        selection: ClaimSelection,
+    ) -> Result<Option<Claim>, JobStoreError> {
+        let now = self.database_now().await?;
+        self.claim(now, selection).await
     }
 
     async fn claim_row(
@@ -313,7 +308,7 @@ impl JobStore {
         claim: &Claim,
         now: TimestampMillis,
     ) -> Result<bool, JobStoreError> {
-        let mut transaction = self.database.transaction().await?;
+        let mut transaction = self.database.immediate_transaction().await?;
         let result = sqlx::query(
             "UPDATE jobs SET state = 'succeeded', lease_owner = NULL, claim_token = NULL, \
              lease_expires_at = NULL, updated_at = $1 \
@@ -338,7 +333,7 @@ impl JobStore {
         error: JobError,
         now: TimestampMillis,
     ) -> Result<bool, JobStoreError> {
-        let mut transaction = self.database.transaction().await?;
+        let mut transaction = self.database.immediate_transaction().await?;
         let row = sqlx::query(
             "SELECT max_attempts, kind FROM jobs WHERE id = $1 AND state = 'running' \
              AND attempt_count = $2 AND claim_token = $3",
@@ -405,7 +400,7 @@ impl JobStore {
         claim: &Claim,
         now: TimestampMillis,
     ) -> Result<bool, JobStoreError> {
-        let mut transaction = self.database.transaction().await?;
+        let mut transaction = self.database.immediate_transaction().await?;
         let result = sqlx::query(
             "UPDATE jobs SET state = 'queued', attempt_count = attempt_count - 1, \
              available_at = $1, lease_owner = NULL, claim_token = NULL, lease_expires_at = NULL, \
@@ -554,6 +549,85 @@ async fn finish_attempt(
     .execute(&mut **transaction)
     .await?;
     Ok(())
+}
+
+/// The `job_limits` rows: the limits the root user set in Admin, by job kind.
+pub async fn load_limit_overrides<'e>(
+    executor: impl Executor<'e, Database = Any>,
+) -> Result<BTreeMap<String, JobLimits>, sqlx::Error> {
+    let rows = sqlx::query("SELECT kind, concurrency, workspace_concurrency FROM job_limits")
+        .fetch_all(executor)
+        .await?;
+    let limit = |value: Option<i64>| value.and_then(|value| u32::try_from(value).ok());
+    rows.iter()
+        .map(|row| {
+            Ok((
+                row.try_get("kind")?,
+                JobLimits {
+                    concurrency: limit(row.try_get("concurrency")?),
+                    workspace_concurrency: limit(row.try_get("workspace_concurrency")?),
+                },
+            ))
+        })
+        .collect()
+}
+
+async fn count_running(
+    transaction: &mut Transaction<'_, Any>,
+    kind: &str,
+    workspace_id: Option<&str>,
+    now: TimestampMillis,
+) -> Result<i64, sqlx::Error> {
+    match workspace_id {
+        None => {
+            sqlx::query_scalar(
+                "SELECT COUNT(*) FROM jobs WHERE kind = $1 AND state = 'running' \
+                 AND lease_expires_at > $2",
+            )
+            .bind(kind)
+            .bind(now.as_millis())
+            .fetch_one(&mut **transaction)
+            .await
+        }
+        Some(workspace_id) => {
+            sqlx::query_scalar(
+                "SELECT COUNT(*) FROM jobs WHERE kind = $1 AND state = 'running' \
+                 AND lease_expires_at > $2 AND workspace_id = $3",
+            )
+            .bind(kind)
+            .bind(now.as_millis())
+            .bind(workspace_id)
+            .fetch_one(&mut **transaction)
+            .await
+        }
+    }
+}
+
+/// Whether another workspace below its limit has a job of `kind` ready to run.
+async fn another_workspace_waits(
+    transaction: &mut Transaction<'_, Any>,
+    kind: &str,
+    workspace_id: &str,
+    limit: u32,
+    now: TimestampMillis,
+) -> Result<bool, sqlx::Error> {
+    let Flag(waits) = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM jobs waiting WHERE waiting.kind = $1 \
+         AND waiting.state = 'queued' AND waiting.available_at <= $2 \
+         AND waiting.workspace_id IS NOT NULL AND waiting.workspace_id != $3 \
+         AND (SELECT COUNT(*) FROM jobs running WHERE running.kind = $4 \
+              AND running.workspace_id = waiting.workspace_id AND running.state = 'running' \
+              AND running.lease_expires_at > $5) < $6)",
+    )
+    .bind(kind)
+    .bind(now.as_millis())
+    .bind(workspace_id)
+    .bind(kind)
+    .bind(now.as_millis())
+    .bind(i64::from(limit))
+    .fetch_one(&mut **transaction)
+    .await?;
+    Ok(waits)
 }
 
 fn selection_name(selection: ClaimSelection) -> &'static str {
