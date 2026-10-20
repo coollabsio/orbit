@@ -6,6 +6,7 @@ import { MemoryRouter, useLocation } from 'react-router'
 import { WorkspaceProvider } from '@/features/workspaces/WorkspaceProvider'
 import type { WorkspaceRecord, WorkspaceRole } from '@/api/generated/types.gen'
 import { testWorkspace } from '@/test/workspace'
+import { queryKeys } from '@/api/queryKeys'
 import { DangerZonePage } from '@/features/settings/pages/DangerZonePage'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { waitForAbsence } from '@/test/waitForAbsence'
@@ -27,6 +28,8 @@ function SelectedWorkspace() {
 function setup(role: WorkspaceRole = 'owner', last = false) {
   window.localStorage.clear()
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } } })
+  // Signed in: the app shell has the user before any workspace page.
+  client.setQueryData(queryKeys.currentUser, { id: 'user-1', email: 'owner@orbit.test', display_name: 'Owner', installation_admin: false, root: false })
   client.setQueryData(['workspaces'], [
     testWorkspace(role, { id: 'alpha', name: 'Alpha', version: 7 }),
     ...last ? [] : [BETA],

@@ -5,7 +5,7 @@ import { ShortcutHelpDialog } from '@/shortcuts/ShortcutHelpDialog'
 import { NavigationCommands, useGlobalCommands } from './globalCommands'
 import { NewTaskProvider } from '@/features/tasks/newTask'
 import { useCommand } from '@/shortcuts/useCommand'
-import { useEffect, useLayoutEffect, useState } from 'react'
+import { useContext, useEffect, useLayoutEffect, useState } from 'react'
 import { useWorkspaceEvents } from '@/features/realtime/useWorkspaceEvents'
 import { ChatProvider } from '@/features/chat/api/ChatProvider'
 import { useChatBadgeCount } from '@/features/chat/api/queries'
@@ -19,7 +19,7 @@ import { cn } from 'cn'
 import { SideSheet, SideSheetContent } from '@/components/common/SideSheet'
 import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
-import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { useWorkspace, WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { useIsInstallationAdmin } from '@/features/workspaces/permissions'
 import { WorkspaceSwitcher } from './WorkspaceSwitcher'
 import { CommandPalette } from './CommandPalette'
@@ -29,9 +29,15 @@ import { Topbar } from './Topbar'
 import { UserMenu } from './UserMenu'
 import { MobileDock } from './MobileDock'
 import { ProfilePopoverProvider } from './ProfilePopover'
+import { OperatorShell } from './OperatorShell'
 
-/** The signed-in app. Shortcuts exist only here, with the user's own keys; the sign-in pages have none. */
+/** The signed-in app. An operator with no workspace (`WorkspaceProvider` lets only them in) gets Admin alone. */
 export function AppShell() {
+  return useContext(WorkspaceContext) ? <WorkspaceShell /> : <OperatorShell />
+}
+
+/** Shortcuts exist only here, with the user's own keys; the sign-in pages have none. */
+function WorkspaceShell() {
   const { overrides } = useShortcutBindings()
   return (
     <ShortcutProvider overrides={overrides}>
