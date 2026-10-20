@@ -798,10 +798,12 @@ impl CollabHub {
     }
 
     /// First open of a document: builds it from the stored content (`pages.content_json`, a
-    /// task's description).
+    /// task's description). Reading the content and storing the document is one write transaction,
+    /// so a content write on another server lands before (and is read) or after (and replaces the
+    /// stored document, see [`CollabWrite::replace`]).
     async fn initialize(&self, room: &Room, state: &mut RoomState) -> Result<(), CollabError> {
-        let pool = &self.inner.pool;
-        let blocks = self.content(room).await?;
+        let mut tx = self.write_transaction().await?;
+        let blocks = self.content(room, &mut tx).await?;
         state.reset_doc();
         write_document(state, &blocks, &room.policy());
         state.take_captured();
@@ -820,9 +822,10 @@ impl CollabHub {
         .bind(blocknote::converter_version())
         .bind(now)
         .bind(now)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?
         .rows_affected();
+        tx.commit().await?;
         if inserted == 0 {
             // Another server opened the page first: use its document.
             state.reset_doc();
@@ -846,7 +849,9 @@ impl CollabHub {
         if state.unprojected_since.is_some() {
             self.persist(room, state, true, false).await?;
         }
-        let blocks = self.content(room).await?;
+        let mut connection = self.inner.pool.acquire().await?;
+        let blocks = self.content(room, &mut connection).await?;
+        drop(connection);
         state.reset_doc();
         write_document(state, &blocks, &room.policy());
         state.take_captured();
@@ -895,12 +900,16 @@ impl CollabHub {
     }
 
     /// The stored content a new document is built from.
-    async fn content(&self, room: &Room) -> Result<Vec<Value>, CollabError> {
+    async fn content(
+        &self,
+        room: &Room,
+        connection: &mut AnyConnection,
+    ) -> Result<Vec<Value>, CollabError> {
         match room.key.kind {
-            DocKind::Page => kind_page::content(&self.inner.pool, room.key.id).await,
+            DocKind::Page => kind_page::content(connection, room.key.id).await,
             DocKind::Task => {
                 let workspace_id = *room.workspace_id.get().ok_or(CollabError::NotFound)?;
-                kind_task::content(&self.inner.pool, room.key.id, workspace_id).await
+                kind_task::content(connection, room.key.id, workspace_id).await
             }
         }
     }
@@ -1477,6 +1486,7 @@ impl CollabHub {
             state: Some(state),
             staged: None,
             touched: false,
+            rebuilt: false,
         })
     }
 
@@ -1628,6 +1638,8 @@ pub struct CollabWrite {
     state: Option<OwnedMutexGuard<RoomState>>,
     staged: Option<Staged>,
     touched: bool,
+    /// The stored document was rebuilt under a new epoch (another server's rooms must reset).
+    rebuilt: bool,
 }
 
 struct Staged {
@@ -1657,6 +1669,36 @@ impl CollabWrite {
             return Ok(());
         };
         if !state.initialized {
+            // Another server may have stored the document after this room was loaded (it opened
+            // the document first, from the content this write replaces). Rebuild that document from
+            // the new blocks under a new epoch, so its clients reset and load this write.
+            let kind = self.room.key.kind;
+            let id = self.room.key.id.to_string();
+            let stored: Option<String> = sqlx::query_scalar(
+                kind.sql("SELECT epoch FROM page_collab_docs WHERE page_id = $1"),
+            )
+            .bind(&id)
+            .fetch_optional(&mut **tx)
+            .await?;
+            if stored.is_some() {
+                let sanitized = sanitize_blocks_for(blocks, &self.room.policy());
+                sqlx::query(kind.sql(
+                    "UPDATE page_collab_docs SET snapshot = $1, snapshot_seq = 0, epoch = $2, \
+                     converter_version = $3, projected_seq = 0, updated_at = $4 WHERE page_id = $5",
+                ))
+                .bind(blocknote::blocks_to_update(&sanitized, None))
+                .bind(random_epoch())
+                .bind(blocknote::converter_version())
+                .bind(now.as_millis())
+                .bind(&id)
+                .execute(&mut **tx)
+                .await?;
+                sqlx::query(kind.sql("DELETE FROM page_collab_updates WHERE page_id = $1"))
+                    .bind(&id)
+                    .execute(&mut **tx)
+                    .await?;
+                self.rebuilt = true;
+            }
             return Ok(());
         }
         // The caller's write transaction: the replacement goes after every row it can see.
@@ -1711,6 +1753,13 @@ impl CollabWrite {
         let Some(mut state) = self.state.take() else {
             return;
         };
+        if self.rebuilt {
+            // other servers' rooms hold the replaced document
+            self.hub.tell(CollabMessage::Close {
+                key: self.room.key,
+                code: close::RESET,
+            });
+        }
         if let Some(staged) = self.staged.take() {
             for delta in &staged.deltas {
                 state.state_bytes += delta.len();

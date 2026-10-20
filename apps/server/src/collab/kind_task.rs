@@ -4,7 +4,7 @@
 
 use orbit_platform::{Id, Row, TimestampMillis};
 use serde_json::Value;
-use sqlx::{Any, AnyPool, Transaction};
+use sqlx::{Any, AnyConnection, AnyPool, Transaction};
 
 use super::hub::CollabError;
 use super::markdown_import::markdown_to_blocks;
@@ -37,13 +37,13 @@ pub(super) async fn meta(pool: &AnyPool, id: Id) -> Result<Option<(Id, bool)>, C
 /// text, converted (mentions of the workspace's members included). The conversion is stored, so
 /// later edits compare against the same blocks even when member names change.
 pub(super) async fn content(
-    pool: &AnyPool,
+    connection: &mut AnyConnection,
     id: Id,
     workspace_id: Id,
 ) -> Result<Vec<Value>, CollabError> {
     let row = sqlx::query("SELECT description, description_json FROM tasks WHERE id = $1")
         .bind(id.to_string())
-        .fetch_optional(pool)
+        .fetch_optional(&mut *connection)
         .await?
         .ok_or(CollabError::NotFound)?;
     if let Some(blocks) = row
@@ -52,7 +52,7 @@ pub(super) async fn content(
     {
         return Ok(blocks);
     }
-    let members = members(pool, workspace_id).await?;
+    let members = members(&mut *connection, workspace_id).await?;
     let policy = LinkPolicy {
         kind: DocKind::Task,
         workspace_id,
@@ -62,17 +62,13 @@ pub(super) async fn content(
         &markdown_to_blocks(&row.get::<String, _>("description"), &members),
         &policy,
     );
-    // Only a cache of the conversion: a failed write must not keep the description from opening.
-    if let Err(error) = sqlx::query(
+    sqlx::query(
         "UPDATE tasks SET description_json = $1 WHERE id = $2 AND description_json IS NULL",
     )
     .bind(Value::Array(blocks.clone()).to_string())
     .bind(id.to_string())
-    .execute(pool)
-    .await
-    {
-        tracing::warn!(task_id = %id, error = %error, "storing the converted description failed");
-    }
+    .execute(&mut *connection)
+    .await?;
     Ok(blocks)
 }
 

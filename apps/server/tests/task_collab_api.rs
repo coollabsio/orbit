@@ -8,7 +8,6 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 
 mod collab_support;
-#[allow(dead_code)]
 mod shared_postgres;
 
 use collab_support::*;
@@ -639,4 +638,46 @@ async fn a_write_that_would_load_a_document_past_the_memory_budget_is_refused() 
 
 async fn open_doc(server: &Server, users: &Users, id: &str) -> Client {
     open(server, users, &users.owner, id).await
+}
+
+#[tokio::test]
+async fn a_write_racing_the_first_open_on_another_server_is_not_lost() {
+    use orbit_server::collab::{CollabHub, DocKey};
+
+    let Some(database) = shared_postgres::SharedDatabase::create().await else {
+        return; // several servers need a Postgres database
+    };
+    let (root_one, root_two) = (TempDir::new().unwrap(), TempDir::new().unwrap());
+    let one = Server::start_shared(&root_one, &database.url, fast_config()).await;
+    let users = setup(&one).await;
+    let two = Server::start_shared(&root_two, &database.url, fast_config()).await;
+    let task = create_task(&one, &users, "Old").await;
+    let id = task["id"].as_str().unwrap();
+    make_old(&one, id).await;
+    let key = DocKey::task(id.parse().unwrap());
+
+    // server two starts a write while nobody has the task open (no stored document yet)
+    let mut write = CollabHub::of(&two.database).write(key).await.unwrap();
+    // server one opens the task first: it stores a document of the old text
+    let mut reader = open(&one, &users, &users.owner, id).await;
+    assert_eq!(reader.text(), "Old");
+    // server two's write commits
+    let blocks = vec![
+        json!({"type": "paragraph", "content": [{"type": "text", "text": "New", "styles": {}}]}),
+    ];
+    let mut tx = two.database.immediate_transaction().await.unwrap();
+    write
+        .replace(&mut tx, &blocks, users.owner_id, TimestampMillis::now())
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    write.commit();
+
+    // the old document is gone: open clients reset, and a new one sees the write
+    assert_eq!(reader.wait_close().await, 4409);
+    let fresh = open(&one, &users, &users.owner, id).await;
+    assert_eq!(fresh.text(), "New");
+    one.stop().await;
+    two.stop().await;
+    database.drop().await;
 }

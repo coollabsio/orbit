@@ -3,7 +3,7 @@
 
 use orbit_platform::{Id, Row, TimestampMillis};
 use serde_json::Value;
-use sqlx::{Any, AnyPool, Transaction};
+use sqlx::{Any, AnyConnection, AnyPool, Transaction};
 
 use super::hub::CollabError;
 use crate::repositories::page_versions::project_collab_content;
@@ -28,10 +28,13 @@ pub(super) async fn meta(pool: &AnyPool, id: Id) -> Result<Option<(Id, bool)>, C
 }
 
 /// The page's stored content (`pages.content_json`), the source of a new document.
-pub(super) async fn content(pool: &AnyPool, id: Id) -> Result<Vec<Value>, CollabError> {
+pub(super) async fn content(
+    connection: &mut AnyConnection,
+    id: Id,
+) -> Result<Vec<Value>, CollabError> {
     let content: String = sqlx::query_scalar("SELECT content_json FROM pages WHERE id = $1")
         .bind(id.to_string())
-        .fetch_optional(pool)
+        .fetch_optional(&mut *connection)
         .await?
         .ok_or(CollabError::NotFound)?;
     Ok(serde_json::from_str(&content).unwrap_or_default())
