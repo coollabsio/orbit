@@ -543,13 +543,25 @@ impl App {
                 }
             }
         };
-        if tokio::time::timeout(BACKGROUND_DRAIN, drain).await.is_err() {
+        let drained = tokio::time::timeout(BACKGROUND_DRAIN, drain).await.is_ok();
+        if !drained {
             abort_services(&mut services);
-            return Err(AppError::DrainTimeout);
         }
-        // Open documents: write and project every pending edit, close their sockets (1012).
-        if let Some(hub) = crate::collab::CollabHub::existing(&self.database) {
-            hub.shutdown().await;
+        // Also after a drain timeout. Open documents: write and project every pending edit, close
+        // their sockets (1012). Live sockets: close them (1012), so the clients reconnect at once.
+        let collab = async {
+            if let Some(hub) = crate::collab::CollabHub::existing(&self.database) {
+                hub.shutdown().await;
+            }
+        };
+        let live = async {
+            if let Some(hub) = crate::live::LiveHub::existing(&self.database) {
+                hub.shutdown().await;
+            }
+        };
+        tokio::join!(collab, live);
+        if !drained {
+            return Err(AppError::DrainTimeout);
         }
         http_result
             .expect("HTTP server result is recorded during drain")
@@ -722,6 +734,7 @@ async fn initialize_production_services(
     let scheduler = Scheduler::new(store.clone());
     let failure = CancellationToken::new();
     let retention_repository = Arc::clone(&workspaces);
+    let retention_database = database.clone();
     let integrity_service = integrity;
     let integrity_failure = failure.clone();
     let worker_config = WorkerConfig::new(concurrency)
@@ -729,11 +742,16 @@ async fn initialize_production_services(
     let worker = Worker::new(store, worker_config)
         .with_handler(maintenance_kind("workspace.retention"), move |_| {
             let repository = Arc::clone(&retention_repository);
+            let database = retention_database.clone();
             async move {
                 repository
                     .run_retention_maintenance()
                     .await
-                    .map_err(|_| JobError::Retryable("retention maintenance failed".to_owned()))
+                    .map_err(|_| JobError::Retryable("retention maintenance failed".to_owned()))?;
+                crate::oauth::prune_clients(&database)
+                    .await
+                    .map(|_| ())
+                    .map_err(|_| JobError::Retryable("OAuth client pruning failed".to_owned()))
             }
         })
         .and_then(|worker| {
