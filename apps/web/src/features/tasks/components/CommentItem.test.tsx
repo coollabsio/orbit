@@ -1,6 +1,6 @@
-import { expect, mock, test } from 'bun:test'
+import { afterEach, expect, mock, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { fireEvent, render } from '@testing-library/react'
+import { act, fireEvent, render, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { MemoryRouter } from 'react-router'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
@@ -38,7 +38,7 @@ function state(overrides: Partial<TaskViewState> = {}): TaskViewState {
 }
 
 test('comment header keeps author name and timestamp as separate text', () => {
-  const view = render(<CommentItem state={state()} taskId="task-1" comment={comment()} mentionTokens={[]} />, { wrapper: wrapper() })
+  const view = render(<CommentItem state={state()} taskId="task-1" comment={comment()} />, { wrapper: wrapper() })
 
   expect(view.getByText('Orbit Developers')).toBeTruthy()
   expect(view.getByText('just now')).toBeTruthy()
@@ -46,7 +46,7 @@ test('comment header keeps author name and timestamp as separate text', () => {
 })
 
 test('author comments expose compact copy, edit, and delete actions', () => {
-  const view = render(<CommentItem state={state()} taskId="task-1" comment={comment()} mentionTokens={[]} />, { wrapper: wrapper() })
+  const view = render(<CommentItem state={state()} taskId="task-1" comment={comment()} />, { wrapper: wrapper() })
 
   expect(view.getByRole('button', { name: 'Copy text' })).toBeTruthy()
   expect(view.getByRole('button', { name: 'Edit comment' })).toBeTruthy()
@@ -55,7 +55,7 @@ test('author comments expose compact copy, edit, and delete actions', () => {
 
 test('a comment the server marks as delete-only shows Delete without Edit', () => {
   const view = render(
-    <CommentItem state={state({ currentUserId: 'user-2' })} taskId="task-1" comment={comment({ canEdit: false })} mentionTokens={[]} />,
+    <CommentItem state={state({ currentUserId: 'user-2' })} taskId="task-1" comment={comment({ canEdit: false })} />,
     { wrapper: wrapper() },
   )
 
@@ -65,7 +65,7 @@ test('a comment the server marks as delete-only shows Delete without Edit', () =
 
 test('a comment the caller may not change offers only Copy', () => {
   const view = render(
-    <CommentItem state={state({ currentUserId: 'user-2' })} taskId="task-1" comment={comment({ canEdit: false, canDelete: false })} mentionTokens={[]} />,
+    <CommentItem state={state({ currentUserId: 'user-2' })} taskId="task-1" comment={comment({ canEdit: false, canDelete: false })} />,
     { wrapper: wrapper() },
   )
 
@@ -74,12 +74,84 @@ test('a comment the caller may not change offers only Copy', () => {
   expect(view.queryByRole('button', { name: 'Delete comment' })).toBeNull()
 })
 
-test('edit mode replaces the body with a save/cancel textarea', () => {
-  const view = render(<CommentItem state={state()} taskId="task-1" comment={comment()} mentionTokens={[]} />, { wrapper: wrapper() })
+test('edit mode offers save and cancel and hides the other actions until it ends', () => {
+  const view = render(<CommentItem state={state()} taskId="task-1" comment={comment()} />, { wrapper: wrapper() })
 
   fireEvent.click(view.getByRole('button', { name: 'Edit comment' }))
-  expect(view.getByLabelText('Edit comment')).toBeTruthy()
-  expect(view.getByText('escape').tagName).toBe('KBD')
-  expect(view.getByText('cancel')).toBeTruthy()
+  expect(view.getByRole('button', { name: 'Save' })).toBeTruthy()
   expect(view.queryByRole('button', { name: 'Copy text' })).toBeNull()
+  fireEvent.click(view.getByRole('button', { name: 'Cancel' }))
+  expect(view.getByRole('button', { name: 'Copy text' })).toBeTruthy()
+})
+
+const originalFetch = globalThis.fetch
+afterEach(() => { globalThis.fetch = originalFetch })
+
+/** Opens the editor and waits until it has loaded the comment. */
+async function edit(view: ReturnType<typeof render>) {
+  fireEvent.click(view.getByRole('button', { name: 'Edit comment' }))
+  await waitFor(() => expect(view.container.querySelector('.bn-editor[contenteditable="true"]')).toBeTruthy(), { timeout: 4000 })
+}
+
+test('saving an unchanged comment sends nothing (an old comment is not marked edited)', async () => {
+  const requests: string[] = []
+  globalThis.fetch = (async (request: Request) => {
+    requests.push(request.method)
+    return Response.json({})
+  }) as unknown as typeof fetch
+  const view = render(<CommentItem state={state()} taskId="task-1" comment={comment({ body: 'hello', bodyJson: null })} />, { wrapper: wrapper() })
+  await edit(view)
+
+  fireEvent.click(view.getByRole('button', { name: 'Save' }))
+  // the mutation starts after a tick
+  await new Promise((resolve) => setTimeout(resolve, 50))
+
+  expect(requests.filter((method) => method === 'PATCH')).toEqual([])
+  expect(view.getByRole('button', { name: 'Copy text' })).toBeTruthy()
+})
+
+test('an unchanged Save on an old attachment-only comment just closes the editor', async () => {
+  const attachment = { id: 'a1', fileName: 'shot.png', mimeType: 'image/png', fileSize: 10, url: '/x' }
+  const view = render(
+    <CommentItem state={state()} taskId="task-1" comment={comment({ body: '', bodyJson: null, attachments: [attachment] })} />,
+    { wrapper: wrapper() },
+  )
+  await edit(view)
+
+  fireEvent.click(view.getByRole('button', { name: 'Save' }))
+
+  expect(view.queryByText('Delete comment?')).toBeNull()
+  expect(view.getByRole('button', { name: 'Copy text' })).toBeTruthy()
+})
+
+/** Controls when the comment counts as near the screen. */
+function stubIntersections() {
+  const observers: Array<(entries: Array<{ isIntersecting: boolean }>) => void> = []
+  const original = globalThis.IntersectionObserver
+  globalThis.IntersectionObserver = class {
+    constructor(callback: (entries: Array<{ isIntersecting: boolean }>) => void) { observers.push(callback) }
+    observe() {}
+    disconnect() {}
+    unobserve() {}
+    takeRecords() { return [] }
+  } as unknown as typeof IntersectionObserver
+  return {
+    reveal: () => act(() => observers.forEach((callback) => callback([{ isIntersecting: true }]))),
+    restore: () => { globalThis.IntersectionObserver = original },
+  }
+}
+
+test('a comment away from the screen shows its text without an editor, and mounts the editor near the screen', async () => {
+  const io = stubIntersections()
+  try {
+    const view = render(<CommentItem state={state()} taskId="task-1" comment={comment({ body: 'Far **away**', bodyJson: null })} />, { wrapper: wrapper() })
+    expect(view.getByText('away').tagName).toBe('STRONG')
+    expect(view.container.querySelector('.bn-editor')).toBeNull()
+
+    io.reveal()
+
+    await waitFor(() => expect(view.container.querySelector('.bn-editor')).toBeTruthy(), { timeout: 4000 })
+  } finally {
+    io.restore()
+  }
 })

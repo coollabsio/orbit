@@ -3,7 +3,7 @@ set -uo pipefail
 
 api_port=${ORBIT_DEV_API_PORT:-8080}
 web_port=${ORBIT_DEV_WEB_PORT:-8888}
-public_origin=${ORBIT__HTTP__PUBLIC_ORIGIN:-http://127.0.0.1:${web_port}}
+public_origin=${ORBIT_PUBLIC_ORIGIN:-http://127.0.0.1:${web_port}}
 marker=$(mktemp)
 backend_pid=""
 
@@ -36,12 +36,12 @@ start_backend() {
         trap 'stop_child; exit 0' INT TERM
         trap stop_child EXIT
 
-        ORBIT__ENVIRONMENT=development cargo run -p orbit-server -- migrate run --seed &
+        ORBIT_ENV=development cargo run -p orbit-server -- migrate run --seed &
         child_pid=$!
         wait "$child_pid" || exit $?
         child_pid=""
 
-        ORBIT__ENVIRONMENT=development cargo run -p orbit-server -- serve --listen "127.0.0.1:${api_port}" --origin "$public_origin" &
+        ORBIT_ENV=development cargo run -p orbit-server -- serve --listen "127.0.0.1:${api_port}" --origin "$public_origin" &
         child_pid=$!
         wait "$child_pid"
     ) &

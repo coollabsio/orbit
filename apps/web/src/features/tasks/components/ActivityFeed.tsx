@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState, type ReactNode } from 'react'
+import { Fragment, useState, type ReactNode } from 'react'
 import { ChevronDown } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
@@ -7,7 +7,6 @@ import { TaskStatusIcon } from './TaskStatusIcon'
 import type { Task, TaskActivity, TaskViewState } from '@/features/tasks/api/models'
 import { useCreateTaskComment } from '@/features/tasks/api/tasks'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
-import { buildMentionTokens } from '@/lib/mentions'
 import { activityChangeText, agoLabel, buildFeed, type CommentThread } from '@/features/tasks/tasksLib'
 import { CommentItem } from './CommentItem'
 import { TaskCommentComposer } from './TaskCommentComposer'
@@ -58,7 +57,6 @@ export function ActivityFeed({ task, state, onOpenTask }: ActivityFeedProps) {
   const [unfolded, setUnfolded] = useState<string[]>([])
   const { workspace } = useWorkspace()
   const createComment = useCreateTaskComment(workspace.id, task.id)
-  const mentionTokens = useMemo(() => buildMentionTokens(state.users, []), [state.users])
   const userById = (id: string) => state.users.find((u) => u.id === id)
   const feed = buildFeed(task)
 
@@ -110,12 +108,12 @@ export function ActivityFeed({ task, state, onOpenTask }: ActivityFeedProps) {
 
   const renderThread = (thread: CommentThread) => (
     <div key={thread.root.id} className="my-3 overflow-hidden rounded-[10px] border bg-card">
-      <CommentItem state={state} taskId={task.id} comment={thread.root} mentionTokens={mentionTokens} />
+      <CommentItem state={state} taskId={task.id} comment={thread.root} />
       {thread.replies.map((reply) => (
-        <CommentItem key={reply.id} state={state} taskId={task.id} comment={reply} mentionTokens={mentionTokens} reply />
+        <CommentItem key={reply.id} state={state} taskId={task.id} comment={reply} reply />
       ))}
       <div className="border-t py-1.5 pr-2 pl-3.5">
-        <TaskCommentComposer compact placeholder="Leave a reply…" pending={createComment.isPending} progress={createComment.progress} error={createComment.isError ? `${createComment.remainingCount || 'Reply'} upload failed.` : undefined} onSend={(body, files) => createComment.mutateAsync({ body, files, parentId: thread.root.id })} />
+        <TaskCommentComposer compact workspaceId={workspace.id} taskId={task.id} pending={createComment.isPending} error={createComment.isError ? 'Reply failed.' : undefined} members={state.users} onSend={(bodyJson) => createComment.mutateAsync({ bodyJson, parentId: thread.root.id })} />
       </div>
     </div>
   )

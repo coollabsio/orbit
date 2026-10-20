@@ -16,6 +16,7 @@ use tower::ServiceExt;
 fn app_config(root: &TempDir) -> Config {
     let mut config = Config {
         environment: EnvironmentMode::Development,
+        app_key: Some(orbit_platform::AppKey::new([1; 32])),
         ..Config::default()
     };
     config.data.database = root.path().join("data/orbit.sqlite");
@@ -192,7 +193,7 @@ async fn app_build_migrates_checks_readiness_and_returns_first_run_setup_url() {
             .scalar::<i64>("SELECT MAX(version) FROM schema_migrations")
             .await
             .unwrap(),
-        51
+        52
     );
 
     let readiness = app

@@ -60,6 +60,7 @@ impl Server {
         let root = tempfile::tempdir().unwrap();
         let mut config = Config {
             environment: EnvironmentMode::Development,
+            app_key: Some(orbit_platform::AppKey::new([1; 32])),
             ..Config::default()
         };
         config.data.database = root.path().join("data/orbit.sqlite");
@@ -67,10 +68,7 @@ impl Server {
         config.data.backups = root.path().join("backups");
         config.data.database_url = url.map(str::to_owned);
         if url.is_some() {
-            config.secrets.insert(
-                "app_key".to_owned(),
-                orbit_platform::Secret::new(shared_postgres::APP_KEY),
-            );
+            config.app_key = Some(shared_postgres::APP_KEY.parse().unwrap());
         }
         config.rate_limits.general_per_minute = 100_000;
         let app = App::build(config).await.unwrap();

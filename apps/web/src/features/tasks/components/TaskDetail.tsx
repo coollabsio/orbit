@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from
 import { cn } from 'cn'
 import { useQueryClient } from '@tanstack/react-query'
 import { confirmAction } from '@/components/common/confirmAction'
-import { Add as Plus, ArrowLeft, Calendar, Hierarchy2, Link2, Paperclip2 as Paperclip, Tag, TaskSquare as SquareCheck, User as UserIcon, Xmark as X } from 'reicon-react'
+import { Add as Plus, ArrowLeft, Calendar, Hierarchy2, Link2, Tag, TaskSquare as SquareCheck, User as UserIcon, Xmark as X } from 'reicon-react'
 import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
@@ -31,7 +31,7 @@ import { cachedDescendantIds, type PageTaskRecord } from '@/features/tasks/api/o
 import { useProjects } from '@/features/tasks/api/projects'
 import {
   useAddTaskRelation, useCreateTaskComment, useDeleteTask, useDeleteTaskAttachment, useRemoveTaskRelation,
-  subIssuesQuery, useSubIssues, useTaskGithubLinks, useTaskRelations, useUpdateTask, useUploadTaskAttachments,
+  subIssuesQuery, useSubIssues, useTaskGithubLinks, useTaskRelations, useUpdateTask,
 } from '@/features/tasks/api/tasks'
 import { pickerTitle, relatedTaskIds, type RelationKind } from '@/features/tasks/relationsLib'
 import { useDuplicateActions } from '@/features/tasks/useDuplicateActions'
@@ -48,6 +48,7 @@ import { Attachments } from '@/components/common/Attachments'
 import { ActivityFeed } from './ActivityFeed'
 import { TaskCommentComposer } from './TaskCommentComposer'
 import { LabelPicker, LabelPill } from './TaskLabels'
+import { TaskDescriptionEditor, type TaskDescriptionHandle } from './TaskDescriptionEditor'
 import { TaskTextFields } from './TaskTextFields'
 
 interface TaskDetailProps {
@@ -66,7 +67,6 @@ interface TaskDetailProps {
 export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenProject }: TaskDetailProps) {
   const { workspace } = useWorkspace()
   const updateTask = useUpdateTask(workspace.id)
-  const uploadAttachments = useUploadTaskAttachments(workspace.id, task?.id ?? '')
   const deleteAttachment = useDeleteTaskAttachment(workspace.id, task?.id ?? '')
   const createComment = useCreateTaskComment(workspace.id, task?.id ?? '')
   const deleteTask = useDeleteTask(workspace.id)
@@ -79,7 +79,7 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
   const taskLabels = task ? projectLabels(state.labels, task.projectId).filter((label) => task.labels.includes(label.id)).sort((a, b) => a.name.localeCompare(b.name)) : []
   const moveToProject = useMoveToProject(workspace.id)
   const users = state.users
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  const descriptionRef = useRef<TaskDescriptionHandle>(null)
   // the date panel needs to close itself from Clear, so the popover stays controlled
   const [dueDateOpen, setDueDateOpen] = useState(false)
   // each pick saves and the picker stays open; quick picks queue behind the save in flight
@@ -123,9 +123,6 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
     setUnmarking(true)
     await duplicates.unmarkOne(task)
     setUnmarking(false)
-  }
-  const attach = (files: FileList | File[] | null) => {
-    if (task && files && files.length > 0) uploadAttachments.mutate(Array.from(files))
   }
   const status = state.statuses.find((s) => s.id === task?.statusId)
   const statusOptions = task ? projectStatuses(state.statuses, task.projectId) : []
@@ -195,30 +192,24 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
               task={task}
               readOnly={githubContentReadOnly}
               onUpdate={(body) => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, ...body } })}
-              onAttachFiles={attach}
-            >
-              {task.attachments.length > 0 ? (
-                <div className="max-w-[520px]">
-                  <Attachments attachments={task.attachments} onRemove={(id) => deleteAttachment.mutate(id)} />
-                </div>
-              ) : null}
-              <div className="mt-1.5">
-                <input ref={fileInputRef} type="file" multiple hidden aria-label="Attach files" onChange={(e) => attach(e.target.files)} />
-                <Button variant="ghost" className="-ml-2 text-xs text-muted-foreground/70" onClick={() => fileInputRef.current?.click()}>
-                  <Paperclip className="size-3.5" />
-                  Attach
-                </Button>
-                <AddRelationMenu open={relationMenuOpen} onOpenChange={setRelationMenuOpen} onChoose={setPicker} />
-                {(task.subIssueCount ?? 0) === 0 && childIds.length === 0 && !composingSubIssue ? (
-                  <Button ref={subIssueAddRef} variant="ghost" className="text-xs text-muted-foreground/70" onClick={() => setComposingSubIssue(true)}>
-                    <Hierarchy2 className="size-3.5" aria-hidden="true" />
-                    Add sub-issue
-                  </Button>
-                ) : null}
-                {uploadAttachments.isPending ? <span role="status" aria-live="polite" className="text-xs text-muted-foreground/70 tabular-nums">Uploading {uploadAttachments.progress}%</span> : null}
-                {uploadAttachments.isError ? <span role="alert" className="text-xs text-destructive">{uploadAttachments.remainingCount} file(s) remain. <Button variant="ghost" onClick={uploadAttachments.retry}>Retry upload</Button></span> : null}
+              onTitleTab={() => descriptionRef.current?.focus()}
+            />
+            <TaskDescriptionEditor ref={descriptionRef} workspaceId={workspace.id} task={task} readOnly={githubContentReadOnly} />
+            {/* files attached before rich text; new files go into the description */}
+            {task.attachments.length > 0 ? (
+              <div className="mt-2 max-w-[520px]">
+                <Attachments attachments={task.attachments} onRemove={(id) => deleteAttachment.mutate(id)} />
               </div>
-            </TaskTextFields>
+            ) : null}
+            <div className="mt-1.5">
+              <AddRelationMenu open={relationMenuOpen} onOpenChange={setRelationMenuOpen} onChoose={setPicker} />
+              {(task.subIssueCount ?? 0) === 0 && childIds.length === 0 && !composingSubIssue ? (
+                <Button ref={subIssueAddRef} variant="ghost" className="text-xs text-muted-foreground/70" onClick={() => setComposingSubIssue(true)}>
+                  <Hierarchy2 className="size-3.5" aria-hidden="true" />
+                  Add sub-issue
+                </Button>
+              ) : null}
+            </div>
             {githubLinks.data?.some((link) => link.source) ? <p className="mt-2 text-xs text-muted-foreground">This task's title and description are read-only while it is linked to GitHub.</p> : null}
             {githubSyncPaused ? <p className="mt-2 text-xs text-muted-foreground">Add the project label to the GitHub issue or pull request again to resume updates.</p> : null}
             {updateTask.isError ? <p role="alert" className="text-xs text-destructive">Task update failed. <Button variant="ghost" onClick={() => updateTask.variables && updateTask.mutate(updateTask.variables)}>Retry</Button></p> : null}
@@ -495,9 +486,9 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
           <div className="col-start-1 min-w-0 min-[900px]:mx-auto min-[900px]:w-full min-[900px]:max-w-[840px] min-[900px]:px-10 min-[900px]:pb-12">
             <ActivityFeed task={task} state={state} onOpenTask={onOpenTask} />
 
-            {/* the chat composer: markdown, @mentions, emoji, attachments (paste / drop / pick) */}
+            {/* the rich text comment field: blocks, @mentions, inline files (paste / drop / pick) */}
             <div className="mt-4 max-[899px]:mt-3">
-              <TaskCommentComposer placeholder="Leave a comment…" pending={createComment.isPending} progress={createComment.progress} error={createComment.isError ? `${createComment.remainingCount || 'Comment'} upload failed.` : undefined} members={users} onSend={(body, files, mentionedUserIds) => createComment.mutateAsync({ body, files, mentionedUserIds })} />
+              <TaskCommentComposer workspaceId={workspace.id} taskId={task.id} pending={createComment.isPending} error={createComment.isError ? 'Comment failed.' : undefined} members={users} onSend={(bodyJson) => createComment.mutateAsync({ bodyJson })} />
             </div>
           </div>
           {picker ? (

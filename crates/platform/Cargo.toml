@@ -24,7 +24,6 @@ sqlx = { version = "0.9", default-features = false, features = ["any", "postgres
 tempfile = "3"
 thiserror = "2"
 utoipa = "5"
-toml = "0.9"
 tokio = { version = "1", features = ["fs", "io-util", "rt-multi-thread", "sync", "time"] }
 tokio-util = { version = "0.7", features = ["io", "rt"] }
 tracing = "0.1"

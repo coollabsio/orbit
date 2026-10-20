@@ -43,6 +43,7 @@ utoipa = { version = "5", features = ["axum_extras"] }
 webauthn-rs = { version = "=0.6.1-dev", features = ["danger-allow-state-serialisation", "conditional-ui"] }
 yrs = { version = "=0.28.0", features = ["sync"] }
 zip = { version = "8.6", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+pulldown-cmark = { version = "0.13", default-features = false }
 p256 = { version = "0.13", features = ["ecdh", "ecdsa"] }
 hkdf = "0.12"
 aes-gcm = "0.10"

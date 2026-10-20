@@ -4,7 +4,7 @@ Read [`.ai/README.md`](.ai/README.md) first: it lists the project guides in orde
 
 ## Databases: SQLite and Postgres
 
-Orbit runs on SQLite (default, `data.database`) or Postgres (`data.database_url` / `ORBIT__DATA__DATABASE_URL`).
+Orbit runs on SQLite (default, `ORBIT_DATABASE_PATH`) or Postgres (`ORBIT_DATABASE_URL`).
 Every change must work on both.
 
 - **SQL:** all queries use the sqlx `Any` driver. Write placeholders as `$1, $2, …` (never `?`). Build dynamic SQL
@@ -23,5 +23,5 @@ Every change must work on both.
   `ORBIT_TEST_POSTGRES_URL=postgres://orbit:orbit@127.0.0.1:15432/orbit`. Tests that only make sense on SQLite
   start with `if orbit_platform::testing_postgres() { return; }` and a one-line reason.
 - **Postgres setup:** the database must use `LOCALE_PROVIDER builtin BUILTIN_LOCALE 'C.UTF-8' LOCALE 'C.UTF-8'`
-  (Orbit refuses other databases), and the server needs `secrets.app_key`. S3 for files and backups stays optional
+  (Orbit refuses other databases), and the server needs `ORBIT_APP_KEY`. S3 for files and backups stays optional
   and is set in Admin → Storage. Operator details: [`docs/operations.md`](docs/operations.md).

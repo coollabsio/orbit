@@ -178,13 +178,13 @@ impl App {
         .await
         .map_err(|error| AppError::Authentication(error.to_string()))?;
 
-        let app_key = Some(
-            crate::secret_box::load_or_create_app_key(
-                config.secrets.get("app_key").map(|secret| secret.expose()),
-                &config.data.database,
-            )
-            .map_err(AppError::Config)?,
-        );
+        let app_key = config.app_key.as_ref().map(|key| *key.bytes());
+        if let Some(key) = &config.app_key
+            && config.data.database_url.is_none()
+        {
+            crate::secret_box::check_old_app_key_file(key, &config.data.database)
+                .map_err(AppError::Config)?;
+        }
         let object_storage = ObjectStorage::default();
         let storage_settings = InstanceSettingsRepository::new(database.clone())
             .storage()
@@ -952,6 +952,7 @@ mod tests {
     fn test_config(root: &TempDir) -> Config {
         let mut config = Config {
             environment: EnvironmentMode::Development,
+            app_key: Some(orbit_platform::AppKey::new([1; 32])),
             ..Config::default()
         };
         config.data.database = root.path().join("data/orbit.sqlite");

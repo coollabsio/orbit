@@ -96,9 +96,10 @@ test('task deletion retry returns to the task list after success', async () => {
   let calls = 0
   globalThis.fetch = (async (request: Request) => {
     const path = new URL(request.url).pathname
-    if (path.endsWith('/github-links') || path.endsWith('/relations')) return Response.json([])
-    // the projects list and the detail's sub-issues list are reads, not the delete under test
-    if (path.endsWith('/projects') || (request.method === 'GET' && path.endsWith('/tasks'))) return Response.json({ items: [], next_cursor: null })
+    // every read (links, relations, projects, sub-issues, members, the current user) is not the delete under test
+    if (request.method === 'GET') {
+      return path.endsWith('/projects') || path.endsWith('/tasks') ? Response.json({ items: [], next_cursor: null }) : Response.json([])
+    }
     calls += 1
     return calls === 1 ? failure() : new Response(null, { status: 204 })
   }) as unknown as typeof fetch

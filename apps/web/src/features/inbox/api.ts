@@ -101,9 +101,11 @@ export function notificationTarget(notification: NotificationRecord): string | n
   return notification.task_id ? taskPath({ id: notification.task_id }) : null
 }
 
-/** Mentions in task comments, page comments, page bodies and chat. */
+/** Mentions in task comments and descriptions, page comments, page bodies and chat. */
 export function isMention(notification: NotificationRecord): boolean {
-  return ['comment_mentioned', 'page_comment_mentioned', 'page_mentioned', 'chat_mentioned'].includes(notification.kind)
+  return ['comment_mentioned', 'description_mentioned', 'page_comment_mentioned', 'page_mentioned', 'chat_mentioned'].includes(
+    notification.kind,
+  )
 }
 
 export function notificationCopy(notification: NotificationRecord, pageTitle?: string, actorName?: string): { title: string; body: string } {
@@ -120,6 +122,9 @@ export function notificationCopy(notification: NotificationRecord, pageTitle?: s
   }
   if (notification.kind === 'comment_mentioned') {
     return { title: 'You were mentioned', body: 'Someone mentioned you in a task comment.' }
+  }
+  if (notification.kind === 'description_mentioned') {
+    return { title: 'You were mentioned', body: 'Someone mentioned you in a task description.' }
   }
   return { title: 'You were assigned a task', body: 'A task was assigned to you.' }
 }
