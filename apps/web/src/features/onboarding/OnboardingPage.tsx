@@ -1,9 +1,10 @@
 import { useState } from 'react'
-import { Navigate, useNavigate } from 'react-router'
+import { Link, Navigate, useNavigate } from 'react-router'
 import { Check } from 'reicon-react'
 import { ApiProblem } from '@/api/problem'
 import { ColorSwatch } from '@/components/common/ColorSwatch'
-import { Button } from '@/components/ui/button'
+import { cn } from 'cn'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { AuthBrand, AuthCard } from '@/features/auth/components/AuthForm'
@@ -11,6 +12,7 @@ import { useProjects, useUpdateProject } from '@/features/tasks/api/projects'
 import type { Project } from '@/features/tasks/api/models'
 import { PROJECT_COLORS } from '@/features/tasks/taskMeta'
 import { useCreateWorkspace, useWorkspaces } from '@/features/workspaces/api'
+import { useIsInstallationAdmin } from '@/features/workspaces/permissions'
 
 /** The tag a project name suggests: its first three letters or digits, upper case. */
 function suggestedProjectKey(name: string) {
@@ -48,6 +50,7 @@ function StepHeader({ step, title, children }: { step: number; title: string; ch
 
 function WorkspaceStep({ onCreated }: { onCreated: (workspaceId: string) => void }) {
   const createWorkspace = useCreateWorkspace()
+  const isOperator = useIsInstallationAdmin()
   const [name, setName] = useState('')
   return (
     <AuthCard>
@@ -66,6 +69,8 @@ function WorkspaceStep({ onCreated }: { onCreated: (workspaceId: string) => void
         </Field>
         {createWorkspace.isError ? <p role="alert" className="text-[13px] text-destructive">{problemText(createWorkspace.error, 'The workspace could not be created.')}</p> : null}
         <Button type="submit" disabled={createWorkspace.isPending || !name.trim()}>{createWorkspace.isPending ? 'Please wait…' : 'Create workspace'}</Button>
+        {/* An operator does not need a workspace: Admin works without one. */}
+        {isOperator ? <Link to="/admin" className={cn(buttonVariants({ variant: 'ghost' }), '-mt-2')}>Back to Admin</Link> : null}
       </form>
     </AuthCard>
   )

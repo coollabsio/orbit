@@ -551,3 +551,148 @@ async fn user_suspension_invalidates_both_access_and_refresh() {
         StatusCode::BAD_REQUEST
     );
 }
+
+async fn register_from(f: &Fixture, ip: &str) -> (StatusCode, Value) {
+    let mut request = Request::post("/oauth/register")
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(
+            json!({"client_name":"Test client","redirect_uris":[CALLBACK]}).to_string(),
+        ))
+        .unwrap();
+    let peer: std::net::SocketAddr = format!("{ip}:40000").parse().unwrap();
+    request
+        .extensions_mut()
+        .insert(axum::extract::ConnectInfo(peer));
+    decode(f.app.clone().oneshot(request).await.unwrap()).await
+}
+
+async fn client_exists(f: &Fixture, client: &str) -> bool {
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM oauth_clients WHERE id = $1")
+        .bind(client)
+        .fetch_one(f.db.pool())
+        .await
+        .unwrap();
+    count == 1
+}
+
+#[tokio::test]
+async fn one_address_cannot_fill_the_client_registry() {
+    let f = Fixture::new().await;
+    for _ in 0..20 {
+        assert_eq!(
+            register_from(&f, "203.0.113.7").await.0,
+            StatusCode::CREATED
+        );
+    }
+    let (status, body) = register_from(&f, "203.0.113.7").await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{body}");
+    assert_eq!(body["error"], "temporarily_unavailable");
+    // Another address, and the other half of an IPv6 /64 counts as the same client.
+    assert_eq!(
+        register_from(&f, "198.51.100.1").await.0,
+        StatusCode::CREATED
+    );
+    for _ in 0..20 {
+        assert_eq!(
+            register_from(&f, "[2001:db8::1]").await.0,
+            StatusCode::CREATED
+        );
+    }
+    assert_eq!(
+        register_from(&f, "[2001:db8::ffff]").await.0,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    // A day later the address may register again.
+    sqlx::query("UPDATE auth_throttle_ips SET failed_at = failed_at - 86400001")
+        .execute(f.db.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        register_from(&f, "203.0.113.7").await.0,
+        StatusCode::CREATED
+    );
+}
+
+#[tokio::test]
+async fn unused_clients_are_pruned_and_live_ones_kept() {
+    let f = Fixture::new().await;
+    let day_ago = TimestampMillis::now().as_millis() - 86_400_001;
+    let unused = f.register().await;
+    let recent = f.register().await;
+    let connected = f.register().await;
+    let code = f.code(&connected).await;
+    f.issue(&connected, &code).await;
+    let revoked = f.register().await;
+    let code = f.code(&revoked).await;
+    f.issue(&revoked, &code).await;
+    for client in [&unused, &connected, &revoked] {
+        sqlx::query("UPDATE oauth_clients SET created_at = $1 WHERE id = $2")
+            .bind(day_ago)
+            .bind(client)
+            .execute(f.db.pool())
+            .await
+            .unwrap();
+        sqlx::query("UPDATE oauth_grants SET created_at = $1 WHERE client_id = $2")
+            .bind(day_ago)
+            .bind(client)
+            .execute(f.db.pool())
+            .await
+            .unwrap();
+        sqlx::query("UPDATE oauth_requests SET expires_at = 1 WHERE client_id = $1")
+            .bind(client)
+            .execute(f.db.pool())
+            .await
+            .unwrap();
+    }
+    sqlx::query("UPDATE oauth_grants SET revoked_at = $1 WHERE client_id = $2")
+        .bind(day_ago)
+        .bind(&revoked)
+        .execute(f.db.pool())
+        .await
+        .unwrap();
+
+    assert_eq!(orbit_server::oauth::prune_clients(&f.db).await.unwrap(), 2);
+    assert!(!client_exists(&f, &unused).await);
+    assert!(!client_exists(&f, &revoked).await);
+    assert!(client_exists(&f, &recent).await);
+    assert!(client_exists(&f, &connected).await);
+}
+
+#[tokio::test]
+async fn a_full_registry_prunes_unused_clients_before_it_refuses() {
+    let f = Fixture::new().await;
+    let connected = f.register().await;
+    let code = f.code(&connected).await;
+    f.issue(&connected, &code).await;
+    // Unused clients registered an hour ago fill the registry.
+    let hour_ago = TimestampMillis::now().as_millis() - 60 * 60 * 1000;
+    sqlx::query(
+        "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 9999) \
+         INSERT INTO oauth_clients (id, name, redirect_uris, created_at) \
+         SELECT 'filler-' || i, 'Filler', '[]', $1 FROM n",
+    )
+    .bind(hour_ago)
+    .execute(f.db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        register_from(&f, "198.51.100.2").await.0,
+        StatusCode::CREATED
+    );
+    assert!(client_exists(&f, &connected).await);
+
+    // Clients that may still be in an authorization are not pruned: then registration stops.
+    let now = TimestampMillis::now().as_millis();
+    sqlx::query(
+        "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 9998) \
+         INSERT INTO oauth_clients (id, name, redirect_uris, created_at) \
+         SELECT 'fresh-' || i, 'Fresh', '[]', $1 FROM n",
+    )
+    .bind(now)
+    .execute(f.db.pool())
+    .await
+    .unwrap();
+    let (status, body) = register_from(&f, "198.51.100.3").await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"], "temporarily_unavailable");
+}
