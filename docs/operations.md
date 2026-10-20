@@ -155,7 +155,7 @@ A request, a live socket or a co-editing socket can go to any server; sticky ses
 
 ### Limits per account and workspace
 
-The root user sets two limits in **Admin → Settings → Limits**. They apply to every installation, also SQLite. Empty or 0 is unlimited. A lower limit refuses only new work: nothing that exists is removed.
+The root user and the instance admins set two limits in **Admin → Settings → Limits**. Workspace owners and workspace admins cannot change them (403 `installation_admin_required`). They apply to every installation, also SQLite. Empty or 0 is unlimited. A lower limit refuses only new work: nothing that exists is removed.
 
 - **Workspaces per account** (default 10): how many workspaces one account may own, not counting workspaces in the trash. Creating a workspace, restoring one from the trash and transferring ownership to an account at the limit fail with 409 `workspace_limit_reached`. The root user and the instance admins are not limited.
 - **Storage per workspace** (default 5 GB): the bytes of files one workspace stores. This includes task and comment attachments, page and chat files, custom emoji and stickers. A file is counted once per workspace, however often it is attached. Profile pictures belong to the account and do not count. An upload that would go over the quota fails with 413 `storage_quota_exceeded` before Orbit stores the file. Members see the use and the quota in **Settings → General**.
