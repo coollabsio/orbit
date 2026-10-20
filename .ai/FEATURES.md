@@ -46,16 +46,20 @@ Core files: `TasksPage.tsx`, `components/TaskList.tsx`, `components/TaskBoard.ts
   (`PageEditor` `profile="task"`: no page blocks, no comments; slash menu with Callout and Mermaid; @mentions).
   `tasks.description_json` / `task_comments.body_json` hold the blocks; `description` / `body` keep a markdown copy
   (search, MCP, GitHub, API clients that send markdown, which the server converts: `collab/markdown_import.rs`).
-  NULL JSON is a row written before rich text; it is converted when first opened or edited.
+  NULL JSON is a row written before rich text; it is converted (and stored) when first opened or edited. Task lists
+  leave `description_json` out (null); `GET /tasks/{id}` and write responses carry it.
 - The description is co-edited live like a docs page (`GET /tasks/{id}/collab`, `task_collab_docs` /
   `task_collab_updates`, the same hub keyed by `DocKey { Page | Task }`): cursors, presence avatars, a read-only
   preview until the first sync. Edits project into the task without a version bump; REST and GitHub writes replace the
-  live document. A GitHub-linked task is locked. Newly mentioned members get `description_mentioned`.
+  live document. A GitHub-linked task is locked. Newly mentioned members get `description_mentioned` (again after 10
+  minutes, not while a mention is removed and added back).
 - Files pasted, dropped or picked into the description or a comment become image/file blocks; they are task
-  attachments with `inline = 1`, left out of the attachment list (which shows only older attachments). The new task
+  attachments with `inline = 1`, left out of the attachment list (which shows only older attachments). Text copied
+  between tasks of a workspace keeps its files (any task attachment of the workspace is allowed). The new task
   dialog keeps file chips and appends the files to the description after create.
-- Comments: Cmd/Ctrl+Enter sends; edits use the same editor (Cmd/Ctrl+Enter saves, Esc cancels); the server reads
-  mentions from the mention nodes and notifies only newly mentioned members on edit.
+- Comments: Cmd/Ctrl+Enter sends; edits use the same editor (Cmd/Ctrl+Enter saves, Esc cancels; Save on an emptied
+  comment asks to delete it; an unchanged Save sends nothing); the server reads mentions from the mention nodes and
+  notifies only newly mentioned members on edit.
 - Projects, workflows, labels, tasks, comments, and task attachments persist in SQLite.
 - Labels belong to one project (Project settings → Labels); a task takes only its project's labels. Moving a task keeps the labels whose name the target project also has. Views across projects merge same-named labels: label filters store the label key (the name) and the server matches it case-insensitively in every project (an id saved before migration 0051 stands for its name and becomes a key when the filter is edited); group-by-label, filter pickers and bulk label menus show one entry per name. Views across projects show no labels of trashed projects.
 - Writes include the observed record version. Stale writes restore the server record and expose a conflict prompt.
