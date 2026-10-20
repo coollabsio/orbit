@@ -10,6 +10,7 @@ import { useCan } from '@/features/workspaces/permissions'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { FieldGrid } from '@/features/settings/components/SettingsParts'
+import { WorkspaceLeave } from '@/features/settings/components/WorkspaceLeave'
 import { useSlowPending } from '@/lib/useDebouncedValue'
 
 const THEME_OPTIONS = [
@@ -67,6 +68,7 @@ export function GeneralPage() {
           </Field>
         </FieldGrid>
       </SettingsCard>
+      <WorkspaceLeave key={workspace.id} />
       {dirty ? (
         <UnsavedBar
           onReset={() => { if (renameWorkspace.isPending) return; setNameDraft(null); renameWorkspace.reset() }}
