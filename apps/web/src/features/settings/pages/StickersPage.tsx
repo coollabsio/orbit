@@ -20,6 +20,7 @@ import { shortDate } from '@/lib/format'
 const SERVER_PROBLEMS: Record<string, string> = {
   chat_forbidden: 'Only workspace owners and administrators can manage stickers.',
   sticker_too_large: 'The image is too large. The limit is 512 KB.',
+  storage_quota_exceeded: 'The workspace storage is full. Delete files, or ask the administrator of this Orbit for a higher quota.',
   invalid_sticker: 'The file is not a PNG, JPEG, WebP or GIF image.',
   validation_failed: 'A name has 2 to 30 characters.',
   sticker_name_taken: 'A sticker with this name exists already. Choose another name.',

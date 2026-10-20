@@ -11,7 +11,7 @@ base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 cron = "0.15"
 fs2 = "0.4"
-futures-util = { version = "0.3", default-features = false }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 hmac = "0.12"
 http-body-util = "0.1"
 ipnet = "2"

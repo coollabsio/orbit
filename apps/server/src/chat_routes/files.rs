@@ -188,6 +188,9 @@ pub(super) fn upload_problem(
         UploadError::FileTooLarge { .. } | UploadError::RequestTooLarge { .. } => {
             too_large(instance, request_id)
         }
+        UploadError::StorageQuotaExceeded { .. } => {
+            crate::attachment_routes::storage_quota_exceeded(instance, request_id)
+        }
         UploadError::InvalidDisplayName => validation("file", instance, request_id),
         UploadError::BlobStore(BlobStoreError::Io { source, .. })
             if source.kind() == io::ErrorKind::FileTooLarge =>

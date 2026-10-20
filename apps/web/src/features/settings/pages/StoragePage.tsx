@@ -5,18 +5,11 @@ import { Button } from '@/components/ui/button'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { FieldGrid, SettingsRow } from '@/features/settings/components/SettingsParts'
+import { formatBytes } from '@/lib/formatBytes'
 import { cacheUsage, clearLocalCache, MEDIA_LIMITS_MB, useMediaLimit } from '@/lib/localCache'
 
 const LIMIT_OPTIONS = MEDIA_LIMITS_MB.map((megabytes) => ({ value: String(megabytes), label: megabytes >= 1000 ? `${megabytes / 1000} GB` : `${megabytes} MB` }))
 const USAGE_KEY = ['local-cache-usage'] as const
-
-/** `1.2 MB`, `340 KB`: decimal units, as the limit is. */
-function formatBytes(bytes: number): string {
-  if (bytes >= 1_000_000_000) return `${Number((bytes / 1_000_000_000).toFixed(1))} GB`
-  if (bytes >= 1_000_000) return `${Number((bytes / 1_000_000).toFixed(1))} MB`
-  if (bytes >= 1000) return `${Math.round(bytes / 1000)} KB`
-  return `${bytes} B`
-}
 
 /** Account view: what Orbit keeps on this device, how much it may keep, and the button that removes it. */
 export function StoragePage() {

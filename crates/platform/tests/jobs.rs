@@ -104,6 +104,159 @@ async fn a_kind_limit_holds_across_the_servers_of_the_database() {
     assert!(two.claim(now, ClaimSelection::Any).await.unwrap().is_some());
 }
 
+fn import_kind() -> JobKind {
+    JobKind::new("import")
+        .with_concurrency_limit(2)
+        .with_workspace_limit(1)
+}
+
+async fn enqueue_import(queue: &JobQueue, workspace: &str, at: i64) -> orbit_platform::Id {
+    queue
+        .enqueue(
+            Job::new(import_kind(), json!({}), TimestampMillis::from_millis(at))
+                .with_workspace(workspace),
+        )
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_workspace_at_its_limit_lets_another_workspace_go_first() {
+    let (_database, store) = store().await;
+    let queue = JobQueue::new(store.clone());
+    let a1 = enqueue_import(&queue, "a", 1_000).await;
+    let a2 = enqueue_import(&queue, "a", 1_001).await;
+    let b1 = enqueue_import(&queue, "b", 1_002).await;
+    let now = TimestampMillis::from_millis(2_000);
+    let claim = || async { store.claim(now, ClaimSelection::Any).await.unwrap() };
+
+    assert_eq!(claim().await.unwrap().job_id, a1);
+    let b = claim().await.unwrap();
+    assert_eq!(b.job_id, b1, "b goes before a's second import");
+    assert!(claim().await.is_none(), "the kind runs two at a time");
+
+    store.complete(&b, now).await.unwrap();
+    assert_eq!(
+        claim().await.unwrap().job_id,
+        a2,
+        "with nobody else waiting, a uses the free slot"
+    );
+}
+
+#[tokio::test]
+async fn workspaces_at_their_limit_do_not_block_each_other() {
+    let (database, store) = store().await;
+    database
+        .execute("INSERT INTO job_limits (kind, concurrency, workspace_concurrency, updated_at) VALUES ('import', 4, 1, 0)")
+        .await
+        .unwrap();
+    let queue = JobQueue::new(store.clone());
+    for (workspace, at) in [("a", 1_000), ("b", 1_001), ("a", 1_002), ("b", 1_003)] {
+        enqueue_import(&queue, workspace, at).await;
+    }
+    let now = TimestampMillis::from_millis(2_000);
+
+    for _ in 0..4 {
+        assert!(
+            store
+                .claim(now, ClaimSelection::Any)
+                .await
+                .unwrap()
+                .is_some()
+        );
+    }
+}
+
+#[tokio::test]
+async fn limits_saved_in_the_database_apply_on_the_next_claim() {
+    let (database, store) = store().await;
+    let queue = JobQueue::new(store.clone());
+    for at in [1_000, 1_001, 1_002] {
+        enqueue_import(&queue, "a", at).await;
+    }
+    let now = TimestampMillis::from_millis(2_000);
+    let set_limits = |sql: &'static str| {
+        let database = database.clone();
+        async move { database.execute(sql).await.unwrap() }
+    };
+
+    set_limits("INSERT INTO job_limits (kind, concurrency, workspace_concurrency, updated_at) VALUES ('import', 1, NULL, 0)").await;
+    assert!(
+        store
+            .claim(now, ClaimSelection::Any)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        store
+            .claim(now, ClaimSelection::Any)
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    set_limits("UPDATE job_limits SET concurrency = 3").await;
+    assert!(
+        store
+            .claim(now, ClaimSelection::Any)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    assert!(
+        store
+            .claim(now, ClaimSelection::Any)
+            .await
+            .unwrap()
+            .is_some()
+    );
+}
+
+#[tokio::test]
+async fn the_worker_runs_as_many_jobs_as_a_raised_limit_allows() {
+    let (database, store) = store().await;
+    database
+        .execute("INSERT INTO job_limits (kind, concurrency, workspace_concurrency, updated_at) VALUES ('import', 3, NULL, 0)")
+        .await
+        .unwrap();
+    let queue = JobQueue::new(store.clone());
+    for at in [0, 1, 2] {
+        enqueue_import(&queue, "a", at).await;
+    }
+    let running = Arc::new(AtomicUsize::new(0));
+    let running_in_handler = running.clone();
+    let worker = Worker::new(
+        store.clone(),
+        WorkerConfig::new(4)
+            .unwrap()
+            .with_poll_interval(Duration::from_millis(5))
+            .with_drain_timeout(Duration::from_millis(20)),
+    )
+    .with_handler(import_kind(), move |context| {
+        let running = running_in_handler.clone();
+        async move {
+            running.fetch_add(1, Ordering::SeqCst);
+            context.cancelled().await;
+            Err(JobError::Retryable("cancelled".to_owned()))
+        }
+    })
+    .unwrap();
+    let shutdown = CancellationToken::new();
+    let worker_task = tokio::spawn(worker.run(shutdown.clone()));
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while running.load(Ordering::SeqCst) < 3 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("three imports run at once, above the default limit of two");
+
+    shutdown.cancel();
+    worker_task.await.unwrap().unwrap();
+}
+
 #[tokio::test]
 async fn worker_keeps_a_slot_available_for_critical_work() {
     let (_database, store) = store().await;

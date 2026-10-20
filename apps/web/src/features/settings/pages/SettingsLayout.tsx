@@ -1,5 +1,5 @@
 import { Navigate, NavLink, Outlet } from 'react-router'
-import { ArchiveBox, ClipboardText, CloudConnection, SecurityUser, Driver, Key, Keyboard, Link2, Lock, Notification as Bell, Setting2 as Settings, ShieldTick as ShieldCheck, SmileCircle, Sticker, Danger as TriangleAlert, Trash as Trash2, User, People as Users } from 'reicon-react'
+import { ArchiveBox, ClipboardText, CloudConnection, Cpu, SecurityUser, Driver, Key, Keyboard, Link2, Lock, Notification as Bell, Setting2 as Settings, ShieldTick as ShieldCheck, SmileCircle, Sticker, Danger as TriangleAlert, Trash as Trash2, User, People as Users } from 'reicon-react'
 import { cn } from 'cn'
 import { buttonVariants } from '@/components/ui/button'
 import { Pane, PaneHeader, PaneTitle } from '@/components/common/Pane'
@@ -65,6 +65,7 @@ const ADMIN_SECTIONS: { label: string; items: NavItem[] }[] = [
       { to: '/admin/audit', label: 'Audit log', icon: ClipboardText },
       { to: '/admin/storage', label: 'Storage', icon: CloudConnection },
       { to: '/admin/backups', label: 'Backups', icon: ArchiveBox },
+      { to: '/admin/jobs', label: 'Background jobs', icon: Cpu },
     ],
   },
 ]

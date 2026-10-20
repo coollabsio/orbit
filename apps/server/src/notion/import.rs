@@ -70,7 +70,8 @@ const MAX_LISTED_IMPORTS: i64 = 20;
 const ACTIVE: &str = "('scanning', 'queued', 'importing')";
 const OPEN: &str = "('scanning', 'ready', 'queued', 'importing')";
 
-/// Both import job kinds: two at a time globally, a few retries for Notion outages.
+/// Both import job kinds: two at a time on all servers and one per workspace while another
+/// workspace waits (defaults; Admin can change them), a few retries for Notion outages.
 #[must_use]
 pub fn scan_job_kind() -> JobKind {
     notion_job_kind(SCAN_JOB)
@@ -84,6 +85,7 @@ pub fn import_job_kind() -> JobKind {
 fn notion_job_kind(name: &str) -> JobKind {
     JobKind::new(name)
         .with_concurrency_limit(2)
+        .with_workspace_limit(1)
         .with_retry_policy(
             5,
             vec![

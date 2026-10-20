@@ -5,13 +5,15 @@ use axum::body::{Body, Bytes, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use orbit_platform::{
     AttachmentMutationCoordinator, AuthenticatedUser, HttpLimits, HttpPlatformLayer, Id,
-    LocalBlobStore, OriginPolicy, PasswordService, TestDatabase, TimestampMillis, UploadLimits,
-    UploadService,
+    LocalBlobStore, OriginPolicy, PasswordService, TestDatabase, TimestampMillis, UploadError,
+    UploadLimits, UploadService,
 };
 use orbit_server::attachment_routes::{AttachmentState, attachment_router};
 use orbit_server::auth_routes::CookieMode;
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
+use orbit_server::repositories::workspaces::WorkspaceRepository;
 use orbit_server::task_routes::{TaskState, task_router};
+use orbit_server::workspace_routes::{WorkspaceState, workspace_router};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -1076,6 +1078,162 @@ async fn only_the_author_changes_the_attachments_of_a_comment() {
         .await
         .unwrap();
     assert_eq!(delete.status(), StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn uploads_stay_within_the_workspace_storage_quota() {
+    let fixture = Fixture::new(UploadLimits::default()).await;
+    let workspace_id: Id = fixture.workspace_id.parse().unwrap();
+    let owner_id: Id = fixture.owner_id.parse().unwrap();
+    let workspaces = WorkspaceRepository::new((*fixture.database).clone());
+    let storage = workspaces.storage(workspace_id, owner_id).await.unwrap();
+    assert_eq!(
+        (storage.used_bytes, storage.quota_bytes),
+        (0, Some(5_000_000_000))
+    );
+    let quota = PNG.len() as i64 + 100;
+    sqlx::query("UPDATE instance_settings SET workspace_storage_quota_bytes = $1 WHERE id = 1")
+        .bind(quota)
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+
+    assert_eq!(
+        fixture.upload("first.png", PNG).await.status(),
+        StatusCode::CREATED
+    );
+    // The same bytes again are stored once, so they fit.
+    assert_eq!(
+        fixture.upload("again.png", PNG).await.status(),
+        StatusCode::CREATED
+    );
+    let too_large = fixture.upload("big.bin", &[7_u8; 101]).await;
+    assert_eq!(too_large.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(
+        response_json(too_large).await["code"],
+        "storage_quota_exceeded"
+    );
+    // Refused before the bytes were stored.
+    assert_eq!(fixture.store.blobs().await.unwrap().len(), 1);
+    assert_eq!(
+        fixture.upload("small.bin", &[7_u8; 100]).await.status(),
+        StatusCode::CREATED
+    );
+
+    let router = workspace_router(WorkspaceState::new(
+        Arc::clone(&fixture.identity),
+        "https://orbit.test".to_owned(),
+        CookieMode::secure(),
+    ));
+    let usage = router
+        .oneshot(cookie_request(
+            "GET",
+            &format!("/api/v1/workspaces/{workspace_id}/storage"),
+            &fixture.owner_cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(usage.status(), StatusCode::OK);
+    assert_eq!(
+        response_json(usage).await,
+        json!({"used_bytes": quota, "quota_bytes": quota})
+    );
+
+    // Emoji and stickers count too; a profile picture is not a workspace file.
+    let uploads = UploadService::new(
+        (*fixture.database).clone(),
+        Arc::new(fixture.store.clone()),
+        AttachmentMutationCoordinator::default(),
+        UploadLimits::default(),
+    );
+    let now = TimestampMillis::now();
+    {
+        let finalization = uploads.begin_finalization().await;
+        let mut transaction = fixture.database.immediate_transaction().await.unwrap();
+        assert!(matches!(
+            finalization
+                .finalize_bytes_in_transaction(&mut transaction, workspace_id, b"emoji", now)
+                .await,
+            Err(UploadError::StorageQuotaExceeded { .. })
+        ));
+        finalization
+            .finalize_unmetered_bytes_in_transaction(&mut transaction, owner_id, b"avatar", now)
+            .await
+            .unwrap();
+        transaction.commit().await.unwrap();
+    }
+    assert_eq!(
+        workspaces
+            .storage(workspace_id, owner_id)
+            .await
+            .unwrap()
+            .used_bytes,
+        quota as u64
+    );
+
+    // Deleted files stop counting once reconcile removes them.
+    for attachment in response_json(
+        fixture
+            .app
+            .clone()
+            .oneshot(cookie_request(
+                "GET",
+                &fixture.task_attachments(),
+                &fixture.owner_cookie,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await["items"]
+        .as_array()
+        .unwrap()
+    {
+        let deleted = fixture
+            .app
+            .clone()
+            .oneshot(cookie_request(
+                "DELETE",
+                &format!(
+                    "{}/{}",
+                    fixture.task_attachments(),
+                    attachment["id"].as_str().unwrap()
+                ),
+                &fixture.owner_cookie,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+    }
+    // Reconcile keeps a blob for a day after its last reference and after its file was written.
+    uploads
+        .reconcile(TimestampMillis::now().as_millis() + 2 * 24 * 60 * 60 * 1000)
+        .await
+        .unwrap();
+    assert_eq!(
+        workspaces
+            .storage(workspace_id, owner_id)
+            .await
+            .unwrap()
+            .used_bytes,
+        0
+    );
+    // 0 is unlimited.
+    sqlx::query("UPDATE instance_settings SET workspace_storage_quota_bytes = 0 WHERE id = 1")
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        workspaces
+            .storage(workspace_id, owner_id)
+            .await
+            .unwrap()
+            .quota_bytes,
+        None
+    );
+    assert_eq!(
+        fixture.upload("big.bin", &[7_u8; 1000]).await.status(),
+        StatusCode::CREATED
+    );
 }
 
 fn multipart_request(uri: &str, cookie: &str, files: &[(&str, &[u8])]) -> Request<Body> {

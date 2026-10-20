@@ -13,7 +13,7 @@ use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
 use orbit_domain::WorkspaceRole;
 use orbit_platform::{
-    BackupError, BackupKind, BackupService, BackupSnapshot, ClientIp, Id, ObjectStorage,
+    BackupError, BackupKind, BackupService, BackupSnapshot, ClientIp, Id, JobLimits, ObjectStorage,
     PasswordError, PasswordExecutor, PasswordService, RateLimitConfig, RequestId, ThrottleDecision,
     TieredBlobStore, TimestampMillis,
 };
@@ -34,8 +34,9 @@ use crate::repositories::identity::{
     AdminAccountError, AdminUser, AuthenticatedSession, IdentityRepository,
 };
 use crate::repositories::instance_settings::{
-    BackupSchedule, InstanceSettingsError, InstanceSettingsRepository, PasswordChange, S3Settings,
-    SmtpSecurity, SmtpSettings, StorageSettingsError,
+    BackupSchedule, InstanceLimits, InstanceSettingsError, InstanceSettingsRepository,
+    PasswordChange, S3Settings, SmtpSecurity, SmtpSettings, StorageSettingsError,
+    adjustable_job_kinds,
 };
 use crate::repositories::workspaces::{InvitationDelivery, WorkspaceError, WorkspaceRepository};
 
@@ -173,6 +174,10 @@ pub fn workspace_router(state: WorkspaceState) -> Router {
                 .delete(delete_workspace),
         )
         .route(
+            "/api/v1/workspaces/{workspace_id}/storage",
+            get(get_workspace_storage),
+        )
+        .route(
             "/api/v1/workspaces/{workspace_id}/restore",
             post(restore_workspace),
         )
@@ -222,6 +227,11 @@ pub fn workspace_router(state: WorkspaceState) -> Router {
         .route("/api/v1/admin/settings/smtp/test", post(send_test_email))
         .route("/api/v1/admin/settings/s3", put(save_s3).delete(remove_s3))
         .route("/api/v1/admin/settings/storage", put(save_storage_options))
+        .route("/api/v1/admin/settings/limits", put(save_limits))
+        .route(
+            "/api/v1/admin/jobs/limits",
+            get(get_job_limits).put(save_job_limits),
+        )
         .route(
             "/api/v1/admin/attachments/compress",
             post(start_image_compression),
@@ -380,6 +390,25 @@ async fn get_workspace(
     state
         .workspaces
         .get(workspace_id, session.user.id)
+        .await
+        .map(Json)
+        .map_err(|error| workspace_problem(error, instance, request_id.as_ref()))
+}
+
+/// How many bytes of files the workspace stores, and its quota. Any member may read it.
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/storage", params(("workspace_id" = String, Path)), responses((status = 200, body = crate::repositories::workspaces::WorkspaceStorage)))]
+async fn get_workspace_storage(
+    State(state): State<WorkspaceState>,
+    Path(workspace_id): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<crate::repositories::workspaces::WorkspaceStorage>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace_id}/storage");
+    let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
+    let workspace_id = parse_id(&workspace_id, &instance, request_id.as_ref())?;
+    state
+        .workspaces
+        .storage(workspace_id, session.user.id)
         .await
         .map(Json)
         .map_err(|error| workspace_problem(error, instance, request_id.as_ref()))
@@ -1516,6 +1545,27 @@ struct InstanceSettingsView {
     /// `null` until a mail server is saved.
     smtp: Option<SmtpView>,
     storage: StorageView,
+    limits: LimitsView,
+}
+
+/// Limits for a shared installation. `null` is unlimited.
+#[derive(Deserialize, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct LimitsView {
+    /// Workspaces (not in the trash) one account may own. Instance admins are not limited.
+    max_owned_workspaces: Option<u32>,
+    /// Bytes of files one workspace may store: attachments, page and chat files, emoji and stickers. A file is
+    /// counted once per workspace, however often it is attached.
+    workspace_storage_quota_bytes: Option<u64>,
+}
+
+impl From<InstanceLimits> for LimitsView {
+    fn from(limits: InstanceLimits) -> Self {
+        Self {
+            max_owned_workspaces: limits.max_owned_workspaces,
+            workspace_storage_quota_bytes: limits.workspace_storage_quota_bytes,
+        }
+    }
 }
 
 async fn settings_view(
@@ -1530,6 +1580,10 @@ async fn settings_view(
         .map_err(|_| internal(instance, request_id))?;
     let storage = repository
         .storage()
+        .await
+        .map_err(|_| internal(instance, request_id))?;
+    let limits = repository
+        .limits()
         .await
         .map_err(|_| internal(instance, request_id))?;
     let moving = state
@@ -1554,6 +1608,7 @@ async fn settings_view(
             move_error: moving.error,
             image_compression: state.image_compressor.as_ref().map(ImageCompressor::status),
         },
+        limits: limits.into(),
         registration_open: settings.registration_open,
         smtp: settings.smtp.map(|smtp| SmtpView {
             host: smtp.host,
@@ -1588,6 +1643,140 @@ async fn get_instance_settings(
     let instance = "/api/v1/admin/settings";
     require_root(&state, &headers, instance, request_id.as_ref()).await?;
     settings_view(&state, instance, request_id.as_ref()).await
+}
+
+/// The most jobs of one kind that a limit allows.
+const MAX_JOB_LIMIT: u32 = 100;
+
+/// How many jobs of one kind may run at once. `null` is no limit.
+#[derive(Serialize, ToSchema)]
+struct JobLimitView {
+    kind: String,
+    /// On all servers together.
+    concurrency: Option<u32>,
+    /// For one workspace while another workspace has a job of the kind waiting.
+    workspace_concurrency: Option<u32>,
+    default_concurrency: Option<u32>,
+    default_workspace_concurrency: Option<u32>,
+}
+
+#[derive(Serialize, ToSchema)]
+struct JobLimitsView {
+    kinds: Vec<JobLimitView>,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct JobLimitBody {
+    kind: String,
+    /// 1 to 100, or `null` for no limit.
+    concurrency: Option<u32>,
+    /// 1 to 100, or `null` for no limit.
+    workspace_concurrency: Option<u32>,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct JobLimitsBody {
+    /// Kinds left out keep their limits.
+    kinds: Vec<JobLimitBody>,
+}
+
+async fn job_limits_view(
+    state: &WorkspaceState,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> Result<Json<JobLimitsView>, ApiError> {
+    let kinds = InstanceSettingsRepository::new(state.identity.database().clone())
+        .job_limits()
+        .await
+        .map_err(|_| internal(instance, request_id))?;
+    Ok(Json(JobLimitsView {
+        kinds: kinds
+            .into_iter()
+            .map(|kind| JobLimitView {
+                kind: kind.kind,
+                concurrency: kind.limits.concurrency,
+                workspace_concurrency: kind.limits.workspace_concurrency,
+                default_concurrency: kind.defaults.concurrency,
+                default_workspace_concurrency: kind.defaults.workspace_concurrency,
+            })
+            .collect(),
+    }))
+}
+
+/// Background job limits of the kinds that customers start (Notion imports).
+#[utoipa::path(get, path = "/api/v1/admin/jobs/limits", responses((status = 200, body = JobLimitsView)))]
+async fn get_job_limits(
+    State(state): State<WorkspaceState>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<JobLimitsView>, ApiError> {
+    let instance = "/api/v1/admin/jobs/limits";
+    require_root(&state, &headers, instance, request_id.as_ref()).await?;
+    job_limits_view(&state, instance, request_id.as_ref()).await
+}
+
+/// Saves job limits. Every server uses them from its next job claim, without a restart.
+#[utoipa::path(put, path = "/api/v1/admin/jobs/limits", request_body = JobLimitsBody, responses((status = 200, body = JobLimitsView)))]
+async fn save_job_limits(
+    State(state): State<WorkspaceState>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<JobLimitsBody>,
+) -> Result<Json<JobLimitsView>, ApiError> {
+    let instance = "/api/v1/admin/jobs/limits";
+    let session = require_root(&state, &headers, instance, request_id.as_ref()).await?;
+    let invalid = |detail: String| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_job_limits",
+            "Invalid job limits",
+            detail,
+            instance,
+            request_id.as_ref(),
+        )
+    };
+    let mut limits = Vec::with_capacity(body.kinds.len());
+    for item in body.kinds {
+        let kind = adjustable_job_kinds()
+            .into_iter()
+            .find(|kind| kind.name() == item.kind)
+            .ok_or_else(|| {
+                invalid(format!(
+                    "{}: this job kind has no adjustable limits.",
+                    item.kind
+                ))
+            })?;
+        for value in [item.concurrency, item.workspace_concurrency]
+            .into_iter()
+            .flatten()
+        {
+            if !(1..=MAX_JOB_LIMIT).contains(&value) {
+                return Err(invalid(format!(
+                    "{}: enter a limit from 1 to {MAX_JOB_LIMIT}, or no limit.",
+                    item.kind
+                )));
+            }
+        }
+        limits.push((
+            kind,
+            JobLimits {
+                concurrency: item.concurrency,
+                workspace_concurrency: item.workspace_concurrency,
+            },
+        ));
+    }
+    InstanceSettingsRepository::new(state.identity.database().clone())
+        .save_job_limits(
+            session.user.id,
+            &limits,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|_| internal(instance, request_id.as_ref()))?;
+    job_limits_view(&state, instance, request_id.as_ref()).await
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -2038,6 +2227,48 @@ struct StorageOptionsBody {
     /// New backups are uploaded to the bucket.
     backups_in_s3: bool,
     backup_schedule: BackupSchedule,
+}
+
+/// Saves the limits of a shared installation; `null` or 0 is unlimited. A lower limit refuses new workspaces and
+/// uploads only: nothing that exists is removed.
+#[utoipa::path(put, path = "/api/v1/admin/settings/limits", request_body = LimitsView, responses((status = 200, body = InstanceSettingsView)))]
+async fn save_limits(
+    State(state): State<WorkspaceState>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<LimitsView>,
+) -> Result<Json<InstanceSettingsView>, ApiError> {
+    let instance = "/api/v1/admin/settings/limits";
+    let session = require_root(&state, &headers, instance, request_id.as_ref()).await?;
+    let max_owned_workspaces = body.max_owned_workspaces.filter(|limit| *limit > 0);
+    let workspace_storage_quota_bytes = body
+        .workspace_storage_quota_bytes
+        .filter(|limit| *limit > 0);
+    if max_owned_workspaces.is_some_and(|limit| limit > 1_000_000)
+        || workspace_storage_quota_bytes.is_some_and(|limit| i64::try_from(limit).is_err())
+    {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_limits",
+            "Invalid limits",
+            "Use at most 1000000 workspaces and a storage quota that fits in 63 bits.",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
+    InstanceSettingsRepository::new(state.identity.database().clone())
+        .save_limits(
+            session.user.id,
+            InstanceLimits {
+                max_owned_workspaces,
+                workspace_storage_quota_bytes,
+            },
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|_| internal(instance, request_id.as_ref()))?;
+    settings_view(&state, instance, request_id.as_ref()).await
 }
 
 /// Where attachments and backups are stored, and how often Orbit backs up by itself. Using S3 needs a saved
@@ -2734,6 +2965,22 @@ fn workspace_problem(
         WorkspaceError::VersionConflict { current_version } => {
             ApiError::conflict(current_version, instance.clone(), instance, request_id)
         }
+        WorkspaceError::OwnedWorkspaceLimit { limit } => ApiError::new(
+            StatusCode::CONFLICT,
+            "workspace_limit_reached",
+            "Workspace limit reached",
+            format!(
+                "An account can own at most {limit} {}, and this account already owns that many. Delete a \
+                 workspace you own, or ask the administrator of this Orbit for a higher limit.",
+                if limit == 1 {
+                    "workspace"
+                } else {
+                    "workspaces"
+                }
+            ),
+            instance,
+            request_id,
+        ),
         WorkspaceError::Unavailable(_) | WorkspaceError::Storage(_) => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",

@@ -75,3 +75,12 @@ function isProblem(value: unknown): value is ProblemDocument {
     typeof problem.request_id === 'string'
   )
 }
+
+/**
+ * The server's reason when a file did not fit in the workspace's storage quota (`storage_quota_exceeded`), else
+ * `null`. Looks through one `cause`, as an upload queue wraps the error of the file that failed.
+ */
+export function storageQuotaDetail(error: unknown): string | null {
+  const problem = error instanceof ApiProblem ? error : error instanceof Error ? error.cause : null
+  return problem instanceof ApiProblem && problem.code === 'storage_quota_exceeded' ? problem.detail : null
+}

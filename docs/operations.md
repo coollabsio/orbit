@@ -140,9 +140,26 @@ A request, a live socket or a co-editing socket can go to any server; sticky ses
 | Sign-in | 2FA and passkey steps are in `auth_pending`; failed sign-ins and registrations in `auth_throttle_emails` and `auth_throttle_ips`, so a lockout holds on every server. |
 | Request limits | The authentication, recovery/registration and invitation classes count in `rate_limit_windows` (one atomic upsert per request and subject, without the write lock), so their limits hold for the cluster. The other classes count in each server's memory (see [Limits](#limits)). |
 | Email caps | Registration, password reset and invitation emails are logged in `email_sends` for 24 hours; the per-address, per-workspace and per-inviter caps hold for the cluster. |
-| Jobs | Durable jobs are claimed in the database; a job kind's concurrency limit holds for all servers. Schedules are unique per job kind. Push notifications are claimed once. |
+| Jobs | Durable jobs are claimed in the database; a job kind's limits hold for all servers (see [Background job limits](#background-job-limits)). Schedules are unique per job kind. Push notifications are claimed once. |
 | Storage settings | A save in **Admin → Storage** tells the other servers; each also compares the saved settings every 5 s. |
 | One server at a time | Image compression takes a cluster-wide lock. A Notion import cancel checks the jobs table for a running import. |
+
+### Background job limits
+
+Two settings control how many background jobs run at the same time:
+
+- **Per server:** `jobs.concurrency` (`ORBIT__JOBS__CONCURRENCY`, default 4) is the number of jobs one server runs at the same time. It sets the size of the server, so it stays in the configuration file and a change needs a restart.
+- **Per job kind:** in **Admin → Background jobs**, the root user sets two limits for each job kind that customers start (Notion scans and Notion imports):
+  - **All servers:** the number of jobs of the kind that run at the same time on all servers together. Default: 2.
+  - **Per workspace:** the number of jobs of the kind that one workspace runs at the same time while a different workspace has a job of the kind waiting. Default: 1. When no other workspace waits, one workspace can use all the slots of the kind. Thus, one customer cannot stop the imports of the other customers.
+
+  An empty field means no limit. **Reset to defaults** puts the values from the code back in the form. Save to apply them.
+
+The limits are in the `job_limits` table. Each server reads the table each time it starts a job, so a change applies to all servers at the next job start. A restart is not necessary. A job that already runs continues. A saved value that is the same as the default removes the row of the kind, so a later change of the default in the code applies to it. Each save writes `instance.job_limits_updated` to the audit log. The API is `GET` and `PUT /api/v1/admin/jobs/limits` (root user only).
+
+The maintenance jobs (retention, integrity check, scheduled backup, Notion cleanup) always run one at a time. You cannot change their limit.
+
+A job counts against a limit until it ends or its lease expires (5 minutes without a heartbeat). If a server stops suddenly, its jobs hold their slots until their leases expire.
 
 ### Limits
 
@@ -150,6 +167,17 @@ A request, a live socket or a co-editing socket can go to any server; sticky ses
 - **Event order:** the events of one server's writes keep their commit order. Two writes to the same workspace on two servers in the same moment can reach clients in the other order; the next event or a reload corrects the view.
 - **A server that stops without a beat:** its members show as online for up to 20 s more.
 - **Page lock:** a lock or unlock closes the page's sockets on every server; an edit that another server receives in the same moment can still be saved.
+
+### Limits per account and workspace
+
+The root user and the instance admins set two limits in **Admin → Settings → Limits**. Workspace owners and workspace admins cannot change them (403 `installation_admin_required`). They apply to every installation, also SQLite. Empty or 0 is unlimited. A lower limit refuses only new work: nothing that exists is removed.
+
+- **Workspaces per account** (default 10): how many workspaces one account may own, not counting workspaces in the trash. Creating a workspace, restoring one from the trash and transferring ownership to an account at the limit fail with 409 `workspace_limit_reached`. The root user and the instance admins are not limited.
+- **Storage per workspace** (default 5 GB): the bytes of files one workspace stores. This includes task and comment attachments, page and chat files, custom emoji and stickers. A file is counted once per workspace, however often it is attached. Profile pictures belong to the account and do not count. An upload that would go over the quota fails with 413 `storage_quota_exceeded` before Orbit stores the file. Members see the use and the quota in **Settings → General**.
+
+Both checks run in the serialized write transaction, so they hold for concurrent requests on every server. Orbit calculates storage use from the stored files (`attachment_blobs`), so existing data counts at once. A deleted file stops counting when Orbit removes it from storage: about a day after its last reference goes. Files of trashed tasks, pages and messages count until the trash is emptied or purged.
+
+5 GB is enough for a small team: it holds 200 files at the largest upload size (25 MB). With 10 workspaces per account, it limits one open-registration account to 50 GB. Raise the quota for customers who need more.
 
 ## Object storage (S3), backups and a lost server
 

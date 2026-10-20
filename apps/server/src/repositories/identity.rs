@@ -1337,7 +1337,7 @@ impl IdentityRepository {
         let finalization = uploads.begin_finalization().await;
         let mut transaction = self.database.immediate_transaction().await?;
         let blob = finalization
-            .finalize_bytes_in_transaction(&mut transaction, user_id, bytes, now)
+            .finalize_unmetered_bytes_in_transaction(&mut transaction, user_id, bytes, now)
             .await?;
         sqlx::query(
             "INSERT INTO user_avatars (user_id, mime_type, blob_id, updated_at) VALUES ($1, $2, $3, $4) \

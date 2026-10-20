@@ -41,7 +41,8 @@ pub use files::{
     FinalizedAttachment, FinalizedBlob, INLINE_IMAGE_TYPES, LocalBlobStore, NewAttachmentReference,
     ObjectStorage, ObjectStorageState, ReconcileResult, S3_DELETE_DELAY_MILLIS, S3Bucket, S3Config,
     S3Error, S3Object, StagedUpload, StoredObject, TieredBlobStore, UploadError,
-    UploadFinalization, UploadLimitError, UploadLimits, UploadService, start_fake_s3,
+    UploadFinalization, UploadLimitError, UploadLimits, UploadService, WORKSPACE_STORAGE_USED,
+    start_fake_s3,
 };
 pub use health::{HealthCheck, HealthCheckResult, HealthRegistry, ReadinessReport};
 pub use http::{
@@ -51,9 +52,9 @@ pub use id::{Id, ParseIdError};
 pub use integrity::{IntegrityError, IntegrityService};
 pub use jobs::{
     CatchUpMode, Claim, ClaimSelection, CronSchedule, Job, JobContext, JobError, JobKind,
-    JobKindRegistrationError, JobKindRegistry, JobPriority, JobQueue, JobState, JobStore,
-    JobStoreError, RecurringSchedule, ScheduleError, Scheduler, Worker, WorkerConfig,
-    WorkerConfigError, WorkerError,
+    JobKindRegistrationError, JobKindRegistry, JobLimits, JobPriority, JobQueue, JobState,
+    JobStore, JobStoreError, RecurringSchedule, ScheduleError, Scheduler, Worker, WorkerConfig,
+    WorkerConfigError, WorkerError, load_limit_overrides,
 };
 pub use observability::{TracingFormat, init_tracing};
 pub use problem::{ConflictMetadata, Problem};
