@@ -5,7 +5,9 @@ use std::time::Duration;
 
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
-use orbit_platform::{AuthenticatedUser, Id, PasswordService, TestDatabase, TimestampMillis};
+use orbit_platform::{
+    AuthenticatedUser, Id, PasswordService, RateLimitConfig, TestDatabase, TimestampMillis,
+};
 use orbit_server::auth_routes::{AuthState, CookieMode, auth_router};
 use orbit_server::mail::{Mailer, Outbox, OutgoingEmail};
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
@@ -60,12 +62,22 @@ async fn fixture() -> Fixture {
 
 /// The auth and workspace routes, sharing `mailer` when given.
 fn router(identity: &Arc<IdentityRepository>, mailer: Option<Mailer>) -> axum::Router {
-    let mut auth = AuthState::new(Arc::clone(identity), CookieMode::secure());
+    limited_router(identity, mailer, RateLimitConfig::default())
+}
+
+fn limited_router(
+    identity: &Arc<IdentityRepository>,
+    mailer: Option<Mailer>,
+    limits: RateLimitConfig,
+) -> axum::Router {
+    let mut auth =
+        AuthState::new(Arc::clone(identity), CookieMode::secure()).with_rate_limits(limits);
     let mut workspaces = WorkspaceState::new(
         Arc::clone(identity),
         ORIGIN.to_owned(),
         CookieMode::secure(),
-    );
+    )
+    .with_rate_limits(limits);
     if let Some(mailer) = mailer {
         auth = auth.with_mailer(mailer.clone());
         workspaces = workspaces.with_mailer(mailer);
@@ -401,10 +413,174 @@ async fn emailed_invitations_need_a_mail_server_and_send_the_link_instead_of_ret
     assert!(body.get("url").is_none());
     let emails = sent(&outbox, 1).await;
     assert_eq!(emails[0].to, "guest@example.com");
-    assert_eq!(emails[0].subject, "Root invited you to Orbit on Orbit");
+    assert_eq!(emails[0].subject, "You have been invited to Orbit");
+    assert!(emails[0].body.contains("the workspace \"Orbit\""));
     assert!(
         emails[0]
             .body
             .contains("https://orbit.test/accept-invitation?token=")
     );
+}
+
+#[tokio::test]
+async fn account_emails_to_one_address_have_a_cooldown_and_a_daily_cap() {
+    let fixture = fixture().await;
+    let (mailer, outbox) = Mailer::recording(fixture.identity.database().clone(), ORIGIN);
+    let app = router(&fixture.identity, Some(mailer));
+    let root = Some(fixture.root_cookie.as_str());
+    call(
+        &app,
+        "PUT",
+        "/api/v1/admin/settings/smtp",
+        root,
+        Some(smtp_body()),
+    )
+    .await;
+    call(
+        &app,
+        "PUT",
+        "/api/v1/admin/settings/registration",
+        root,
+        Some(json!({"open": true})),
+    )
+    .await;
+    let recovery = |email: &str| {
+        call(
+            &app,
+            "POST",
+            "/api/v1/auth/recovery/request",
+            None,
+            Some(json!({ "email": email })),
+        )
+    };
+
+    // A second request in the cooldown gets the same answer and no email.
+    let first = recovery("root@example.com").await;
+    let second = recovery("ROOT@example.com").await;
+    assert_eq!(first, second);
+    assert_eq!(second.0, StatusCode::ACCEPTED);
+    // A registration link to the same address shares the cooldown; a request for an existing
+    // account (no email) does not use it up for others.
+    let register = |email: &str| {
+        call(
+            &app,
+            "POST",
+            "/api/v1/auth/register/request",
+            None,
+            Some(json!({ "email": email })),
+        )
+    };
+    assert_eq!(register("root@example.com").await.0, StatusCode::ACCEPTED);
+    assert_eq!(register("new@example.com").await.0, StatusCode::ACCEPTED);
+    let emails = sent(&outbox, 2).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let recipients: Vec<_> = outbox
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|email| email.to.clone())
+        .collect();
+    assert_eq!(
+        recipients,
+        ["root@example.com", "new@example.com"],
+        "{emails:?}"
+    );
+
+    // The daily cap holds without a cooldown too.
+    let (mailer, outbox) = Mailer::recording(fixture.identity.database().clone(), ORIGIN);
+    let capped = limited_router(
+        &fixture.identity,
+        Some(mailer),
+        RateLimitConfig {
+            account_email_cooldown_seconds: 0,
+            account_emails_per_day: 2,
+            ..RateLimitConfig::default()
+        },
+    );
+    for _ in 0..3 {
+        let (status, _) = call(
+            &capped,
+            "POST",
+            "/api/v1/auth/register/request",
+            None,
+            Some(json!({"email": "capped@example.com"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED);
+    }
+    sent(&outbox, 3).await;
+    assert_eq!(outbox.lock().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn invitation_emails_have_daily_caps_per_workspace_and_per_inviter() {
+    let fixture = fixture().await;
+    let (mailer, outbox) = Mailer::recording(fixture.identity.database().clone(), ORIGIN);
+    let app = limited_router(
+        &fixture.identity,
+        Some(mailer),
+        RateLimitConfig {
+            invitation_emails_per_workspace_per_day: 2,
+            invitation_emails_per_inviter_per_day: 3,
+            ..RateLimitConfig::default()
+        },
+    );
+    let root = Some(fixture.root_cookie.as_str());
+    let invite = |workspace: String, email: &'static str, delivery: &'static str| {
+        let app = app.clone();
+        async move {
+            call(
+                &app,
+                "POST",
+                &format!("/api/v1/workspaces/{workspace}/invitations"),
+                root,
+                Some(json!({"email": email, "role": "member", "delivery": delivery})),
+            )
+            .await
+        }
+    };
+    let workspace = fixture.workspace_id.clone();
+    assert_eq!(
+        invite(workspace.clone(), "a@example.com", "smtp").await.0,
+        StatusCode::CREATED
+    );
+    assert_eq!(
+        invite(workspace.clone(), "b@example.com", "smtp").await.0,
+        StatusCode::CREATED
+    );
+    let (status, body) = invite(workspace.clone(), "c@example.com", "smtp").await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(body["code"], "invitation_email_limit");
+    // The refused invitation was taken back; a link (no email) is not capped.
+    let pending: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM workspace_invitations WHERE lower(email) = 'c@example.com' AND revoked_at IS NULL",
+    )
+    .fetch_one(fixture.identity.database().pool())
+    .await
+    .unwrap();
+    assert_eq!(pending, 0);
+    assert_eq!(
+        invite(workspace, "c@example.com", "manual").await.0,
+        StatusCode::CREATED
+    );
+
+    // The inviter's cap holds across workspaces.
+    let (status, body) = call(
+        &app,
+        "POST",
+        "/api/v1/workspaces",
+        root,
+        Some(json!({"name": "Second"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    let second = body["id"].as_str().unwrap().to_owned();
+    assert_eq!(
+        invite(second.clone(), "d@example.com", "smtp").await.0,
+        StatusCode::CREATED
+    );
+    let (status, body) = invite(second, "e@example.com", "smtp").await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(body["code"], "invitation_email_limit");
+    assert_eq!(sent(&outbox, 3).await.len(), 3);
 }

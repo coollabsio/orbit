@@ -10815,6 +10815,10 @@ export type CreateInvitationErrors = {
      */
     422: WorkspaceProblem;
     /**
+     * invitation_email_limit: the workspace or the inviter sent the most invitation emails allowed in 24 hours
+     */
+    429: WorkspaceProblem;
+    /**
      * internal_error
      */
     500: WorkspaceProblem;

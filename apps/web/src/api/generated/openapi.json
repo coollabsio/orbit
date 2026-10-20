@@ -4489,7 +4489,7 @@
         "tags": [
           "crate::auth_routes"
         ],
-        "summary": "Emails a one-time sign-up link when registration is open. The answer does not tell whether the address already\nhas an account (then no email is sent).",
+        "summary": "Emails a one-time sign-up link when registration is open. The answer does not tell whether the address already\nhas an account or reached its email limit (then no email is sent).",
         "operationId": "registration_request",
         "parameters": [
           {
@@ -16728,6 +16728,16 @@
           },
           "422": {
             "description": "invalid_email",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "invitation_email_limit: the workspace or the inviter sent the most invitation emails allowed in 24 hours",
             "content": {
               "application/problem+json": {
                 "schema": {

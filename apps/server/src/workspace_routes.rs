@@ -14,8 +14,8 @@ use axum::{Json, Router};
 use orbit_domain::WorkspaceRole;
 use orbit_platform::{
     BackupError, BackupKind, BackupService, BackupSnapshot, ClientIp, Id, ObjectStorage,
-    PasswordError, PasswordExecutor, PasswordService, RequestId, ThrottleDecision, TieredBlobStore,
-    TimestampMillis,
+    PasswordError, PasswordExecutor, PasswordService, RateLimitConfig, RequestId, ThrottleDecision,
+    TieredBlobStore, TimestampMillis,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -24,6 +24,7 @@ use utoipa::{IntoParams, ToSchema};
 
 use crate::auth_routes::throttle::SharedThrottler;
 use crate::auth_routes::{CookieMode, issued_session_cookie, request_session};
+use crate::email_quota::{self, Quota};
 use crate::image_compression::{CompressionStatus, ImageCompressor};
 use crate::mail::{self, Mailer};
 use crate::repositories::api_tokens::{
@@ -50,6 +51,8 @@ pub struct WorkspaceState {
     backups: Option<BackupService>,
     /// Sends invitation emails and keeps the app key for the SMTP password; `None` sends nothing.
     mailer: Option<Mailer>,
+    /// The daily caps of invitation emails.
+    rate_limits: RateLimitConfig,
     /// The running attachment and backup storage, changed by Admin → Storage.
     object_storage: Option<(ObjectStorage, TieredBlobStore)>,
     /// Makes large stored images smaller (Admin → Storage).
@@ -83,6 +86,7 @@ impl WorkspaceState {
             registration_throttler,
             backups: None,
             mailer: None,
+            rate_limits: RateLimitConfig::default(),
             object_storage: None,
             image_compressor: None,
         }
@@ -108,6 +112,7 @@ impl WorkspaceState {
             registration_throttler,
             backups: Some(backups),
             mailer: None,
+            rate_limits: RateLimitConfig::default(),
             object_storage: None,
             image_compressor: None,
         }
@@ -116,6 +121,12 @@ impl WorkspaceState {
     #[must_use]
     pub fn with_mailer(mut self, mailer: Mailer) -> Self {
         self.mailer = Some(mailer);
+        self
+    }
+
+    #[must_use]
+    pub fn with_rate_limits(mut self, rate_limits: RateLimitConfig) -> Self {
+        self.rate_limits = rate_limits;
         self
     }
 
@@ -797,7 +808,7 @@ struct InvitationResponse {
     url: Option<String>,
 }
 
-#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/invitations", params(("workspace_id" = String, Path)), request_body = InvitationBody, responses((status = 201, body = InvitationResponse)))]
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/invitations", params(("workspace_id" = String, Path)), request_body = InvitationBody, responses((status = 201, body = InvitationResponse), (status = 429, description = "invitation_email_limit: the workspace or the inviter sent the most invitation emails allowed in 24 hours", body = ProblemBody, content_type = "application/problem+json")))]
 async fn create_invitation(
     State(state): State<WorkspaceState>,
     Path(workspace_id): Path<String>,
@@ -850,21 +861,50 @@ async fn create_invitation(
     );
     if let Some(mailer) = mailer {
         let now = TimestampMillis::now();
-        let workspace_name = state
-            .workspaces
-            .preview_invitation(&issued.token, now)
-            .await
-            .map(|preview| preview.workspace_name)
-            .unwrap_or_else(|_| "Orbit".to_owned());
-        let sent = mailer
-            .send(mail::templates::invitation(
-                &issued.invitation.email,
-                &session.user.display_name,
-                &workspace_name,
-                &link,
-            ))
-            .await;
-        if let Err(error) = sent {
+        let sent = async {
+            // Counted after the invitation was made, so a member who may not invite cannot use
+            // up the workspace's emails.
+            let quotas = [
+                Quota {
+                    scope: "invitation_workspace",
+                    subject: workspace_id.to_string(),
+                    per_day: state.rate_limits.invitation_emails_per_workspace_per_day,
+                    cooldown: std::time::Duration::ZERO,
+                },
+                Quota {
+                    scope: "invitation_inviter",
+                    subject: session.user.id.to_string(),
+                    per_day: state.rate_limits.invitation_emails_per_inviter_per_day,
+                    cooldown: std::time::Duration::ZERO,
+                },
+            ];
+            let decision = email_quota::take(state.identity.database(), &quotas, now)
+                .await
+                .map_err(|_| internal(&instance, request_id.as_ref()))?;
+            if let ThrottleDecision::RetryAfter(delay) = decision {
+                return Err(invitation_email_limited(
+                    delay,
+                    &instance,
+                    request_id.as_ref(),
+                ));
+            }
+            let workspace_name = state
+                .workspaces
+                .preview_invitation(&issued.token, now)
+                .await
+                .map(|preview| preview.workspace_name)
+                .unwrap_or_else(|_| "Orbit".to_owned());
+            mailer
+                .send(mail::templates::invitation(
+                    &issued.invitation.email,
+                    &workspace_name,
+                    &link,
+                ))
+                .await
+                .map_err(|error| email_failed(&error, &instance, request_id.as_ref()))
+        }
+        .await;
+        if let Err(problem) = sent {
             // Nobody can use an invitation whose link never arrived: take it back, so the admin can retry.
             let _ = state
                 .workspaces
@@ -876,7 +916,7 @@ async fn create_invitation(
                     now,
                 )
                 .await;
-            return Err(email_failed(&error, &instance, request_id.as_ref()));
+            return Err(problem);
         }
     }
     let url = (delivery == InvitationDelivery::Manual).then_some(link);
@@ -2718,6 +2758,23 @@ fn registration_field_problem(
         instance,
         request_id,
     )
+}
+
+fn invitation_email_limited(
+    retry_after: std::time::Duration,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> ApiError {
+    let mut error = ApiError::new(
+        StatusCode::TOO_MANY_REQUESTS,
+        "invitation_email_limit",
+        "Invitation email limit reached",
+        "This workspace or you sent the most invitation emails allowed in 24 hours. Try again later, or copy an invitation link instead.",
+        instance,
+        request_id,
+    );
+    error.retry_after = Some(retry_after);
+    error
 }
 
 fn invitation_throttled_problem(

@@ -1,10 +1,11 @@
-//! Request limits on two servers of one Postgres database (Orbit Cloud): they must
+//! Request limits and email caps on two servers of one Postgres database (Orbit Cloud): they must
 //! hold for the cluster, not for each server.
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use orbit_platform::{Config, EnvironmentMode, RateLimitConfig};
+use orbit_platform::{Config, EnvironmentMode, PasswordService, RateLimitConfig, TimestampMillis};
 use orbit_server::app::App;
+use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
@@ -15,6 +16,7 @@ const COOKIE: &str = "orbit_session_dev";
 
 struct Server {
     base: String,
+    database: orbit_platform::Database,
     shutdown: CancellationToken,
     task: tokio::task::JoinHandle<()>,
     http: reqwest::Client,
@@ -38,6 +40,7 @@ impl Server {
             orbit_platform::Secret::new(shared_postgres::APP_KEY),
         );
         let app = App::build(config).await.unwrap();
+        let database = app.database().clone();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
         let shutdown = CancellationToken::new();
@@ -47,6 +50,7 @@ impl Server {
         });
         Self {
             base,
+            database,
             shutdown,
             task,
             http: reqwest::Client::new(),
@@ -77,6 +81,36 @@ impl Server {
         let response = request.send().await.unwrap();
         let status = response.status().as_u16();
         (status, response.json().await.unwrap_or(Value::Null))
+    }
+
+    /// Completes the setup; returns the root user's session and the workspace.
+    async fn setup(&self) -> (String, String) {
+        let identity = IdentityRepository::new(self.database.clone());
+        let now = TimestampMillis::now();
+        identity
+            .store_setup_token(
+                "limits-setup",
+                TimestampMillis::from_millis(now.as_millis() + 60_000),
+            )
+            .await
+            .unwrap();
+        let setup = identity
+            .complete_setup(
+                SetupRequest {
+                    token: "limits-setup".to_owned(),
+                    email: "owner@example.com".to_owned(),
+                    display_name: "Owner".to_owned(),
+                    password_hash: PasswordService::default()
+                        .hash("correct horse battery")
+                        .unwrap(),
+                    workspace_name: "Orbit".to_owned(),
+                    project_name: "General".to_owned(),
+                },
+                now,
+            )
+            .await
+            .unwrap();
+        (setup.session.token, setup.workspace_id.to_string())
     }
 }
 
@@ -113,6 +147,56 @@ async fn sensitive_request_limits_hold_across_servers() {
     assert_eq!(status, 429);
     assert_eq!(body["code"], "rate_limit_exceeded");
     assert_eq!(two.call("POST", path, None, recovery).await.0, 429);
+    one.stop().await;
+    two.stop().await;
+    database.drop().await;
+}
+
+#[tokio::test]
+async fn email_caps_hold_across_servers() {
+    let Some(database) = shared_postgres::SharedDatabase::create().await else {
+        return; // several servers need a Postgres database
+    };
+    let limits = RateLimitConfig {
+        invitation_emails_per_workspace_per_day: 1,
+        ..RateLimitConfig::default()
+    };
+    let one = Server::start(&database.url, limits).await;
+    let two = Server::start(&database.url, limits).await;
+    let (root, workspace) = one.setup().await;
+    // A mail server that refuses connections: the emails fail after they were counted.
+    let smtp = json!({
+        "host": "127.0.0.1", "port": 9, "security": "none", "username": null, "password": null,
+        "from_address": "orbit@example.com", "from_name": "Orbit"
+    });
+    let (status, body) = one
+        .call("PUT", "/api/v1/admin/settings/smtp", Some(&root), smtp)
+        .await;
+    assert_eq!(status, 200, "{body}");
+
+    // A password reset link from each server: only the first is issued (the address cooldown).
+    let reset = json!({"email": "owner@example.com"});
+    let path = "/api/v1/auth/recovery/request";
+    assert_eq!(one.call("POST", path, None, reset.clone()).await.0, 202);
+    assert_eq!(two.call("POST", path, None, reset).await.0, 202);
+    let links: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM recovery_tokens")
+        .fetch_one(one.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(links, 1);
+
+    // The workspace's one invitation email of the day was used on server one.
+    let invitations = format!("/api/v1/workspaces/{workspace}/invitations");
+    let invite = |email: &str| json!({"email": email, "role": "member", "delivery": "smtp"});
+    let (status, body) = one
+        .call("POST", &invitations, Some(&root), invite("a@example.com"))
+        .await;
+    assert_eq!(status, 502, "{body}");
+    let (status, body) = two
+        .call("POST", &invitations, Some(&root), invite("b@example.com"))
+        .await;
+    assert_eq!(status, 429, "{body}");
+    assert_eq!(body["code"], "invitation_email_limit");
     one.stop().await;
     two.stop().await;
     database.drop().await;

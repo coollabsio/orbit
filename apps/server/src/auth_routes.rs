@@ -13,8 +13,8 @@ use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
 use orbit_platform::{
-    AuthenticatedUser, ClientIp, Id, PasswordError, PasswordExecutor, PasswordService, RequestId,
-    ThrottleDecision, TimestampMillis, UploadService,
+    AuthenticatedUser, ClientIp, Id, PasswordError, PasswordExecutor, PasswordService,
+    RateLimitConfig, RequestId, ThrottleDecision, TimestampMillis, UploadService,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -22,6 +22,7 @@ use serde_json::json;
 use utoipa::ToSchema;
 
 use crate::audit::AuditOutcome;
+use crate::email_quota::{self, Quota};
 use crate::live::LiveHub;
 use crate::mail::{self, Mailer};
 use crate::repositories::identity::{
@@ -124,6 +125,8 @@ pub struct AuthState {
     dummy_hash: String,
     /// Sends registration and password reset links; `None` sends nothing.
     mailer: Option<Mailer>,
+    /// The per-address limits of those emails.
+    rate_limits: RateLimitConfig,
     /// Encrypts authenticator app secrets; without it the app cannot be set up.
     app_key: Option<[u8; 32]>,
     /// Passkeys; `None` when the public origin is not a domain name (an IP address cannot have passkeys).
@@ -138,6 +141,12 @@ impl AuthState {
     #[must_use]
     pub fn with_mailer(mut self, mailer: Mailer) -> Self {
         self.mailer = Some(mailer);
+        self
+    }
+
+    #[must_use]
+    pub fn with_rate_limits(mut self, rate_limits: RateLimitConfig) -> Self {
+        self.rate_limits = rate_limits;
         self
     }
 
@@ -169,6 +178,24 @@ impl AuthState {
         self.repository.database()
     }
 
+    /// Whether a registration or password reset email may go to `address` now. Both kinds share
+    /// the per-address cooldown and daily cap, on every server, so nobody can flood an inbox.
+    async fn account_email_allowed(&self, address: &str) -> Result<bool, sqlx::Error> {
+        let quota = Quota {
+            scope: "account_email",
+            subject: orbit_platform::normalize_email(address),
+            per_day: self.rate_limits.account_emails_per_day,
+            cooldown: Duration::from_secs(u64::from(
+                self.rate_limits.account_email_cooldown_seconds,
+            )),
+        };
+        let decision = email_quota::take(self.database(), &[quota], TimestampMillis::now()).await?;
+        if decision != ThrottleDecision::Allowed {
+            tracing::info!("account email not sent: the address reached its email limit");
+        }
+        Ok(decision == ThrottleDecision::Allowed)
+    }
+
     /// The mailer when a mail server is saved.
     async fn mailer(&self) -> Option<&Mailer> {
         match &self.mailer {
@@ -195,6 +222,7 @@ impl AuthState {
             cookie_mode,
             dummy_hash,
             mailer: None,
+            rate_limits: RateLimitConfig::default(),
             app_key: None,
             webauthn: None,
             pending,
@@ -1337,13 +1365,22 @@ async fn recovery_request(
     let Some(mailer) = state.mailer().await else {
         return Ok(accepted(GENERIC_RECOVERY_DETAIL));
     };
-    // The answer is the same whether or not the account exists, and the email goes out in the background.
+    // The answer is the same whether or not the account exists or reached its email limit, and the
+    // email goes out in the background.
     let account = state
         .repository
         .find_by_email(body.email.trim())
         .await
         .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
         .filter(|account| !account.suspended);
+    let account = match account {
+        Some(account) => state
+            .account_email_allowed(&account.email)
+            .await
+            .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
+            .then_some(account),
+        None => None,
+    };
     if let Some(account) = account {
         let token = orbit_platform::generate_opaque_token();
         let expires_at =
@@ -1409,7 +1446,7 @@ struct RegistrationRequestBody {
 }
 
 /// Emails a one-time sign-up link when registration is open. The answer does not tell whether the address already
-/// has an account (then no email is sent).
+/// has an account or reached its email limit (then no email is sent).
 #[utoipa::path(post, path = "/api/v1/auth/register/request", request_body = RegistrationRequestBody, responses((status = 202, body = RecoveryRequestResponse), (status = 403, description = "registration_closed", body = ProblemBody, content_type = "application/problem+json"), (status = 422, description = "invalid_email", body = ProblemBody, content_type = "application/problem+json")))]
 async fn registration_request(
     State(state): State<AuthState>,
@@ -1445,7 +1482,12 @@ async fn registration_request(
         .await
         .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
         .is_some();
-    if !exists {
+    if !exists
+        && state
+            .account_email_allowed(email)
+            .await
+            .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
+    {
         let token = orbit_platform::generate_opaque_token();
         let now = TimestampMillis::now();
         state

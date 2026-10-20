@@ -105,13 +105,15 @@ A request, a live socket or a co-editing socket can go to any server; sticky ses
 | Live socket (chat, presence, typing) | Numbered events are in `live_events` (the newest 1000 for each workspace), so a client can reconnect to any server and get a replay. Signals and presence go through cluster messages. |
 | Co-editing | Each server has its own room for an open page; small updates and cursors go to the others at once. The update log is the truth: before a server writes, projects or compacts a document, it reads what the others logged, in the same serialized write transaction. |
 | Sign-in | 2FA and passkey steps are in `auth_pending`; failed sign-ins and registrations in `auth_throttle_emails` and `auth_throttle_ips`, so a lockout holds on every server. |
+| Request limits | The authentication, recovery/registration and invitation classes count in `rate_limit_windows` (one atomic upsert per request and subject, without the write lock), so their limits hold for the cluster. The other classes count in each server's memory (see [Limits](#limits)). |
+| Email caps | Registration, password reset and invitation emails are logged in `email_sends` for 24 hours; the per-address, per-workspace and per-inviter caps hold for the cluster. |
 | Jobs | Durable jobs are claimed in the database; a job kind's concurrency limit holds for all servers. Schedules are unique per job kind. Push notifications are claimed once. |
 | Storage settings | A save in **Admin → Storage** tells the other servers; each also compares the saved settings every 5 s. |
 | One server at a time | Image compression takes a cluster-wide lock. A Notion import cancel checks the jobs table for a running import. |
 
 ### Limits
 
-- **Rate limits** (`[rate_limits]`) and the co-editing connection limits count on each server: with N servers the effective limit is N times the setting. Add a request limit at the load balancer for the endpoint classes that matter to you. The sign-in lockout is shared (see above).
+- **Rate limits** (`[rate_limits]`, see [Request limits and email caps](#request-limits-and-email-caps)): the authentication, recovery/registration and invitation limits hold for the cluster. The upload, chat and general limits and the co-editing connection limits count on each server: with N servers the effective limit is N times the setting. A database write for each of those requests would put every request of the cluster through the one writer (see **Write throughput**), so they stay in memory. Add a request limit at the load balancer if you need a cluster-wide one. The sign-in lockout and the email caps are shared.
 - **Event order:** the events of one server's writes keep their commit order. Two writes to the same workspace on two servers in the same moment can reach clients in the other order; the next event or a reload corrects the view.
 - **A server that stops without a beat:** its members show as online for up to 20 s more.
 - **Page lock:** a lock or unlock closes the page's sockets on every server; an edit that another server receives in the same moment can still be saved.
@@ -165,8 +167,30 @@ If the root user lost their own password, use (on SQLite, after you stop Orbit) 
 - Unknown `/api/*` paths must return `application/problem+json`, never SPA HTML.
 - `/api` itself and wrong methods on known API routes must return Problem Details.
 - Production mode requires an HTTPS public origin and at least one explicitly trusted proxy. Requests without a verified HTTPS transport are rejected. Development mode is loopback-only.
-- Tune `[rate_limits]` only after observing the endpoint-class defaults. Values must be between 1 and 1,000,000 requests per minute. Limit responses are correlated `429` Problem Details; IPv6 clients are grouped by `/64` and the in-memory limiter has a hard entry cap.
+- Tune `[rate_limits]` only after observing the endpoint-class defaults (see [Request limits and email caps](#request-limits-and-email-caps)). Limit responses are correlated `429` Problem Details with `Retry-After`; IPv6 clients are grouped by `/64`. The in-memory limiter keeps at most 16,384 entries; when it is full it forgets the entry with the fewest requests, so a flood of new addresses never locks out new clients and does not reset a client at its limit.
 - If metrics are enabled, the configured private `/metrics` listener must be reachable only by the monitoring network and must not appear on the public listener.
+
+## Request limits and email caps
+
+Set them in `[rate_limits]` or with `ORBIT__RATE_LIMITS__<KEY>` (for example `ORBIT__RATE_LIMITS__GENERAL_PER_MINUTE`).
+
+| Key | Default | What it limits |
+|---|---|---|
+| `authentication_per_minute` | 30 | Sign-in, sessions, setup and OAuth requests. Cluster-wide. |
+| `recovery_per_minute` | 10 | Password reset and open registration requests. Cluster-wide. |
+| `invitation_per_minute` | 60 | Invitation requests. Cluster-wide. |
+| `upload_per_minute` | 120 | Attachment and chat file uploads. Per server. |
+| `general_per_minute` | 600 | Every other API and MCP request (chat: 3 times this). Per server. |
+| `workspace_multiplier` | 10 | A workspace may make this many times each limit above. |
+| `account_email_cooldown_seconds` | 60 | Time between two registration or password reset emails to one address. |
+| `account_emails_per_day` | 5 | Registration and password reset emails to one address in 24 hours. |
+| `invitation_emails_per_workspace_per_day` | 100 | Invitation emails of one workspace in 24 hours. |
+| `invitation_emails_per_inviter_per_day` | 50 | Invitation emails one person sends in 24 hours, in all workspaces. |
+
+- **Who a request counts against:** first its client IP address, then its credential (the session cookie or the `Authorization` header: a session, an API token, an MCP token), then, for a request with a credential, the workspace in its path (`/api/v1/workspaces/{id}/…`). The first one over its limit refuses the request with `429 rate_limit_exceeded`, and the ones after it do not count it. So a client without a credential cannot use up a workspace's budget, and one address can use at most its own limit of it.
+- **Account emails:** registration and password reset links to one address share the cooldown and the daily cap, on every server. Over the cap, Orbit sends nothing and gives the usual `202` answer, so the answer does not tell whether an account exists. Requests for which no email goes out (an unknown address for a reset, an existing account for registration) do not count.
+- **Invitation emails:** an email invitation over a cap is taken back and answered with `429 invitation_email_limit` and `Retry-After`. Invitation links (`"delivery": "manual"`) have no cap. The subject is always "You have been invited to Orbit"; the body names the workspace on one line, in quotes, without control or direction characters, and at most 60 characters long. The inviter's name is not in the email.
+- Values: the per-minute limits 1 to 1,000,000; `workspace_multiplier` 1 to 1000; the cooldown 0 to 86,400 seconds; the daily caps 1 to 100,000.
 
 ## Monitoring and operational ownership
 

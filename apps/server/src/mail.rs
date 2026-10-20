@@ -172,17 +172,45 @@ fn transport(
 pub mod templates {
     use super::OutgoingEmail;
 
+    /// The subject is fixed and the body names only the workspace, cleaned up: the names come from
+    /// users, and a name must not make the email say something Orbit does not.
     #[must_use]
-    pub fn invitation(to: &str, inviter: &str, workspace: &str, url: &str) -> OutgoingEmail {
+    pub fn invitation(to: &str, workspace: &str, url: &str) -> OutgoingEmail {
         OutgoingEmail {
             to: to.to_owned(),
-            subject: format!("{inviter} invited you to {workspace} on Orbit"),
+            subject: "You have been invited to Orbit".to_owned(),
             body: format!(
-                "{inviter} invited you to join the workspace \"{workspace}\" on Orbit.\n\n\
+                "You have been invited to join the workspace {} on Orbit.\n\n\
                  Accept the invitation:\n{url}\n\n\
-                 The link expires in 7 days. If you did not expect this invitation, ignore this email.\n"
+                 The link expires in 7 days. If you did not expect this invitation, ignore this email.\n",
+                quoted_name(workspace)
             ),
         }
+    }
+
+    /// `name` on one line in quotes: without control, invisible or direction characters (which
+    /// could add lines or reorder text), and at most 60 characters long.
+    fn quoted_name(name: &str) -> String {
+        const MAX_CHARS: usize = 60;
+        let visible: String = name
+            .chars()
+            .filter(|character| {
+                !matches!(character,
+                    '\u{061C}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}'
+                    | '\u{2060}'..='\u{2069}' | '\u{FEFF}')
+            })
+            .map(|character| match character {
+                '"' => '\'',
+                _ if character.is_control() => ' ',
+                _ => character,
+            })
+            .collect();
+        let words = visible.split_whitespace().collect::<Vec<_>>().join(" ");
+        let mut short: String = words.chars().take(MAX_CHARS).collect();
+        if words.chars().count() > MAX_CHARS {
+            short.push('…');
+        }
+        format!("\"{short}\"")
     }
 
     #[must_use]
@@ -218,6 +246,24 @@ pub mod templates {
             body: "Your Orbit mail settings work. Orbit can now send invitations, registration links and \
                    password reset links.\n"
                 .to_owned(),
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        #[test]
+        fn an_invitation_names_the_workspace_on_one_quoted_line() {
+            let email = super::invitation(
+                "guest@example.com",
+                "Acme\n\nYour account is locked: \"visit\" evil.example\u{202E}",
+                "https://orbit.test/accept-invitation?token=t",
+            );
+            assert_eq!(email.subject, "You have been invited to Orbit");
+            assert!(email.body.starts_with(
+                "You have been invited to join the workspace \"Acme Your account is locked: 'visit' evil.example\" on Orbit.\n\n"
+            ));
+            let long = super::invitation("g@example.com", &"x".repeat(100), "u");
+            assert!(long.body.contains(&format!("\"{}…\"", "x".repeat(60))));
         }
     }
 }

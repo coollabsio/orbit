@@ -502,7 +502,7 @@ export const registrationComplete = <ThrowOnError extends boolean = false>(optio
 
 /**
  * Emails a one-time sign-up link when registration is open. The answer does not tell whether the address already
- * has an account (then no email is sent).
+ * has an account or reached its email limit (then no email is sent).
  */
 export const registrationRequest = <ThrowOnError extends boolean = false>(options: Options<RegistrationRequestData, ThrowOnError>): RequestResult<RegistrationRequestResponses, RegistrationRequestErrors, ThrowOnError> => (options.client ?? client).post<RegistrationRequestResponses, RegistrationRequestErrors, ThrowOnError>({
     url: '/api/v1/auth/register/request',

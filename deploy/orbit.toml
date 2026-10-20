@@ -27,12 +27,21 @@ max_file_bytes = 26214400
 max_request_bytes = 104857600
 
 [rate_limits]
-# Each value must be in 1..=1000000. IPv6 clients are grouped by /64.
+# Requests per minute for each client IP address (IPv6 grouped by /64) and each session or token;
+# 1..=1000000. A workspace gets workspace_multiplier (1..=1000) times each limit. Authentication,
+# recovery and invitation requests are counted for all servers of the database, the others per server.
 authentication_per_minute = 30
 recovery_per_minute = 10
 invitation_per_minute = 60
 upload_per_minute = 120
 general_per_minute = 600
+workspace_multiplier = 10
+# Registration and password reset emails to one address: the time between two (0..=86400 s) and the
+# number in 24 hours. Invitation emails in 24 hours per workspace and per inviter. Daily caps: 1..=100000.
+account_email_cooldown_seconds = 60
+account_emails_per_day = 5
+invitation_emails_per_workspace_per_day = 100
+invitation_emails_per_inviter_per_day = 50
 
 # Metrics are disabled unless a private listener is configured.
 [metrics]

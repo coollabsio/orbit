@@ -5,6 +5,7 @@ pub mod auth_routes;
 pub mod chat_routes;
 pub mod cluster;
 pub mod collab;
+mod email_quota;
 pub mod export;
 pub mod export_routes;
 pub mod image_compression;
