@@ -18,6 +18,7 @@ export const queryKeys = {
   backups: ['admin', 'backups'] as const,
   adminUsers: ['admin', 'users'] as const,
   adminSettings: ['admin', 'settings'] as const,
+  adminJobLimits: ['admin', 'job-limits'] as const,
   /** Public: what the sign-in pages offer (open registration, email). */
   authOptions: ['auth-options'] as const,
   adminAudit: ['admin', 'audit'] as const,

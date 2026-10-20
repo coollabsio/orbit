@@ -1,8 +1,8 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
-import { createBackup, createRecoveryLink, deleteBackup, getInstanceSettings, listAdminUsers, listBackups, listGlobalAudit, removeS3, removeSmtp, resetTwoFactor, saveS3, saveStorageOptions, setInstanceAdmin, startImageCompression, saveSmtp, sendTestEmail, setAccountSuspension, setRegistration } from '@/api/generated/sdk.gen'
-import type { InstanceSettingsView, S3Body, SmtpBody, StorageOptionsBody } from '@/api/generated/types.gen'
+import { createBackup, createRecoveryLink, deleteBackup, getInstanceSettings, getJobLimits, saveJobLimits, listAdminUsers, listBackups, listGlobalAudit, removeS3, removeSmtp, resetTwoFactor, saveS3, saveStorageOptions, setInstanceAdmin, startImageCompression, saveSmtp, sendTestEmail, setAccountSuspension, setRegistration } from '@/api/generated/sdk.gen'
+import type { InstanceSettingsView, JobLimitsBody, S3Body, SmtpBody, StorageOptionsBody } from '@/api/generated/types.gen'
 
 /** Accounts on this instance in cursor pages; `search` matches part of the name or email. Admins only. */
 export function useAdminUsers(search: string) {
@@ -198,5 +198,28 @@ export function useStartImageCompression() {
   return useSettingsWrite(async () => {
     const { data } = await startImageCompression({ client: apiClient, throwOnError: true })
     return data
+  })
+}
+
+/** How many background jobs of each kind customers start may run at once. */
+export function useJobLimits() {
+  return useQuery({
+    queryKey: queryKeys.adminJobLimits,
+    queryFn: async () => {
+      const { data } = await getJobLimits({ client: apiClient, throwOnError: true })
+      return data
+    },
+  })
+}
+
+export function useSaveJobLimits() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (body: JobLimitsBody) => {
+      const { data } = await saveJobLimits({ client: apiClient, throwOnError: true, body })
+      return data
+    },
+    onSuccess: (limits) => queryClient.setQueryData(queryKeys.adminJobLimits, limits),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.adminAudit }),
   })
 }

@@ -13,7 +13,7 @@ use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
 use orbit_domain::WorkspaceRole;
 use orbit_platform::{
-    BackupError, BackupKind, BackupService, BackupSnapshot, ClientIp, Id, ObjectStorage,
+    BackupError, BackupKind, BackupService, BackupSnapshot, ClientIp, Id, JobLimits, ObjectStorage,
     PasswordError, PasswordExecutor, PasswordService, RequestId, ThrottleDecision, TieredBlobStore,
     TimestampMillis,
 };
@@ -34,7 +34,7 @@ use crate::repositories::identity::{
 };
 use crate::repositories::instance_settings::{
     BackupSchedule, InstanceSettingsError, InstanceSettingsRepository, PasswordChange, S3Settings,
-    SmtpSecurity, SmtpSettings, StorageSettingsError,
+    SmtpSecurity, SmtpSettings, StorageSettingsError, adjustable_job_kinds,
 };
 use crate::repositories::workspaces::{InvitationDelivery, WorkspaceError, WorkspaceRepository};
 
@@ -211,6 +211,10 @@ pub fn workspace_router(state: WorkspaceState) -> Router {
         .route("/api/v1/admin/settings/smtp/test", post(send_test_email))
         .route("/api/v1/admin/settings/s3", put(save_s3).delete(remove_s3))
         .route("/api/v1/admin/settings/storage", put(save_storage_options))
+        .route(
+            "/api/v1/admin/jobs/limits",
+            get(get_job_limits).put(save_job_limits),
+        )
         .route(
             "/api/v1/admin/attachments/compress",
             post(start_image_compression),
@@ -1548,6 +1552,140 @@ async fn get_instance_settings(
     let instance = "/api/v1/admin/settings";
     require_root(&state, &headers, instance, request_id.as_ref()).await?;
     settings_view(&state, instance, request_id.as_ref()).await
+}
+
+/// The most jobs of one kind that a limit allows.
+const MAX_JOB_LIMIT: u32 = 100;
+
+/// How many jobs of one kind may run at once. `null` is no limit.
+#[derive(Serialize, ToSchema)]
+struct JobLimitView {
+    kind: String,
+    /// On all servers together.
+    concurrency: Option<u32>,
+    /// For one workspace while another workspace has a job of the kind waiting.
+    workspace_concurrency: Option<u32>,
+    default_concurrency: Option<u32>,
+    default_workspace_concurrency: Option<u32>,
+}
+
+#[derive(Serialize, ToSchema)]
+struct JobLimitsView {
+    kinds: Vec<JobLimitView>,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct JobLimitBody {
+    kind: String,
+    /// 1 to 100, or `null` for no limit.
+    concurrency: Option<u32>,
+    /// 1 to 100, or `null` for no limit.
+    workspace_concurrency: Option<u32>,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct JobLimitsBody {
+    /// Kinds left out keep their limits.
+    kinds: Vec<JobLimitBody>,
+}
+
+async fn job_limits_view(
+    state: &WorkspaceState,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> Result<Json<JobLimitsView>, ApiError> {
+    let kinds = InstanceSettingsRepository::new(state.identity.database().clone())
+        .job_limits()
+        .await
+        .map_err(|_| internal(instance, request_id))?;
+    Ok(Json(JobLimitsView {
+        kinds: kinds
+            .into_iter()
+            .map(|kind| JobLimitView {
+                kind: kind.kind,
+                concurrency: kind.limits.concurrency,
+                workspace_concurrency: kind.limits.workspace_concurrency,
+                default_concurrency: kind.defaults.concurrency,
+                default_workspace_concurrency: kind.defaults.workspace_concurrency,
+            })
+            .collect(),
+    }))
+}
+
+/// Background job limits of the kinds that customers start (Notion imports).
+#[utoipa::path(get, path = "/api/v1/admin/jobs/limits", responses((status = 200, body = JobLimitsView)))]
+async fn get_job_limits(
+    State(state): State<WorkspaceState>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<JobLimitsView>, ApiError> {
+    let instance = "/api/v1/admin/jobs/limits";
+    require_root(&state, &headers, instance, request_id.as_ref()).await?;
+    job_limits_view(&state, instance, request_id.as_ref()).await
+}
+
+/// Saves job limits. Every server uses them from its next job claim, without a restart.
+#[utoipa::path(put, path = "/api/v1/admin/jobs/limits", request_body = JobLimitsBody, responses((status = 200, body = JobLimitsView)))]
+async fn save_job_limits(
+    State(state): State<WorkspaceState>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<JobLimitsBody>,
+) -> Result<Json<JobLimitsView>, ApiError> {
+    let instance = "/api/v1/admin/jobs/limits";
+    let session = require_root(&state, &headers, instance, request_id.as_ref()).await?;
+    let invalid = |detail: String| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_job_limits",
+            "Invalid job limits",
+            detail,
+            instance,
+            request_id.as_ref(),
+        )
+    };
+    let mut limits = Vec::with_capacity(body.kinds.len());
+    for item in body.kinds {
+        let kind = adjustable_job_kinds()
+            .into_iter()
+            .find(|kind| kind.name() == item.kind)
+            .ok_or_else(|| {
+                invalid(format!(
+                    "{}: this job kind has no adjustable limits.",
+                    item.kind
+                ))
+            })?;
+        for value in [item.concurrency, item.workspace_concurrency]
+            .into_iter()
+            .flatten()
+        {
+            if !(1..=MAX_JOB_LIMIT).contains(&value) {
+                return Err(invalid(format!(
+                    "{}: enter a limit from 1 to {MAX_JOB_LIMIT}, or no limit.",
+                    item.kind
+                )));
+            }
+        }
+        limits.push((
+            kind,
+            JobLimits {
+                concurrency: item.concurrency,
+                workspace_concurrency: item.workspace_concurrency,
+            },
+        ));
+    }
+    InstanceSettingsRepository::new(state.identity.database().clone())
+        .save_job_limits(
+            session.user.id,
+            &limits,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|_| internal(instance, request_id.as_ref()))?;
+    job_limits_view(&state, instance, request_id.as_ref()).await
 }
 
 #[derive(Deserialize, ToSchema)]

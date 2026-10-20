@@ -1121,6 +1121,46 @@ export type IssuedApiToken = ApiTokenRecord & {
     token: string;
 };
 
+export type JobLimitBody = {
+    /**
+     * 1 to 100, or `null` for no limit.
+     */
+    concurrency?: number | null;
+    kind: string;
+    /**
+     * 1 to 100, or `null` for no limit.
+     */
+    workspace_concurrency?: number | null;
+};
+
+/**
+ * How many jobs of one kind may run at once. `null` is no limit.
+ */
+export type JobLimitView = {
+    /**
+     * On all servers together.
+     */
+    concurrency?: number | null;
+    default_concurrency?: number | null;
+    default_workspace_concurrency?: number | null;
+    kind: string;
+    /**
+     * For one workspace while another workspace has a job of the kind waiting.
+     */
+    workspace_concurrency?: number | null;
+};
+
+export type JobLimitsBody = {
+    /**
+     * Kinds left out keep their limits.
+     */
+    kinds: Array<JobLimitBody>;
+};
+
+export type JobLimitsView = {
+    kinds: Array<JobLimitView>;
+};
+
 export type LabelBody = {
     color: string;
     name: string;
@@ -3653,6 +3693,114 @@ export type DownloadBackupResponses = {
 };
 
 export type DownloadBackupResponse = DownloadBackupResponses[keyof DownloadBackupResponses];
+
+export type GetJobLimitsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/jobs/limits';
+};
+
+export type GetJobLimitsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type GetJobLimitsError = GetJobLimitsErrors[keyof GetJobLimitsErrors];
+
+export type GetJobLimitsResponses = {
+    200: JobLimitsView;
+};
+
+export type GetJobLimitsResponse = GetJobLimitsResponses[keyof GetJobLimitsResponses];
+
+export type SaveJobLimitsData = {
+    body: JobLimitsBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/jobs/limits';
+};
+
+export type SaveJobLimitsErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_job_limits
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type SaveJobLimitsError = SaveJobLimitsErrors[keyof SaveJobLimitsErrors];
+
+export type SaveJobLimitsResponses = {
+    200: JobLimitsView;
+};
+
+export type SaveJobLimitsResponse = SaveJobLimitsResponses[keyof SaveJobLimitsResponses];
 
 export type GetInstanceSettingsData = {
     body?: never;
