@@ -11,6 +11,7 @@ import { ChatProvider } from '@/features/chat/api/ChatProvider'
 import { useChatBadgeCount } from '@/features/chat/api/queries'
 import { useHasUnreadNotifications } from '@/features/inbox/api'
 import { startPushWorker } from '@/features/realtime/push'
+import { preloadPageEditorWhenIdle } from '@/features/docs/editor/loadPageEditor'
 import { useUnreadFavicon } from '@/lib/favicon'
 import { chatEnabled } from './productNavigation'
 import { Outlet } from 'react-router'
@@ -52,6 +53,8 @@ function Shell() {
   useUnreadFavicon(chatBadge + (inboxUnread ? 1 : 0))
   // Signed in: the worker that shows notifications may run. This asks for no permission.
   useEffect(() => startPushWorker(), [])
+  // The rich text editor (tasks, comments, docs, the new task dialog) is ready before its first use.
+  useEffect(() => preloadPageEditorWhenIdle(), [])
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   // One saved preference for every page, so collapsing the sidebar in chat keeps it collapsed in tasks too.
