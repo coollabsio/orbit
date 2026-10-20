@@ -10,6 +10,7 @@ import {
   createInvitation,
   createWorkspace,
   deleteWorkspace,
+  getWorkspaceStorage,
   listInvitations,
   listMembers,
   listWorkspaces,
@@ -102,6 +103,17 @@ export function useInvitations(workspaceId: string | null) {
         })
         return required(data, 'Invitations response was empty.')
       })
+    },
+  })
+}
+
+/** Bytes of files the workspace stores, and its quota (`null` is unlimited). */
+export function useWorkspaceStorage(workspaceId: string) {
+  return useQuery({
+    queryKey: queryKeys.workspaceStorage(workspaceId),
+    queryFn: async () => {
+      const { data } = await getWorkspaceStorage({ client: apiClient, path: { workspace_id: workspaceId }, throwOnError: true })
+      return required(data, 'Workspace storage response was empty.')
     },
   })
 }

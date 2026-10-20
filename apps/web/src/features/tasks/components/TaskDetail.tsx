@@ -1,4 +1,5 @@
 import { useCommand } from '@/shortcuts/useCommand'
+import { storageQuotaDetail } from '@/api/problem'
 import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import { cn } from 'cn'
 import { useQueryClient } from '@tanstack/react-query'
@@ -216,7 +217,7 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
                   </Button>
                 ) : null}
                 {uploadAttachments.isPending ? <span role="status" aria-live="polite" className="text-xs text-muted-foreground/70 tabular-nums">Uploading {uploadAttachments.progress}%</span> : null}
-                {uploadAttachments.isError ? <span role="alert" className="text-xs text-destructive">{uploadAttachments.remainingCount} file(s) remain. <Button variant="ghost" onClick={uploadAttachments.retry}>Retry upload</Button></span> : null}
+                {uploadAttachments.isError ? <span role="alert" className="text-xs text-destructive">{storageQuotaDetail(uploadAttachments.error) ?? `${uploadAttachments.remainingCount} file(s) remain.`} <Button variant="ghost" onClick={uploadAttachments.retry}>Retry upload</Button></span> : null}
               </div>
             </TaskTextFields>
             {githubLinks.data?.some((link) => link.source) ? <p className="mt-2 text-xs text-muted-foreground">This task's title and description are read-only while it is linked to GitHub.</p> : null}
@@ -497,7 +498,7 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
 
             {/* the chat composer: markdown, @mentions, emoji, attachments (paste / drop / pick) */}
             <div className="mt-4 max-[899px]:mt-3">
-              <TaskCommentComposer placeholder="Leave a comment…" pending={createComment.isPending} progress={createComment.progress} error={createComment.isError ? `${createComment.remainingCount || 'Comment'} upload failed.` : undefined} members={users} onSend={(body, files, mentionedUserIds) => createComment.mutateAsync({ body, files, mentionedUserIds })} />
+              <TaskCommentComposer placeholder="Leave a comment…" pending={createComment.isPending} progress={createComment.progress} error={createComment.isError ? storageQuotaDetail(createComment.error) ?? `${createComment.remainingCount || 'Comment'} upload failed.` : undefined} members={users} onSend={(body, files, mentionedUserIds) => createComment.mutateAsync({ body, files, mentionedUserIds })} />
             </div>
           </div>
           {picker ? (

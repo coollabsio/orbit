@@ -955,6 +955,133 @@
         ]
       }
     },
+    "/api/v1/admin/settings/limits": {
+      "put": {
+        "tags": [
+          "crate::workspace_routes"
+        ],
+        "summary": "Saves the limits of a shared installation; `null` or 0 is unlimited. A lower limit refuses new workspaces and\nuploads only: nothing that exists is removed.",
+        "operationId": "save_limits",
+        "parameters": [
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LimitsView"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceSettingsView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden, installation_admin_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_limits",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/settings/registration": {
       "put": {
         "tags": [
@@ -7383,7 +7510,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch",
+            "description": "contract_mismatch, workspace_limit_reached",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -11911,7 +12038,7 @@
             }
           },
           "413": {
-            "description": "request_too_large, emoji_too_large",
+            "description": "request_too_large, emoji_too_large, storage_quota_exceeded",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -12325,7 +12452,7 @@
             }
           },
           "413": {
-            "description": "request_too_large, upload_too_large",
+            "description": "request_too_large, upload_too_large, storage_quota_exceeded",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -14634,7 +14761,7 @@
             }
           },
           "413": {
-            "description": "request_too_large, sticker_too_large",
+            "description": "request_too_large, sticker_too_large, storage_quota_exceeded",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -19896,7 +20023,7 @@
             }
           },
           "413": {
-            "description": "request_too_large, upload_too_large",
+            "description": "request_too_large, upload_too_large, storage_quota_exceeded",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -25343,7 +25470,122 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, workspace_conflict, conflict",
+            "description": "contract_mismatch, workspace_conflict, conflict, workspace_limit_reached",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/storage": {
+      "get": {
+        "tags": [
+          "crate::workspace_routes"
+        ],
+        "summary": "How many bytes of files the workspace stores, and its quota. Any member may read it.",
+        "operationId": "get_workspace_storage",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceStorage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "workspace_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -27102,7 +27344,7 @@
             }
           },
           "413": {
-            "description": "request_too_large, upload_too_large",
+            "description": "request_too_large, upload_too_large, storage_quota_exceeded",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -27846,7 +28088,7 @@
             }
           },
           "413": {
-            "description": "request_too_large, upload_too_large",
+            "description": "request_too_large, upload_too_large, storage_quota_exceeded",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -28452,7 +28694,7 @@
             }
           },
           "413": {
-            "description": "request_too_large, upload_too_large",
+            "description": "request_too_large, upload_too_large, storage_quota_exceeded",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -30276,7 +30518,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, workspace_conflict, conflict",
+            "description": "contract_mismatch, workspace_conflict, conflict, workspace_limit_reached",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -34693,9 +34935,13 @@
         "type": "object",
         "required": [
           "registration_open",
-          "storage"
+          "storage",
+          "limits"
         ],
         "properties": {
+          "limits": {
+            "$ref": "#/components/schemas/LimitsView"
+          },
           "registration_open": {
             "type": "boolean"
           },
@@ -34904,6 +35150,31 @@
           "board",
           "timeline"
         ]
+      },
+      "LimitsView": {
+        "type": "object",
+        "description": "Limits for a shared installation. `null` is unlimited.",
+        "properties": {
+          "max_owned_workspaces": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int32",
+            "description": "Workspaces (not in the trash) one account may own. Instance admins are not limited.",
+            "minimum": 0
+          },
+          "workspace_storage_quota_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Bytes of files one workspace may store: attachments, page and chat files, emoji and stickers. A file is\ncounted once per workspace, however often it is attached.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "LinkPreview": {
         "type": "object",
@@ -40623,6 +40894,30 @@
           "admin",
           "member"
         ]
+      },
+      "WorkspaceStorage": {
+        "type": "object",
+        "description": "How many bytes of files a workspace stores, and its quota.",
+        "required": [
+          "used_bytes"
+        ],
+        "properties": {
+          "quota_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "`null` is unlimited.",
+            "minimum": 0
+          },
+          "used_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Each stored file once, however often it is attached. A deleted file stops counting about a day after its\nlast reference goes (trashed tasks, pages and messages keep their files until the trash is emptied).",
+            "minimum": 0
+          }
+        }
       }
     },
     "securitySchemes": {

@@ -110,6 +110,7 @@ export async function uploadPageFileRequest(client: ApiClient, workspaceId: stri
 /** A short, user-facing reason for a failed page upload. */
 export function pageUploadErrorMessage(error: unknown): string {
   if (error instanceof ApiProblem) {
+    if (error.code === 'storage_quota_exceeded') return error.detail
     if (error.status === 413) return 'The file is too large to upload.'
     if (error.status === 404) return 'This page is no longer available.'
     if (error.status === 422) return 'The file name is not valid.'

@@ -28,6 +28,8 @@ export const queryKeys = {
   memberProfile: (workspaceId: string, userId: string) => [...workspace(workspaceId), 'profiles', userId] as const,
   invitations: (workspaceId: string) => [...workspace(workspaceId), 'invitations'] as const,
   apiTokens: (workspaceId: string) => [...workspace(workspaceId), 'api-tokens'] as const,
+  /** Bytes of files the workspace stores, and its quota. */
+  workspaceStorage: (workspaceId: string) => [...workspace(workspaceId), 'storage'] as const,
   projects: (workspaceId: string) => [...workspace(workspaceId), 'projects'] as const,
   statuses: (workspaceId: string, projectId: string) =>
     [...workspace(workspaceId), 'projects', projectId, 'statuses'] as const,

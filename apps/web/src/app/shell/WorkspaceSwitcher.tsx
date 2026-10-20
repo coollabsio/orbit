@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState, type ComponentProps } from 'react'
+import { ApiProblem } from '@/api/problem'
 import { Add as Plus, ChevronDown } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
@@ -64,7 +65,7 @@ function WorkspaceMenu({ onSelect, createWorkspace }: { onSelect: () => void; cr
     <form className="flex w-60 max-w-full flex-col gap-2 p-2" onSubmit={(event) => { event.preventDefault(); void create() }}>
       <Label className="mb-1.5 h-4 gap-1 text-[13px] leading-4 font-medium text-muted-foreground" htmlFor={inputId}>New workspace</Label>
       <Input id={inputId} autoFocus required value={name} disabled={createWorkspace.isPending} onChange={(event) => setName(event.target.value)} />
-      {createWorkspace.isError ? <p role="alert" className="text-xs text-destructive">Workspace creation failed. Try again.</p> : null}
+      {createWorkspace.isError ? <p role="alert" className="text-xs text-destructive">{createWorkspace.error instanceof ApiProblem ? createWorkspace.error.detail : 'Workspace creation failed. Try again.'}</p> : null}
       <Button type="submit" disabled={!name.trim() || createWorkspace.isPending}>{createWorkspace.isPending ? 'Creating…' : 'Create workspace'}</Button>
       <Button type="button" variant="ghost" disabled={createWorkspace.isPending} onClick={() => { setCreating(false); setName(''); createWorkspace.reset() }}>Cancel</Button>
     </form>

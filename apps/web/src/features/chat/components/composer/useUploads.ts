@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useUploadAttachment } from '../../api/mutations'
-import type { Attachment } from '../../api/types'
+import { ChatError, type Attachment } from '../../api/types'
 
 export interface Upload {
   id: string
@@ -8,6 +8,8 @@ export interface Upload {
   /** 0 to 1. */
   progress: number
   status: 'uploading' | 'failed' | 'done'
+  /** The upload failed because the workspace storage quota is used up. */
+  storageFull?: boolean
   attachment?: Attachment
 }
 
@@ -35,9 +37,9 @@ export function useUploads() {
     upload(file, { signal: controller.signal, onProgress: (progress) => patch(id, { progress }) })
       .then(
         (attachment) => patch(id, { status: 'done', progress: 1, attachment }),
-        () => {
+        (error: unknown) => {
           // A cancelled upload is removed by `remove`; anything else failed.
-          if (!controller.signal.aborted) patch(id, { status: 'failed' })
+          if (!controller.signal.aborted) patch(id, { status: 'failed', storageFull: error instanceof ChatError && error.code === 'storage_full' })
         },
       )
       .finally(() => {
@@ -61,7 +63,7 @@ export function useUploads() {
     retry(id: string) {
       const item = uploads.find((candidate) => candidate.id === id)
       if (!item) return
-      patch(id, { status: 'uploading', progress: 0 })
+      patch(id, { status: 'uploading', progress: 0, storageFull: false })
       start(id, item.file)
     },
     /** After a send: the files now belong to the message. */
