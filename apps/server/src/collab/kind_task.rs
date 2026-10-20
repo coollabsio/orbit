@@ -62,13 +62,17 @@ pub(super) async fn content(
         &markdown_to_blocks(&row.get::<String, _>("description"), &members),
         &policy,
     );
-    sqlx::query(
+    // Only a cache of the conversion: a failed write must not keep the description from opening.
+    if let Err(error) = sqlx::query(
         "UPDATE tasks SET description_json = $1 WHERE id = $2 AND description_json IS NULL",
     )
     .bind(Value::Array(blocks.clone()).to_string())
     .bind(id.to_string())
     .execute(pool)
-    .await?;
+    .await
+    {
+        tracing::warn!(task_id = %id, error = %error, "storing the converted description failed");
+    }
     Ok(blocks)
 }
 

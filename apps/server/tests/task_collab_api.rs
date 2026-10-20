@@ -46,6 +46,20 @@ async fn create_task(server: &Server, users: &Users, description: &str) -> Value
     task
 }
 
+/// Makes a task look like one written before rich text: markdown only, no notifications yet.
+async fn make_old(server: &Server, id: &str) {
+    sqlx::query("UPDATE tasks SET description_json = NULL WHERE id = $1")
+        .bind(id)
+        .execute(server.database.pool())
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM notifications WHERE task_id = $1")
+        .bind(id)
+        .execute(server.database.pool())
+        .await
+        .unwrap();
+}
+
 async fn get_task(server: &Server, users: &Users, id: &str) -> Value {
     let (status, task) = server
         .api(
@@ -110,6 +124,7 @@ async fn old_markdown_task_opens_as_blocks() {
     let users = setup(&server).await;
     let task = create_task(&server, &users, "# Title\n\n- a").await;
     let id = task["id"].as_str().unwrap();
+    make_old(&server, id).await;
 
     let client = open(&server, &users, &users.owner, id).await;
     let blocks = doc_to_blocks(&client.doc);
@@ -417,6 +432,7 @@ async fn imported_mentions_do_not_notify_on_first_projection() {
     let users = setup(&server).await;
     let task = create_task(&server, &users, "Ask @Mia Member").await;
     let id = task["id"].as_str().unwrap();
+    make_old(&server, id).await;
 
     let mut client = open(&server, &users, &users.owner, id).await;
     client.type_text(0, "Please ").await;
@@ -536,6 +552,7 @@ async fn a_renamed_member_is_not_notified_for_an_old_mention() {
     let users = setup(&server).await;
     let task = create_task(&server, &users, "Ask @Mia Member").await;
     let id = task["id"].as_str().unwrap();
+    make_old(&server, id).await;
 
     // the first open converts the markdown, with the mention
     let first = open(&server, &users, &users.owner, id).await;
@@ -555,5 +572,17 @@ async fn a_renamed_member_is_not_notified_for_an_old_mention() {
     })
     .await;
     assert_eq!(description_mentions(&server, users.member_id).await, 0);
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn mentions_in_a_markdown_create_notify() {
+    let root = TempDir::new().unwrap();
+    let server = Server::start(&root, fast_config()).await;
+    let users = setup(&server).await;
+    let task = create_task(&server, &users, "@Mia Member please check").await;
+    assert_eq!(description_mentions(&server, users.member_id).await, 1);
+    assert_eq!(task["description"], "@Mia Member please check");
+    assert_eq!(task["description_json"][0]["content"][0]["type"], "mention");
     server.stop().await;
 }

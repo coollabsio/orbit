@@ -1484,7 +1484,16 @@ impl TaskRepository {
                 let (markdown, blocks) = description_from_blocks(workspace_id, id, blocks);
                 (markdown, Some(blocks))
             }
-            None => (input.description.clone(), None),
+            // markdown (API, MCP, chat): converted now, so its mentions notify like typed ones
+            None if input.description.trim().is_empty() => (input.description.clone(), None),
+            None => {
+                let members = members(&mut *tx, workspace_id).await?;
+                let blocks = sanitize_blocks_for(
+                    &markdown_to_blocks(&input.description, &members),
+                    &task_policy(workspace_id, id),
+                );
+                (input.description.clone(), Some(blocks))
+            }
         };
         let description_json = blocks
             .as_ref()
