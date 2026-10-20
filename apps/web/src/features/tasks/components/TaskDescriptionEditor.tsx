@@ -174,7 +174,8 @@ export function TaskDescriptionEditor({
         <div data-testid="description-preview">
           <Suspense fallback={editorSpinner}>
             <PageEditor
-              key={`preview:${collab.key}`}
+              // old markdown links its @mentions once the members are known
+              key={`preview:${collab.key}:${members ? 'members' : ''}`}
               pageId={`preview:task:${task.id}`}
               profile="task"
               fileScope={fileScope}

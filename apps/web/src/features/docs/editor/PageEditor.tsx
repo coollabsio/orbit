@@ -28,7 +28,7 @@ import { cn } from 'cn'
 import { collabBlockPresence } from '../collab/blockPresence'
 import { renderCollabCursor } from '../collab/cursor'
 import { ImageZoomButton } from './ImageZoomButton'
-import { internalPageLinkId, isSafeLinkHref, pastedFilesToCopy, toEditorContent, toStoredContent, type FileScope, type FileToCopy } from './content'
+import { internalPageLinkId, isSafeLinkHref, linkMentions, pastedFilesToCopy, toEditorContent, toStoredContent, type FileScope, type FileToCopy } from './content'
 import { insertPageBlock } from './pageBlockCommands'
 import { PageEditorContext, type PageEditorContextValue, type PageRef } from './pageEditorContext'
 import { EDITOR_BLOCK_TYPES, markdownToTaskBlocks, pageEditorSchema, TASK_EDITOR_BLOCK_TYPES, taskEditorSchema, type PageEditorInstance } from './schema'
@@ -305,7 +305,7 @@ function PageEditorInner({
           ...options,
           // `[]` (new page) becomes undefined → BlockNote starts with one empty paragraph.
           initialContent: toEditorContent(
-            initialContent ?? (initialMarkdown ? markdownToTaskBlocks(initialMarkdown) : []),
+            initialContent ?? (initialMarkdown ? (linkMentions(markdownToTaskBlocks(initialMarkdown), mentions?.members ?? []) as unknown[]) : []),
             task ? TASK_EDITOR_BLOCK_TYPES : EDITOR_BLOCK_TYPES,
             fileScope,
           ) as never,

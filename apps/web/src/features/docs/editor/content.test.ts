@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { contentEquals, internalPageLinkId, isPageFileUrl, isSafeFileUrl, isSafeLinkHref, isTaskAttachmentUrl, normalizeLinkHref, pastedFilesToCopy, taskAttachmentUrl, toEditorContent, toStoredContent } from './content'
+import { contentEquals, internalPageLinkId, isPageFileUrl, isSafeFileUrl, isSafeLinkHref, isTaskAttachmentUrl, linkMentions, normalizeLinkHref, pastedFilesToCopy, taskAttachmentUrl, toEditorContent, toStoredContent } from './content'
 
 const TYPES = new Set(['paragraph', 'heading', 'table', 'page'])
 const NUL = String.fromCharCode(0)
@@ -207,5 +207,25 @@ describe('pastedFilesToCopy', () => {
       { id: 'task', url: fromTask, name: 'shot.png' },
       { id: 'page', url: fromPage, name: 'shot.png' },
     ])
+  })
+})
+
+describe('linkMentions', () => {
+  const ada = { id: 'u-ada', name: 'Ada Lovelace' }
+  const text = (value: string, styles = {}) => ({ type: 'text', text: value, styles })
+  const paragraph = (...content: unknown[]) => [{ type: 'paragraph', content, children: [] }]
+
+  test('an exact member name after @ becomes a mention', () => {
+    expect(linkMentions(paragraph(text('hi @Ada Lovelace, look')), [ada, { id: 'u-ad', name: 'Ada' }])).toEqual(
+      paragraph(text('hi '), { type: 'mention', props: { userId: 'u-ada', name: 'Ada Lovelace' } }, text(', look')),
+    )
+  })
+
+  test('two members with the name, no word boundary, or code stay text', () => {
+    const twins = [{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Ada' }]
+    expect(linkMentions(paragraph(text('hi @Ada')), twins)).toEqual(paragraph(text('hi @Ada')))
+    expect(linkMentions(paragraph(text('@Adam')), [{ id: 'a', name: 'Ada' }])).toEqual(paragraph(text('@Adam')))
+    expect(linkMentions(paragraph(text('mail@Ada')), [{ id: 'a', name: 'Ada' }])).toEqual(paragraph(text('mail@Ada')))
+    expect(linkMentions(paragraph(text('@Ada', { code: true })), [{ id: 'a', name: 'Ada' }])).toEqual(paragraph(text('@Ada', { code: true })))
   })
 })

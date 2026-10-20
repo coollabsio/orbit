@@ -207,3 +207,65 @@ export function pastedFilesToCopy(document: readonly unknown[], before: Readonly
   return out
 }
 
+
+export interface MentionMember {
+  id: string
+  name: string
+}
+
+/** The member whose name starts `text` (longest name first), unless two members share it (as on the server). */
+function mentionedMember(text: string, members: readonly MentionMember[]): MentionMember | null {
+  const fits = (name: string) => name !== '' && text.startsWith(name) && !/^[\p{L}\p{N}]/u.test(text.slice(name.length))
+  const longest = Math.max(0, ...members.filter((member) => fits(member.name)).map((member) => member.name.length))
+  if (longest === 0) return null
+  const matches = members.filter((member) => member.name.length === longest && fits(member.name))
+  return matches.length === 1 ? matches[0] : null
+}
+
+/** Splits one plain text node at `@Name` mentions. */
+function splitMentions(node: Record<string, unknown>, members: readonly MentionMember[]): unknown[] {
+  const text = node.text as string
+  const out: unknown[] = []
+  let pending = ''
+  let at = 0
+  while (at < text.length) {
+    const index = text.indexOf('@', at)
+    if (index === -1) break
+    const before = pending + text.slice(at, index)
+    const boundary = before === '' || !/[\p{L}\p{N}]$/u.test(before)
+    const member = boundary ? mentionedMember(text.slice(index + 1), members) : null
+    if (member) {
+      if (before) out.push({ ...node, text: before })
+      out.push({ type: 'mention', props: { userId: member.id, name: member.name } })
+      pending = ''
+      at = index + 1 + member.name.length
+    } else {
+      pending = before + '@'
+      at = index + 1
+    }
+  }
+  const rest = pending + text.slice(at)
+  if (rest) out.push({ ...node, text: rest })
+  return out
+}
+
+/**
+ * `@Name` in text written before rich text becomes a mention of that member (exact name, one member with it, not in
+ * code), as the server's import does, so old comments and descriptions show mention chips.
+ */
+export function linkMentions(value: unknown, members: readonly MentionMember[]): unknown {
+  if (members.length === 0) return value
+  if (Array.isArray(value)) {
+    return value.flatMap((item) =>
+      isRecord(item) && item.type === 'text' && typeof item.text === 'string' && !(isRecord(item.styles) && item.styles.code)
+        ? splitMentions(item, members)
+        : [linkMentions(item, members)],
+    )
+  }
+  if (isRecord(value)) {
+    const out: Record<string, unknown> = {}
+    for (const [key, child] of Object.entries(value)) out[key] = linkMentions(child, members)
+    return out
+  }
+  return value
+}
