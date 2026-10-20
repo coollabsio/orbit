@@ -383,6 +383,11 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0051_project_labels.sql"),
                     false,
                 ),
+                Migration::new(
+                    52,
+                    include_str!("../../../../apps/server/migrations/0052_rate_limits.sql"),
+                    false,
+                ),
             ],
         );
         runner.postgres = vec![
@@ -412,6 +417,11 @@ impl MigrationRunner {
             Migration::new(
                 51,
                 include_str!("../../../../apps/server/migrations/postgres/0051_project_labels.sql"),
+                false,
+            ),
+            Migration::new(
+                52,
+                include_str!("../../../../apps/server/migrations/postgres/0052_rate_limits.sql"),
                 false,
             ),
         ];

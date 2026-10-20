@@ -26,11 +26,7 @@ const JOBS_CONCURRENCY_ENV: &str = "ORBIT__JOBS__CONCURRENCY";
 const UPLOADS_MAX_FILE_BYTES_ENV: &str = "ORBIT__UPLOADS__MAX_FILE_BYTES";
 const UPLOADS_MAX_REQUEST_BYTES_ENV: &str = "ORBIT__UPLOADS__MAX_REQUEST_BYTES";
 const METRICS_LISTEN_ENV: &str = "ORBIT__METRICS__LISTEN";
-const RATE_AUTH_ENV: &str = "ORBIT__RATE_LIMITS__AUTHENTICATION_PER_MINUTE";
-const RATE_RECOVERY_ENV: &str = "ORBIT__RATE_LIMITS__RECOVERY_PER_MINUTE";
-const RATE_INVITATION_ENV: &str = "ORBIT__RATE_LIMITS__INVITATION_PER_MINUTE";
-const RATE_UPLOAD_ENV: &str = "ORBIT__RATE_LIMITS__UPLOAD_PER_MINUTE";
-const RATE_GENERAL_ENV: &str = "ORBIT__RATE_LIMITS__GENERAL_PER_MINUTE";
+const RATE_LIMITS_ENV_PREFIX: &str = "ORBIT__RATE_LIMITS__";
 const SECRETS_ENV_PREFIX: &str = "ORBIT__SECRETS__";
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -187,13 +183,24 @@ pub struct MetricsConfig {
     pub listen: Option<SocketAddr>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// `[rate_limits]`. The `*_per_minute` limits apply to each client IP address, each credential
+/// (session or token) and, multiplied by `workspace_multiplier`, each workspace. The email limits
+/// hold for every server of the database.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(default, deny_unknown_fields)]
 pub struct RateLimitConfig {
     pub authentication_per_minute: u32,
     pub recovery_per_minute: u32,
     pub invitation_per_minute: u32,
     pub upload_per_minute: u32,
     pub general_per_minute: u32,
+    pub workspace_multiplier: u32,
+    /// The time between two registration or password reset emails to one address.
+    pub account_email_cooldown_seconds: u32,
+    /// Registration and password reset emails to one address in 24 hours.
+    pub account_emails_per_day: u32,
+    pub invitation_emails_per_workspace_per_day: u32,
+    pub invitation_emails_per_inviter_per_day: u32,
 }
 
 impl Default for RateLimitConfig {
@@ -204,7 +211,87 @@ impl Default for RateLimitConfig {
             invitation_per_minute: 60,
             upload_per_minute: 120,
             general_per_minute: 600,
+            workspace_multiplier: 10,
+            account_email_cooldown_seconds: 60,
+            account_emails_per_day: 5,
+            invitation_emails_per_workspace_per_day: 100,
+            invitation_emails_per_inviter_per_day: 50,
         }
+    }
+}
+
+impl RateLimitConfig {
+    /// The setting named `name` (as in the TOML file), for the environment overrides.
+    fn setting_mut(&mut self, name: &str) -> Option<&mut u32> {
+        Some(match name {
+            "authentication_per_minute" => &mut self.authentication_per_minute,
+            "recovery_per_minute" => &mut self.recovery_per_minute,
+            "invitation_per_minute" => &mut self.invitation_per_minute,
+            "upload_per_minute" => &mut self.upload_per_minute,
+            "general_per_minute" => &mut self.general_per_minute,
+            "workspace_multiplier" => &mut self.workspace_multiplier,
+            "account_email_cooldown_seconds" => &mut self.account_email_cooldown_seconds,
+            "account_emails_per_day" => &mut self.account_emails_per_day,
+            "invitation_emails_per_workspace_per_day" => {
+                &mut self.invitation_emails_per_workspace_per_day
+            }
+            "invitation_emails_per_inviter_per_day" => {
+                &mut self.invitation_emails_per_inviter_per_day
+            }
+            _ => return None,
+        })
+    }
+
+    fn validate(&self) -> Result<(), ConfigError> {
+        let invalid = |key, detail: &str| {
+            Err(ConfigError::InvalidSetting {
+                key,
+                detail: detail.to_owned(),
+            })
+        };
+        let per_minute = [
+            self.authentication_per_minute,
+            self.recovery_per_minute,
+            self.invitation_per_minute,
+            self.upload_per_minute,
+            self.general_per_minute,
+        ];
+        if per_minute.contains(&0) {
+            return invalid("rate_limits", "all endpoint-class limits must be positive");
+        }
+        if per_minute.into_iter().any(|limit| limit > 1_000_000) {
+            return invalid(
+                "rate_limits",
+                "endpoint-class limits cannot exceed 1000000 per minute",
+            );
+        }
+        if !(1..=1_000).contains(&self.workspace_multiplier) {
+            return invalid(
+                "rate_limits.workspace_multiplier",
+                "must be between 1 and 1000",
+            );
+        }
+        if self.account_email_cooldown_seconds > 86_400 {
+            return invalid(
+                "rate_limits.account_email_cooldown_seconds",
+                "cannot exceed 86400 seconds",
+            );
+        }
+        let per_day = [
+            self.account_emails_per_day,
+            self.invitation_emails_per_workspace_per_day,
+            self.invitation_emails_per_inviter_per_day,
+        ];
+        if per_day
+            .into_iter()
+            .any(|limit| !(1..=100_000).contains(&limit))
+        {
+            return invalid(
+                "rate_limits",
+                "daily email limits must be between 1 and 100000",
+            );
+        }
+        Ok(())
     }
 }
 
@@ -399,32 +486,13 @@ impl Config {
                 detail: "must be at least uploads.max_file_bytes".to_owned(),
             });
         }
-        let rate_limits = [
-            self.rate_limits.authentication_per_minute,
-            self.rate_limits.recovery_per_minute,
-            self.rate_limits.invitation_per_minute,
-            self.rate_limits.upload_per_minute,
-            self.rate_limits.general_per_minute,
-        ];
         if self.http.shutdown_delay_seconds > 300 {
             return Err(ConfigError::InvalidSetting {
                 key: "http.shutdown_delay_seconds",
                 detail: "the delay cannot exceed 300 seconds".to_owned(),
             });
         }
-        if rate_limits.contains(&0) {
-            return Err(ConfigError::InvalidSetting {
-                key: "rate_limits",
-                detail: "all endpoint-class limits must be positive".to_owned(),
-            });
-        }
-        if rate_limits.into_iter().any(|limit| limit > 1_000_000) {
-            return Err(ConfigError::InvalidSetting {
-                key: "rate_limits",
-                detail: "endpoint-class limits cannot exceed 1000000 per minute".to_owned(),
-            });
-        }
-        Ok(())
+        self.rate_limits.validate()
     }
 }
 
@@ -437,7 +505,7 @@ struct RawConfig {
     jobs: RawJobsConfig,
     uploads: RawUploadConfig,
     metrics: RawMetricsConfig,
-    rate_limits: RawRateLimitConfig,
+    rate_limits: RateLimitConfig,
     secrets: BTreeMap<String, String>,
 }
 
@@ -483,13 +551,7 @@ impl RawConfig {
                     .map(|value| parse_setting("metrics.listen", value))
                     .transpose()?,
             },
-            rate_limits: RateLimitConfig {
-                authentication_per_minute: self.rate_limits.authentication_per_minute,
-                recovery_per_minute: self.rate_limits.recovery_per_minute,
-                invitation_per_minute: self.rate_limits.invitation_per_minute,
-                upload_per_minute: self.rate_limits.upload_per_minute,
-                general_per_minute: self.rate_limits.general_per_minute,
-            },
+            rate_limits: self.rate_limits,
             secrets: self
                 .secrets
                 .into_iter()
@@ -580,29 +642,6 @@ struct RawMetricsConfig {
     listen: Option<String>,
 }
 
-#[derive(Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct RawRateLimitConfig {
-    authentication_per_minute: u32,
-    recovery_per_minute: u32,
-    invitation_per_minute: u32,
-    upload_per_minute: u32,
-    general_per_minute: u32,
-}
-
-impl Default for RawRateLimitConfig {
-    fn default() -> Self {
-        let defaults = RateLimitConfig::default();
-        Self {
-            authentication_per_minute: defaults.authentication_per_minute,
-            recovery_per_minute: defaults.recovery_per_minute,
-            invitation_per_minute: defaults.invitation_per_minute,
-            upload_per_minute: defaults.upload_per_minute,
-            general_per_minute: defaults.general_per_minute,
-        }
-    }
-}
-
 fn apply_environment(
     config: &mut Config,
     environment: &BTreeMap<String, String>,
@@ -656,16 +695,11 @@ fn apply_environment(
             config.uploads.max_request_bytes = parse_environment(key, value)?;
         } else if key == METRICS_LISTEN_ENV {
             config.metrics.listen = Some(parse_environment(key, value)?);
-        } else if key == RATE_AUTH_ENV {
-            config.rate_limits.authentication_per_minute = parse_environment(key, value)?;
-        } else if key == RATE_RECOVERY_ENV {
-            config.rate_limits.recovery_per_minute = parse_environment(key, value)?;
-        } else if key == RATE_INVITATION_ENV {
-            config.rate_limits.invitation_per_minute = parse_environment(key, value)?;
-        } else if key == RATE_UPLOAD_ENV {
-            config.rate_limits.upload_per_minute = parse_environment(key, value)?;
-        } else if key == RATE_GENERAL_ENV {
-            config.rate_limits.general_per_minute = parse_environment(key, value)?;
+        } else if let Some(setting) = key
+            .strip_prefix(RATE_LIMITS_ENV_PREFIX)
+            .and_then(|name| config.rate_limits.setting_mut(&name.to_ascii_lowercase()))
+        {
+            *setting = parse_environment(key, value)?;
         } else if let Some(secret_name) = key.strip_prefix(SECRETS_ENV_PREFIX) {
             apply_secret(config, key, secret_name, value)?;
         } else if key.starts_with("ORBIT__") {

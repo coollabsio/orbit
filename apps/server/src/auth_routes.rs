@@ -161,6 +161,14 @@ impl AuthState {
         self
     }
 
+    pub(crate) fn cookie_mode(&self) -> CookieMode {
+        self.cookie_mode
+    }
+
+    pub(crate) fn database(&self) -> &orbit_platform::Database {
+        self.repository.database()
+    }
+
     /// The mailer when a mail server is saved.
     async fn mailer(&self) -> Option<&Mailer> {
         match &self.mailer {

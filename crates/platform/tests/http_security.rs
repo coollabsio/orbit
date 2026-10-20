@@ -709,6 +709,12 @@ async fn endpoint_class_limits_return_correlated_problem_details() {
     let response = app.oneshot(request()).await.unwrap();
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(response.headers()[CONTENT_TYPE], "application/problem+json");
+    let retry_after: u64 = response.headers()["retry-after"]
+        .to_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    assert!((1..=60).contains(&retry_after));
     let response_request_id = response.headers()["x-request-id"]
         .to_str()
         .unwrap()

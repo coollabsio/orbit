@@ -51,6 +51,8 @@ pub fn production_router(
     require_secure_transport: bool,
 ) -> Router {
     let csp_script_hash = assets.csp_script_hash().to_owned();
+    let session_cookie = api.auth.cookie_mode().session_cookie_name();
+    let database = api.auth.database().clone();
     let realtime = crate::realtime::router(api.tasks.clone());
     let views = view_router(api.tasks.clone());
     auth_router(api.auth)
@@ -83,6 +85,8 @@ pub fn production_router(
                 .with_contract_id(crate::openapi::CONTRACT_ID)
                 .with_limits(limits)
                 .with_rate_limits(rate_limits)
+                .with_session_cookie(session_cookie)
+                .with_shared_rate_limits(database)
                 .with_csp_script_hash(csp_script_hash);
             if require_secure_transport {
                 layer.require_secure_transport()

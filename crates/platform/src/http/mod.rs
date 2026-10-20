@@ -1,25 +1,23 @@
 mod limits;
+mod rate_limit;
 mod request_id;
 mod security;
 
-use std::collections::HashMap;
 use std::convert::Infallible;
 use std::future::Future;
 use std::net::SocketAddr;
-use std::net::{IpAddr, Ipv6Addr};
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::body::Body;
 use axum::extract::ConnectInfo;
-use axum::http::header::{CONTENT_TYPE, HeaderName, HeaderValue};
-use axum::http::{Method, Request, Response, StatusCode};
+use axum::http::header::{CONTENT_TYPE, HeaderName, HeaderValue, RETRY_AFTER};
+use axum::http::{Request, Response, StatusCode};
 use axum::response::Response as AxumResponse;
 use tower::{Layer, Service};
 
-use crate::{Problem, RateLimitConfig};
+use crate::{Database, Problem, RateLimitConfig};
+use rate_limit::RateLimiter;
 
 pub use limits::HttpLimits;
 pub use request_id::RequestId;
@@ -70,7 +68,22 @@ impl HttpPlatformLayer {
 
     #[must_use]
     pub fn with_rate_limits(mut self, config: RateLimitConfig) -> Self {
-        self.rate_limiter = RateLimiter::new(config);
+        self.rate_limiter = self.rate_limiter.with_config(config);
+        self
+    }
+
+    /// Counts the requests of each session (the cookie `name`) against its own limits too.
+    #[must_use]
+    pub fn with_session_cookie(mut self, name: &'static str) -> Self {
+        self.rate_limiter = self.rate_limiter.with_session_cookie(name);
+        self
+    }
+
+    /// Counts the sensitive endpoint classes in `database`, so their limits hold for every server
+    /// of the database.
+    #[must_use]
+    pub fn with_shared_rate_limits(mut self, database: Database) -> Self {
+        self.rate_limiter = self.rate_limiter.with_database(database);
         self
     }
 
@@ -249,16 +262,29 @@ where
                 ));
             }
 
-            if !rate_limiter.permits(client_ip.0, request.method(), request.uri().path()) {
+            if let Err(refused) = rate_limiter
+                .check(
+                    client_ip.0,
+                    request.method(),
+                    request.uri().path(),
+                    request.headers(),
+                )
+                .await
+            {
+                let mut response = problem_response(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "rate_limit_exceeded",
+                    "Rate limit exceeded",
+                    "Too many requests were made to this endpoint class.",
+                    &request_id,
+                    request.uri().path(),
+                );
+                response.headers_mut().insert(
+                    RETRY_AFTER,
+                    HeaderValue::from(refused.retry_after.as_secs()),
+                );
                 return Ok(finish_response(
-                    problem_response(
-                        StatusCode::TOO_MANY_REQUESTS,
-                        "rate_limit_exceeded",
-                        "Rate limit exceeded",
-                        "Too many requests were made to this endpoint class.",
-                        &request_id,
-                        request.uri().path(),
-                    ),
+                    response,
                     &request_id,
                     transport.is_secure(),
                     csp_script_hash.as_deref(),
@@ -403,232 +429,4 @@ fn finish_response(
         .insert(HeaderName::from_static("x-request-id"), request_id);
     add_security_headers(response.headers_mut(), secure, csp_script_hash);
     response
-}
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-enum EndpointClass {
-    Authentication,
-    Recovery,
-    Invitation,
-    Upload,
-    /// Chat has its own budget, so a busy conversation cannot use up the requests of the
-    /// other apps (and they cannot use up chat's).
-    Chat,
-    General,
-}
-
-/// Chat makes more small requests than the other apps (a read receipt for each conversation
-/// that is looked at), so its budget is this many times the general one.
-const CHAT_RATE_FACTOR: u32 = 3;
-
-#[derive(Clone, Debug)]
-struct RateLimiter {
-    config: RateLimitConfig,
-    entries: RateLimitEntries,
-}
-
-type RateLimitKey = (IpAddr, EndpointClass);
-type RateLimitWindow = (u64, u32);
-type RateLimitEntries = Arc<Mutex<HashMap<RateLimitKey, RateLimitWindow>>>;
-const MAX_RATE_LIMIT_ENTRIES: usize = 4_096;
-
-impl Default for RateLimiter {
-    fn default() -> Self {
-        Self::new(RateLimitConfig::default())
-    }
-}
-
-impl RateLimiter {
-    fn new(config: RateLimitConfig) -> Self {
-        Self {
-            config,
-            entries: Arc::new(Mutex::new(HashMap::new())),
-        }
-    }
-
-    fn permits(&self, ip: IpAddr, method: &Method, path: &str) -> bool {
-        let Some(class) = endpoint_class(method, path) else {
-            return true;
-        };
-        let limit = match class {
-            EndpointClass::Authentication => self.config.authentication_per_minute,
-            EndpointClass::Recovery => self.config.recovery_per_minute,
-            EndpointClass::Invitation => self.config.invitation_per_minute,
-            EndpointClass::Upload => self.config.upload_per_minute,
-            EndpointClass::Chat => self
-                .config
-                .general_per_minute
-                .saturating_mul(CHAT_RATE_FACTOR),
-            EndpointClass::General => self.config.general_per_minute,
-        };
-        let window = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
-            / 60;
-        let ip = rate_limit_ip(ip);
-        let mut entries = self
-            .entries
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if entries.len() >= MAX_RATE_LIMIT_ENTRIES {
-            entries.retain(|_, (entry_window, _)| *entry_window == window);
-        }
-        let key = (ip, class);
-        if !entries.contains_key(&key) && entries.len() >= MAX_RATE_LIMIT_ENTRIES {
-            return false;
-        }
-        let entry = entries.entry(key).or_insert((window, 0));
-        if entry.0 != window {
-            *entry = (window, 0);
-        }
-        if entry.1 >= limit {
-            return false;
-        }
-        entry.1 += 1;
-        true
-    }
-}
-
-fn rate_limit_ip(ip: IpAddr) -> IpAddr {
-    match ip {
-        IpAddr::V4(_) => ip,
-        IpAddr::V6(ip) => IpAddr::V6(Ipv6Addr::from(u128::from(ip) & (u128::MAX << 64))),
-    }
-}
-
-fn endpoint_class(method: &Method, path: &str) -> Option<EndpointClass> {
-    if matches!(
-        path,
-        "/oauth/register" | "/oauth/authorize" | "/oauth/token" | "/oauth/revoke"
-    ) {
-        return Some(EndpointClass::Authentication);
-    }
-    if path == "/mcp" || path.starts_with("/.well-known/oauth-") {
-        return Some(EndpointClass::General);
-    }
-    if path != "/api" && !path.starts_with("/api/") {
-        return None;
-    }
-    // Both send email to an address anyone can type, so they share the strict recovery limit.
-    if path.contains("/recovery") || path.contains("/auth/register") {
-        Some(EndpointClass::Recovery)
-    } else if path.contains("/invitations") {
-        Some(EndpointClass::Invitation)
-    } else if path.contains("/attachments") {
-        Some(EndpointClass::Upload)
-    } else if method == Method::POST && path.ends_with("/chat/files") {
-        // A chat file upload. The downloads (`GET .../chat/files/{id}`) are chat requests.
-        Some(EndpointClass::Upload)
-    } else if path.ends_with("/login") || path.contains("/session") || path.contains("/setup") {
-        Some(EndpointClass::Authentication)
-    } else if path.contains("/chat/") {
-        Some(EndpointClass::Chat)
-    } else {
-        Some(EndpointClass::General)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rate_limit_state_has_a_hard_cap_during_one_window() {
-        let limiter = RateLimiter::default();
-        for host in 0..5_000_u32 {
-            assert_eq!(
-                limiter.permits(IpAddr::V4(host.into()), &Method::GET, "/api/v1/tasks"),
-                host < MAX_RATE_LIMIT_ENTRIES as u32
-            );
-        }
-        assert!(
-            limiter
-                .entries
-                .lock()
-                .unwrap_or_else(std::sync::PoisonError::into_inner)
-                .len()
-                <= 4_096
-        );
-    }
-
-    #[test]
-    fn rate_limit_aggregates_ipv6_clients_by_network_prefix() {
-        let limiter = RateLimiter::new(RateLimitConfig {
-            general_per_minute: 1,
-            ..RateLimitConfig::default()
-        });
-        assert!(limiter.permits(
-            "2001:db8:1:2::1".parse().unwrap(),
-            &Method::GET,
-            "/api/v1/tasks"
-        ));
-        assert!(!limiter.permits(
-            "2001:db8:1:2::2".parse().unwrap(),
-            &Method::GET,
-            "/api/v1/tasks"
-        ));
-    }
-
-    #[test]
-    fn chat_has_its_own_budget_of_three_times_the_general_one() {
-        let limiter = RateLimiter::new(RateLimitConfig {
-            general_per_minute: 1,
-            ..RateLimitConfig::default()
-        });
-        let client = IpAddr::V4(1_u32.into());
-        let chat = "/api/v1/workspaces/w/chat/conversations/c/read";
-        for _ in 0..3 {
-            assert!(limiter.permits(client, &Method::GET, chat));
-        }
-        assert!(!limiter.permits(client, &Method::GET, chat));
-        // Exhausted chat leaves the other apps alone.
-        assert!(limiter.permits(client, &Method::GET, "/api/v1/workspaces/w/tasks"));
-    }
-
-    #[test]
-    fn a_chat_file_upload_is_an_upload_and_a_download_is_a_chat_request() {
-        let files = "/api/v1/workspaces/w/chat/files";
-        assert_eq!(
-            endpoint_class(&Method::POST, files),
-            Some(EndpointClass::Upload)
-        );
-        assert_eq!(
-            endpoint_class(&Method::GET, "/api/v1/workspaces/w/chat/files/f"),
-            Some(EndpointClass::Chat)
-        );
-        assert_eq!(
-            endpoint_class(&Method::POST, "/api/v1/workspaces/w/chat/read-all"),
-            Some(EndpointClass::Chat)
-        );
-
-        let limiter = RateLimiter::new(RateLimitConfig {
-            upload_per_minute: 1,
-            ..RateLimitConfig::default()
-        });
-        let client = IpAddr::V4(1_u32.into());
-        assert!(limiter.permits(client, &Method::POST, files));
-        assert!(!limiter.permits(client, &Method::POST, files));
-    }
-
-    #[test]
-    fn saturated_state_never_resets_an_exhausted_client() {
-        let limiter = RateLimiter::new(RateLimitConfig {
-            general_per_minute: 1,
-            ..RateLimitConfig::default()
-        });
-        let exhausted = IpAddr::V4(0_u32.into());
-        assert!(limiter.permits(exhausted, &Method::GET, "/api/v1/tasks"));
-        assert!(!limiter.permits(exhausted, &Method::GET, "/api/v1/tasks"));
-        for host in 1..MAX_RATE_LIMIT_ENTRIES as u32 {
-            assert!(limiter.permits(IpAddr::V4(host.into()), &Method::GET, "/api/v1/tasks"));
-        }
-
-        assert!(!limiter.permits(
-            IpAddr::V4((MAX_RATE_LIMIT_ENTRIES as u32).into()),
-            &Method::GET,
-            "/api/v1/tasks"
-        ));
-        assert!(!limiter.permits(exhausted, &Method::GET, "/api/v1/tasks"));
-    }
 }
