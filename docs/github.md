@@ -4,11 +4,11 @@ Orbit uses one GitHub App per workspace. Workspace owners and admins start App r
 
 ## Server setup
 
-1. Give Orbit a public HTTPS URL that serves both the UI and `/api/v1/integrations/github/webhook` to GitHub. In production, set the server's canonical `ORBIT__HTTP__PUBLIC_ORIGIN=https://orbit.example.com`. For local testing, use a public HTTPS tunnel to the Orbit web server with its `/api` proxy; Orbit uses the HTTPS domain open in your browser when you start App registration.
-2. Generate a 32-byte key with `openssl rand -base64 32`. Store it as `ORBIT__SECRETS__APP_KEY` or use Orbit's secret-file configuration. Keep this key outside the database and its backups. Orbit cannot verify webhooks or use the saved App credentials if the key is lost.
+1. Give Orbit a public HTTPS URL that serves both the UI and `/api/v1/integrations/github/webhook` to GitHub. In production, set the server's canonical `ORBIT_PUBLIC_ORIGIN=https://orbit.example.com`. For local testing, use a public HTTPS tunnel to the Orbit web server with its `/api` proxy; Orbit uses the HTTPS domain open in your browser when you start App registration.
+2. Generate a 32-byte key with `openssl rand -base64 32`. Store it as `ORBIT_APP_KEY`, or put it in a file and set `ORBIT_APP_KEY_FILE` to the file path. Keep this key outside the database and its backups. Orbit cannot verify webhooks or use the saved App credentials if the key is lost.
 3. Restart Orbit. Do not set `GITHUB_CONNECTIONS` or the older `GITHUB_*` connection variables; Orbit no longer reads them.
 
-For local development, `just dev` also loads a root `.env.local` file. Put `ORBIT__SECRETS__APP_KEY=<base64-key>` there. Keep the file private and out of Git. Open Orbit through a public HTTPS tunnel to the web server before you select **Register GitHub App**. You do not need to set `ORBIT__HTTP__PUBLIC_ORIGIN` to the tunnel URL for this development flow. A plain `http://127.0.0.1` tab cannot register a GitHub App.
+For local development, `just dev` also loads a root `.env.local` file. Put `ORBIT_APP_KEY=<base64-key>` there. Keep the file private and out of Git. Open Orbit through a public HTTPS tunnel to the web server before you select **Register GitHub App**. You do not need to set `ORBIT_PUBLIC_ORIGIN` to the tunnel URL for this development flow. A plain `http://127.0.0.1` tab cannot register a GitHub App.
 
 ## Register the workspace App and connect a project
 

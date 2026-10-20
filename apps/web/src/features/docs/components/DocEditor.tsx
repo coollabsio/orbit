@@ -51,7 +51,7 @@ import { PageAutosaver, type AutosaveState, type PagePatch } from '@/features/do
 import { revealCollabCursor } from '@/features/docs/collab/cursor'
 import { useCollaborators } from '@/features/docs/collab/presence'
 import { PresenceAvatars } from '@/features/docs/collab/PresenceAvatars'
-import { collabStatusLabel, type CollabProblem, type CollabSession, type CollabState } from '@/features/docs/collab/session'
+import { collabProblemAction, collabStatusLabel, type CollabProblem, type CollabSession, type CollabState } from '@/features/docs/collab/session'
 import { useCollabSession } from '@/features/docs/collab/useCollabSession'
 import { useDocPageActions } from '@/features/docs/pageActions'
 import { downloadPageMarkdown, printPage } from '@/features/docs/pageExport'
@@ -305,26 +305,22 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
   }
 
   const onCollabProblem = (problem: CollabProblem) => {
-    switch (problem) {
-      case 'gone':
-      case 'forbidden':
-        leavePage(problem)
+    switch (collabProblemAction(problem)) {
+      case 'leave':
+        leavePage(problem === 'gone' ? 'gone' : 'forbidden')
         break
-      case 'session':
+      case 'unauthorized':
         // The same path as any 401 from the API: clear the session and go to the login page.
         window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
         break
-      case 'reset':
+      case 'reopen':
         void reopen()
         break
       case 'rate-limited':
         toast.warning('Too many changes at once. Syncing again in a few seconds.', { id: `collab-rate-${pageId}` })
         break
-      case 'too-large':
-        setNotice('too-large')
-        break
-      case 'protocol':
-        setNotice('protocol')
+      case 'notice':
+        setNotice(problem === 'too-large' ? 'too-large' : 'protocol')
         break
     }
   }
@@ -341,7 +337,8 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
 
   const collab = useCollabSession({
     workspaceId,
-    pageId,
+    kind: 'pages',
+    id: pageId,
     epoch: page.collab_epoch,
     generation,
     user: collabUser,

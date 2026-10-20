@@ -241,4 +241,14 @@ describe('PageEditor', () => {
     expect(await view.findByText('locked')).toBeTruthy()
     expect(view.container.querySelector('.bn-editor')?.getAttribute('contenteditable')).toBe('false')
   })
+
+  test('Cmd/Ctrl+Enter submits, but Cmd/Ctrl+Shift+Enter is left to the page (create and add another)', async () => {
+    const submit = mock(() => {})
+    const { view } = await renderEditor({ profile: 'task', submitShortcut: submit })
+    const editable = view.container.querySelector('.bn-editor')!
+    fireEvent.keyDown(editable, { key: 'Enter', ctrlKey: true, shiftKey: true })
+    expect(submit).not.toHaveBeenCalled()
+    fireEvent.keyDown(editable, { key: 'Enter', ctrlKey: true })
+    expect(submit).toHaveBeenCalledTimes(1)
+  })
 })

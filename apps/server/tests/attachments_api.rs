@@ -263,7 +263,7 @@ async fn target_is_revalidated_atomically_after_the_stream_finishes() {
         .unwrap();
     let app = fixture.app.clone();
     let response = tokio::spawn(async move { app.oneshot(request).await.unwrap() });
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    wait_until_read(&sender).await;
     sqlx::query("UPDATE tasks SET deleted_at = $1 WHERE id = $2")
         .bind(TimestampMillis::now().as_millis())
         .bind(&fixture.task_id)
@@ -478,7 +478,7 @@ async fn revoked_actor_cannot_finalize_after_streaming_bytes() {
         .unwrap();
     let app = fixture.app.clone();
     let response = tokio::spawn(async move { app.oneshot(request).await.unwrap() });
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    wait_until_read(&sender).await;
     sqlx::query("UPDATE users SET suspended_at = $1 WHERE id = $2")
         .bind(TimestampMillis::now().as_millis())
         .bind(&fixture.owner_id)
@@ -596,7 +596,7 @@ async fn revoked_session_cannot_finalize_after_streaming_bytes() {
         .unwrap();
     let app = fixture.app.clone();
     let response = tokio::spawn(async move { app.oneshot(request).await.unwrap() });
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    wait_until_read(&sender).await;
     sqlx::query("UPDATE sessions SET revoked_at = $1 WHERE user_id = $2")
         .bind(TimestampMillis::now().as_millis())
         .bind(&fixture.owner_id)
@@ -1144,4 +1144,71 @@ async fn fail_inserts(
         ),
     };
     database.execute(&sql).await.unwrap();
+}
+
+#[tokio::test]
+async fn inline_upload_hidden_from_list_but_downloadable() {
+    let fixture = Fixture::new(UploadLimits::default()).await;
+    let inline = fixture
+        .app
+        .clone()
+        .oneshot(multipart_request(
+            &format!("{}?inline=1", fixture.task_attachments()),
+            &fixture.owner_cookie,
+            &[("pasted.png", PNG)],
+        ))
+        .await
+        .unwrap();
+    assert_eq!(inline.status(), StatusCode::CREATED);
+    let inline = response_json(inline).await;
+    assert_eq!(
+        fixture.upload("listed.png", PNG).await.status(),
+        StatusCode::CREATED
+    );
+
+    let listed = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request(
+            "GET",
+            &fixture.task_attachments(),
+            &fixture.owner_cookie,
+        ))
+        .await
+        .unwrap();
+    let items = response_json(listed).await["items"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["display_name"], "listed.png");
+
+    let download = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request(
+            "GET",
+            &format!(
+                "{}/{}/download",
+                fixture.task_attachments(),
+                inline["id"].as_str().unwrap()
+            ),
+            &fixture.owner_cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(download.status(), StatusCode::OK);
+}
+
+/// Waits until the server has read every chunk sent so far: it authorized the request and is
+/// streaming the body. (A fixed sleep raced the authorization on a slow database.)
+async fn wait_until_read<T>(sender: &tokio::sync::mpsc::Sender<T>) {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(5);
+    while sender.capacity() < sender.max_capacity() {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the server did not read the upload"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
 }

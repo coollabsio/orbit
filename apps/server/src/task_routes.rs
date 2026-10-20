@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use axum::extract::{Extension, FromRequest, FromRequestParts, Path, Query, Request, State};
+use axum::extract::{
+    Extension, FromRequest, FromRequestParts, Path, Query, Request, State, WebSocketUpgrade,
+};
 use axum::http::header::CONTENT_TYPE;
 use axum::http::request::Parts;
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
@@ -22,8 +24,9 @@ use crate::repositories::task_filter::{
 };
 use crate::repositories::task_relations::{NewTaskRelationType, TaskRelationRecord};
 use crate::repositories::tasks::{
-    CreateTask, NotificationRecord, Page, ProjectAutomationPatch, SortOrder, TaskChanges,
-    TaskError, TaskFilter, TaskRecord, TaskRepository, TaskSort, TaskUpdate, normalize_project_key,
+    CommentContent, CreateTask, NotificationRecord, Page, ProjectAutomationPatch, SortOrder,
+    TaskChanges, TaskError, TaskFilter, TaskRecord, TaskRepository, TaskSort, TaskUpdate,
+    normalize_project_key,
 };
 use crate::repositories::views::ViewRepository;
 
@@ -124,6 +127,10 @@ pub fn task_router(state: TaskState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/tasks/{task_id}",
             get(get_task).patch(update_task).delete(delete_task),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/collab",
+            get(collab_socket),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/activity",
@@ -896,8 +903,12 @@ struct CreateTaskBody {
     project_id: String,
     status_id: String,
     title: String,
+    /// Markdown. Send `description_json` instead for rich text (not both).
     #[serde(default)]
     description: String,
+    /// The description as BlockNote blocks; its markdown copy becomes `description`.
+    #[schema(value_type = Option<Vec<Object>>)]
+    description_json: Option<Vec<Value>>,
     source_url: Option<String>,
     #[serde(default = "default_priority")]
     priority: String,
@@ -921,7 +932,11 @@ struct TaskUpdateBody {
     project_id: Option<String>,
     status_id: Option<String>,
     title: Option<String>,
+    /// Markdown. Send `description_json` instead for rich text (not both).
     description: Option<String>,
+    /// The description as BlockNote blocks; its markdown copy becomes `description`.
+    #[schema(value_type = Option<Vec<Object>>)]
+    description_json: Option<Vec<Value>>,
     #[serde(default, deserialize_with = "deserialize_source_patch")]
     source_url: Option<Option<String>>,
     priority: Option<String>,
@@ -1169,6 +1184,28 @@ fn task_order(order_by: OrderBy, direction: OrderDirection) -> (TaskSort, SortOr
     (sort, order)
 }
 
+/// The description's co-editing socket (see [`crate::collab::socket`]).
+async fn collab_socket(
+    State(state): State<TaskState>,
+    Path((workspace, task)): Path<(String, String)>,
+    Query(query): Query<crate::collab::socket::CollabQuery>,
+    headers: HeaderMap,
+    upgrade: WebSocketUpgrade,
+) -> Response {
+    crate::collab::socket::upgrade(
+        &state.identity,
+        state.cookie_mode,
+        state.identity.database(),
+        &workspace,
+        crate::collab::DocKind::Task,
+        &task,
+        query,
+        &headers,
+        upgrade,
+    )
+    .await
+}
+
 /// `task_id` is the task UUID or its identifier, e.g. `ENG-12` (case-insensitive).
 #[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}", params(("workspace_id" = String, Path), ("task_id" = String, Path, description = "Task UUID or identifier such as `ENG-12`")), responses((status = 200, body = crate::repositories::tasks::TaskRecord)))]
 async fn get_task(
@@ -1373,6 +1410,7 @@ async fn create_task(
     let instance = format!("/api/v1/workspaces/{workspace}/tasks");
     let (workspace_id, actor_id) =
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let has_markdown = !body.description.is_empty();
     let input = CreateTask {
         project_id: parse_id(&body.project_id, &instance, request_id.as_ref())?,
         status_id: parse_id(&body.status_id, &instance, request_id.as_ref())?,
@@ -1389,6 +1427,12 @@ async fn create_task(
             100_000,
             100_000,
             "description",
+            &instance,
+            request_id.as_ref(),
+        )?,
+        description_json: description_json(
+            body.description_json,
+            has_markdown,
             &instance,
             request_id.as_ref(),
         )?,
@@ -1478,6 +1522,7 @@ async fn bulk_tasks(
                     status_id: item.status_id,
                     title: item.title,
                     description: item.description,
+                    description_json: None,
                     source_url: item.source_url,
                     priority: item.priority,
                     position: item.position,
@@ -1632,8 +1677,14 @@ async fn list_task_trash(
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct CommentBody {
-    body: String,
+    /// Markdown. Send `body_json` instead for rich text (exactly one of the two).
+    body: Option<String>,
+    /// The comment as BlockNote blocks; its markdown copy becomes `body`, and its mention nodes
+    /// decide who is notified (`mentioned_user_ids` is ignored).
+    #[schema(value_type = Option<Vec<Object>>)]
+    body_json: Option<Vec<Value>>,
     parent_id: Option<String>,
+    /// With a markdown `body`: the members to notify.
     #[serde(default)]
     mentioned_user_ids: Vec<String>,
 }
@@ -1641,7 +1692,11 @@ struct CommentBody {
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct CommentUpdateBody {
-    body: String,
+    /// Markdown. Send `body_json` instead for rich text (exactly one of the two).
+    body: Option<String>,
+    /// The comment as BlockNote blocks; members it newly mentions are notified.
+    #[schema(value_type = Option<Vec<Object>>)]
+    body_json: Option<Vec<Value>>,
     expected_version: u64,
 }
 
@@ -1685,11 +1740,10 @@ async fn create_comment(
     let task_id = parse_id(&task, &instance, request_id.as_ref())?;
     let parent_id = optional_id(body.parent_id, &instance, request_id.as_ref())?;
     let mentioned_user_ids = parse_ids(body.mentioned_user_ids, &instance, request_id.as_ref())?;
-    let body = message(
+    let content = comment_content(
         body.body,
-        100_000,
-        100_000,
-        "body",
+        body.body_json,
+        mentioned_user_ids,
         &instance,
         request_id.as_ref(),
     )?;
@@ -1700,8 +1754,7 @@ async fn create_comment(
             task_id,
             actor_id,
             parent_id,
-            body,
-            mentioned_user_ids,
+            content,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )
@@ -1723,11 +1776,10 @@ async fn update_comment(
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
     let task_id = parse_id(&task, &instance, request_id.as_ref())?;
     let comment_id = parse_id(&comment, &instance, request_id.as_ref())?;
-    let body_text = message(
+    let content = comment_content(
         body.body,
-        100_000,
-        100_000,
-        "body",
+        body.body_json,
+        Vec::new(),
         &instance,
         request_id.as_ref(),
     )?;
@@ -1738,7 +1790,7 @@ async fn update_comment(
             task_id,
             comment_id,
             actor_id,
-            body_text,
+            content,
             body.expected_version,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
@@ -1861,6 +1913,52 @@ async fn read_all_notifications(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+/// Serialized `description_json` / `body_json` may be at most this large (the markdown copy is
+/// cut to 100 000 characters).
+const DESCRIPTION_JSON_MAX_BYTES: usize = 1_000_000;
+
+/// A comment's content: exactly one of markdown `body` (not blank) and `body_json`.
+fn comment_content(
+    body: Option<String>,
+    body_json: Option<Vec<Value>>,
+    mentioned_user_ids: Vec<Id>,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> Result<CommentContent, ApiError> {
+    match (body, body_json) {
+        (Some(body), None) => Ok(CommentContent::Markdown {
+            body: message(body, 100_000, 100_000, "body", instance, request_id)?,
+            mentioned_user_ids,
+        }),
+        (None, Some(blocks)) => {
+            let size = serde_json::to_string(&blocks).map_or(usize::MAX, |json| json.len());
+            if size > DESCRIPTION_JSON_MAX_BYTES {
+                return Err(validation("body_json", instance, request_id));
+            }
+            Ok(CommentContent::Blocks(blocks))
+        }
+        _ => Err(validation("body", instance, request_id)),
+    }
+}
+
+/// Checks `description_json`: at most [`DESCRIPTION_JSON_MAX_BYTES`], and not together with a
+/// markdown `description` (`with_markdown`).
+fn description_json(
+    blocks: Option<Vec<Value>>,
+    with_markdown: bool,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> Result<Option<Vec<Value>>, ApiError> {
+    let Some(blocks) = blocks else {
+        return Ok(None);
+    };
+    let size = serde_json::to_string(&blocks).map_or(usize::MAX, |json| json.len());
+    if with_markdown || size > DESCRIPTION_JSON_MAX_BYTES {
+        return Err(validation("description_json", instance, request_id));
+    }
+    Ok(Some(blocks))
+}
+
 fn task_update(
     id: String,
     body: TaskUpdateBody,
@@ -1877,6 +1975,12 @@ fn task_update(
                 .title
                 .map(|value| text(value, 500, 500, "title", instance, request_id))
                 .transpose()?,
+            description_json: description_json(
+                body.description_json,
+                body.description.is_some(),
+                instance,
+                request_id,
+            )?,
             description: body
                 .description
                 .map(|value| bounded(value, 100_000, 100_000, "description", instance, request_id))
@@ -2277,6 +2381,14 @@ pub(crate) fn task_problem(
             "parent_invalid",
             "Invalid parent",
             "The parent task does not exist, is in the trash, or is not in this workspace.",
+            instance,
+            request_id,
+        ),
+        TaskError::Busy => ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "task_busy",
+            "Task busy",
+            "The task's description is busy on the server. Try again in a moment.",
             instance,
             request_id,
         ),

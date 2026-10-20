@@ -500,7 +500,7 @@ test('content is live: a read-only preview until the first sync, then the live e
   const { view, calls } = setup('/docs/first', pageRoutes(saved), 'owner', { collab })
   await view.findByLabelText('Page title')
   await waitFor(() => expect(collab.connections).toHaveLength(1))
-  expect(collab.last().target).toEqual({ workspaceId: 'workspace-1', pageId: 'first', epoch: 'epoch-1' })
+  expect(collab.last().target).toEqual({ workspaceId: 'workspace-1', kind: 'pages', id: 'first', epoch: 'epoch-1' })
   // Never bound to an unsynced (empty) document: the saved content shows read-only until the first sync.
   const preview = await view.findByTestId('editor-preview')
   await waitFor(() => expect(preview.textContent).toContain('Saved text'))

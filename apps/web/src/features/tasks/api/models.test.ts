@@ -9,7 +9,7 @@ const project: ProjectRecord = {
 }
 const record: TaskRecord = {
   id: '01HZYTASK000000000000001', workspace_id: 'workspace-1', project_id: project.id, number: 12,
-  status_id: 'status-1', title: 'Ship it', description: 'Ready', position: 4, priority: 'high',
+  status_id: 'status-1', title: 'Ship it', description: 'Ready', description_json: null, collab_epoch: 'epoch-1', position: 4, priority: 'high',
   assignee_ids: ['user-1'], creator_id: 'user-1', label_ids: ['label-1'],
   due_at: '2030-01-02T12:30:00.000Z',
   created_at: '2026-09-04T10:00:00Z', updated_at: '2026-09-04T11:00:00Z', duplicate_of: null, blocked: false, version: 7,
@@ -17,7 +17,7 @@ const record: TaskRecord = {
 }
 const comment: CommentRecord = {
   id: 'comment-1', workspace_id: 'workspace-1', task_id: record.id, author_id: 'user-1',
-  body: 'Looks good', can_edit: true, can_delete: true, created_at: '2026-09-04T12:00:00Z', updated_at: '2026-09-04T12:05:00Z', version: 3,
+  body: 'Looks good', body_json: null, can_edit: true, can_delete: true, created_at: '2026-09-04T12:00:00Z', updated_at: '2026-09-04T12:05:00Z', version: 3,
 }
 const attachment: AttachmentRecord = {
   id: 'attachment-1', workspace_id: 'workspace-1', task_id: record.id, owner_id: 'user-1',

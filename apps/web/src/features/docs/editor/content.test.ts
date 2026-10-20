@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { contentEquals, internalPageLinkId, isPageFileUrl, isSafeFileUrl, isSafeLinkHref, normalizeLinkHref, toEditorContent, toStoredContent } from './content'
+import { contentEquals, internalPageLinkId, isPageFileUrl, isSafeFileUrl, isSafeLinkHref, isTaskAttachmentUrl, linkMentions, normalizeLinkHref, pastedFilesToCopy, taskAttachmentUrl, toEditorContent, toStoredContent } from './content'
 
 const TYPES = new Set(['paragraph', 'heading', 'table', 'page'])
 const NUL = String.fromCharCode(0)
@@ -154,5 +154,78 @@ describe('file block URLs', () => {
       expect(blocks[1].props?.url).toBe('')
       expect(blocks[2].children?.[0].props.url).toBe('')
     }
+  })
+})
+
+describe('task attachment urls', () => {
+  const ws = '0199a0b0-0000-7000-8000-000000000001'
+  const task = '0199a0b0-0000-7000-8000-000000000002'
+  const file = '0199a0b0-0000-7000-8000-000000000003'
+  const scope = { workspaceId: ws, taskId: task }
+
+  test('taskAttachmentUrl is the download path', () => {
+    expect(taskAttachmentUrl(ws, task, file)).toBe(`/api/v1/workspaces/${ws}/tasks/${task}/attachments/${file}/download`)
+  })
+
+  test('attachments of tasks in the same workspace are safe for a task', () => {
+    expect(isTaskAttachmentUrl(taskAttachmentUrl(ws, task, file), scope)).toBe(true)
+    // copied from another task of the workspace
+    expect(isTaskAttachmentUrl(taskAttachmentUrl(ws, file, file), scope)).toBe(true)
+    expect(isTaskAttachmentUrl(taskAttachmentUrl(file, task, file), scope)).toBe(false)
+    expect(isTaskAttachmentUrl(`/api/v1/workspaces/${ws}/pages/${task}/files/${file}`, scope)).toBe(false)
+    expect(isSafeFileUrl(taskAttachmentUrl(ws, task, file), scope)).toBe(true)
+    expect(isSafeFileUrl(`/api/v1/workspaces/${ws}/pages/${task}/files/${file}`, scope)).toBe(false)
+  })
+
+  test('task content keeps its own attachments when loaded and stored', () => {
+    const url = taskAttachmentUrl(ws, task, file)
+    const blocks = [{ type: 'image', props: { url } }]
+    expect(toEditorContent(blocks, new Set(['image']), scope)?.[0]).toEqual({ type: 'image', props: { url } })
+    expect(toStoredContent(blocks, scope)[0]).toEqual({ type: 'image', props: { url } })
+    expect(toStoredContent(blocks)[0]).toEqual({ type: 'image', props: { url: '' } })
+  })
+})
+
+describe('pastedFilesToCopy', () => {
+  const ws = '0199a0b0-0000-7000-8000-000000000001'
+  const task = '0199a0b0-0000-7000-8000-000000000002'
+  const other = '0199a0b0-0000-7000-8000-000000000003'
+  const file = '0199a0b0-0000-7000-8000-000000000004'
+  const scope = { workspaceId: ws, taskId: task }
+  const block = (id: string, url: string, children: unknown[] = []) => ({ id, type: 'image', props: { url, name: 'shot.png' }, children })
+
+  test('files of another task or of a page are copied; own files, links and earlier blocks are not', () => {
+    const fromTask = taskAttachmentUrl(ws, other, file)
+    const fromPage = `/api/v1/workspaces/${ws}/pages/${other}/files/${file}`
+    const document = [
+      block('kept', taskAttachmentUrl(ws, other, file)),
+      block('own', taskAttachmentUrl(ws, task, file)),
+      block('web', 'https://example.com/a.png'),
+      { id: 'p', type: 'paragraph', children: [block('task', fromTask), block('page', fromPage)] },
+    ]
+    expect(pastedFilesToCopy(document, new Set(['kept']), scope)).toEqual([
+      { id: 'task', url: fromTask, name: 'shot.png' },
+      { id: 'page', url: fromPage, name: 'shot.png' },
+    ])
+  })
+})
+
+describe('linkMentions', () => {
+  const ada = { id: 'u-ada', name: 'Ada Lovelace' }
+  const text = (value: string, styles = {}) => ({ type: 'text', text: value, styles })
+  const paragraph = (...content: unknown[]) => [{ type: 'paragraph', content, children: [] }]
+
+  test('an exact member name after @ becomes a mention', () => {
+    expect(linkMentions(paragraph(text('hi @Ada Lovelace, look')), [ada, { id: 'u-ad', name: 'Ada' }])).toEqual(
+      paragraph(text('hi '), { type: 'mention', props: { userId: 'u-ada', name: 'Ada Lovelace' } }, text(', look')),
+    )
+  })
+
+  test('two members with the name, no word boundary, or code stay text', () => {
+    const twins = [{ id: 'a', name: 'Ada' }, { id: 'b', name: 'Ada' }]
+    expect(linkMentions(paragraph(text('hi @Ada')), twins)).toEqual(paragraph(text('hi @Ada')))
+    expect(linkMentions(paragraph(text('@Adam')), [{ id: 'a', name: 'Ada' }])).toEqual(paragraph(text('@Adam')))
+    expect(linkMentions(paragraph(text('mail@Ada')), [{ id: 'a', name: 'Ada' }])).toEqual(paragraph(text('mail@Ada')))
+    expect(linkMentions(paragraph(text('@Ada', { code: true })), [{ id: 'a', name: 'Ada' }])).toEqual(paragraph(text('@Ada', { code: true })))
   })
 })

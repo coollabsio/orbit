@@ -687,14 +687,36 @@ export type ChatWriteThreadStateRecord = {
 };
 
 export type CommentBody = {
-    body: string;
+    /**
+     * Markdown. Send `body_json` instead for rich text (exactly one of the two).
+     */
+    body?: string | null;
+    /**
+     * The comment as BlockNote blocks; its markdown copy becomes `body`, and its mention nodes
+     * decide who is notified (`mentioned_user_ids` is ignored).
+     */
+    body_json?: Array<{
+        [key: string]: unknown;
+    }> | null;
+    /**
+     * With a markdown `body`: the members to notify.
+     */
     mentioned_user_ids?: Array<string>;
     parent_id?: string | null;
 };
 
 export type CommentRecord = {
     author_id: string;
+    /**
+     * Markdown copy of `body_json`.
+     */
     body: string;
+    /**
+     * BlockNote blocks, the comment's source; null for a comment written before rich text.
+     */
+    body_json: Array<{
+        [key: string]: unknown;
+    }> | null;
     /**
      * Whether the caller may delete this comment.
      */
@@ -713,7 +735,16 @@ export type CommentRecord = {
 };
 
 export type CommentUpdateBody = {
-    body: string;
+    /**
+     * Markdown. Send `body_json` instead for rich text (exactly one of the two).
+     */
+    body?: string | null;
+    /**
+     * The comment as BlockNote blocks; members it newly mentions are notified.
+     */
+    body_json?: Array<{
+        [key: string]: unknown;
+    }> | null;
     expected_version: number;
 };
 
@@ -861,7 +892,16 @@ export type CreatePageThreadBody = {
 
 export type CreateTaskBody = {
     assignee_ids?: Array<string>;
+    /**
+     * Markdown. Send `description_json` instead for rich text (not both).
+     */
     description?: string;
+    /**
+     * The description as BlockNote blocks; its markdown copy becomes `description`.
+     */
+    description_json?: Array<{
+        [key: string]: unknown;
+    }> | null;
     due_at?: string | null;
     due_start_at?: string | null;
     label_ids?: Array<string>;
@@ -1446,8 +1486,9 @@ export type NotificationRecord = {
     created_at: string;
     id: string;
     /**
-     * `task_assigned`, `comment_mentioned` (task comment), `page_comment_mentioned`,
-     * `page_mentioned` (an @mention in a page body) or `chat_mentioned` (a chat message).
+     * `task_assigned`, `comment_mentioned` (task comment), `description_mentioned` (task
+     * description), `page_comment_mentioned`, `page_mentioned` (an @mention in a page body) or
+     * `chat_mentioned` (a chat message).
      */
     kind: string;
     /**
@@ -2042,7 +2083,16 @@ export type PageAuditEvent = {
 export type PageCommentRecord = {
     items: Array<{
         author_id: string;
+        /**
+         * Markdown copy of `body_json`.
+         */
         body: string;
+        /**
+         * BlockNote blocks, the comment's source; null for a comment written before rich text.
+         */
+        body_json: Array<{
+            [key: string]: unknown;
+        }> | null;
         /**
          * Whether the caller may delete this comment.
          */
@@ -2136,8 +2186,9 @@ export type PageNotificationRecord = {
         created_at: string;
         id: string;
         /**
-         * `task_assigned`, `comment_mentioned` (task comment), `page_comment_mentioned`,
-         * `page_mentioned` (an @mention in a page body) or `chat_mentioned` (a chat message).
+         * `task_assigned`, `comment_mentioned` (task comment), `description_mentioned` (task
+         * description), `page_comment_mentioned`, `page_mentioned` (an @mention in a page body) or
+         * `chat_mentioned` (a chat message).
          */
         kind: string;
         /**
@@ -2211,12 +2262,26 @@ export type PageTaskRecord = {
          * True while at least one live task that is not completed, cancelled or a duplicate blocks it.
          */
         blocked: boolean;
+        /**
+         * Epoch of the description's co-editing document (`/tasks/{id}/collab?epoch=`).
+         */
+        collab_epoch: string;
         created_at: string;
         creator_id?: string | null;
         creator_service_account_id?: string | null;
         creator_service_account_name?: string | null;
         deleted_at?: string | null;
+        /**
+         * Markdown copy of `description_json` (search, MCP, GitHub, API clients).
+         */
         description: string;
+        /**
+         * BlockNote blocks, the description's source; null for a task written before rich text
+         * (only `description` exists then) and in task lists (read the task for it).
+         */
+        description_json: Array<{
+            [key: string]: unknown;
+        }> | null;
         due_at?: string | null;
         due_start_at?: string | null;
         duplicate_of: null | TaskRef;
@@ -2923,12 +2988,26 @@ export type TaskRecord = {
      * True while at least one live task that is not completed, cancelled or a duplicate blocks it.
      */
     blocked: boolean;
+    /**
+     * Epoch of the description's co-editing document (`/tasks/{id}/collab?epoch=`).
+     */
+    collab_epoch: string;
     created_at: string;
     creator_id?: string | null;
     creator_service_account_id?: string | null;
     creator_service_account_name?: string | null;
     deleted_at?: string | null;
+    /**
+     * Markdown copy of `description_json` (search, MCP, GitHub, API clients).
+     */
     description: string;
+    /**
+     * BlockNote blocks, the description's source; null for a task written before rich text
+     * (only `description` exists then) and in task lists (read the task for it).
+     */
+    description_json: Array<{
+        [key: string]: unknown;
+    }> | null;
     due_at?: string | null;
     due_start_at?: string | null;
     duplicate_of: null | TaskRef;
@@ -3007,7 +3086,16 @@ export type TaskRelationType = 'blocks' | 'related' | 'duplicate';
 
 export type TaskUpdateBody = {
     assignee_ids?: Array<string> | null;
+    /**
+     * Markdown. Send `description_json` instead for rich text (not both).
+     */
     description?: string | null;
+    /**
+     * The description as BlockNote blocks; its markdown copy becomes `description`.
+     */
+    description_json?: Array<{
+        [key: string]: unknown;
+    }> | null;
     due_at?: string | null;
     due_start_at?: string | null;
     /**
@@ -15402,7 +15490,12 @@ export type UploadTaskAttachmentsData = {
         workspace_id: string;
         task_id: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * `1`: a file placed in the description or a comment's text; attachment lists leave it out
+         */
+        inline?: string;
+    };
     url: '/api/v1/workspaces/{workspace_id}/tasks/{task_id}/attachments';
 };
 

@@ -14,14 +14,14 @@ The Cargo workspace has three crates with one-way dependencies:
 
 Chat (`repositories/chat/`, `chat_routes/`) keeps each member's unread count as counters that change in the transaction of the message, and makes no audit rows, so a message does not trigger a workspace refetch. `live/` is the live socket of a workspace (`GET /api/v1/workspaces/{id}/live`): an in-memory hub numbers events, keeps the newest 1,000 for a client that reconnects, and knows who is online. A chat write holds the hub's write lock from before its transaction until its events are published, so events go out in commit order.
 
-The public router records bounded request counters. When `metrics.listen` is configured, a separate private listener exposes those identifier-free Prometheus metrics; it is disabled by default and never mounts `/metrics` on the public listener.
+The public router records bounded request counters. When `ORBIT_METRICS_LISTEN` is configured, a separate private listener exposes those identifier-free Prometheus metrics; it is disabled by default and never mounts `/metrics` on the public listener.
 
 On shutdown, the HTTP server stops accepting new connections and drains active requests. Orbit then cancels retention and attachment reconciliation services. Durable job handlers get up to 30 seconds to finish before local tasks are aborted and leases recover naturally.
 
 ## Persistence and security
 
 - SQLite uses WAL, foreign keys, a busy timeout, and one process ownership lock.
-- Postgres (`data.database_url`) uses an advisory ownership lock: shared by servers and online CLI commands (`DatabaseConfig::shared`), exclusive for restore and reset. A server checks its lock connection every 5 s (`Database::verify_ownership`) and stops when it is lost. `immediate_transaction()` serializes writers with a transaction-scoped advisory lock. Several servers can share one Postgres database: `apps/server/src/cluster.rs` carries live-socket and co-editing messages between them over `LISTEN`/`NOTIFY`, live events are numbered in `live_events`, and process-local state that must hold for all servers lives in the database (see `docs/operations.md`, Orbit Cloud). Rules for portable SQL are in [`AGENTS.md`](../AGENTS.md).
+- Postgres (`ORBIT_DATABASE_URL`) uses an advisory ownership lock: shared by servers and online CLI commands (`DatabaseConfig::shared`), exclusive for restore and reset. A server checks its lock connection every 5 s (`Database::verify_ownership`) and stops when it is lost. `immediate_transaction()` serializes writers with a transaction-scoped advisory lock. Several servers can share one Postgres database: `apps/server/src/cluster.rs` carries live-socket and co-editing messages between them over `LISTEN`/`NOTIFY`, live events are numbered in `live_events`, and process-local state that must hold for all servers lives in the database (see `docs/operations.md`, Orbit Cloud). Rules for portable SQL are in [`AGENTS.md`](../AGENTS.md).
 - Repositories own explicit SQL and workspace scoping. HTTP handlers do not issue feature SQL.
 - Major mutations use record versions and return conflict metadata.
 - Session cookies are host-only, HTTP-only, SameSite Lax, and Secure in production.

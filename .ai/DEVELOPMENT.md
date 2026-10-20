@@ -25,14 +25,14 @@ cd apps/web
 bun install --frozen-lockfile
 bun run dev -- --host 127.0.0.1 --port 8888 --strictPort
 
-ORBIT_ENV=development ORBIT__ENVIRONMENT=development cargo run -p orbit-server -- \
+ORBIT_ENV=development ORBIT_APP_KEY=b3JiaXQtZGV2ZWxvcG1lbnQta2V5LW5vdC1zZWNyZXQ= cargo run -p orbit-server -- \
   --database data/development.sqlite \
   --attachments data/attachments \
   --backups backups \
   serve --listen 127.0.0.1:8080 --origin http://127.0.0.1:8888
 ```
 
-To develop on Postgres, put `ORBIT__DATA__DATABASE_URL` and `ORBIT__SECRETS__APP_KEY` in `.env.local` (see [`AGENTS.md`](../AGENTS.md) for the required database locale). `just dev` loads that file; `just db-reset` and `just seed` do not, so export the variables first.
+The `justfile` sets a public development `ORBIT_APP_KEY` when none is set. To develop on Postgres, put `ORBIT_DATABASE_URL` in `.env.local` (see [`AGENTS.md`](../AGENTS.md) for the required database locale). `just dev` loads that file; `just db-reset` and `just seed` do not, so export the variables first.
 
 ## Verification commands
 
@@ -60,16 +60,22 @@ Build the frontend first because Cargo embeds `apps/web/dist`:
 
 ```bash
 just build
-cp config/orbit.example.toml config/orbit.toml
-./target/release/orbit --config config/orbit.toml config check
-./target/release/orbit --config config/orbit.toml config show
-./target/release/orbit --config config/orbit.toml serve
+(umask 077 && openssl rand -base64 32 > /etc/orbit/app-key)  # once; keep a copy of this file off the server
+export ORBIT_ENV=production \
+  ORBIT_PUBLIC_ORIGIN=https://orbit.example.com \
+  ORBIT_TRUSTED_PROXIES=127.0.0.1/32,::1/128 \
+  ORBIT_APP_KEY_FILE=/etc/orbit/app-key
+./target/release/orbit config check
+./target/release/orbit config show
+./target/release/orbit serve
 ```
+
+Orbit reads its configuration only from `ORBIT_*` environment variables. For the full list and the defaults, see [Configuration](../docs/operations.md#configuration).
 
 On a fresh database, the server prints one `Initial setup URL` to stderr. Open it in the browser, complete the Owner and workspace form, and store no copy of the token. If it expires before use, stop the server and run:
 
 ```bash
-./target/release/orbit --config config/orbit.toml setup-token rotate
+./target/release/orbit setup-token rotate
 ```
 
 ## OCI image
@@ -79,19 +85,21 @@ docker build --build-arg ORBIT_BUILD_REVISION="$(git rev-parse HEAD)" -t orbit:m
 docker run --rm orbit:milestone-1 --help
 docker run --name orbit --restart unless-stopped \
   -p 127.0.0.1:8080:8080 \
-  -v "$PWD/config/orbit.toml:/etc/orbit/orbit.toml:ro" \
+  -e ORBIT_PUBLIC_ORIGIN=https://orbit.example.com \
+  -e ORBIT_TRUSTED_PROXIES=172.17.0.1/32 \
+  -e ORBIT_APP_KEY=<base64 key, see docs/operations.md> \
   -v orbit-data:/var/lib/orbit \
   -v "$PWD/backups:/var/backups/orbit" \
   orbit:milestone-1
 ```
 
-The final Alpine image runs as numeric user and group 65532. It contains the static Orbit binary, Bash for operator diagnostics, CA certificates, timezone data, and empty mount points. Port 2525 is reserved for the deferred inbound SMTP milestone; this release does not listen on it.
+The final Alpine image runs as numeric user and group 65532. It contains the static Orbit binary, Bash for operator diagnostics, CA certificates, timezone data, and empty mount points. The image sets `ORBIT_ENV=production`, `ORBIT_TRUSTED_PROXIES=0.0.0.0/0,::/0`, binds to `0.0.0.0`, and keeps data in `/var/lib/orbit` and backups in `/var/backups/orbit`. Port 2525 is reserved for the deferred inbound SMTP milestone; this release does not listen on it.
 
 ## Reverse proxy and Tailscale
 
-Set `http.public_origin` to the exact external HTTPS origin. Bind to `0.0.0.0` for a container or Tailscale-reachable interface, then restrict access with the host firewall. Add only the actual proxy network to `http.trusted_proxies`.
+Set `ORBIT_PUBLIC_ORIGIN` to the exact external HTTPS origin. Bind to `0.0.0.0` for a container or Tailscale-reachable interface, then restrict access with the host firewall. Add only the actual proxy network to `ORBIT_TRUSTED_PROXIES`.
 
-Prometheus metrics are disabled by default. To expose them on a private interface only, set `metrics.listen`, for example `127.0.0.1:9090`, and scrape `http://127.0.0.1:9090/metrics`. Never proxy this listener through the public site.
+Prometheus metrics are disabled by default. To expose them on a private interface only, set `ORBIT_METRICS_LISTEN`, for example `127.0.0.1:9090`, and scrape `http://127.0.0.1:9090/metrics`. Never proxy this listener through the public site.
 
 A local Caddy example:
 
@@ -107,15 +115,15 @@ For Tailscale Serve:
 tailscale serve --bg --https=443 http://127.0.0.1:8080
 ```
 
-Use the resulting `https://<host>.<tailnet>.ts.net` value as `http.public_origin`. Keep Orbit bound to `127.0.0.1` when Tailscale Serve runs on the same host. Trust `127.0.0.1/32` and `::1/128`, not the whole tailnet, unless a separate tailnet proxy sends forwarding headers.
+Use the resulting `https://<host>.<tailnet>.ts.net` value as `ORBIT_PUBLIC_ORIGIN`. Keep Orbit bound to `127.0.0.1` when Tailscale Serve runs on the same host. Trust `127.0.0.1/32` and `::1/128`, not the whole tailnet, unless a separate tailnet proxy sends forwarding headers.
 
 ## Migration, backup, and restore
 
 Inspect and run migrations while Orbit is stopped:
 
 ```bash
-orbit --config config/orbit.toml migrate status
-orbit --config config/orbit.toml migrate run
+orbit migrate status
+orbit migrate run
 ```
 
 Startup runs the same forward-only migration gate automatically. A destructive migration requires a verified pre-migration backup before it runs.
@@ -123,19 +131,19 @@ Startup runs the same forward-only migration gate automatically. A destructive m
 Backup commands:
 
 ```bash
-orbit --config config/orbit.toml backup create
-orbit --config config/orbit.toml backup list
-orbit --config config/orbit.toml backup list --pre-migration
-orbit --config config/orbit.toml backup verify <backup-id>
+orbit backup create
+orbit backup list
+orbit backup list --pre-migration
+orbit backup verify <backup-id>
 ```
 
 Restore procedure:
 
 1. Stop Orbit. Restore refuses a database owned by a running process.
 2. Copy the current data directory somewhere safe.
-3. Run `orbit --config config/orbit.toml backup verify <backup-id>`.
-4. Run `orbit --config config/orbit.toml backup restore <backup-id>`. A snapshot restores only into the same kind of database (SQLite or Postgres) it came from.
-5. Run `orbit --config config/orbit.toml migrate status`.
+3. Run `orbit backup verify <backup-id>`.
+4. Run `orbit backup restore <backup-id>`. A snapshot restores only into the same kind of database (SQLite or Postgres) it came from.
+5. Run `orbit migrate status`.
 6. Start Orbit and check `/health/ready` before sending traffic.
 
 Weekly full database integrity checks use a durable schedule (on Postgres this check only tests the connection). Backups are created manually from Settings or the backup CLI while Orbit is stopped. Upload and retention file mutations share the in-process backup pause. Orbit retains up to 24 snapshots from the last day, plus 7 daily and 4 weekly snapshot buckets when enough manual snapshots exist. Operators must copy backups off-host and protect their permissions.
@@ -147,7 +155,7 @@ Workspace Owners and Admins can generate manual invitation links in `/settings/m
 Password recovery requests use the server's bounded administrator-delivery boundary. Until an outbound provider is added, an operator can issue a 30-minute link while Orbit is stopped:
 
 ```bash
-orbit --config config/orbit.toml recovery-link \
+orbit recovery-link \
   --email user@example.com \
   --origin https://orbit.example.com
 ```

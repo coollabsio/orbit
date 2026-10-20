@@ -154,10 +154,7 @@ fn server_config(url: &str, root: &std::path::Path) -> Config {
     config.data.attachments = root.join("data/attachments");
     config.data.backups = root.join("backups");
     config.data.database_url = Some(url.to_owned());
-    config.secrets.insert(
-        "app_key".to_owned(),
-        orbit_platform::Secret::new(shared_postgres::APP_KEY),
-    );
+    config.app_key = Some(shared_postgres::APP_KEY.parse().unwrap());
     config
 }
 

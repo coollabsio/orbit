@@ -1,11 +1,13 @@
-//! `GET /api/v1/workspaces/{workspace_id}/pages/{page_id}/collab?v=1&epoch=<collab_epoch>`:
-//! the page's y-sync WebSocket (what y-websocket 3 speaks).
+//! `GET /api/v1/workspaces/{workspace_id}/pages/{page_id}/collab?v=1&epoch=<collab_epoch>` and
+//! `GET /api/v1/workspaces/{workspace_id}/tasks/{task_id}/collab?…`: the y-sync WebSocket of a
+//! page or a task description (what y-websocket 3 speaks).
 //!
 //! Before the upgrade: the platform layer requires exactly one allowed `Origin` for any request
 //! with `Upgrade` (403); then the session cookie (401), and workspace membership plus a live page
-//! the user can see (404, the same answer as for an unknown id). After it: `v` must be `1`
-//! (4426) and `epoch` must be the page's `collab_epoch` (4409). The connection is re-checked every
-//! 15 s and whenever pages move, get trashed or members leave.
+//! the user can see, or a live task in a live project (404, the same answer as for an unknown id).
+//! After it: `v` must be `1` (4426) and `epoch` must be the document's `collab_epoch` (4409). The
+//! connection is re-checked every 15 s and whenever pages or tasks move, get trashed or members
+//! leave.
 
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
@@ -19,8 +21,8 @@ use serde::Deserialize;
 use sqlx::AnyPool;
 use tokio::sync::broadcast;
 
-use super::close;
 use super::hub::{CollabHub, MessageKind, Outbound, Peer};
+use super::{DocKey, DocKind, close};
 use crate::auth_routes::{CookieMode, request_session};
 use crate::repositories::identity::IdentityRepository;
 
@@ -46,19 +48,20 @@ impl Denied {
         match self {
             Self::Session => (close::SESSION, "session ended"),
             Self::Forbidden => (close::FORBIDDEN, "no access"),
-            Self::Gone => (close::GONE, "page not found"),
+            Self::Gone => (close::GONE, "document not found"),
         }
     }
 }
 
-/// Upgrades an authorized request to the page's collaboration socket.
+/// Upgrades an authorized request to the collaboration socket of a page or task (`kind`).
 #[allow(clippy::too_many_arguments)]
 pub async fn upgrade(
     identity: &IdentityRepository,
     cookie_mode: CookieMode,
     database: &Database,
     workspace: &str,
-    page: &str,
+    kind: DocKind,
+    id: &str,
     query: CollabQuery,
     headers: &HeaderMap,
     upgrade: WebSocketUpgrade,
@@ -66,11 +69,12 @@ pub async fn upgrade(
     let Some(session) = request_session(identity, cookie_mode, headers).await else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
-    let (Ok(workspace_id), Ok(page_id)) = (workspace.parse::<Id>(), page.parse::<Id>()) else {
+    let (Ok(workspace_id), Ok(id)) = (workspace.parse::<Id>(), id.parse::<Id>()) else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    let key = DocKey { kind, id };
     let pool = database.pool().clone();
-    match check_access(&pool, workspace_id, page_id, session.id, session.user.id).await {
+    match check_access(&pool, workspace_id, key, session.id, session.user.id).await {
         Ok(None) => {}
         // Not a member, someone else's private page, trashed or unknown: all look the same.
         Ok(Some(Denied::Forbidden | Denied::Gone)) => {
@@ -88,7 +92,7 @@ pub async fn upgrade(
         hub,
         pool,
         workspace_id,
-        page_id,
+        key,
         session_id: session.id,
         peer: Peer {
             user_id: session.user.id,
@@ -109,7 +113,7 @@ struct Connection {
     hub: CollabHub,
     pool: AnyPool,
     workspace_id: Id,
-    page_id: Id,
+    key: DocKey,
     session_id: Id,
     peer: Peer,
     query: CollabQuery,
@@ -152,7 +156,7 @@ impl Connection {
             send_close(&mut socket, close::PROTOCOL, "unsupported protocol version").await;
             return;
         }
-        let joined = match self.hub.join(self.page_id, &self.peer).await {
+        let joined = match self.hub.join(self.key, &self.peer).await {
             Ok(joined) => joined,
             Err((code, reason)) => {
                 send_close(&mut socket, code, reason).await;
@@ -260,7 +264,7 @@ impl Connection {
         check_access(
             &self.pool,
             self.workspace_id,
-            self.page_id,
+            self.key,
             self.session_id,
             self.peer.user_id,
         )
@@ -270,16 +274,29 @@ impl Connection {
 }
 
 /// `None` when the session is valid, the user is a member of the workspace and the page is live
-/// and visible to them.
+/// and visible to them (a task: live, in a live project).
 async fn check_access(
     pool: &AnyPool,
     workspace_id: Id,
-    page_id: Id,
+    key: DocKey,
     session_id: Id,
     user_id: Id,
 ) -> Result<Option<Denied>, sqlx::Error> {
     let now = TimestampMillis::now().as_millis();
-    let row = sqlx::query(
+    let state = match key.kind {
+        DocKind::Page => {
+            "(SELECT CASE WHEN deleted_at IS NOT NULL THEN 2 \
+                          WHEN teamspace_id IS NULL AND owner_id IS DISTINCT FROM $2 THEN 1 ELSE 0 END \
+              FROM pages WHERE id = $4 AND workspace_id = $3)"
+        }
+        DocKind::Task => {
+            "(SELECT CASE WHEN tasks.deleted_at IS NOT NULL OR projects.deleted_at IS NOT NULL \
+                          THEN 2 ELSE 0 END \
+              FROM tasks JOIN projects ON projects.id = tasks.project_id \
+              WHERE tasks.id = $4 AND tasks.workspace_id = $3)"
+        }
+    };
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT \
          EXISTS(SELECT 1 FROM sessions JOIN users ON users.id = sessions.user_id \
                 WHERE sessions.id = $1 AND sessions.revoked_at IS NULL AND users.suspended_at IS NULL \
@@ -287,14 +304,12 @@ async fn check_access(
          EXISTS(SELECT 1 FROM memberships JOIN workspaces ON workspaces.id = memberships.workspace_id \
                 WHERE memberships.user_id = $2 AND memberships.workspace_id = $3 \
                 AND workspaces.deleted_at IS NULL) AS member, \
-         (SELECT CASE WHEN deleted_at IS NOT NULL THEN 2 \
-                      WHEN teamspace_id IS NULL AND owner_id IS DISTINCT FROM $2 THEN 1 ELSE 0 END \
-          FROM pages WHERE id = $4 AND workspace_id = $3) AS page_state",
-    )
+         {state} AS doc_state"
+    )))
     .bind(session_id.to_string())
     .bind(user_id.to_string())
     .bind(workspace_id.to_string())
-    .bind(page_id.to_string())
+    .bind(key.id.to_string())
     .bind(now)
     .fetch_one(pool)
     .await?;
@@ -303,7 +318,7 @@ async fn check_access(
     } else if !row.get::<bool, _>("member") {
         Some(Denied::Forbidden)
     } else {
-        match row.get::<Option<i64>, _>("page_state") {
+        match row.get::<Option<i64>, _>("doc_state") {
             Some(0) => None,
             Some(1) => Some(Denied::Forbidden),
             _ => Some(Denied::Gone),

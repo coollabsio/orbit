@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test'
 import { BlockNoteEditor } from '@blocknote/core'
-import { getPageSlashMenuItems, mergeSlashItems, PAGE_ITEMS_GROUP, preferTitleMatches } from './slashMenu'
-import { EDITOR_BLOCK_TYPES, FILE_BLOCK_TYPES, pageEditorSchema, REMOVED_BLOCK_TYPES } from './schema'
+import { getPageSlashMenuItems, getTaskSlashMenuItems, mergeSlashItems, PAGE_ITEMS_GROUP, preferTitleMatches } from './slashMenu'
+import { EDITOR_BLOCK_TYPES, FILE_BLOCK_TYPES, pageEditorSchema, REMOVED_BLOCK_TYPES, taskEditorSchema } from './schema'
 
 function editor() {
   return BlockNoteEditor.create({ schema: pageEditorSchema })
@@ -149,5 +149,20 @@ describe('preferTitleMatches', () => {
 
   test('keeps the order for an empty query', () => {
     expect(preferTitleMatches(items, ' ')).toEqual(items)
+  })
+})
+
+describe('task profile', () => {
+  test('the task schema has the page block types minus page', () => {
+    const page = Object.keys(pageEditorSchema.blockSpecs).filter((type) => type !== 'page').sort()
+    expect(Object.keys(taskEditorSchema.blockSpecs).sort()).toEqual(page)
+  })
+
+  test('the task slash menu has callout and mermaid but no page items', () => {
+    const titles = getTaskSlashMenuItems(BlockNoteEditor.create({ schema: taskEditorSchema }) as never, '').map((item) => item.title)
+    expect(titles).toContain('Callout')
+    expect(titles).toContain('Mermaid diagram')
+    expect(titles).not.toContain('Sub-page')
+    expect(titles).not.toContain('Link a page')
   })
 })
