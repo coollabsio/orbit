@@ -586,3 +586,57 @@ async fn mentions_in_a_markdown_create_notify() {
     assert_eq!(task["description_json"][0]["content"][0]["type"], "mention");
     server.stop().await;
 }
+
+#[tokio::test]
+async fn a_write_that_would_load_a_document_past_the_memory_budget_is_refused() {
+    let root = TempDir::new().unwrap();
+    let config = orbit_server::collab::CollabConfig {
+        memory_budget_bytes: 1,
+        ..fast_config()
+    };
+    let server = Server::start(&root, config).await;
+    let users = setup(&server).await;
+    let stored = create_task(&server, &users, "Stored").await;
+    let stored_id = stored["id"].as_str().unwrap();
+    let open = create_task(&server, &users, "Open").await;
+    let open_id = open["id"].as_str().unwrap();
+    let plain = create_task(&server, &users, "Plain").await;
+    let plain_id = plain["id"].as_str().unwrap();
+
+    // `stored` gets a stored document, then its room goes (nobody has it open)
+    drop(open_doc(&server, &users, stored_id).await);
+    wait_until("the idle room to go", || async {
+        let (rooms, _) = orbit_server::collab::CollabHub::of(&server.database).stats();
+        rooms == 0
+    })
+    .await;
+    // someone keeps `open` open: its memory cannot be freed
+    let _editor = open_doc(&server, &users, open_id).await;
+
+    let patch = |id: String, version: Value| {
+        let path = format!("/api/v1/workspaces/{}/tasks/{id}", users.workspace);
+        let server = &server;
+        let token = users.owner.clone();
+        async move {
+            server
+                .api(
+                    &token,
+                    "PATCH",
+                    &path,
+                    Some(json!({"expected_version": version, "description": "New"})),
+                )
+                .await
+                .0
+        }
+    };
+    let version = get_task(&server, &users, stored_id).await["version"].clone();
+    assert_eq!(patch(stored_id.to_owned(), version).await, 503);
+    // a task without a stored document loads nothing and is written as usual
+    let version = get_task(&server, &users, plain_id).await["version"].clone();
+    assert_eq!(patch(plain_id.to_owned(), version).await, 200);
+    server.stop().await;
+}
+
+async fn open_doc(server: &Server, users: &Users, id: &str) -> Client {
+    open(server, users, &users.owner, id).await
+}

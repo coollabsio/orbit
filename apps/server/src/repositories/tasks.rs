@@ -397,6 +397,9 @@ pub enum TaskError {
     ParentInvalid,
     #[error("task repository is unavailable")]
     Unavailable(#[from] sqlx::Error),
+    /// Co-editing is at its memory budget, or another server reset the document: try again.
+    #[error("the task's co-editing document is busy")]
+    Busy,
 }
 
 impl From<CollabError> for TaskError {
@@ -404,8 +407,8 @@ impl From<CollabError> for TaskError {
         match error {
             CollabError::NotFound => Self::NotFound,
             CollabError::Unavailable(error) => Self::Unavailable(error),
-            // An unreadable document, an overloaded hub or a reset by another server: retry.
-            other => Self::Unavailable(sqlx::Error::Protocol(other.to_string())),
+            CollabError::Overloaded | CollabError::Reset => Self::Busy,
+            CollabError::Corrupt(reason) => Self::Unavailable(sqlx::Error::Protocol(reason)),
         }
     }
 }

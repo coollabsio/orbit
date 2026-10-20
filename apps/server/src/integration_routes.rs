@@ -1417,6 +1417,14 @@ fn task_problem(error: TaskError, request_id: Option<&RequestId>) -> ApiError {
             request_id,
         ),
         TaskError::Invalid { field } => validation(field, request_id),
+        // the sender (GitHub) delivers the event again later
+        TaskError::Busy => ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "task_busy",
+            "Task busy",
+            "The task's description is busy on the server. Try again in a moment.",
+            request_id,
+        ),
         TaskError::Conflict
         | TaskError::GithubContentReadOnly
         | TaskError::GithubLinkedMove

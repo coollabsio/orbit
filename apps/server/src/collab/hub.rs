@@ -1457,7 +1457,17 @@ impl CollabHub {
     /// Locks the document for a server-side content replacement. Pending edits are written and
     /// projected first, so the caller's transaction reads the current stored content.
     pub async fn write(&self, key: DocKey) -> Result<CollabWrite, CollabError> {
+        let live = self.rooms().contains_key(&key);
         let (room, mut state) = self.room(key, false).await?;
+        // A write that loaded a stored document (bulk writes load one for each item) respects the memory
+        // budget like a new connection: idle rooms go first, and if that is not enough the write is refused.
+        if !live && state.initialized && !self.enforce_budget(false).await {
+            if state.connections == 0 {
+                state.closed = true;
+                self.forget(&room);
+            }
+            return Err(CollabError::Overloaded);
+        }
         if state.initialized && (state.unprojected_since.is_some() || !state.pending.is_empty()) {
             self.persist(&room, &mut state, true, false).await?;
         }

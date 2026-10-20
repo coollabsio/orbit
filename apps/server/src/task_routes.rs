@@ -2384,6 +2384,14 @@ pub(crate) fn task_problem(
             instance,
             request_id,
         ),
+        TaskError::Busy => ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "task_busy",
+            "Task busy",
+            "The task's description is busy on the server. Try again in a moment.",
+            instance,
+            request_id,
+        ),
         TaskError::Unavailable(_) => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
