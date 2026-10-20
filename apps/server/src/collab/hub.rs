@@ -1,4 +1,6 @@
-//! Rooms: one live Yjs document per open page, shared by every connection editing it.
+//! Rooms: one live Yjs document per open page or task description ([`DocKey`]), shared by every
+//! connection editing it. Pages and tasks have the same table pair each (`page_collab_*`,
+//! `task_collab_*`); the SQL below names the page tables and [`DocKind::sql`] maps it per kind.
 //!
 //! Locking rule: a room's state lock is always taken *before* a database transaction is begun,
 //! never while one is open, so room locks and SQLite's single writer cannot deadlock.
@@ -38,9 +40,9 @@ use yrs::{ClientID, ReadTxn, StateVector, Transact, Update, WriteTxn};
 
 use super::blocknote::{self, FRAGMENT};
 use super::close;
-use super::sanitize::{repair_document, sanitize_blocks};
+use super::sanitize::{repair_document_for, sanitize_blocks_for};
+use super::{DocKey, DocKind, LinkPolicy, kind_page, kind_task};
 use crate::cluster::{Cluster, Message as ClusterMessage};
-use crate::repositories::page_versions::project_collab_content;
 
 /// Limits and timings of the co-editing hub.
 #[derive(Clone, Debug)]
@@ -121,7 +123,7 @@ const USER_COLORS: [&str; 9] = [
 
 #[derive(Debug, Error)]
 pub enum CollabError {
-    #[error("page was not found")]
+    #[error("document was not found")]
     NotFound,
     #[error("co-editing is overloaded")]
     Overloaded,
@@ -141,17 +143,17 @@ pub(crate) enum CollabMessage {
     /// A client's document update as the sending server applied it (base64; small ones only:
     /// the others read larger ones from the log).
     Update {
-        page_id: Id,
+        key: DocKey,
         epoch: String,
         data: String,
         user_id: Id,
     },
     /// A y-sync awareness frame (cursors), base64.
-    Awareness { page_id: Id, data: String },
+    Awareness { key: DocKey, data: String },
     /// The sending server wrote rows of the page's update log, or a new snapshot.
-    Logged { page_id: Id },
+    Logged { key: DocKey },
     /// Close the page's room and its connections with this code (document reset, lock change).
-    Close { page_id: Id, code: u16 },
+    Close { key: DocKey, code: u16 },
     /// The connections of the workspace (all with `None`) check their access again.
     Revalidate { workspace_id: Option<Id> },
 }
@@ -179,7 +181,7 @@ pub(crate) enum Outbound {
 }
 
 pub(crate) struct Room {
-    pub(crate) page_id: Id,
+    pub(crate) key: DocKey,
     workspace_id: OnceLock<Id>,
     state: Arc<Mutex<RoomState>>,
     pub(crate) tx: broadcast::Sender<Outbound>,
@@ -187,6 +189,17 @@ pub(crate) struct Room {
     connections: AtomicUsize,
     approx_bytes: AtomicUsize,
     idle_since_ms: AtomicU64,
+}
+
+impl Room {
+    /// The document's content policy (its workspace is known once the room is loaded).
+    fn policy(&self) -> LinkPolicy {
+        LinkPolicy {
+            kind: self.key.kind,
+            workspace_id: self.workspace_id.get().copied().unwrap_or(self.key.id),
+            doc_id: self.key.id,
+        }
+    }
 }
 
 pub(crate) struct RoomState {
@@ -303,7 +316,7 @@ pub(crate) struct HubInner {
     backend: Backend,
     cluster: Arc<Cluster>,
     config: CollabConfig,
-    rooms: StdMutex<HashMap<Id, Arc<Room>>>,
+    rooms: StdMutex<HashMap<DocKey, Arc<Room>>>,
     users: StdMutex<HashMap<Id, usize>>,
     connections: AtomicUsize,
     next_connection: AtomicU64,
@@ -413,29 +426,31 @@ impl CollabHub {
         if !self.shared() || !state.initialized {
             return Ok(());
         }
-        let page = room.page_id.to_string();
-        let row =
-            sqlx::query("SELECT snapshot_seq, epoch FROM page_collab_docs WHERE page_id = $1")
-                .bind(&page)
-                .fetch_optional(&mut *connection)
-                .await?
-                .ok_or(CollabError::NotFound)?;
+        let kind = room.key.kind;
+        let page = room.key.id.to_string();
+        let row = sqlx::query(
+            kind.sql("SELECT snapshot_seq, epoch FROM page_collab_docs WHERE page_id = $1"),
+        )
+        .bind(&page)
+        .fetch_optional(&mut *connection)
+        .await?
+        .ok_or(CollabError::NotFound)?;
         if row.get::<String, _>("epoch") != state.epoch {
             return Err(CollabError::Reset);
         }
         let snapshot_seq: i64 = row.get("snapshot_seq");
         let snapshot: Option<Vec<u8>> = if snapshot_seq > state.last_seq {
-            sqlx::query_scalar("SELECT snapshot FROM page_collab_docs WHERE page_id = $1")
+            sqlx::query_scalar(kind.sql("SELECT snapshot FROM page_collab_docs WHERE page_id = $1"))
                 .bind(&page)
                 .fetch_optional(&mut *connection)
                 .await?
         } else {
             None
         };
-        let log = sqlx::query(
+        let log = sqlx::query(kind.sql(
             "SELECT seq, data, user_id FROM page_collab_updates WHERE page_id = $1 AND seq > $2 \
              ORDER BY seq",
-        )
+        ))
         .bind(&page)
         .bind(snapshot_seq.max(state.last_seq))
         .fetch_all(&mut *connection)
@@ -494,7 +509,7 @@ impl CollabHub {
             Ok(()) => {}
             Err(CollabError::Reset) => self.close_room(room, state, close::RESET),
             Err(error) => {
-                tracing::warn!(page_id = %room.page_id, error = %error, "co-editing catch-up failed");
+                tracing::warn!(doc = %room.key, error = %error, "co-editing catch-up failed");
             }
         }
     }
@@ -510,17 +525,17 @@ impl CollabHub {
 
     /// A message from another server.
     pub(crate) async fn receive(&self, message: CollabMessage) {
-        let page_id = match &message {
+        let key = match &message {
             CollabMessage::Revalidate { workspace_id } => {
                 self.revalidate_here(*workspace_id);
                 return;
             }
-            CollabMessage::Update { page_id, .. }
-            | CollabMessage::Awareness { page_id, .. }
-            | CollabMessage::Logged { page_id }
-            | CollabMessage::Close { page_id, .. } => *page_id,
+            CollabMessage::Update { key, .. }
+            | CollabMessage::Awareness { key, .. }
+            | CollabMessage::Logged { key }
+            | CollabMessage::Close { key, .. } => *key,
         };
-        let Some(room) = self.rooms().get(&page_id).cloned() else {
+        let Some(room) = self.rooms().get(&key).cloned() else {
             return;
         };
         let mut state = Arc::clone(&room.state).lock_owned().await;
@@ -599,7 +614,7 @@ impl CollabHub {
         }
     }
 
-    fn rooms(&self) -> std::sync::MutexGuard<'_, HashMap<Id, Arc<Room>>> {
+    fn rooms(&self) -> std::sync::MutexGuard<'_, HashMap<DocKey, Arc<Room>>> {
         self.inner
             .rooms
             .lock()
@@ -640,22 +655,22 @@ impl CollabHub {
         });
     }
 
-    /// The page's room, loaded (and, with `init`, initialized from `pages.content_json`), locked.
+    /// The document's room, loaded (and, with `init`, initialized from its stored content), locked.
     async fn room(
         &self,
-        page_id: Id,
+        key: DocKey,
         init: bool,
     ) -> Result<(Arc<Room>, OwnedMutexGuard<RoomState>), CollabError> {
         self.start_ticker();
         for _ in 0..8 {
             let (room, fresh) = {
                 let mut rooms = self.rooms();
-                match rooms.get(&page_id) {
+                match rooms.get(&key) {
                     Some(room) => (Arc::clone(room), None),
                     None => {
                         let (tx, _) = broadcast::channel(1024);
                         let room = Arc::new(Room {
-                            page_id,
+                            key,
                             workspace_id: OnceLock::new(),
                             state: Arc::new(Mutex::new(RoomState::new())),
                             tx,
@@ -666,7 +681,7 @@ impl CollabHub {
                         let guard = Arc::clone(&room.state)
                             .try_lock_owned()
                             .expect("a new room's lock is free");
-                        rooms.insert(page_id, Arc::clone(&room));
+                        rooms.insert(key, Arc::clone(&room));
                         (room, Some(guard))
                     }
                 }
@@ -702,31 +717,29 @@ impl CollabHub {
     fn forget(&self, room: &Arc<Room>) {
         let mut rooms = self.rooms();
         if rooms
-            .get(&room.page_id)
+            .get(&room.key)
             .is_some_and(|live| Arc::ptr_eq(live, room))
         {
-            rooms.remove(&room.page_id);
+            rooms.remove(&room.key);
         }
     }
 
     /// Reads the stored document (snapshot + log) into the room.
     async fn load(&self, room: &Room, state: &mut RoomState) -> Result<(), CollabError> {
         let pool = &self.inner.pool;
-        let page = sqlx::query(
-            "SELECT workspace_id, locked_at IS NOT NULL AS locked FROM pages WHERE id = $1",
-        )
-        .bind(room.page_id.to_string())
-        .fetch_optional(pool)
-        .await?
+        let kind = room.key.kind;
+        let (workspace_id, locked) = match kind {
+            DocKind::Page => kind_page::meta(pool, room.key.id).await?,
+            DocKind::Task => kind_task::meta(pool, room.key.id).await?,
+        }
         .ok_or(CollabError::NotFound)?;
-        let workspace_id = parse_id(page.get("workspace_id"))?;
         let _ = room.workspace_id.set(workspace_id);
-        state.locked = page.get("locked");
-        let row = sqlx::query(
+        state.locked = locked;
+        let row = sqlx::query(kind.sql(
             "SELECT snapshot, snapshot_seq, epoch, converter_version, projected_seq \
              FROM page_collab_docs WHERE page_id = $1",
-        )
-        .bind(room.page_id.to_string())
+        ))
+        .bind(room.key.id.to_string())
         .fetch_optional(pool)
         .await?;
         state.loaded = true;
@@ -736,11 +749,11 @@ impl CollabHub {
             return Ok(());
         };
         let snapshot_seq: i64 = row.get("snapshot_seq");
-        let log = sqlx::query(
+        let log = sqlx::query(kind.sql(
             "SELECT seq, data, user_id FROM page_collab_updates WHERE page_id = $1 AND seq > $2 \
              ORDER BY seq",
-        )
-        .bind(room.page_id.to_string())
+        ))
+        .bind(room.key.id.to_string())
         .bind(snapshot_seq)
         .fetch_all(pool)
         .await?;
@@ -784,36 +797,35 @@ impl CollabHub {
         self.catch_up(&mut connection, room, state).await
     }
 
-    /// First open of a page: builds the document from `pages.content_json`.
+    /// First open of a document: builds it from the stored content (`pages.content_json`, a
+    /// task's description). Reading the content and storing the document is one write transaction,
+    /// so a content write on another server lands before (and is read) or after (and replaces the
+    /// stored document, see [`CollabWrite::replace`]).
     async fn initialize(&self, room: &Room, state: &mut RoomState) -> Result<(), CollabError> {
-        let pool = &self.inner.pool;
-        let content: String = sqlx::query_scalar("SELECT content_json FROM pages WHERE id = $1")
-            .bind(room.page_id.to_string())
-            .fetch_optional(pool)
-            .await?
-            .ok_or(CollabError::NotFound)?;
-        let blocks: Vec<Value> = serde_json::from_str(&content).unwrap_or_default();
+        let mut tx = self.write_transaction().await?;
+        let blocks = self.content(room, &mut tx).await?;
         state.reset_doc();
-        write_document(state, &blocks);
+        write_document(state, &blocks, &room.policy());
         state.take_captured();
         let snapshot = state.full_state();
         let workspace_id = *room.workspace_id.get().ok_or(CollabError::NotFound)?;
         let now = TimestampMillis::now().as_millis();
-        let inserted = sqlx::query(
+        let inserted = sqlx::query(room.key.kind.sql(
             "INSERT INTO page_collab_docs (page_id, workspace_id, snapshot, snapshot_seq, epoch, \
              converter_version, projected_seq, created_at, updated_at) \
              VALUES ($1, $2, $3, 0, $4, $5, 0, $6, $7) ON CONFLICT (page_id) DO NOTHING",
-        )
-        .bind(room.page_id.to_string())
+        ))
+        .bind(room.key.id.to_string())
         .bind(workspace_id.to_string())
         .bind(&snapshot)
         .bind(&state.epoch)
         .bind(blocknote::converter_version())
         .bind(now)
         .bind(now)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?
         .rows_affected();
+        tx.commit().await?;
         if inserted == 0 {
             // Another server opened the page first: use its document.
             state.reset_doc();
@@ -837,36 +849,37 @@ impl CollabHub {
         if state.unprojected_since.is_some() {
             self.persist(room, state, true, false).await?;
         }
-        let content: String = sqlx::query_scalar("SELECT content_json FROM pages WHERE id = $1")
-            .bind(room.page_id.to_string())
-            .fetch_optional(&self.inner.pool)
-            .await?
-            .ok_or(CollabError::NotFound)?;
-        let blocks: Vec<Value> = serde_json::from_str(&content).unwrap_or_default();
+        let mut connection = self.inner.pool.acquire().await?;
+        let blocks = self.content(room, &mut connection).await?;
+        drop(connection);
         state.reset_doc();
-        write_document(state, &blocks);
+        write_document(state, &blocks, &room.policy());
         state.take_captured();
         let snapshot = state.full_state();
         let epoch = random_epoch();
         let mut tx = self.write_transaction().await?;
-        sqlx::query(
+        sqlx::query(room.key.kind.sql(
             "UPDATE page_collab_docs SET snapshot = $1, snapshot_seq = $2, epoch = $3, \
              converter_version = $4, projected_seq = $5, updated_at = $6 WHERE page_id = $7",
-        )
+        ))
         .bind(&snapshot)
         .bind(state.last_seq)
         .bind(&epoch)
         .bind(blocknote::converter_version())
         .bind(state.last_seq)
         .bind(TimestampMillis::now().as_millis())
-        .bind(room.page_id.to_string())
+        .bind(room.key.id.to_string())
         .execute(&mut *tx)
         .await?;
-        sqlx::query("DELETE FROM page_collab_updates WHERE page_id = $1 AND seq <= $2")
-            .bind(room.page_id.to_string())
-            .bind(state.last_seq)
-            .execute(&mut *tx)
-            .await?;
+        sqlx::query(
+            room.key
+                .kind
+                .sql("DELETE FROM page_collab_updates WHERE page_id = $1 AND seq <= $2"),
+        )
+        .bind(room.key.id.to_string())
+        .bind(state.last_seq)
+        .execute(&mut *tx)
+        .await?;
         tx.commit().await?;
         state.epoch = epoch;
         state.projected_seq = state.last_seq;
@@ -880,10 +893,25 @@ impl CollabHub {
             reason: "document reset",
         });
         self.tell(CollabMessage::Close {
-            page_id: room.page_id,
+            key: room.key,
             code: close::RESET,
         });
         Ok(())
+    }
+
+    /// The stored content a new document is built from.
+    async fn content(
+        &self,
+        room: &Room,
+        connection: &mut AnyConnection,
+    ) -> Result<Vec<Value>, CollabError> {
+        match room.key.kind {
+            DocKind::Page => kind_page::content(connection, room.key.id).await,
+            DocKind::Task => {
+                let workspace_id = *room.workspace_id.get().ok_or(CollabError::NotFound)?;
+                kind_task::content(connection, room.key.id, workspace_id).await
+            }
+        }
     }
 
     fn set_bytes(&self, room: &Room, state: &RoomState) {
@@ -911,7 +939,7 @@ impl CollabHub {
             state.pending.clear();
             return Ok(());
         }
-        let page_id = room.page_id;
+        let key = room.key;
         let workspace_id = *room.workspace_id.get().ok_or(CollabError::NotFound)?;
         let mut tx = self.write_transaction().await?;
         // First what the other servers wrote: the projection and the snapshot must have it.
@@ -920,7 +948,7 @@ impl CollabHub {
             return Err(error);
         }
         let project = project && state.unprojected_since.is_some();
-        if project && repair(state) {
+        if project && repair(state, &room.policy()) {
             // The repair is an ordinary update: persisted with the batch and broadcast.
             self.queue_repair(room, state);
         }
@@ -941,20 +969,25 @@ impl CollabHub {
                 }
             }
         };
-        let blocks =
-            project.then(|| sanitize_blocks(&blocknote::doc_to_blocks(state.awareness.doc())));
+        let blocks = project.then(|| {
+            sanitize_blocks_for(
+                &blocknote::doc_to_blocks(state.awareness.doc()),
+                &room.policy(),
+            )
+        });
         let snapshot = compact.then(|| state.full_state());
         let result: Result<(i64, bool), CollabError> = async {
             let mut seq = state.last_seq;
             if let Some(data) = &merged {
-                seq = append(&mut tx, page_id, workspace_id, data, state.last_editor, now).await?;
+                seq = append(&mut tx, key, workspace_id, data, state.last_editor, now).await?;
             }
             let mut audited = false;
             if let Some(blocks) = &blocks {
                 let audited_at: Option<i64> = sqlx::query_scalar(
-                    "SELECT audited_at FROM page_collab_docs WHERE page_id = $1",
+                    key.kind
+                        .sql("SELECT audited_at FROM page_collab_docs WHERE page_id = $1"),
                 )
-                .bind(page_id.to_string())
+                .bind(key.id.to_string())
                 .fetch_optional(&mut *tx)
                 .await?
                 .flatten();
@@ -962,39 +995,40 @@ impl CollabHub {
                     i64::try_from(self.inner.config.audit_interval.as_millis()).unwrap_or(i64::MAX);
                 let audit = state.last_editor.is_some()
                     && audited_at.is_none_or(|at| now.as_millis().saturating_sub(at) >= interval);
-                let changed = project_collab_content(
-                    &mut tx,
-                    page_id,
-                    blocks,
-                    state.last_editor,
-                    audit,
-                    &format!("collab-{page_id}"),
-                    now,
-                )
-                .await
-                .map_err(|error| match error {
-                    crate::repositories::pages::PageError::NotFound => CollabError::NotFound,
-                    crate::repositories::pages::PageError::Unavailable(error) => {
-                        CollabError::Unavailable(error)
+                let changed = match key.kind {
+                    DocKind::Page => {
+                        kind_page::project(&mut tx, key.id, blocks, state.last_editor, audit, now)
+                            .await?
                     }
-                    other => CollabError::Corrupt(other.to_string()),
-                })?;
+                    DocKind::Task => {
+                        kind_task::project(
+                            &mut tx,
+                            key.id,
+                            workspace_id,
+                            blocks,
+                            state.last_editor,
+                            audit,
+                            now,
+                        )
+                        .await?
+                    }
+                };
                 audited = changed && audit;
-                sqlx::query(
+                sqlx::query(key.kind.sql(
                     "UPDATE page_collab_docs SET projected_seq = $1, \
                      audited_at = CASE WHEN $2 THEN $3 ELSE audited_at END, updated_at = $4 \
                      WHERE page_id = $5",
-                )
+                ))
                 .bind(seq)
                 .bind(audited)
                 .bind(now.as_millis())
                 .bind(now.as_millis())
-                .bind(page_id.to_string())
+                .bind(key.id.to_string())
                 .execute(&mut *tx)
                 .await?;
             }
             if let Some(snapshot) = &snapshot {
-                compact_log(&mut tx, page_id, snapshot, seq, now).await?;
+                compact_log(&mut tx, key, snapshot, seq, now).await?;
             }
             Ok((seq, audited))
         }
@@ -1026,7 +1060,7 @@ impl CollabHub {
             self.set_bytes(room, state);
         }
         if merged.is_some() || compact {
-            self.tell(CollabMessage::Logged { page_id });
+            self.tell(CollabMessage::Logged { key });
         }
         Ok(())
     }
@@ -1059,7 +1093,7 @@ impl CollabHub {
                 state.closed = true;
                 let _ = room.tx.send(Outbound::Close {
                     code: close::GONE,
-                    reason: "page deleted",
+                    reason: "document deleted",
                 });
                 false
             }
@@ -1076,7 +1110,7 @@ impl CollabHub {
                 false
             }
             Err(error) => {
-                tracing::warn!(page_id = %room.page_id, error = %error, "co-editing persistence failed");
+                tracing::warn!(doc = %room.key, error = %error, "co-editing persistence failed");
                 false
             }
         }
@@ -1167,10 +1201,10 @@ impl CollabHub {
         fits(self.memory_in_use())
     }
 
-    /// Admits a connection of `peer` to the page's room. `Err` carries a close code.
+    /// Admits a connection of `peer` to the document's room. `Err` carries a close code.
     pub(crate) async fn join(
         &self,
-        page_id: Id,
+        key: DocKey,
         peer: &Peer,
     ) -> Result<Joined, (u16, &'static str)> {
         let config = &self.inner.config;
@@ -1190,21 +1224,21 @@ impl CollabHub {
                 return Err((close::OVERLOADED, "too many connections for this user"));
             }
         }
-        let live = self.rooms().contains_key(&page_id);
+        let live = self.rooms().contains_key(&key);
         if !live && !self.enforce_budget(true).await {
             return Err((close::OVERLOADED, "memory budget exceeded"));
         }
-        let (room, mut state) = match self.room(page_id, true).await {
+        let (room, mut state) = match self.room(key, true).await {
             Ok(room) => room,
-            Err(CollabError::NotFound) => return Err((close::GONE, "page not found")),
+            Err(CollabError::NotFound) => return Err((close::GONE, "document not found")),
             Err(CollabError::Overloaded) => return Err((close::OVERLOADED, "overloaded")),
             Err(error) => {
-                tracing::warn!(page_id = %page_id, error = %error, "co-editing room failed to load");
+                tracing::warn!(doc = %key, error = %error, "co-editing room failed to load");
                 return Err((close::OVERLOADED, "document unavailable"));
             }
         };
         if state.connections >= config.max_connections_per_page {
-            return Err((close::OVERLOADED, "too many connections to this page"));
+            return Err((close::OVERLOADED, "too many connections to this document"));
         }
         state.connections += 1;
         room.connections.store(state.connections, Ordering::Relaxed);
@@ -1268,7 +1302,7 @@ impl CollabHub {
             if let Ok(update) = state.awareness.update_with_clients(ids) {
                 let frame = Message::Awareness(update).encode_v1();
                 self.share(CollabMessage::Awareness {
-                    page_id: room.page_id,
+                    key: room.key,
                     data: BASE64.encode(&frame),
                 });
                 let _ = room.tx.send(Outbound::Frame {
@@ -1368,7 +1402,7 @@ impl CollabHub {
                         }
                         if let Ok(merged) = yrs::merge_updates_v1(&deltas) {
                             self.share(CollabMessage::Update {
-                                page_id: room.page_id,
+                                key: room.key,
                                 epoch: state.epoch.clone(),
                                 data: BASE64.encode(merged),
                                 user_id: peer.user_id,
@@ -1376,7 +1410,7 @@ impl CollabHub {
                         }
                         // Links and file URLs can only arrive in updates that name them.
                         if (contains(&update, b"link") || contains(&update, b"url"))
-                            && repair(&state)
+                            && repair(&state, &room.policy())
                         {
                             for delta in state.take_captured() {
                                 broadcast_update(room, None, &delta);
@@ -1399,7 +1433,7 @@ impl CollabHub {
                         let frame = Message::Awareness(accepted.clone()).encode_v1();
                         if state.awareness.apply_update(accepted).is_ok() {
                             self.share(CollabMessage::Awareness {
-                                page_id: room.page_id,
+                                key: room.key,
                                 data: BASE64.encode(&frame),
                             });
                             // Echo to everyone incl. the sender: y-websocket closes a socket
@@ -1429,10 +1463,20 @@ impl CollabHub {
         handled
     }
 
-    /// Locks the page's document for a server-side content replacement. Pending edits are written
-    /// and projected first, so the caller's transaction reads the current `content_json`.
-    pub async fn write(&self, page_id: Id) -> Result<CollabWrite, CollabError> {
-        let (room, mut state) = self.room(page_id, false).await?;
+    /// Locks the document for a server-side content replacement. Pending edits are written and
+    /// projected first, so the caller's transaction reads the current stored content.
+    pub async fn write(&self, key: DocKey) -> Result<CollabWrite, CollabError> {
+        let live = self.rooms().contains_key(&key);
+        let (room, mut state) = self.room(key, false).await?;
+        // A write that loaded a stored document (bulk writes load one for each item) respects the memory
+        // budget like a new connection: idle rooms go first, and if that is not enough the write is refused.
+        if !live && state.initialized && !self.enforce_budget(false).await {
+            if state.connections == 0 {
+                state.closed = true;
+                self.forget(&room);
+            }
+            return Err(CollabError::Overloaded);
+        }
         if state.initialized && (state.unprojected_since.is_some() || !state.pending.is_empty()) {
             self.persist(&room, &mut state, true, false).await?;
         }
@@ -1442,13 +1486,14 @@ impl CollabHub {
             state: Some(state),
             staged: None,
             touched: false,
+            rebuilt: false,
         })
     }
 
     /// Holds the page's room for a lock change (taken before the caller's transaction, like
     /// [`Self::write`]), so no client update slips in between the commit and the flag.
-    pub async fn lock_change(&self, page_id: Id) -> Result<CollabLock, CollabError> {
-        let (room, state) = self.room(page_id, false).await?;
+    pub async fn lock_change(&self, key: DocKey) -> Result<CollabLock, CollabError> {
+        let (room, state) = self.room(key, false).await?;
         Ok(CollabLock {
             hub: self.clone(),
             room,
@@ -1456,11 +1501,16 @@ impl CollabHub {
         })
     }
 
-    /// Writes pending edits of the page (if it is loaded) and projects them into
-    /// `pages.content_json` now (before duplicate, history, reads). With other servers, it also
-    /// projects the edits they logged and did not project yet.
+    /// [`Self::flush`] of a page.
     pub async fn flush_page(&self, page_id: Id) {
-        let room = self.rooms().get(&page_id).cloned();
+        self.flush(DocKey::page(page_id)).await;
+    }
+
+    /// Writes pending edits of the document (if it is loaded) and projects them into its stored
+    /// content now (before duplicate, history, reads). With other servers, it also projects the
+    /// edits they logged and did not project yet.
+    pub async fn flush(&self, key: DocKey) {
+        let room = self.rooms().get(&key).cloned();
         if let Some(room) = room {
             let mut state = Arc::clone(&room.state).lock_owned().await;
             if !state.closed {
@@ -1471,54 +1521,63 @@ impl CollabHub {
         if !self.shared() {
             return;
         }
-        let behind = sqlx::query_scalar::<_, Flag>(
+        let sql = key.kind.sql(
             "SELECT EXISTS (SELECT 1 FROM page_collab_docs JOIN page_collab_updates \
              ON page_collab_updates.page_id = page_collab_docs.page_id \
              AND page_collab_updates.seq > page_collab_docs.projected_seq \
              WHERE page_collab_docs.page_id = $1)",
-        )
-        .bind(page_id.to_string())
-        .fetch_one(&self.inner.pool)
-        .await;
+        );
+        let behind = sqlx::query_scalar::<_, Flag>(sql)
+            .bind(key.id.to_string())
+            .fetch_one(&self.inner.pool)
+            .await;
         if matches!(behind, Ok(Flag(true))) {
             // Loading reads the log and marks what was not projected.
-            match self.room(page_id, false).await {
+            match self.room(key, false).await {
                 Ok((room, mut state)) => {
                     self.persist_logged(&room, &mut state, true, false).await;
                 }
                 Err(error) => {
-                    tracing::warn!(page_id = %page_id, error = %error, "co-editing flush failed");
+                    tracing::warn!(doc = %key, error = %error, "co-editing flush failed");
                 }
             }
         }
     }
 
-    /// [`Self::flush_page`] for every loaded page of the workspace, and with other servers for
-    /// every page of it with edits that were not projected.
+    /// [`Self::flush`] for every loaded document of the workspace, and with other servers for
+    /// every document of it with edits that were not projected.
     pub async fn flush_workspace(&self, workspace_id: Id) {
-        let mut pages: Vec<Id> = self
+        let mut docs: Vec<DocKey> = self
             .rooms()
             .values()
             .filter(|room| room.workspace_id.get() == Some(&workspace_id))
-            .map(|room| room.page_id)
+            .map(|room| room.key)
             .collect();
         if self.shared() {
-            let behind = sqlx::query_scalar::<_, String>(
-                "SELECT DISTINCT page_collab_docs.page_id FROM page_collab_docs \
-                 JOIN page_collab_updates ON page_collab_updates.page_id = page_collab_docs.page_id \
-                 AND page_collab_updates.seq > page_collab_docs.projected_seq \
-                 WHERE page_collab_docs.workspace_id = $1",
-            )
-            .bind(workspace_id.to_string())
-            .fetch_all(&self.inner.pool)
-            .await
-            .unwrap_or_default();
-            pages.extend(behind.iter().filter_map(|id| id.parse::<Id>().ok()));
-            pages.sort_unstable();
-            pages.dedup();
+            for kind in [DocKind::Page, DocKind::Task] {
+                let sql = kind.sql(
+                    "SELECT DISTINCT page_collab_docs.page_id FROM page_collab_docs \
+                     JOIN page_collab_updates ON page_collab_updates.page_id = page_collab_docs.page_id \
+                     AND page_collab_updates.seq > page_collab_docs.projected_seq \
+                     WHERE page_collab_docs.workspace_id = $1",
+                );
+                let behind = sqlx::query_scalar::<_, String>(sql)
+                    .bind(workspace_id.to_string())
+                    .fetch_all(&self.inner.pool)
+                    .await
+                    .unwrap_or_default();
+                docs.extend(
+                    behind
+                        .iter()
+                        .filter_map(|id| id.parse::<Id>().ok())
+                        .map(|id| DocKey { kind, id }),
+                );
+            }
+            docs.sort_unstable_by_key(|key| (key.kind == DocKind::Task, key.id));
+            docs.dedup();
         }
-        for page_id in pages {
-            self.flush_page(page_id).await;
+        for key in docs {
+            self.flush(key).await;
         }
     }
 
@@ -1579,6 +1638,8 @@ pub struct CollabWrite {
     state: Option<OwnedMutexGuard<RoomState>>,
     staged: Option<Staged>,
     touched: bool,
+    /// The stored document was rebuilt under a new epoch (another server's rooms must reset).
+    rebuilt: bool,
 }
 
 struct Staged {
@@ -1608,6 +1669,36 @@ impl CollabWrite {
             return Ok(());
         };
         if !state.initialized {
+            // Another server may have stored the document after this room was loaded (it opened
+            // the document first, from the content this write replaces). Rebuild that document from
+            // the new blocks under a new epoch, so its clients reset and load this write.
+            let kind = self.room.key.kind;
+            let id = self.room.key.id.to_string();
+            let stored: Option<String> = sqlx::query_scalar(
+                kind.sql("SELECT epoch FROM page_collab_docs WHERE page_id = $1"),
+            )
+            .bind(&id)
+            .fetch_optional(&mut **tx)
+            .await?;
+            if stored.is_some() {
+                let sanitized = sanitize_blocks_for(blocks, &self.room.policy());
+                sqlx::query(kind.sql(
+                    "UPDATE page_collab_docs SET snapshot = $1, snapshot_seq = 0, epoch = $2, \
+                     converter_version = $3, projected_seq = 0, updated_at = $4 WHERE page_id = $5",
+                ))
+                .bind(blocknote::blocks_to_update(&sanitized, None))
+                .bind(random_epoch())
+                .bind(blocknote::converter_version())
+                .bind(now.as_millis())
+                .bind(&id)
+                .execute(&mut **tx)
+                .await?;
+                sqlx::query(kind.sql("DELETE FROM page_collab_updates WHERE page_id = $1"))
+                    .bind(&id)
+                    .execute(&mut **tx)
+                    .await?;
+                self.rebuilt = true;
+            }
             return Ok(());
         }
         // The caller's write transaction: the replacement goes after every row it can see.
@@ -1617,7 +1708,7 @@ impl CollabWrite {
             }
             return Err(error);
         }
-        let sanitized = sanitize_blocks(blocks);
+        let sanitized = sanitize_blocks_for(blocks, &self.room.policy());
         self.touched = true;
         {
             let doc = state.awareness.doc();
@@ -1634,19 +1725,19 @@ impl CollabWrite {
         let workspace_id = *self.room.workspace_id.get().ok_or(CollabError::NotFound)?;
         let seq = append(
             tx,
-            self.room.page_id,
+            self.room.key,
             workspace_id,
             &merged,
             Some(actor_id),
             now,
         )
         .await?;
-        sqlx::query(
+        sqlx::query(self.room.key.kind.sql(
             "UPDATE page_collab_docs SET projected_seq = $1, updated_at = $2 WHERE page_id = $3",
-        )
+        ))
         .bind(seq)
         .bind(now.as_millis())
-        .bind(self.room.page_id.to_string())
+        .bind(self.room.key.id.to_string())
         .execute(&mut **tx)
         .await?;
         self.staged = Some(Staged {
@@ -1662,6 +1753,13 @@ impl CollabWrite {
         let Some(mut state) = self.state.take() else {
             return;
         };
+        if self.rebuilt {
+            // other servers' rooms hold the replaced document
+            self.hub.tell(CollabMessage::Close {
+                key: self.room.key,
+                code: close::RESET,
+            });
+        }
         if let Some(staged) = self.staged.take() {
             for delta in &staged.deltas {
                 state.state_bytes += delta.len();
@@ -1672,9 +1770,7 @@ impl CollabWrite {
             state.log_updates += 1;
             state.log_bytes += staged.bytes;
             self.hub.set_bytes(&self.room, &state);
-            self.hub.tell(CollabMessage::Logged {
-                page_id: self.room.page_id,
-            });
+            self.hub.tell(CollabMessage::Logged { key: self.room.key });
         }
         if state.connections == 0 {
             // Written through: nothing to keep in memory for a page nobody has open.
@@ -1733,7 +1829,7 @@ impl CollabLock {
         }
         // The other servers' rooms reload the lock with the document.
         self.hub.tell(CollabMessage::Close {
-            page_id: self.room.page_id,
+            key: self.room.key,
             code: close::LOCK_CHANGED,
         });
         if state.connections == 0 {
@@ -1759,8 +1855,8 @@ fn apply(txn: &mut yrs::TransactionMut, data: &[u8]) -> Result<(), CollabError> 
         .map_err(|error| CollabError::Corrupt(error.to_string()))
 }
 
-fn write_document(state: &RoomState, blocks: &[Value]) {
-    let sanitized = sanitize_blocks(blocks);
+fn write_document(state: &RoomState, blocks: &[Value], policy: &LinkPolicy) {
+    let sanitized = sanitize_blocks_for(blocks, policy);
     let doc = state.awareness.doc();
     let mut txn = doc.transact_mut();
     let fragment = txn.get_or_insert_xml_fragment(FRAGMENT);
@@ -1768,11 +1864,11 @@ fn write_document(state: &RoomState, blocks: &[Value]) {
 }
 
 /// Runs the link / file URL repair on the document; the deltas land in `captured`.
-fn repair(state: &RoomState) -> bool {
+fn repair(state: &RoomState, policy: &LinkPolicy) -> bool {
     let doc = state.awareness.doc();
     let mut txn = doc.transact_mut();
     let fragment = txn.get_or_insert_xml_fragment(FRAGMENT);
-    repair_document(&mut txn, &fragment)
+    repair_document_for(&mut txn, &fragment, policy)
 }
 
 fn broadcast_update(room: &Room, except: Option<u64>, delta: &[u8]) {
@@ -1872,12 +1968,6 @@ fn color_slot(user_id: Id) -> usize {
     hash as usize % USER_COLORS.len()
 }
 
-fn parse_id(value: String) -> Result<Id, CollabError> {
-    value
-        .parse()
-        .map_err(|_| CollabError::Corrupt("invalid id".to_owned()))
-}
-
 fn random_epoch() -> String {
     Id::new_v7().to_string().replace('-', "")
 }
@@ -1891,17 +1981,17 @@ pub(crate) async fn generation(pool: &AnyPool) -> Result<String, sqlx::Error> {
 
 async fn append(
     tx: &mut Transaction<'_, Any>,
-    page_id: Id,
+    key: DocKey,
     workspace_id: Id,
     data: &[u8],
     user_id: Option<Id>,
     now: TimestampMillis,
 ) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar(
+    sqlx::query_scalar(key.kind.sql(
         "INSERT INTO page_collab_updates (page_id, workspace_id, data, user_id, created_at) \
          VALUES ($1, $2, $3, $4, $5) RETURNING seq",
-    )
-    .bind(page_id.to_string())
+    ))
+    .bind(key.id.to_string())
     .bind(workspace_id.to_string())
     .bind(data)
     .bind(user_id.map(|id| id.to_string()))
@@ -1912,26 +2002,29 @@ async fn append(
 
 async fn compact_log(
     tx: &mut Transaction<'_, Any>,
-    page_id: Id,
+    key: DocKey,
     snapshot: &[u8],
     seq: i64,
     now: TimestampMillis,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(
+    sqlx::query(key.kind.sql(
         "UPDATE page_collab_docs SET snapshot = $1, snapshot_seq = $2, updated_at = $3 \
          WHERE page_id = $4",
-    )
+    ))
     .bind(snapshot)
     .bind(seq)
     .bind(now.as_millis())
-    .bind(page_id.to_string())
+    .bind(key.id.to_string())
     .execute(&mut **tx)
     .await?;
-    sqlx::query("DELETE FROM page_collab_updates WHERE page_id = $1 AND seq <= $2")
-        .bind(page_id.to_string())
-        .bind(seq)
-        .execute(&mut **tx)
-        .await?;
+    sqlx::query(
+        key.kind
+            .sql("DELETE FROM page_collab_updates WHERE page_id = $1 AND seq <= $2"),
+    )
+    .bind(key.id.to_string())
+    .bind(seq)
+    .execute(&mut **tx)
+    .await?;
     Ok(())
 }
 

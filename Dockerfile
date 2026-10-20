@@ -24,13 +24,21 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
 
 FROM alpine:3.23
 RUN apk add --no-cache bash ca-certificates tzdata \
-    && mkdir -p /var/lib/orbit /var/backups/orbit /etc/orbit \
-    && chown -R 65532:65532 /var/lib/orbit /var/backups/orbit /etc/orbit
+    && mkdir -p /var/lib/orbit /var/backups/orbit \
+    && chown -R 65532:65532 /var/lib/orbit /var/backups/orbit
 COPY --from=server /orbit /orbit
-COPY deploy/orbit.toml /etc/orbit/orbit.toml
+# The image trusts forwarding headers from every address: it expects to run behind a proxy that is the only
+# way in. Publish port 8080 directly, or share the network with untrusted containers, and clients can fake
+# their IP address and https. Then set ORBIT_TRUSTED_PROXIES to the proxy network.
+ENV ORBIT_ENV=production \
+    ORBIT_BIND=0.0.0.0 \
+    ORBIT_TRUSTED_PROXIES=0.0.0.0/0,::/0 \
+    ORBIT_DATABASE_PATH=/var/lib/orbit/orbit.sqlite \
+    ORBIT_ATTACHMENTS_PATH=/var/lib/orbit/attachments \
+    ORBIT_BACKUPS_PATH=/var/backups/orbit
 USER 65532:65532
 VOLUME ["/var/lib/orbit", "/var/backups/orbit"]
 EXPOSE 8080
-HEALTHCHECK --interval=5s --timeout=3s --start-period=5s --retries=10 CMD ["/orbit", "--config", "/etc/orbit/orbit.toml", "healthcheck"]
-ENTRYPOINT ["/orbit", "--config", "/etc/orbit/orbit.toml"]
+HEALTHCHECK --interval=5s --timeout=3s --start-period=5s --retries=10 CMD ["/orbit", "healthcheck"]
+ENTRYPOINT ["/orbit"]
 CMD ["serve"]

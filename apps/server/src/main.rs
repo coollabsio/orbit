@@ -26,15 +26,13 @@ where
 }
 
 async fn run() -> ExitCode {
-    let format = if std::env::var("ORBIT__ENVIRONMENT").as_deref() == Ok("development")
-        || std::env::var("ORBIT_ENV").as_deref() == Ok("development")
-    {
+    let format = if std::env::var("ORBIT_ENV").as_deref() == Ok("development") {
         orbit_platform::TracingFormat::Compact
     } else {
         orbit_platform::TracingFormat::Json
     };
     let _ = orbit_platform::init_tracing(format);
-    match cli::run(cli::Cli::parse()).await {
+    match cli::run(cli::Cli::parse(), std::env::vars().collect()).await {
         Ok(output) => {
             if !output.is_empty() {
                 println!("{output}");

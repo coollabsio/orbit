@@ -385,7 +385,12 @@ impl MigrationRunner {
                 ),
                 Migration::new(
                     52,
-                    include_str!("../../../../apps/server/migrations/0052_tenant_limits.sql"),
+                    include_str!("../../../../apps/server/migrations/0052_task_rich_text.sql"),
+                    false,
+                ),
+                Migration::new(
+                    53,
+                    include_str!("../../../../apps/server/migrations/0053_tenant_limits.sql"),
                     false,
                 ),
             ],
@@ -421,7 +426,12 @@ impl MigrationRunner {
             ),
             Migration::new(
                 52,
-                include_str!("../../../../apps/server/migrations/postgres/0052_tenant_limits.sql"),
+                include_str!("../../../../apps/server/migrations/postgres/0052_task_rich_text.sql"),
+                false,
+            ),
+            Migration::new(
+                53,
+                include_str!("../../../../apps/server/migrations/postgres/0053_tenant_limits.sql"),
                 false,
             ),
         ];

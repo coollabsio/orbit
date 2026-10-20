@@ -13,6 +13,7 @@ use yrs::types::text::YChange;
 use yrs::{Any, Out, ReadTxn, Text, TransactionMut, Xml, XmlElementRef, XmlFragment, XmlOut};
 
 use super::blocknote::schema;
+use super::{DocKind, LinkPolicy};
 
 /// Blocks whose `props.url` is a page file or an external URL.
 const FILE_BLOCKS: [&str; 2] = ["image", "file"];
@@ -147,10 +148,30 @@ fn is_page_file_path(url: &str) -> bool {
         if is_uuid(workspace, true) && is_uuid(page, true) && is_uuid(file, true))
 }
 
+/// `/api/v1/workspaces/<workspace>/tasks/<task>/attachments/<uuid>/download` of a task in the policy's
+/// workspace (text copied between tasks keeps its files; every member may download them).
+fn is_task_attachment_path(url: &str, policy: &LinkPolicy) -> bool {
+    let Some(rest) = url.strip_prefix("/api/v1/workspaces/") else {
+        return false;
+    };
+    let parts: Vec<&str> = rest.split('/').collect();
+    matches!(parts.as_slice(), [workspace, "tasks", task, "attachments", file, "download"]
+        if *workspace == policy.workspace_id.to_string() && is_uuid(task, true) && is_uuid(file, true))
+}
+
 /// Image/file URL policy: empty (waiting for an upload), a page file, or an absolute http(s) URL.
 #[must_use]
 pub fn is_safe_file_url(url: &str) -> bool {
-    if url.is_empty() || is_page_file_path(url) {
+    is_safe_file_url_in(url, None)
+}
+
+/// [`is_safe_file_url`] for one document: a task accepts its own attachments instead of page files.
+fn is_safe_file_url_in(url: &str, policy: Option<&LinkPolicy>) -> bool {
+    let own_file = match policy {
+        Some(policy) if policy.kind == DocKind::Task => is_task_attachment_path(url, policy),
+        _ => is_page_file_path(url),
+    };
+    if url.is_empty() || own_file {
         return true;
     }
     let after_scheme = if starts_with_ignore_case(url, "http://") {
@@ -171,14 +192,28 @@ pub fn is_safe_file_url(url: &str) -> bool {
 /// editor's `toEditorContent`.
 #[must_use]
 pub fn sanitize_blocks(blocks: &[Value]) -> Vec<Value> {
-    let known = keep_known_blocks(blocks);
+    sanitize_blocks_in(blocks, None)
+}
+
+/// [`sanitize_blocks`] under one document's policy.
+#[must_use]
+pub fn sanitize_blocks_for(blocks: &[Value], policy: &LinkPolicy) -> Vec<Value> {
+    sanitize_blocks_in(blocks, Some(policy))
+}
+
+fn sanitize_blocks_in(blocks: &[Value], policy: Option<&LinkPolicy>) -> Vec<Value> {
+    let task = policy.is_some_and(|policy| policy.kind == DocKind::Task);
+    let known = keep_known_blocks(blocks, task);
     let Value::Array(linked) = sanitize_links(&Value::Array(known)) else {
         return Vec::new();
     };
     let Value::Array(mentioned) = sanitize_mentions(&Value::Array(linked)) else {
         return Vec::new();
     };
-    mentioned.into_iter().map(sanitize_file_block).collect()
+    mentioned
+        .into_iter()
+        .map(|block| sanitize_file_block(block, policy))
+        .collect()
 }
 
 fn mention_name(value: Option<&Value>) -> String {
@@ -229,19 +264,22 @@ fn sanitize_mentions(value: &Value) -> Value {
     }
 }
 
-fn keep_known_blocks(blocks: &[Value]) -> Vec<Value> {
+/// Blocks of the editor schema; a task's editor has no `page` blocks.
+fn keep_known_blocks(blocks: &[Value], task: bool) -> Vec<Value> {
     blocks
         .iter()
         .filter(|block| {
             block
                 .get("type")
                 .and_then(Value::as_str)
-                .is_some_and(|block_type| schema().blocks.contains_key(block_type))
+                .is_some_and(|block_type| {
+                    schema().blocks.contains_key(block_type) && !(task && block_type == "page")
+                })
         })
         .map(|block| {
             let mut block = block.clone();
             if let Some(children) = block.get("children").and_then(Value::as_array) {
-                block["children"] = Value::Array(keep_known_blocks(children));
+                block["children"] = Value::Array(keep_known_blocks(children, task));
             }
             block
         })
@@ -291,7 +329,7 @@ fn sanitize_links(value: &Value) -> Value {
     }
 }
 
-fn sanitize_file_block(mut block: Value) -> Value {
+fn sanitize_file_block(mut block: Value, policy: Option<&LinkPolicy>) -> Value {
     let is_file_block = block
         .get("type")
         .and_then(Value::as_str)
@@ -301,13 +339,16 @@ fn sanitize_file_block(mut block: Value) -> Value {
         && !props
             .get("url")
             .and_then(Value::as_str)
-            .is_some_and(is_safe_file_url)
+            .is_some_and(|url| is_safe_file_url_in(url, policy))
     {
         props.insert("url".to_owned(), Value::String(String::new()));
     }
     if let Some(children) = block.get_mut("children").and_then(Value::as_array_mut) {
         let taken = std::mem::take(children);
-        *children = taken.into_iter().map(sanitize_file_block).collect();
+        *children = taken
+            .into_iter()
+            .map(|child| sanitize_file_block(child, policy))
+            .collect();
     }
     block
 }
@@ -315,6 +356,23 @@ fn sanitize_file_block(mut block: Value) -> Value {
 /// Rewrites unsafe links and file URLs inside a live document; returns whether anything changed.
 /// The caller broadcasts the resulting update like any other edit.
 pub fn repair_document(txn: &mut TransactionMut, fragment: &yrs::XmlFragmentRef) -> bool {
+    repair_document_in(txn, fragment, None)
+}
+
+/// [`repair_document`] under one document's policy.
+pub fn repair_document_for(
+    txn: &mut TransactionMut,
+    fragment: &yrs::XmlFragmentRef,
+    policy: &LinkPolicy,
+) -> bool {
+    repair_document_in(txn, fragment, Some(policy))
+}
+
+fn repair_document_in(
+    txn: &mut TransactionMut,
+    fragment: &yrs::XmlFragmentRef,
+    policy: Option<&LinkPolicy>,
+) -> bool {
     let mut elements = Vec::new();
     let mut texts = Vec::new();
     for child in fragment.children(txn) {
@@ -328,7 +386,7 @@ pub fn repair_document(txn: &mut TransactionMut, fragment: &yrs::XmlFragmentRef)
         }
         let safe = match element.get_attribute(txn, "url") {
             None | Some(Out::Any(Any::Undefined | Any::Null)) => true,
-            Some(Out::Any(Any::String(url))) => is_safe_file_url(&url),
+            Some(Out::Any(Any::String(url))) => is_safe_file_url_in(&url, policy),
             Some(_) => false,
         };
         if !safe {
@@ -468,9 +526,11 @@ fn collect<T: ReadTxn>(
 
 #[cfg(test)]
 mod tests {
+    use orbit_platform::Id;
     use serde_json::json;
 
     use super::*;
+    use crate::collab::{DocKind, LinkPolicy};
 
     const PAGE: &str = "0199a0b0-0000-7000-8000-000000000001";
 
@@ -614,6 +674,125 @@ mod tests {
                 .count(),
             MENTION_NAME_MAX_CHARS
         );
+    }
+
+    fn task_policy() -> LinkPolicy {
+        LinkPolicy {
+            kind: DocKind::Task,
+            workspace_id: Id::new_v7(),
+            doc_id: Id::new_v7(),
+        }
+    }
+
+    fn attachment_url(workspace: Id, task: Id) -> String {
+        format!(
+            "/api/v1/workspaces/{workspace}/tasks/{task}/attachments/{}/download",
+            Id::new_v7()
+        )
+    }
+
+    fn image(url: &str) -> Value {
+        json!({"type": "image", "props": {"url": url}})
+    }
+
+    #[test]
+    fn task_policy_keeps_own_attachment_url() {
+        let policy = task_policy();
+        let url = attachment_url(policy.workspace_id, policy.doc_id);
+        let sanitized = sanitize_blocks_for(&[image(&url)], &policy);
+        assert_eq!(sanitized[0]["props"]["url"], url.as_str());
+    }
+
+    #[test]
+    fn task_policy_keeps_another_task_attachment_of_the_workspace() {
+        let policy = task_policy();
+        let url = attachment_url(policy.workspace_id, Id::new_v7());
+        let sanitized = sanitize_blocks_for(&[image(&url)], &policy);
+        assert_eq!(sanitized[0]["props"]["url"], url.as_str());
+    }
+
+    #[test]
+    fn task_policy_blanks_another_workspace_attachment() {
+        let policy = task_policy();
+        let url = attachment_url(Id::new_v7(), policy.doc_id);
+        let sanitized = sanitize_blocks_for(&[image(&url)], &policy);
+        assert_eq!(sanitized[0]["props"]["url"], "");
+    }
+
+    #[test]
+    fn task_policy_blanks_page_file_url() {
+        let policy = task_policy();
+        let url = format!(
+            "/api/v1/workspaces/{}/pages/{}/files/{}",
+            policy.workspace_id,
+            Id::new_v7(),
+            Id::new_v7()
+        );
+        let sanitized = sanitize_blocks_for(&[image(&url)], &policy);
+        assert_eq!(sanitized[0]["props"]["url"], "");
+    }
+
+    #[test]
+    fn task_policy_drops_page_block() {
+        let blocks = [
+            json!({"type": "page", "props": {"pageId": PAGE}}),
+            json!({"type": "paragraph", "content": [{"type": "text", "text": "kept", "styles": {}}]}),
+        ];
+        let sanitized = sanitize_blocks_for(&blocks, &task_policy());
+        assert_eq!(sanitized.len(), 1);
+        assert_eq!(sanitized[0]["type"], "paragraph");
+    }
+
+    #[test]
+    fn page_policy_unchanged() {
+        let file = format!("/api/v1/workspaces/{PAGE}/pages/{PAGE}/files/{PAGE}");
+        let blocks = [
+            json!({"type": "page", "props": {"pageId": PAGE}}),
+            image(&file),
+            image("javascript:x"),
+        ];
+        let policy = LinkPolicy {
+            kind: DocKind::Page,
+            workspace_id: Id::new_v7(),
+            doc_id: Id::new_v7(),
+        };
+        assert_eq!(
+            sanitize_blocks_for(&blocks, &policy),
+            sanitize_blocks(&blocks)
+        );
+    }
+
+    #[test]
+    fn task_policy_repairs_live_foreign_attachment_url() {
+        use yrs::{Transact, WriteTxn};
+
+        use crate::collab::blocknote::{FRAGMENT, doc_to_blocks, new_doc, write_blocks};
+
+        let policy = task_policy();
+        let own = attachment_url(policy.workspace_id, policy.doc_id);
+        let foreign = attachment_url(Id::new_v7(), policy.doc_id);
+        let doc = new_doc(None);
+        {
+            let mut txn = doc.transact_mut();
+            let fragment = txn.get_or_insert_xml_fragment(FRAGMENT);
+            write_blocks(
+                &mut txn,
+                &fragment,
+                &[
+                    json!({"id": "a", "type": "image", "props": {"url": own}}),
+                    json!({"id": "b", "type": "image", "props": {"url": foreign}}),
+                ],
+            );
+        }
+        let repaired = {
+            let mut txn = doc.transact_mut();
+            let fragment = txn.get_or_insert_xml_fragment(FRAGMENT);
+            repair_document_for(&mut txn, &fragment, &policy)
+        };
+        assert!(repaired);
+        let blocks = doc_to_blocks(&doc);
+        assert_eq!(blocks[0]["props"]["url"], own.as_str());
+        assert_eq!(blocks[1]["props"]["url"], "");
     }
 
     #[test]

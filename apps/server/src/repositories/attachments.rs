@@ -177,7 +177,7 @@ impl AttachmentRepository {
             sqlx::query(
                 "SELECT id, workspace_id, task_id, comment_id, owner_id, display_name, media_type, \
                  byte_size, created_at FROM attachment_references WHERE workspace_id = $1 AND task_id = $2 \
-                 AND comment_id IS NOT DISTINCT FROM $3 AND (created_at > $4 OR (created_at = $5 AND id > $6)) \
+                 AND comment_id IS NOT DISTINCT FROM $3 AND inline = 0 AND (created_at > $4 OR (created_at = $5 AND id > $6)) \
                  ORDER BY created_at, id LIMIT $7",
             )
             .bind(workspace_id.to_string())
@@ -193,7 +193,7 @@ impl AttachmentRepository {
             sqlx::query(
                 "SELECT id, workspace_id, task_id, comment_id, owner_id, display_name, media_type, \
                  byte_size, created_at FROM attachment_references WHERE workspace_id = $1 AND task_id = $2 \
-                 AND comment_id IS NOT DISTINCT FROM $3 ORDER BY created_at, id LIMIT $4",
+                 AND comment_id IS NOT DISTINCT FROM $3 AND inline = 0 ORDER BY created_at, id LIMIT $4",
             )
             .bind(workspace_id.to_string())
             .bind(task_id.to_string())
@@ -390,12 +390,15 @@ impl AttachmentRepository {
         })
     }
 
+    /// Finalizes an upload as an attachment of the task or comment; `inline` files belong to
+    /// the text (description or comment) and are left out of the attachment lists.
     pub async fn finalize(
         &self,
         session: &AuthenticatedSession,
         workspace_id: Id,
         task_id: Id,
         comment_id: Option<Id>,
+        inline: bool,
         upload: &StagedUpload,
     ) -> Result<CreatedAttachment, AttachmentRepositoryError> {
         let (attachment, _) = self
@@ -405,6 +408,7 @@ impl AttachmentRepository {
                 task_id,
                 comment_id,
                 false,
+                inline,
                 "",
                 upload,
             )
@@ -427,6 +431,7 @@ impl AttachmentRepository {
                 task_id,
                 None,
                 true,
+                false,
                 request_id,
                 upload,
             )
@@ -442,6 +447,7 @@ impl AttachmentRepository {
         task_id: Id,
         comment_id: Option<Id>,
         create_comment: bool,
+        inline: bool,
         request_id: &str,
         upload: &StagedUpload,
     ) -> Result<(CreatedAttachment, Option<CommentRecord>), AttachmentRepositoryError> {
@@ -511,6 +517,7 @@ impl AttachmentRepository {
                 author_id: session.user.id,
                 parent_id: None,
                 body: String::new(),
+                body_json: None,
                 can_edit: true,
                 can_delete: true,
                 version: 0,
@@ -521,7 +528,10 @@ impl AttachmentRepository {
             None
         };
         let target_comment_id = comment.as_ref().map(|comment| comment.id).or(comment_id);
-        let reference = NewAttachmentReference::new(task_id, target_comment_id);
+        let reference = NewAttachmentReference {
+            inline,
+            ..NewAttachmentReference::new(task_id, target_comment_id)
+        };
         let finalized = finalization
             .finalize_in_transaction(&mut transaction, upload, reference, now)
             .await?;

@@ -111,6 +111,8 @@ pub struct NewAttachmentReference {
     pub id: Id,
     pub task_id: Id,
     pub comment_id: Option<Id>,
+    /// A file placed in a task description or comment text: not listed with the attachments.
+    pub inline: bool,
 }
 
 impl NewAttachmentReference {
@@ -120,6 +122,7 @@ impl NewAttachmentReference {
             id: Id::new_v7(),
             task_id,
             comment_id,
+            inline: false,
         }
     }
 }
@@ -228,8 +231,8 @@ impl UploadFinalization<'_> {
         sqlx::query(
             "INSERT INTO attachment_references (\
                 id, workspace_id, task_id, comment_id, owner_id, blob_id, display_name, media_type,\
-                byte_size, created_at\
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+                byte_size, created_at, inline\
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
         )
         .bind(attachment.id.to_string())
         .bind(upload.workspace_id.to_string())
@@ -241,6 +244,7 @@ impl UploadFinalization<'_> {
         .bind(&upload.detected_media_type)
         .bind(size_i64)
         .bind(now.as_millis())
+        .bind(i64::from(attachment.inline))
         .execute(&mut **transaction)
         .await?;
 

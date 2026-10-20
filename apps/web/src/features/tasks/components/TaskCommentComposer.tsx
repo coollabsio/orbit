@@ -1,105 +1,156 @@
 import { useShortcutTitle } from '@/shortcuts/shortcutText'
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUp, Paperclip2 as Paperclip, Xmark as X } from 'reicon-react'
+import { Suspense, useCallback, useMemo, useRef, useState } from 'react'
+import { toast } from 'sonner'
+import { ArrowUp, Paperclip2 as Paperclip } from 'reicon-react'
 import { cn } from 'cn'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
-import { UserAvatar } from '@/components/common/UserAvatar'
-import { Textarea } from '@/components/ui/textarea'
-import type { User } from '@/features/workspaces/models'
+import type { PageMentionMember } from '@/features/docs/editor/pageMentions'
+import { uploadInlineFile } from '@/features/tasks/api/inlineFiles'
+import { storageQuotaDetail } from '@/api/problem'
+import { fileBlock, isEmptyRichText } from '@/features/tasks/lib/richText'
+// Type-only import: erased at build time, so the BlockNote chunk stays lazy.
+import type { PageEditorHandle } from '@/features/docs/editor/PageEditor'
+import { EditorFallback, PageEditor } from './lazyEditor'
 
-export function TaskCommentComposer({ placeholder, pending, progress, error, members = [], compact, onSend }: { placeholder: string; pending: boolean; progress?: number; error?: string; members?: User[]; compact?: boolean; onSend: (body: string, files: File[], mentionedUserIds: string[]) => Promise<unknown> }) {
-  const [body, setBody] = useState('')
-  const [files, setFiles] = useState<File[]>([])
-  const [mentionedUserIds, setMentionedUserIds] = useState<string[]>([])
+/**
+ * A comment or reply field: rich text with @mentions, the slash menu and inline files (paste, drop, paperclip).
+ * Cmd/Ctrl+Enter sends. The draft stays while the task is open.
+ */
+export function TaskCommentComposer({
+  workspaceId,
+  taskId,
+  pending,
+  error,
+  members,
+  compact,
+  onSend,
+}: {
+  workspaceId: string
+  taskId: string
+  pending: boolean
+  error?: string
+  members: readonly PageMentionMember[] | null
+  compact?: boolean
+  onSend: (bodyJson: unknown[]) => Promise<unknown>
+}) {
+  const editorRef = useRef<PageEditorHandle | null>(null)
   const input = useRef<HTMLInputElement>(null)
-  // `pending` arrives a render late; this blocks a second click before it does
+  /** A reply field mounts its editor when it is first used (a thread list would mount one per thread). */
+  const [active, setActive] = useState(!compact)
+  const focusOnMount = useRef(false)
+  const setEditor = useCallback((handle: PageEditorHandle | null) => {
+    editorRef.current = handle
+    if (handle && focusOnMount.current) {
+      focusOnMount.current = false
+      handle.focus()
+    }
+  }, [])
+  /** Files still uploading: a send now would keep an empty image block. */
+  const [uploads, setUploads] = useState(0)
+  /** Bumped after a send: a fresh, empty editor. */
+  const [draftKey, setDraftKey] = useState(0)
+  const [hasContent, setHasContent] = useState(false)
+  // `pending` arrives a render late; this blocks a second send before it does
   const sending = useRef(false)
-  const mentionQuery = useMemo(() => {
-    const match = body.match(/(?:^|\s)@([^\s@]*)$/)
-    return match ? match[1].toLowerCase() : null
-  }, [body])
-  const suggestions = mentionQuery === null
-    ? []
-    : members.filter((member) => member.name.toLowerCase().includes(mentionQuery) || member.handle.toLowerCase().includes(mentionQuery)).slice(0, 8)
-  useEffect(() => {
-    if (files.length === 0 && input.current) input.current.value = ''
-  }, [files.length])
   const sendTitle = useShortcutTitle('detail.sendComment', 'Send')
+
   const send = async () => {
-    if (sending.current || pending || (!body.trim() && files.length === 0)) return
+    const content = editorRef.current?.getContent() ?? []
+    if (sending.current || pending || uploads > 0 || isEmptyRichText(content)) return
     sending.current = true
     try {
-      await onSend(body, files, mentionedUserIds)
-      setBody((current) => current === body ? '' : current)
-      setFiles((current) => current === files ? [] : current)
-      setMentionedUserIds((current) => current === mentionedUserIds ? [] : current)
+      await onSend(content)
+      setDraftKey((key) => key + 1)
+      setHasContent(false)
+    } catch {
+      // the draft stays; the caller shows the error
     } finally {
       sending.current = false
     }
   }
-  const insertMention = (member: User) => {
-    setBody((current) => current.replace(/@([^\s@]*)$/, `@${member.name} `))
-    setMentionedUserIds((current) => current.includes(member.id) ? current : [...current, member.id])
+  const uploadFile = useCallback(
+    async (file: File) => {
+      setUploads((count) => count + 1)
+      try {
+        return await uploadInlineFile(workspaceId, taskId, file)
+      } catch (failure) {
+        toast.error(storageQuotaDetail(failure) ?? `Could not upload “${file.name}”.`)
+        throw failure
+      } finally {
+        setUploads((count) => count - 1)
+      }
+    },
+    [workspaceId, taskId],
+  )
+  const attach = async (files: File[]) => {
+    for (const file of files) {
+      const url = await uploadFile(file).catch(() => null)
+      if (url) editorRef.current?.appendBlocks([fileBlock(file, url)])
+    }
   }
+  const mentions = useMemo(
+    () => ({ members, candidates: (members ?? []).filter((member) => !member.suspended), privatePage: false }),
+    [members],
+  )
+  const fileScope = useMemo(() => ({ workspaceId, taskId }), [workspaceId, taskId])
+
+  if (!active) {
+    return (
+      <button
+        type="button"
+        className="w-full cursor-text py-1 text-left text-[13px] text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        onClick={() => {
+          focusOnMount.current = true
+          setActive(true)
+        }}
+      >
+        Leave a reply…
+      </button>
+    )
+  }
+
   return (
-    // one box holds the field and its actions; a reply (`compact`) is a single line inside its thread card
-    <div
-      className={cn('relative flex flex-wrap items-end', compact ? 'gap-x-1' : 'rounded-[10px] border bg-card transition-colors focus-within:border-ring')}
-      onDrop={(event) => { event.preventDefault(); setFiles((current) => [...current, ...event.dataTransfer.files]) }}
-      onDragOver={(event) => event.preventDefault()}
-    >
-      {suggestions.length > 0 ? (
-        <div className="absolute bottom-full right-0 left-0 z-[5] mb-1.5 flex max-h-[200px] flex-col gap-px overflow-auto overscroll-contain rounded-lg border bg-popover p-1 shadow-lg" role="listbox" aria-label="Mention member">
-          {suggestions.map((member) => (
-            <Button variant="ghost" key={member.id} type="button" className="w-full justify-start font-normal" onMouseDown={(event) => { event.preventDefault(); insertMention(member) }}>
-              {/* decorative: the initials must not go into the button's name */}
-              <span className="flex" aria-hidden>
-                <UserAvatar user={member} size={20} />
-              </span>
-              @{member.name}
-            </Button>
-          ))}
-        </div>
-      ) : null}
-      <Textarea
-        className={cn(
-          'block max-h-60 min-h-0 resize-none overflow-y-auto rounded-none border-0 bg-transparent text-[13px] leading-5 focus-visible:ring-0 md:text-[13px] dark:bg-transparent',
-          compact ? 'w-auto min-w-0 flex-1 px-0 py-1' : 'min-h-12 basis-full px-3 pt-2.5 pb-0',
-        )}
-        rows={1}
-        value={body}
-        placeholder={placeholder}
-        onChange={(event) => setBody(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-            event.preventDefault()
-            void send()
-          }
-        }}
-        onPaste={(event) => {
-          const pasted = Array.from(event.clipboardData.files)
-          if (pasted.length > 0) setFiles((current) => [...current, ...pasted])
-        }}
-      />
-      {files.length > 0 ? <div className={cn('flex basis-full flex-wrap items-center gap-1.5', compact ? 'py-1' : 'px-3 pt-2')}>{files.map((file, index) => (
-        <Badge variant="outline" className="pr-0.5" key={`${file.name}-${index}`}>
-          {file.name}
-          <Button type="button" variant="ghost" size="icon-xs" className="size-4 rounded-full text-muted-foreground" aria-label={`Remove ${file.name}`} onClick={() => setFiles((current) => current.filter((_, itemIndex) => itemIndex !== index))}>
-            <X />
-          </Button>
-        </Badge>
-      ))}</div> : null}
+    // one box holds the field and its actions; a reply (`compact`) sits inside its thread card
+    <div data-realtime-safe="" className={cn('relative flex flex-wrap items-end', compact ? 'gap-x-1' : 'rounded-[10px] border bg-card transition-colors focus-within:border-ring')}>
+      <div className={cn('min-w-0', compact ? 'flex-1 py-1' : 'basis-full px-3 pt-2.5')}>
+        <Suspense fallback={<EditorFallback />}>
+          <PageEditor
+            key={draftKey}
+            ref={setEditor}
+            pageId={`comment:${taskId}:${draftKey}`}
+            profile="task"
+            fileScope={fileScope}
+            placeholder={compact ? 'reply' : 'comment'}
+            ariaLabel={compact ? 'Reply' : 'Comment'}
+            editable={!pending}
+            onChange={(content) => setHasContent(!isEmptyRichText(content))}
+            submitShortcut={() => void send()}
+            uploadFile={uploadFile}
+            mentions={mentions}
+            sideMenu={false}
+            className="text-[13px] [&_.bn-editor]:min-h-6"
+          />
+        </Suspense>
+      </div>
       {error ? <p role="alert" className={cn('basis-full text-xs text-destructive', !compact && 'px-3 pt-2')}>{error}</p> : null}
       <div className={cn('ml-auto flex items-center gap-1', !compact && 'p-1.5')}>
-        <input ref={input} type="file" multiple hidden aria-label="Attach comment files" onChange={(event) => setFiles(Array.from(event.target.files ?? []))} />
-        {progress !== undefined && (pending || error) ? <span role="status" aria-live="polite" className="text-xs text-muted-foreground/70 tabular-nums">Uploading {progress}%</span> : null}
+        <input
+          ref={input}
+          type="file"
+          multiple
+          hidden
+          aria-label="Attach comment files"
+          onChange={(event) => {
+            void attach(Array.from(event.target.files ?? []))
+            event.target.value = ''
+          }}
+        />
         <Tip label="Attach files"><Button variant="ghost" size="icon-sm" type="button" className="text-muted-foreground" aria-label="Attach" onClick={() => input.current?.click()}><Paperclip /></Button></Tip>
         {error ? (
           <Button type="button" size="sm" disabled={pending} onClick={() => void send()}>Retry</Button>
         ) : (
-          <Tip label={sendTitle}><Button type="button" size="icon-sm" className="rounded-full" aria-label={pending ? 'Sending…' : 'Send'} disabled={pending || (!body.trim() && files.length === 0)} onClick={() => void send()}><ArrowUp /></Button></Tip>
+          <Tip label={sendTitle}><Button type="button" size="icon-sm" className="rounded-full" aria-label={pending ? 'Sending…' : 'Send'} disabled={pending || !hasContent || uploads > 0} onClick={() => void send()}><ArrowUp /></Button></Tip>
         )}
       </div>
     </div>

@@ -22,7 +22,7 @@ use super::tasks::{TaskError, record_mutation, require_access, require_access_tx
 use super::teamspaces::{default_teamspace, teamspace_exists};
 use super::workspaces::WorkspaceError;
 use crate::audit::{self, AuditOutcome};
-use crate::collab::{CollabError, CollabHub, CollabLock};
+use crate::collab::{CollabError, CollabHub, CollabLock, DocKey};
 
 const TRASH_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
 const SEARCH_LIMIT: i64 = 20;
@@ -357,6 +357,9 @@ pub enum PageError {
     Corrupt,
     #[error("page repository is unavailable")]
     Unavailable(#[from] sqlx::Error),
+    /// Co-editing is at its memory budget, or another server reset the document: try again.
+    #[error("the page's co-editing document is busy")]
+    Busy,
 }
 
 impl From<CollabError> for PageError {
@@ -364,11 +367,9 @@ impl From<CollabError> for PageError {
         match error {
             CollabError::NotFound => Self::NotFound,
             CollabError::Unavailable(error) => Self::Unavailable(error),
-            CollabError::Overloaded | CollabError::Corrupt(_) => Self::Corrupt,
-            // Another server reset the document while this write waited: try again.
-            CollabError::Reset => Self::Unavailable(sqlx::Error::Protocol(
-                "co-editing document was reset".to_owned(),
-            )),
+            // the memory budget is full, or another server reset the document while this write waited
+            CollabError::Overloaded | CollabError::Reset => Self::Busy,
+            CollabError::Corrupt(_) => Self::Corrupt,
         }
     }
 }
@@ -615,7 +616,11 @@ impl PageRepository {
         let mut collab = match &changes.content {
             Some(_) => {
                 self.get_visible(workspace_id, page_id, actor_id).await?;
-                Some(CollabHub::of(&self.database).write(page_id).await?)
+                Some(
+                    CollabHub::of(&self.database)
+                        .write(DocKey::page(page_id))
+                        .await?,
+                )
             }
             None => None,
         };
@@ -979,7 +984,7 @@ impl PageRepository {
                 continue;
             };
             // The room is taken before the transaction (see `CollabHub`).
-            let mut collab = hub.write(linking_id).await?;
+            let mut collab = hub.write(DocKey::page(linking_id)).await?;
             let mut tx = self.database.immediate_transaction().await?;
             let Some(current) = page_by_id_in_tx(&mut tx, linking_id).await? else {
                 continue;
@@ -1656,7 +1661,9 @@ impl PageRepository {
     ) -> Result<PageRecord, PageError> {
         self.get_visible(workspace_id, page_id, actor_id).await?;
         // The room is held across the transaction, so no update lands between commit and flag.
-        let room: CollabLock = CollabHub::of(&self.database).lock_change(page_id).await?;
+        let room: CollabLock = CollabHub::of(&self.database)
+            .lock_change(DocKey::page(page_id))
+            .await?;
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let current = page_in_tx(&mut tx, workspace_id, page_id, actor_id, false).await?;

@@ -1,6 +1,6 @@
 # Read-only task MCP
 
-Orbit serves a read-only MCP endpoint at `<http.public_origin>/mcp`. It uses
+Orbit serves a read-only MCP endpoint at `<public origin>/mcp`. It uses
 Streamable HTTP in the existing server. No separate process is needed.
 
 ## Client setup
@@ -65,7 +65,7 @@ The public origin must match the HTTPS address used by the MCP client. For this
 repository's development server, configure Jean's Run command as follows:
 
 ```bash
-ORBIT__HTTP__PUBLIC_ORIGIN=https://devserver.tail661ee3.ts.net:18888 \
+ORBIT_PUBLIC_ORIGIN=https://devserver.tail661ee3.ts.net:18888 \
 ORBIT_DEV_API_PORT=18080 ORBIT_DEV_WEB_PORT=18888 just dev
 ```
 
@@ -99,7 +99,7 @@ alternative.
 - To revoke access, open **Settings → Sessions → Connected apps** in Orbit and
   disconnect the client.
 - If the protected-resource address does not match, correct
-  `ORBIT__HTTP__PUBLIC_ORIGIN`, restart Orbit, then authenticate again.
+  `ORBIT_PUBLIC_ORIGIN`, restart Orbit, then authenticate again.
 - If tool discovery fails after a server update, reconnect the server in
   Claude's `/mcp` menu or start a new Claude session.
 
@@ -107,7 +107,7 @@ alternative.
 
 Orbit includes its own authorization server. No external identity provider is
 needed. In your MCP client, choose **Streamable HTTP** and **OAuth**, then enter
-`<http.public_origin>/mcp`.
+`<public origin>/mcp`.
 
 1. The client discovers Orbit's authorization server and registers as a public
    client with a callback URI.
@@ -165,7 +165,7 @@ origins. Restart an already-running dev command after changing its port or origi
 
 A local client can connect to these URLs. A cloud-hosted client cannot reach your
 loopback server. It needs a public HTTPS endpoint and a matching
-`ORBIT__HTTP__PUBLIC_ORIGIN` value. Do not expose a development server to the
+`ORBIT_PUBLIC_ORIGIN` value. Do not expose a development server to the
 internet without separate access controls. Production still requires HTTPS.
 
 ## API-token alternative
@@ -200,7 +200,7 @@ There are no document, mail, chat, administration, or mutation tools.
 
 ## Deployment
 
-Set `http.public_origin` to the public HTTPS origin. The reverse proxy must keep
+Set `ORBIT_PUBLIC_ORIGIN` to the public HTTPS origin. The reverse proxy must keep
 the public `Host` header and forward `Authorization` to Orbit. Use the existing
 trusted-proxy configuration so Orbit can verify HTTPS.
 
