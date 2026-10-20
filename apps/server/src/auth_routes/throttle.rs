@@ -169,7 +169,9 @@ impl SharedThrottler {
             .execute(&mut *transaction)
             .await?;
         // What no longer counts.
-        sqlx::query("DELETE FROM auth_throttle_ips WHERE failed_at <= $1")
+        // Only this scope: others (`oauth.register`) count over a longer time.
+        sqlx::query("DELETE FROM auth_throttle_ips WHERE scope = $1 AND failed_at <= $2")
+            .bind(self.scope)
             .bind(cutoff)
             .execute(&mut *transaction)
             .await?;

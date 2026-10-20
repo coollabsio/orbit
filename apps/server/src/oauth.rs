@@ -1,16 +1,19 @@
 //! OAuth authorization code flow for Orbit's read-only MCP resource.
 //! The application owns consent and persistence; oxide-auth validates S256 PKCE.
 use std::borrow::Cow;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::sync::Arc;
 
-use axum::extract::{DefaultBodyLimit, Form, Path, Query, Request, State};
+use axum::extract::{DefaultBodyLimit, Extension, Form, Path, Query, Request, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use base64::Engine;
-use orbit_platform::{Backend, Database, Flag, Id, Row, TimestampMillis, generate_opaque_token};
+use orbit_platform::{
+    Backend, ClientIp, Database, Flag, Id, Row, TimestampMillis, generate_opaque_token,
+};
 use oxide_auth::code_grant::extensions::Pkce;
 use oxide_auth::primitives::grant::Value as PkceValue;
 use serde::{Deserialize, Serialize};
@@ -29,6 +32,13 @@ const SCOPE: &str = "tasks:read";
 const ACCESS_SECONDS: i64 = 15 * 60;
 const REFRESH_MILLIS: i64 = 30 * 24 * 60 * 60 * 1000;
 const REQUEST_MILLIS: i64 = 10 * 60 * 1000;
+const DAY_MILLIS: i64 = 24 * 60 * 60 * 1000;
+/// Registered clients on the whole instance: the last guard, after the per-IP limit and pruning.
+const MAX_CLIENTS: i64 = 10_000;
+/// Clients one IP address (an IPv6 /64) may register in a day, on all servers together. The times
+/// are kept in `auth_throttle_ips` under this scope.
+const REGISTRATIONS_PER_IP: i64 = 20;
+const REGISTRATION_SCOPE: &str = "oauth.register";
 
 #[derive(Clone)]
 pub struct OAuthState {
@@ -172,6 +182,12 @@ impl OAuthError {
             code,
         }
     }
+    fn throttled() -> Self {
+        Self {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            code: "temporarily_unavailable",
+        }
+    }
     fn unauthorized() -> Self {
         Self {
             status: StatusCode::UNAUTHORIZED,
@@ -229,6 +245,7 @@ struct Registration {
 }
 async fn register(
     State(state): State<OAuthState>,
+    client_ip: Option<Extension<ClientIp>>,
     Json(input): Json<Registration>,
 ) -> Result<Response, OAuthError> {
     if input.redirect_uris.is_empty()
@@ -257,13 +274,36 @@ async fn register(
     }
     let id = format!("orbit-client-{}", Id::new_v7());
     let now = TimestampMillis::now().as_millis();
+    let ip = registration_ip(client_ip.map(|Extension(ip)| ip.0));
     let mut tx = state.database.immediate_transaction().await?;
-    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM oauth_clients")
-        .fetch_one(&mut *tx)
+    sqlx::query("DELETE FROM auth_throttle_ips WHERE scope = $1 AND failed_at <= $2")
+        .bind(REGISTRATION_SCOPE)
+        .bind(now - DAY_MILLIS)
+        .execute(&mut *tx)
         .await?;
-    if count >= 10_000 {
-        return Err(OAuthError::invalid("temporarily_unavailable"));
+    let from_ip: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM auth_throttle_ips WHERE scope = $1 AND ip = $2")
+            .bind(REGISTRATION_SCOPE)
+            .bind(&ip)
+            .fetch_one(&mut *tx)
+            .await?;
+    if from_ip >= REGISTRATIONS_PER_IP {
+        return Err(OAuthError::throttled());
     }
+    if client_count(&mut tx).await? >= MAX_CLIENTS {
+        // Under pressure, a client that is not in use goes after the time an authorization takes.
+        prune(&mut tx, now, REQUEST_MILLIS).await?;
+        if client_count(&mut tx).await? >= MAX_CLIENTS {
+            tx.commit().await?;
+            return Err(OAuthError::invalid("temporarily_unavailable"));
+        }
+    }
+    sqlx::query("INSERT INTO auth_throttle_ips (scope, ip, failed_at) VALUES ($1, $2, $3)")
+        .bind(REGISTRATION_SCOPE)
+        .bind(&ip)
+        .bind(now)
+        .execute(&mut *tx)
+        .await?;
     sqlx::query(
         "INSERT INTO oauth_clients (id, name, redirect_uris, created_at) VALUES ($1, $2, $3, $4)",
     )
@@ -277,6 +317,47 @@ async fn register(
     Ok((StatusCode::CREATED, Json(json!({"client_id": id, "client_name": name, "client_id_issued_at": now / 1000,
         "redirect_uris": input.redirect_uris, "token_endpoint_auth_method": "none",
         "grant_types": ["authorization_code", "refresh_token"], "response_types": ["code"], "scope": SCOPE}))).into_response())
+}
+
+/// The address that registrations count against: an IPv6 client usually holds a whole /64.
+fn registration_ip(ip: Option<IpAddr>) -> String {
+    match ip.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)) {
+        IpAddr::V6(ip) => Ipv6Addr::from(u128::from(ip) & (u128::MAX << 64)).to_string(),
+        ip => ip.to_string(),
+    }
+}
+
+async fn client_count(tx: &mut Transaction<'_, Any>) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar("SELECT count(*) FROM oauth_clients")
+        .fetch_one(&mut **tx)
+        .await
+}
+
+/// Deletes the clients that are not in use (with their grants, tokens and requests): registered
+/// over a day ago, with no authorization in progress and no grant that was made, revoked or
+/// could refresh in the last day. Runs with the daily retention job.
+pub async fn prune_clients(database: &Database) -> Result<u64, sqlx::Error> {
+    let mut tx = database.immediate_transaction().await?;
+    let deleted = prune(&mut tx, TimestampMillis::now().as_millis(), DAY_MILLIS).await?;
+    tx.commit().await?;
+    Ok(deleted)
+}
+
+/// Deletes the clients that have been unused for `idle` milliseconds; see [`prune_clients`].
+async fn prune(tx: &mut Transaction<'_, Any>, now: i64, idle: i64) -> Result<u64, sqlx::Error> {
+    let deleted = sqlx::query(
+        "DELETE FROM oauth_clients WHERE created_at <= $1 \
+         AND NOT EXISTS (SELECT 1 FROM oauth_requests r WHERE r.client_id = oauth_clients.id AND r.expires_at > $2) \
+         AND NOT EXISTS (SELECT 1 FROM oauth_grants g WHERE g.client_id = oauth_clients.id \
+         AND (g.created_at > $1 OR g.revoked_at > $1 OR (g.revoked_at IS NULL \
+         AND EXISTS (SELECT 1 FROM oauth_tokens t WHERE t.grant_id = g.id AND t.refresh_expires_at > $1))))",
+    )
+    .bind(now - idle)
+    .bind(now)
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    Ok(deleted)
 }
 
 fn valid_redirect(raw: &str) -> bool {
