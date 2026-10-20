@@ -110,6 +110,28 @@ export function problemOfClose(code: number): CollabProblem | null {
   }
 }
 
+/** What a screen does about a terminal problem (pages and task descriptions handle each the same way). */
+export type CollabProblemAction = 'leave' | 'unauthorized' | 'reopen' | 'rate-limited' | 'notice'
+
+export function collabProblemAction(problem: CollabProblem): CollabProblemAction {
+  switch (problem) {
+    case 'gone':
+    case 'forbidden':
+      // trashed, moved out of reach or access removed
+      return 'leave'
+    case 'session':
+      return 'unauthorized'
+    case 'reset':
+      // the server's document was reset (new epoch, lock change): load again and reconnect
+      return 'reopen'
+    case 'rate-limited':
+      return 'rate-limited'
+    case 'too-large':
+    case 'protocol':
+      return 'notice'
+  }
+}
+
 const realTimers: CollabTimers = {
   set: (callback, ms) => setTimeout(callback, ms),
   clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),

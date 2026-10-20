@@ -1,12 +1,10 @@
 import { confirmAction } from '@/components/common/confirmAction'
 import { keepPreviousData, queryOptions, useMutation, useInfiniteQuery, useQueries, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
-import { useRef, useState } from 'react'
 import { apiClient } from '@/api/client'
 import type { createApiClient } from '@/api/client'
 import { fetchAllPages } from '@/api/pagination'
 import {
   bulkTasks,
-  createAttachmentComment,
   createComment,
   createTask,
   createTaskRelation,
@@ -27,8 +25,6 @@ import {
   restoreTask,
   updateComment,
   updateTask,
-  uploadCommentAttachments,
-  uploadTaskAttachments,
 } from '@/api/generated/sdk.gen'
 import type {
   BulkItem,
@@ -46,10 +42,7 @@ import type {
 import { queryKeys } from '@/api/queryKeys'
 import { announceAutoClosed } from './autoClosed'
 import { isTaskVersionConflict } from './conflicts'
-import { commentUploadMode } from './commentUpload'
 import { findCachedTask, patchWorkspaceTask, reconcileWorkspaceTask, restoreWorkspaceTasks, snapshotTasks, type WorkspaceTaskSnapshot } from './optimistic'
-import { shrinkImage } from '@/lib/shrinkImage'
-import { PartialUploadError, uploadFiles } from './uploadQueue'
 import { isTaskUuid, normalizeTaskParam, taskSlug } from '@/lib/taskLinks'
 import { loadFailed } from '@/lib/connection'
 
@@ -536,82 +529,28 @@ export function useRestoreTask(workspaceId: string) {
   })
 }
 
+/** Sends a comment (or a reply with `parentId`); files are already in it as inline attachments. */
 export function useCreateTaskComment(workspaceId: string, taskId: string) {
   const queryClient = useQueryClient()
-  const [progress, setProgress] = useState<number>()
-  const [remainingCount, setRemainingCount] = useState(0)
-  const resume = useRef<{ signature: string; commentId: string; version: number; remaining: File[]; total: number } | null>(null)
-  const mutation = useMutation({
-    mutationFn: async (input: { body: string; parentId?: string; files: File[]; mentionedUserIds?: string[] }) => {
-      const { body, parentId, files, mentionedUserIds = [] } = input
-      const signature = JSON.stringify([body, parentId ?? null, mentionedUserIds, files.map((file) => [file.name, file.size, file.type, file.lastModified])])
-      if (resume.current && resume.current.signature !== signature) {
-        await deleteComment({
-          client: apiClient,
-          path: { workspace_id: workspaceId, task_id: taskId, comment_id: resume.current.commentId },
-          query: { expected_version: resume.current.version },
-          throwOnError: true,
-        })
-        resume.current = null
-      }
-
-      let state = resume.current
-      if (!state) {
-        let comment: CommentRecord
-        let remaining = files
-        setProgress(files.length > 0 ? 0 : undefined)
-        setRemainingCount(files.length)
-        const mode = commentUploadMode(body, files.length)
-        if (mode === 'text') {
-          const response = await createComment({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId }, body: { body, parent_id: parentId, mentioned_user_ids: mentionedUserIds }, throwOnError: true })
-          comment = required(response.data, 'Create comment response was empty.')
-        } else if (mode === 'attachment-only') {
-          const [first, ...rest] = files
-          if (!first) throw new Error('A comment attachment was missing.')
-          const response = await createAttachmentComment({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId }, body: { file: await shrinkImage(first) }, throwOnError: true })
-          comment = required(response.data, 'Attachment comment response was empty.').comment
-          remaining = rest
-          setProgress(Math.round(100 / files.length))
-        } else {
-          throw new Error('A comment needs text or an attachment.')
-        }
-        state = { signature, commentId: comment.id, version: comment.version, remaining, total: files.length }
-        resume.current = state
-      }
-
-      const completedBefore = state.total - state.remaining.length
-      try {
-        await uploadFiles(
-          state.remaining,
-          (file) => uploadCommentAttachments({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId, comment_id: state.commentId }, body: { file }, throwOnError: true }),
-          (remainingProgress) => setProgress(Math.round(((completedBefore + remainingProgress * state.remaining.length / 100) / state.total) * 100)),
-        )
-      } catch (error) {
-        if (error instanceof PartialUploadError) {
-          state.remaining = error.remaining
-          setRemainingCount(error.remaining.length)
-        }
-        throw error
-      }
-      const commentId = state.commentId
-      resume.current = null
-      setRemainingCount(0)
-      if (state.total > 0) setProgress(100)
-      return commentId
+  return useMutation({
+    mutationFn: async ({ bodyJson, parentId }: { bodyJson: unknown[]; parentId?: string }) => {
+      const response = await createComment({
+        client: apiClient,
+        path: { workspace_id: workspaceId, task_id: taskId },
+        body: { body_json: bodyJson as Array<Record<string, unknown>>, parent_id: parentId },
+        throwOnError: true,
+      })
+      return required(response.data, 'Create comment response was empty.')
     },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.comments(workspaceId, taskId) })
-      void queryClient.invalidateQueries({ queryKey: queryKeys.attachments(workspaceId, taskId) })
-    },
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.comments(workspaceId, taskId) }),
   })
-  return { ...mutation, progress, remainingCount }
 }
 
 export function useUpdateTaskComment(workspaceId: string, taskId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async ({ commentId, body, version }: { commentId: string; body: string; version: number }) => {
-      const { data } = await updateComment({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId, comment_id: commentId }, body: { body, expected_version: version }, throwOnError: true })
+    mutationFn: async ({ commentId, bodyJson, version }: { commentId: string; bodyJson: unknown[]; version: number }) => {
+      const { data } = await updateComment({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId, comment_id: commentId }, body: { body_json: bodyJson as Array<Record<string, unknown>>, expected_version: version }, throwOnError: true })
       return required(data, 'Update comment response was empty.')
     },
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.comments(workspaceId, taskId) }),
@@ -626,36 +565,6 @@ export function useDeleteTaskComment(workspaceId: string, taskId: string) {
     },
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.comments(workspaceId, taskId) }),
   })
-}
-
-export function useUploadTaskAttachments(workspaceId: string, taskId: string) {
-  const queryClient = useQueryClient()
-  const [progress, setProgress] = useState(0)
-  const [remainingCount, setRemainingCount] = useState(0)
-  const remaining = useRef<File[]>([])
-  const mutation = useMutation({
-    mutationFn: async (files: File[]) => {
-      setProgress(0)
-      setRemainingCount(files.length)
-      try {
-        await uploadFiles(
-          files,
-          (file) => uploadTaskAttachments({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId }, body: { file }, throwOnError: true }),
-          setProgress,
-        )
-      } catch (error) {
-        if (error instanceof PartialUploadError) {
-          remaining.current = error.remaining
-          setRemainingCount(error.remaining.length)
-        }
-        throw error
-      }
-      remaining.current = []
-      setRemainingCount(0)
-    },
-    onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.attachments(workspaceId, taskId) }),
-  })
-  return { ...mutation, progress, remainingCount, retry: () => mutation.mutate(remaining.current) }
 }
 
 export function useDeleteTaskAttachment(workspaceId: string, taskId: string) {

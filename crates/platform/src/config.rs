@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::fmt;
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::Read;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::{Path, PathBuf};
@@ -8,26 +8,28 @@ use std::str::FromStr;
 
 use axum::http::Uri;
 use ipnet::IpNet;
-use serde::Deserialize;
 use thiserror::Error;
 
 const MAX_SECRET_FILE_BYTES: u64 = 64 * 1024;
-const HTTP_PORT_ENV: &str = "ORBIT__HTTP__PORT";
-const HTTP_BIND_ENV: &str = "ORBIT__HTTP__BIND";
-const HTTP_PUBLIC_ORIGIN_ENV: &str = "ORBIT__HTTP__PUBLIC_ORIGIN";
-const HTTP_TRUSTED_PROXIES_ENV: &str = "ORBIT__HTTP__TRUSTED_PROXIES";
-const HTTP_SHUTDOWN_DELAY_ENV: &str = "ORBIT__HTTP__SHUTDOWN_DELAY_SECONDS";
-const ENVIRONMENT_ENV: &str = "ORBIT__ENVIRONMENT";
-const DATA_DATABASE_ENV: &str = "ORBIT__DATA__DATABASE";
-const DATA_DATABASE_URL_ENV: &str = "ORBIT__DATA__DATABASE_URL";
-const DATA_ATTACHMENTS_ENV: &str = "ORBIT__DATA__ATTACHMENTS";
-const DATA_BACKUPS_ENV: &str = "ORBIT__DATA__BACKUPS";
-const JOBS_CONCURRENCY_ENV: &str = "ORBIT__JOBS__CONCURRENCY";
-const UPLOADS_MAX_FILE_BYTES_ENV: &str = "ORBIT__UPLOADS__MAX_FILE_BYTES";
-const UPLOADS_MAX_REQUEST_BYTES_ENV: &str = "ORBIT__UPLOADS__MAX_REQUEST_BYTES";
-const METRICS_LISTEN_ENV: &str = "ORBIT__METRICS__LISTEN";
-const RATE_LIMITS_ENV_PREFIX: &str = "ORBIT__RATE_LIMITS__";
-const SECRETS_ENV_PREFIX: &str = "ORBIT__SECRETS__";
+const HTTP_PORT_ENV: &str = "ORBIT_PORT";
+const HTTP_BIND_ENV: &str = "ORBIT_BIND";
+const HTTP_PUBLIC_ORIGIN_ENV: &str = "ORBIT_PUBLIC_ORIGIN";
+const HTTP_TRUSTED_PROXIES_ENV: &str = "ORBIT_TRUSTED_PROXIES";
+const HTTP_SHUTDOWN_DELAY_ENV: &str = "ORBIT_SHUTDOWN_DELAY_SECONDS";
+const ENVIRONMENT_ENV: &str = "ORBIT_ENV";
+const DATA_DATABASE_ENV: &str = "ORBIT_DATABASE_PATH";
+const DATA_DATABASE_URL_ENV: &str = "ORBIT_DATABASE_URL";
+const DATA_ATTACHMENTS_ENV: &str = "ORBIT_ATTACHMENTS_PATH";
+const DATA_BACKUPS_ENV: &str = "ORBIT_BACKUPS_PATH";
+const JOBS_CONCURRENCY_ENV: &str = "ORBIT_JOBS_CONCURRENCY";
+const UPLOADS_MAX_FILE_BYTES_ENV: &str = "ORBIT_UPLOAD_MAX_FILE_BYTES";
+const UPLOADS_MAX_REQUEST_BYTES_ENV: &str = "ORBIT_UPLOAD_MAX_REQUEST_BYTES";
+const METRICS_LISTEN_ENV: &str = "ORBIT_METRICS_LISTEN";
+const RATE_LIMITS_ENV_PREFIX: &str = "ORBIT_RATE_LIMIT_";
+const APP_KEY_ENV: &str = "ORBIT_APP_KEY";
+const APP_KEY_FILE_ENV: &str = "ORBIT_APP_KEY_FILE";
+/// Variables that scripts and tests use, not the server.
+const IGNORED_ENV_PREFIXES: [&str; 2] = ["ORBIT_DEV_", "ORBIT_TEST_"];
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct Config {
@@ -38,7 +40,9 @@ pub struct Config {
     pub uploads: UploadConfig,
     pub metrics: MetricsConfig,
     pub rate_limits: RateLimitConfig,
-    pub secrets: BTreeMap<String, Secret>,
+    /// The key for secrets saved in the database (`ORBIT_APP_KEY`). Required: [`Config::validate`]
+    /// refuses a configuration without it.
+    pub app_key: Option<AppKey>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -183,11 +187,10 @@ pub struct MetricsConfig {
     pub listen: Option<SocketAddr>,
 }
 
-/// `[rate_limits]`. The `*_per_minute` limits apply to each client IP address, each credential
+/// `ORBIT_RATE_LIMIT_<FIELD>`. The `*_per_minute` limits apply to each client IP address, each credential
 /// (session or token) and, multiplied by `workspace_multiplier`, each workspace. The email limits
 /// hold for every server of the database.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
-#[serde(default, deny_unknown_fields)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RateLimitConfig {
     pub authentication_per_minute: u32,
     pub recovery_per_minute: u32,
@@ -221,7 +224,7 @@ impl Default for RateLimitConfig {
 }
 
 impl RateLimitConfig {
-    /// The setting named `name` (as in the TOML file), for the environment overrides.
+    /// The setting named `name` (the lowercase rest of its `ORBIT_RATE_LIMIT_` variable).
     fn setting_mut(&mut self, name: &str) -> Option<&mut u32> {
         Some(match name {
             "authentication_per_minute" => &mut self.authentication_per_minute,
@@ -257,23 +260,26 @@ impl RateLimitConfig {
             self.general_per_minute,
         ];
         if per_minute.contains(&0) {
-            return invalid("rate_limits", "all endpoint-class limits must be positive");
+            return invalid(
+                "ORBIT_RATE_LIMIT_*",
+                "all endpoint-class limits must be positive",
+            );
         }
         if per_minute.into_iter().any(|limit| limit > 1_000_000) {
             return invalid(
-                "rate_limits",
+                "ORBIT_RATE_LIMIT_*",
                 "endpoint-class limits cannot exceed 1000000 per minute",
             );
         }
         if !(1..=1_000).contains(&self.workspace_multiplier) {
             return invalid(
-                "rate_limits.workspace_multiplier",
+                "ORBIT_RATE_LIMIT_WORKSPACE_MULTIPLIER",
                 "must be between 1 and 1000",
             );
         }
         if self.account_email_cooldown_seconds > 86_400 {
             return invalid(
-                "rate_limits.account_email_cooldown_seconds",
+                "ORBIT_RATE_LIMIT_ACCOUNT_EMAIL_COOLDOWN_SECONDS",
                 "cannot exceed 86400 seconds",
             );
         }
@@ -287,7 +293,7 @@ impl RateLimitConfig {
             .any(|limit| !(1..=100_000).contains(&limit))
         {
             return invalid(
-                "rate_limits",
+                "ORBIT_RATE_LIMIT_*",
                 "daily email limits must be between 1 and 100000",
             );
         }
@@ -295,49 +301,45 @@ impl RateLimitConfig {
     }
 }
 
-#[derive(Clone, Eq, PartialEq)]
-pub struct Secret(String);
+/// The 32-byte key that encrypts secrets saved in the database. Set as base64 in `ORBIT_APP_KEY`.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub struct AppKey([u8; 32]);
 
-impl Secret {
+impl AppKey {
     #[must_use]
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
+    pub const fn new(bytes: [u8; 32]) -> Self {
+        Self(bytes)
     }
 
     #[must_use]
-    pub fn expose(&self) -> &str {
+    pub const fn bytes(&self) -> &[u8; 32] {
         &self.0
     }
 }
 
-impl fmt::Debug for Secret {
+impl FromStr for AppKey {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        use base64::Engine as _;
+
+        base64::engine::general_purpose::STANDARD
+            .decode(value.trim())
+            .ok()
+            .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
+            .map(Self)
+            .ok_or(())
+    }
+}
+
+impl fmt::Debug for AppKey {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("[REDACTED]")
     }
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct ConfigOverride {
-    pub http_port: Option<u16>,
-}
-
-#[derive(Clone, Eq, PartialEq)]
-pub struct ConfigSources {
-    pub path: PathBuf,
-    pub env: BTreeMap<String, String>,
-    pub cli: ConfigOverride,
-}
-
 #[derive(Debug, Error)]
 pub enum ConfigError {
-    #[error("failed to read configuration file {path}: {source}")]
-    ReadConfig {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-    #[error("invalid configuration file {path}")]
-    ParseConfig { path: PathBuf },
     #[error("invalid value for {key}: {value}")]
     InvalidEnvironment { key: String, value: String },
     #[error("invalid configuration setting {key}: {detail}")]
@@ -362,29 +364,6 @@ pub enum ConfigError {
 }
 
 impl Config {
-    pub fn load(sources: ConfigSources) -> Result<Self, ConfigError> {
-        let contents =
-            fs::read_to_string(&sources.path).map_err(|source| ConfigError::ReadConfig {
-                path: sources.path.clone(),
-                source,
-            })?;
-        let raw: RawConfig = toml::from_str(&contents).map_err(|_| ConfigError::ParseConfig {
-            path: sources.path.clone(),
-        })?;
-        let uses_default_origin = raw.http.public_origin.is_none();
-        let mut config = raw.into_config()?;
-
-        apply_environment(&mut config, &sources.env)?;
-        if let Some(port) = sources.cli.http_port {
-            config.http.port = port;
-        }
-        if uses_default_origin && !sources.env.contains_key(HTTP_PUBLIC_ORIGIN_ENV) {
-            config.http.public_origin = default_public_origin(config.http.bind, config.http.port);
-        }
-        config.validate()?;
-        Ok(config)
-    }
-
     pub fn from_environment(env: BTreeMap<String, String>) -> Result<Self, ConfigError> {
         let mut config = Self::default();
         apply_environment(&mut config, &env)?;
@@ -409,7 +388,7 @@ impl Config {
             });
         if !valid_origin {
             return Err(ConfigError::InvalidSetting {
-                key: "http.public_origin",
+                key: HTTP_PUBLIC_ORIGIN_ENV,
                 detail: "must be an absolute http or https origin without a path or query"
                     .to_owned(),
             });
@@ -417,31 +396,34 @@ impl Config {
         match self.environment {
             EnvironmentMode::Unspecified => {
                 return Err(ConfigError::InvalidSetting {
-                    key: "environment",
+                    key: ENVIRONMENT_ENV,
                     detail: "must be explicitly set to development or production".to_owned(),
                 });
             }
             EnvironmentMode::Development if !self.http.bind.is_loopback() => {
                 return Err(ConfigError::InvalidSetting {
-                    key: "http.bind",
+                    key: HTTP_BIND_ENV,
                     detail: "development mode must bind to a loopback address".to_owned(),
                 });
             }
             EnvironmentMode::Development if !self.http.trusted_proxies.is_empty() => {
                 return Err(ConfigError::InvalidSetting {
-                    key: "http.trusted_proxies",
+                    key: HTTP_TRUSTED_PROXIES_ENV,
                     detail: "development mode does not accept trusted proxies".to_owned(),
                 });
             }
             EnvironmentMode::Production if !self.http.public_origin.starts_with("https://") => {
                 return Err(ConfigError::InvalidSetting {
-                    key: "http.public_origin",
-                    detail: "production mode requires an https public origin".to_owned(),
+                    key: HTTP_PUBLIC_ORIGIN_ENV,
+                    detail: format!(
+                        "production mode requires an https public origin, got {:?}",
+                        self.http.public_origin
+                    ),
                 });
             }
             EnvironmentMode::Production if self.http.trusted_proxies.is_empty() => {
                 return Err(ConfigError::InvalidSetting {
-                    key: "http.trusted_proxies",
+                    key: HTTP_TRUSTED_PROXIES_ENV,
                     detail:
                         "production mode requires at least one trusted proxy for the HTTPS boundary"
                             .to_owned(),
@@ -453,42 +435,39 @@ impl Config {
             && !(url.starts_with("postgres://") || url.starts_with("postgresql://"))
         {
             return Err(ConfigError::InvalidSetting {
-                key: "data.database_url",
+                key: DATA_DATABASE_URL_ENV,
                 detail: "must be a postgres:// or postgresql:// URL".to_owned(),
             });
         }
-        // With Postgres the database lives on another host and the server can be replaced, so the key
-        // for saved secrets (the S3 secret among them) must come from the configuration, not an
-        // `app.key` file on this server's disk.
-        if self.data.database_url.is_some() && !self.secrets.contains_key("app_key") {
+        if self.app_key.is_none() {
             return Err(ConfigError::InvalidSetting {
-                key: "secrets.app_key",
-                detail: "a Postgres database (data.database_url) needs secrets.app_key \
-                         (base64 of 32 random bytes): the server keeps no app.key file"
+                key: APP_KEY_ENV,
+                detail: "is required: create it with `openssl rand -base64 32` and keep a copy \
+                         outside the server, because saved secrets cannot be read without it"
                     .to_owned(),
             });
         }
         if self.jobs.concurrency == 0 {
             return Err(ConfigError::InvalidSetting {
-                key: "jobs.concurrency",
+                key: JOBS_CONCURRENCY_ENV,
                 detail: "must be positive".to_owned(),
             });
         }
         if self.uploads.max_file_bytes == 0 {
             return Err(ConfigError::InvalidSetting {
-                key: "uploads.max_file_bytes",
+                key: UPLOADS_MAX_FILE_BYTES_ENV,
                 detail: "must be positive".to_owned(),
             });
         }
         if self.uploads.max_request_bytes < self.uploads.max_file_bytes {
             return Err(ConfigError::InvalidSetting {
-                key: "uploads.max_request_bytes",
-                detail: "must be at least uploads.max_file_bytes".to_owned(),
+                key: UPLOADS_MAX_REQUEST_BYTES_ENV,
+                detail: "must be at least ORBIT_UPLOAD_MAX_FILE_BYTES".to_owned(),
             });
         }
         if self.http.shutdown_delay_seconds > 300 {
             return Err(ConfigError::InvalidSetting {
-                key: "http.shutdown_delay_seconds",
+                key: HTTP_SHUTDOWN_DELAY_ENV,
                 detail: "the delay cannot exceed 300 seconds".to_owned(),
             });
         }
@@ -496,166 +475,14 @@ impl Config {
     }
 }
 
-#[derive(Deserialize, Default)]
-#[serde(default, deny_unknown_fields)]
-struct RawConfig {
-    environment: String,
-    http: RawHttpConfig,
-    data: RawDataConfig,
-    jobs: RawJobsConfig,
-    uploads: RawUploadConfig,
-    metrics: RawMetricsConfig,
-    rate_limits: RateLimitConfig,
-    secrets: BTreeMap<String, String>,
-}
-
-impl RawConfig {
-    fn into_config(self) -> Result<Config, ConfigError> {
-        let bind = parse_setting("http.bind", &self.http.bind)?;
-        let trusted_proxies = self
-            .http
-            .trusted_proxies
-            .iter()
-            .map(|value| parse_setting("http.trusted_proxies", value))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Config {
-            environment: parse_setting("environment", &self.environment)?,
-            http: HttpConfig {
-                bind,
-                port: self.http.port,
-                public_origin: self
-                    .http
-                    .public_origin
-                    .unwrap_or_else(|| default_public_origin(bind, self.http.port)),
-                trusted_proxies,
-                shutdown_delay_seconds: self.http.shutdown_delay_seconds,
-            },
-            data: DataConfig {
-                database: self.data.database,
-                database_url: self.data.database_url.filter(|url| !url.is_empty()),
-                attachments: self.data.attachments,
-                backups: self.data.backups,
-            },
-            jobs: JobsConfig {
-                concurrency: self.jobs.concurrency,
-            },
-            uploads: UploadConfig {
-                max_file_bytes: self.uploads.max_file_bytes,
-                max_request_bytes: self.uploads.max_request_bytes,
-            },
-            metrics: MetricsConfig {
-                listen: self
-                    .metrics
-                    .listen
-                    .as_deref()
-                    .map(|value| parse_setting("metrics.listen", value))
-                    .transpose()?,
-            },
-            rate_limits: self.rate_limits,
-            secrets: self
-                .secrets
-                .into_iter()
-                .map(|(name, value)| (name, Secret(value)))
-                .collect(),
-        })
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct RawHttpConfig {
-    bind: String,
-    port: u16,
-    public_origin: Option<String>,
-    trusted_proxies: Vec<String>,
-    shutdown_delay_seconds: u64,
-}
-
-impl Default for RawHttpConfig {
-    fn default() -> Self {
-        let defaults = HttpConfig::default();
-        Self {
-            bind: defaults.bind.to_string(),
-            port: defaults.port,
-            public_origin: None,
-            trusted_proxies: Vec::new(),
-            shutdown_delay_seconds: defaults.shutdown_delay_seconds,
-        }
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct RawDataConfig {
-    database: PathBuf,
-    database_url: Option<String>,
-    attachments: PathBuf,
-    backups: PathBuf,
-}
-
-impl Default for RawDataConfig {
-    fn default() -> Self {
-        let defaults = DataConfig::default();
-        Self {
-            database: defaults.database,
-            database_url: defaults.database_url,
-            attachments: defaults.attachments,
-            backups: defaults.backups,
-        }
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct RawJobsConfig {
-    concurrency: usize,
-}
-
-impl Default for RawJobsConfig {
-    fn default() -> Self {
-        Self {
-            concurrency: JobsConfig::default().concurrency,
-        }
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(default, deny_unknown_fields)]
-struct RawUploadConfig {
-    max_file_bytes: u64,
-    max_request_bytes: u64,
-}
-
-impl Default for RawUploadConfig {
-    fn default() -> Self {
-        let defaults = UploadConfig::default();
-        Self {
-            max_file_bytes: defaults.max_file_bytes,
-            max_request_bytes: defaults.max_request_bytes,
-        }
-    }
-}
-
-#[derive(Deserialize, Default)]
-#[serde(default, deny_unknown_fields)]
-struct RawMetricsConfig {
-    listen: Option<String>,
-}
-
 fn apply_environment(
     config: &mut Config,
     environment: &BTreeMap<String, String>,
 ) -> Result<(), ConfigError> {
-    for key in environment.keys() {
-        if let Some(secret_name) = key
-            .strip_prefix(SECRETS_ENV_PREFIX)
-            .and_then(|name| name.strip_suffix("_FILE"))
-        {
-            let direct_key = format!("{SECRETS_ENV_PREFIX}{secret_name}");
-            if environment.contains_key(&direct_key) {
-                return Err(ConfigError::AmbiguousSecret { key: direct_key });
-            }
-        }
+    if environment.contains_key(APP_KEY_ENV) && environment.contains_key(APP_KEY_FILE_ENV) {
+        return Err(ConfigError::AmbiguousSecret {
+            key: APP_KEY_ENV.to_owned(),
+        });
     }
 
     for (key, value) in environment {
@@ -700,23 +527,19 @@ fn apply_environment(
             .and_then(|name| config.rate_limits.setting_mut(&name.to_ascii_lowercase()))
         {
             *setting = parse_environment(key, value)?;
-        } else if let Some(secret_name) = key.strip_prefix(SECRETS_ENV_PREFIX) {
-            apply_secret(config, key, secret_name, value)?;
-        } else if key.starts_with("ORBIT__") {
+        } else if key == APP_KEY_ENV {
+            config.app_key = Some(parse_app_key(value)?);
+        } else if key == APP_KEY_FILE_ENV {
+            config.app_key = Some(parse_app_key(&read_secret_file(key, Path::new(value))?)?);
+        } else if key.starts_with("ORBIT_")
+            && !IGNORED_ENV_PREFIXES
+                .iter()
+                .any(|prefix| key.starts_with(prefix))
+        {
             return Err(ConfigError::UnknownEnvironment(key.clone()));
         }
     }
     Ok(())
-}
-
-fn parse_setting<T>(key: &'static str, value: &str) -> Result<T, ConfigError>
-where
-    T: std::str::FromStr,
-{
-    value.parse().map_err(|_| ConfigError::InvalidSetting {
-        key,
-        detail: format!("invalid value {value}"),
-    })
 }
 
 fn parse_environment<T>(key: &str, value: &str) -> Result<T, ConfigError>
@@ -738,33 +561,6 @@ fn display_ip(address: IpAddr) -> String {
 
 fn default_public_origin(bind: IpAddr, port: u16) -> String {
     format!("http://{}:{port}", display_ip(bind))
-}
-
-fn apply_secret(
-    config: &mut Config,
-    key: &str,
-    secret_name: &str,
-    value: &str,
-) -> Result<(), ConfigError> {
-    if let Some(name) = secret_name.strip_suffix("_FILE") {
-        if name.is_empty() {
-            return Err(ConfigError::UnknownEnvironment(key.to_owned()));
-        }
-        let path = Path::new(value);
-        let mut secret = read_secret_file(key, path)?;
-        remove_one_trailing_line_ending(&mut secret);
-        config
-            .secrets
-            .insert(name.to_ascii_lowercase(), Secret(secret));
-    } else {
-        if secret_name.is_empty() {
-            return Err(ConfigError::UnknownEnvironment(key.to_owned()));
-        }
-        config
-            .secrets
-            .insert(secret_name.to_ascii_lowercase(), Secret(value.to_owned()));
-    }
-    Ok(())
 }
 
 fn read_secret_file(key: &str, path: &Path) -> Result<String, ConfigError> {
@@ -810,10 +606,10 @@ fn read_secret_file(key: &str, path: &Path) -> Result<String, ConfigError> {
     })
 }
 
-fn remove_one_trailing_line_ending(value: &mut String) {
-    if value.ends_with("\r\n") {
-        value.truncate(value.len() - 2);
-    } else if value.ends_with('\n') {
-        value.pop();
-    }
+/// Unlike [`parse_environment`], the error does not repeat the value: it is a secret.
+fn parse_app_key(value: &str) -> Result<AppKey, ConfigError> {
+    value.parse().map_err(|()| ConfigError::InvalidSetting {
+        key: APP_KEY_ENV,
+        detail: "must be base64 of 32 bytes (`openssl rand -base64 32`)".to_owned(),
+    })
 }

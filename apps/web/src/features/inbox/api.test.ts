@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { NotificationRecord } from '@/api/generated/types.gen'
-import { isMention, notificationTarget } from './api'
+import { isMention, notificationCopy, notificationTarget } from './api'
 
 const base: NotificationRecord = {
   id: 'n1',
@@ -17,4 +17,11 @@ test('a chat mention opens the conversation at the message', () => {
   expect(isMention(notification)).toBe(true)
   // Without its conversation there is nowhere to go.
   expect(notificationTarget(base)).toBeNull()
+})
+
+test('a description mention is a mention that opens the task', () => {
+  const notification = { kind: 'description_mentioned', task_id: 'task-1' } as NotificationRecord
+  expect(isMention(notification)).toBe(true)
+  expect(notificationTarget(notification)).toBe('/tasks/task-1')
+  expect(notificationCopy(notification).body).toBe('Someone mentioned you in a task description.')
 })

@@ -27031,6 +27031,15 @@
             }
           },
           {
+            "name": "inline",
+            "in": "query",
+            "description": "`1`: a file placed in the description or a comment's text; attachment lists leave it out",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "X-Orbit-Contract",
             "in": "header",
             "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
@@ -33613,18 +33622,30 @@
       },
       "CommentBody": {
         "type": "object",
-        "required": [
-          "body"
-        ],
         "properties": {
           "body": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Markdown. Send `body_json` instead for rich text (exactly one of the two)."
+          },
+          "body_json": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object"
+            },
+            "description": "The comment as BlockNote blocks; its markdown copy becomes `body`, and its mention nodes\ndecide who is notified (`mentioned_user_ids` is ignored)."
           },
           "mentioned_user_ids": {
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "description": "With a markdown `body`: the members to notify."
           },
           "parent_id": {
             "type": [
@@ -33643,6 +33664,7 @@
           "task_id",
           "author_id",
           "body",
+          "body_json",
           "can_edit",
           "can_delete",
           "version",
@@ -33654,7 +33676,18 @@
             "type": "string"
           },
           "body": {
-            "type": "string"
+            "type": "string",
+            "description": "Markdown copy of `body_json`."
+          },
+          "body_json": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object"
+            },
+            "description": "BlockNote blocks, the comment's source; null for a comment written before rich text."
           },
           "can_delete": {
             "type": "boolean",
@@ -33697,12 +33730,25 @@
       "CommentUpdateBody": {
         "type": "object",
         "required": [
-          "body",
           "expected_version"
         ],
         "properties": {
           "body": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Markdown. Send `body_json` instead for rich text (exactly one of the two)."
+          },
+          "body_json": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object"
+            },
+            "description": "The comment as BlockNote blocks; members it newly mentions are notified."
           },
           "expected_version": {
             "type": "integer",
@@ -34064,7 +34110,18 @@
             }
           },
           "description": {
-            "type": "string"
+            "type": "string",
+            "description": "Markdown. Send `description_json` instead for rich text (not both)."
+          },
+          "description_json": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object"
+            },
+            "description": "The description as BlockNote blocks; its markdown copy becomes `description`."
           },
           "due_at": {
             "type": [
@@ -35617,7 +35674,7 @@
           },
           "kind": {
             "type": "string",
-            "description": "`task_assigned`, `comment_mentioned` (task comment), `page_comment_mentioned`,\n`page_mentioned` (an @mention in a page body) or `chat_mentioned` (a chat message)."
+            "description": "`task_assigned`, `comment_mentioned` (task comment), `description_mentioned` (task\ndescription), `page_comment_mentioned`, `page_mentioned` (an @mention in a page body) or\n`chat_mentioned` (a chat message)."
           },
           "page_block_id": {
             "type": [
@@ -37071,6 +37128,7 @@
                 "task_id",
                 "author_id",
                 "body",
+                "body_json",
                 "can_edit",
                 "can_delete",
                 "version",
@@ -37082,7 +37140,18 @@
                   "type": "string"
                 },
                 "body": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Markdown copy of `body_json`."
+                },
+                "body_json": {
+                  "type": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "type": "object"
+                  },
+                  "description": "BlockNote blocks, the comment's source; null for a comment written before rich text."
                 },
                 "can_delete": {
                   "type": "boolean",
@@ -37375,7 +37444,7 @@
                 },
                 "kind": {
                   "type": "string",
-                  "description": "`task_assigned`, `comment_mentioned` (task comment), `page_comment_mentioned`,\n`page_mentioned` (an @mention in a page body) or `chat_mentioned` (a chat message)."
+                  "description": "`task_assigned`, `comment_mentioned` (task comment), `description_mentioned` (task\ndescription), `page_comment_mentioned`, `page_mentioned` (an @mention in a page body) or\n`chat_mentioned` (a chat message)."
                 },
                 "page_block_id": {
                   "type": [
@@ -37592,6 +37661,8 @@
                 "number",
                 "title",
                 "description",
+                "description_json",
+                "collab_epoch",
                 "priority",
                 "position",
                 "assignee_ids",
@@ -37627,6 +37698,10 @@
                   "type": "boolean",
                   "description": "True while at least one live task that is not completed, cancelled or a duplicate blocks it."
                 },
+                "collab_epoch": {
+                  "type": "string",
+                  "description": "Epoch of the description's co-editing document (`/tasks/{id}/collab?epoch=`)."
+                },
                 "created_at": {
                   "type": "string",
                   "format": "date-time"
@@ -37657,7 +37732,18 @@
                   "format": "date-time"
                 },
                 "description": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Markdown copy of `description_json` (search, MCP, GitHub, API clients)."
+                },
+                "description_json": {
+                  "type": [
+                    "array",
+                    "null"
+                  ],
+                  "items": {
+                    "type": "object"
+                  },
+                  "description": "BlockNote blocks, the description's source; null for a task written before rich text\n(only `description` exists then) and in task lists (read the task for it)."
                 },
                 "due_at": {
                   "type": [
@@ -39493,6 +39579,8 @@
           "number",
           "title",
           "description",
+          "description_json",
+          "collab_epoch",
           "priority",
           "position",
           "assignee_ids",
@@ -39528,6 +39616,10 @@
             "type": "boolean",
             "description": "True while at least one live task that is not completed, cancelled or a duplicate blocks it."
           },
+          "collab_epoch": {
+            "type": "string",
+            "description": "Epoch of the description's co-editing document (`/tasks/{id}/collab?epoch=`)."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"
@@ -39558,7 +39650,18 @@
             "format": "date-time"
           },
           "description": {
-            "type": "string"
+            "type": "string",
+            "description": "Markdown copy of `description_json` (search, MCP, GitHub, API clients)."
+          },
+          "description_json": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object"
+            },
+            "description": "BlockNote blocks, the description's source; null for a task written before rich text\n(only `description` exists then) and in task lists (read the task for it)."
           },
           "due_at": {
             "type": [
@@ -39781,7 +39884,18 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "Markdown. Send `description_json` instead for rich text (not both)."
+          },
+          "description_json": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object"
+            },
+            "description": "The description as BlockNote blocks; its markdown copy becomes `description`."
           },
           "due_at": {
             "type": [

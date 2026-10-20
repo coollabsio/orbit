@@ -48,6 +48,7 @@ fn fast_config() -> CollabConfig {
 fn app_config(root: &TempDir) -> Config {
     let mut config = Config {
         environment: EnvironmentMode::Development,
+        app_key: Some(orbit_platform::AppKey::new([1; 32])),
         ..Config::default()
     };
     config.data.database = root.path().join("data/orbit.sqlite");

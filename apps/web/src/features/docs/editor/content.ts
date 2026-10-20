@@ -52,13 +52,35 @@ export function isPageFileUrl(url: unknown): url is string {
   return typeof url === 'string' && PAGE_FILE_PATH.test(url)
 }
 
-/**
- * URL policy for image/file blocks: an uploaded page file, an absolute http(s) URL (embedded by link), or empty
- * (a block still waiting for its upload). Everything else (javascript:, data:, other paths) is dropped.
- */
-export function isSafeFileUrl(url: unknown): url is string {
+/** The task whose attachments a task description or comment may show (instead of page files). */
+export interface FileScope {
+  workspaceId: string
+  taskId: string
+}
+
+/** The download path of a task attachment, what inline images and files in task text point at. */
+export function taskAttachmentUrl(workspaceId: string, taskId: string, attachmentId: string): string {
+  return `/api/v1/workspaces/${workspaceId}/tasks/${taskId}/attachments/${attachmentId}/download`
+}
+
+const TASK_ATTACHMENT_PATH = new RegExp(`^/api/v1/workspaces/(${UUID})/tasks/(${UUID})/attachments/${UUID}/download$`)
+
+/** True for an attachment download path of a task in the scope's workspace (text copied between tasks keeps its files). */
+export function isTaskAttachmentUrl(url: unknown, scope: FileScope): url is string {
   if (typeof url !== 'string') return false
-  if (url === '' || PAGE_FILE_PATH.test(url)) return true
+  const match = TASK_ATTACHMENT_PATH.exec(url)
+  return match !== null && match[1] === scope.workspaceId
+}
+
+/**
+ * URL policy for image/file blocks: an uploaded page file (with a `scope`: the task's own attachment), an
+ * absolute http(s) URL (embedded by link), or empty (a block still waiting for its upload). Everything else
+ * (javascript:, data:, other paths) is dropped.
+ */
+export function isSafeFileUrl(url: unknown, scope?: FileScope): url is string {
+  if (typeof url !== 'string') return false
+  const ownFile = scope ? isTaskAttachmentUrl(url, scope) : PAGE_FILE_PATH.test(url)
+  if (url === '' || ownFile) return true
   const cleaned = url.replace(URL_NOISE, '')
   return cleaned === url && /^https?:\/\/[^/\\]/i.test(url)
 }
@@ -98,14 +120,14 @@ function sanitizeLinks(value: unknown): unknown {
 }
 
 /** Blanks unsafe `props.url` values of image/file blocks anywhere in the tree (the block stays, empty). */
-function sanitizeFileBlocks(blocks: unknown[]): unknown[] {
+function sanitizeFileBlocks(blocks: unknown[], scope?: FileScope): unknown[] {
   return blocks.map((block) => {
     if (!isRecord(block)) return block
     let next = block
-    if (typeof block.type === 'string' && FILE_BLOCKS.has(block.type) && isRecord(block.props) && !isSafeFileUrl(block.props.url)) {
+    if (typeof block.type === 'string' && FILE_BLOCKS.has(block.type) && isRecord(block.props) && !isSafeFileUrl(block.props.url, scope)) {
       next = { ...block, props: { ...block.props, url: '' } }
     }
-    return Array.isArray(next.children) ? { ...next, children: sanitizeFileBlocks(next.children) } : next
+    return Array.isArray(next.children) ? { ...next, children: sanitizeFileBlocks(next.children, scope) } : next
   })
 }
 
@@ -125,15 +147,15 @@ function keepKnownBlocks(blocks: unknown[], allowedTypes: ReadonlySet<string>): 
  * non-arrays and unknown block types are dropped, links are sanitized, and an empty document becomes
  * `undefined` so BlockNote creates its single empty paragraph (it throws on `[]`).
  */
-export function toEditorContent(content: unknown, allowedTypes: ReadonlySet<string>): Record<string, unknown>[] | undefined {
+export function toEditorContent(content: unknown, allowedTypes: ReadonlySet<string>, scope?: FileScope): Record<string, unknown>[] | undefined {
   if (!Array.isArray(content)) return undefined
-  const blocks = sanitizeFileBlocks(sanitizeLinks(keepKnownBlocks(content, allowedTypes)) as unknown[]) as Record<string, unknown>[]
+  const blocks = sanitizeFileBlocks(sanitizeLinks(keepKnownBlocks(content, allowedTypes)) as unknown[], scope) as Record<string, unknown>[]
   return blocks.length > 0 ? blocks : undefined
 }
 
 /** Sanitizes the editor document before it is handed to `onChange` (and therefore persisted). */
-export function toStoredContent(document: readonly unknown[]): unknown[] {
-  return sanitizeFileBlocks(sanitizeLinks(document) as unknown[])
+export function toStoredContent(document: readonly unknown[], scope?: FileScope): unknown[] {
+  return sanitizeFileBlocks(sanitizeLinks(document) as unknown[], scope)
 }
 
 function stableStringify(value: unknown): string {
@@ -153,4 +175,97 @@ function stableStringify(value: unknown): string {
  */
 export function contentEquals(a: unknown, b: unknown): boolean {
   return stableStringify(a) === stableStringify(b)
+}
+
+export interface FileToCopy {
+  id: string
+  url: string
+  name: string
+}
+
+/**
+ * Image/file blocks a paste brought in (not in `before`) that show a file of another task or of a docs page. A task's
+ * text keeps its own copy of them, so they stay when the source is trashed (see `PageEditor`'s paste handler).
+ */
+export function pastedFilesToCopy(document: readonly unknown[], before: ReadonlySet<string>, scope: FileScope): FileToCopy[] {
+  const out: FileToCopy[] = []
+  const visit = (blocks: readonly unknown[]) => {
+    for (const block of blocks) {
+      if (!isRecord(block)) continue
+      const props = isRecord(block.props) ? block.props : {}
+      const url = props.url
+      const id = block.id
+      if (typeof id === 'string' && !before.has(id) && typeof block.type === 'string' && FILE_BLOCKS.has(block.type) && typeof url === 'string') {
+        const task = TASK_ATTACHMENT_PATH.exec(url)
+        const foreignTask = task !== null && task[1] === scope.workspaceId && task[2] !== scope.taskId
+        if (foreignTask || isPageFileUrl(url)) out.push({ id, url, name: typeof props.name === 'string' && props.name ? props.name : 'file' })
+      }
+      if (Array.isArray(block.children)) visit(block.children)
+    }
+  }
+  visit(document)
+  return out
+}
+
+
+export interface MentionMember {
+  id: string
+  name: string
+}
+
+/** The member whose name starts `text` (longest name first), unless two members share it (as on the server). */
+function mentionedMember(text: string, members: readonly MentionMember[]): MentionMember | null {
+  const fits = (name: string) => name !== '' && text.startsWith(name) && !/^[\p{L}\p{N}]/u.test(text.slice(name.length))
+  const longest = Math.max(0, ...members.filter((member) => fits(member.name)).map((member) => member.name.length))
+  if (longest === 0) return null
+  const matches = members.filter((member) => member.name.length === longest && fits(member.name))
+  return matches.length === 1 ? matches[0] : null
+}
+
+/** Splits one plain text node at `@Name` mentions. */
+function splitMentions(node: Record<string, unknown>, members: readonly MentionMember[]): unknown[] {
+  const text = node.text as string
+  const out: unknown[] = []
+  let pending = ''
+  let at = 0
+  while (at < text.length) {
+    const index = text.indexOf('@', at)
+    if (index === -1) break
+    const before = pending + text.slice(at, index)
+    const boundary = before === '' || !/[\p{L}\p{N}]$/u.test(before)
+    const member = boundary ? mentionedMember(text.slice(index + 1), members) : null
+    if (member) {
+      if (before) out.push({ ...node, text: before })
+      out.push({ type: 'mention', props: { userId: member.id, name: member.name } })
+      pending = ''
+      at = index + 1 + member.name.length
+    } else {
+      pending = before + '@'
+      at = index + 1
+    }
+  }
+  const rest = pending + text.slice(at)
+  if (rest) out.push({ ...node, text: rest })
+  return out
+}
+
+/**
+ * `@Name` in text written before rich text becomes a mention of that member (exact name, one member with it, not in
+ * code), as the server's import does, so old comments and descriptions show mention chips.
+ */
+export function linkMentions(value: unknown, members: readonly MentionMember[]): unknown {
+  if (members.length === 0) return value
+  if (Array.isArray(value)) {
+    return value.flatMap((item) =>
+      isRecord(item) && item.type === 'text' && typeof item.text === 'string' && !(isRecord(item.styles) && item.styles.code)
+        ? splitMentions(item, members)
+        : [linkMentions(item, members)],
+    )
+  }
+  if (isRecord(value)) {
+    const out: Record<string, unknown> = {}
+    for (const [key, child] of Object.entries(value)) out[key] = linkMentions(child, members)
+    return out
+  }
+  return value
 }

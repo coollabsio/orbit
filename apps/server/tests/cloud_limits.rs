@@ -35,10 +35,7 @@ impl Server {
         config.data.attachments = root.path().join("data/attachments");
         config.data.backups = root.path().join("backups");
         config.data.database_url = Some(url.to_owned());
-        config.secrets.insert(
-            "app_key".to_owned(),
-            orbit_platform::Secret::new(shared_postgres::APP_KEY),
-        );
+        config.app_key = Some(shared_postgres::APP_KEY.parse().unwrap());
         let app = App::build(config).await.unwrap();
         let database = app.database().clone();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

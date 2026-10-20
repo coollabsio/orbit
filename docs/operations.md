@@ -2,14 +2,45 @@
 
 This runbook covers the failure paths that need an operator decision. Exact build, first-run, proxy, backup, and restore commands live in [`.ai/DEVELOPMENT.md`](../.ai/DEVELOPMENT.md).
 
+## Configuration
+
+Orbit reads its configuration only from environment variables that start with `ORBIT_`. Orbit refuses to start when it finds an unknown `ORBIT_` variable. Orbit ignores variables that start with `ORBIT_DEV_` or `ORBIT_TEST_`: scripts and tests use them. The CLI flags `--database`, `--attachments`, `--backups`, `--attachment-max-file-bytes` and `--attachment-max-request-bytes` override the related variables.
+
+- `orbit config check` validates the configuration and prints `configuration is valid`.
+- `orbit config show` prints the effective configuration as `ORBIT_…=value` lines. Secrets show as `[REDACTED]`. The password in the database URL is redacted.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `ORBIT_ENV` | none | Required: `development` or `production`. Orbit does not start without it. Production requires an HTTPS public origin and at least one trusted proxy. Development is loopback-only. |
+| `ORBIT_BIND` | `127.0.0.1` | `0.0.0.0` works for containers and Tailscale interfaces. Firewall the port. |
+| `ORBIT_PORT` | `8080` | |
+| `ORBIT_PUBLIC_ORIGIN` | `http://<bind>:<port>` | The exact external origin. Production requires `https://`. |
+| `ORBIT_TRUSTED_PROXIES` | none (image: `0.0.0.0/0,::/0`) | Comma-separated CIDRs, for example `127.0.0.1/32,::1/128`. Production requires at least one. Orbit reads the client IP and `https` from forwarding headers only on connections from these networks. The image default trusts every address: use it only when the reverse proxy is the only way to reach port 8080. |
+| `ORBIT_SHUTDOWN_DELAY_SECONDS` | `0` | 0 to 300. Use it behind a load balancer: after SIGTERM, `/health/ready` reports 503 and the server continues to serve for this time. See [Orbit Cloud](#deployment). |
+| `ORBIT_DATABASE_PATH` | `data/orbit.sqlite` | The SQLite database file. Keep the database, attachment directory and backup directory separate. |
+| `ORBIT_DATABASE_URL` | none | Postgres instead of SQLite, for example `postgres://orbit:password@db.internal:5432/orbit`. See [Postgres](#postgres). |
+| `ORBIT_ATTACHMENTS_PATH` | `data/attachments` | |
+| `ORBIT_BACKUPS_PATH` | `backups` | Must be outside the attachment directory. |
+| `ORBIT_JOBS_CONCURRENCY` | `4` | |
+| `ORBIT_UPLOAD_MAX_FILE_BYTES` | `26214400` (25 MiB) | |
+| `ORBIT_UPLOAD_MAX_REQUEST_BYTES` | `104857600` (100 MiB) | |
+| `ORBIT_METRICS_LISTEN` | none (metrics off) | A private listener, for example `127.0.0.1:9090`. Never send it through the public site. |
+| `ORBIT_RATE_LIMIT_*` | see notes | Request limits and email caps. See [Request limits and email caps](#request-limits-and-email-caps). |
+| `ORBIT_APP_KEY` | none | **Required.** The key for saved secrets: base64 of 32 random bytes. |
+| `ORBIT_APP_KEY_FILE` | none | The path of a file that contains the app key, instead of `ORBIT_APP_KEY`. Do not set both. |
+
+Create the app key once with `openssl rand -base64 32` and keep a copy outside the server. Orbit does not start without it. See [Email, registration and the app key](#email-registration-and-the-app-key).
+
+The root user configures outgoing email in **Admin → Settings** and S3 storage in **Admin → Storage**, not with variables.
+
 ## Startup fails before HTTP binds
 
 Orbit deliberately binds last. Read the first error and keep the process stopped.
 
-1. Run `orbit --config config/orbit.toml config check`.
-2. Run `orbit --config config/orbit.toml config show` and verify paths, origin, bind address, and trusted proxies. The database file must remain outside attachment and backup storage. Secrets remain redacted.
-3. Run `orbit --config config/orbit.toml migrate status`.
-4. Verify the newest backup with `orbit --config config/orbit.toml backup verify <id>`.
+1. Run `orbit config check`.
+2. Run `orbit config show` and verify paths, origin, bind address, and trusted proxies. The database file must remain outside attachment and backup storage. Secrets remain redacted.
+3. Run `orbit migrate status`.
+4. Verify the newest backup with `orbit backup verify <id>`.
 5. Fix ownership or capacity on the database, attachment, and backup paths.
 6. Start Orbit again. Never delete SQLite WAL files while the process runs.
 
@@ -27,11 +58,11 @@ Retention, reconciliation, scheduler, or integrity supervision failure cancels n
 
 Restore refuses an active database ownership lock (the `<database>.lock` file next to the database; do not delete it while Orbit runs). Stop every Orbit process that uses that file. If restore reports rollback failure, do not start Orbit. Preserve the target and rollback paths named by the error and recover from a separate verified snapshot.
 
-On Postgres (`data.database_url`), the ownership lock is a Postgres advisory lock. Each server holds it shared; `backup restore`, `migrate run --reset` and `db-reset` need it exclusive, so stop every Orbit server that uses the database first. A server whose lock connection drops (network, Postgres failover) stops with `lost the database ownership lock`; start it again. A Postgres snapshot holds one `COPY` file per table (`database/<table>.copy`) instead of `database.sqlite`. Restore replaces every table in one transaction: if it fails, the database is unchanged. A snapshot restores only into the same kind of database it came from.
+On Postgres (`ORBIT_DATABASE_URL`), the ownership lock is a Postgres advisory lock. Each server holds it shared; `backup restore`, `migrate run --reset` and `db-reset` need it exclusive, so stop every Orbit server that uses the database first. A server whose lock connection drops (network, Postgres failover) stops with `lost the database ownership lock`; start it again. A Postgres snapshot holds one `COPY` file per table (`database/<table>.copy`) instead of `database.sqlite`. Restore replaces every table in one transaction: if it fails, the database is unchanged. A snapshot restores only into the same kind of database it came from.
 
 ## Lost or expired setup token
 
-Run `orbit --config config/orbit.toml setup-token rotate` (on SQLite, stop Orbit first; on Postgres it works while Orbit runs). Share the new setup URL directly with the installation owner; the account created there becomes the root user. Rotation invalidates the unused old token. Once setup completes, setup cannot run again.
+Run `orbit setup-token rotate` (on SQLite, stop Orbit first; on Postgres it works while Orbit runs). Share the new setup URL directly with the installation owner; the account created there becomes the root user. Rotation invalidates the unused old token. Once setup completes, setup cannot run again.
 
 ## Root user and Admin area
 
@@ -44,8 +75,8 @@ The root user can make other accounts **instance admins** (Admin → Users → M
 When nobody can fix the root user in the web app (the root account is suspended, the wrong account became root after an upgrade, or the root person left), use the CLI on the server. Like `recovery-link`, on SQLite it needs Orbit stopped, because a running Orbit owns the database file (on Postgres it works while Orbit runs):
 
 ```sh
-orbit --config config/orbit.toml root show
-orbit --config config/orbit.toml root set --email new-root@example.com
+orbit root show
+orbit root set --email new-root@example.com
 ```
 
 With the Compose deployment:
@@ -64,13 +95,15 @@ Orbit sends email only for invitations, open-registration sign-up links and pass
 
 Registration is closed after setup: people join only by invitation. The root user can turn on **Open registration** in **Admin → Settings** once a mail server is saved. A new person then enters their email, opens the emailed link (60 minutes, one use) and chooses a name and password. Removing the mail server closes registration.
 
-Saved secrets (the SMTP password, GitHub App keys, Notion import tokens) are encrypted with the app key. Set `secrets.app_key` (base64 of 32 random bytes, for example `openssl rand -base64 32`) to manage it yourself; otherwise, on SQLite, Orbit creates `app.key` beside the database on first start (mode 600); Postgres requires `secrets.app_key`. Keep that file with your backups: a restored database without it cannot read its saved secrets, and the root user must enter them again.
+Saved secrets (the SMTP password, GitHub App keys, Notion import tokens) are encrypted with the app key. `ORBIT_APP_KEY` (base64 of 32 random bytes, from `openssl rand -base64 32`) is required. Orbit does not create a key. Keep a copy outside the server and its backups: a database restored without the same key cannot read its saved secrets, and the root user must enter them again. Users with two-factor authentication must set it up again.
+
+Older versions created an `app.key` file beside the SQLite database. If that file still exists, Orbit starts only when `ORBIT_APP_KEY` holds the same key. Set `ORBIT_APP_KEY` to the contents of the file, start Orbit, and then you can delete the file.
 
 ## Postgres
 
-With `data.database_url`, the database is on another host. Orbit then needs `secrets.app_key` (`ORBIT__SECRETS__APP_KEY`, base64 of 32 random bytes) instead of an `app.key` file: it encrypts saved secrets, the S3 secret among them, so a new server needs the same key. Keep it with the database credentials.
+With `ORBIT_DATABASE_URL`, the database is on another host. `ORBIT_APP_KEY` encrypts saved secrets, the S3 secret among them, so every server and every new server needs the same key. Keep it with the database credentials.
 
-Files and backups still go to `data.attachments` and `data.backups` on this server until the root user saves a bucket in **Admin → Storage** and turns on attachments and backups in S3. Do that to make the server replaceable; pre-migration backups always stay local.
+Files and backups still go to `ORBIT_ATTACHMENTS_PATH` and `ORBIT_BACKUPS_PATH` on this server until the root user saves a bucket in **Admin → Storage** and turns on attachments and backups in S3. Do that to make the server replaceable; pre-migration backups always stay local.
 
 Several servers can share one Postgres database; see [Orbit Cloud](#orbit-cloud-one-postgres-several-orbit-servers).
 
@@ -87,10 +120,10 @@ A request, a live socket or a co-editing socket can go to any server; sticky ses
 ### Deployment
 
 - **Postgres:** one database with failover (a managed service, or Patroni). Connect directly or through a pooler in session mode: Orbit uses advisory locks and `LISTEN`/`NOTIFY`, which a pooler in transaction mode (PgBouncer `pool_mode = transaction`) breaks. Give each server its share of `max_connections` (each server uses its pools plus two connections: the ownership lock and the cluster listener).
-- **Configuration on every server:** the same `data.database_url`, `secrets.app_key` and `http.public_origin`. `http.trusted_proxies` holds the load balancer addresses.
+- **Configuration on every server:** the same `ORBIT_DATABASE_URL`, `ORBIT_APP_KEY` and `ORBIT_PUBLIC_ORIGIN`. `ORBIT_TRUSTED_PROXIES` holds the load balancer addresses.
 - **Storage:** save a bucket in **Admin → Storage** and turn on attachments and backups in S3 before the second server starts. The local disk of a server then holds only temporary files (upload staging, backup downloads), so it can be an ephemeral volume. While other servers run, Orbit refuses to move attachments back to local disks (409 `storage_shared`), and a server that hears other servers while attachments are local logs a warning.
 - **Load balancer:** check `/health/ready` and remove a server on 503. Keep WebSockets open for a long time (idle timeout of 1 hour or more) for `/api/v1/workspaces/{id}/events`, the live socket (`/api/v1/workspaces/{id}/live`) and the co-editing socket of a page.
-- **Stopping a server:** set `http.shutdown_delay_seconds` (`ORBIT__HTTP__SHUTDOWN_DELAY_SECONDS`, 0 to 300, default 0) to a little more than the load balancer's health check interval. After SIGTERM, `/health/ready` reports 503 (`accepting`) at once and the server still serves for that long, then drains for up to 30 s. Give the orchestrator a stop timeout of at least the delay plus 30 s.
+- **Stopping a server:** set `ORBIT_SHUTDOWN_DELAY_SECONDS` (0 to 300, default 0) to a little more than the load balancer's health check interval. After SIGTERM, `/health/ready` reports 503 (`accepting`) at once and the server still serves for that long, then drains for up to 30 s. Give the orchestrator a stop timeout of at least the delay plus 30 s.
 - **Upgrades:** run `orbit migrate run` once (or let the first new server do it; a lock makes the others wait), then replace the servers one at a time. A migration must keep the previous release working until all servers run the new one: old servers stay ready on a newer schema, but an old server cannot start on it.
 - **CLI on a running cluster:** `root`, `recovery-link`, `setup-token`, `migrate status` and `backup create` work while the servers run. They refuse a database that needs migrations (run `orbit migrate run`). `backup restore`, `migrate run --reset`, `db-reset` and `attachments compress` need every server stopped.
 - **Restore:** stop every server before `backup restore` (see [Restore rollback or ownership error](#restore-rollback-or-ownership-error)). This is a full outage; choose the backup schedule for it.
@@ -113,7 +146,7 @@ A request, a live socket or a co-editing socket can go to any server; sticky ses
 
 ### Limits
 
-- **Rate limits** (`[rate_limits]`, see [Request limits and email caps](#request-limits-and-email-caps)): the authentication, recovery/registration and invitation limits hold for the cluster. The upload, chat and general limits and the co-editing connection limits count on each server: with N servers the effective limit is N times the setting. A database write for each of those requests would put every request of the cluster through the one writer (see **Write throughput**), so they stay in memory. Add a request limit at the load balancer if you need a cluster-wide one. The sign-in lockout and the email caps are shared.
+- **Rate limits** (`ORBIT_RATE_LIMIT_*`, see [Request limits and email caps](#request-limits-and-email-caps)): the authentication, recovery/registration and invitation limits hold for the cluster. The upload, chat and general limits and the co-editing connection limits count on each server: with N servers the effective limit is N times the setting. A database write for each of those requests would put every request of the cluster through the one writer (see **Write throughput**), so they stay in memory. Add a request limit at the load balancer if you need a cluster-wide one. The sign-in lockout and the email caps are shared.
 - **Event order:** the events of one server's writes keep their commit order. Two writes to the same workspace on two servers in the same moment can reach clients in the other order; the next event or a reload corrects the view.
 - **A server that stops without a beat:** its members show as online for up to 20 s more.
 - **Page lock:** a lock or unlock closes the page's sockets on every server; an edit that another server receives in the same moment can still be saved.
@@ -133,11 +166,11 @@ When the server is lost, restore on a new server from the bucket. The command li
 ```sh
 export ORBIT_BACKUP_S3_ENDPOINT=https://s3.eu-central-1.amazonaws.com ORBIT_BACKUP_S3_BUCKET=orbit-files \
   ORBIT_BACKUP_S3_ACCESS_KEY_ID=… ORBIT_BACKUP_S3_SECRET_ACCESS_KEY=…   # optional: _REGION, _PREFIX, _PATH_STYLE=true
-orbit --config config/orbit.toml backup list            # the last column says local or s3
-orbit --config config/orbit.toml backup restore <id>
+orbit backup list            # the last column says local or s3
+orbit backup restore <id>
 ```
 
-Put the old `app.key` (or `secrets.app_key`) on the new server before you start Orbit: without it, Orbit cannot read the saved S3 secret and does not start while a bucket is saved. Data written after the last backup is lost, so choose the schedule by how much data you can lose.
+Set the same `ORBIT_APP_KEY` on the new server before you start Orbit: without it, Orbit cannot read the saved S3 secret and does not start while a bucket is saved. Data written after the last backup is lost, so choose the schedule by how much data you can lose.
 
 ## Large images
 
@@ -148,15 +181,15 @@ To do the same to images that were uploaded before, the root user clicks **Compr
 While Orbit is stopped, the same works from the command line for files on this server (files in S3 are skipped):
 
 ```sh
-orbit --config config/orbit.toml attachments compress --dry-run   # reports the savings, changes nothing
-orbit --config config/orbit.toml attachments compress
+orbit attachments compress --dry-run   # reports the savings, changes nothing
+orbit attachments compress
 ```
 
 ## Password recovery without SMTP
 
 The root user opens **Admin → Users**, selects **Manage → Create password recovery link** for the account and shares the 30-minute link through an authenticated channel. The root user changes their own password in Profile instead.
 
-If the root user lost their own password, use (on SQLite, after you stop Orbit) `orbit --config config/orbit.toml recovery-link --email <email> --origin <https-origin>`. Never log a link. Unknown or suspended accounts do not receive a link.
+If the root user lost their own password, use (on SQLite, after you stop Orbit) `orbit recovery-link --email <email> --origin <https-origin>`. Never log a link. Unknown or suspended accounts do not receive a link.
 
 ## Security checks after proxy changes
 
@@ -167,12 +200,12 @@ If the root user lost their own password, use (on SQLite, after you stop Orbit) 
 - Unknown `/api/*` paths must return `application/problem+json`, never SPA HTML.
 - `/api` itself and wrong methods on known API routes must return Problem Details.
 - Production mode requires an HTTPS public origin and at least one explicitly trusted proxy. Requests without a verified HTTPS transport are rejected. Development mode is loopback-only.
-- Tune `[rate_limits]` only after observing the endpoint-class defaults (see [Request limits and email caps](#request-limits-and-email-caps)). Limit responses are correlated `429` Problem Details with `Retry-After`; IPv6 clients are grouped by `/64`. The in-memory limiter keeps at most 16,384 entries; when it is full it forgets the entry with the fewest requests, so a flood of new addresses never locks out new clients and does not reset a client at its limit.
+- Tune the `ORBIT_RATE_LIMIT_*` variables only after observing the endpoint-class defaults (see [Request limits and email caps](#request-limits-and-email-caps)). Limit responses are correlated `429` Problem Details with `Retry-After`; IPv6 clients are grouped by `/64`. The in-memory limiter keeps at most 16,384 entries; when it is full it forgets the entry with the fewest requests, so a flood of new addresses never locks out new clients and does not reset a client at its limit.
 - If metrics are enabled, the configured private `/metrics` listener must be reachable only by the monitoring network and must not appear on the public listener.
 
 ## Request limits and email caps
 
-Set them in `[rate_limits]` or with `ORBIT__RATE_LIMITS__<KEY>` (for example `ORBIT__RATE_LIMITS__GENERAL_PER_MINUTE`).
+Set them with `ORBIT_RATE_LIMIT_<KEY>`, the key in upper case (for example `ORBIT_RATE_LIMIT_GENERAL_PER_MINUTE`).
 
 | Key | Default | What it limits |
 |---|---|---|
@@ -198,7 +231,7 @@ Existing endpoints:
 
 - `GET /health/live` — process liveness
 - `GET /health/ready` — serving readiness; treat 503 as take-out-of-proxy
-- Optional private `GET /metrics` when `[metrics].listen` is set
+- Optional private `GET /metrics` when `ORBIT_METRICS_LISTEN` is set
 
 Alerting should live in the operator's existing monitor (systemd, Caddy, Prometheus, host disk checks). Do not scrape `/metrics` through the public origin.
 
@@ -217,4 +250,4 @@ Ownership template (fill with real names before rollout):
 | Upgrades and rollback | | |
 | Incident response | | |
 
-Automated subset: `ORBIT_VERIFY_ORIGIN=https://… deploy/verify-production.sh`. Restore rehearsal: `deploy/backup-rehearsal.sh config/orbit.toml <backup-id> /path/to/scratch`. Both require an operator-chosen host and off-host backup destination; they do not complete Tasks 10, 11, or 14 by themselves.
+Automated subset: `ORBIT_VERIFY_ORIGIN=https://… deploy/verify-production.sh`. Restore rehearsal: `deploy/backup-rehearsal.sh <backup-id> /path/to/scratch` (with the same `ORBIT_*` variables as the server). Both require an operator-chosen host and off-host backup destination; they do not complete Tasks 10, 11, or 14 by themselves.

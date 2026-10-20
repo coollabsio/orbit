@@ -76,6 +76,9 @@ pub(super) async fn dump(
 
 /// Replaces every table in `pool` with the snapshot in `directory` and returns the transaction
 /// uncommitted, so the caller can switch the attachments before it commits.
+/// The schema version that added `task_collab_docs` (migration 0052).
+const TASK_COLLAB_SCHEMA_VERSION: i64 = 52;
+
 pub(super) async fn restore(
     pool: &PgPool,
     directory: &Path,
@@ -197,6 +200,13 @@ pub(super) async fn restore(
     .execute(&mut *transaction)
     .await
     .map_err(BackupError::CollabEpochs)?;
+    // Task descriptions are co-edited since schema 52; an older snapshot has no such table.
+    if schema_version >= TASK_COLLAB_SCHEMA_VERSION {
+        sqlx::raw_sql("UPDATE task_collab_docs SET epoch = md5(random()::text)")
+            .execute(&mut *transaction)
+            .await
+            .map_err(BackupError::CollabEpochs)?;
+    }
     Ok(transaction)
 }
 

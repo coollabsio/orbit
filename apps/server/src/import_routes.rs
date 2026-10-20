@@ -308,7 +308,7 @@ fn import_problem(
             StatusCode::CONFLICT,
             "app_key_missing",
             "App key missing",
-            "The server app key (secrets.app_key) must be configured before importing from Notion.",
+            "The server app key (ORBIT_APP_KEY) must be configured before importing from Notion.",
         ),
         ImportError::TokenInvalid => (
             StatusCode::UNPROCESSABLE_ENTITY,
