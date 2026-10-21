@@ -2,7 +2,7 @@ use sha2::{Digest, Sha256};
 use sqlx::Row;
 use thiserror::Error;
 
-use super::{Backend, Database};
+use super::{Backend, Database, Flag};
 use crate::{BackupError, BackupService, Config, TimestampMillis};
 
 const PLATFORM_SCHEMA: &str = include_str!("../../../../apps/server/migrations/0001_platform.sql");
@@ -490,8 +490,13 @@ impl MigrationRunner {
     ) -> Result<Vec<PendingMigration>, MigrationError> {
         let migrations = self.migrations(database);
         validate_catalog(migrations)?;
-        ensure_metadata_table(database).await?;
-        let applied = validate_applied(database, migrations).await?;
+        // Readiness calls this on every probe: create nothing here, so Postgres does not log an
+        // "already exists" notice each time.
+        let applied = if metadata_table_exists(database).await? {
+            validate_applied(database, migrations).await?
+        } else {
+            Vec::new()
+        };
 
         Ok(migrations
             .iter()
@@ -505,6 +510,8 @@ impl MigrationRunner {
     }
 
     pub async fn run(&self, database: &Database) -> Result<(), MigrationError> {
+        validate_catalog(self.migrations(database))?;
+        ensure_metadata_table(database).await?;
         let pending = self.pending(database).await?;
         for pending_migration in pending {
             let migration = self
@@ -555,6 +562,18 @@ fn validate_catalog(migrations: &[Migration]) -> Result<(), MigrationError> {
         }
     }
     Ok(())
+}
+
+async fn metadata_table_exists(database: &Database) -> Result<bool, sqlx::Error> {
+    let sql = match database.backend() {
+        Backend::Sqlite => {
+            "SELECT EXISTS (SELECT 1 FROM sqlite_master \
+             WHERE type = 'table' AND name = 'schema_migrations')"
+        }
+        Backend::Postgres => "SELECT to_regclass('schema_migrations') IS NOT NULL",
+    };
+    let exists: Flag = sqlx::query_scalar(sql).fetch_one(database.pool()).await?;
+    Ok(exists.0)
 }
 
 async fn ensure_metadata_table(database: &Database) -> Result<(), sqlx::Error> {

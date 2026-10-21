@@ -463,6 +463,29 @@ async fn exposes_pending_destructive_migrations_without_running_backups() {
 }
 
 #[tokio::test]
+async fn pending_migrations_do_not_create_the_metadata_table() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
+        .await
+        .unwrap();
+    let runner = MigrationRunner::new(
+        "test",
+        vec![Migration::new(
+            1,
+            "CREATE TABLE example (id BIGINT);",
+            false,
+        )],
+    );
+
+    assert_eq!(runner.pending(&database).await.unwrap().len(), 1);
+    assert_eq!(table_count(&database, "schema_migrations").await, 0);
+
+    runner.run(&database).await.unwrap();
+
+    assert!(runner.pending(&database).await.unwrap().is_empty());
+}
+
+#[tokio::test]
 async fn task_relations_migration_rebuilds_statuses_and_seeds_duplicate_statuses() {
     if orbit_platform::testing_postgres() {
         return; // SQLite migration history (embedded_through)
