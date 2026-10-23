@@ -1182,10 +1182,58 @@ pub fn redacted_config(config: &Config) -> String {
         Some(listen) => lines.push(format!("ORBIT_METRICS_LISTEN={listen}")),
         None => lines.push("# ORBIT_METRICS_LISTEN is not set: metrics are disabled".to_owned()),
     }
+    lines.extend(redacted_mail_config(&config.mail));
     if config.app_key.is_some() {
         lines.push("ORBIT_APP_KEY=[REDACTED]".to_owned());
     }
     lines.join("\n")
+}
+
+fn redacted_mail_config(mail: &orbit_platform::MailConfig) -> Vec<String> {
+    fn cidrs<T: ToString>(cidrs: &[T]) -> String {
+        cidrs
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+    let mut lines = vec![
+        format!("ORBIT_MAIL_ENABLED={}", mail.enabled),
+        format!("ORBIT_MAIL_SMTP_BIND={}", mail.smtp_bind),
+        format!("ORBIT_MAIL_SMTP_PORT={}", mail.smtp_port),
+        format!("ORBIT_MAIL_MODE={}", mail.mode.as_str()),
+        format!("ORBIT_MAIL_RELAY_CIDRS={}", cidrs(&mail.relay_cidrs)),
+        format!("ORBIT_MAIL_PROXY_CIDRS={}", cidrs(&mail.proxy_cidrs)),
+        format!("ORBIT_MAIL_MAX_MESSAGE_BYTES={}", mail.max_message_bytes),
+    ];
+    let optional = [
+        ("ORBIT_MAIL_HOSTNAME", mail.hostname.clone()),
+        (
+            "ORBIT_MAIL_RELAY_AUTHSERV_ID",
+            mail.relay_authserv_id.clone(),
+        ),
+        (
+            "ORBIT_MAIL_TLS_CERT",
+            mail.tls_cert
+                .as_ref()
+                .map(|path| path.display().to_string()),
+        ),
+        (
+            "ORBIT_MAIL_TLS_KEY",
+            mail.tls_key.as_ref().map(|path| path.display().to_string()),
+        ),
+        (
+            "ORBIT_MAIL_DNS_RESOLVER",
+            mail.dns_resolver.map(|address| address.to_string()),
+        ),
+        ("ORBIT_MAIL_CONTENT_ORIGIN", mail.content_origin.clone()),
+    ];
+    lines.extend(
+        optional
+            .into_iter()
+            .filter_map(|(key, value)| value.map(|value| format!("{key}={value}"))),
+    );
+    lines
 }
 
 pub fn failure_message(error: &str) -> String {

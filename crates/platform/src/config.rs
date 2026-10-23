@@ -28,6 +28,21 @@ const METRICS_LISTEN_ENV: &str = "ORBIT_METRICS_LISTEN";
 const RATE_LIMITS_ENV_PREFIX: &str = "ORBIT_RATE_LIMIT_";
 const APP_KEY_ENV: &str = "ORBIT_APP_KEY";
 const APP_KEY_FILE_ENV: &str = "ORBIT_APP_KEY_FILE";
+const MAIL_ENABLED_ENV: &str = "ORBIT_MAIL_ENABLED";
+const MAIL_HOSTNAME_ENV: &str = "ORBIT_MAIL_HOSTNAME";
+const MAIL_SMTP_BIND_ENV: &str = "ORBIT_MAIL_SMTP_BIND";
+const MAIL_SMTP_PORT_ENV: &str = "ORBIT_MAIL_SMTP_PORT";
+const MAIL_MODE_ENV: &str = "ORBIT_MAIL_MODE";
+const MAIL_RELAY_CIDRS_ENV: &str = "ORBIT_MAIL_RELAY_CIDRS";
+const MAIL_RELAY_AUTHSERV_ID_ENV: &str = "ORBIT_MAIL_RELAY_AUTHSERV_ID";
+const MAIL_PROXY_CIDRS_ENV: &str = "ORBIT_MAIL_PROXY_CIDRS";
+const MAIL_TLS_CERT_ENV: &str = "ORBIT_MAIL_TLS_CERT";
+const MAIL_TLS_KEY_ENV: &str = "ORBIT_MAIL_TLS_KEY";
+const MAIL_MAX_MESSAGE_BYTES_ENV: &str = "ORBIT_MAIL_MAX_MESSAGE_BYTES";
+const MAIL_DNS_RESOLVER_ENV: &str = "ORBIT_MAIL_DNS_RESOLVER";
+const MAIL_CONTENT_ORIGIN_ENV: &str = "ORBIT_MAIL_CONTENT_ORIGIN";
+/// The default Docker bridge gateway: every container on the bridge seems to connect from it.
+const DOCKER_GATEWAY: IpAddr = IpAddr::V4(Ipv4Addr::new(172, 17, 0, 1));
 /// Variables that scripts and tests use, not the server.
 const IGNORED_ENV_PREFIXES: [&str; 2] = ["ORBIT_DEV_", "ORBIT_TEST_"];
 
@@ -40,6 +55,7 @@ pub struct Config {
     pub uploads: UploadConfig,
     pub metrics: MetricsConfig,
     pub rate_limits: RateLimitConfig,
+    pub mail: MailConfig,
     /// The key for secrets saved in the database (`ORBIT_APP_KEY`). Required: [`Config::validate`]
     /// refuses a configuration without it.
     pub app_key: Option<AppKey>,
@@ -185,6 +201,142 @@ impl Default for UploadConfig {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct MetricsConfig {
     pub listen: Option<SocketAddr>,
+}
+
+/// `ORBIT_MAIL_*`: the SMTP listener that receives mail for verified domains.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct MailConfig {
+    pub enabled: bool,
+    /// The name for `EHLO`, the MX target and the certificate check. Required when enabled.
+    pub hostname: Option<String>,
+    pub smtp_bind: IpAddr,
+    pub smtp_port: u16,
+    pub mode: MailMode,
+    /// Relay mode: the only sources that can connect.
+    pub relay_cidrs: Vec<IpNet>,
+    /// Relay mode: the `authserv-id` of the relay's `Authentication-Results` header, the only one Orbit trusts.
+    pub relay_authserv_id: Option<String>,
+    /// Sources that can send a PROXY protocol v2 header.
+    pub proxy_cidrs: Vec<IpNet>,
+    pub tls_cert: Option<PathBuf>,
+    pub tls_key: Option<PathBuf>,
+    /// The raw message size limit.
+    pub max_message_bytes: u64,
+    /// The DNS resolver for the checks; the system resolver when not set.
+    pub dns_resolver: Option<SocketAddr>,
+    /// A separate origin for HTML views and attachments.
+    pub content_origin: Option<String>,
+}
+
+impl Default for MailConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            hostname: None,
+            smtp_bind: IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            smtp_port: 2525,
+            mode: MailMode::Relay,
+            relay_cidrs: Vec::new(),
+            relay_authserv_id: None,
+            proxy_cidrs: Vec::new(),
+            tls_cert: None,
+            tls_key: None,
+            max_message_bytes: 50 * 1024 * 1024,
+            dns_resolver: None,
+            content_origin: None,
+        }
+    }
+}
+
+impl MailConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        let invalid = |key, detail: &str| {
+            Err(ConfigError::InvalidSetting {
+                key,
+                detail: detail.to_owned(),
+            })
+        };
+        if self.max_message_bytes < 1024 * 1024 {
+            return invalid(
+                MAIL_MAX_MESSAGE_BYTES_ENV,
+                "must be at least 1048576 (1 MiB)",
+            );
+        }
+        if let Some(origin) = &self.content_origin
+            && !is_http_origin(origin)
+        {
+            return invalid(
+                MAIL_CONTENT_ORIGIN_ENV,
+                "must be an absolute http or https origin without a path or query",
+            );
+        }
+        if self
+            .relay_cidrs
+            .iter()
+            .any(|cidr| cidr.prefix_len() == 0 || cidr.contains(&DOCKER_GATEWAY))
+        {
+            return invalid(
+                MAIL_RELAY_CIDRS_ENV,
+                "cannot contain the Docker gateway 172.17.0.1: every container would count as the relay",
+            );
+        }
+        if !self.enabled {
+            return Ok(());
+        }
+        if self.hostname.as_deref().is_none_or(str::is_empty) {
+            return invalid(
+                MAIL_HOSTNAME_ENV,
+                "is required when ORBIT_MAIL_ENABLED=true",
+            );
+        }
+        match self.mode {
+            MailMode::Relay if self.relay_cidrs.is_empty() => {
+                invalid(MAIL_RELAY_CIDRS_ENV, "is required in relay mode")
+            }
+            MailMode::Relay if self.relay_authserv_id.as_deref().is_none_or(str::is_empty) => {
+                invalid(MAIL_RELAY_AUTHSERV_ID_ENV, "is required in relay mode")
+            }
+            MailMode::Direct if self.tls_cert.is_none() => {
+                invalid(MAIL_TLS_CERT_ENV, "is required in direct mode")
+            }
+            MailMode::Direct if self.tls_key.is_none() => {
+                invalid(MAIL_TLS_KEY_ENV, "is required in direct mode")
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
+/// How mail reaches the listener (`ORBIT_MAIL_MODE`).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum MailMode {
+    /// A relay in front of Orbit receives the mail and checks it.
+    #[default]
+    Relay,
+    /// Senders connect to Orbit and Orbit checks the mail.
+    Direct,
+}
+
+impl FromStr for MailMode {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "relay" => Ok(Self::Relay),
+            "direct" => Ok(Self::Direct),
+            _ => Err(()),
+        }
+    }
+}
+
+impl MailMode {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Relay => "relay",
+            Self::Direct => "direct",
+        }
+    }
 }
 
 /// `ORBIT_RATE_LIMIT_<FIELD>`. The `*_per_minute` limits apply to each client IP address, each credential
@@ -375,18 +527,7 @@ impl Config {
     }
 
     pub fn validate(&self) -> Result<(), ConfigError> {
-        let valid_origin = self
-            .http
-            .public_origin
-            .parse::<Uri>()
-            .ok()
-            .is_some_and(|origin| {
-                matches!(origin.scheme_str(), Some("http" | "https"))
-                    && origin.authority().is_some()
-                    && origin.path() == "/"
-                    && origin.query().is_none()
-            });
-        if !valid_origin {
+        if !is_http_origin(&self.http.public_origin) {
             return Err(ConfigError::InvalidSetting {
                 key: HTTP_PUBLIC_ORIGIN_ENV,
                 detail: "must be an absolute http or https origin without a path or query"
@@ -471,8 +612,18 @@ impl Config {
                 detail: "the delay cannot exceed 300 seconds".to_owned(),
             });
         }
-        self.rate_limits.validate()
+        self.rate_limits.validate()?;
+        self.mail.validate()
     }
+}
+
+fn is_http_origin(value: &str) -> bool {
+    value.parse::<Uri>().ok().is_some_and(|origin| {
+        matches!(origin.scheme_str(), Some("http" | "https"))
+            && origin.authority().is_some()
+            && origin.path() == "/"
+            && origin.query().is_none()
+    })
 }
 
 fn apply_environment(
@@ -498,12 +649,7 @@ fn apply_environment(
         } else if key == HTTP_PUBLIC_ORIGIN_ENV {
             config.http.public_origin = value.clone();
         } else if key == HTTP_TRUSTED_PROXIES_ENV {
-            config.http.trusted_proxies = value
-                .split(',')
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(|value| parse_environment(key, value))
-                .collect::<Result<Vec<_>, _>>()?;
+            config.http.trusted_proxies = parse_list(key, value)?;
         } else if key == HTTP_SHUTDOWN_DELAY_ENV {
             config.http.shutdown_delay_seconds = parse_environment(key, value)?;
         } else if key == DATA_DATABASE_ENV {
@@ -527,6 +673,32 @@ fn apply_environment(
             .and_then(|name| config.rate_limits.setting_mut(&name.to_ascii_lowercase()))
         {
             *setting = parse_environment(key, value)?;
+        } else if key == MAIL_ENABLED_ENV {
+            config.mail.enabled = parse_environment(key, value)?;
+        } else if key == MAIL_HOSTNAME_ENV {
+            config.mail.hostname = Some(value.trim().to_ascii_lowercase());
+        } else if key == MAIL_SMTP_BIND_ENV {
+            config.mail.smtp_bind = parse_environment(key, value)?;
+        } else if key == MAIL_SMTP_PORT_ENV {
+            config.mail.smtp_port = parse_environment(key, value)?;
+        } else if key == MAIL_MODE_ENV {
+            config.mail.mode = parse_environment(key, value)?;
+        } else if key == MAIL_RELAY_CIDRS_ENV {
+            config.mail.relay_cidrs = parse_list(key, value)?;
+        } else if key == MAIL_RELAY_AUTHSERV_ID_ENV {
+            config.mail.relay_authserv_id = Some(value.trim().to_owned());
+        } else if key == MAIL_PROXY_CIDRS_ENV {
+            config.mail.proxy_cidrs = parse_list(key, value)?;
+        } else if key == MAIL_TLS_CERT_ENV {
+            config.mail.tls_cert = Some(PathBuf::from(value));
+        } else if key == MAIL_TLS_KEY_ENV {
+            config.mail.tls_key = Some(PathBuf::from(value));
+        } else if key == MAIL_MAX_MESSAGE_BYTES_ENV {
+            config.mail.max_message_bytes = parse_environment(key, value)?;
+        } else if key == MAIL_DNS_RESOLVER_ENV {
+            config.mail.dns_resolver = Some(parse_environment(key, value)?);
+        } else if key == MAIL_CONTENT_ORIGIN_ENV {
+            config.mail.content_origin = Some(value.clone());
         } else if key == APP_KEY_ENV {
             config.app_key = Some(parse_app_key(value)?);
         } else if key == APP_KEY_FILE_ENV {
@@ -550,6 +722,19 @@ where
         key: key.to_owned(),
         value: value.to_owned(),
     })
+}
+
+/// A comma-separated list; empty items are skipped.
+fn parse_list<T>(key: &str, value: &str) -> Result<Vec<T>, ConfigError>
+where
+    T: std::str::FromStr,
+{
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| parse_environment(key, value))
+        .collect()
 }
 
 fn display_ip(address: IpAddr) -> String {

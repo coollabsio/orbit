@@ -376,3 +376,140 @@ fn postgres_database_url_comes_from_environment_and_is_redacted() {
     assert_eq!(load([]).unwrap().data.database_url, None);
     assert!(load([("ORBIT_DATABASE_URL", "mysql://x")]).is_err());
 }
+
+fn invalid_key(error: orbit_platform::ConfigError) -> &'static str {
+    match error {
+        orbit_platform::ConfigError::InvalidSetting { key, .. } => key,
+        other => panic!("expected an invalid setting, got {other}"),
+    }
+}
+
+const RELAY_MAIL: [(&str, &str); 4] = [
+    ("ORBIT_MAIL_ENABLED", "true"),
+    ("ORBIT_MAIL_HOSTNAME", "mx.example.com"),
+    ("ORBIT_MAIL_RELAY_CIDRS", "10.0.0.5/32"),
+    ("ORBIT_MAIL_RELAY_AUTHSERV_ID", "relay.example.com"),
+];
+
+#[test]
+fn mail_defaults_keep_the_listener_off() {
+    let mail = load([]).unwrap().mail;
+
+    assert!(!mail.enabled);
+    assert_eq!(mail.smtp_bind.to_string(), "0.0.0.0");
+    assert_eq!(mail.smtp_port, 2525);
+    assert_eq!(mail.mode, orbit_platform::MailMode::Relay);
+    assert_eq!(mail.max_message_bytes, 52_428_800);
+}
+
+#[test]
+fn mail_relay_settings_are_read() {
+    let [enabled, hostname, relay_cidrs, authserv_id] = RELAY_MAIL;
+    let mail = load([
+        enabled,
+        hostname,
+        relay_cidrs,
+        authserv_id,
+        ("ORBIT_MAIL_PROXY_CIDRS", "10.0.1.0/24, 10.0.2.0/24"),
+        ("ORBIT_MAIL_SMTP_PORT", "2526"),
+        ("ORBIT_MAIL_MAX_MESSAGE_BYTES", "1048576"),
+        ("ORBIT_MAIL_DNS_RESOLVER", "1.1.1.1:53"),
+        ("ORBIT_MAIL_CONTENT_ORIGIN", "http://127.0.0.2:8080"),
+    ])
+    .unwrap()
+    .mail;
+
+    assert!(mail.enabled);
+    assert_eq!(mail.hostname.as_deref(), Some("mx.example.com"));
+    assert_eq!(mail.relay_cidrs.len(), 1);
+    assert_eq!(mail.proxy_cidrs.len(), 2);
+    assert_eq!(mail.relay_authserv_id.as_deref(), Some("relay.example.com"));
+    assert_eq!(mail.smtp_port, 2526);
+    assert_eq!(mail.max_message_bytes, 1_048_576);
+    assert_eq!(mail.dns_resolver.unwrap().to_string(), "1.1.1.1:53");
+    assert_eq!(
+        mail.content_origin.as_deref(),
+        Some("http://127.0.0.2:8080")
+    );
+}
+
+#[test]
+fn mail_enabled_needs_hostname() {
+    let error = load([("ORBIT_MAIL_ENABLED", "true")]).unwrap_err();
+
+    assert_eq!(invalid_key(error), "ORBIT_MAIL_HOSTNAME");
+}
+
+#[test]
+fn mail_relay_needs_cidrs_and_authserv_id() {
+    let base = [
+        ("ORBIT_MAIL_ENABLED", "true"),
+        ("ORBIT_MAIL_HOSTNAME", "mx.example.com"),
+    ];
+    let error = load(base).unwrap_err();
+    assert_eq!(invalid_key(error), "ORBIT_MAIL_RELAY_CIDRS");
+
+    let error = load([base[0], base[1], ("ORBIT_MAIL_RELAY_CIDRS", "10.0.0.5/32")]).unwrap_err();
+    assert_eq!(invalid_key(error), "ORBIT_MAIL_RELAY_AUTHSERV_ID");
+
+    load(RELAY_MAIL).unwrap();
+}
+
+#[test]
+fn mail_direct_needs_tls_files() {
+    let base = [
+        ("ORBIT_MAIL_ENABLED", "true"),
+        ("ORBIT_MAIL_HOSTNAME", "mx.example.com"),
+        ("ORBIT_MAIL_MODE", "direct"),
+    ];
+    let error = load(base).unwrap_err();
+    assert_eq!(invalid_key(error), "ORBIT_MAIL_TLS_CERT");
+
+    let error = load([base[0], base[1], base[2], ("ORBIT_MAIL_TLS_CERT", "/c.pem")]).unwrap_err();
+    assert_eq!(invalid_key(error), "ORBIT_MAIL_TLS_KEY");
+
+    let mail = load([
+        base[0],
+        base[1],
+        base[2],
+        ("ORBIT_MAIL_TLS_CERT", "/c.pem"),
+        ("ORBIT_MAIL_TLS_KEY", "/k.pem"),
+    ])
+    .unwrap()
+    .mail;
+    assert_eq!(mail.mode, orbit_platform::MailMode::Direct);
+    assert_eq!(mail.tls_key, Some(PathBuf::from("/k.pem")));
+}
+
+#[test]
+fn mail_mode_must_be_known() {
+    assert!(load([("ORBIT_MAIL_MODE", "smart")]).is_err());
+}
+
+#[test]
+fn mail_relay_cidr_containing_docker_gateway_is_refused() {
+    for cidrs in ["172.17.0.0/16", "0.0.0.0/0", "10.0.0.5/32,172.16.0.0/12"] {
+        let error = load([
+            RELAY_MAIL[0],
+            RELAY_MAIL[1],
+            RELAY_MAIL[3],
+            ("ORBIT_MAIL_RELAY_CIDRS", cidrs),
+        ])
+        .unwrap_err();
+        assert_eq!(invalid_key(error), "ORBIT_MAIL_RELAY_CIDRS", "{cidrs}");
+    }
+}
+
+#[test]
+fn mail_max_message_bytes_below_1mib_refused() {
+    let error = load([("ORBIT_MAIL_MAX_MESSAGE_BYTES", "1048575")]).unwrap_err();
+
+    assert_eq!(invalid_key(error), "ORBIT_MAIL_MAX_MESSAGE_BYTES");
+}
+
+#[test]
+fn mail_content_origin_must_be_an_origin() {
+    let error = load([("ORBIT_MAIL_CONTENT_ORIGIN", "https://mail.example.com/x")]).unwrap_err();
+
+    assert_eq!(invalid_key(error), "ORBIT_MAIL_CONTENT_ORIGIN");
+}
