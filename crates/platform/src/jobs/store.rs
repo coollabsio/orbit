@@ -81,7 +81,18 @@ impl JobStore {
 
     pub async fn enqueue(&self, job: &Job) -> Result<Id, JobStoreError> {
         self.register_kind(job.kind.clone())?;
-        insert_job(&self.database, job).await?;
+        insert_job(self.database.pool(), job).await?;
+        Ok(job.id)
+    }
+
+    /// [`Self::enqueue`] inside the caller's transaction: the job exists only if the transaction commits.
+    pub async fn enqueue_in(
+        &self,
+        transaction: &mut Transaction<'_, Any>,
+        job: &Job,
+    ) -> Result<Id, JobStoreError> {
+        self.register_kind(job.kind.clone())?;
+        insert_job(&mut **transaction, job).await?;
         Ok(job.id)
     }
 
@@ -477,7 +488,10 @@ impl JobQueue {
     }
 }
 
-pub(crate) async fn insert_job(database: &Database, job: &Job) -> Result<u64, JobStoreError> {
+pub(crate) async fn insert_job<'e, E>(executor: E, job: &Job) -> Result<u64, JobStoreError>
+where
+    E: Executor<'e, Database = Any>,
+{
     Ok(sqlx::query(
         "INSERT INTO jobs (id, workspace_id, schedule_id, scheduled_for, \
          manual_retry_of, kind, payload_json, state, priority, attempt_count, max_attempts, \
@@ -496,7 +510,7 @@ pub(crate) async fn insert_job(database: &Database, job: &Job) -> Result<u64, Jo
     .bind(job.available_at.as_millis())
     .bind(job.created_at.as_millis())
     .bind(job.updated_at.as_millis())
-    .execute(database.pool())
+    .execute(executor)
     .await?
     .rows_affected())
 }

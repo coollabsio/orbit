@@ -1134,3 +1134,30 @@ async fn graceful_shutdown_requeues_without_spending_attempts() {
         assert_eq!(attempts, 0);
     }
 }
+
+#[tokio::test]
+async fn enqueue_in_commits_with_the_callers_transaction() {
+    let (database, store) = store().await;
+    let queued = job("in_transaction", JobPriority::Normal, 1_000);
+    let mut transaction = database.immediate_transaction().await.unwrap();
+    store.enqueue_in(&mut transaction, &queued).await.unwrap();
+    transaction.commit().await.unwrap();
+
+    let claim = store
+        .claim(TimestampMillis::from_millis(1_000), ClaimSelection::Any)
+        .await
+        .unwrap()
+        .expect("the committed job can be claimed");
+    assert_eq!(claim.job_id, queued.id);
+}
+
+#[tokio::test]
+async fn enqueue_in_rolls_back_with_the_callers_transaction() {
+    let (database, store) = store().await;
+    let queued = job("rolled_back", JobPriority::Normal, 1_000);
+    let mut transaction = database.immediate_transaction().await.unwrap();
+    store.enqueue_in(&mut transaction, &queued).await.unwrap();
+    drop(transaction);
+
+    assert!(store.get(queued.id).await.unwrap().is_none());
+}
