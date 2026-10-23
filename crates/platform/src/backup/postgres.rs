@@ -10,9 +10,10 @@ use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::{PgPool, Postgres};
 use sqlx::{Row, Transaction};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio_util::sync::CancellationToken;
 
+use super::crypto::DataKey;
 use super::{BackupError, check_cancelled, io_error};
 use crate::{Backend, Migration, db::metadata_table_sql};
 
@@ -27,9 +28,16 @@ struct TableCopy {
     columns: Vec<String>,
 }
 
+/// The path of a file of this directory in the snapshot, the associated data of its encryption.
+fn snapshot_path(name: &str) -> String {
+    format!("{DATABASE_DIRECTORY}/{name}")
+}
+
+/// With `key`, every file is encrypted as it is written.
 pub(super) async fn dump(
     pool: &PgPool,
     directory: &Path,
+    key: Option<&DataKey>,
     cancellation: &CancellationToken,
 ) -> Result<(), BackupError> {
     super::create_dir_all(directory)?;
@@ -40,10 +48,13 @@ pub(super) async fn dump(
     let tables = tables(&mut transaction).await?;
     for table in &tables {
         check_cancelled(cancellation)?;
-        let path = directory.join(format!("{}.copy", table.table));
+        let name = format!("{}.copy", table.table);
+        let path = directory.join(&name);
         let mut file = tokio::fs::File::create(&path)
             .await
             .map_err(|source| io_error(&path, source))?;
+        let mut sealer = key.map(|key| key.sealer(&snapshot_path(&name)));
+        let mut sealed = Vec::new();
         let mut rows = transaction
             .copy_out_raw(&format!(
                 "COPY {} ({}) TO STDOUT",
@@ -53,11 +64,26 @@ pub(super) async fn dump(
             .await
             .map_err(BackupError::Postgres)?;
         while let Some(chunk) = rows.try_next().await.map_err(BackupError::Postgres)? {
-            file.write_all(&chunk)
+            let bytes = match &mut sealer {
+                Some(sealer) => {
+                    sealed.clear();
+                    sealer.update(&chunk, &mut sealed)?;
+                    &sealed[..]
+                }
+                None => &chunk[..],
+            };
+            file.write_all(bytes)
                 .await
                 .map_err(|source| io_error(&path, source))?;
         }
         drop(rows);
+        if let Some(sealer) = sealer {
+            sealed.clear();
+            sealer.finish(&mut sealed)?;
+            file.write_all(&sealed)
+                .await
+                .map_err(|source| io_error(&path, source))?;
+        }
         file.sync_all()
             .await
             .map_err(|source| io_error(&path, source))?;
@@ -65,10 +91,18 @@ pub(super) async fn dump(
     transaction.commit().await.map_err(BackupError::Postgres)?;
 
     let path = directory.join(TABLES_FILE);
-    let contents = serde_json::to_vec_pretty(&tables).map_err(|source| BackupError::Manifest {
-        path: path.clone(),
-        source,
-    })?;
+    let mut contents =
+        serde_json::to_vec_pretty(&tables).map_err(|source| BackupError::Manifest {
+            path: path.clone(),
+            source,
+        })?;
+    if let Some(key) = key {
+        let mut sealer = key.sealer(&snapshot_path(TABLES_FILE));
+        let mut sealed = Vec::new();
+        sealer.update(&contents, &mut sealed)?;
+        sealer.finish(&mut sealed)?;
+        contents = sealed;
+    }
     tokio::fs::write(&path, contents)
         .await
         .map_err(|source| io_error(&path, source))
@@ -84,9 +118,17 @@ pub(super) async fn restore(
     directory: &Path,
     schema_version: i64,
     migrations: &[Migration],
+    key: Option<&DataKey>,
 ) -> Result<Transaction<'static, Postgres>, BackupError> {
     let path = directory.join(TABLES_FILE);
-    let contents = std::fs::read(&path).map_err(|source| io_error(&path, source))?;
+    let mut contents = std::fs::read(&path).map_err(|source| io_error(&path, source))?;
+    if let Some(key) = key {
+        let mut opener = key.opener(&snapshot_path(TABLES_FILE));
+        let mut opened = Vec::new();
+        opener.update(&contents, &mut opened)?;
+        opener.finish(&mut opened)?;
+        contents = opened;
+    }
     let copies: Vec<TableCopy> =
         serde_json::from_slice(&contents).map_err(|source| BackupError::Manifest {
             path: path.clone(),
@@ -145,8 +187,9 @@ pub(super) async fn restore(
     let order = load_order(&mut transaction, &copies).await?;
     set_user_triggers(&mut transaction, &order, "DISABLE").await?;
     for copy in &order {
-        let path = directory.join(format!("{}.copy", copy.table));
-        let file = tokio::fs::File::open(&path)
+        let name = format!("{}.copy", copy.table);
+        let path = directory.join(&name);
+        let mut file = tokio::fs::File::open(&path)
             .await
             .map_err(|source| io_error(&path, source))?;
         let mut sink = transaction
@@ -157,7 +200,36 @@ pub(super) async fn restore(
             ))
             .await
             .map_err(BackupError::Postgres)?;
-        sink.read_from(file).await.map_err(BackupError::Postgres)?;
+        match key {
+            None => {
+                sink.read_from(file).await.map_err(BackupError::Postgres)?;
+            }
+            // Decrypted a piece at a time: a table is never held in memory.
+            Some(key) => {
+                let mut opener = key.opener(&snapshot_path(&name));
+                let mut buffer = vec![0_u8; 256 * 1024];
+                let mut opened = Vec::new();
+                loop {
+                    let read = file
+                        .read(&mut buffer)
+                        .await
+                        .map_err(|source| io_error(&path, source))?;
+                    if read == 0 {
+                        break;
+                    }
+                    opener.update(&buffer[..read], &mut opened)?;
+                    if !opened.is_empty() {
+                        sink.send(std::mem::take(&mut opened))
+                            .await
+                            .map_err(BackupError::Postgres)?;
+                    }
+                }
+                opener.finish(&mut opened)?;
+                if !opened.is_empty() {
+                    sink.send(opened).await.map_err(BackupError::Postgres)?;
+                }
+            }
+        }
         sink.finish().await.map_err(BackupError::Postgres)?;
     }
     // Deferred keys (the workspace owner) are checked now: a table with pending checks cannot

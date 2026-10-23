@@ -209,7 +209,8 @@ impl App {
         )
         .map_err(|error| AppError::Config(format!("object storage: {error}")))?;
         let backups = BackupService::new(&config.data.backups, &config.data.attachments)
-            .with_object_storage(object_storage.clone());
+            .with_object_storage(object_storage.clone())
+            .with_app_key(app_key);
         let blob_store = TieredBlobStore::new(
             LocalBlobStore::new(&config.data.attachments),
             object_storage.clone(),

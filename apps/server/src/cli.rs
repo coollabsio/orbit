@@ -365,8 +365,10 @@ async fn migrate(config: Config, command: &MigrateCommand) -> Result<String, Cli
 
 async fn backup(config: Config, command: &BackupCommand) -> Result<String, CliError> {
     let storage = orbit_server::object_storage::from_env().map_err(CliError::Operation)?;
+    // New backups are encrypted with the app key (`effective_config` requires it); restoring one needs the same key.
     let service = BackupService::new(&config.data.backups, &config.data.attachments)
-        .with_object_storage(storage);
+        .with_object_storage(storage)
+        .with_app_key(config.app_key.map(|key| *key.bytes()));
     match command {
         BackupCommand::Create => {
             let database = open_database(&config.data).await?;
@@ -1743,10 +1745,59 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(backups.len(), 1);
+        assert!(backups[0].manifest.encryption.is_some());
         BackupService::new(&config.data.backups, &config.data.attachments)
             .verify(&backups[0].id)
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn backup_commands_encrypt_with_the_app_key() {
+        if orbit_platform::testing_postgres() {
+            return; // SQLite file restore; Postgres: backup_restore_replaces_a_postgres_database.
+        }
+        let root = tempfile::TempDir::new().unwrap();
+        let path = |name: &str| root.path().join(name).to_str().unwrap().to_owned();
+        let (database, attachments, backups) =
+            (path("orbit.sqlite"), path("attachments"), path("backups"));
+        let with_key = |key: &str| {
+            environment(&[
+                ("ORBIT_ENV", "development"),
+                ("ORBIT_DATABASE_PATH", &database),
+                ("ORBIT_ATTACHMENTS_PATH", &attachments),
+                ("ORBIT_BACKUPS_PATH", &backups),
+                ("ORBIT_APP_KEY", key),
+            ])
+        };
+        let cli = |args: &[&str]| Cli::try_parse_from([&["orbit"], args].concat()).unwrap();
+        run(cli(&["migrate", "run"]), with_key(APP_KEY))
+            .await
+            .unwrap();
+
+        let id = run(cli(&["backup", "create"]), with_key(APP_KEY))
+            .await
+            .unwrap();
+        let manifest = fs::read_to_string(
+            root.path()
+                .join("backups/snapshots")
+                .join(&id)
+                .join("manifest.json"),
+        )
+        .unwrap();
+        assert!(manifest.contains("key_sealed"));
+
+        let other_key = "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI=";
+        let error = run(cli(&["backup", "restore", &id]), with_key(other_key))
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("different app key"), "{error}");
+        assert_eq!(
+            run(cli(&["backup", "restore", &id]), with_key(APP_KEY))
+                .await
+                .unwrap(),
+            format!("backup {id} restored")
+        );
     }
 
     #[tokio::test]
@@ -2192,6 +2243,7 @@ mod tests {
             .await
             .unwrap();
         let backup = BackupService::new(&config.data.backups, &config.data.attachments)
+            .with_app_key(config.app_key.map(|key| *key.bytes()))
             .create(&database)
             .await
             .unwrap();

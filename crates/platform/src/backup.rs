@@ -15,13 +15,18 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::{
-    Backend, Database, DatabaseError, MigrationRunner, ObjectStorage, S3Bucket, S3Error,
+    AppKey, Backend, Database, DatabaseError, MigrationRunner, ObjectStorage, S3Bucket, S3Error,
     lock_database_ownership,
 };
 
+mod crypto;
 mod postgres;
 
+use crypto::DataKey;
+
 const DATABASE_FILE: &str = "database.sqlite";
+/// `VACUUM INTO` writes here before the file is encrypted into [`DATABASE_FILE`].
+const PLAIN_DATABASE_FILE: &str = ".database.sqlite.plain";
 const MANIFEST_FILE: &str = "manifest.json";
 /// Snapshots fetched from S3 for verify, download or restore.
 const DOWNLOADS: &str = "downloads";
@@ -58,6 +63,19 @@ pub struct BackupManifest {
     #[serde(default)]
     pub database: Backend,
     pub files: Vec<BackupFile>,
+    /// How the files are encrypted. Backups made before encryption, or without an app key, have none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encryption: Option<BackupEncryption>,
+}
+
+/// Every file of an encrypted snapshot is encrypted with the backup's own random key, which is sealed with the
+/// app key. The manifest itself stays plaintext, so backups are listed and verified without the key.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct BackupEncryption {
+    /// `chacha20poly1305-stream`: 64 KiB chunks, a random nonce prefix for each file.
+    pub algorithm: String,
+    /// Base64 of the data key sealed with the app key (ChaCha20-Poly1305, associated data `backup:` + id).
+    pub key_sealed: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -94,6 +112,7 @@ pub struct BackupService {
     attachment_root: PathBuf,
     attachment_mutations: AttachmentMutationCoordinator,
     storage: ObjectStorage,
+    app_key: Option<AppKey>,
 }
 
 #[derive(Debug, Error)]
@@ -168,6 +187,14 @@ pub enum BackupError {
         snapshot: Backend,
         database: Backend,
     },
+    #[error(
+        "backup {id} is encrypted: set ORBIT_APP_KEY to the app key of the server that made it"
+    )]
+    KeyRequired { id: String },
+    #[error("backup {id} was encrypted with a different app key")]
+    KeyMismatch { id: String },
+    #[error("backup file {path} could not be encrypted or decrypted")]
+    Crypto { path: String },
 }
 
 impl BackupService {
@@ -178,7 +205,16 @@ impl BackupService {
             attachment_root: attachment_root.into(),
             attachment_mutations: AttachmentMutationCoordinator::default(),
             storage: ObjectStorage::default(),
+            app_key: None,
         }
+    }
+
+    /// With a key, every new backup is encrypted (see [`BackupEncryption`]) and encrypted backups can be
+    /// restored. Verify, list and delete need no key.
+    #[must_use]
+    pub fn with_app_key(mut self, app_key: Option<[u8; 32]>) -> Self {
+        self.app_key = app_key.map(AppKey::new);
+        self
     }
 
     /// New snapshots go to the backup bucket of `storage` when it has one, and snapshots in its bucket are listed
@@ -357,6 +393,7 @@ impl BackupService {
                 database: Backend::Sqlite,
             });
         }
+        let key = self.data_key(&snapshot.manifest)?;
         let database_path = canonicalize_future_path(database_path)?;
         let attachment_path = canonicalize_future_path(attachment_path)?;
         if database_path == attachment_path
@@ -381,7 +418,11 @@ impl BackupService {
         let old_attachments =
             attachment_parent.join(format!(".orbit-restore-old-attachments-{token}"));
 
-        let staged = match copy_file_synced(&snapshot.path.join(DATABASE_FILE), &staged_database) {
+        let staged = match copy_file_synced(
+            &snapshot.path.join(DATABASE_FILE),
+            &staged_database,
+            key.as_ref().map(|key| (key, DATABASE_FILE)),
+        ) {
             Ok(()) => rotate_collab_epochs(&staged_database).await,
             Err(error) => Err(error),
         };
@@ -390,7 +431,7 @@ impl BackupService {
                 &snapshot.path.join("attachments"),
                 &staged_attachments,
                 &snapshot.path,
-                None,
+                key.as_ref(),
             )?;
 
             let staged_database_lock = OpenOptions::new()
@@ -502,6 +543,7 @@ impl BackupService {
                 });
             }
         };
+        let key = self.data_key(&snapshot.manifest)?;
         let attachment_path = canonicalize_future_path(&self.attachment_root)?;
         let attachment_parent = parent_directory(&attachment_path);
         create_dir_all(attachment_parent)?;
@@ -514,7 +556,7 @@ impl BackupService {
                 &snapshot.path.join("attachments"),
                 &staged,
                 &snapshot.path,
-                None,
+                key.as_ref(),
             )?;
             let runner = MigrationRunner::embedded(env!("CARGO_PKG_VERSION"));
             let transaction = postgres::restore(
@@ -522,6 +564,7 @@ impl BackupService {
                 &snapshot.path.join(postgres::DATABASE_DIRECTORY),
                 snapshot.manifest.schema_version,
                 runner.postgres_migrations(),
+                key.as_ref(),
             )
             .await?;
             // The database commits last, so a failed switch leaves both as they were.
@@ -580,6 +623,21 @@ impl BackupService {
             () = cancellation.cancelled() => return Err(BackupError::Cancelled),
         };
         let id = Uuid::now_v7().to_string();
+        let encryption = match &self.app_key {
+            Some(app_key) => {
+                let key = DataKey::generate();
+                let sealed = key.seal(app_key.bytes(), &id)?;
+                Some((
+                    key,
+                    BackupEncryption {
+                        algorithm: crypto::ALGORITHM.to_owned(),
+                        key_sealed: sealed,
+                    },
+                ))
+            }
+            None => None,
+        };
+        let key = encryption.as_ref().map(|(key, _)| key.clone());
         let kind_root = self.kind_root(kind);
         create_dir_all(&kind_root)?;
         let temporary = kind_root.join(format!(".{id}.tmp"));
@@ -590,9 +648,13 @@ impl BackupService {
             None => temporary.join(DATABASE_FILE),
             Some(_) => temporary.join(postgres::DATABASE_DIRECTORY),
         };
+        // An SQLite snapshot is written in plaintext first and encrypted below; Postgres rows are encrypted as
+        // they arrive.
+        let plain_database = temporary.join(PLAIN_DATABASE_FILE);
         let written = match database.postgres_pool() {
+            None if key.is_some() => online_backup(database, &plain_database, &cancellation).await,
             None => online_backup(database, &database_path, &cancellation).await,
-            Some(pool) => postgres::dump(pool, &database_path, &cancellation).await,
+            Some(pool) => postgres::dump(pool, &database_path, key.as_ref(), &cancellation).await,
         };
         if let Err(error) = written {
             let _ = fs::remove_dir_all(&temporary);
@@ -603,6 +665,20 @@ impl BackupService {
         tokio::task::spawn_blocking(move || {
             let result = (|| {
                 check_cancelled(&cancellation)?;
+                if let Some(key) = &key
+                    && plain_database.exists()
+                {
+                    let encrypted = crypto::encrypt_file(
+                        &plain_database,
+                        &database_path,
+                        key,
+                        DATABASE_FILE,
+                        &cancellation,
+                    );
+                    let removed = fs::remove_file(&plain_database)
+                        .map_err(|source| io_error(&plain_database, source));
+                    encrypted.and(removed)?;
+                }
                 let mut files = Vec::new();
                 if database_path.is_dir() {
                     let mut entries = fs::read_dir(&database_path)
@@ -628,6 +704,7 @@ impl BackupService {
                     &temporary.join("attachments"),
                     &temporary,
                     &mut files,
+                    key.as_ref(),
                     &cancellation,
                 )?;
                 files.sort_by(|left, right| left.path.cmp(&right.path));
@@ -639,6 +716,7 @@ impl BackupService {
                     application_version: env!("CARGO_PKG_VERSION").to_owned(),
                     database: backend,
                     files,
+                    encryption: encryption.map(|(_, encryption)| encryption),
                 };
                 write_manifest(&temporary, &manifest)?;
                 let unpublished = BackupSnapshot {
@@ -805,6 +883,29 @@ impl BackupService {
         Ok(())
     }
 
+    /// The data key of an encrypted snapshot, opened before a restore touches anything.
+    fn data_key(&self, manifest: &BackupManifest) -> Result<Option<DataKey>, BackupError> {
+        let Some(encryption) = &manifest.encryption else {
+            return Ok(None);
+        };
+        if encryption.algorithm != crypto::ALGORITHM {
+            return Err(BackupError::InvalidSnapshot(format!(
+                "unknown encryption {}",
+                encryption.algorithm
+            )));
+        }
+        let Some(app_key) = &self.app_key else {
+            return Err(BackupError::KeyRequired {
+                id: manifest.id.clone(),
+            });
+        };
+        DataKey::open(&encryption.key_sealed, app_key.bytes(), &manifest.id)
+            .map(Some)
+            .ok_or_else(|| BackupError::KeyMismatch {
+                id: manifest.id.clone(),
+            })
+    }
+
     fn kind_root(&self, kind: BackupKind) -> PathBuf {
         self.backup_root.join(match kind {
             BackupKind::Snapshot => "snapshots",
@@ -845,11 +946,12 @@ async fn online_backup(
     check_cancelled(cancellation)
 }
 
+/// Copies the snapshot directory `source` (below `backup_root`) to `destination`, decrypting with `key`.
 fn copy_directory(
     source: &Path,
     destination: &Path,
     backup_root: &Path,
-    mut files: Option<&mut Vec<BackupFile>>,
+    key: Option<&DataKey>,
 ) -> Result<(), BackupError> {
     create_dir_all(destination)?;
     if !source.exists() {
@@ -867,17 +969,19 @@ fn copy_directory(
             .file_type()
             .map_err(|error| io_error(&source_path, error))?;
         if file_type.is_dir() {
-            copy_directory(
-                &source_path,
-                &destination_path,
-                backup_root,
-                files.as_deref_mut(),
-            )?;
+            copy_directory(&source_path, &destination_path, backup_root, key)?;
         } else if file_type.is_file() {
-            fs::copy(&source_path, &destination_path)
-                .map_err(|error| io_error(&destination_path, error))?;
-            if let Some(files) = files.as_deref_mut() {
-                files.push(file_manifest(&destination_path, backup_root)?);
+            match key {
+                Some(key) => crypto::decrypt_file(
+                    &source_path,
+                    &destination_path,
+                    key,
+                    &snapshot_path(&source_path, backup_root),
+                )?,
+                None => {
+                    fs::copy(&source_path, &destination_path)
+                        .map_err(|error| io_error(&destination_path, error))?;
+                }
             }
         } else {
             return Err(BackupError::UnsupportedAttachment { path: source_path });
@@ -899,6 +1003,7 @@ fn copy_directory_cancellable(
     destination: &Path,
     backup_root: &Path,
     files: &mut Vec<BackupFile>,
+    key: Option<&DataKey>,
     cancellation: &CancellationToken,
 ) -> Result<(), BackupError> {
     check_cancelled(cancellation)?;
@@ -924,10 +1029,20 @@ fn copy_directory_cancellable(
                 &destination_path,
                 backup_root,
                 files,
+                key,
                 cancellation,
             )?;
         } else if file_type.is_file() {
-            copy_file_cancellable(&source_path, &destination_path, cancellation)?;
+            match key {
+                Some(key) => crypto::encrypt_file(
+                    &source_path,
+                    &destination_path,
+                    key,
+                    &snapshot_path(&destination_path, backup_root),
+                    cancellation,
+                )?,
+                None => copy_file_cancellable(&source_path, &destination_path, cancellation)?,
+            }
             files.push(file_manifest_cancellable(
                 &destination_path,
                 backup_root,
@@ -984,30 +1099,19 @@ fn file_manifest_cancellable(
         digest.update(&buffer[..read]);
         byte_size = byte_size.saturating_add(read as u64);
     }
-    let relative = path
-        .strip_prefix(root)
-        .expect("backup files are created below the backup root")
-        .to_string_lossy()
-        .replace(std::path::MAIN_SEPARATOR, "/");
     Ok(BackupFile {
-        path: relative,
+        path: snapshot_path(path, root),
         sha256: format!("{:x}", digest.finalize()),
         byte_size,
     })
 }
 
-fn file_manifest(path: &Path, root: &Path) -> Result<BackupFile, BackupError> {
-    let bytes = fs::read(path).map_err(|source| io_error(path, source))?;
-    let relative = path
-        .strip_prefix(root)
+/// The `/`-separated path of `path` in the snapshot at `root`, as in the manifest.
+fn snapshot_path(path: &Path, root: &Path) -> String {
+    path.strip_prefix(root)
         .expect("backup files are created below the backup root")
         .to_string_lossy()
-        .replace(std::path::MAIN_SEPARATOR, "/");
-    Ok(BackupFile {
-        path: relative,
-        sha256: format!("{:x}", Sha256::digest(&bytes)),
-        byte_size: bytes.len() as u64,
-    })
+        .replace(std::path::MAIN_SEPARATOR, "/")
 }
 
 fn write_manifest(path: &Path, manifest: &BackupManifest) -> Result<(), BackupError> {
@@ -1209,7 +1313,15 @@ fn create_dir_all(path: &Path) -> Result<(), BackupError> {
     fs::create_dir_all(path).map_err(|source| io_error(path, source))
 }
 
-fn copy_file_synced(source: &Path, destination: &Path) -> Result<(), BackupError> {
+/// Copies `source` to the new file `destination`; with a key, decrypts the snapshot file stored as its path.
+fn copy_file_synced(
+    source: &Path,
+    destination: &Path,
+    key: Option<(&DataKey, &str)>,
+) -> Result<(), BackupError> {
+    if let Some((key, path)) = key {
+        return crypto::decrypt_file(source, destination, key, path);
+    }
     let mut source_file = File::open(source).map_err(|error| io_error(source, error))?;
     let mut destination_file = OpenOptions::new()
         .create_new(true)

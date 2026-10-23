@@ -459,7 +459,11 @@ async fn installation_admin_can_create_an_online_backup() {
         root.path().join("backups"),
         root.path().join("data/attachments"),
     );
-    backups.verify(id).await.unwrap();
+    let snapshot = backups.verify(id).await.unwrap();
+    assert!(
+        snapshot.manifest.encryption.is_some(),
+        "the server encrypts backups with its app key"
+    );
 
     let list = app
         .router()
@@ -495,16 +499,18 @@ async fn installation_admin_can_create_an_online_backup() {
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
     let names: Vec<String> = archive.file_names().map(str::to_owned).collect();
     assert!(names.contains(&format!("{id}/manifest.json")));
-    // A Postgres snapshot holds the `COPY` rows of every table instead of the SQLite file.
-    let (database_file, header) = if orbit_platform::testing_postgres() {
-        (format!("{id}/database/users.copy"), &b""[..])
+    // A Postgres snapshot holds the `COPY` rows of every table instead of the SQLite file. The archive keeps the
+    // files encrypted, so `orbit backup restore` with the same app key restores it.
+    let database_file = if orbit_platform::testing_postgres() {
+        format!("{id}/database/users.copy")
     } else {
-        (format!("{id}/database.sqlite"), &b"SQLite format 3\0"[..])
+        format!("{id}/database.sqlite")
     };
     let mut database = Vec::new();
     std::io::Read::read_to_end(&mut archive.by_name(&database_file).unwrap(), &mut database)
         .unwrap();
-    assert!(database.starts_with(header));
+    assert!(!database.is_empty());
+    assert!(!database.starts_with(b"SQLite format 3"));
 
     let missing = app
         .router()

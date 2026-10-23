@@ -22,8 +22,8 @@ pub use auth::{
     generate_opaque_token, normalize_email,
 };
 pub use backup::{
-    AttachmentMutationCoordinator, AttachmentMutationGuard, BackupError, BackupFile, BackupKind,
-    BackupManifest, BackupService, BackupSnapshot,
+    AttachmentMutationCoordinator, AttachmentMutationGuard, BackupEncryption, BackupError,
+    BackupFile, BackupKind, BackupManifest, BackupService, BackupSnapshot,
 };
 pub use config::{
     AppKey, Config, ConfigError, DataConfig, EnvironmentMode, HttpConfig, JobsConfig, MailConfig,

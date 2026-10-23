@@ -97,6 +97,8 @@ Registration is closed after setup: people join only by invitation. The root use
 
 Saved secrets (the SMTP password, GitHub App keys, Notion import tokens) are encrypted with the app key. `ORBIT_APP_KEY` (base64 of 32 random bytes, from `openssl rand -base64 32`) is required. Orbit does not create a key. Keep a copy outside the server and its backups: a database restored without the same key cannot read its saved secrets, and the root user must enter them again. Users with two-factor authentication must set it up again.
 
+**Backups are encrypted with the app key.** Each new backup (manual, automatic and pre-migration, local and in S3) has its own random key, sealed with the app key in the backup's `manifest.json`; the database and every attachment file are encrypted. Without the app key a backup cannot be restored: `orbit backup restore` stops with "backup … is encrypted" when `ORBIT_APP_KEY` is not set, and with "encrypted with a different app key" when it is another key, before it changes anything. `orbit backup verify` checks the stored files and needs no key. So keep a copy of the app key outside the server and outside its backups, for example in a password manager. Backups made by older versions are not encrypted and still restore.
+
 Older versions created an `app.key` file beside the SQLite database. If that file still exists, Orbit starts only when `ORBIT_APP_KEY` holds the same key. Set `ORBIT_APP_KEY` to the contents of the file, start Orbit, and then you can delete the file.
 
 ## Postgres
