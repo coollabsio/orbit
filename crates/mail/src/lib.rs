@@ -21,6 +21,8 @@ pub use html::{
     CidUrl, ProxyUrl, RenderOptions, Rendered, csp_header, new_nonce, render_document,
     render_text_document,
 };
+/// The resolver crate `mail-auth` uses, so the server's DNS checks share its version and features.
+pub use mail_auth::hickory_resolver;
 pub use parse::{
     AttachmentInfo, Mailbox, ParseError, ParseLimits, ParsedMessage, normalize_subject, parse,
     part_bytes, sniff_image,

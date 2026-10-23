@@ -15,6 +15,7 @@ use crate::chat_routes::{ChatState, chat_router};
 use crate::export_routes::{ExportState, export_router};
 use crate::import_routes::{ImportState, import_router};
 use crate::integration_routes::{IntegrationState, integration_router};
+use crate::mail_routes::{MailState, mail_router};
 use crate::page_comment_routes::{PageCommentState, page_comment_router};
 use crate::page_file_routes::{PageFileState, page_file_router};
 use crate::page_routes::{PageState, page_router};
@@ -39,6 +40,7 @@ pub struct ApiRoutes {
     pub integrations: IntegrationState,
     pub imports: ImportState,
     pub chat: ChatState,
+    pub mail: MailState,
 }
 
 pub fn production_router(
@@ -72,6 +74,7 @@ pub fn production_router(
         .merge(import_router(api.imports))
         .merge(crate::live::socket::live_router(api.chat.clone()))
         .merge(chat_router(api.chat))
+        .merge(mail_router(api.mail))
         .merge(
             Router::new()
                 .route("/health/live", get(liveness))

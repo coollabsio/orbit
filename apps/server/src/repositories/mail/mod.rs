@@ -5,11 +5,16 @@
 //! ([`MailKeys`]); `mail_receipts.blob_id` references it, so the blob reconcile removes a blob
 //! that no receipt uses. No HTML is stored: it is sanitized from the raw message on each view.
 
+mod domains;
 mod keys;
 
 use orbit_platform::{Database, UploadError, UploadService};
 use thiserror::Error;
 
+pub use domains::{
+    DAILY_CHECK_MS, DNS_CHECK_JOB, DkimPublic, DnsReport, Domain, DomainStatus, PENDING_CHECK_MS,
+    PENDING_WINDOW_MS, RecordStatus, SUSPENDED_GRACE_MS, dkim_aad, dns_check_job, dns_check_kind,
+};
 pub use keys::{MailKeys, open_blob, receipt_aad, seal_blob};
 
 #[derive(Debug, Error)]
@@ -46,6 +51,8 @@ pub struct MailRepository {
     database: Database,
     uploads: UploadService,
     keys: MailKeys,
+    /// Seals DKIM private keys (associated data [`dkim_aad`]).
+    app_key: [u8; 32],
 }
 
 impl MailRepository {
@@ -55,6 +62,7 @@ impl MailRepository {
             keys: MailKeys::new(database.clone(), app_key),
             database,
             uploads,
+            app_key,
         }
     }
 

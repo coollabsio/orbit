@@ -23,6 +23,7 @@ mime_guess = "2"
 oxide-auth = "=0.6.1"
 url = "2"
 orbit-domain = { path = "../../crates/orbit" }
+orbit-mail = { path = "../../crates/mail" }
 orbit-platform = { path = "../../crates/platform" }
 rmcp = { version = "=3.5.0", default-features = false, features = ["server", "transport-streamable-http-server"] }
 schemars = "1"

@@ -26,6 +26,8 @@ use crate::chat_routes::ChatState;
 use crate::export_routes::ExportState;
 use crate::import_routes::ImportState;
 use crate::integration_routes::IntegrationState;
+use crate::mail_dns::{DnsChecker, HickoryDns};
+use crate::mail_routes::{MailSettings, MailState};
 use crate::metrics::Metrics;
 use crate::notion::client::NotionClientConfig;
 use crate::notion::import::{NotionImportService, NotionImportSettings};
@@ -35,6 +37,7 @@ use crate::page_routes::PageState;
 use crate::repositories::api_tokens::ApiTokenRepository;
 use crate::repositories::identity::IdentityRepository;
 use crate::repositories::instance_settings::InstanceSettingsRepository;
+use crate::repositories::mail::{DNS_CHECK_JOB, MailRepository, PENDING_CHECK_MS, dns_check_kind};
 use crate::repositories::page_files::PageFileRepository;
 use crate::repositories::tasks::TaskRepository;
 use crate::repositories::workspaces::WorkspaceRepository;
@@ -247,12 +250,28 @@ impl App {
             },
         );
 
+        // `validate` requires the app key.
+        let mail_key =
+            app_key.ok_or_else(|| AppError::Config("ORBIT_APP_KEY is required".to_owned()))?;
+        let mail = Arc::new(MailRepository::new(
+            database.clone(),
+            attachment_state.uploads.clone(),
+            mail_key,
+        ));
+        let dns_checker = DnsChecker::new(
+            Arc::clone(&mail),
+            Arc::new(HickoryDns::new(config.mail.dns_resolver)),
+            config.mail.hostname.clone(),
+            config.mail.mode,
+        );
+
         let production_services = initialize_production_services(
             &database,
             backups.clone(),
             Arc::clone(&workspaces),
             integrity.clone(),
             notion_imports.clone(),
+            dns_checker,
             config.jobs.concurrency,
         )
         .await?;
@@ -346,6 +365,15 @@ impl App {
                     Arc::clone(&identity),
                     attachment_state.uploads.clone(),
                     cookie_mode,
+                ),
+                mail: MailState::new(
+                    Arc::clone(&identity),
+                    mail,
+                    cookie_mode,
+                    MailSettings {
+                        hostname: config.mail.hostname.clone(),
+                        mode: config.mail.mode,
+                    },
                 ),
             },
             health,
@@ -730,6 +758,7 @@ async fn initialize_production_services(
     workspaces: Arc<WorkspaceRepository>,
     integrity: IntegrityService,
     notion_imports: NotionImportService,
+    dns_checker: DnsChecker,
     concurrency: usize,
 ) -> Result<ProductionServices, AppError> {
     let store = JobStore::new(database.clone());
@@ -794,6 +823,12 @@ async fn initialize_production_services(
             })
         })
         .and_then(|worker| crate::notion::import::register_jobs(worker, notion_imports))
+        .and_then(|worker| {
+            worker.with_handler(dns_check_kind(), move |context| {
+                let checker = dns_checker.clone();
+                async move { checker.run(&context.job.payload).await }
+            })
+        })
         .map_err(|error| AppError::ProductionServices(error.to_string()))?;
 
     let now = database
@@ -833,6 +868,14 @@ async fn initialize_production_services(
         &scheduler,
         NOTION_CLEANUP,
         Duration::from_secs(60 * 60),
+        now,
+    )
+    .await?;
+    // Pending domains every 10 minutes; the job picks the domains that are due.
+    ensure_schedule(
+        &scheduler,
+        DNS_CHECK_JOB,
+        Duration::from_millis(PENDING_CHECK_MS.unsigned_abs()),
         now,
     )
     .await?;

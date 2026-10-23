@@ -263,6 +263,14 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::chat_routes::stickers::create_chat_sticker,
         crate::chat_routes::stickers::delete_chat_sticker,
         crate::chat_routes::stickers::get_chat_sticker_image,
+        crate::mail_routes::domains::list_mail_domains,
+        crate::mail_routes::domains::create_mail_domain,
+        crate::mail_routes::domains::get_mail_domain,
+        crate::mail_routes::domains::delete_mail_domain,
+        crate::mail_routes::domains::check_mail_domain,
+        crate::mail_routes::domains::set_mail_domain_catch_all,
+        crate::mail_routes::domains::set_mail_domain_enabled,
+        crate::mail_routes::domains::move_mail_domain,
     )
 )]
 struct ApiDocument;
@@ -381,6 +389,7 @@ fn problem_schema(route: &str) -> &'static str {
         || route.contains("/teamspaces")
         || route.contains("/imports/")
         || route.contains("/chat/")
+        || route.contains("/mail/")
     {
         "TaskProblem"
     } else if route.starts_with("/api/v1/auth") || route.starts_with("/api/v1/setup") {
@@ -680,6 +689,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         id if page_operation(id) => page_errors(id, &mut responses),
         id if teamspace_operation(id) => teamspace_errors(id, &mut responses),
         id if id.contains("chat") => chat_errors(id, &mut responses),
+        id if id.contains("mail_domain") => mail_domain_errors(id, &mut responses),
         _ => {}
     }
 
@@ -1212,6 +1222,43 @@ fn chat_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
         ))
     {
         add_code(responses, "403", "chat_forbidden");
+    }
+}
+
+/// Mail domain routes need `mail.manage`; an outsider of the workspace gets `mail_not_found`.
+fn mail_domain_errors(
+    operation_id: &str,
+    responses: &mut BTreeMap<&'static str, Vec<&'static str>>,
+) {
+    if matches!(
+        operation_id,
+        "create_mail_domain"
+            | "set_mail_domain_catch_all"
+            | "set_mail_domain_enabled"
+            | "move_mail_domain"
+    ) {
+        add_code(responses, "400", "invalid_request");
+    }
+    if operation_id == "move_mail_domain" {
+        add_code(responses, "403", "installation_admin_required");
+        add_code(responses, "404", "mail_not_found");
+        add_code(responses, "409", "domain_has_mailboxes");
+        add_code(responses, "409", "domain_claimed");
+        add_code(responses, "422", "validation_failed");
+        return;
+    }
+    add_code(responses, "403", "mail_forbidden");
+    add_code(responses, "404", "mail_not_found");
+    match operation_id {
+        "create_mail_domain" => {
+            add_code(responses, "403", "mail_domains_disabled");
+            add_code(responses, "409", "domain_claimed");
+            add_code(responses, "409", "domain_exists");
+            add_code(responses, "422", "validation_failed");
+        }
+        "delete_mail_domain" => add_code(responses, "409", "domain_has_mailboxes"),
+        "set_mail_domain_catch_all" => add_code(responses, "422", "validation_failed"),
+        _ => {}
     }
 }
 

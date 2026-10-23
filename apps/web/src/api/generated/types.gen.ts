@@ -842,6 +842,13 @@ export type CreateApiTokenBody = {
     service_account?: boolean;
 };
 
+export type CreateMailDomainBody = {
+    /**
+     * A domain such as `example.com`; Unicode names are stored as A-labels.
+     */
+    name: string;
+};
+
 export type CreateNotionImportBody = {
     /**
      * A Notion personal access token (recommended) or internal connection token. Validated
@@ -1285,6 +1292,106 @@ export type LoginResponse = {
     user: AuthUserResponse;
 };
 
+export type MailDnsRecord = {
+    kind: MailDnsRecordKind;
+    /**
+     * The full name, without a trailing dot.
+     */
+    name: string;
+    /**
+     * MX only.
+     */
+    priority?: number | null;
+    /**
+     * `unknown` before the first check, or when the last lookup timed out.
+     */
+    status: MailRecordStatus;
+    /**
+     * TXT only: `value` cut into strings of at most 255 bytes. A DKIM key is longer than one
+     * string; zone files write them as `"…" "…"`, most DNS panels take `value` as it is.
+     */
+    txt_strings: Array<string>;
+    type: MailDnsRecordType;
+    /**
+     * The TXT text, or the MX target host.
+     */
+    value: string;
+};
+
+export type MailDnsRecordKind = 'verify' | 'mx' | 'dkim' | 'spf' | 'dmarc';
+
+export type MailDnsRecordType = 'TXT' | 'MX';
+
+/**
+ * A mail domain with the records to publish and the result of its last DNS check.
+ */
+export type MailDomain = {
+    /**
+     * Addresses on the domain. A domain is removed only without any.
+     */
+    address_count: number;
+    catch_all_mailbox_id?: string | null;
+    /**
+     * The last check that reached the DNS; `null` before the first one.
+     */
+    checked_at?: string | null;
+    created_at: string;
+    /**
+     * The `p=` of the domain's DMARC record at the last check.
+     */
+    dmarc_policy?: string | null;
+    /**
+     * Suspended domains only: mail is refused after this.
+     */
+    grace_ends_at?: string | null;
+    id: string;
+    last_verified_at?: string | null;
+    /**
+     * Normalized: lower case, IDNA A-labels (`xn--…`), no trailing dot.
+     */
+    name: string;
+    /**
+     * The records to publish, each with its status at the last check.
+     */
+    records: Array<MailDnsRecord>;
+    status: MailDomainStatus;
+    /**
+     * When the TXT record of a verified domain was found missing.
+     */
+    suspended_at?: string | null;
+    verified_at?: string | null;
+};
+
+export type MailDomainCatchAllBody = {
+    /**
+     * A mailbox of the workspace, or `null` to refuse unknown addresses.
+     */
+    mailbox_id?: string | null;
+};
+
+export type MailDomainEnabledBody = {
+    /**
+     * `false` refuses all mail for the domain.
+     */
+    enabled: boolean;
+};
+
+export type MailDomainStatus = 'pending' | 'verified' | 'suspended' | 'disabled';
+
+/**
+ * The result of one DNS record check.
+ */
+export type MailRecordStatus = {
+    status: 'ok';
+} | {
+    status: 'missing';
+} | {
+    found: string;
+    status: 'wrong';
+} | {
+    status: 'unknown';
+};
+
 export type MemberNoteBody = {
     /**
      * The note; an empty text removes it.
@@ -1432,6 +1539,10 @@ export type MoveFavoriteBody = {
      * Index among the caller's visible favorites; larger values move it last.
      */
     position: number;
+};
+
+export type MoveMailDomainBody = {
+    workspace_id: string;
 };
 
 export type MovePageBody = {
@@ -3920,6 +4031,68 @@ export type SaveJobLimitsResponses = {
 };
 
 export type SaveJobLimitsResponse = SaveJobLimitsResponses[keyof SaveJobLimitsResponses];
+
+export type MoveMailDomainData = {
+    body: MoveMailDomainBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        name: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/mail/domains/{name}/workspace';
+};
+
+export type MoveMailDomainErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, installation_admin_required
+     */
+    403: TaskProblem;
+    /**
+     * mail_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, domain_has_mailboxes, domain_claimed
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type MoveMailDomainError = MoveMailDomainErrors[keyof MoveMailDomainErrors];
+
+export type MoveMailDomainResponses = {
+    204: void;
+};
+
+export type MoveMailDomainResponse = MoveMailDomainResponses[keyof MoveMailDomainResponses];
 
 export type GetInstanceSettingsData = {
     body?: never;
@@ -11278,6 +11451,423 @@ export type ListLabelsResponses = {
 };
 
 export type ListLabelsResponse = ListLabelsResponses[keyof ListLabelsResponses];
+
+export type ListMailDomainsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/mail/domains';
+};
+
+export type ListMailDomainsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * mail_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * mail_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListMailDomainsError = ListMailDomainsErrors[keyof ListMailDomainsErrors];
+
+export type ListMailDomainsResponses = {
+    200: Array<MailDomain>;
+};
+
+export type ListMailDomainsResponse = ListMailDomainsResponses[keyof ListMailDomainsResponses];
+
+export type CreateMailDomainData = {
+    body: CreateMailDomainBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/mail/domains';
+};
+
+export type CreateMailDomainErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, mail_forbidden, mail_domains_disabled
+     */
+    403: TaskProblem;
+    /**
+     * mail_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, domain_claimed, domain_exists
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateMailDomainError = CreateMailDomainErrors[keyof CreateMailDomainErrors];
+
+export type CreateMailDomainResponses = {
+    201: MailDomain;
+};
+
+export type CreateMailDomainResponse = CreateMailDomainResponses[keyof CreateMailDomainResponses];
+
+export type DeleteMailDomainData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        domain_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/mail/domains/{domain_id}';
+};
+
+export type DeleteMailDomainErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, mail_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * mail_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, domain_has_mailboxes
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type DeleteMailDomainError = DeleteMailDomainErrors[keyof DeleteMailDomainErrors];
+
+export type DeleteMailDomainResponses = {
+    204: void;
+};
+
+export type DeleteMailDomainResponse = DeleteMailDomainResponses[keyof DeleteMailDomainResponses];
+
+export type GetMailDomainData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        domain_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/mail/domains/{domain_id}';
+};
+
+export type GetMailDomainErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * mail_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * mail_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetMailDomainError = GetMailDomainErrors[keyof GetMailDomainErrors];
+
+export type GetMailDomainResponses = {
+    200: MailDomain;
+};
+
+export type GetMailDomainResponse = GetMailDomainResponses[keyof GetMailDomainResponses];
+
+export type SetMailDomainCatchAllData = {
+    body: MailDomainCatchAllBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        domain_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/mail/domains/{domain_id}/catch-all';
+};
+
+export type SetMailDomainCatchAllErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, mail_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * mail_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type SetMailDomainCatchAllError = SetMailDomainCatchAllErrors[keyof SetMailDomainCatchAllErrors];
+
+export type SetMailDomainCatchAllResponses = {
+    200: MailDomain;
+};
+
+export type SetMailDomainCatchAllResponse = SetMailDomainCatchAllResponses[keyof SetMailDomainCatchAllResponses];
+
+export type CheckMailDomainData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        domain_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/mail/domains/{domain_id}/check';
+};
+
+export type CheckMailDomainErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, mail_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * mail_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CheckMailDomainError = CheckMailDomainErrors[keyof CheckMailDomainErrors];
+
+export type CheckMailDomainResponses = {
+    202: unknown;
+};
+
+export type SetMailDomainEnabledData = {
+    body: MailDomainEnabledBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        domain_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/mail/domains/{domain_id}/enabled';
+};
+
+export type SetMailDomainEnabledErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, mail_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * mail_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type SetMailDomainEnabledError = SetMailDomainEnabledErrors[keyof SetMailDomainEnabledErrors];
+
+export type SetMailDomainEnabledResponses = {
+    200: MailDomain;
+};
+
+export type SetMailDomainEnabledResponse = SetMailDomainEnabledResponses[keyof SetMailDomainEnabledResponses];
 
 export type ListMembersData = {
     body?: never;
