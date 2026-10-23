@@ -1,10 +1,14 @@
 //! The inbound SMTP session: a state machine over any `AsyncRead + AsyncWrite` stream, with the limits of spec §4.5.
 //!
 //! The session knows no database. It asks a [`SessionHandler`] about each recipient and hands it the finished
-//! message; the server's listener implements the handler. Every reply text lives in [`Reply`].
+//! message; the server's listener implements the handler. Every reply text lives in [`Reply`]. The listener's
+//! network pieces are here too: the reloadable TLS acceptor, PROXY v2 and the connection limits.
 
+mod conn_limit;
 mod limits;
+mod proxy;
 mod session;
+mod tls;
 
 use std::fmt;
 use std::future::Future;
@@ -14,8 +18,11 @@ use std::net::IpAddr;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite};
 
+pub use conn_limit::{ConnLimiter, ConnPermit};
 pub use limits::{MAX_COMMAND_LINE, MAX_TEXT_LINE, SessionLimits, TARPIT_DELAY};
+pub use proxy::{DOCKER_DEFAULT_GATEWAY, ProxyError, is_docker_bridge, read_proxy_v2};
 pub use session::run_session;
+pub use tls::{CERT_EXPIRY_WARNING, CertInfo, TlsAcceptorHandle, TlsError};
 
 /// One SMTP reply: `code enhanced text`. An empty `enhanced` writes no enhanced status code (RFC 2034 leaves it out
 /// of the greeting, the EHLO answer and `354`).

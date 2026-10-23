@@ -1,5 +1,6 @@
 //! Mail protocol code for Orbit: address rules, MIME parsing, the SPF, DKIM and DMARC checks and the inbound SMTP
-//! session. Later modules add the HTML view document and DKIM keys. This crate has no database and no HTTP code.
+//! session with its TLS acceptor, PROXY v2 and connection limits. Later modules add the HTML view document and DKIM
+//! keys. This crate has no database and no HTTP code.
 
 mod address;
 mod auth;
@@ -18,7 +19,9 @@ pub use parse::{
     part_bytes, sniff_image,
 };
 pub use smtp::{
-    AcceptedRecipient, DataDecision, Envelope, MAX_COMMAND_LINE, MAX_TEXT_LINE, NoTls,
-    RcptDecision, Reply, SessionContext, SessionError, SessionHandler, SessionLimits, StartTls,
-    TARPIT_DELAY, TlsInfo, run_session,
+    AcceptedRecipient, CERT_EXPIRY_WARNING, CertInfo, ConnLimiter, ConnPermit,
+    DOCKER_DEFAULT_GATEWAY, DataDecision, Envelope, MAX_COMMAND_LINE, MAX_TEXT_LINE, NoTls,
+    ProxyError, RcptDecision, Reply, SessionContext, SessionError, SessionHandler, SessionLimits,
+    StartTls, TARPIT_DELAY, TlsAcceptorHandle, TlsError, TlsInfo, is_docker_bridge, read_proxy_v2,
+    run_session,
 };
