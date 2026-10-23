@@ -1,0 +1,10 @@
+[package]
+name = "orbit-mail"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+idna = "1"
+mail-parser = "0.11"
+thiserror = "2"

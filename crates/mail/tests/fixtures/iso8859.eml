@@ -1,0 +1,10 @@
+Message-ID: <latin-1@sender.example>
+Date: Thu, 22 Oct 2026 12:00:00 +0000
+From: =?ISO-8859-1?Q?Fran=E7ois?= <francois@sender.example>
+To: bob@orbit.example
+Subject: =?ISO-8859-1?Q?Caf=E9_cr=E8me?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=ISO-8859-1
+Content-Transfer-Encoding: quoted-printable
+
+Un caf=E9 cr=E8me, s'il vous pla=EEt.

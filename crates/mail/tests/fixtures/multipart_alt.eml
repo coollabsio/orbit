@@ -1,0 +1,19 @@
+Message-ID: <alt-1@sender.example>
+In-Reply-To: <plain-1@sender.example>
+References: <root@sender.example> <plain-1@sender.example>
+Date: Thu, 22 Oct 2026 10:00:00 +0000
+From: ann@sender.example
+To: bob@orbit.example
+Subject: Re: Quarterly numbers
+MIME-Version: 1.0
+Content-Type: multipart/alternative; boundary="alt-b"
+
+--alt-b
+Content-Type: text/plain; charset=utf-8
+
+Plain version of the reply.
+--alt-b
+Content-Type: text/html; charset=utf-8
+
+<html><body><p>HTML <b>version</b> of the reply.</p></body></html>
+--alt-b--
