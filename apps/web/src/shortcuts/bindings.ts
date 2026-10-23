@@ -87,6 +87,8 @@ export function findConflicts(bindings: Bindings, id: string, keys: string): Com
   return (COMMANDS as readonly Command[]).filter((other) => {
     const otherKeys = bindings[other.id]
     if (other.id === id || !otherKeys || !contextsOverlap(command.context, other.context)) return false
+    // a page command that shadows a global one takes its keys on purpose
+    if (command.shadows === other.id || other.shadows === command.id) return false
     const otherSteps = parseKeys(otherKeys)?.map(toEngineStep)
     return otherSteps !== undefined && (isPrefix(steps, otherSteps) || isPrefix(otherSteps, steps))
   })

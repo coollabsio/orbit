@@ -1,125 +1,120 @@
-import { useState } from 'react'
+import type { ComponentType, ReactNode } from 'react'
 import { useNavigate } from 'react-router'
-import { Add as Plus } from 'reicon-react'
-import { Button } from '@/components/ui/button'
-import { Tip } from '@/components/common/Tip'
+import { DirectboxDefault, Star } from 'reicon-react'
+import type { MailCounts, MailLabel, MailMeMailbox } from '@/api/generated/types.gen'
+import { ColorDot } from '@/components/common/ColorDot'
+import { PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
-import { PaneTitle } from '@/components/common/Pane'
-import { createMailFolder, moveThread } from '@/mock/actions'
-import type { MailFolder, MailThread } from '@/mock/types'
-import { FOLDER_ICONS, folderUnreadCount } from '@/features/mail/mailLib'
+import { Button } from '@/components/ui/button'
+import { FOLDERS, mailViewPath, type MailView } from '@/features/mail/mailLib'
 
 interface FolderRailProps {
-  folders: MailFolder[]
-  threads: MailThread[]
-  activeFolderId: string
+  view: MailView
+  mailboxes: MailMeMailbox[]
+  labels: MailLabel[]
+  counts: MailCounts | undefined
 }
 
-export function FolderRail({ folders, threads, activeFolderId }: FolderRailProps) {
+function RailRow({
+  icon: Icon,
+  label,
+  unread = 0,
+  active,
+  onClick,
+  children,
+}: {
+  icon?: ComponentType<{ className?: string }>
+  label: string
+  unread?: number
+  active: boolean
+  onClick: () => void
+  children?: ReactNode
+}) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      className="w-full min-w-0 justify-start gap-2.5 text-[13px] data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground"
+      data-active={active || undefined}
+      aria-current={active ? 'page' : undefined}
+      aria-label={unread > 0 ? `${label}, ${unread} unread` : label}
+      onClick={onClick}
+    >
+      {Icon ? <Icon className="opacity-90" /> : children}
+      <span className="min-w-0 flex-1 truncate text-left">{label}</span>
+      {unread > 0 ? (
+        <Badge aria-hidden="true" className="h-4 min-w-4 px-1 text-[10px] tabular-nums">
+          {unread > 999 ? '999+' : unread}
+        </Badge>
+      ) : null}
+    </Button>
+  )
+}
+
+function RailSection({ children }: { children: string }) {
+  return <span className="mt-3 px-2.5 py-1 text-[11px] font-medium text-sidebar-foreground/60 select-none">{children}</span>
+}
+
+/**
+ * The mail sidebar: the inbox of every mailbox, each mailbox with its unread count (when there are several), Starred,
+ * the folders and the labels. With a mailbox open, the folders are that mailbox's.
+ */
+export function FolderRail({ view, mailboxes, labels, counts }: FolderRailProps) {
   const navigate = useNavigate()
-  const [adding, setAdding] = useState(false)
-  const [dropFolderId, setDropFolderId] = useState<string | null>(null)
-  const [draft, setDraft] = useState('')
-  const system = folders.filter((f) => !f.custom)
-  const custom = folders.filter((f) => f.custom)
-
-  const commit = () => {
-    const name = draft.trim()
-    setAdding(false)
-    setDraft('')
-    if (!name) return
-    const folder = createMailFolder(name)
-    navigate(`/mail?folder=${folder.id}`)
-  }
-
-  const row = (folder: MailFolder) => {
-    const Icon = FOLDER_ICONS[folder.icon]
-    const unread = folderUnreadCount(threads, folder.id)
-    // "Starred" is virtual (filters on the star flag): it cannot hold a dropped thread
-    const droppable = folder.id !== 'f_starred'
-    return (
-      <Button
-        key={folder.id}
-        type="button"
-        variant="ghost"
-        className="w-full min-w-0 justify-start gap-2.5 text-[13px] data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground data-drop-over:bg-primary/10 data-drop-over:text-primary"
-        data-active={folder.id === activeFolderId || undefined}
-        data-drop-over={dropFolderId === folder.id || undefined}
-        onClick={() => navigate(`/mail?folder=${folder.id}`)}
-        onDragOver={(e) => {
-          if (!droppable || !e.dataTransfer.types.includes('text/mail-thread-id')) return
-          e.preventDefault()
-          e.dataTransfer.dropEffect = 'move'
-          if (dropFolderId !== folder.id) setDropFolderId(folder.id)
-        }}
-        onDragLeave={() => {
-          if (dropFolderId === folder.id) setDropFolderId(null)
-        }}
-        onDrop={(e) => {
-          e.preventDefault()
-          setDropFolderId(null)
-          const threadId = e.dataTransfer.getData('text/mail-thread-id')
-          if (threadId && droppable) moveThread(threadId, folder.id)
-        }}
-      >
-        <Icon className="opacity-90" />
-        <span className="min-w-0 flex-1 truncate text-left">{folder.name}</span>
-        {unread > 0 ? (
-          <Badge className="h-4 min-w-4 px-1 text-[10px] tabular-nums">
-            {unread}
-          </Badge>
-        ) : null}
-      </Button>
-    )
-  }
+  const unread = (mailboxId: string | undefined, folder: 'inbox' | 'spam') =>
+    (counts?.mailboxes ?? []).filter((mailbox) => !mailboxId || mailbox.mailbox_id === mailboxId).reduce((sum, mailbox) => sum + mailbox[folder], 0)
+  const scope = view.kind === 'folder' ? view.mailboxId : undefined
+  const go = (next: MailView) => navigate(mailViewPath(next))
 
   return (
-    <nav className="flex h-full w-[200px] shrink-0 flex-col bg-background max-[899px]:hidden">
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+    <nav aria-label="Mail folders" className="flex h-full w-[200px] shrink-0 flex-col bg-background max-[899px]:hidden">
+      <PaneHeader>
         <PaneTitle>Mail</PaneTitle>
-      </div>
+      </PaneHeader>
       <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto p-2">
-        {system.map(row)}
-        <div className="mt-3 flex items-center pr-0.5">
-          <span className="px-2.5 py-1 text-[11px] font-medium text-sidebar-foreground/60 select-none">
-            Custom folders
-          </span>
-          <span className="flex-1" />
-          <Tip label="New folder">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              className="text-muted-foreground/70"
-              aria-label="New folder"
-              onClick={() => setAdding(true)}
-            >
-              <Plus className="size-4" />
-            </Button>
-          </Tip>
-        </div>
-        {custom.map(row)}
-        {adding ? (
-          <Input
-            className="mt-0.5 h-7 text-[13px] md:text-[13px]"
-            autoFocus
-            placeholder="Folder name"
-            aria-label="New folder name"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={commit}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                e.preventDefault()
-                commit()
-              } else if (e.key === 'Escape') {
-                setDraft('')
-                setAdding(false)
-              }
-            }}
+        <RailRow
+          icon={FOLDERS[0].icon}
+          label="Inbox"
+          unread={unread(undefined, 'inbox')}
+          active={view.kind === 'folder' && view.folder === 'inbox' && !view.mailboxId}
+          onClick={() => go({ kind: 'folder', folder: 'inbox' })}
+        />
+        {mailboxes.length > 1
+          ? mailboxes.map((mailbox) => (
+              <RailRow
+                key={mailbox.id}
+                icon={DirectboxDefault}
+                label={mailbox.name}
+                unread={unread(mailbox.id, 'inbox')}
+                active={view.kind === 'folder' && view.folder === 'inbox' && view.mailboxId === mailbox.id}
+                onClick={() => go({ kind: 'folder', folder: 'inbox', mailboxId: mailbox.id })}
+              />
+            ))
+          : null}
+        <RailRow icon={Star} label="Starred" active={view.kind === 'starred'} onClick={() => go({ kind: 'starred' })} />
+        {FOLDERS.slice(1).map(({ folder, label, icon }) => (
+          <RailRow
+            key={folder}
+            icon={icon}
+            label={label}
+            unread={folder === 'spam' ? unread(scope, 'spam') : 0}
+            active={view.kind === 'folder' && view.folder === folder}
+            onClick={() => go({ kind: 'folder', folder, mailboxId: scope })}
           />
-        ) : null}
+        ))}
+        {labels.length > 0 ? <RailSection>Labels</RailSection> : null}
+        {labels.map((label) => (
+          <RailRow
+            key={label.id}
+            label={label.name}
+            active={view.kind === 'label' && view.labelId === label.id}
+            onClick={() => go({ kind: 'label', labelId: label.id })}
+          >
+            <span className="flex size-4 items-center justify-center">
+              <ColorDot color={label.color} className="size-2" />
+            </span>
+          </RailRow>
+        ))}
       </div>
     </nav>
   )

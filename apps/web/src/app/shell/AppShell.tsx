@@ -8,6 +8,7 @@ import { useCommand } from '@/shortcuts/useCommand'
 import { useContext, useEffect, useLayoutEffect, useState } from 'react'
 import { useWorkspaceEvents } from '@/features/realtime/useWorkspaceEvents'
 import { ChatProvider } from '@/features/chat/api/ChatProvider'
+import { emitMailEvent, resyncMail } from '@/features/mail/api/events'
 import { useChatBadgeCount } from '@/features/chat/api/queries'
 import { useHasUnreadNotifications } from '@/features/inbox/api'
 import { startPushWorker } from '@/features/realtime/push'
@@ -42,7 +43,8 @@ function WorkspaceShell() {
   const { overrides } = useShortcutBindings()
   return (
     <ShortcutProvider overrides={overrides}>
-      <ChatProvider enabled={chatEnabled}>
+      {/* mail shares the live socket: app/ wires its handlers, so chat does not import mail */}
+      <ChatProvider enabled={chatEnabled} onMailEvent={emitMailEvent} onResync={resyncMail}>
         <Shell />
       </ChatProvider>
     </ShortcutProvider>

@@ -8,9 +8,9 @@ Docs pages persist too (tree, content, trash, search; see Docs below).
 
 Chat persists too (channels, direct messages, threads, files, search; see Chat below).
 
-Mail receiving persists on the server (domains, mailboxes, threads; see Mail below).
+Mail persists too (receiving and a read-only web client: domains, mailboxes, threads, search; see Mail below). Sending mail is a follow-up milestone.
 
-Home, Mail, Profile and webhooks still use isolated frontend seed data. Their routes show a `Mock data` badge in every build. Sending mail is a follow-up milestone.
+Home, Profile and webhooks still use isolated frontend seed data. Their routes show a `Mock data` badge in every build.
 
 ## Global shell
 
@@ -408,7 +408,8 @@ blocks and cover URLs load; the image host then sees the viewer's IP. Plain http
 
 Core files: server `crates/mail` (`orbit-mail`: SMTP, SPF/DKIM/DMARC, MIME, HTML sanitizing),
 `apps/server/src/{mail_listener,mail_intake,mail_dns,mail_image_proxy}.rs`, `repositories/mail/`, `mail_routes/`;
-web `MailPage.tsx`, `components/FolderRail.tsx`, `components/ThreadList.tsx`, `components/ThreadView.tsx`.
+web `features/mail/` (`pages/MailPage.tsx`, `mailLib.ts`, `api/`, `components/{FolderRail,ThreadList,ThreadView,
+MessageItem,MailHtmlFrame,SafetyBanner,MailSearch}.tsx`), settings in `features/settings/pages/mail/`.
 Design: `docs/superpowers/specs/2026-10-23-mail-slice-1-design.md` (local file). Operator guide:
 `docs/operations.md#mail`.
 
@@ -426,16 +427,31 @@ Slice 1 receives and reads mail; it does not send. Server (migration 0056):
 - Admin health card (listener, certificate, client IP, PTR) and a one-time `check-…@domain` test address.
   Failed messages list with Retry.
 
-The web mail app below is still mock-backed until the real client lands:
+Web client (`/mail`, sidebar entry with a **Beta** tag; read-only, no compose or reply yet):
 
-- Three-pane desktop layout: folders, thread list, reader.
-- Custom folders can be created inline.
-- Threads can be dragged onto system/custom folders with a compact drag ghost.
-- Reader toolbar supports star, unread, move-to-folder, archive, and trash.
-- Messages expand/collapse and offer Reply and Forward.
-- Forward opens compose with quoted sender/date/subject/body.
-- Reply composer is hidden until Reply is clicked; it is free-flow rather than boxed.
-- Replies support text, attachment-only sending, file picker, paste, drop, compact file chips, inline images, removal, discard, and Cmd/Ctrl+Enter.
+- Three panes: the folder rail (Inbox of all mailboxes, each mailbox with its unread count from `GET counts`, Starred,
+  Archive, Spam, Trash, labels; with a mailbox open the folders are that mailbox's), a virtual thread list with cursor
+  pages, and the reader. Routes `/mail`, `/mail/<folder>`, `/mail/<mailbox>/<folder>`, `/mail/label/<id>`,
+  `/mail/starred`, `/mail/search?q=`, each with `/t/<thread>` for the open thread (`parseMailPath` in `mailLib.ts`).
+- Rows: senders, subject, snippet, time, label chips, star, unread dot, attachment icon; `x` or the row checkbox
+  selects, and a bulk bar archives, moves to spam or trash, restores, marks read or unread, stars and labels.
+- Opening a thread marks it read; only the newest message is expanded. HTML shows in a sandboxed iframe from a
+  short-lived `view-url` (height from the frame's own `postMessage`, 80–20,000 px); plain text renders as text.
+- Banners: Failed authentication (DMARC fail), Lookalike name, Outside reply (`external`), External sender, plain
+  text after a parse warning; In Spam (Not spam) and In Trash (Restore). The sender line shows the address and the
+  DMARC-aligned domain.
+- Remote images stay off until **Load images** (offered on every HTML message whose sender has no preference, since
+  the view cannot report how many it removed); **Always for this sender** (only when DMARC passed) saves a sender pref.
+- Message menu: Show original (first 1 MB as text), Download `.eml`, Print (the conversation, via `lib/print.ts`).
+  Attachments: images open in the viewer (`?inline=1`, PNG/JPEG/GIF/WebP/AVIF), other files download.
+- Search box with operator and value completion (`from:`, `to:`, `subject:`, `label:`, `in:`, `is:`, `has:`,
+  `before:`, `after:`). Live updates from the `mail` topic; `app/shell/AppShell.tsx` passes `emitMailEvent` and
+  `resyncMail` to `ChatProvider`, so chat does not import mail.
+- Shortcuts (context `mail`): `j`/`k`, `Enter`/`o`, `Esc`, `e`, `#`, `!`, `s`, `u`, `l`, `x`, `/`, `g s` (starred),
+  `g t` (trash), and global `g i` (mail). `/`, `g s` and `g t` shadow the global search, settings and tasks keys on
+  the mail page (`Command.shadows`). Mail commands also show in ⌘K.
+- Empty states fill the pane: **Set up mail** for managers without a mailbox, "Ask an admin for a mailbox" for
+  members, and one text for each empty folder, label, Starred and search.
 
 ## Chat
 

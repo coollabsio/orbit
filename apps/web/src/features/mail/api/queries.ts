@@ -7,6 +7,7 @@ import {
   getMailDomain,
   getMailMe,
   getMailTestAddress,
+  downloadMailMessage,
   getMailThread,
   listFailedMailReceipts,
   listMailboxes,
@@ -47,7 +48,7 @@ export function useMailMe() {
 }
 
 /** A folder or label list, newest first, in cursor pages; `data` is the rows of every loaded page. */
-export function useThreads(filter: ThreadFilter) {
+export function useThreads(filter: ThreadFilter, enabled = true) {
   const workspaceId = useWorkspaceId()
   return useInfiniteQuery({
     queryKey: mailKeys.threads(workspaceId, filter),
@@ -69,6 +70,7 @@ export function useThreads(filter: ThreadFilter) {
     },
     getNextPageParam: (last) => last.cursor ?? undefined,
     select: flatten,
+    enabled,
     staleTime: LIVE_STALE_MS,
   })
 }
@@ -136,6 +138,29 @@ export function useViewUrl(messageId: string | null | undefined, loadImages: boo
     gcTime: VIEW_URL_STALE_MS,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
+  })
+}
+
+/** **Show original**: the message as received, as text (at most `RAW_TEXT_CHARS`; the `.eml` download has it all). */
+export const RAW_TEXT_CHARS = 1_000_000
+
+export function useRawMessage(messageId: string | null | undefined) {
+  const workspaceId = useWorkspaceId()
+  return useQuery({
+    queryKey: mailKeys.raw(workspaceId, messageId ?? ''),
+    queryFn: async () => {
+      const { data } = await downloadMailMessage({
+        client: apiClient,
+        path: { workspace_id: workspaceId, message_id: messageId! },
+        parseAs: 'text',
+        throwOnError: true,
+      })
+      const text = data as unknown as string
+      return { text: text.slice(0, RAW_TEXT_CHARS), truncated: text.length > RAW_TEXT_CHARS }
+    },
+    enabled: Boolean(messageId),
+    staleTime: Infinity,
+    gcTime: 60_000,
   })
 }
 

@@ -14,7 +14,8 @@ const WORKSPACE_LINKS = [
   { to: '/tasks', label: 'Tasks', icon: SquareCheck, enabled: true },
   { to: '/docs', label: 'Docs', icon: FileText, enabled: true },
   { to: '/chat', label: 'Chat', icon: MessageSquare, enabled: false },
-  { to: '/mail', label: 'Mail', icon: Mail, enabled: false },
+  // slice 1 receives and reads mail; sending comes later
+  { to: '/mail', label: 'Mail', icon: Mail, enabled: true, tag: 'Beta' },
 ].filter((link) => !(docsHidden && link.to === '/docs'))
 
 const sidebarNavItemVariants = cva(
@@ -49,6 +50,7 @@ function SidebarNavItem({
   active,
   badge = 0,
   unread = false,
+  tag,
   size,
   className,
   ...props
@@ -62,6 +64,8 @@ function SidebarNavItem({
   badge?: number
   /** Something waits for the user, but there is no count: a dot shows. */
   unread?: boolean
+  /** A short note after the label, e.g. "Beta". Hidden while collapsed. */
+  tag?: string
 }) {
   const collapsed = useContext(SidebarNavCollapsed)
   const match = useMatch({ path: useResolvedPath(to).pathname, end })
@@ -80,6 +84,11 @@ function SidebarNavItem({
       >
         <Icon />
         <SidebarNavLabel>{label}</SidebarNavLabel>
+        {tag ? (
+          <span data-slot="sidebar-nav-tag" aria-hidden="true" className="shrink-0 text-[10px] text-muted-foreground/70 group-data-[collapsed=true]/sidebar-nav:hidden">
+            {tag}
+          </span>
+        ) : null}
         {badge > 0 ? (
           <span
             data-slot="sidebar-nav-badge"
@@ -205,6 +214,7 @@ export function SidebarNav({
                 end={link.to === '/'}
                 icon={link.icon}
                 label={link.label}
+                tag={link.tag}
                 badge={link.to === '/chat' ? chatBadge : undefined}
                 onClick={onNavigate}
               />

@@ -5,8 +5,8 @@ import { ApiProblem } from '@/api/problem'
 
 type ApiClient = ReturnType<typeof createApiClient>
 
-/** On `<html>` while the browser prints a page: `@media print` rules in index.css show only the page content. */
-export const PRINT_ATTR = 'data-print-doc'
+// Printing lives in lib/print: mail prints a conversation the same way.
+export { PRINT_ATTR, printPage } from '@/lib/print'
 
 /**
  * The download name from a Content-Disposition header: the RFC 5987 `filename*` (UTF-8) when present, else the plain
@@ -96,31 +96,5 @@ export async function downloadPageMarkdown({
   } catch (error) {
     toast.error(exportErrorMessage(error, name), { id: toastId })
     return false
-  }
-}
-
-/**
- * Prints the open page (the browser's "Save as PDF" makes the PDF). The print attribute switches the print stylesheet to
- * page-only, light, full-width output; the document title becomes the page title (the default PDF file name). Both
- * are restored after printing.
- */
-export function printPage(title: string, win: Window = window): void {
-  const root = win.document.documentElement
-  const previousTitle = win.document.title
-  let restored = false
-  const restore = () => {
-    if (restored) return
-    restored = true
-    root.removeAttribute(PRINT_ATTR)
-    win.document.title = previousTitle
-    win.removeEventListener('afterprint', restore)
-  }
-  root.setAttribute(PRINT_ATTR, '')
-  win.document.title = title.trim() || 'Untitled'
-  win.addEventListener('afterprint', restore)
-  try {
-    win.print()
-  } catch {
-    restore()
   }
 }

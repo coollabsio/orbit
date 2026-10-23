@@ -10,7 +10,6 @@ import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { ChatContext } from './chatContext'
 import type { ChatClient } from './client'
 import { applyChatEvent } from './events'
-import { emitMailEvent, resyncMail } from '@/features/mail/api/events'
 import { createHttpChatClient } from './httpClient'
 import { reportConnection } from '@/lib/connection'
 import { CustomEmojiContext, NO_CUSTOM_EMOJI } from '@/lib/customEmojiContext'
@@ -20,6 +19,19 @@ import { clearTyping, noteTyping, resetLiveStore, setConnectionStatus } from './
 
 /** One client for each workspace and user, kept for the page lifetime so chat state survives navigation. */
 const clients = new Map<string, ChatClient>()
+
+/**
+ * Other products on the live socket: `app/` passes the mail handlers, so chat does not import mail. Read when a
+ * socket event arrives, so a client made earlier uses the current ones.
+ */
+export interface LiveHandlers {
+  /** An event of the `mail` topic. */
+  onMailEvent?: (queryClient: QueryClient, workspaceId: string, event: unknown) => void
+  /** The socket missed events: everything it keeps current is read again. */
+  onResync?: (queryClient: QueryClient, workspaceId: string) => void
+}
+
+const liveHandlers: LiveHandlers = {}
 
 /** The only place that picks the implementation. */
 function clientFor(workspaceId: string, currentUserId: string, queryClient: QueryClient): ChatClient {
@@ -33,7 +45,7 @@ function clientFor(workspaceId: string, currentUserId: string, queryClient: Quer
       onInboxChanged: () => void queryClient.invalidateQueries({ queryKey: [...queryKeys.workspace(workspaceId), 'notifications'] }),
       onNotify: (notice) => void handleNotice(notice).catch(() => {}),
       // Mail shares the live socket: its topic keeps the mail lists, threads and counts current.
-      onMailEvent: (event) => emitMailEvent(queryClient, workspaceId, event),
+      onMailEvent: (event) => liveHandlers.onMailEvent?.(queryClient, workspaceId, event),
     })
     clients.set(key, client)
   }
@@ -45,8 +57,17 @@ function clientFor(workspaceId: string, currentUserId: string, queryClient: Quer
  * With `enabled` false there is no client: chat queries stay idle and the badge counts are zero. It also supplies the
  * workspace's custom emoji to everything below it (`CustomEmojiContext`).
  */
-export function ChatProvider({ enabled = true, children }: { enabled?: boolean; children: ReactNode }) {
+export function ChatProvider({
+  enabled = true,
+  onMailEvent,
+  onResync,
+  children,
+}: { enabled?: boolean; children: ReactNode } & LiveHandlers) {
   const queryClient = useQueryClient()
+  useEffect(() => {
+    liveHandlers.onMailEvent = onMailEvent
+    liveHandlers.onResync = onResync
+  }, [onMailEvent, onResync])
   const workspaceId = useWorkspace().workspace.id
   const currentUserId = useCurrentUser().data?.id ?? null
   const customEmoji = useCustomEmojiByName(workspaceId, enabled).data ?? NO_CUSTOM_EMOJI
@@ -90,7 +111,7 @@ export function ChatProvider({ enabled = true, children }: { enabled?: boolean; 
           setConnectionStatus(event.status)
           break
         case 'resync':
-          resyncMail(queryClient, workspaceId)
+          liveHandlers.onResync?.(queryClient, workspaceId)
           applyChatEvent(queryClient, workspaceId, event)
           break
         case 'conversation.removed':

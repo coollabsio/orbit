@@ -14,6 +14,7 @@ export const NAVIGATION: ReadonlyArray<{ id: CommandId; to: string }> = [
   { id: 'nav.views', to: '/views' },
   { id: 'nav.docs', to: '/docs' },
   { id: 'nav.chat', to: '/chat' },
+  { id: 'nav.mail', to: '/mail' },
   { id: 'nav.trash', to: '/tasks-trash' },
   { id: 'nav.settings', to: '/settings' },
   { id: 'nav.profile', to: '/profile' },

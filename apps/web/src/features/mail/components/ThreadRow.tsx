@@ -1,67 +1,83 @@
-import { useState } from 'react'
 import { Paperclip2 as Paperclip, Star } from 'reicon-react'
 import { cn } from 'cn'
-import { Button } from '@/components/ui/button'
+import type { MailLabel, MailThreadSummary } from '@/api/generated/types.gen'
+import { ColorDot } from '@/components/common/ColorDot'
 import { Tip } from '@/components/common/Tip'
 import { UserAvatar } from '@/components/common/UserAvatar'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { relativeTime } from '@/lib/format'
-import { toggleThreadStar } from '@/mock/actions'
-import type { MailThread } from '@/mock/types'
-import { threadSender } from '@/features/mail/mailLib'
+import { personName, threadSenders } from '@/features/mail/mailLib'
 
 interface ThreadRowProps {
-  thread: MailThread
+  thread: MailThreadSummary
+  labels: ReadonlyMap<string, MailLabel>
   active: boolean
+  focused: boolean
+  selected: boolean
+  /** Some row is selected: every row shows its checkbox. */
+  selecting: boolean
   onOpen: (threadId: string) => void
+  onSelect: (threadId: string) => void
+  onStar: (thread: MailThreadSummary) => void
 }
 
-export function ThreadRow({ thread, active, onOpen }: ThreadRowProps) {
-  const sender = threadSender(thread)
-  const [dragging, setDragging] = useState(false)
+/** A row of the thread list: sender, subject, snippet, time, label chips, star, unread dot, attachment icon. */
+export function ThreadRow({ thread, labels, active, focused, selected, selecting, onOpen, onSelect, onStar }: ThreadRowProps) {
+  const chips = thread.labels.flatMap((id) => labels.get(id) ?? [])
   return (
     <div
-      className="group/row flex min-h-16 w-full min-w-0 cursor-pointer items-start gap-2 border-b px-3 py-2.5 text-left transition-colors outline-none hover:bg-foreground/[0.02] focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset data-active:bg-muted data-dragging:bg-muted data-dragging:text-foreground"
-      data-active={active ? 'true' : undefined}
-      data-unread={thread.unread ? 'true' : undefined}
-      data-dragging={dragging || undefined}
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.effectAllowed = 'move'
-        e.dataTransfer.setData('text/mail-thread-id', thread.id)
-        // drag image: a small pill with the subject, not the whole translucent row
-        const ghost = document.createElement('div')
-        ghost.className =
-          'fixed top-[-100px] left-[-100px] z-100 max-w-[260px] overflow-hidden rounded-[8px] border bg-card px-2.5 py-1.5 text-[12px] font-medium text-ellipsis whitespace-nowrap text-foreground shadow-[0_12px_32px_rgba(0,0,0,0.16)]'
-        ghost.textContent = `✉️ ${thread.subject}`
-        document.body.appendChild(ghost)
-        e.dataTransfer.setDragImage(ghost, 12, 12)
-        setTimeout(() => ghost.remove(), 0)
-        setDragging(true)
-      }}
-      onDragEnd={() => setDragging(false)}
+      data-slot="mail-thread-row"
+      className="group/row flex min-h-16 w-full min-w-0 cursor-pointer items-start gap-2 border-b px-3 py-2.5 text-left transition-colors outline-none hover:bg-foreground/[0.02] focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset data-active:bg-muted data-focused:shadow-[inset_2px_0_0_var(--primary)] data-selected:bg-primary/5"
+      data-active={active || undefined}
+      data-focused={focused || undefined}
+      data-selected={selected || undefined}
+      data-selecting={selecting || undefined}
+      data-unread={thread.unread || undefined}
       role="button"
       tabIndex={0}
+      aria-label={`${thread.unread ? 'Unread, ' : ''}${threadSenders(thread)}: ${thread.subject || '(no subject)'}`}
       onClick={() => onOpen(thread.id)}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' && e.target === e.currentTarget) onOpen(thread.id)
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' && event.target === event.currentTarget) onOpen(thread.id)
       }}
     >
       <span className="flex max-h-8 w-2 shrink-0 items-center self-stretch">
         {thread.unread ? <span className="size-2 shrink-0 rounded-full bg-primary" /> : null}
       </span>
-      <UserAvatar user={null} name={sender.name} size={32} />
+      <span className="relative flex size-8 shrink-0 items-center justify-center" onClick={(event) => event.stopPropagation()}>
+        <span className="group-data-selecting/row:invisible hover-fine:group-hover/row:invisible">
+          <UserAvatar user={null} name={personName(thread.from[0])} size={32} />
+        </span>
+        <span className="invisible absolute inset-0 flex items-center justify-center group-data-selecting/row:visible hover-fine:group-hover/row:visible">
+          <Checkbox aria-label="Select conversation" checked={selected} onCheckedChange={() => onSelect(thread.id)} />
+        </span>
+      </span>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="flex items-baseline gap-2">
-          <span className="min-w-0 truncate text-[13px] font-normal text-foreground group-data-[unread]/row:font-semibold">
-            {sender.name}
+          <span className="min-w-0 truncate text-[13px] font-normal text-foreground group-data-unread/row:font-semibold">
+            {threadSenders(thread)}
+            {thread.message_count > 1 ? <span className="ml-1 text-xs font-normal text-muted-foreground/70">{thread.message_count}</span> : null}
           </span>
           <span className="flex-1" />
-          <span className="shrink-0 text-xs text-muted-foreground/70">{relativeTime(thread.updatedAt)}</span>
+          <span className="shrink-0 text-xs text-muted-foreground/70" title={new Date(thread.last_message_at).toLocaleString()}>
+            {relativeTime(thread.last_message_at)}
+          </span>
         </div>
-        <div className="truncate text-[13px] text-foreground group-data-[unread]/row:font-semibold">{thread.subject}</div>
+        <div className="truncate text-[13px] text-foreground group-data-unread/row:font-semibold">{thread.subject || '(no subject)'}</div>
         <div className="truncate text-xs text-muted-foreground/70">{thread.snippet}</div>
+        {chips.length > 0 ? (
+          <div className="mt-1 flex min-w-0 flex-wrap gap-1">
+            {chips.map((label) => (
+              <span key={label.id} className="inline-flex h-5 max-w-32 items-center gap-1 rounded-full border px-1.5 text-[11px] text-muted-foreground">
+                <ColorDot color={label.color} />
+                <span className="truncate">{label.name}</span>
+              </span>
+            ))}
+          </div>
+        ) : null}
       </div>
-      <div className="flex shrink-0 flex-col items-center gap-1 text-muted-foreground/70" onClick={(e) => e.stopPropagation()}>
+      <div className="flex shrink-0 flex-col items-center gap-1 text-muted-foreground/70" onClick={(event) => event.stopPropagation()}>
         <Tip label={thread.starred ? 'Unstar' : 'Star'}>
           <Button
             type="button"
@@ -69,12 +85,13 @@ export function ThreadRow({ thread, active, onOpen }: ThreadRowProps) {
             size="icon-xs"
             className="text-muted-foreground/70"
             aria-label={thread.starred ? 'Unstar' : 'Star'}
-            onClick={() => toggleThreadStar(thread.id)}
+            aria-pressed={thread.starred}
+            onClick={() => onStar(thread)}
           >
             <Star className={cn('size-4', thread.starred && 'fill-[#fcd452] text-[#fcd452]')} />
           </Button>
         </Tip>
-        {thread.hasAttachment ? <Paperclip className="size-3.5" /> : null}
+        {thread.has_attachments ? <Paperclip className="size-3.5" aria-label="Has attachments" /> : null}
       </div>
     </div>
   )

@@ -42,4 +42,6 @@ export const mailKeys = {
    */
   viewUrl: (workspaceId: string, messageId: string, loadImages: boolean) =>
     ['mail-view-url', workspaceId, messageId, { loadImages }] as const,
+  /** **Show original**: outside the `all` prefix too, so a resync does not read a large message again. */
+  raw: (workspaceId: string, messageId: string) => ['mail-raw', workspaceId, messageId] as const,
 }

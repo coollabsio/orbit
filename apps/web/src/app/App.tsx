@@ -37,6 +37,7 @@ import { MailDomainsPage } from '@/features/settings/pages/mail/MailDomainsPage'
 import { MailMailboxesPage } from '@/features/settings/pages/mail/MailMailboxesPage'
 import { MailLabelsPage } from '@/features/settings/pages/mail/MailLabelsPage'
 import { FailedMailPage } from '@/features/settings/pages/mail/FailedMailPage'
+import { MailPage } from '@/features/mail/pages/MailPage'
 import { ProfilePage } from '@/features/profile/pages/ProfilePage'
 import { InboxPage } from '@/features/inbox/pages/InboxPage'
 import { AuthGate, GuestGate } from '@/features/auth/AuthGate'
@@ -97,7 +98,7 @@ export default function App() {
               <Route path="docs/trash" element={<DocsPage view="trash" />} />
               <Route path="docs/import/:importId?" element={<DocsPage view="import" />} />
               <Route path="docs/:pageId?" element={<DocsPage />} />
-              <Route path="mail/*" element={<Navigate to="/tasks" replace />} />
+              <Route path="mail/*" element={<MailPage />} />
               {chatEnabled ? (
                 <>
                   <Route path="chat" element={<ChatPage />} />

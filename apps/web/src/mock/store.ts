@@ -24,10 +24,3 @@ function subscribe(listener: () => void): () => void {
 export function useAppState(): AppState {
   return useSyncExternalStore(subscribe, getState)
 }
-
-let idCounter = 1000
-
-export function nextId(prefix: string): string {
-  idCounter += 1
-  return `${prefix}_${idCounter}`
-}

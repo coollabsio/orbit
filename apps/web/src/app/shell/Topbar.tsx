@@ -1,13 +1,12 @@
 import { Shortcut } from '@/shortcuts/Shortcut'
 import type { ReactNode } from 'react'
 import { useRender } from '@base-ui/react/use-render'
-import { Link, useLocation, useNavigate, useSearchParams } from 'react-router'
+import { Link, useLocation, useNavigate } from 'react-router'
 import { Lock, Add as Plus, Menu, Moon, SearchNormal as Search, Sun } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
 import { useTheme } from '@/lib/themeContext'
-import { useAppState } from '@/mock/store'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useAllStatuses, useProjects } from '@/features/tasks/api/projects'
 import { taskFromRecord, type Project, type Task, type TaskStatusDef } from '@/features/tasks/api/models'
@@ -15,7 +14,6 @@ import { useTasks } from '@/features/tasks/api/tasks'
 import { useOpenNewTask } from '@/features/tasks/newTask'
 import { TaskStatusIcon } from '@/features/tasks/components/TaskStatusIcon'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuShortcut, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import type { AppState } from '@/mock/types'
 import type { PageSummary, Teamspace } from '@/api/generated/types.gen'
 import { useCreatePage, usePageTree } from '@/features/docs/api/pages'
 import { useTeamspaces } from '@/features/docs/api/teamspaces'
@@ -33,7 +31,10 @@ type TaskNavigation = { projects: Project[]; tasks: Task[]; statuses: TaskStatus
 
 type DocsNavigation = { pages?: PageSummary[]; teamspaces?: Teamspace[] }
 
-function crumbsFor(pathname: string, folderParam: string | null, state: AppState, taskNavigation: TaskNavigation, docs: DocsNavigation = {}): { crumbs: Crumb[]; status?: React.ReactNode } {
+/** The pages of Settings → Mail, by their path segment. */
+const MAIL_SETTINGS: Record<string, string> = { domains: 'Domains', mailboxes: 'Mailboxes', labels: 'Mail labels', failed: 'Failed messages' }
+
+function crumbsFor(pathname: string, taskNavigation: TaskNavigation, docs: DocsNavigation = {}): { crumbs: Crumb[]; status?: React.ReactNode } {
   const [, root, id, sub, subId] = pathname.split('/')
   switch (root) {
     case 'tasks': {
@@ -74,15 +75,9 @@ function crumbsFor(pathname: string, folderParam: string | null, state: AppState
       const icon = space === 'private' ? <Lock className="mr-1 inline size-3.5 align-[-2px]" aria-hidden="true" /> : undefined
       return { crumbs: [...crumbs, { label: spaceLabel(space, docs.teamspaces), icon }, ...chain] }
     }
-    case 'mail': {
-      const crumbs: Crumb[] = [{ label: 'Mail', to: '/mail' }]
-      const thread = id ? state.mailThreads.find((t) => t.id === id) : null
-      const folderId = folderParam ?? thread?.folderId ?? 'f_inbox'
-      const folder = state.mailFolders.find((f) => f.id === folderId)
-      if (folder) crumbs.push({ label: folder.name, to: `/mail?folder=${folder.id}` })
-      if (thread) crumbs.push({ label: thread.subject })
-      return { crumbs }
-    }
+    case 'mail':
+      // the mail page has its own header on every screen size; the topbar stays hidden there
+      return { crumbs: [{ label: 'Mail', to: '/mail' }] }
     case 'chat':
       return { crumbs: [{ label: 'Chat', to: '/chat' }] }
     case 'views':
@@ -97,6 +92,8 @@ function crumbsFor(pathname: string, folderParam: string | null, state: AppState
       else if (id === 'backups') crumbs.push({ label: 'Backups' })
       else if (id === 'storage') crumbs.push({ label: 'Storage' })
       else if (id === 'users') crumbs.push({ label: 'Users' })
+      else if (id === 'jobs') crumbs.push({ label: 'Background jobs' })
+      else if (id === 'mail') crumbs.push({ label: 'Mail' })
       else crumbs.push({ label: 'General' })
       return { crumbs }
     }
@@ -106,6 +103,11 @@ function crumbsFor(pathname: string, folderParam: string | null, state: AppState
       else if (id === 'github') crumbs.push({ label: 'GitHub' })
       else if (id === 'sessions') crumbs.push({ label: 'Sessions' })
       else if (id === 'danger-zone') crumbs.push({ label: 'Danger zone' })
+      else if (id === 'mail') {
+        crumbs.push({ label: 'Mail', to: '/settings/mail/domains' })
+        const page = MAIL_SETTINGS[sub ?? '']
+        if (page) crumbs.push({ label: page })
+      }
       return { crumbs }
     }
     default:
@@ -131,7 +133,6 @@ function TopbarCrumb({ to, current, children }: { to?: string; current: boolean;
 }
 
 export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => void; onOpenPalette: () => void }) {
-  const state = useAppState()
   const { workspace } = useWorkspace()
   const projects = useProjects(workspace.id)
   const statuses = useAllStatuses(workspace.id, projects.data ?? [])
@@ -141,7 +142,6 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
   const pageTree = usePageTree(workspace.id, routeRoot === 'docs')
   const teamspaces = useTeamspaces(workspace.id, routeRoot === 'docs')
   const createPage = useCreatePage(workspace.id)
-  const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const { theme, toggleTheme } = useTheme()
   const openNewTask = useOpenNewTask()
@@ -151,7 +151,7 @@ export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => vo
     statuses: statuses.data,
     tasks: tasks.data?.pages.flatMap((page) => page.items.map((record) => taskFromRecord(record, projects.data?.find((project) => project.id === record.project_id)))) ?? [],
   }
-  const { crumbs, status } = crumbsFor(location.pathname, searchParams.get('folder'), state, taskNavigation, { pages: pageTree.data, teamspaces: teamspaces.data })
+  const { crumbs, status } = crumbsFor(location.pathname, taskNavigation, { pages: pageTree.data, teamspaces: teamspaces.data })
 
   return (
     <header
