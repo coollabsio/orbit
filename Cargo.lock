@@ -2531,8 +2531,10 @@ dependencies = [
  "idna",
  "mail-auth",
  "mail-parser",
+ "smtp-proto",
  "thiserror 2.0.20",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -3819,6 +3821,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9be42f50aa861c555654aa3a37f52f4b1074bacf4e48fe0ef7fa584e80f1f0f"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "smtp-proto"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "142a5a642c6bd7ffd7e1b525ad6a6e9921ccef992dba4663974f8519209a00c1"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]
