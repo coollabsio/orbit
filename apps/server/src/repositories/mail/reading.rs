@@ -284,12 +284,12 @@ pub struct ThreadChange {
 }
 
 /// The caller as a member of the workspace.
-struct Reader {
-    membership_id: Id,
+pub(super) struct Reader {
+    pub(super) membership_id: Id,
     actor: Actor,
 }
 
-async fn reader(
+pub(super) async fn reader(
     transaction: &mut Transaction<'_, Any>,
     workspace_id: Id,
     user_id: Id,

@@ -495,6 +495,35 @@ async fn security_headers_are_added_to_every_response() {
 }
 
 #[tokio::test]
+async fn a_handler_policy_is_kept() {
+    let app = Router::new()
+        .route(
+            "/frame",
+            get(|| async {
+                (
+                    [
+                        (CONTENT_SECURITY_POLICY, "sandbox; default-src 'none'"),
+                        (axum::http::header::REFERRER_POLICY, "no-referrer"),
+                    ],
+                    "<p>mail</p>",
+                )
+            }),
+        )
+        .layer(HttpPlatformLayer::new(OriginPolicy::new(
+            "https://orbit.test",
+        )));
+
+    let response = app.oneshot(request("GET", "/frame")).await.unwrap();
+
+    assert_eq!(
+        response.headers()[CONTENT_SECURITY_POLICY],
+        "sandbox; default-src 'none'"
+    );
+    assert_eq!(response.headers()["referrer-policy"], "no-referrer");
+    assert_eq!(response.headers()["x-content-type-options"], "nosniff");
+}
+
+#[tokio::test]
 async fn internal_errors_are_replaced_with_safe_problem_details_and_the_request_id() {
     let app = test_app(OriginPolicy::new("https://orbit.test"));
 

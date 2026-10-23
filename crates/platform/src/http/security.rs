@@ -220,15 +220,20 @@ pub(crate) fn add_security_headers(
     let policy = format!(
         "default-src 'self'; {script_source}style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: https:; frame-src https://www.youtube-nocookie.com; media-src 'self' https://video.twimg.com; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self' https://github.com"
     );
-    headers.insert(
-        CONTENT_SECURITY_POLICY,
-        HeaderValue::from_str(&policy).expect("validated CSP values form a valid header"),
-    );
+    // A handler that sets its own policy keeps it (the sandboxed mail view document).
+    if !headers.contains_key(CONTENT_SECURITY_POLICY) {
+        headers.insert(
+            CONTENT_SECURITY_POLICY,
+            HeaderValue::from_str(&policy).expect("validated CSP values form a valid header"),
+        );
+    }
     headers.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
-    headers.insert(
-        REFERRER_POLICY,
-        HeaderValue::from_static("strict-origin-when-cross-origin"),
-    );
+    if !headers.contains_key(REFERRER_POLICY) {
+        headers.insert(
+            REFERRER_POLICY,
+            HeaderValue::from_static("strict-origin-when-cross-origin"),
+        );
+    }
     headers.insert(
         HeaderName::from_static("permissions-policy"),
         HeaderValue::from_static("camera=(), microphone=(), geolocation=(), payment=()"),

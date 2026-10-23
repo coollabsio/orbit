@@ -399,6 +399,10 @@ impl App {
                         hostname: config.mail.hostname.clone(),
                         mode: config.mail.mode,
                     },
+                )
+                .with_origins(
+                    config.http.public_origin.clone(),
+                    config.mail.content_origin.clone(),
                 ),
             },
             health,

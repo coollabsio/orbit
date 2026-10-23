@@ -193,6 +193,24 @@ fn people_json(list: &[Mailbox]) -> String {
 }
 
 impl MailRepository {
+    /// The raw message of receipt `receipt_id`, opened with its workspace data key; `NotFound`
+    /// when the receipt is gone.
+    pub(super) async fn read_raw(&self, receipt_id: Id) -> Result<Vec<u8>, MailError> {
+        let receipt = load_receipt(self.database.pool(), receipt_id)
+            .await?
+            .ok_or(MailError::NotFound)?;
+        let key = self
+            .keys
+            .get(receipt.workspace_id, receipt.key_version)
+            .await?;
+        let sealed = self
+            .uploads
+            .read_blob(&receipt.storage_key)
+            .await
+            .map_err(MailError::Upload)?;
+        open_blob(&key, &receipt_aad(receipt_id), &sealed)
+    }
+
     /// Parses receipt `receipt_id` and delivers it to each recipient mailbox (spec §4.4). Safe to
     /// run again at any point; see the module docs.
     pub async fn ingest(

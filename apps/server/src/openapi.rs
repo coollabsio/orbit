@@ -294,6 +294,13 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::mail_routes::threads::get_mail_counts,
         crate::mail_routes::threads::search_mail,
         crate::mail_routes::threads::get_mail_me,
+        crate::mail_routes::content::create_mail_view_url,
+        crate::mail_routes::content::get_mail_content,
+        crate::mail_routes::content::get_mail_part,
+        crate::mail_routes::content::get_mail_image,
+        crate::mail_routes::content::download_mail_attachment,
+        crate::mail_routes::content::download_mail_message,
+        crate::mail_routes::content::set_mail_sender_pref,
     )
 )]
 struct ApiDocument;
@@ -399,7 +406,7 @@ impl Modify for ProblemDetails {
 }
 
 fn problem_schema(route: &str) -> &'static str {
-    if route.contains("/integrations/discord") {
+    if route.contains("/integrations/discord") || route.contains("/mail/") {
         "TaskProblem"
     } else if route.contains("/attachments") {
         "AttachmentProblem"
@@ -436,6 +443,9 @@ fn public_operation(operation_id: &str) -> bool {
             | "preview_invitation"
             | "github_webhook"
             | "github_manifest_callback"
+            | "get_mail_content"
+            | "get_mail_part"
+            | "get_mail_image"
     )
 }
 
@@ -717,6 +727,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             mailbox_errors(id, &mut responses);
         }
         id if mail_thread_operation(id) => mail_thread_errors(id, &mut responses),
+        id if mail_content_operation(id) => mail_content_errors(id, &mut responses),
         _ => {}
     }
 
@@ -1347,6 +1358,40 @@ fn mail_thread_errors(
     ) {
         add_code(responses, "400", "invalid_request");
         add_code(responses, "422", "validation_failed");
+    }
+}
+
+fn mail_content_operation(operation_id: &str) -> bool {
+    matches!(
+        operation_id,
+        "create_mail_view_url"
+            | "get_mail_content"
+            | "get_mail_part"
+            | "get_mail_image"
+            | "download_mail_attachment"
+            | "download_mail_message"
+            | "set_mail_sender_pref"
+    )
+}
+
+/// Content routes are for mailbox members; a bad, expired or foreign content token is
+/// `mail_not_found` too.
+fn mail_content_errors(
+    operation_id: &str,
+    responses: &mut BTreeMap<&'static str, Vec<&'static str>>,
+) {
+    add_code(responses, "404", "mail_not_found");
+    match operation_id {
+        "create_mail_view_url" | "set_mail_sender_pref" => {
+            add_code(responses, "400", "invalid_request");
+            add_code(responses, "422", "validation_failed");
+        }
+        "get_mail_image" => {
+            add_code(responses, "400", "invalid_request");
+            add_code(responses, "502", "mail_image_unavailable");
+        }
+        "download_mail_attachment" => add_code(responses, "400", "invalid_request"),
+        _ => {}
     }
 }
 

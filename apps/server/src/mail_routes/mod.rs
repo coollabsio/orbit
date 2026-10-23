@@ -1,6 +1,7 @@
 //! Mail (`/mail`), session-authenticated. Management routes need `mail.manage` (workspace
 //! owners and admins); an outsider of the workspace gets `mail_not_found`.
 
+pub(crate) mod content;
 pub(crate) mod domains;
 pub(crate) mod labels;
 pub(crate) mod mailboxes;
@@ -14,7 +15,10 @@ use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::routing::{delete, get, post, put};
 use orbit_platform::{Id, JobStore, MailMode, RequestId};
 
+pub use content::{ViewGrant, ViewKey, ViewPurpose};
+
 use crate::auth_routes::CookieMode;
+use crate::mail_image_proxy::ImageProxy;
 use crate::repositories::identity::IdentityRepository;
 use crate::repositories::mail::{MailError, MailRepository};
 use crate::task_routes::{ApiError, authenticate_session, request_id_value, validation};
@@ -34,6 +38,13 @@ pub struct MailState {
     pub(crate) jobs: JobStore,
     pub(crate) cookie_mode: CookieMode,
     pub(crate) settings: MailSettings,
+    /// Signs the view, part and image proxy URLs of mail content.
+    pub(crate) view_key: ViewKey,
+    /// The app's public origin (empty: the request's own origin).
+    pub(crate) public_origin: String,
+    /// `ORBIT_MAIL_CONTENT_ORIGIN`: where mail content is served, when set.
+    pub(crate) content_origin: Option<String>,
+    pub(crate) image_proxy: Arc<ImageProxy>,
 }
 
 impl MailState {
@@ -46,11 +57,43 @@ impl MailState {
     ) -> Self {
         Self {
             jobs: JobStore::new(identity.database().clone()),
+            view_key: ViewKey::new(mail.app_key()),
             identity,
             mail,
             cookie_mode,
             settings,
+            public_origin: String::new(),
+            content_origin: None,
+            image_proxy: Arc::new(ImageProxy::new()),
         }
+    }
+
+    /// The app's public origin (frames mail content) and the origin that serves mail content
+    /// (`ORBIT_MAIL_CONTENT_ORIGIN`; the public origin when `None`).
+    #[must_use]
+    pub fn with_origins(
+        mut self,
+        public_origin: impl Into<String>,
+        content_origin: Option<String>,
+    ) -> Self {
+        self.public_origin = public_origin.into().trim_end_matches('/').to_owned();
+        self.content_origin = content_origin
+            .map(|origin| origin.trim_end_matches('/').to_owned())
+            .filter(|origin| !origin.is_empty());
+        self
+    }
+
+    #[must_use]
+    pub fn with_image_proxy(mut self, proxy: Arc<ImageProxy>) -> Self {
+        self.image_proxy = proxy;
+        self
+    }
+
+    /// The origin in mail content URLs (empty: root-relative URLs).
+    pub(crate) fn content_base(&self) -> &str {
+        self.content_origin
+            .as_deref()
+            .unwrap_or(&self.public_origin)
     }
 }
 
@@ -147,6 +190,31 @@ pub fn mail_router(state: MailState) -> Router {
             get(threads::get_mail_me),
         )
         .route(
+            "/api/v1/workspaces/{workspace_id}/mail/messages/{message_id}/view-url",
+            post(content::create_mail_view_url),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/messages/{message_id}/raw",
+            get(content::download_mail_message),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/attachments/{attachment_id}",
+            get(content::download_mail_attachment),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/sender-prefs",
+            put(content::set_mail_sender_pref),
+        )
+        .route(
+            "/api/v1/mail/content/{token}",
+            get(content::get_mail_content),
+        )
+        .route(
+            "/api/v1/mail/parts/{token}/{attachment_id}",
+            get(content::get_mail_part),
+        )
+        .route("/api/v1/mail/image", get(content::get_mail_image))
+        .route(
             "/api/v1/admin/mail/domains/{name}/workspace",
             put(domains::move_mail_domain),
         )
@@ -159,6 +227,7 @@ type RequestIdExtension = Option<Extension<RequestId>>;
 struct Call<'a> {
     workspace_id: Id,
     actor_id: Id,
+    session_id: Id,
     instance: String,
     request_id: Option<&'a Extension<RequestId>>,
 }
@@ -187,6 +256,7 @@ impl<'a> Call<'a> {
         Ok(Self {
             workspace_id,
             actor_id: session.user.id,
+            session_id: session.id,
             instance,
             request_id,
         })
