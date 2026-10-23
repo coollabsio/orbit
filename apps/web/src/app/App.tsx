@@ -20,6 +20,7 @@ import { AdminJobsPage } from '@/features/admin/pages/AdminJobsPage'
 import { AdminStoragePage } from '@/features/admin/pages/AdminStoragePage'
 import { AdminSettingsPage } from '@/features/admin/pages/AdminSettingsPage'
 import { AdminUsersPage } from '@/features/admin/pages/AdminUsersPage'
+import { AdminMailPage } from '@/features/admin/pages/AdminMailPage'
 import { GeneralPage } from '@/features/settings/pages/GeneralPage'
 import { GithubPage } from '@/features/settings/pages/GithubPage'
 import { EmojiPage } from '@/features/settings/pages/EmojiPage'
@@ -32,6 +33,10 @@ import { StickersPage } from '@/features/settings/pages/StickersPage'
 import { StoragePage } from '@/features/settings/pages/StoragePage'
 import { NotificationsPage } from '@/features/settings/pages/NotificationsPage'
 import { ApiTokensPage } from '@/features/settings/pages/ApiTokensPage'
+import { MailDomainsPage } from '@/features/settings/pages/mail/MailDomainsPage'
+import { MailMailboxesPage } from '@/features/settings/pages/mail/MailMailboxesPage'
+import { MailLabelsPage } from '@/features/settings/pages/mail/MailLabelsPage'
+import { FailedMailPage } from '@/features/settings/pages/mail/FailedMailPage'
 import { ProfilePage } from '@/features/profile/pages/ProfilePage'
 import { InboxPage } from '@/features/inbox/pages/InboxPage'
 import { AuthGate, GuestGate } from '@/features/auth/AuthGate'
@@ -122,6 +127,7 @@ export default function App() {
                 <Route path="storage" element={<AdminStoragePage />} />
                 <Route path="backups" element={<AdminBackupsPage />} />
                 <Route path="jobs" element={<AdminJobsPage />} />
+                <Route path="mail" element={<AdminMailPage />} />
               </Route>
               <Route path="settings" element={<SettingsLayout />}>
                 <Route index element={<GeneralPage />} />
@@ -138,6 +144,11 @@ export default function App() {
                 <Route path="shortcuts" element={<MovedTo path="/profile/shortcuts" />} />
                 <Route path="notifications" element={<MovedTo path="/profile/notifications" />} />
                 <Route path="api-tokens" element={<ApiTokensPage />} />
+                <Route path="mail" element={<Navigate to="/settings/mail/domains" replace />} />
+                <Route path="mail/domains" element={<MailDomainsPage />} />
+                <Route path="mail/mailboxes" element={<MailMailboxesPage />} />
+                <Route path="mail/labels" element={<MailLabelsPage />} />
+                <Route path="mail/failed" element={<FailedMailPage />} />
               </Route>
               <Route path="*" element={<Navigate to="/tasks" replace />} />
             </Route>

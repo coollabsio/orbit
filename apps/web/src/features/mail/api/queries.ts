@@ -16,7 +16,7 @@ import {
   previewPersonalMailboxes,
   searchMail,
 } from '@/api/generated/sdk.gen'
-import type { MailNamePattern, MailThreadPage } from '@/api/generated/types.gen'
+import type { MailDomain, MailNamePattern, MailThreadPage } from '@/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { mailKeys, type ThreadFilter } from './keys'
@@ -148,14 +148,21 @@ export function useMailDomains() {
 }
 
 /** One domain with its records; `refetchInterval` while a DNS check runs. */
-export function useMailDomain(domainId: string | null | undefined, refetchInterval: number | false = false) {
+/** `refetchInterval` may be a function of the cached domain and when it was read, to poll until a change shows. */
+export function useMailDomain(
+  domainId: string | null | undefined,
+  refetchInterval: number | false | ((data: MailDomain | undefined, updatedAt: number) => number | false) = false,
+) {
   const workspaceId = useWorkspaceId()
   return useQuery({
     queryKey: mailKeys.domain(workspaceId, domainId ?? ''),
     queryFn: async () =>
       required((await getMailDomain({ client: apiClient, path: { workspace_id: workspaceId, domain_id: domainId! }, throwOnError: true })).data),
     enabled: Boolean(domainId),
-    refetchInterval,
+    refetchInterval:
+      typeof refetchInterval === 'function'
+        ? (query) => refetchInterval(query.state.data, query.state.dataUpdatedAt)
+        : refetchInterval,
   })
 }
 
