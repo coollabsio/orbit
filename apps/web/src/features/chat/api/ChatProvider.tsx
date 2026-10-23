@@ -10,6 +10,7 @@ import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { ChatContext } from './chatContext'
 import type { ChatClient } from './client'
 import { applyChatEvent } from './events'
+import { emitMailEvent, resyncMail } from '@/features/mail/api/events'
 import { createHttpChatClient } from './httpClient'
 import { reportConnection } from '@/lib/connection'
 import { CustomEmojiContext, NO_CUSTOM_EMOJI } from '@/lib/customEmojiContext'
@@ -31,6 +32,8 @@ function clientFor(workspaceId: string, currentUserId: string, queryClient: Quer
       // Chat writes are not in the workspace's change feed, so the inbox learns of a chat mention here.
       onInboxChanged: () => void queryClient.invalidateQueries({ queryKey: [...queryKeys.workspace(workspaceId), 'notifications'] }),
       onNotify: (notice) => void handleNotice(notice).catch(() => {}),
+      // Mail shares the live socket: its topic keeps the mail lists, threads and counts current.
+      onMailEvent: (event) => emitMailEvent(queryClient, workspaceId, event),
     })
     clients.set(key, client)
   }
@@ -85,6 +88,10 @@ export function ChatProvider({ enabled = true, children }: { enabled?: boolean; 
           break
         case 'connection':
           setConnectionStatus(event.status)
+          break
+        case 'resync':
+          resyncMail(queryClient, workspaceId)
+          applyChatEvent(queryClient, workspaceId, event)
           break
         case 'conversation.removed':
           forgetConversation(workspaceId, event.conversationId)
