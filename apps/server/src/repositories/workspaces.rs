@@ -1334,6 +1334,17 @@ impl WorkspaceRepository {
             transaction.commit().await?;
             return Err(denied.into());
         }
+        // The member's personal mailbox stays for the admins, suspended: the delete below sets
+        // its owner to NULL and removes its only member.
+        crate::repositories::mail::suspend_owned_mailboxes(
+            &mut transaction,
+            workspace_id,
+            membership_id,
+            actor_id,
+            request_id,
+            now,
+        )
+        .await?;
         sqlx::query("DELETE FROM memberships WHERE id = $1 AND workspace_id = $2 AND version = $3")
             .bind(membership_id.to_string())
             .bind(workspace_id.to_string())

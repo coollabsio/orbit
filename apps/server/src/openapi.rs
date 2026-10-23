@@ -271,6 +271,22 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::mail_routes::domains::set_mail_domain_catch_all,
         crate::mail_routes::domains::set_mail_domain_enabled,
         crate::mail_routes::domains::move_mail_domain,
+        crate::mail_routes::mailboxes::list_mailboxes,
+        crate::mail_routes::mailboxes::create_mailbox,
+        crate::mail_routes::mailboxes::get_mailbox,
+        crate::mail_routes::mailboxes::update_mailbox,
+        crate::mail_routes::mailboxes::delete_mailbox,
+        crate::mail_routes::mailboxes::set_mailbox_status,
+        crate::mail_routes::mailboxes::add_mailbox_member,
+        crate::mail_routes::mailboxes::remove_mailbox_member,
+        crate::mail_routes::mailboxes::add_mailbox_alias,
+        crate::mail_routes::mailboxes::remove_mailbox_address,
+        crate::mail_routes::mailboxes::preview_personal_mailboxes,
+        crate::mail_routes::mailboxes::create_personal_mailboxes,
+        crate::mail_routes::labels::list_mail_labels,
+        crate::mail_routes::labels::create_mail_label,
+        crate::mail_routes::labels::update_mail_label,
+        crate::mail_routes::labels::delete_mail_label,
     )
 )]
 struct ApiDocument;
@@ -690,6 +706,9 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         id if teamspace_operation(id) => teamspace_errors(id, &mut responses),
         id if id.contains("chat") => chat_errors(id, &mut responses),
         id if id.contains("mail_domain") => mail_domain_errors(id, &mut responses),
+        id if id.contains("mailbox") || id.contains("mail_label") => {
+            mailbox_errors(id, &mut responses);
+        }
         _ => {}
     }
 
@@ -1258,6 +1277,39 @@ fn mail_domain_errors(
         }
         "delete_mail_domain" => add_code(responses, "409", "domain_has_mailboxes"),
         "set_mail_domain_catch_all" => add_code(responses, "422", "validation_failed"),
+        _ => {}
+    }
+}
+
+/// Mailbox and mail label routes: reads for members (outsiders get `mail_not_found`), changes
+/// need `mail.manage`.
+fn mailbox_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'static str>>) {
+    add_code(responses, "404", "mail_not_found");
+    if matches!(
+        operation_id,
+        "list_mailboxes" | "get_mailbox" | "list_mail_labels"
+    ) {
+        return;
+    }
+    add_code(responses, "403", "mail_forbidden");
+    if !operation_id.starts_with("delete_") && !operation_id.starts_with("remove_") {
+        add_code(responses, "400", "invalid_request");
+        add_code(responses, "422", "validation_failed");
+    }
+    match operation_id {
+        "create_mailbox" => {
+            add_code(responses, "409", "address_taken");
+            add_code(responses, "409", "member_has_mailbox");
+        }
+        "add_mailbox_alias" => add_code(responses, "409", "address_taken"),
+        "remove_mailbox_address" => add_code(responses, "409", "address_primary"),
+        "add_mailbox_member" | "remove_mailbox_member" => {
+            add_code(responses, "409", "mailbox_personal");
+        }
+        "set_mailbox_status" => add_code(responses, "409", "mailbox_owner_left"),
+        "create_mail_label" | "update_mail_label" => {
+            add_code(responses, "409", "label_exists");
+        }
         _ => {}
     }
 }

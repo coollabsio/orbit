@@ -2,7 +2,7 @@
 
 import { type Client, type ClientMeta, formDataBodySerializer, type Options as Options2, type RequestResult, type TDataShape } from './client';
 import { client } from './client.gen';
-import type { AcceptInvitationData, AcceptInvitationErrors, AcceptInvitationResponses, AddChatMembersData, AddChatMembersErrors, AddChatMembersResponses, AddChatReactionData, AddChatReactionErrors, AddChatReactionResponses, AddPageFavoriteData, AddPageFavoriteErrors, AddPageFavoriteResponses, ArchiveChatChannelData, ArchiveChatChannelErrors, ArchiveChatChannelResponses, AuthOptionsData, AuthOptionsErrors, AuthOptionsResponses, BulkTasksData, BulkTasksErrors, BulkTasksResponses, CancelNotionImportData, CancelNotionImportErrors, CancelNotionImportResponses, ChangeMemberRoleData, ChangeMemberRoleErrors, ChangeMemberRoleResponses, ChangePasswordData, ChangePasswordErrors, ChangePasswordResponses, CheckMailDomainData, CheckMailDomainErrors, CheckMailDomainResponses, CreateApiTokenData, CreateApiTokenErrors, CreateApiTokenResponses, CreateAttachmentCommentData, CreateAttachmentCommentErrors, CreateAttachmentCommentResponses, CreateBackupData, CreateBackupErrors, CreateBackupResponses, CreateChatCategoryData, CreateChatCategoryErrors, CreateChatCategoryResponses, CreateChatChannelData, CreateChatChannelErrors, CreateChatChannelResponses, CreateChatEmojiData, CreateChatEmojiErrors, CreateChatEmojiResponses, CreateChatStickerData, CreateChatStickerErrors, CreateChatStickerResponses, CreateCommentData, CreateCommentErrors, CreateCommentResponses, CreateDiscordEventData, CreateDiscordEventErrors, CreateDiscordEventResponses, CreateInvitationData, CreateInvitationErrors, CreateInvitationResponses, CreateLabelData, CreateLabelErrors, CreateLabelResponses, CreateMailDomainData, CreateMailDomainErrors, CreateMailDomainResponses, CreateNotionImportData, CreateNotionImportErrors, CreateNotionImportResponses, CreatePageCommentData, CreatePageCommentErrors, CreatePageCommentResponses, CreatePageData, CreatePageErrors, CreatePageResponses, CreatePageThreadData, CreatePageThreadErrors, CreatePageThreadResponses, CreateProjectData, CreateProjectErrors, CreateProjectResponses, CreatePushSubscriptionData, CreatePushSubscriptionErrors, CreatePushSubscriptionResponses, CreateRecoveryLinkData, CreateRecoveryLinkErrors, CreateRecoveryLinkResponses, CreateStatusData, CreateStatusErrors, CreateStatusResponses, CreateTaskData, CreateTaskErrors, CreateTaskRelationData, CreateTaskRelationErrors, CreateTaskRelationResponses, CreateTaskResponses, CreateTeamspaceData, CreateTeamspaceErrors, CreateTeamspaceResponses, CreateViewData, CreateViewErrors, CreateViewResponses, CreateWorkspaceData, CreateWorkspaceErrors, CreateWorkspaceResponses, DeleteBackupData, DeleteBackupErrors, DeleteBackupResponses, DeleteChatCategoryData, DeleteChatCategoryErrors, DeleteChatCategoryResponses, DeleteChatEmojiData, DeleteChatEmojiErrors, DeleteChatEmojiResponses, DeleteChatMessageData, DeleteChatMessageErrors, DeleteChatMessageResponses, DeleteChatStickerData, DeleteChatStickerErrors, DeleteChatStickerResponses, DeleteCommentAttachmentData, DeleteCommentAttachmentErrors, DeleteCommentAttachmentResponses, DeleteCommentData, DeleteCommentErrors, DeleteCommentResponses, DeleteGithubProjectConnectionData, DeleteGithubProjectConnectionErrors, DeleteGithubProjectConnectionResponses, DeleteLabelData, DeleteLabelErrors, DeleteLabelResponses, DeleteMailDomainData, DeleteMailDomainErrors, DeleteMailDomainResponses, DeletePageCommentData, DeletePageCommentErrors, DeletePageCommentResponses, DeletePageData, DeletePageErrors, DeletePageResponses, DeletePageThreadData, DeletePageThreadErrors, DeletePageThreadResponses, DeletePasskeyData, DeletePasskeyErrors, DeletePasskeyResponses, DeleteProjectData, DeleteProjectErrors, DeleteProjectResponses, DeletePushSubscriptionData, DeletePushSubscriptionErrors, DeletePushSubscriptionResponses, DeleteStatusData, DeleteStatusErrors, DeleteStatusResponses, DeleteTaskAttachmentData, DeleteTaskAttachmentErrors, DeleteTaskAttachmentResponses, DeleteTaskData, DeleteTaskErrors, DeleteTaskRelationData, DeleteTaskRelationErrors, DeleteTaskRelationResponses, DeleteTaskResponses, DeleteTeamspaceData, DeleteTeamspaceErrors, DeleteTeamspaceResponses, DeleteViewData, DeleteViewErrors, DeleteViewResponses, DeleteWorkspaceData, DeleteWorkspaceErrors, DeleteWorkspaceResponses, DisableTwoFactorData, DisableTwoFactorErrors, DisableTwoFactorResponses, DownloadBackupData, DownloadBackupErrors, DownloadBackupResponses, DownloadChatFileData, DownloadChatFileErrors, DownloadChatFileResponses, DownloadCommentAttachmentData, DownloadCommentAttachmentErrors, DownloadCommentAttachmentResponses, DownloadPageFileData, DownloadPageFileErrors, DownloadPageFileResponses, DownloadTaskAttachmentData, DownloadTaskAttachmentErrors, DownloadTaskAttachmentResponses, DuplicatePageData, DuplicatePageErrors, DuplicatePageResponses, EditChatMessageData, EditChatMessageErrors, EditChatMessageResponses, EmptyPageTrashData, EmptyPageTrashErrors, EmptyPageTrashResponses, EnableTotpData, EnableTotpErrors, EnableTotpResponses, ExportGlobalAuditData, ExportGlobalAuditErrors, ExportGlobalAuditResponses, ExportPageData, ExportPageErrors, ExportPageResponses, FavoriteViewData, FavoriteViewErrors, FavoriteViewResponses, FinishPasskeyLoginData, FinishPasskeyLoginErrors, FinishPasskeyLoginResponses, FinishPasskeyRegistrationData, FinishPasskeyRegistrationErrors, FinishPasskeyRegistrationResponses, FollowChatThreadData, FollowChatThreadErrors, FollowChatThreadResponses, ForwardChatMessageData, ForwardChatMessageErrors, ForwardChatMessageResponses, GetChatEmojiImageData, GetChatEmojiImageErrors, GetChatEmojiImageResponses, GetChatLinkPreviewData, GetChatLinkPreviewErrors, GetChatLinkPreviewResponses, GetChatStickerImageData, GetChatStickerImageErrors, GetChatStickerImageResponses, GetChatThreadData, GetChatThreadErrors, GetChatThreadResponses, GetInstanceSettingsData, GetInstanceSettingsErrors, GetInstanceSettingsResponses, GetJobLimitsData, GetJobLimitsErrors, GetJobLimitsResponses, GetMailDomainData, GetMailDomainErrors, GetMailDomainResponses, GetMemberProfileData, GetMemberProfileErrors, GetMemberProfileResponses, GetNotificationPreferencesData, GetNotificationPreferencesErrors, GetNotificationPreferencesResponses, GetNotionImportData, GetNotionImportErrors, GetNotionImportResponses, GetPageData, GetPageErrors, GetPageResponses, GetPageVersionData, GetPageVersionErrors, GetPageVersionResponses, GetPushKeyData, GetPushKeyErrors, GetPushKeyResponses, GetShortcutsData, GetShortcutsErrors, GetShortcutsResponses, GetTaskData, GetTaskErrors, GetTaskResponses, GetTwoFactorData, GetTwoFactorErrors, GetTwoFactorResponses, GetViewData, GetViewErrors, GetViewPreferenceData, GetViewPreferenceErrors, GetViewPreferenceResponses, GetViewResponses, GetWorkspaceData, GetWorkspaceErrors, GetWorkspaceResponses, GetWorkspaceStorageData, GetWorkspaceStorageErrors, GetWorkspaceStorageResponses, GithubManifestCallbackData, GithubManifestCallbackErrors, GithubManifestCallbackResponses, GithubProjectSettingsData, GithubProjectSettingsErrors, GithubProjectSettingsResponses, GithubWebhookData, GithubWebhookErrors, GithubWebhookResponses, GithubWorkspaceSettingsData, GithubWorkspaceSettingsErrors, GithubWorkspaceSettingsResponses, JoinChatChannelData, JoinChatChannelErrors, JoinChatChannelResponses, LeaveChatChannelData, LeaveChatChannelErrors, LeaveChatChannelResponses, ListAdminUsersData, ListAdminUsersErrors, ListAdminUsersResponses, ListApiTokensData, ListApiTokensErrors, ListApiTokensResponses, ListAuditData, ListAuditErrors, ListAuditResponses, ListBackupsData, ListBackupsErrors, ListBackupsResponses, ListChatCategoriesData, ListChatCategoriesErrors, ListChatCategoriesResponses, ListChatConversationsData, ListChatConversationsErrors, ListChatConversationsResponses, ListChatEmojiData, ListChatEmojiErrors, ListChatEmojiResponses, ListChatFilesData, ListChatFilesErrors, ListChatFilesResponses, ListChatMessagesData, ListChatMessagesErrors, ListChatMessagesResponses, ListChatPinsData, ListChatPinsErrors, ListChatPinsResponses, ListChatSearchData, ListChatSearchErrors, ListChatSearchResponses, ListChatStatesData, ListChatStatesErrors, ListChatStatesResponses, ListChatStickersData, ListChatStickersErrors, ListChatStickersResponses, ListChatThreadsData, ListChatThreadsErrors, ListChatThreadsResponses, ListCommentAttachmentsData, ListCommentAttachmentsErrors, ListCommentAttachmentsResponses, ListCommentsData, ListCommentsErrors, ListCommentsResponses, ListFollowedChatThreadsData, ListFollowedChatThreadsErrors, ListFollowedChatThreadsResponses, ListGithubLinksData, ListGithubLinksErrors, ListGithubLinksResponses, ListGlobalAuditData, ListGlobalAuditErrors, ListGlobalAuditResponses, ListInvitationsData, ListInvitationsErrors, ListInvitationsResponses, ListLabelsData, ListLabelsErrors, ListLabelsResponses, ListMailDomainsData, ListMailDomainsErrors, ListMailDomainsResponses, ListMembersData, ListMembersErrors, ListMembersResponses, ListNotificationsData, ListNotificationsErrors, ListNotificationsResponses, ListNotionImportsData, ListNotionImportsErrors, ListNotionImportsResponses, ListPageFavoritesData, ListPageFavoritesErrors, ListPageFavoritesResponses, ListPagesData, ListPagesErrors, ListPagesResponses, ListPageThreadsData, ListPageThreadsErrors, ListPageThreadsResponses, ListPageTrashData, ListPageTrashErrors, ListPageTrashResponses, ListPageVersionsData, ListPageVersionsErrors, ListPageVersionsResponses, ListPasskeysData, ListPasskeysErrors, ListPasskeysResponses, ListProjectLabelsData, ListProjectLabelsErrors, ListProjectLabelsResponses, ListProjectsData, ListProjectsErrors, ListProjectsResponses, ListProjectTrashData, ListProjectTrashErrors, ListProjectTrashResponses, ListPushSubscriptionsData, ListPushSubscriptionsErrors, ListPushSubscriptionsResponses, ListRecentPagesData, ListRecentPagesErrors, ListRecentPagesResponses, ListSessionsData, ListSessionsErrors, ListSessionsResponses, ListStatusesData, ListStatusesErrors, ListStatusesResponses, ListTaskActivityData, ListTaskActivityErrors, ListTaskActivityResponses, ListTaskAttachmentsData, ListTaskAttachmentsErrors, ListTaskAttachmentsResponses, ListTaskRelationsData, ListTaskRelationsErrors, ListTaskRelationsResponses, ListTasksData, ListTasksErrors, ListTasksResponses, ListTaskTrashData, ListTaskTrashErrors, ListTaskTrashResponses, ListTeamspacesData, ListTeamspacesErrors, ListTeamspacesResponses, ListTrashData, ListTrashErrors, ListTrashResponses, ListViewsData, ListViewsErrors, ListViewsResponses, ListWorkspacesData, ListWorkspacesErrors, ListWorkspacesResponses, LoginData, LoginErrors, LoginResponses, LoginSecondFactorData, LoginSecondFactorErrors, LoginSecondFactorResponses, LogoutData, LogoutErrors, LogoutResponses, MarkChatMessageUnreadData, MarkChatMessageUnreadErrors, MarkChatMessageUnreadResponses, MeData, MeErrors, MeResponses, MoveChatItemData, MoveChatItemErrors, MoveChatItemResponses, MoveMailDomainData, MoveMailDomainErrors, MoveMailDomainResponses, MovePageData, MovePageErrors, MovePageFavoriteData, MovePageFavoriteErrors, MovePageFavoriteResponses, MovePageResponses, MoveTeamspaceData, MoveTeamspaceErrors, MoveTeamspaceResponses, OpenChatDmData, OpenChatDmErrors, OpenChatDmResponses, PinChatMessageData, PinChatMessageErrors, PinChatMessageResponses, PlaceChatChannelData, PlaceChatChannelErrors, PlaceChatChannelResponses, PreviewInvitationData, PreviewInvitationErrors, PreviewInvitationResponses, PurgePageData, PurgePageErrors, PurgePageResponses, PutMemberNoteData, PutMemberNoteErrors, PutMemberNoteResponses, PutNotificationPreferencesData, PutNotificationPreferencesErrors, PutNotificationPreferencesResponses, PutShortcutsData, PutShortcutsErrors, PutShortcutsResponses, PutStatusData, PutStatusErrors, PutStatusResponses, PutViewPreferenceData, PutViewPreferenceErrors, PutViewPreferenceResponses, QueryTasksData, QueryTasksErrors, QueryTasksResponses, ReadAllChatData, ReadAllChatErrors, ReadAllChatResponses, ReadAllNotificationsData, ReadAllNotificationsErrors, ReadAllNotificationsResponses, ReadChatConversationData, ReadChatConversationErrors, ReadChatConversationResponses, ReadChatThreadData, ReadChatThreadErrors, ReadChatThreadResponses, ReadNotificationData, ReadNotificationErrors, ReadNotificationResponses, RecordPageVisitData, RecordPageVisitErrors, RecordPageVisitResponses, RecoveryCompleteData, RecoveryCompleteErrors, RecoveryCompleteResponses, RecoveryRequestData, RecoveryRequestErrors, RecoveryRequestResponses, RegenerateRecoveryCodesData, RegenerateRecoveryCodesErrors, RegenerateRecoveryCodesResponses, RegistrationCompleteData, RegistrationCompleteErrors, RegistrationCompleteResponses, RegistrationRequestData, RegistrationRequestErrors, RegistrationRequestResponses, RemoveAvatarData, RemoveAvatarErrors, RemoveAvatarResponses, RemoveChatMemberData, RemoveChatMemberErrors, RemoveChatMemberResponses, RemoveChatReactionData, RemoveChatReactionErrors, RemoveChatReactionResponses, RemoveMemberData, RemoveMemberErrors, RemoveMemberResponses, RemovePageFavoriteData, RemovePageFavoriteErrors, RemovePageFavoriteResponses, RemoveS3Data, RemoveS3Errors, RemoveS3Responses, RemoveSmtpData, RemoveSmtpErrors, RemoveSmtpResponses, RenameChatCategoryData, RenameChatCategoryErrors, RenameChatCategoryResponses, RenameWorkspaceData, RenameWorkspaceErrors, RenameWorkspaceResponses, ReopenPageThreadData, ReopenPageThreadErrors, ReopenPageThreadResponses, ReorderStatusesData, ReorderStatusesErrors, ReorderStatusesResponses, ReorderTasksData, ReorderTasksErrors, ReorderTasksResponses, ReorderViewFavoritesData, ReorderViewFavoritesErrors, ReorderViewFavoritesResponses, ResetTwoFactorData, ResetTwoFactorErrors, ResetTwoFactorResponses, ResolvePageThreadData, ResolvePageThreadErrors, ResolvePageThreadResponses, RestoreChatReadData, RestoreChatReadErrors, RestoreChatReadResponses, RestorePageData, RestorePageErrors, RestorePageResponses, RestorePageVersionData, RestorePageVersionErrors, RestorePageVersionResponses, RestoreProjectData, RestoreProjectErrors, RestoreProjectResponses, RestoreTaskData, RestoreTaskErrors, RestoreTaskResponses, RestoreWorkspaceData, RestoreWorkspaceErrors, RestoreWorkspaceResponses, RevokeApiTokenData, RevokeApiTokenErrors, RevokeApiTokenResponses, RevokeInvitationData, RevokeInvitationErrors, RevokeInvitationResponses, RevokeSessionData, RevokeSessionErrors, RevokeSessionResponses, SaveGithubProjectConnectionData, SaveGithubProjectConnectionErrors, SaveGithubProjectConnectionResponses, SaveJobLimitsData, SaveJobLimitsErrors, SaveJobLimitsResponses, SaveLimitsData, SaveLimitsErrors, SaveLimitsResponses, SaveS3Data, SaveS3Errors, SaveS3Responses, SaveSmtpData, SaveSmtpErrors, SaveSmtpResponses, SaveStorageOptionsData, SaveStorageOptionsErrors, SaveStorageOptionsResponses, SearchPagesData, SearchPagesErrors, SearchPagesResponses, SendChatMessageData, SendChatMessageErrors, SendChatMessageResponses, SendTestEmailData, SendTestEmailErrors, SendTestEmailResponses, SendTestPushData, SendTestPushErrors, SendTestPushResponses, SetAccountSuspensionData, SetAccountSuspensionErrors, SetAccountSuspensionResponses, SetInstanceAdminData, SetInstanceAdminErrors, SetInstanceAdminResponses, SetMailDomainCatchAllData, SetMailDomainCatchAllErrors, SetMailDomainCatchAllResponses, SetMailDomainEnabledData, SetMailDomainEnabledErrors, SetMailDomainEnabledResponses, SetPageLockData, SetPageLockErrors, SetPageLockResponses, SetRegistrationData, SetRegistrationErrors, SetRegistrationResponses, SetupCompleteData, SetupCompleteErrors, SetupCompleteResponses, SetupStatusData, SetupStatusErrors, SetupStatusResponses, SetupTotpData, SetupTotpErrors, SetupTotpResponses, StartGithubManifestData, StartGithubManifestErrors, StartGithubManifestResponses, StartImageCompressionData, StartImageCompressionErrors, StartImageCompressionResponses, StartNotionImportData, StartNotionImportErrors, StartNotionImportResponses, StartPasskeyLoginData, StartPasskeyLoginErrors, StartPasskeyLoginResponses, StartPasskeyRegistrationData, StartPasskeyRegistrationErrors, StartPasskeyRegistrationResponses, TransferOwnershipData, TransferOwnershipErrors, TransferOwnershipResponses, UnfavoriteViewData, UnfavoriteViewErrors, UnfavoriteViewResponses, UpdateChatChannelData, UpdateChatChannelErrors, UpdateChatChannelResponses, UpdateChatStateData, UpdateChatStateErrors, UpdateChatStateResponses, UpdateCommentData, UpdateCommentErrors, UpdateCommentResponses, UpdateLabelData, UpdateLabelErrors, UpdateLabelResponses, UpdateMeData, UpdateMeErrors, UpdateMeResponses, UpdatePageCommentData, UpdatePageCommentErrors, UpdatePageCommentResponses, UpdatePageData, UpdatePageErrors, UpdatePageResponses, UpdateProjectData, UpdateProjectErrors, UpdateProjectResponses, UpdateStatusData, UpdateStatusErrors, UpdateStatusResponses, UpdateTaskData, UpdateTaskErrors, UpdateTaskResponses, UpdateTeamspaceData, UpdateTeamspaceErrors, UpdateTeamspaceResponses, UpdateViewData, UpdateViewErrors, UpdateViewResponses, UploadAvatarData, UploadAvatarErrors, UploadAvatarResponses, UploadChatFileData, UploadChatFileErrors, UploadChatFileResponses, UploadCommentAttachmentsData, UploadCommentAttachmentsErrors, UploadCommentAttachmentsResponses, UploadPageFileData, UploadPageFileErrors, UploadPageFileResponses, UploadTaskAttachmentsData, UploadTaskAttachmentsErrors, UploadTaskAttachmentsResponses, UserAvatarData, UserAvatarErrors, UserAvatarResponses } from './types.gen';
+import type { AcceptInvitationData, AcceptInvitationErrors, AcceptInvitationResponses, AddChatMembersData, AddChatMembersErrors, AddChatMembersResponses, AddChatReactionData, AddChatReactionErrors, AddChatReactionResponses, AddMailboxAliasData, AddMailboxAliasErrors, AddMailboxAliasResponses, AddMailboxMemberData, AddMailboxMemberErrors, AddMailboxMemberResponses, AddPageFavoriteData, AddPageFavoriteErrors, AddPageFavoriteResponses, ArchiveChatChannelData, ArchiveChatChannelErrors, ArchiveChatChannelResponses, AuthOptionsData, AuthOptionsErrors, AuthOptionsResponses, BulkTasksData, BulkTasksErrors, BulkTasksResponses, CancelNotionImportData, CancelNotionImportErrors, CancelNotionImportResponses, ChangeMemberRoleData, ChangeMemberRoleErrors, ChangeMemberRoleResponses, ChangePasswordData, ChangePasswordErrors, ChangePasswordResponses, CheckMailDomainData, CheckMailDomainErrors, CheckMailDomainResponses, CreateApiTokenData, CreateApiTokenErrors, CreateApiTokenResponses, CreateAttachmentCommentData, CreateAttachmentCommentErrors, CreateAttachmentCommentResponses, CreateBackupData, CreateBackupErrors, CreateBackupResponses, CreateChatCategoryData, CreateChatCategoryErrors, CreateChatCategoryResponses, CreateChatChannelData, CreateChatChannelErrors, CreateChatChannelResponses, CreateChatEmojiData, CreateChatEmojiErrors, CreateChatEmojiResponses, CreateChatStickerData, CreateChatStickerErrors, CreateChatStickerResponses, CreateCommentData, CreateCommentErrors, CreateCommentResponses, CreateDiscordEventData, CreateDiscordEventErrors, CreateDiscordEventResponses, CreateInvitationData, CreateInvitationErrors, CreateInvitationResponses, CreateLabelData, CreateLabelErrors, CreateLabelResponses, CreateMailboxData, CreateMailboxErrors, CreateMailboxResponses, CreateMailDomainData, CreateMailDomainErrors, CreateMailDomainResponses, CreateMailLabelData, CreateMailLabelErrors, CreateMailLabelResponses, CreateNotionImportData, CreateNotionImportErrors, CreateNotionImportResponses, CreatePageCommentData, CreatePageCommentErrors, CreatePageCommentResponses, CreatePageData, CreatePageErrors, CreatePageResponses, CreatePageThreadData, CreatePageThreadErrors, CreatePageThreadResponses, CreatePersonalMailboxesData, CreatePersonalMailboxesErrors, CreatePersonalMailboxesResponses, CreateProjectData, CreateProjectErrors, CreateProjectResponses, CreatePushSubscriptionData, CreatePushSubscriptionErrors, CreatePushSubscriptionResponses, CreateRecoveryLinkData, CreateRecoveryLinkErrors, CreateRecoveryLinkResponses, CreateStatusData, CreateStatusErrors, CreateStatusResponses, CreateTaskData, CreateTaskErrors, CreateTaskRelationData, CreateTaskRelationErrors, CreateTaskRelationResponses, CreateTaskResponses, CreateTeamspaceData, CreateTeamspaceErrors, CreateTeamspaceResponses, CreateViewData, CreateViewErrors, CreateViewResponses, CreateWorkspaceData, CreateWorkspaceErrors, CreateWorkspaceResponses, DeleteBackupData, DeleteBackupErrors, DeleteBackupResponses, DeleteChatCategoryData, DeleteChatCategoryErrors, DeleteChatCategoryResponses, DeleteChatEmojiData, DeleteChatEmojiErrors, DeleteChatEmojiResponses, DeleteChatMessageData, DeleteChatMessageErrors, DeleteChatMessageResponses, DeleteChatStickerData, DeleteChatStickerErrors, DeleteChatStickerResponses, DeleteCommentAttachmentData, DeleteCommentAttachmentErrors, DeleteCommentAttachmentResponses, DeleteCommentData, DeleteCommentErrors, DeleteCommentResponses, DeleteGithubProjectConnectionData, DeleteGithubProjectConnectionErrors, DeleteGithubProjectConnectionResponses, DeleteLabelData, DeleteLabelErrors, DeleteLabelResponses, DeleteMailboxData, DeleteMailboxErrors, DeleteMailboxResponses, DeleteMailDomainData, DeleteMailDomainErrors, DeleteMailDomainResponses, DeleteMailLabelData, DeleteMailLabelErrors, DeleteMailLabelResponses, DeletePageCommentData, DeletePageCommentErrors, DeletePageCommentResponses, DeletePageData, DeletePageErrors, DeletePageResponses, DeletePageThreadData, DeletePageThreadErrors, DeletePageThreadResponses, DeletePasskeyData, DeletePasskeyErrors, DeletePasskeyResponses, DeleteProjectData, DeleteProjectErrors, DeleteProjectResponses, DeletePushSubscriptionData, DeletePushSubscriptionErrors, DeletePushSubscriptionResponses, DeleteStatusData, DeleteStatusErrors, DeleteStatusResponses, DeleteTaskAttachmentData, DeleteTaskAttachmentErrors, DeleteTaskAttachmentResponses, DeleteTaskData, DeleteTaskErrors, DeleteTaskRelationData, DeleteTaskRelationErrors, DeleteTaskRelationResponses, DeleteTaskResponses, DeleteTeamspaceData, DeleteTeamspaceErrors, DeleteTeamspaceResponses, DeleteViewData, DeleteViewErrors, DeleteViewResponses, DeleteWorkspaceData, DeleteWorkspaceErrors, DeleteWorkspaceResponses, DisableTwoFactorData, DisableTwoFactorErrors, DisableTwoFactorResponses, DownloadBackupData, DownloadBackupErrors, DownloadBackupResponses, DownloadChatFileData, DownloadChatFileErrors, DownloadChatFileResponses, DownloadCommentAttachmentData, DownloadCommentAttachmentErrors, DownloadCommentAttachmentResponses, DownloadPageFileData, DownloadPageFileErrors, DownloadPageFileResponses, DownloadTaskAttachmentData, DownloadTaskAttachmentErrors, DownloadTaskAttachmentResponses, DuplicatePageData, DuplicatePageErrors, DuplicatePageResponses, EditChatMessageData, EditChatMessageErrors, EditChatMessageResponses, EmptyPageTrashData, EmptyPageTrashErrors, EmptyPageTrashResponses, EnableTotpData, EnableTotpErrors, EnableTotpResponses, ExportGlobalAuditData, ExportGlobalAuditErrors, ExportGlobalAuditResponses, ExportPageData, ExportPageErrors, ExportPageResponses, FavoriteViewData, FavoriteViewErrors, FavoriteViewResponses, FinishPasskeyLoginData, FinishPasskeyLoginErrors, FinishPasskeyLoginResponses, FinishPasskeyRegistrationData, FinishPasskeyRegistrationErrors, FinishPasskeyRegistrationResponses, FollowChatThreadData, FollowChatThreadErrors, FollowChatThreadResponses, ForwardChatMessageData, ForwardChatMessageErrors, ForwardChatMessageResponses, GetChatEmojiImageData, GetChatEmojiImageErrors, GetChatEmojiImageResponses, GetChatLinkPreviewData, GetChatLinkPreviewErrors, GetChatLinkPreviewResponses, GetChatStickerImageData, GetChatStickerImageErrors, GetChatStickerImageResponses, GetChatThreadData, GetChatThreadErrors, GetChatThreadResponses, GetInstanceSettingsData, GetInstanceSettingsErrors, GetInstanceSettingsResponses, GetJobLimitsData, GetJobLimitsErrors, GetJobLimitsResponses, GetMailboxData, GetMailboxErrors, GetMailboxResponses, GetMailDomainData, GetMailDomainErrors, GetMailDomainResponses, GetMemberProfileData, GetMemberProfileErrors, GetMemberProfileResponses, GetNotificationPreferencesData, GetNotificationPreferencesErrors, GetNotificationPreferencesResponses, GetNotionImportData, GetNotionImportErrors, GetNotionImportResponses, GetPageData, GetPageErrors, GetPageResponses, GetPageVersionData, GetPageVersionErrors, GetPageVersionResponses, GetPushKeyData, GetPushKeyErrors, GetPushKeyResponses, GetShortcutsData, GetShortcutsErrors, GetShortcutsResponses, GetTaskData, GetTaskErrors, GetTaskResponses, GetTwoFactorData, GetTwoFactorErrors, GetTwoFactorResponses, GetViewData, GetViewErrors, GetViewPreferenceData, GetViewPreferenceErrors, GetViewPreferenceResponses, GetViewResponses, GetWorkspaceData, GetWorkspaceErrors, GetWorkspaceResponses, GetWorkspaceStorageData, GetWorkspaceStorageErrors, GetWorkspaceStorageResponses, GithubManifestCallbackData, GithubManifestCallbackErrors, GithubManifestCallbackResponses, GithubProjectSettingsData, GithubProjectSettingsErrors, GithubProjectSettingsResponses, GithubWebhookData, GithubWebhookErrors, GithubWebhookResponses, GithubWorkspaceSettingsData, GithubWorkspaceSettingsErrors, GithubWorkspaceSettingsResponses, JoinChatChannelData, JoinChatChannelErrors, JoinChatChannelResponses, LeaveChatChannelData, LeaveChatChannelErrors, LeaveChatChannelResponses, ListAdminUsersData, ListAdminUsersErrors, ListAdminUsersResponses, ListApiTokensData, ListApiTokensErrors, ListApiTokensResponses, ListAuditData, ListAuditErrors, ListAuditResponses, ListBackupsData, ListBackupsErrors, ListBackupsResponses, ListChatCategoriesData, ListChatCategoriesErrors, ListChatCategoriesResponses, ListChatConversationsData, ListChatConversationsErrors, ListChatConversationsResponses, ListChatEmojiData, ListChatEmojiErrors, ListChatEmojiResponses, ListChatFilesData, ListChatFilesErrors, ListChatFilesResponses, ListChatMessagesData, ListChatMessagesErrors, ListChatMessagesResponses, ListChatPinsData, ListChatPinsErrors, ListChatPinsResponses, ListChatSearchData, ListChatSearchErrors, ListChatSearchResponses, ListChatStatesData, ListChatStatesErrors, ListChatStatesResponses, ListChatStickersData, ListChatStickersErrors, ListChatStickersResponses, ListChatThreadsData, ListChatThreadsErrors, ListChatThreadsResponses, ListCommentAttachmentsData, ListCommentAttachmentsErrors, ListCommentAttachmentsResponses, ListCommentsData, ListCommentsErrors, ListCommentsResponses, ListFollowedChatThreadsData, ListFollowedChatThreadsErrors, ListFollowedChatThreadsResponses, ListGithubLinksData, ListGithubLinksErrors, ListGithubLinksResponses, ListGlobalAuditData, ListGlobalAuditErrors, ListGlobalAuditResponses, ListInvitationsData, ListInvitationsErrors, ListInvitationsResponses, ListLabelsData, ListLabelsErrors, ListLabelsResponses, ListMailboxesData, ListMailboxesErrors, ListMailboxesResponses, ListMailDomainsData, ListMailDomainsErrors, ListMailDomainsResponses, ListMailLabelsData, ListMailLabelsErrors, ListMailLabelsResponses, ListMembersData, ListMembersErrors, ListMembersResponses, ListNotificationsData, ListNotificationsErrors, ListNotificationsResponses, ListNotionImportsData, ListNotionImportsErrors, ListNotionImportsResponses, ListPageFavoritesData, ListPageFavoritesErrors, ListPageFavoritesResponses, ListPagesData, ListPagesErrors, ListPagesResponses, ListPageThreadsData, ListPageThreadsErrors, ListPageThreadsResponses, ListPageTrashData, ListPageTrashErrors, ListPageTrashResponses, ListPageVersionsData, ListPageVersionsErrors, ListPageVersionsResponses, ListPasskeysData, ListPasskeysErrors, ListPasskeysResponses, ListProjectLabelsData, ListProjectLabelsErrors, ListProjectLabelsResponses, ListProjectsData, ListProjectsErrors, ListProjectsResponses, ListProjectTrashData, ListProjectTrashErrors, ListProjectTrashResponses, ListPushSubscriptionsData, ListPushSubscriptionsErrors, ListPushSubscriptionsResponses, ListRecentPagesData, ListRecentPagesErrors, ListRecentPagesResponses, ListSessionsData, ListSessionsErrors, ListSessionsResponses, ListStatusesData, ListStatusesErrors, ListStatusesResponses, ListTaskActivityData, ListTaskActivityErrors, ListTaskActivityResponses, ListTaskAttachmentsData, ListTaskAttachmentsErrors, ListTaskAttachmentsResponses, ListTaskRelationsData, ListTaskRelationsErrors, ListTaskRelationsResponses, ListTasksData, ListTasksErrors, ListTasksResponses, ListTaskTrashData, ListTaskTrashErrors, ListTaskTrashResponses, ListTeamspacesData, ListTeamspacesErrors, ListTeamspacesResponses, ListTrashData, ListTrashErrors, ListTrashResponses, ListViewsData, ListViewsErrors, ListViewsResponses, ListWorkspacesData, ListWorkspacesErrors, ListWorkspacesResponses, LoginData, LoginErrors, LoginResponses, LoginSecondFactorData, LoginSecondFactorErrors, LoginSecondFactorResponses, LogoutData, LogoutErrors, LogoutResponses, MarkChatMessageUnreadData, MarkChatMessageUnreadErrors, MarkChatMessageUnreadResponses, MeData, MeErrors, MeResponses, MoveChatItemData, MoveChatItemErrors, MoveChatItemResponses, MoveMailDomainData, MoveMailDomainErrors, MoveMailDomainResponses, MovePageData, MovePageErrors, MovePageFavoriteData, MovePageFavoriteErrors, MovePageFavoriteResponses, MovePageResponses, MoveTeamspaceData, MoveTeamspaceErrors, MoveTeamspaceResponses, OpenChatDmData, OpenChatDmErrors, OpenChatDmResponses, PinChatMessageData, PinChatMessageErrors, PinChatMessageResponses, PlaceChatChannelData, PlaceChatChannelErrors, PlaceChatChannelResponses, PreviewInvitationData, PreviewInvitationErrors, PreviewInvitationResponses, PreviewPersonalMailboxesData, PreviewPersonalMailboxesErrors, PreviewPersonalMailboxesResponses, PurgePageData, PurgePageErrors, PurgePageResponses, PutMemberNoteData, PutMemberNoteErrors, PutMemberNoteResponses, PutNotificationPreferencesData, PutNotificationPreferencesErrors, PutNotificationPreferencesResponses, PutShortcutsData, PutShortcutsErrors, PutShortcutsResponses, PutStatusData, PutStatusErrors, PutStatusResponses, PutViewPreferenceData, PutViewPreferenceErrors, PutViewPreferenceResponses, QueryTasksData, QueryTasksErrors, QueryTasksResponses, ReadAllChatData, ReadAllChatErrors, ReadAllChatResponses, ReadAllNotificationsData, ReadAllNotificationsErrors, ReadAllNotificationsResponses, ReadChatConversationData, ReadChatConversationErrors, ReadChatConversationResponses, ReadChatThreadData, ReadChatThreadErrors, ReadChatThreadResponses, ReadNotificationData, ReadNotificationErrors, ReadNotificationResponses, RecordPageVisitData, RecordPageVisitErrors, RecordPageVisitResponses, RecoveryCompleteData, RecoveryCompleteErrors, RecoveryCompleteResponses, RecoveryRequestData, RecoveryRequestErrors, RecoveryRequestResponses, RegenerateRecoveryCodesData, RegenerateRecoveryCodesErrors, RegenerateRecoveryCodesResponses, RegistrationCompleteData, RegistrationCompleteErrors, RegistrationCompleteResponses, RegistrationRequestData, RegistrationRequestErrors, RegistrationRequestResponses, RemoveAvatarData, RemoveAvatarErrors, RemoveAvatarResponses, RemoveChatMemberData, RemoveChatMemberErrors, RemoveChatMemberResponses, RemoveChatReactionData, RemoveChatReactionErrors, RemoveChatReactionResponses, RemoveMailboxAddressData, RemoveMailboxAddressErrors, RemoveMailboxAddressResponses, RemoveMailboxMemberData, RemoveMailboxMemberErrors, RemoveMailboxMemberResponses, RemoveMemberData, RemoveMemberErrors, RemoveMemberResponses, RemovePageFavoriteData, RemovePageFavoriteErrors, RemovePageFavoriteResponses, RemoveS3Data, RemoveS3Errors, RemoveS3Responses, RemoveSmtpData, RemoveSmtpErrors, RemoveSmtpResponses, RenameChatCategoryData, RenameChatCategoryErrors, RenameChatCategoryResponses, RenameWorkspaceData, RenameWorkspaceErrors, RenameWorkspaceResponses, ReopenPageThreadData, ReopenPageThreadErrors, ReopenPageThreadResponses, ReorderStatusesData, ReorderStatusesErrors, ReorderStatusesResponses, ReorderTasksData, ReorderTasksErrors, ReorderTasksResponses, ReorderViewFavoritesData, ReorderViewFavoritesErrors, ReorderViewFavoritesResponses, ResetTwoFactorData, ResetTwoFactorErrors, ResetTwoFactorResponses, ResolvePageThreadData, ResolvePageThreadErrors, ResolvePageThreadResponses, RestoreChatReadData, RestoreChatReadErrors, RestoreChatReadResponses, RestorePageData, RestorePageErrors, RestorePageResponses, RestorePageVersionData, RestorePageVersionErrors, RestorePageVersionResponses, RestoreProjectData, RestoreProjectErrors, RestoreProjectResponses, RestoreTaskData, RestoreTaskErrors, RestoreTaskResponses, RestoreWorkspaceData, RestoreWorkspaceErrors, RestoreWorkspaceResponses, RevokeApiTokenData, RevokeApiTokenErrors, RevokeApiTokenResponses, RevokeInvitationData, RevokeInvitationErrors, RevokeInvitationResponses, RevokeSessionData, RevokeSessionErrors, RevokeSessionResponses, SaveGithubProjectConnectionData, SaveGithubProjectConnectionErrors, SaveGithubProjectConnectionResponses, SaveJobLimitsData, SaveJobLimitsErrors, SaveJobLimitsResponses, SaveLimitsData, SaveLimitsErrors, SaveLimitsResponses, SaveS3Data, SaveS3Errors, SaveS3Responses, SaveSmtpData, SaveSmtpErrors, SaveSmtpResponses, SaveStorageOptionsData, SaveStorageOptionsErrors, SaveStorageOptionsResponses, SearchPagesData, SearchPagesErrors, SearchPagesResponses, SendChatMessageData, SendChatMessageErrors, SendChatMessageResponses, SendTestEmailData, SendTestEmailErrors, SendTestEmailResponses, SendTestPushData, SendTestPushErrors, SendTestPushResponses, SetAccountSuspensionData, SetAccountSuspensionErrors, SetAccountSuspensionResponses, SetInstanceAdminData, SetInstanceAdminErrors, SetInstanceAdminResponses, SetMailboxStatusData, SetMailboxStatusErrors, SetMailboxStatusResponses, SetMailDomainCatchAllData, SetMailDomainCatchAllErrors, SetMailDomainCatchAllResponses, SetMailDomainEnabledData, SetMailDomainEnabledErrors, SetMailDomainEnabledResponses, SetPageLockData, SetPageLockErrors, SetPageLockResponses, SetRegistrationData, SetRegistrationErrors, SetRegistrationResponses, SetupCompleteData, SetupCompleteErrors, SetupCompleteResponses, SetupStatusData, SetupStatusErrors, SetupStatusResponses, SetupTotpData, SetupTotpErrors, SetupTotpResponses, StartGithubManifestData, StartGithubManifestErrors, StartGithubManifestResponses, StartImageCompressionData, StartImageCompressionErrors, StartImageCompressionResponses, StartNotionImportData, StartNotionImportErrors, StartNotionImportResponses, StartPasskeyLoginData, StartPasskeyLoginErrors, StartPasskeyLoginResponses, StartPasskeyRegistrationData, StartPasskeyRegistrationErrors, StartPasskeyRegistrationResponses, TransferOwnershipData, TransferOwnershipErrors, TransferOwnershipResponses, UnfavoriteViewData, UnfavoriteViewErrors, UnfavoriteViewResponses, UpdateChatChannelData, UpdateChatChannelErrors, UpdateChatChannelResponses, UpdateChatStateData, UpdateChatStateErrors, UpdateChatStateResponses, UpdateCommentData, UpdateCommentErrors, UpdateCommentResponses, UpdateLabelData, UpdateLabelErrors, UpdateLabelResponses, UpdateMailboxData, UpdateMailboxErrors, UpdateMailboxResponses, UpdateMailLabelData, UpdateMailLabelErrors, UpdateMailLabelResponses, UpdateMeData, UpdateMeErrors, UpdateMeResponses, UpdatePageCommentData, UpdatePageCommentErrors, UpdatePageCommentResponses, UpdatePageData, UpdatePageErrors, UpdatePageResponses, UpdateProjectData, UpdateProjectErrors, UpdateProjectResponses, UpdateStatusData, UpdateStatusErrors, UpdateStatusResponses, UpdateTaskData, UpdateTaskErrors, UpdateTaskResponses, UpdateTeamspaceData, UpdateTeamspaceErrors, UpdateTeamspaceResponses, UpdateViewData, UpdateViewErrors, UpdateViewResponses, UploadAvatarData, UploadAvatarErrors, UploadAvatarResponses, UploadChatFileData, UploadChatFileErrors, UploadChatFileResponses, UploadCommentAttachmentsData, UploadCommentAttachmentsErrors, UploadCommentAttachmentsResponses, UploadPageFileData, UploadPageFileErrors, UploadPageFileResponses, UploadTaskAttachmentsData, UploadTaskAttachmentsErrors, UploadTaskAttachmentsResponses, UserAvatarData, UserAvatarErrors, UserAvatarResponses } from './types.gen';
 
 export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends boolean = boolean, TResponse = unknown> = Options2<TData, ThrowOnError, TResponse> & {
     /**
@@ -1865,6 +1865,249 @@ export const setMailDomainEnabled = <ThrowOnError extends boolean = false>(optio
             type: 'apiKey'
         }],
     url: '/api/v1/workspaces/{workspace_id}/mail/domains/{domain_id}/enabled',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * The mail labels of the workspace by name, for any member.
+ */
+export const listMailLabels = <ThrowOnError extends boolean = false>(options: Options<ListMailLabelsData, ThrowOnError>): RequestResult<ListMailLabelsResponses, ListMailLabelsErrors, ThrowOnError> => (options.client ?? client).get<ListMailLabelsResponses, ListMailLabelsErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/mail/labels',
+    ...options
+});
+
+export const createMailLabel = <ThrowOnError extends boolean = false>(options: Options<CreateMailLabelData, ThrowOnError>): RequestResult<CreateMailLabelResponses, CreateMailLabelErrors, ThrowOnError> => (options.client ?? client).post<CreateMailLabelResponses, CreateMailLabelErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/mail/labels',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Deletes a label; threads lose it.
+ */
+export const deleteMailLabel = <ThrowOnError extends boolean = false>(options: Options<DeleteMailLabelData, ThrowOnError>): RequestResult<DeleteMailLabelResponses, DeleteMailLabelErrors, ThrowOnError> => (options.client ?? client).delete<DeleteMailLabelResponses, DeleteMailLabelErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/mail/labels/{label_id}',
+    ...options
+});
+
+/**
+ * Renames a label or changes its color.
+ */
+export const updateMailLabel = <ThrowOnError extends boolean = false>(options: Options<UpdateMailLabelData, ThrowOnError>): RequestResult<UpdateMailLabelResponses, UpdateMailLabelErrors, ThrowOnError> => (options.client ?? client).patch<UpdateMailLabelResponses, UpdateMailLabelErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/mail/labels/{label_id}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Owners and admins: every mailbox of the workspace. Other members: their mailboxes.
+ */
+export const listMailboxes = <ThrowOnError extends boolean = false>(options: Options<ListMailboxesData, ThrowOnError>): RequestResult<ListMailboxesResponses, ListMailboxesErrors, ThrowOnError> => (options.client ?? client).get<ListMailboxesResponses, ListMailboxesErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/mail/mailboxes',
+    ...options
+});
+
+/**
+ * Creates a personal or shared mailbox with its primary address.
+ */
+export const createMailbox = <ThrowOnError extends boolean = false>(options: Options<CreateMailboxData, ThrowOnError>): RequestResult<CreateMailboxResponses, CreateMailboxErrors, ThrowOnError> => (options.client ?? client).post<CreateMailboxResponses, CreateMailboxErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/mail/mailboxes',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * **Create a mailbox for each member**: creates the proposals of the preview with the admin's
+ * edits. Conflicting ones are returned and not created.
+ */
+export const createPersonalMailboxes = <ThrowOnError extends boolean = false>(options: Options<CreatePersonalMailboxesData, ThrowOnError>): RequestResult<CreatePersonalMailboxesResponses, CreatePersonalMailboxesErrors, ThrowOnError> => (options.client ?? client).post<CreatePersonalMailboxesResponses, CreatePersonalMailboxesErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/mail/mailboxes/bulk-personal',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * The personal mailboxes a pattern gives the members without one. Names are folded to ASCII;
+ * taken and repeated addresses are marked as conflicts. Nothing is written.
+ */
+export const previewPersonalMailboxes = <ThrowOnError extends boolean = false>(options: Options<PreviewPersonalMailboxesData, ThrowOnError>): RequestResult<PreviewPersonalMailboxesResponses, PreviewPersonalMailboxesErrors, ThrowOnError> => (options.client ?? client).post<PreviewPersonalMailboxesResponses, PreviewPersonalMailboxesErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/mail/mailboxes/bulk-personal/preview',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Deletes a mailbox with its addresses and threads.
+ */
+export const deleteMailbox = <ThrowOnError extends boolean = false>(options: Options<DeleteMailboxData, ThrowOnError>): RequestResult<DeleteMailboxResponses, DeleteMailboxErrors, ThrowOnError> => (options.client ?? client).delete<DeleteMailboxResponses, DeleteMailboxErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/mail/mailboxes/{mailbox_id}',
+    ...options
+});
+
+/**
+ * A mailbox, for its members and for owners and admins.
+ */
+export const getMailbox = <ThrowOnError extends boolean = false>(options: Options<GetMailboxData, ThrowOnError>): RequestResult<GetMailboxResponses, GetMailboxErrors, ThrowOnError> => (options.client ?? client).get<GetMailboxResponses, GetMailboxErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/mail/mailboxes/{mailbox_id}',
+    ...options
+});
+
+/**
+ * Renames a mailbox.
+ */
+export const updateMailbox = <ThrowOnError extends boolean = false>(options: Options<UpdateMailboxData, ThrowOnError>): RequestResult<UpdateMailboxResponses, UpdateMailboxErrors, ThrowOnError> => (options.client ?? client).patch<UpdateMailboxResponses, UpdateMailboxErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/mail/mailboxes/{mailbox_id}',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Adds an alias on any domain of the workspace.
+ */
+export const addMailboxAlias = <ThrowOnError extends boolean = false>(options: Options<AddMailboxAliasData, ThrowOnError>): RequestResult<AddMailboxAliasResponses, AddMailboxAliasErrors, ThrowOnError> => (options.client ?? client).post<AddMailboxAliasResponses, AddMailboxAliasErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/mail/mailboxes/{mailbox_id}/addresses',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Removes an alias. The primary address stays.
+ */
+export const removeMailboxAddress = <ThrowOnError extends boolean = false>(options: Options<RemoveMailboxAddressData, ThrowOnError>): RequestResult<RemoveMailboxAddressResponses, RemoveMailboxAddressErrors, ThrowOnError> => (options.client ?? client).delete<RemoveMailboxAddressResponses, RemoveMailboxAddressErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/mail/mailboxes/{mailbox_id}/addresses/{address_id}',
+    ...options
+});
+
+/**
+ * Adds a member to a shared mailbox.
+ */
+export const addMailboxMember = <ThrowOnError extends boolean = false>(options: Options<AddMailboxMemberData, ThrowOnError>): RequestResult<AddMailboxMemberResponses, AddMailboxMemberErrors, ThrowOnError> => (options.client ?? client).post<AddMailboxMemberResponses, AddMailboxMemberErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/mail/mailboxes/{mailbox_id}/members',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
+/**
+ * Removes a member from a shared mailbox.
+ */
+export const removeMailboxMember = <ThrowOnError extends boolean = false>(options: Options<RemoveMailboxMemberData, ThrowOnError>): RequestResult<RemoveMailboxMemberResponses, RemoveMailboxMemberErrors, ThrowOnError> => (options.client ?? client).delete<RemoveMailboxMemberResponses, RemoveMailboxMemberErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/mail/mailboxes/{mailbox_id}/members/{membership_id}',
+    ...options
+});
+
+/**
+ * Suspends a mailbox (its mail is refused) or resumes it.
+ */
+export const setMailboxStatus = <ThrowOnError extends boolean = false>(options: Options<SetMailboxStatusData, ThrowOnError>): RequestResult<SetMailboxStatusResponses, SetMailboxStatusErrors, ThrowOnError> => (options.client ?? client).put<SetMailboxStatusResponses, SetMailboxStatusErrors, ThrowOnError>({
+    security: [{
+            in: 'cookie',
+            name: '__Host-orbit_session',
+            type: 'apiKey'
+        }],
+    url: '/api/v1/workspaces/{workspace_id}/mail/mailboxes/{mailbox_id}/status',
     ...options,
     headers: {
         'Content-Type': 'application/json',

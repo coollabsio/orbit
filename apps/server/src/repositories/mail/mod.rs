@@ -7,8 +7,11 @@
 
 mod domains;
 mod keys;
+mod labels;
+mod mailboxes;
 
-use orbit_platform::{Database, UploadError, UploadService};
+use orbit_platform::{Database, Id, TimestampMillis, UploadError, UploadService};
+use sqlx::{Any, Transaction};
 use thiserror::Error;
 
 pub use domains::{
@@ -16,6 +19,12 @@ pub use domains::{
     PENDING_WINDOW_MS, RecordStatus, SUSPENDED_GRACE_MS, dkim_aad, dns_check_job, dns_check_kind,
 };
 pub use keys::{MailKeys, open_blob, receipt_aad, seal_blob};
+pub use labels::Label;
+pub(crate) use mailboxes::suspend_owned_mailboxes;
+pub use mailboxes::{
+    AddressKind, BulkResult, MailAddress, Mailbox, MailboxKind, MailboxStatus, NamePattern,
+    NewMailbox, Proposal, RecipientLookup, local_part_for, lookup_recipient,
+};
 
 #[derive(Debug, Error)]
 pub enum MailError {
@@ -80,4 +89,33 @@ impl MailRepository {
     pub fn keys(&self) -> &MailKeys {
         &self.keys
     }
+}
+
+/// A successful mail change in the audit log.
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn record_mail_audit(
+    transaction: &mut Transaction<'_, Any>,
+    workspace_id: Id,
+    actor_id: Id,
+    action: &str,
+    resource_type: &str,
+    resource_id: Id,
+    request_id: &str,
+    metadata: serde_json::Value,
+    now: TimestampMillis,
+) -> Result<(), MailError> {
+    crate::audit::record(
+        transaction,
+        workspace_id,
+        Some(actor_id),
+        action,
+        crate::audit::AuditOutcome::Success,
+        resource_type,
+        Some(resource_id),
+        request_id,
+        metadata,
+        now,
+    )
+    .await?;
+    Ok(())
 }

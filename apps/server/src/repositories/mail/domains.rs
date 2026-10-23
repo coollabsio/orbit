@@ -185,7 +185,7 @@ const DOMAIN_FROM: &str = "mail_domains d LEFT JOIN mail_dkim_keys k ON k.id = (
      SELECT k2.id FROM mail_dkim_keys k2 WHERE k2.domain_id = d.id \
      AND k2.status IN ('pending', 'active') ORDER BY k2.created_at DESC, k2.id DESC LIMIT 1)";
 
-fn parse_id(value: &str) -> Result<Id, MailError> {
+pub(super) fn parse_id(value: &str) -> Result<Id, MailError> {
     value.parse().map_err(|_| MailError::NotFound)
 }
 
@@ -304,7 +304,9 @@ pub fn dns_check_kind() -> orbit_platform::JobKind {
     orbit_platform::JobKind::new(DNS_CHECK_JOB).with_concurrency_limit(1)
 }
 
-async fn manager(
+/// The caller as an owner or admin of the workspace: `Forbidden("mail_forbidden")` for other
+/// members, `NotFound` for outsiders.
+pub(super) async fn manager(
     transaction: &mut Transaction<'_, Any>,
     workspace_id: Id,
     actor_id: Id,

@@ -2749,6 +2749,7 @@ dependencies = [
  "totp-rs",
  "tower",
  "tracing",
+ "unicode-normalization",
  "url",
  "utoipa",
  "webauthn-rs",

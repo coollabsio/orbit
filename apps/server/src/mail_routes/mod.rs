@@ -2,13 +2,15 @@
 //! owners and admins); an outsider of the workspace gets `mail_not_found`.
 
 pub(crate) mod domains;
+pub(crate) mod labels;
+pub(crate) mod mailboxes;
 
 use std::sync::Arc;
 
 use axum::Router;
 use axum::extract::Extension;
 use axum::http::{HeaderMap, StatusCode, Uri};
-use axum::routing::{get, post, put};
+use axum::routing::{delete, get, post, put};
 use orbit_platform::{Id, JobStore, MailMode, RequestId};
 
 use crate::auth_routes::CookieMode;
@@ -72,6 +74,52 @@ pub fn mail_router(state: MailState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/mail/domains/{domain_id}/enabled",
             put(domains::set_mail_domain_enabled),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/mailboxes",
+            get(mailboxes::list_mailboxes).post(mailboxes::create_mailbox),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/mailboxes/bulk-personal",
+            post(mailboxes::create_personal_mailboxes),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/mailboxes/bulk-personal/preview",
+            post(mailboxes::preview_personal_mailboxes),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/mailboxes/{mailbox_id}",
+            get(mailboxes::get_mailbox)
+                .patch(mailboxes::update_mailbox)
+                .delete(mailboxes::delete_mailbox),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/mailboxes/{mailbox_id}/status",
+            put(mailboxes::set_mailbox_status),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/mailboxes/{mailbox_id}/members",
+            post(mailboxes::add_mailbox_member),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/mailboxes/{mailbox_id}/members/{membership_id}",
+            delete(mailboxes::remove_mailbox_member),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/mailboxes/{mailbox_id}/addresses",
+            post(mailboxes::add_mailbox_alias),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/mailboxes/{mailbox_id}/addresses/{address_id}",
+            delete(mailboxes::remove_mailbox_address),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/labels",
+            get(labels::list_mail_labels).post(labels::create_mail_label),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/labels/{label_id}",
+            axum::routing::patch(labels::update_mail_label).delete(labels::delete_mail_label),
         )
         .route(
             "/api/v1/admin/mail/domains/{name}/workspace",
@@ -152,6 +200,14 @@ fn detail(code: &'static str) -> &'static str {
         }
         "domain_exists" => "This workspace has this domain already.",
         "domain_has_mailboxes" => "Remove the addresses on this domain first.",
+        "address_taken" => "Another mailbox has this address already.",
+        "address_primary" => "The primary address of a mailbox cannot be removed.",
+        "mailbox_personal" => "A personal mailbox has only its owner as a member.",
+        "member_has_mailbox" => "This member has a personal mailbox already.",
+        "mailbox_owner_left" => {
+            "The owner of this personal mailbox left the workspace. It stays suspended; delete it when it is no longer needed."
+        }
+        "label_exists" => "A label with this name exists already.",
         _ => "This action is not possible.",
     }
 }
