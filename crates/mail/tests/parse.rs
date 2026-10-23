@@ -285,6 +285,17 @@ fn iso8859_body_and_headers_are_decoded() {
 }
 
 #[test]
+fn shift_jis_subject_and_body_are_decoded() {
+    let raw = b"From: a@sender.example\r\nTo: b@orbit.example\r\n\
+        Subject: =?Shift_JIS?B?k/qWe4zqgsyMj5a8?=\r\n\
+        Content-Type: text/plain; charset=Shift_JIS\r\n\
+        Content-Transfer-Encoding: base64\r\n\r\nlnuVtoLFgrc=\r\n";
+    let message = parse(raw, &ParseLimits::default()).unwrap();
+    assert_eq!(message.subject, "日本語の件名");
+    assert_eq!(message.body_text.trim(), "本文です");
+}
+
+#[test]
 fn rfc2047_subject_and_display_names_are_decoded() {
     let message = parse_fixture("rfc2047_subject.eml");
     assert_eq!(message.subject, "Grüße aus Köln — 日本語");
