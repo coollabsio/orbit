@@ -1867,9 +1867,9 @@ impl WorkspaceRepository {
                     .execute(&mut *transaction)
                     .await?
                     .rows_affected();
-            // Page files and chat files hold their blobs with ON DELETE RESTRICT, so they go
-            // before the blobs.
-            for table in ["page_files", "chat_message_files"] {
+            // Page files, chat files and mail receipts hold their blobs with ON DELETE RESTRICT,
+            // so they go before the blobs. A receipt takes its parsed messages along.
+            for table in ["page_files", "chat_message_files", "mail_receipts"] {
                 attachment_references_purged += sqlx::query(sqlx::AssertSqlSafe(format!(
                     "DELETE FROM {table} WHERE workspace_id = $1"
                 )))

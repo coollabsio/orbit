@@ -38549,7 +38549,8 @@
           "pages.purge",
           "views.manage_shared",
           "comments.moderate",
-          "chat.manage"
+          "chat.manage",
+          "mail.manage"
         ]
       },
       "Presence": {
@@ -41405,7 +41406,8 @@
       "pages.purge",
       "views.manage_shared",
       "comments.moderate",
-      "chat.manage"
+      "chat.manage",
+      "mail.manage"
     ],
     "member": [],
     "owner": [
@@ -41420,7 +41422,8 @@
       "pages.purge",
       "views.manage_shared",
       "comments.moderate",
-      "chat.manage"
+      "chat.manage",
+      "mail.manage"
     ]
   }
 }

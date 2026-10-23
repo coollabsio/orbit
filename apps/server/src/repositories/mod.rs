@@ -3,6 +3,7 @@ pub mod attachments;
 pub mod chat;
 pub mod identity;
 pub mod instance_settings;
+pub mod mail;
 pub(crate) mod membership;
 pub mod page_comments;
 pub mod page_export;

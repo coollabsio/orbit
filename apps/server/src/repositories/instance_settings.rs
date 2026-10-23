@@ -246,6 +246,46 @@ impl InstanceSettingsRepository {
         Ok(())
     }
 
+    /// Whether workspaces may add mail domains (off until the root user turns it on).
+    pub async fn mail_domains_enabled(&self) -> Result<bool, sqlx::Error> {
+        let enabled = sqlx::query_scalar::<_, i64>(
+            "SELECT mail_domains_enabled FROM instance_settings WHERE id = 1",
+        )
+        .fetch_one(self.database.pool())
+        .await?;
+        Ok(enabled == 1)
+    }
+
+    pub async fn set_mail_domains_enabled(
+        &self,
+        actor_id: Id,
+        enabled: bool,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), sqlx::Error> {
+        let mut transaction = self.database.immediate_transaction().await?;
+        sqlx::query(
+            "UPDATE instance_settings SET mail_domains_enabled = $1, updated_at = $2 WHERE id = 1",
+        )
+        .bind(i64::from(enabled))
+        .bind(now.as_millis())
+        .execute(&mut *transaction)
+        .await?;
+        audit::record_global(
+            &mut transaction,
+            Some(actor_id),
+            "instance.mail_updated",
+            AuditOutcome::Success,
+            "installation",
+            None,
+            request_id,
+            serde_json::json!({ "domains_enabled": enabled }),
+            now,
+        )
+        .await?;
+        transaction.commit().await
+    }
+
     pub async fn save_smtp(
         &self,
         actor_id: Id,

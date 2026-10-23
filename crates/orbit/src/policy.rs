@@ -41,10 +41,14 @@ pub enum Permission {
     /// members, and delete other members' chat messages.
     #[serde(rename = "chat.manage")]
     ChatManage,
+    /// Manage the workspace's mail: domains, mailboxes and their addresses and members, labels
+    /// and failed receipts.
+    #[serde(rename = "mail.manage")]
+    MailManage,
 }
 
 impl Permission {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::WorkspaceUpdate,
         Self::WorkspaceDelete,
         Self::WorkspaceTransfer,
@@ -57,6 +61,7 @@ impl Permission {
         Self::ViewsManageShared,
         Self::CommentsModerate,
         Self::ChatManage,
+        Self::MailManage,
     ];
 }
 
@@ -220,7 +225,8 @@ impl Policy {
             | Permission::PagesPurge
             | Permission::ViewsManageShared
             | Permission::CommentsModerate
-            | Permission::ChatManage => {
+            | Permission::ChatManage
+            | Permission::MailManage => {
                 matches!(role, WorkspaceRole::Owner | WorkspaceRole::Admin)
             }
         }

@@ -26,6 +26,9 @@
   (Python's SQLite 3.46.1 also says ok). It made the weekly integrity job (which runs at App start in tests) stop the
   server once `page_search` rows were updated. `IntegrityService::full` now confirms such findings with FTS5's own check
   (2026-09-25). Check new virtual tables against `integrity_check` with the bundled SQLite, not the system one.
+- A contentless FTS5 table (`content = ''`) refuses `DELETE` unless it is created with `contentless_delete = 1`
+  (SQLite 3.43+); then `DELETE … WHERE rowid = …` works and reads the same as on the Postgres twin table
+  (`mail_search`, 2026-10-23).
 
 ## API retry load
 - A failed `invalidateQueries` call can refetch many active queries. Do not retry it on a short fixed UI timer; use bounded backoff so an API error cannot exhaust the shared rate limit.

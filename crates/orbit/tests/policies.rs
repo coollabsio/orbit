@@ -202,3 +202,11 @@ fn members_leave_but_do_not_remove_or_invite_others() {
         Ok(())
     );
 }
+
+#[test]
+fn mail_manage_is_owner_and_admin_only() {
+    assert!(Permission::ALL.contains(&Permission::MailManage));
+    assert!(Policy::can(WorkspaceRole::Owner, Permission::MailManage));
+    assert!(Policy::can(WorkspaceRole::Admin, Permission::MailManage));
+    assert!(!Policy::can(WorkspaceRole::Member, Permission::MailManage));
+}
