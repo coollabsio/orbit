@@ -1335,6 +1335,52 @@ export type LoginResponse = {
 
 export type MailAddressKind = 'primary' | 'alias';
 
+export type MailAttachmentView = {
+    /**
+     * Without `<>`.
+     */
+    content_id?: string | null;
+    /**
+     * The type detected from the bytes (served).
+     */
+    content_type: string;
+    filename?: string | null;
+    id: string;
+    /**
+     * An inline part (an image in the HTML body).
+     */
+    inline: boolean;
+    size: number;
+};
+
+/**
+ * An SPF, DKIM or DMARC result.
+ */
+export type MailAuthResult = 'pass' | 'fail' | 'softfail' | 'neutral' | 'none' | 'temperror' | 'permerror';
+
+/**
+ * What the checks found when the message arrived.
+ */
+export type MailAuthSummary = {
+    /**
+     * The `From` domain that DMARC proved (only when it passed).
+     */
+    aligned_domain?: string | null;
+    dkim: MailAuthResult;
+    /**
+     * `pass`, `fail`, `none` or `temperror`.
+     */
+    dmarc: MailAuthResult;
+    spf: MailAuthResult;
+};
+
+export type MailCounts = {
+    /**
+     * The mailboxes the caller reads, by name.
+     */
+    mailboxes: Array<MailboxUnread>;
+};
+
 export type MailDnsRecord = {
     kind: MailDnsRecordKind;
     /**
@@ -1421,6 +1467,8 @@ export type MailDomainEnabledBody = {
 
 export type MailDomainStatus = 'pending' | 'verified' | 'suspended' | 'disabled';
 
+export type MailFolder = 'inbox' | 'archive' | 'spam' | 'trash';
+
 export type MailLabel = {
     /**
      * `#rrggbb`, lower case.
@@ -1458,9 +1506,102 @@ export type MailMailbox = {
 };
 
 /**
+ * What the mail app needs at start.
+ */
+export type MailMe = {
+    /**
+     * The caller manages mail (domains, mailboxes, labels).
+     */
+    can_manage: boolean;
+    labels: Array<MailLabel>;
+    /**
+     * The mailboxes the caller is a member of, by name.
+     */
+    mailboxes: Array<MailMeMailbox>;
+};
+
+/**
+ * A mailbox the caller reads.
+ */
+export type MailMeMailbox = {
+    id: string;
+    kind: MailboxKind;
+    name: string;
+    primary_address?: string | null;
+    /**
+     * A suspended mailbox refuses new mail; its threads stay readable.
+     */
+    status: MailboxStatus;
+    /**
+     * Unread threads in the inbox.
+     */
+    unread: number;
+};
+
+/**
+ * A message of a thread.
+ */
+export type MailMessageView = {
+    attachments: Array<MailAttachmentView>;
+    auth: MailAuthSummary;
+    body_text: string;
+    cc: Array<MailPerson>;
+    /**
+     * Came from outside the workspace into a thread that started inside it.
+     */
+    external: boolean;
+    from?: null | MailPerson;
+    /**
+     * The sender's domain is not a domain of the workspace: the **External** banner.
+     */
+    from_external: boolean;
+    /**
+     * The message has an HTML body (shown in the sandboxed frame from `view-url`).
+     */
+    has_html: boolean;
+    id: string;
+    /**
+     * Remote images load at once: the caller chose it for this sender and DMARC passed.
+     */
+    load_images_default: boolean;
+    /**
+     * The display name of the member whose name the sender uses with an address that is not
+     * theirs: the **Lookalike name** banner.
+     */
+    lookalike_member?: string | null;
+    received_at: string;
+    reply_to: Array<MailPerson>;
+    /**
+     * The `Sender` address, when it differs from `From`.
+     */
+    sender?: string | null;
+    /**
+     * The `Date` header, when it parsed.
+     */
+    sent_at?: string | null;
+    subject: string;
+    to: Array<MailPerson>;
+    /**
+     * Why the message shows as plain text only (`parse_failed`, `limit`).
+     */
+    warning?: string | null;
+};
+
+/**
  * How **Create a mailbox for each member** names the addresses.
  */
 export type MailNamePattern = 'first' | 'first_dot_last' | 'flast';
+
+/**
+ * A name and an address from a mail header.
+ */
+export type MailPerson = {
+    /**
+     * Lower case.
+     */
+    address: string;
+    name?: string | null;
+};
 
 /**
  * The result of one DNS record check.
@@ -1474,6 +1615,59 @@ export type MailRecordStatus = {
     status: 'wrong';
 } | {
     status: 'unknown';
+};
+
+export type MailThreadDetail = {
+    /**
+     * Oldest first.
+     */
+    messages: Array<MailMessageView>;
+    thread: MailThreadSummary;
+};
+
+export type MailThreadList = {
+    /**
+     * The changed threads, newest first.
+     */
+    items: Array<MailThreadSummary>;
+};
+
+export type MailThreadPage = {
+    /**
+     * Pass as `cursor` for the next page; null on the last one.
+     */
+    cursor: string | null;
+    items: Array<MailThreadSummary>;
+};
+
+/**
+ * A row of the thread list, as the caller sees it (`unread` and `starred` are the caller's own).
+ */
+export type MailThreadSummary = {
+    folder: MailFolder;
+    /**
+     * The distinct senders, first sender first (at most 5).
+     */
+    from: Array<MailPerson>;
+    /**
+     * A message has an attachment that is not an inline image.
+     */
+    has_attachments: boolean;
+    id: string;
+    /**
+     * Label ids, by label name.
+     */
+    labels: Array<string>;
+    last_message_at: string;
+    mailbox_id: string;
+    message_count: number;
+    snippet: string;
+    starred: boolean;
+    subject: string;
+    /**
+     * A message arrived after the caller last read the thread.
+     */
+    unread: boolean;
 };
 
 export type MailboxAddress = {
@@ -1527,6 +1721,17 @@ export type MailboxStatus = 'active' | 'suspended';
 
 export type MailboxStatusBody = {
     status: MailboxStatus;
+};
+
+/**
+ * Unread threads of a mailbox in each folder, for the caller.
+ */
+export type MailboxUnread = {
+    archive: number;
+    inbox: number;
+    mailbox_id: string;
+    spam: number;
+    trash: number;
 };
 
 export type MemberNoteBody = {
@@ -3547,6 +3752,47 @@ export type TwoFactorStatus = {
 export type UpdateMailLabelBody = {
     color?: string | null;
     name?: string | null;
+};
+
+/**
+ * A change to a thread; absent fields keep their value.
+ */
+export type UpdateMailThreadBody = {
+    /**
+     * Label ids of the workspace.
+     */
+    add_labels?: Array<string>;
+    folder?: null | MailFolder;
+    /**
+     * The caller's read state.
+     */
+    read?: boolean | null;
+    remove_labels?: Array<string>;
+    /**
+     * Moves a trashed thread back to the folder it came from (the inbox when unknown). Not
+     * together with `folder`.
+     */
+    restore?: boolean;
+    /**
+     * The caller's star.
+     */
+    starred?: boolean | null;
+};
+
+/**
+ * The same change for many threads.
+ */
+export type UpdateMailThreadsBody = {
+    add_labels?: Array<string>;
+    folder?: null | MailFolder;
+    /**
+     * 1–100 thread ids. Threads the caller does not read are left alone.
+     */
+    ids: Array<string>;
+    read?: boolean | null;
+    remove_labels?: Array<string>;
+    restore?: boolean;
+    starred?: boolean | null;
 };
 
 export type UpdateMailboxBody = {
@@ -11616,6 +11862,60 @@ export type ListLabelsResponses = {
 
 export type ListLabelsResponse = ListLabelsResponses[keyof ListLabelsResponses];
 
+export type GetMailCountsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/mail/counts';
+};
+
+export type GetMailCountsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * mail_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetMailCountsError = GetMailCountsErrors[keyof GetMailCountsErrors];
+
+export type GetMailCountsResponses = {
+    200: MailCounts;
+};
+
+export type GetMailCountsResponse = GetMailCountsResponses[keyof GetMailCountsResponses];
+
 export type ListMailDomainsData = {
     body?: never;
     headers?: {
@@ -12996,6 +13296,398 @@ export type SetMailboxStatusResponses = {
 };
 
 export type SetMailboxStatusResponse = SetMailboxStatusResponses[keyof SetMailboxStatusResponses];
+
+export type GetMailMeData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/mail/me';
+};
+
+export type GetMailMeErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * mail_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetMailMeError = GetMailMeErrors[keyof GetMailMeErrors];
+
+export type GetMailMeResponses = {
+    200: MailMe;
+};
+
+export type GetMailMeResponse = GetMailMeResponses[keyof GetMailMeResponses];
+
+export type SearchMailData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: {
+        /**
+         * Words (every one must match, the last as a prefix) and the operators `from:`, `to:`,
+         * `subject:`, `label:`, `in:`, `is:unread`, `is:starred`, `has:attachment`, `before:` and
+         * `after:` (`YYYY-MM-DD`). Without `in:`, spam and trash are left out.
+         */
+        q?: string;
+        /**
+         * The `cursor` of the page before.
+         */
+        cursor?: string;
+        /**
+         * 1–100; default 50.
+         */
+        limit?: number;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/mail/search';
+};
+
+export type SearchMailErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * mail_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type SearchMailError = SearchMailErrors[keyof SearchMailErrors];
+
+export type SearchMailResponses = {
+    200: MailThreadPage;
+};
+
+export type SearchMailResponse = SearchMailResponses[keyof SearchMailResponses];
+
+export type ListMailThreadsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: {
+        /**
+         * One mailbox the caller reads; without it, every mailbox the caller reads.
+         */
+        mailbox_id?: string;
+        /**
+         * Without a folder: the inbox, or with `label_id` or `starred` every folder but spam and
+         * trash.
+         */
+        folder?: MailFolder;
+        label_id?: string;
+        /**
+         * Only the caller's starred threads.
+         */
+        starred?: boolean;
+        /**
+         * The `cursor` of the page before.
+         */
+        cursor?: string;
+        /**
+         * 1–100; default 50.
+         */
+        limit?: number;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/mail/threads';
+};
+
+export type ListMailThreadsErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * mail_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListMailThreadsError = ListMailThreadsErrors[keyof ListMailThreadsErrors];
+
+export type ListMailThreadsResponses = {
+    200: MailThreadPage;
+};
+
+export type ListMailThreadsResponse = ListMailThreadsResponses[keyof ListMailThreadsResponses];
+
+export type UpdateMailThreadsData = {
+    body: UpdateMailThreadsBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/mail/threads/bulk';
+};
+
+export type UpdateMailThreadsErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * mail_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type UpdateMailThreadsError = UpdateMailThreadsErrors[keyof UpdateMailThreadsErrors];
+
+export type UpdateMailThreadsResponses = {
+    200: MailThreadList;
+};
+
+export type UpdateMailThreadsResponse = UpdateMailThreadsResponses[keyof UpdateMailThreadsResponses];
+
+export type GetMailThreadData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        thread_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/mail/threads/{thread_id}';
+};
+
+export type GetMailThreadErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * mail_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetMailThreadError = GetMailThreadErrors[keyof GetMailThreadErrors];
+
+export type GetMailThreadResponses = {
+    200: MailThreadDetail;
+};
+
+export type GetMailThreadResponse = GetMailThreadResponses[keyof GetMailThreadResponses];
+
+export type UpdateMailThreadData = {
+    body: UpdateMailThreadBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        thread_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/mail/threads/{thread_id}';
+};
+
+export type UpdateMailThreadErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * mail_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type UpdateMailThreadError = UpdateMailThreadErrors[keyof UpdateMailThreadErrors];
+
+export type UpdateMailThreadResponses = {
+    200: MailThreadSummary;
+};
+
+export type UpdateMailThreadResponse = UpdateMailThreadResponses[keyof UpdateMailThreadResponses];
 
 export type ListMembersData = {
     body?: never;

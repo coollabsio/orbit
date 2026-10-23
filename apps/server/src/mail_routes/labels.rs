@@ -24,7 +24,7 @@ pub(crate) struct MailLabel {
     updated_at: TimestampMillis,
 }
 
-fn view(label: Label) -> MailLabel {
+pub(super) fn view(label: Label) -> MailLabel {
     MailLabel {
         id: label.id,
         name: label.name,

@@ -95,6 +95,21 @@ async fn check_name_free(
     }
 }
 
+/// The labels of the workspace by name.
+pub(super) async fn load_labels(
+    transaction: &mut Transaction<'_, Any>,
+    workspace_id: Id,
+) -> Result<Vec<Label>, MailError> {
+    let rows = sqlx::query(
+        "SELECT id, name, color, created_at, updated_at FROM mail_labels \
+         WHERE workspace_id = $1 ORDER BY lower(name), id",
+    )
+    .bind(workspace_id.to_string())
+    .fetch_all(&mut **transaction)
+    .await?;
+    rows.iter().map(label).collect()
+}
+
 impl MailRepository {
     /// The labels of the workspace by name, for any member.
     pub async fn list_labels(
@@ -106,15 +121,9 @@ impl MailRepository {
         membership::actor(&mut *transaction, workspace_id, actor_id)
             .await?
             .ok_or(MailError::NotFound)?;
-        let rows = sqlx::query(
-            "SELECT id, name, color, created_at, updated_at FROM mail_labels \
-             WHERE workspace_id = $1 ORDER BY lower(name), id",
-        )
-        .bind(workspace_id.to_string())
-        .fetch_all(&mut *transaction)
-        .await?;
+        let labels = load_labels(&mut transaction, workspace_id).await?;
         transaction.commit().await?;
-        rows.iter().map(label).collect()
+        Ok(labels)
     }
 
     pub async fn create_label(

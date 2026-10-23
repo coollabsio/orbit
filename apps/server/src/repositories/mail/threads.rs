@@ -330,7 +330,7 @@ async fn index_thread(
 }
 
 /// The users who read the mailbox (its members' users).
-async fn mailbox_users(
+pub(super) async fn mailbox_users(
     transaction: &mut Transaction<'_, Any>,
     mailbox_id: Id,
 ) -> Result<Vec<Id>, MailError> {

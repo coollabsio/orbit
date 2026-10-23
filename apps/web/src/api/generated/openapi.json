@@ -17538,6 +17538,121 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/mail/counts": {
+      "get": {
+        "tags": [
+          "crate::mail_routes::threads"
+        ],
+        "summary": "Unread threads in each folder of each mailbox the caller reads.",
+        "operationId": "get_mail_counts",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailCounts"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "mail_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/mail/domains": {
       "get": {
         "tags": [
@@ -20661,6 +20776,882 @@
           },
           "409": {
             "description": "contract_mismatch, mailbox_owner_left",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mail/me": {
+      "get": {
+        "tags": [
+          "crate::mail_routes::threads"
+        ],
+        "summary": "The caller's mailboxes with their unread counts, the labels, and whether the caller manages\nmail.",
+        "operationId": "get_mail_me",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailMe"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "mail_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mail/search": {
+      "get": {
+        "tags": [
+          "crate::mail_routes::threads"
+        ],
+        "summary": "Threads of the mailboxes the caller reads that match `q`, newest first. Empty when `q` has\nnothing to look for.",
+        "operationId": "search_mail",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Words (every one must match, the last as a prefix) and the operators `from:`, `to:`,\n`subject:`, `label:`, `in:`, `is:unread`, `is:starred`, `has:attachment`, `before:` and\n`after:` (`YYYY-MM-DD`). Without `in:`, spam and trash are left out.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The `cursor` of the page before.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "1–100; default 50.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailThreadPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "mail_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mail/threads": {
+      "get": {
+        "tags": [
+          "crate::mail_routes::threads"
+        ],
+        "summary": "The threads of one mailbox or all the caller reads, newest first.",
+        "operationId": "list_mail_threads",
+        "parameters": [
+          {
+            "name": "mailbox_id",
+            "in": "query",
+            "description": "One mailbox the caller reads; without it, every mailbox the caller reads.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "folder",
+            "in": "query",
+            "description": "Without a folder: the inbox, or with `label_id` or `starred` every folder but spam and\ntrash.",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/MailFolder"
+            }
+          },
+          {
+            "name": "label_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "starred",
+            "in": "query",
+            "description": "Only the caller's starred threads.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "The `cursor` of the page before.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "1–100; default 50.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailThreadPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "mail_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mail/threads/bulk": {
+      "post": {
+        "tags": [
+          "crate::mail_routes::threads"
+        ],
+        "summary": "The same change for up to 100 threads (selection with `x`).",
+        "operationId": "update_mail_threads",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMailThreadsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailThreadList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "mail_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mail/threads/{thread_id}": {
+      "get": {
+        "tags": [
+          "crate::mail_routes::threads"
+        ],
+        "summary": "A thread with its messages, oldest first.",
+        "operationId": "get_mail_thread",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailThreadDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "mail_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "crate::mail_routes::threads"
+        ],
+        "summary": "Moves a thread, marks it read or unread, stars it, or changes its labels.",
+        "operationId": "update_mail_thread",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMailThreadBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailThreadSummary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "mail_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -39169,6 +40160,101 @@
           "alias"
         ]
       },
+      "MailAttachmentView": {
+        "type": "object",
+        "required": [
+          "id",
+          "content_type",
+          "size",
+          "inline"
+        ],
+        "properties": {
+          "content_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Without `<>`."
+          },
+          "content_type": {
+            "type": "string",
+            "description": "The type detected from the bytes (served)."
+          },
+          "filename": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "inline": {
+            "type": "boolean",
+            "description": "An inline part (an image in the HTML body)."
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "MailAuthResult": {
+        "type": "string",
+        "description": "An SPF, DKIM or DMARC result.",
+        "enum": [
+          "pass",
+          "fail",
+          "softfail",
+          "neutral",
+          "none",
+          "temperror",
+          "permerror"
+        ]
+      },
+      "MailAuthSummary": {
+        "type": "object",
+        "description": "What the checks found when the message arrived.",
+        "required": [
+          "spf",
+          "dkim",
+          "dmarc"
+        ],
+        "properties": {
+          "aligned_domain": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The `From` domain that DMARC proved (only when it passed)."
+          },
+          "dkim": {
+            "$ref": "#/components/schemas/MailAuthResult"
+          },
+          "dmarc": {
+            "$ref": "#/components/schemas/MailAuthResult",
+            "description": "`pass`, `fail`, `none` or `temperror`."
+          },
+          "spf": {
+            "$ref": "#/components/schemas/MailAuthResult"
+          }
+        }
+      },
+      "MailCounts": {
+        "type": "object",
+        "required": [
+          "mailboxes"
+        ],
+        "properties": {
+          "mailboxes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MailboxUnread"
+            },
+            "description": "The mailboxes the caller reads, by name."
+          }
+        }
+      },
       "MailDnsRecord": {
         "type": "object",
         "required": [
@@ -39359,6 +40445,15 @@
           "disabled"
         ]
       },
+      "MailFolder": {
+        "type": "string",
+        "enum": [
+          "inbox",
+          "archive",
+          "spam",
+          "trash"
+        ]
+      },
       "MailLabel": {
         "type": "object",
         "required": [
@@ -39446,6 +40541,187 @@
           }
         }
       },
+      "MailMe": {
+        "type": "object",
+        "description": "What the mail app needs at start.",
+        "required": [
+          "mailboxes",
+          "labels",
+          "can_manage"
+        ],
+        "properties": {
+          "can_manage": {
+            "type": "boolean",
+            "description": "The caller manages mail (domains, mailboxes, labels)."
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MailLabel"
+            }
+          },
+          "mailboxes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MailMeMailbox"
+            },
+            "description": "The mailboxes the caller is a member of, by name."
+          }
+        }
+      },
+      "MailMeMailbox": {
+        "type": "object",
+        "description": "A mailbox the caller reads.",
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "status",
+          "unread"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/MailboxKind"
+          },
+          "name": {
+            "type": "string"
+          },
+          "primary_address": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/MailboxStatus",
+            "description": "A suspended mailbox refuses new mail; its threads stay readable."
+          },
+          "unread": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Unread threads in the inbox."
+          }
+        }
+      },
+      "MailMessageView": {
+        "type": "object",
+        "description": "A message of a thread.",
+        "required": [
+          "id",
+          "reply_to",
+          "to",
+          "cc",
+          "subject",
+          "received_at",
+          "body_text",
+          "has_html",
+          "attachments",
+          "auth",
+          "from_external",
+          "external",
+          "load_images_default"
+        ],
+        "properties": {
+          "attachments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MailAttachmentView"
+            }
+          },
+          "auth": {
+            "$ref": "#/components/schemas/MailAuthSummary"
+          },
+          "body_text": {
+            "type": "string"
+          },
+          "cc": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MailPerson"
+            }
+          },
+          "external": {
+            "type": "boolean",
+            "description": "Came from outside the workspace into a thread that started inside it."
+          },
+          "from": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MailPerson"
+              }
+            ]
+          },
+          "from_external": {
+            "type": "boolean",
+            "description": "The sender's domain is not a domain of the workspace: the **External** banner."
+          },
+          "has_html": {
+            "type": "boolean",
+            "description": "The message has an HTML body (shown in the sandboxed frame from `view-url`)."
+          },
+          "id": {
+            "type": "string"
+          },
+          "load_images_default": {
+            "type": "boolean",
+            "description": "Remote images load at once: the caller chose it for this sender and DMARC passed."
+          },
+          "lookalike_member": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The display name of the member whose name the sender uses with an address that is not\ntheirs: the **Lookalike name** banner."
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "reply_to": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MailPerson"
+            }
+          },
+          "sender": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The `Sender` address, when it differs from `From`."
+          },
+          "sent_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "The `Date` header, when it parsed."
+          },
+          "subject": {
+            "type": "string"
+          },
+          "to": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MailPerson"
+            }
+          },
+          "warning": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the message shows as plain text only (`parse_failed`, `limit`)."
+          }
+        }
+      },
       "MailNamePattern": {
         "type": "string",
         "description": "How **Create a mailbox for each member** names the addresses.",
@@ -39454,6 +40730,25 @@
           "first_dot_last",
           "flast"
         ]
+      },
+      "MailPerson": {
+        "type": "object",
+        "description": "A name and an address from a mail header.",
+        "required": [
+          "address"
+        ],
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "Lower case."
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
       },
       "MailRecordStatus": {
         "oneOf": [
@@ -39523,6 +40818,130 @@
           }
         ],
         "description": "The result of one DNS record check."
+      },
+      "MailThreadDetail": {
+        "type": "object",
+        "required": [
+          "thread",
+          "messages"
+        ],
+        "properties": {
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MailMessageView"
+            },
+            "description": "Oldest first."
+          },
+          "thread": {
+            "$ref": "#/components/schemas/MailThreadSummary"
+          }
+        }
+      },
+      "MailThreadList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MailThreadSummary"
+            },
+            "description": "The changed threads, newest first."
+          }
+        }
+      },
+      "MailThreadPage": {
+        "type": "object",
+        "required": [
+          "items",
+          "cursor"
+        ],
+        "properties": {
+          "cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Pass as `cursor` for the next page; null on the last one."
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MailThreadSummary"
+            }
+          }
+        }
+      },
+      "MailThreadSummary": {
+        "type": "object",
+        "description": "A row of the thread list, as the caller sees it (`unread` and `starred` are the caller's own).",
+        "required": [
+          "id",
+          "mailbox_id",
+          "subject",
+          "snippet",
+          "from",
+          "last_message_at",
+          "message_count",
+          "unread",
+          "starred",
+          "labels",
+          "has_attachments",
+          "folder"
+        ],
+        "properties": {
+          "folder": {
+            "$ref": "#/components/schemas/MailFolder"
+          },
+          "from": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MailPerson"
+            },
+            "description": "The distinct senders, first sender first (at most 5)."
+          },
+          "has_attachments": {
+            "type": "boolean",
+            "description": "A message has an attachment that is not an inline image."
+          },
+          "id": {
+            "type": "string"
+          },
+          "labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Label ids, by label name."
+          },
+          "last_message_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "mailbox_id": {
+            "type": "string"
+          },
+          "message_count": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "snippet": {
+            "type": "string"
+          },
+          "starred": {
+            "type": "boolean"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "unread": {
+            "type": "boolean",
+            "description": "A message arrived after the caller last read the thread."
+          }
+        }
       },
       "MailboxAddress": {
         "type": "object",
@@ -39634,6 +41053,38 @@
           }
         },
         "additionalProperties": false
+      },
+      "MailboxUnread": {
+        "type": "object",
+        "description": "Unread threads of a mailbox in each folder, for the caller.",
+        "required": [
+          "mailbox_id",
+          "inbox",
+          "archive",
+          "spam",
+          "trash"
+        ],
+        "properties": {
+          "archive": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "inbox": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "mailbox_id": {
+            "type": "string"
+          },
+          "spam": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "trash": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
       },
       "MemberNoteBody": {
         "type": "object",
@@ -44928,6 +46379,109 @@
           "name": {
             "type": [
               "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateMailThreadBody": {
+        "type": "object",
+        "description": "A change to a thread; absent fields keep their value.",
+        "properties": {
+          "add_labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Label ids of the workspace."
+          },
+          "folder": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MailFolder",
+                "description": "Moving to trash keeps the folder to restore; moving out of trash restores it there."
+              }
+            ]
+          },
+          "read": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "The caller's read state."
+          },
+          "remove_labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "restore": {
+            "type": "boolean",
+            "description": "Moves a trashed thread back to the folder it came from (the inbox when unknown). Not\ntogether with `folder`."
+          },
+          "starred": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "The caller's star."
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateMailThreadsBody": {
+        "type": "object",
+        "description": "The same change for many threads.",
+        "required": [
+          "ids"
+        ],
+        "properties": {
+          "add_labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "folder": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MailFolder"
+              }
+            ]
+          },
+          "ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "1–100 thread ids. Threads the caller does not read are left alone."
+          },
+          "read": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "remove_labels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "restore": {
+            "type": "boolean"
+          },
+          "starred": {
+            "type": [
+              "boolean",
               "null"
             ]
           }

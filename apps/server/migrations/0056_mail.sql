@@ -229,6 +229,8 @@ CREATE TABLE mail_messages (
     body_text TEXT NOT NULL DEFAULT '',
     has_attachments INTEGER NOT NULL DEFAULT 0 CHECK (has_attachments IN (0, 1)),
     size INTEGER NOT NULL CHECK (size >= 0),
+    -- mail-parser's index of the HTML body part, when there is one (rendered on each view).
+    html_part INTEGER CHECK (html_part IS NULL OR html_part >= 0),
     -- Why the message shows as plain text only (`parse_failed`, `limit`).
     warning TEXT,
     created_at INTEGER NOT NULL

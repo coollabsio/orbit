@@ -491,7 +491,7 @@ async fn has_personal_mailbox(
 }
 
 /// Which mailboxes [`load_mailboxes`] reads.
-enum Scope {
+pub(super) enum Scope {
     All,
     One(Id),
     /// The mailboxes the user is a member of.
@@ -526,7 +526,7 @@ async fn fetch(
     Ok(query.fetch_all(&mut **transaction).await?)
 }
 
-async fn load_mailboxes(
+pub(super) async fn load_mailboxes(
     transaction: &mut Transaction<'_, Any>,
     workspace_id: Id,
     scope: &Scope,

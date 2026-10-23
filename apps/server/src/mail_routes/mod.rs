@@ -4,6 +4,7 @@
 pub(crate) mod domains;
 pub(crate) mod labels;
 pub(crate) mod mailboxes;
+pub(crate) mod threads;
 
 use std::sync::Arc;
 
@@ -120,6 +121,30 @@ pub fn mail_router(state: MailState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/mail/labels/{label_id}",
             axum::routing::patch(labels::update_mail_label).delete(labels::delete_mail_label),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/threads",
+            get(threads::list_mail_threads),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/threads/bulk",
+            post(threads::update_mail_threads),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/threads/{thread_id}",
+            get(threads::get_mail_thread).patch(threads::update_mail_thread),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/counts",
+            get(threads::get_mail_counts),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/search",
+            get(threads::search_mail),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/me",
+            get(threads::get_mail_me),
         )
         .route(
             "/api/v1/admin/mail/domains/{name}/workspace",

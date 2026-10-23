@@ -10,7 +10,9 @@ mod ingest;
 mod keys;
 mod labels;
 mod mailboxes;
+mod reading;
 mod receipts;
+mod search;
 mod threads;
 
 use orbit_platform::{Database, Id, TimestampMillis, UploadError, UploadService};
@@ -32,10 +34,16 @@ pub use mailboxes::{
     AddressKind, BulkResult, MailAddress, Mailbox, MailboxKind, MailboxStatus, NamePattern,
     NewMailbox, Proposal, RecipientLookup, local_part_for, lookup_recipient,
 };
+pub use reading::{
+    MailAttachmentView, MailAuthResult, MailAuthSummary, MailCounts, MailFolder, MailMessageView,
+    MailOverview, MailPerson, MailThreadDetail, MailThreadPage, MailThreadSummary, MailboxUnread,
+    THREAD_PAGE_DEFAULT, THREAD_PAGE_MAX, ThreadChange, ThreadListInput,
+};
 pub use receipts::{INGEST_JOB, mail_ingest_kind};
 pub(crate) use receipts::{
     NewReceipt, insert_receipt, insert_receipt_recipient, record_health_test,
 };
+pub use search::{MailQuery, ThreadCursor, parse_query};
 pub use threads::SEARCH_BODY_BYTES;
 
 #[derive(Debug, Error)]

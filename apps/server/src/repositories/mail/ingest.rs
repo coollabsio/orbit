@@ -509,9 +509,9 @@ async fn insert_message(
     let inserted = sqlx::query(
         "INSERT INTO mail_messages (id, workspace_id, receipt_id, raw_sha256, message_id_header, \
          in_reply_to, reference_ids, from_name, from_addr, sender, reply_to, to_addrs, cc_addrs, \
-         subject, sent_at, received_at, snippet, body_text, has_attachments, size, warning, created_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, \
-         $19, $20, $21, $22) ON CONFLICT (receipt_id) DO NOTHING",
+         subject, sent_at, received_at, snippet, body_text, has_attachments, size, html_part, warning, \
+         created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, \
+         $17, $18, $19, $20, $21, $22, $23) ON CONFLICT (receipt_id) DO NOTHING",
     )
     .bind(message_id.to_string())
     .bind(receipt.workspace_id.to_string())
@@ -544,6 +544,7 @@ async fn insert_message(
     .bind(clean(&parsed.body_text).into_owned())
     .bind(i64::from(content.has_attachments()))
     .bind(receipt.size)
+    .bind(parsed.html_part.map(i64::from))
     .bind(content.warning)
     .bind(now.as_millis())
     .execute(&mut **transaction)

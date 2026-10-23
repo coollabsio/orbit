@@ -287,6 +287,13 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::mail_routes::labels::create_mail_label,
         crate::mail_routes::labels::update_mail_label,
         crate::mail_routes::labels::delete_mail_label,
+        crate::mail_routes::threads::list_mail_threads,
+        crate::mail_routes::threads::get_mail_thread,
+        crate::mail_routes::threads::update_mail_thread,
+        crate::mail_routes::threads::update_mail_threads,
+        crate::mail_routes::threads::get_mail_counts,
+        crate::mail_routes::threads::search_mail,
+        crate::mail_routes::threads::get_mail_me,
     )
 )]
 struct ApiDocument;
@@ -709,6 +716,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         id if id.contains("mailbox") || id.contains("mail_label") => {
             mailbox_errors(id, &mut responses);
         }
+        id if mail_thread_operation(id) => mail_thread_errors(id, &mut responses),
         _ => {}
     }
 
@@ -1311,6 +1319,34 @@ fn mailbox_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec
             add_code(responses, "409", "label_exists");
         }
         _ => {}
+    }
+}
+
+fn mail_thread_operation(operation_id: &str) -> bool {
+    matches!(
+        operation_id,
+        "list_mail_threads"
+            | "get_mail_thread"
+            | "update_mail_thread"
+            | "update_mail_threads"
+            | "get_mail_counts"
+            | "search_mail"
+            | "get_mail_me"
+    )
+}
+
+/// Thread routes are for mailbox members; anyone else gets `mail_not_found`.
+fn mail_thread_errors(
+    operation_id: &str,
+    responses: &mut BTreeMap<&'static str, Vec<&'static str>>,
+) {
+    add_code(responses, "404", "mail_not_found");
+    if matches!(
+        operation_id,
+        "list_mail_threads" | "update_mail_thread" | "update_mail_threads" | "search_mail"
+    ) {
+        add_code(responses, "400", "invalid_request");
+        add_code(responses, "422", "validation_failed");
     }
 }
 

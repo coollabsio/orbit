@@ -217,6 +217,7 @@ CREATE TABLE mail_messages (
     body_text TEXT NOT NULL DEFAULT '',
     has_attachments BIGINT NOT NULL DEFAULT 0 CHECK (has_attachments IN (0, 1)),
     size BIGINT NOT NULL CHECK (size >= 0),
+    html_part BIGINT CHECK (html_part IS NULL OR html_part >= 0),
     warning TEXT,
     created_at BIGINT NOT NULL
 );

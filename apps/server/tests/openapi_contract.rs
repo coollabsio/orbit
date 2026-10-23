@@ -25,7 +25,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
 
     let document: serde_json::Value = serde_json::from_str(&first).unwrap();
     assert_eq!(document["info"]["version"], CONTRACT_ID);
-    assert_eq!(document["paths"].as_object().unwrap().len(), 205);
+    assert_eq!(document["paths"].as_object().unwrap().len(), 211);
     let operation_count: usize = document["paths"]
         .as_object()
         .unwrap()
@@ -40,7 +40,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
                 .count()
         })
         .sum();
-    assert_eq!(operation_count, 265);
+    assert_eq!(operation_count, 272);
     for path in [
         "/api/v1/setup/status",
         "/api/v1/auth/me",
@@ -584,6 +584,46 @@ fn mail_domain_routes_are_documented() {
         "status",
     ] {
         assert!(record.get(field).is_some(), "MailDnsRecord.{field}");
+    }
+}
+
+#[test]
+fn mail_thread_routes_are_documented() {
+    let document: Value = serde_json::from_str(&openapi_json().unwrap()).unwrap();
+    let base = "/api/v1/workspaces/{workspace_id}/mail";
+    for (path, method, operation_id) in [
+        ("/threads", "get", "list_mail_threads"),
+        ("/threads/{thread_id}", "get", "get_mail_thread"),
+        ("/threads/{thread_id}", "patch", "update_mail_thread"),
+        ("/threads/bulk", "post", "update_mail_threads"),
+        ("/counts", "get", "get_mail_counts"),
+        ("/search", "get", "search_mail"),
+        ("/me", "get", "get_mail_me"),
+    ] {
+        let operation = operation(&document, &format!("{base}{path}"), method);
+        assert_eq!(operation["operationId"], operation_id);
+        assert!(codes(operation, "404").contains(&"mail_not_found".to_owned()));
+    }
+    // Chat has `ThreadPage` and `SearchPage`; the mail schemas keep their own names.
+    let schemas = &document["components"]["schemas"];
+    for schema in [
+        "MailThreadPage",
+        "MailThreadDetail",
+        "MailMessageView",
+        "MailMe",
+    ] {
+        assert!(schemas.get(schema).is_some(), "{schema}");
+    }
+    let message = &schemas["MailMessageView"]["properties"];
+    for field in [
+        "from_external",
+        "external",
+        "lookalike_member",
+        "load_images_default",
+        "has_html",
+        "auth",
+    ] {
+        assert!(message.get(field).is_some(), "MailMessageView.{field}");
     }
 }
 
