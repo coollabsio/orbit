@@ -26,6 +26,7 @@ Orbit reads its configuration only from environment variables that start with `O
 | `ORBIT_UPLOAD_MAX_REQUEST_BYTES` | `104857600` (100 MiB) | |
 | `ORBIT_METRICS_LISTEN` | none (metrics off) | A private listener, for example `127.0.0.1:9090`. Never send it through the public site. |
 | `ORBIT_RATE_LIMIT_*` | see notes | Request limits and email caps. See [Request limits and email caps](#request-limits-and-email-caps). |
+| `ORBIT_MAIL_*` | mail off | The SMTP listener that receives mail. See [Mail](#mail). |
 | `ORBIT_APP_KEY` | none | **Required.** The key for saved secrets: base64 of 32 random bytes. |
 | `ORBIT_APP_KEY_FILE` | none | The path of a file that contains the app key, instead of `ORBIT_APP_KEY`. Do not set both. |
 
@@ -201,6 +202,94 @@ orbit backup restore <id>
 ```
 
 Set the same `ORBIT_APP_KEY` on the new server before you start Orbit: without it, Orbit cannot read the saved S3 secret and does not start while a bucket is saved. Data written after the last backup is lost, so choose the schedule by how much data you can lose.
+
+## Mail
+
+Orbit is its own mail server for incoming mail: an SMTP listener receives mail for the verified domains of the workspaces. Members read it in **Mail**. Outgoing mail is not in this release.
+
+### Settings
+
+| Variable | Default | Notes |
+|---|---|---|
+| `ORBIT_MAIL_ENABLED` | `false` | Starts the listener. |
+| `ORBIT_MAIL_HOSTNAME` | none | Required when mail is on. The name in the SMTP greeting, the MX target and the name the certificate must cover, for example `mx.example.com`. |
+| `ORBIT_MAIL_SMTP_BIND` / `ORBIT_MAIL_SMTP_PORT` | `0.0.0.0` / `2525` | The listener address. |
+| `ORBIT_MAIL_MODE` | `relay` | `relay` or `direct`. See [Modes](#modes). |
+| `ORBIT_MAIL_RELAY_CIDRS` | none | Relay mode: required. The relay's addresses. Orbit refuses `/0` and any range that contains the Docker gateway `172.17.0.1`. |
+| `ORBIT_MAIL_RELAY_AUTHSERV_ID` | none | Relay mode: required. The `authserv-id` of the relay's `Authentication-Results` header. |
+| `ORBIT_MAIL_PROXY_CIDRS` | none | Sources (a TCP load balancer) that can send a PROXY protocol v2 header. Orbit then uses the client address from the header. |
+| `ORBIT_MAIL_TLS_CERT` / `ORBIT_MAIL_TLS_KEY` | none | PEM files. Direct mode: required. Relay mode: optional; with them, Orbit offers STARTTLS. |
+| `ORBIT_MAIL_MAX_MESSAGE_BYTES` | `52428800` (50 MB) | The raw size limit, at least 1 MiB. 50 MB holds about 37 MB of attachments. |
+| `ORBIT_MAIL_DNS_RESOLVER` | system | A resolver address (`ip:port`) for the SPF, DKIM, DMARC and domain checks. |
+| `ORBIT_MAIL_CONTENT_ORIGIN` | public origin | An optional separate origin for mail HTML and attachments. |
+
+The root user lets workspaces add mail domains in **Admin → Mail**. Workspace admins then add domains and mailboxes in **Settings → Mail**.
+
+### Modes
+
+- **Relay (default):** a mail service you trust (a spam filter or a mail gateway) receives the mail and sends it to Orbit. Only `ORBIT_MAIL_RELAY_CIDRS` can connect; other clients get `554 5.7.1`. Orbit does not check SPF, DKIM and DMARC itself: it uses only the relay's `Authentication-Results` header with `ORBIT_MAIL_RELAY_AUTHSERV_ID` and removes the others. A message without that header gets no results, and Orbit logs a warning. Use relay mode when the server cannot receive on port 25.
+- **Direct:** the MX record points to Orbit, and Orbit checks SPF, DKIM and DMARC itself. The certificate must cover `ORBIT_MAIL_HOSTNAME`.
+
+In both modes Orbit removes incoming `Authentication-Results` headers with its own ID and adds its own. A DMARC failure does not refuse a message: Orbit puts it in Spam.
+
+Many cloud providers block port 25 (inbound, outbound or both), or open it only on request. Ask your provider, or use relay mode.
+
+### Port 25 and the client address
+
+The container runs without capabilities, so the listener uses port 2525. The Compose file maps host port 25 to it (`ports: ['25:2525']`, commented out in [`deploy/compose.yaml`](../deploy/compose.yaml)).
+
+Orbit must see the real client address: relay mode, SPF and the connection limits use it. With the default Docker port proxy, clients can arrive from the Docker gateway address. Do one of these:
+
+- Set `"userland-proxy": false` in `/etc/docker/daemon.json` and restart Docker.
+- Run the Orbit service with `network_mode: host`.
+
+Orbit logs a warning and the health card shows an error when clients connect from a Docker bridge address. Behind a TCP load balancer, turn on PROXY protocol v2 on the balancer and set `ORBIT_MAIL_PROXY_CIDRS` to its addresses.
+
+### Certificate
+
+Get a certificate for `ORBIT_MAIL_HOSTNAME` (for example with certbot) and mount it read-only. UID 65532 must be able to read both files. Orbit checks the files every 60 seconds and loads them again when they change, without a restart. If a new file cannot be read, Orbit keeps the last good certificate. Orbit logs a warning 7 days before the certificate expires.
+
+### DNS records
+
+**Settings → Mail → Domains** shows each record with a copy button and its status:
+
+| Record | Name | Value | Need |
+|---|---|---|---|
+| TXT | `_orbit-verify.<domain>` | `orbit-verify=<token>` | Required. Proves that the workspace owns the domain. |
+| MX | `<domain>` | `10 <ORBIT_MAIL_HOSTNAME>` | Required in direct mode. In relay mode, the MX points to the relay, and Orbit accepts any MX. |
+| TXT | `<selector>._domainkey.<domain>` | `v=DKIM1; k=rsa; p=…` | Recommended. For sending in a later release. The value is longer than 255 bytes: zone files need it as several strings, and the page shows them. |
+| TXT | `<domain>` | `v=spf1 mx ~all` | Recommended. |
+| TXT | `_dmarc.<domain>` | `v=DMARC1; p=none` | Recommended. |
+
+The domain check runs every 10 minutes for a pending domain (for 72 hours) and once a day for a verified domain. **Check now** runs it at once.
+
+- **Pending → verified:** the verify record has the token.
+- **Verified → suspended:** the verify record is gone. A suspended domain receives mail for 7 days, then refuses it. When the record is back, the domain is verified again.
+- A DNS timeout shows `unknown` and changes nothing.
+
+A domain belongs to one workspace. Orbit refuses a domain when it, a parent domain or a subdomain belongs to a different workspace. An instance admin can move a domain without mailboxes to a different workspace.
+
+Also set the PTR (reverse DNS) record of the server's public address to `ORBIT_MAIL_HOSTNAME`. Your hosting provider sets it.
+
+### Health card and test message
+
+**Admin → Mail** shows a health card: the listener runs, the certificate covers the hostname and when it expires, the real client address, and the PTR of each address of the hostname. Each failed item shows a short fix.
+
+To test the whole path, click **Test message**. The card shows a one-time address `check-<random>@<verified domain>`, valid for 1 hour. Send a mail to it from an outside account (for example Gmail). When the mail arrives, the card shows the client address, the TLS version, and the SPF, DKIM and DMARC results. The test message does not go to a mailbox. This checks MX, port 25, TLS and the checks without an external service.
+
+### Failed messages
+
+Orbit stores each accepted message first and then files it into the mailboxes in a background job. If that job fails on its last attempt, the message is **failed**. **Settings → Mail → Failed messages** lists failed messages, and messages that wait for more than one hour without a job, with the sender, the size and the error. Fix the cause, then click **Retry**.
+
+### Cluster
+
+Each server runs a listener. Point the MX records to every server, or put a TCP load balancer in front of them (with PROXY protocol v2, see above). Any server can file any message, because the message goes into the shared database first. The connection limits count on each server. A cluster needs S3 for files (see [Orbit Cloud](#orbit-cloud-one-postgres-several-orbit-servers)), so that each server can read each stored message.
+
+### Data at rest and backups
+
+Orbit encrypts each stored message with a key for each workspace, and seals the DKIM keys with the app key. The database holds the headers and the message text without encryption, for search. Protect the database at rest yourself: use disk encryption or a managed Postgres service with encryption.
+
+Backups contain the mail and are encrypted with the app key. See [Email, registration and the app key](#email-registration-and-the-app-key).
 
 ## Large images
 

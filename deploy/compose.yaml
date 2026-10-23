@@ -14,9 +14,23 @@ services:
       ORBIT_PUBLIC_ORIGIN: https://${ORBIT_DOMAIN:?Set ORBIT_DOMAIN in deploy/.env}
       ORBIT_TRUSTED_PROXIES: 172.30.0.2/32
       ORBIT_APP_KEY: ${ORBIT_APP_KEY:?Set ORBIT_APP_KEY in deploy/.env}
+      # Mail (see docs/operations.md#mail). Uncomment these lines, the mail port and the certificate volume.
+      # ORBIT_MAIL_ENABLED: 'true'
+      # ORBIT_MAIL_HOSTNAME: mx.example.com
+      # ORBIT_MAIL_MODE: relay                        # or direct
+      # ORBIT_MAIL_RELAY_CIDRS: 203.0.113.10/32       # relay mode: the relay's addresses
+      # ORBIT_MAIL_RELAY_AUTHSERV_ID: mx.relay.example # relay mode: its Authentication-Results ID
+      # ORBIT_MAIL_TLS_CERT: /etc/orbit/mail-tls/fullchain.pem # required in direct mode
+      # ORBIT_MAIL_TLS_KEY: /etc/orbit/mail-tls/privkey.pem
+    # The container runs without capabilities, so the listener uses port 2525 and the host maps port 25 to it.
+    # Docker must keep the client IP: set "userland-proxy": false in /etc/docker/daemon.json, or run this
+    # service with network_mode: host. Otherwise every client looks like the Docker gateway, and relay mode
+    # and SPF fail.
+    # ports: ['25:2525']
     volumes:
       - orbit-data:/var/lib/orbit
       - orbit-backups:/var/backups/orbit
+      # - ./mail-tls:/etc/orbit/mail-tls:ro             # mail certificate, readable by UID 65532
     networks: [backend]
   proxy:
     image: caddy:2-alpine

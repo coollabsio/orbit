@@ -8,7 +8,9 @@ Docs pages persist too (tree, content, trash, search; see Docs below).
 
 Chat persists too (channels, direct messages, threads, files, search; see Chat below).
 
-Home, Mail, Profile and webhooks still use isolated frontend seed data. Their routes show a `Mock data` badge in every build. SMTP sending, inbound SMTP and mailboxes are follow-up milestones.
+Mail receiving persists on the server (domains, mailboxes, threads; see Mail below).
+
+Home, Mail, Profile and webhooks still use isolated frontend seed data. Their routes show a `Mock data` badge in every build. Sending mail is a follow-up milestone.
 
 ## Global shell
 
@@ -404,9 +406,27 @@ blocks and cover URLs load; the image host then sees the viewer's IP. Plain http
 
 ## Mail
 
-Core files: `MailPage.tsx`, `components/FolderRail.tsx`, `components/ThreadList.tsx`, `components/ThreadView.tsx`.
+Core files: server `crates/mail` (`orbit-mail`: SMTP, SPF/DKIM/DMARC, MIME, HTML sanitizing),
+`apps/server/src/{mail_listener,mail_intake,mail_dns,mail_image_proxy}.rs`, `repositories/mail/`, `mail_routes/`;
+web `MailPage.tsx`, `components/FolderRail.tsx`, `components/ThreadList.tsx`, `components/ThreadView.tsx`.
+Design: `docs/superpowers/specs/2026-10-23-mail-slice-1-design.md` (local file). Operator guide:
+`docs/operations.md#mail`.
 
-This feature is mock-backed. No outbound or inbound SMTP service runs in milestone one.
+Slice 1 receives and reads mail; it does not send. Server (migration 0056):
+
+- SMTP listener on port 2525 when `ORBIT_MAIL_ENABLED=true`, relay mode (default, trusts the relay's
+  `Authentication-Results`) or direct mode (own SPF/DKIM/DMARC checks, STARTTLS, certificate reload every 60 s).
+- Domains per workspace, verified by `_orbit-verify` TXT (`mail.dns_check` every 10 min while pending, daily after);
+  verified → suspended (7-day grace) when the record goes. Root switch in Admin → Mail.
+- Personal and shared mailboxes, aliases, `+tag`, catch-all, labels, bulk personal mailboxes.
+- Intake stores the raw message as an encrypted blob (per-workspace key) and enqueues `mail.ingest`; ingest threads,
+  dedupes per mailbox, indexes search, and sends `thread.updated` on the live socket (topic `mail`).
+- DMARC fail → Spam. Trash purged after 30 days (`mail.purge`). HTML is sanitized on each view and served in a
+  sandboxed frame with signed URLs; remote images go through the image proxy.
+- Admin health card (listener, certificate, client IP, PTR) and a one-time `check-…@domain` test address.
+  Failed messages list with Retry.
+
+The web mail app below is still mock-backed until the real client lands:
 
 - Three-pane desktop layout: folders, thread list, reader.
 - Custom folders can be created inline.

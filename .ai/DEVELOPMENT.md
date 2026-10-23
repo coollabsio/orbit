@@ -93,7 +93,7 @@ docker run --name orbit --restart unless-stopped \
   orbit:milestone-1
 ```
 
-The final Alpine image runs as numeric user and group 65532. It contains the static Orbit binary, Bash for operator diagnostics, CA certificates, timezone data, and empty mount points. The image sets `ORBIT_ENV=production`, `ORBIT_TRUSTED_PROXIES=0.0.0.0/0,::/0`, binds to `0.0.0.0`, and keeps data in `/var/lib/orbit` and backups in `/var/backups/orbit`. Port 2525 is reserved for the deferred inbound SMTP milestone; this release does not listen on it.
+The final Alpine image runs as numeric user and group 65532. It contains the static Orbit binary, Bash for operator diagnostics, CA certificates, timezone data, and empty mount points. The image sets `ORBIT_ENV=production`, `ORBIT_TRUSTED_PROXIES=0.0.0.0/0,::/0`, binds to `0.0.0.0`, and keeps data in `/var/lib/orbit` and backups in `/var/backups/orbit`. The image also exposes port 2525, the inbound SMTP listener; it listens only with `ORBIT_MAIL_ENABLED=true` (see [Mail](../docs/operations.md#mail)). Do not use port 2525 for anything else.
 
 ## Reverse proxy and Tailscale
 

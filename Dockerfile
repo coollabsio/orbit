@@ -38,7 +38,7 @@ ENV ORBIT_ENV=production \
     ORBIT_BACKUPS_PATH=/var/backups/orbit
 USER 65532:65532
 VOLUME ["/var/lib/orbit", "/var/backups/orbit"]
-EXPOSE 8080
+EXPOSE 8080 2525
 HEALTHCHECK --interval=5s --timeout=3s --start-period=5s --retries=10 CMD ["/orbit", "healthcheck"]
 ENTRYPOINT ["/orbit"]
 CMD ["serve"]
