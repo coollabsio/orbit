@@ -550,6 +550,7 @@ async fn critical_durable_schedules_exist_before_serve() {
             "backup.scheduled",
             "integrity.weekly",
             "mail.dns_check",
+            "mail.purge",
             "notion.cleanup",
             "workspace.retention"
         ]

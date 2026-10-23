@@ -37,7 +37,10 @@ use crate::page_routes::PageState;
 use crate::repositories::api_tokens::ApiTokenRepository;
 use crate::repositories::identity::IdentityRepository;
 use crate::repositories::instance_settings::InstanceSettingsRepository;
-use crate::repositories::mail::{DNS_CHECK_JOB, MailRepository, PENDING_CHECK_MS, dns_check_kind};
+use crate::repositories::mail::{
+    DNS_CHECK_JOB, MailRepository, PENDING_CHECK_MS, PURGE_JOB, dns_check_kind, mail_ingest_kind,
+    mail_purge_kind, run_ingest_job,
+};
 use crate::repositories::page_files::PageFileRepository;
 use crate::repositories::tasks::TaskRepository;
 use crate::repositories::workspaces::WorkspaceRepository;
@@ -272,6 +275,7 @@ impl App {
             integrity.clone(),
             notion_imports.clone(),
             dns_checker,
+            Arc::clone(&mail),
             config.jobs.concurrency,
         )
         .await?;
@@ -752,6 +756,7 @@ fn health_registry(
     health
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn initialize_production_services(
     database: &Database,
     backups: BackupService,
@@ -759,6 +764,7 @@ async fn initialize_production_services(
     integrity: IntegrityService,
     notion_imports: NotionImportService,
     dns_checker: DnsChecker,
+    mail: Arc<MailRepository>,
     concurrency: usize,
 ) -> Result<ProductionServices, AppError> {
     let store = JobStore::new(database.clone());
@@ -829,6 +835,33 @@ async fn initialize_production_services(
                 async move { checker.run(&context.job.payload).await }
             })
         })
+        .and_then(|worker| {
+            let mail = Arc::clone(&mail);
+            worker.with_handler(mail_ingest_kind(), move |context| {
+                let mail = Arc::clone(&mail);
+                async move {
+                    run_ingest_job(
+                        &mail,
+                        &context.job.payload,
+                        context.claim.attempt,
+                        context.job.max_attempts,
+                    )
+                    .await
+                }
+            })
+        })
+        .and_then(|worker| {
+            let mail = Arc::clone(&mail);
+            worker.with_handler(mail_purge_kind(), move |_| {
+                let mail = Arc::clone(&mail);
+                async move {
+                    mail.purge(TimestampMillis::now())
+                        .await
+                        .map(|_| ())
+                        .map_err(|error| JobError::Retryable(error.to_string()))
+                }
+            })
+        })
         .map_err(|error| AppError::ProductionServices(error.to_string()))?;
 
     let now = database
@@ -876,6 +909,13 @@ async fn initialize_production_services(
         &scheduler,
         DNS_CHECK_JOB,
         Duration::from_millis(PENDING_CHECK_MS.unsigned_abs()),
+        now,
+    )
+    .await?;
+    ensure_schedule(
+        &scheduler,
+        PURGE_JOB,
+        Duration::from_secs(24 * 60 * 60),
         now,
     )
     .await?;

@@ -6,10 +6,12 @@
 //! that no receipt uses. No HTML is stored: it is sanitized from the raw message on each view.
 
 mod domains;
+mod ingest;
 mod keys;
 mod labels;
 mod mailboxes;
 mod receipts;
+mod threads;
 
 use orbit_platform::{Database, Id, TimestampMillis, UploadError, UploadService};
 use sqlx::{Any, Transaction};
@@ -18,6 +20,10 @@ use thiserror::Error;
 pub use domains::{
     DAILY_CHECK_MS, DNS_CHECK_JOB, DkimPublic, DnsReport, Domain, DomainStatus, PENDING_CHECK_MS,
     PENDING_WINDOW_MS, RecordStatus, SUSPENDED_GRACE_MS, dkim_aad, dns_check_job, dns_check_kind,
+};
+pub use ingest::{
+    Delivery, IngestOutcome, MAIL_TOPIC, PURGE_JOB, PurgeResult, TRASH_RETENTION_MS,
+    mail_purge_kind, run_ingest_job,
 };
 pub use keys::{MailKeys, open_blob, receipt_aad, seal_blob};
 pub use labels::Label;
@@ -30,6 +36,7 @@ pub use receipts::{INGEST_JOB, mail_ingest_kind};
 pub(crate) use receipts::{
     NewReceipt, insert_receipt, insert_receipt_recipient, record_health_test,
 };
+pub use threads::SEARCH_BODY_BYTES;
 
 #[derive(Debug, Error)]
 pub enum MailError {
