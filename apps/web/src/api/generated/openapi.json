@@ -1081,6 +1081,218 @@
         ]
       }
     },
+    "/api/v1/admin/mail": {
+      "get": {
+        "tags": [
+          "crate::mail_routes::admin"
+        ],
+        "summary": "The Admin mail page: the switch, this server's mail settings and the health card.",
+        "operationId": "get_mail_admin",
+        "parameters": [
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailAdmin"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "crate::mail_routes::admin"
+        ],
+        "summary": "Turns on or off whether workspaces may add mail domains (audit `instance.mail_updated`).",
+        "operationId": "set_mail_admin",
+        "parameters": [
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetMailAdminBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailAdmin"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/mail/domains/{name}/workspace": {
       "put": {
         "tags": [
@@ -1183,6 +1395,228 @@
           },
           "422": {
             "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/mail/test-address": {
+      "post": {
+        "tags": [
+          "crate::mail_routes::admin"
+        ],
+        "summary": "Makes a one-time test address on a verified domain, valid for one hour. Mail to it is\nrecorded for the health card and delivered to no mailbox.",
+        "operationId": "create_mail_test_address",
+        "parameters": [
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMailTestBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailTestAddress"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/mail/test-address/{test_id}": {
+      "get": {
+        "tags": [
+          "crate::mail_routes::admin"
+        ],
+        "summary": "The test message's result: `waiting` until it arrives.",
+        "operationId": "get_mail_test_address",
+        "parameters": [
+          {
+            "name": "test_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailTestResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -21694,6 +22128,227 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/mail/receipts": {
+      "get": {
+        "tags": [
+          "crate::mail_routes::admin"
+        ],
+        "summary": "**Failed messages**: received messages that did not reach their mailboxes, newest first.",
+        "operationId": "list_failed_mail_receipts",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailFailedReceipts"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/mail/receipts/{receipt_id}/retry": {
+      "post": {
+        "tags": [
+          "crate::mail_routes::admin"
+        ],
+        "summary": "**Retry**: ingests a failed or stuck message again.",
+        "operationId": "retry_mail_receipt",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "receipt_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/mail/search": {
       "get": {
         "tags": [
@@ -39722,6 +40377,19 @@
         },
         "additionalProperties": false
       },
+      "CreateMailTestBody": {
+        "type": "object",
+        "required": [
+          "domain_id"
+        ],
+        "properties": {
+          "domain_id": {
+            "type": "string",
+            "description": "A verified domain of any workspace."
+          }
+        },
+        "additionalProperties": false
+      },
       "CreateMailboxBody": {
         "type": "object",
         "required": [
@@ -40524,16 +41192,33 @@
         },
         "additionalProperties": false
       },
+      "InstanceMailView": {
+        "type": "object",
+        "description": "Mail on this installation; the health card is `GET /api/v1/admin/mail`.",
+        "required": [
+          "domains_enabled"
+        ],
+        "properties": {
+          "domains_enabled": {
+            "type": "boolean",
+            "description": "Workspaces may add mail domains (`PUT /api/v1/admin/mail`)."
+          }
+        }
+      },
       "InstanceSettingsView": {
         "type": "object",
         "required": [
           "registration_open",
           "storage",
-          "limits"
+          "limits",
+          "mail"
         ],
         "properties": {
           "limits": {
             "$ref": "#/components/schemas/LimitsView"
+          },
+          "mail": {
+            "$ref": "#/components/schemas/InstanceMailView"
           },
           "registration_open": {
             "type": "boolean"
@@ -41052,6 +41737,59 @@
           "alias"
         ]
       },
+      "MailAdmin": {
+        "type": "object",
+        "description": "The Admin mail page.",
+        "required": [
+          "domains_enabled",
+          "enabled",
+          "mode",
+          "listener",
+          "ptr",
+          "test_domains"
+        ],
+        "properties": {
+          "domains_enabled": {
+            "type": "boolean",
+            "description": "Workspaces may add mail domains."
+          },
+          "enabled": {
+            "type": "boolean",
+            "description": "`ORBIT_MAIL_ENABLED` on this server."
+          },
+          "hostname": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`ORBIT_MAIL_HOSTNAME`."
+          },
+          "listener": {
+            "$ref": "#/components/schemas/MailListenerView"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/MailAdminMode"
+          },
+          "ptr": {
+            "$ref": "#/components/schemas/PtrStatus",
+            "description": "Looked up on each request."
+          },
+          "test_domains": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MailTestDomain"
+            },
+            "description": "The verified domains of all workspaces, by name."
+          }
+        }
+      },
+      "MailAdminMode": {
+        "type": "string",
+        "enum": [
+          "relay",
+          "direct"
+        ]
+      },
       "MailAttachmentView": {
         "type": "object",
         "required": [
@@ -41136,6 +41874,37 @@
         "type": "string",
         "format": "binary",
         "description": "Binary bodies in the API description."
+      },
+      "MailCertView": {
+        "type": "object",
+        "description": "The certificate the listener offers for `STARTTLS`.",
+        "required": [
+          "names",
+          "expires_at",
+          "covers_hostname",
+          "expires_soon"
+        ],
+        "properties": {
+          "covers_hostname": {
+            "type": "boolean",
+            "description": "One of `names` matches the mail hostname."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_soon": {
+            "type": "boolean",
+            "description": "It expires within 7 days, or has expired."
+          },
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "DNS names of the certificate, lower case."
+          }
+        }
       },
       "MailCounts": {
         "type": "object",
@@ -41346,6 +42115,77 @@
           "disabled"
         ]
       },
+      "MailFailedReceipt": {
+        "type": "object",
+        "description": "A received message that did not reach its mailboxes. The raw message is kept.",
+        "required": [
+          "id",
+          "status",
+          "size",
+          "attempts",
+          "received_at",
+          "updated_at"
+        ],
+        "properties": {
+          "attempts": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The last ingest error."
+          },
+          "id": {
+            "type": "string"
+          },
+          "mail_from": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The envelope sender; `null` for the null sender `<>`."
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bytes of the raw message."
+          },
+          "status": {
+            "$ref": "#/components/schemas/MailReceiptStatus"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "MailFailedReceipts": {
+        "type": "object",
+        "required": [
+          "count",
+          "receipts"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "All failed and stuck receipts; `receipts` holds the newest 100."
+          },
+          "receipts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MailFailedReceipt"
+            }
+          }
+        }
+      },
       "MailFolder": {
         "type": "string",
         "enum": [
@@ -41382,6 +42222,51 @@
           "updated_at": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "MailListenerView": {
+        "type": "object",
+        "description": "This server's SMTP listener. With several servers, each one reports its own.",
+        "required": [
+          "running",
+          "bridge_peers"
+        ],
+        "properties": {
+          "address": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The bound address while running."
+          },
+          "bridge_peers": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Connections that came from a Docker bridge gateway since the start.",
+            "minimum": 0
+          },
+          "cert": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MailCertView",
+                "description": "`null` without `ORBIT_MAIL_TLS_CERT`."
+              }
+            ]
+          },
+          "last_peer_ip": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The client address of the last connection (after PROXY v2). A Docker gateway here means\nthe real client address is lost."
+          },
+          "running": {
+            "type": "boolean",
+            "description": "It accepts connections now."
           }
         }
       },
@@ -41651,6 +42536,13 @@
           }
         }
       },
+      "MailReceiptStatus": {
+        "type": "string",
+        "enum": [
+          "failed",
+          "stuck"
+        ]
+      },
       "MailRecordStatus": {
         "oneOf": [
           {
@@ -41753,6 +42645,129 @@
           }
         },
         "additionalProperties": false
+      },
+      "MailTestAddress": {
+        "type": "object",
+        "description": "A one-time address for the test message.",
+        "required": [
+          "id",
+          "address",
+          "expires_at"
+        ],
+        "properties": {
+          "address": {
+            "type": "string",
+            "description": "`check-<8 random characters>@<domain>`."
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "One hour after it was made."
+          },
+          "id": {
+            "type": "string"
+          }
+        }
+      },
+      "MailTestDomain": {
+        "type": "object",
+        "description": "A verified domain for the test message.",
+        "required": [
+          "id",
+          "name",
+          "workspace_id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        }
+      },
+      "MailTestResult": {
+        "type": "object",
+        "description": "What the test message showed.",
+        "required": [
+          "id",
+          "address",
+          "status",
+          "expires_at"
+        ],
+        "properties": {
+          "address": {
+            "type": "string"
+          },
+          "auth": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MailAuthSummary"
+              }
+            ]
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "helo": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "mail_from": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "peer_ip": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The sender's address as the listener saw it (after PROXY v2)."
+          },
+          "received_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "status": {
+            "$ref": "#/components/schemas/MailTestStatus"
+          },
+          "tls": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/MailTlsView",
+                "description": "`null` when the message came without `STARTTLS` (or before it arrived)."
+              }
+            ]
+          }
+        }
+      },
+      "MailTestStatus": {
+        "type": "string",
+        "enum": [
+          "waiting",
+          "received",
+          "expired"
+        ]
       },
       "MailThreadDetail": {
         "type": "object",
@@ -41875,6 +42890,22 @@
           "unread": {
             "type": "boolean",
             "description": "A message arrived after the caller last read the thread."
+          }
+        }
+      },
+      "MailTlsView": {
+        "type": "object",
+        "required": [
+          "version",
+          "cipher"
+        ],
+        "properties": {
+          "cipher": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string",
+            "description": "`TLSv1.2` or `TLSv1.3`."
           }
         }
       },
@@ -45164,6 +46195,61 @@
         },
         "additionalProperties": false
       },
+      "PtrAddress": {
+        "type": "object",
+        "required": [
+          "ip",
+          "names",
+          "matches"
+        ],
+        "properties": {
+          "ip": {
+            "type": "string"
+          },
+          "matches": {
+            "type": "boolean",
+            "description": "One of `names` is the hostname."
+          },
+          "names": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The PTR names (lower case, no trailing dot); empty when there is none."
+          }
+        }
+      },
+      "PtrState": {
+        "type": "string",
+        "description": "The result of the reverse DNS check.",
+        "enum": [
+          "ok",
+          "mismatch",
+          "no_address",
+          "unknown",
+          "no_hostname"
+        ]
+      },
+      "PtrStatus": {
+        "type": "object",
+        "description": "Reverse DNS of the mail hostname: receivers of Orbit's mail (a later slice) and some\nsenders' checks expect the PTR of each address to name the hostname.",
+        "required": [
+          "status",
+          "addresses"
+        ],
+        "properties": {
+          "addresses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PtrAddress"
+            },
+            "description": "The A and AAAA addresses of the hostname with their PTR names."
+          },
+          "status": {
+            "$ref": "#/components/schemas/PtrState"
+          }
+        }
+      },
       "PushKey": {
         "type": "object",
         "required": [
@@ -45935,6 +47021,18 @@
             "$ref": "#/components/schemas/AuthenticatedUser"
           }
         }
+      },
+      "SetMailAdminBody": {
+        "type": "object",
+        "required": [
+          "domains_enabled"
+        ],
+        "properties": {
+          "domains_enabled": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
       },
       "SetupBody": {
         "type": "object",

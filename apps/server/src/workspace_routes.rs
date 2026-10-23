@@ -1546,6 +1546,14 @@ struct InstanceSettingsView {
     smtp: Option<SmtpView>,
     storage: StorageView,
     limits: LimitsView,
+    mail: InstanceMailView,
+}
+
+/// Mail on this installation; the health card is `GET /api/v1/admin/mail`.
+#[derive(Serialize, ToSchema)]
+struct InstanceMailView {
+    /// Workspaces may add mail domains (`PUT /api/v1/admin/mail`).
+    domains_enabled: bool,
 }
 
 /// Limits for a shared installation. `null` is unlimited.
@@ -1586,6 +1594,10 @@ async fn settings_view(
         .limits()
         .await
         .map_err(|_| internal(instance, request_id))?;
+    let mail_domains_enabled = repository
+        .mail_domains_enabled()
+        .await
+        .map_err(|_| internal(instance, request_id))?;
     let moving = state
         .object_storage
         .as_ref()
@@ -1609,6 +1621,9 @@ async fn settings_view(
             image_compression: state.image_compressor.as_ref().map(ImageCompressor::status),
         },
         limits: limits.into(),
+        mail: InstanceMailView {
+            domains_enabled: mail_domains_enabled,
+        },
         registration_open: settings.registration_open,
         smtp: settings.smtp.map(|smtp| SmtpView {
             host: smtp.host,

@@ -102,6 +102,7 @@ impl Fixture {
             Arc::clone(&mail),
             CookieMode::secure(),
             MailSettings {
+                enabled: true,
                 hostname: Some(HOSTNAME.to_owned()),
                 mode: MailMode::Direct,
             },

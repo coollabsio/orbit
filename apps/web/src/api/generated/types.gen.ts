@@ -860,6 +860,13 @@ export type CreateMailLabelBody = {
     name: string;
 };
 
+export type CreateMailTestBody = {
+    /**
+     * A verified domain of any workspace.
+     */
+    domain_id: string;
+};
+
 export type CreateMailboxBody = {
     /**
      * The domain of the primary address, a domain of the workspace (any status).
@@ -1172,8 +1179,19 @@ export type InstanceAdminBody = {
     admin: boolean;
 };
 
+/**
+ * Mail on this installation; the health card is `GET /api/v1/admin/mail`.
+ */
+export type InstanceMailView = {
+    /**
+     * Workspaces may add mail domains (`PUT /api/v1/admin/mail`).
+     */
+    domains_enabled: boolean;
+};
+
 export type InstanceSettingsView = {
     limits: LimitsView;
+    mail: InstanceMailView;
     registration_open: boolean;
     smtp?: null | SmtpView;
     storage: StorageView;
@@ -1335,6 +1353,36 @@ export type LoginResponse = {
 
 export type MailAddressKind = 'primary' | 'alias';
 
+/**
+ * The Admin mail page.
+ */
+export type MailAdmin = {
+    /**
+     * Workspaces may add mail domains.
+     */
+    domains_enabled: boolean;
+    /**
+     * `ORBIT_MAIL_ENABLED` on this server.
+     */
+    enabled: boolean;
+    /**
+     * `ORBIT_MAIL_HOSTNAME`.
+     */
+    hostname?: string | null;
+    listener: MailListenerView;
+    mode: MailAdminMode;
+    /**
+     * Looked up on each request.
+     */
+    ptr: PtrStatus;
+    /**
+     * The verified domains of all workspaces, by name.
+     */
+    test_domains: Array<MailTestDomain>;
+};
+
+export type MailAdminMode = 'relay' | 'direct';
+
 export type MailAttachmentView = {
     /**
      * Without `<>`.
@@ -1378,6 +1426,25 @@ export type MailAuthSummary = {
  * Binary bodies in the API description.
  */
 export type MailBytes = Blob | File;
+
+/**
+ * The certificate the listener offers for `STARTTLS`.
+ */
+export type MailCertView = {
+    /**
+     * One of `names` matches the mail hostname.
+     */
+    covers_hostname: boolean;
+    expires_at: string;
+    /**
+     * It expires within 7 days, or has expired.
+     */
+    expires_soon: boolean;
+    /**
+     * DNS names of the certificate, lower case.
+     */
+    names: Array<string>;
+};
 
 export type MailCounts = {
     /**
@@ -1477,6 +1544,37 @@ export type MailDomainEnabledBody = {
 
 export type MailDomainStatus = 'pending' | 'verified' | 'suspended' | 'disabled';
 
+/**
+ * A received message that did not reach its mailboxes. The raw message is kept.
+ */
+export type MailFailedReceipt = {
+    attempts: number;
+    /**
+     * The last ingest error.
+     */
+    error?: string | null;
+    id: string;
+    /**
+     * The envelope sender; `null` for the null sender `<>`.
+     */
+    mail_from?: string | null;
+    received_at: string;
+    /**
+     * Bytes of the raw message.
+     */
+    size: number;
+    status: MailReceiptStatus;
+    updated_at: string;
+};
+
+export type MailFailedReceipts = {
+    /**
+     * All failed and stuck receipts; `receipts` holds the newest 100.
+     */
+    count: number;
+    receipts: Array<MailFailedReceipt>;
+};
+
 export type MailFolder = 'inbox' | 'archive' | 'spam' | 'trash';
 
 export type MailLabel = {
@@ -1488,6 +1586,30 @@ export type MailLabel = {
     id: string;
     name: string;
     updated_at: string;
+};
+
+/**
+ * This server's SMTP listener. With several servers, each one reports its own.
+ */
+export type MailListenerView = {
+    /**
+     * The bound address while running.
+     */
+    address?: string | null;
+    /**
+     * Connections that came from a Docker bridge gateway since the start.
+     */
+    bridge_peers: number;
+    cert?: null | MailCertView;
+    /**
+     * The client address of the last connection (after PROXY v2). A Docker gateway here means
+     * the real client address is lost.
+     */
+    last_peer_ip?: string | null;
+    /**
+     * It accepts connections now.
+     */
+    running: boolean;
 };
 
 /**
@@ -1613,6 +1735,8 @@ export type MailPerson = {
     name?: string | null;
 };
 
+export type MailReceiptStatus = 'failed' | 'stuck';
+
 /**
  * The result of one DNS record check.
  */
@@ -1645,6 +1769,51 @@ export type MailSenderPrefBody = {
      */
     load_images: boolean;
 };
+
+/**
+ * A one-time address for the test message.
+ */
+export type MailTestAddress = {
+    /**
+     * `check-<8 random characters>@<domain>`.
+     */
+    address: string;
+    /**
+     * One hour after it was made.
+     */
+    expires_at: string;
+    id: string;
+};
+
+/**
+ * A verified domain for the test message.
+ */
+export type MailTestDomain = {
+    id: string;
+    name: string;
+    workspace_id: string;
+};
+
+/**
+ * What the test message showed.
+ */
+export type MailTestResult = {
+    address: string;
+    auth?: null | MailAuthSummary;
+    expires_at: string;
+    helo?: string | null;
+    id: string;
+    mail_from?: string | null;
+    /**
+     * The sender's address as the listener saw it (after PROXY v2).
+     */
+    peer_ip?: string | null;
+    received_at?: string | null;
+    status: MailTestStatus;
+    tls?: null | MailTlsView;
+};
+
+export type MailTestStatus = 'waiting' | 'received' | 'expired';
 
 export type MailThreadDetail = {
     /**
@@ -1697,6 +1866,14 @@ export type MailThreadSummary = {
      * A message arrived after the caller last read the thread.
      */
     unread: boolean;
+};
+
+export type MailTlsView = {
+    cipher: string;
+    /**
+     * `TLSv1.2` or `TLSv1.3`.
+     */
+    version: string;
 };
 
 /**
@@ -2987,6 +3164,35 @@ export type ProjectUpdateBody = {
     name: string;
 };
 
+export type PtrAddress = {
+    ip: string;
+    /**
+     * One of `names` is the hostname.
+     */
+    matches: boolean;
+    /**
+     * The PTR names (lower case, no trailing dot); empty when there is none.
+     */
+    names: Array<string>;
+};
+
+/**
+ * The result of the reverse DNS check.
+ */
+export type PtrState = 'ok' | 'mismatch' | 'no_address' | 'unknown' | 'no_hostname';
+
+/**
+ * Reverse DNS of the mail hostname: receivers of Orbit's mail (a later slice) and some
+ * senders' checks expect the PTR of each address to name the hostname.
+ */
+export type PtrStatus = {
+    /**
+     * The A and AAAA addresses of the hostname with their PTR names.
+     */
+    addresses: Array<PtrAddress>;
+    status: PtrState;
+};
+
 export type PushKey = {
     /**
      * The `applicationServerKey` a browser subscribes with.
@@ -3295,6 +3501,10 @@ export type SessionRecord = {
     idle_expires_at: string;
     last_activity_at: string;
     user: AuthenticatedUser;
+};
+
+export type SetMailAdminBody = {
+    domains_enabled: boolean;
 };
 
 export type SetupBody = {
@@ -4490,6 +4700,106 @@ export type SaveJobLimitsResponses = {
 
 export type SaveJobLimitsResponse = SaveJobLimitsResponses[keyof SaveJobLimitsResponses];
 
+export type GetMailAdminData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/mail';
+};
+
+export type GetMailAdminErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type GetMailAdminError = GetMailAdminErrors[keyof GetMailAdminErrors];
+
+export type GetMailAdminResponses = {
+    200: MailAdmin;
+};
+
+export type GetMailAdminResponse = GetMailAdminResponses[keyof GetMailAdminResponses];
+
+export type SetMailAdminData = {
+    body: SetMailAdminBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/mail';
+};
+
+export type SetMailAdminErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type SetMailAdminError = SetMailAdminErrors[keyof SetMailAdminErrors];
+
+export type SetMailAdminResponses = {
+    200: MailAdmin;
+};
+
+export type SetMailAdminResponse = SetMailAdminResponses[keyof SetMailAdminResponses];
+
 export type MoveMailDomainData = {
     body: MoveMailDomainBody;
     headers?: {
@@ -4551,6 +4861,108 @@ export type MoveMailDomainResponses = {
 };
 
 export type MoveMailDomainResponse = MoveMailDomainResponses[keyof MoveMailDomainResponses];
+
+export type CreateMailTestAddressData = {
+    body: CreateMailTestBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/mail/test-address';
+};
+
+export type CreateMailTestAddressErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateMailTestAddressError = CreateMailTestAddressErrors[keyof CreateMailTestAddressErrors];
+
+export type CreateMailTestAddressResponses = {
+    201: MailTestAddress;
+};
+
+export type CreateMailTestAddressResponse = CreateMailTestAddressResponses[keyof CreateMailTestAddressResponses];
+
+export type GetMailTestAddressData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        test_id: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/mail/test-address/{test_id}';
+};
+
+export type GetMailTestAddressErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetMailTestAddressError = GetMailTestAddressErrors[keyof GetMailTestAddressErrors];
+
+export type GetMailTestAddressResponses = {
+    200: MailTestResult;
+};
+
+export type GetMailTestAddressResponse = GetMailTestAddressResponses[keyof GetMailTestAddressResponses];
 
 export type GetInstanceSettingsData = {
     body?: never;
@@ -13745,6 +14157,111 @@ export type CreateMailViewUrlResponses = {
 };
 
 export type CreateMailViewUrlResponse = CreateMailViewUrlResponses[keyof CreateMailViewUrlResponses];
+
+export type ListFailedMailReceiptsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/mail/receipts';
+};
+
+export type ListFailedMailReceiptsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListFailedMailReceiptsError = ListFailedMailReceiptsErrors[keyof ListFailedMailReceiptsErrors];
+
+export type ListFailedMailReceiptsResponses = {
+    200: MailFailedReceipts;
+};
+
+export type ListFailedMailReceiptsResponse = ListFailedMailReceiptsResponses[keyof ListFailedMailReceiptsResponses];
+
+export type RetryMailReceiptData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        receipt_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/mail/receipts/{receipt_id}/retry';
+};
+
+export type RetryMailReceiptErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type RetryMailReceiptError = RetryMailReceiptErrors[keyof RetryMailReceiptErrors];
+
+export type RetryMailReceiptResponses = {
+    204: void;
+};
+
+export type RetryMailReceiptResponse = RetryMailReceiptResponses[keyof RetryMailReceiptResponses];
 
 export type SearchMailData = {
     body?: never;

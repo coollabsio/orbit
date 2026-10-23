@@ -5,9 +5,11 @@
 //! `mail-auth` uses, so there is one version of it) and [`FakeDns`] in tests. A missing name and
 //! a name without records of the type are both [`DnsError::NotFound`]; a timeout or another
 //! failure makes the result `unknown`, which changes nothing.
+//!
+//! [`check_ptr`] is the health card's reverse DNS check of `ORBIT_MAIL_HOSTNAME`.
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -18,8 +20,10 @@ use orbit_mail::hickory_resolver::net::NetError;
 use orbit_mail::hickory_resolver::net::runtime::TokioRuntimeProvider;
 use orbit_mail::hickory_resolver::proto::rr::{Name, RData};
 use orbit_platform::{Id, JobError, MailMode, TimestampMillis};
+use serde::Serialize;
 use serde_json::Value;
 use thiserror::Error;
+use utoipa::ToSchema;
 
 use crate::repositories::mail::{
     DnsReport, Domain, DomainStatus, MailError, MailRepository, RecordStatus,
@@ -48,6 +52,12 @@ pub trait DnsLookup: Send + Sync {
     fn txt<'a>(&'a self, name: &'a str) -> BoxFuture<'a, Result<Vec<String>, DnsError>>;
     /// The MX records of `name`: preference and exchange (lower case, no trailing dot).
     fn mx<'a>(&'a self, name: &'a str) -> BoxFuture<'a, Result<Vec<(u16, String)>, DnsError>>;
+    /// The A records of `name`.
+    fn a<'a>(&'a self, name: &'a str) -> BoxFuture<'a, Result<Vec<Ipv4Addr>, DnsError>>;
+    /// The AAAA records of `name`.
+    fn aaaa<'a>(&'a self, name: &'a str) -> BoxFuture<'a, Result<Vec<Ipv6Addr>, DnsError>>;
+    /// The PTR names of `ip` (lower case, no trailing dot).
+    fn ptr(&self, ip: IpAddr) -> BoxFuture<'_, Result<Vec<String>, DnsError>>;
 }
 
 /// Lookups through hickory, without a cache, so **Check now** sees a record that was just added.
@@ -150,6 +160,63 @@ impl DnsLookup for HickoryDns {
                 .collect())
         })
     }
+
+    fn a<'a>(&'a self, name: &'a str) -> BoxFuture<'a, Result<Vec<Ipv4Addr>, DnsError>> {
+        Box::pin(async move {
+            let resolver = self.resolver()?;
+            let lookup =
+                tokio::time::timeout(LOOKUP_TIMEOUT, resolver.ipv4_lookup(absolute(name)?))
+                    .await
+                    .map_err(|_| DnsError::Timeout)?
+                    .map_err(|error| net_error(&error))?;
+            Ok(lookup
+                .answers()
+                .iter()
+                .filter_map(|record| match &record.data {
+                    RData::A(a) => Some(a.0),
+                    _ => None,
+                })
+                .collect())
+        })
+    }
+
+    fn aaaa<'a>(&'a self, name: &'a str) -> BoxFuture<'a, Result<Vec<Ipv6Addr>, DnsError>> {
+        Box::pin(async move {
+            let resolver = self.resolver()?;
+            let lookup =
+                tokio::time::timeout(LOOKUP_TIMEOUT, resolver.ipv6_lookup(absolute(name)?))
+                    .await
+                    .map_err(|_| DnsError::Timeout)?
+                    .map_err(|error| net_error(&error))?;
+            Ok(lookup
+                .answers()
+                .iter()
+                .filter_map(|record| match &record.data {
+                    RData::AAAA(aaaa) => Some(aaaa.0),
+                    _ => None,
+                })
+                .collect())
+        })
+    }
+
+    fn ptr(&self, ip: IpAddr) -> BoxFuture<'_, Result<Vec<String>, DnsError>> {
+        Box::pin(async move {
+            let resolver = self.resolver()?;
+            // `in-addr.arpa` / `ip6.arpa` name, absolute.
+            let lookup = tokio::time::timeout(LOOKUP_TIMEOUT, resolver.reverse_lookup(ip))
+                .await
+                .map_err(|_| DnsError::Timeout)?
+                .map_err(|error| net_error(&error))?;
+            Ok(lookup
+                .answers()
+                .iter()
+                .filter_map(|record| match &record.data {
+                    RData::PTR(ptr) => Some(host(&ptr.0.to_lowercase().to_ascii())),
+                    _ => None,
+                })
+                .collect())
+        })
+    }
 }
 
 /// Lower case, without a trailing dot.
@@ -157,18 +224,39 @@ fn host(name: &str) -> String {
     name.trim_end_matches('.').to_ascii_lowercase()
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum RecordType {
+    Txt,
+    Mx,
+    A,
+    Aaaa,
+    Ptr,
+}
+
+const RECORD_TYPES: [RecordType; 5] = [
+    RecordType::Txt,
+    RecordType::Mx,
+    RecordType::A,
+    RecordType::Aaaa,
+    RecordType::Ptr,
+];
+
 #[derive(Clone)]
 enum Answer {
     Txt(Vec<String>),
     Mx(Vec<(u16, String)>),
+    A(Vec<Ipv4Addr>),
+    Aaaa(Vec<Ipv6Addr>),
+    Ptr(Vec<String>),
     Fail(DnsError),
 }
 
 /// Answers from a table, for tests. A name that is not in the table is [`DnsError::NotFound`].
-/// Clones share the table, so a test can change the records between checks.
+/// Clones share the table, so a test can change the records between checks. PTR records are
+/// kept under the address's text (`192.0.2.1`).
 #[derive(Clone, Default)]
 pub struct FakeDns {
-    answers: Arc<Mutex<HashMap<(bool, String), Answer>>>,
+    answers: Arc<Mutex<HashMap<(RecordType, String), Answer>>>,
 }
 
 impl FakeDns {
@@ -177,17 +265,20 @@ impl FakeDns {
         Self::default()
     }
 
-    fn set(&self, mx: bool, name: &str, answer: Answer) {
+    fn table(&self) -> std::sync::MutexGuard<'_, HashMap<(RecordType, String), Answer>> {
         self.answers
             .lock()
             .expect("the fake DNS table is not poisoned")
-            .insert((mx, host(name)), answer);
+    }
+
+    fn set(&self, kind: RecordType, name: &str, answer: Answer) {
+        self.table().insert((kind, host(name)), answer);
     }
 
     /// Replaces the TXT records of `name`.
     pub fn set_txt(&self, name: &str, records: &[&str]) {
         let records = records.iter().map(|record| (*record).to_owned()).collect();
-        self.set(false, name, Answer::Txt(records));
+        self.set(RecordType::Txt, name, Answer::Txt(records));
     }
 
     /// Replaces the MX records of `name`.
@@ -196,54 +287,192 @@ impl FakeDns {
             .iter()
             .map(|(preference, exchange)| (*preference, host(exchange)))
             .collect();
-        self.set(true, name, Answer::Mx(records));
+        self.set(RecordType::Mx, name, Answer::Mx(records));
     }
 
-    /// Makes both lookups of `name` fail with `error`.
+    /// Replaces the A records of `name`.
+    pub fn set_a(&self, name: &str, records: &[Ipv4Addr]) {
+        self.set(RecordType::A, name, Answer::A(records.to_vec()));
+    }
+
+    /// Replaces the AAAA records of `name`.
+    pub fn set_aaaa(&self, name: &str, records: &[Ipv6Addr]) {
+        self.set(RecordType::Aaaa, name, Answer::Aaaa(records.to_vec()));
+    }
+
+    /// Replaces the PTR records of `ip`.
+    pub fn set_ptr(&self, ip: IpAddr, names: &[&str]) {
+        let names = names.iter().map(|name| host(name)).collect();
+        self.set(RecordType::Ptr, &ip.to_string(), Answer::Ptr(names));
+    }
+
+    /// Makes every lookup of `name` (or of the address `name`) fail with `error`.
     pub fn fail(&self, name: &str, error: DnsError) {
-        self.set(false, name, Answer::Fail(error.clone()));
-        self.set(true, name, Answer::Fail(error));
+        for kind in RECORD_TYPES {
+            self.set(kind, name, Answer::Fail(error.clone()));
+        }
     }
 
     /// Removes every record of `name`.
     pub fn remove(&self, name: &str) {
-        let mut answers = self
-            .answers
-            .lock()
-            .expect("the fake DNS table is not poisoned");
-        answers.remove(&(false, host(name)));
-        answers.remove(&(true, host(name)));
+        let mut answers = self.table();
+        for kind in RECORD_TYPES {
+            answers.remove(&(kind, host(name)));
+        }
     }
 
-    fn get(&self, mx: bool, name: &str) -> Option<Answer> {
-        self.answers
-            .lock()
-            .expect("the fake DNS table is not poisoned")
-            .get(&(mx, host(name)))
-            .cloned()
+    fn get(&self, kind: RecordType, name: &str) -> Option<Answer> {
+        self.table().get(&(kind, host(name))).cloned()
     }
 }
 
 impl DnsLookup for FakeDns {
     fn txt<'a>(&'a self, name: &'a str) -> BoxFuture<'a, Result<Vec<String>, DnsError>> {
         Box::pin(async move {
-            match self.get(false, name) {
+            match self.get(RecordType::Txt, name) {
                 Some(Answer::Txt(records)) => Ok(records),
                 Some(Answer::Fail(error)) => Err(error),
-                Some(Answer::Mx(_)) | None => Err(DnsError::NotFound),
+                _ => Err(DnsError::NotFound),
             }
         })
     }
 
     fn mx<'a>(&'a self, name: &'a str) -> BoxFuture<'a, Result<Vec<(u16, String)>, DnsError>> {
         Box::pin(async move {
-            match self.get(true, name) {
+            match self.get(RecordType::Mx, name) {
                 Some(Answer::Mx(records)) => Ok(records),
                 Some(Answer::Fail(error)) => Err(error),
-                Some(Answer::Txt(_)) | None => Err(DnsError::NotFound),
+                _ => Err(DnsError::NotFound),
             }
         })
     }
+
+    fn a<'a>(&'a self, name: &'a str) -> BoxFuture<'a, Result<Vec<Ipv4Addr>, DnsError>> {
+        Box::pin(async move {
+            match self.get(RecordType::A, name) {
+                Some(Answer::A(records)) => Ok(records),
+                Some(Answer::Fail(error)) => Err(error),
+                _ => Err(DnsError::NotFound),
+            }
+        })
+    }
+
+    fn aaaa<'a>(&'a self, name: &'a str) -> BoxFuture<'a, Result<Vec<Ipv6Addr>, DnsError>> {
+        Box::pin(async move {
+            match self.get(RecordType::Aaaa, name) {
+                Some(Answer::Aaaa(records)) => Ok(records),
+                Some(Answer::Fail(error)) => Err(error),
+                _ => Err(DnsError::NotFound),
+            }
+        })
+    }
+
+    fn ptr(&self, ip: IpAddr) -> BoxFuture<'_, Result<Vec<String>, DnsError>> {
+        Box::pin(async move {
+            match self.get(RecordType::Ptr, &ip.to_string()) {
+                Some(Answer::Ptr(names)) => Ok(names),
+                Some(Answer::Fail(error)) => Err(error),
+                _ => Err(DnsError::NotFound),
+            }
+        })
+    }
+}
+
+/// The result of the reverse DNS check.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PtrState {
+    /// Every address of the hostname has a PTR record naming the hostname.
+    Ok,
+    /// An address has no PTR record, or one that names another host.
+    Mismatch,
+    /// The hostname has no A or AAAA record.
+    NoAddress,
+    /// A lookup failed or timed out; nothing is known.
+    Unknown,
+    /// `ORBIT_MAIL_HOSTNAME` is not set.
+    NoHostname,
+}
+
+/// Reverse DNS of the mail hostname: receivers of Orbit's mail (a later slice) and some
+/// senders' checks expect the PTR of each address to name the hostname.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct PtrStatus {
+    pub status: PtrState,
+    /// The A and AAAA addresses of the hostname with their PTR names.
+    pub addresses: Vec<PtrAddress>,
+}
+
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct PtrAddress {
+    pub ip: String,
+    /// The PTR names (lower case, no trailing dot); empty when there is none.
+    pub names: Vec<String>,
+    /// One of `names` is the hostname.
+    pub matches: bool,
+}
+
+/// Longest wait for the whole PTR check, so the Admin mail page stays quick.
+const PTR_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Resolves the A and AAAA records of `hostname`, then the PTR of each address; each must
+/// name `hostname`. Gives `unknown` after [`PTR_CHECK_TIMEOUT`].
+pub async fn check_ptr(dns: &dyn DnsLookup, hostname: Option<&str>) -> PtrStatus {
+    let Some(hostname) = hostname.map(host) else {
+        return PtrStatus {
+            status: PtrState::NoHostname,
+            addresses: Vec::new(),
+        };
+    };
+    tokio::time::timeout(PTR_CHECK_TIMEOUT, ptr_report(dns, hostname))
+        .await
+        .unwrap_or(PtrStatus {
+            status: PtrState::Unknown,
+            addresses: Vec::new(),
+        })
+}
+
+async fn ptr_report(dns: &dyn DnsLookup, hostname: String) -> PtrStatus {
+    let mut unknown = false;
+    let mut ips = Vec::new();
+    let (v4, v6) = futures_util::join!(dns.a(&hostname), dns.aaaa(&hostname));
+    match v4 {
+        Ok(found) => ips.extend(found.into_iter().map(IpAddr::V4)),
+        Err(DnsError::NotFound) => {}
+        Err(_) => unknown = true,
+    }
+    match v6 {
+        Ok(found) => ips.extend(found.into_iter().map(IpAddr::V6)),
+        Err(DnsError::NotFound) => {}
+        Err(_) => unknown = true,
+    }
+    let answers = futures_util::future::join_all(ips.iter().map(|ip| dns.ptr(*ip))).await;
+    let mut addresses = Vec::with_capacity(ips.len());
+    for (ip, answer) in ips.into_iter().zip(answers) {
+        let names = match answer {
+            Ok(names) => names,
+            Err(DnsError::NotFound) => Vec::new(),
+            Err(_) => {
+                unknown = true;
+                Vec::new()
+            }
+        };
+        addresses.push(PtrAddress {
+            ip: ip.to_string(),
+            matches: names.contains(&hostname),
+            names,
+        });
+    }
+    let status = if unknown {
+        PtrState::Unknown
+    } else if addresses.is_empty() {
+        PtrState::NoAddress
+    } else if addresses.iter().all(|address| address.matches) {
+        PtrState::Ok
+    } else {
+        PtrState::Mismatch
+    };
+    PtrStatus { status, addresses }
 }
 
 /// Which record of the setup list.

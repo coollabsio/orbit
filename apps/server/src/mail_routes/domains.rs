@@ -11,7 +11,7 @@ use utoipa::ToSchema;
 use super::{Call, MailState, RequestIdExtension, problem};
 use crate::mail_dns::{RecordKind, expected_records, txt_strings};
 use crate::repositories::mail::{Domain, DomainStatus, RecordStatus};
-use crate::task_routes::{ApiError, ApiJson, authenticate_session, request_id_value};
+use crate::task_routes::{ApiError, ApiJson, request_id_value};
 
 /// A mail domain with the records to publish and the result of its last DNS check.
 #[derive(Serialize, ToSchema)]
@@ -352,37 +352,9 @@ pub(crate) async fn move_mail_domain(
     request_id: RequestIdExtension,
     ApiJson(body): ApiJson<MoveMailDomainBody>,
 ) -> Result<StatusCode, ApiError> {
-    let instance = uri.path().to_owned();
     let request_id = request_id.as_ref();
-    let session = authenticate_session(
-        &state.identity,
-        state.cookie_mode,
-        &headers,
-        &instance,
-        request_id,
-    )
-    .await?;
-    let admin = state
-        .identity
-        .is_installation_admin(session.user.id)
-        .await
-        .map_err(|_| {
-            problem(
-                crate::repositories::mail::MailError::Unavailable(sqlx::Error::PoolClosed),
-                &instance,
-                request_id,
-            )
-        })?;
-    if !admin {
-        return Err(ApiError::new(
-            StatusCode::FORBIDDEN,
-            "installation_admin_required",
-            "Installation administrator required",
-            "Only an installation administrator may do this.",
-            instance,
-            request_id,
-        ));
-    }
+    let (actor_id, instance) =
+        super::admin::require_root(&state, &headers, &uri, request_id).await?;
     let workspace_id: Id = body.workspace_id.parse().map_err(|_| {
         problem(
             crate::repositories::mail::MailError::Invalid {
@@ -394,12 +366,7 @@ pub(crate) async fn move_mail_domain(
     })?;
     state
         .mail
-        .move_domain(
-            &name,
-            workspace_id,
-            session.user.id,
-            request_id_value(request_id),
-        )
+        .move_domain(&name, workspace_id, actor_id, request_id_value(request_id))
         .await
         .map_err(|error| problem(error, &instance, request_id))?;
     Ok(StatusCode::NO_CONTENT)

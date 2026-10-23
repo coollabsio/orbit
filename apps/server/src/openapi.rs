@@ -301,6 +301,12 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::mail_routes::content::download_mail_attachment,
         crate::mail_routes::content::download_mail_message,
         crate::mail_routes::content::set_mail_sender_pref,
+        crate::mail_routes::admin::get_mail_admin,
+        crate::mail_routes::admin::set_mail_admin,
+        crate::mail_routes::admin::create_mail_test_address,
+        crate::mail_routes::admin::get_mail_test_address,
+        crate::mail_routes::admin::list_failed_mail_receipts,
+        crate::mail_routes::admin::retry_mail_receipt,
     )
 )]
 struct ApiDocument;

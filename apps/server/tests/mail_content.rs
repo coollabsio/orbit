@@ -216,6 +216,7 @@ impl Fixture {
             Arc::clone(&self.mail),
             CookieMode::secure(),
             MailSettings {
+                enabled: true,
                 hostname: Some("mx.orbit.test".to_owned()),
                 mode: MailMode::Direct,
             },

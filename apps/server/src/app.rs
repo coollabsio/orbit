@@ -26,7 +26,7 @@ use crate::chat_routes::ChatState;
 use crate::export_routes::ExportState;
 use crate::import_routes::ImportState;
 use crate::integration_routes::IntegrationState;
-use crate::mail_dns::{DnsChecker, HickoryDns};
+use crate::mail_dns::{DnsChecker, DnsLookup, HickoryDns};
 use crate::mail_intake::MailIntake;
 use crate::mail_listener::{MailListener, MailListenerStatus, TRACE_HEADROOM};
 use crate::mail_routes::{MailSettings, MailState};
@@ -282,9 +282,10 @@ impl App {
         let mail_status = mail_listener
             .as_ref()
             .map_or_else(Arc::default, MailListener::status);
+        let mail_dns: Arc<dyn DnsLookup> = Arc::new(HickoryDns::new(config.mail.dns_resolver));
         let dns_checker = DnsChecker::new(
             Arc::clone(&mail),
-            Arc::new(HickoryDns::new(config.mail.dns_resolver)),
+            Arc::clone(&mail_dns),
             config.mail.hostname.clone(),
             config.mail.mode,
         );
@@ -396,6 +397,7 @@ impl App {
                     mail,
                     cookie_mode,
                     MailSettings {
+                        enabled: config.mail.enabled,
                         hostname: config.mail.hostname.clone(),
                         mode: config.mail.mode,
                     },
@@ -403,7 +405,8 @@ impl App {
                 .with_origins(
                     config.http.public_origin.clone(),
                     config.mail.content_origin.clone(),
-                ),
+                )
+                .with_health(Arc::clone(&mail_status), mail_dns),
             },
             health,
             assets,

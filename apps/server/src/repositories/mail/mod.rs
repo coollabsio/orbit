@@ -7,6 +7,7 @@
 
 mod content;
 mod domains;
+mod health;
 mod ingest;
 mod keys;
 mod labels;
@@ -25,6 +26,7 @@ pub use domains::{
     DAILY_CHECK_MS, DNS_CHECK_JOB, DkimPublic, DnsReport, Domain, DomainStatus, PENDING_CHECK_MS,
     PENDING_WINDOW_MS, RecordStatus, SUSPENDED_GRACE_MS, dkim_aad, dns_check_job, dns_check_kind,
 };
+pub use health::{HEALTH_TEST_TTL_MS, HealthTest, HealthTestResult, HealthTestStatus, TestDomain};
 pub use ingest::{
     Delivery, IngestOutcome, MAIL_TOPIC, PURGE_JOB, PurgeResult, TRASH_RETENTION_MS,
     mail_purge_kind, run_ingest_job,
@@ -41,7 +43,9 @@ pub use reading::{
     MailOverview, MailPerson, MailThreadDetail, MailThreadPage, MailThreadSummary, MailboxUnread,
     THREAD_PAGE_DEFAULT, THREAD_PAGE_MAX, ThreadChange, ThreadListInput,
 };
-pub use receipts::{INGEST_JOB, mail_ingest_kind};
+pub use receipts::{
+    FailedReceipt, FailedReceipts, INGEST_JOB, ReceiptProblem, STUCK_RECEIPT_MS, mail_ingest_kind,
+};
 pub(crate) use receipts::{
     NewReceipt, insert_receipt, insert_receipt_recipient, record_health_test,
 };

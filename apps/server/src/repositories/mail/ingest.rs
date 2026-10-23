@@ -18,6 +18,7 @@ use serde_json::{Value, json};
 use sqlx::{Any, Transaction};
 
 use super::domains::{manager, parse_id};
+use super::receipts::{STUCK_RECEIPT_MS, STUCK_SQL};
 use super::threads::{self, Incoming, is_inside, truncate};
 use super::{MailError, MailRepository, mail_ingest_kind, open_blob, receipt_aad};
 use crate::live::{LiveHub, NewEvent, Recipients};
@@ -367,7 +368,8 @@ impl MailRepository {
         Ok(())
     }
 
-    /// **Retry** of a failed receipt (owners and admins): back to `pending` with a new ingest job.
+    /// **Retry** of a failed or stuck receipt (owners and admins): back to `pending` with a new
+    /// ingest job. Any other receipt is `receipt_not_failed`.
     pub async fn retry_receipt(
         &self,
         workspace_id: Id,
@@ -378,17 +380,20 @@ impl MailRepository {
         let now = self.database.database_now().await?;
         let mut transaction = self.database.immediate_transaction().await?;
         manager(&mut transaction, workspace_id, actor_id).await?;
-        let status: Option<String> = sqlx::query_scalar(
-            "SELECT status FROM mail_receipts WHERE id = $1 AND workspace_id = $2",
-        )
-        .bind(receipt_id.to_string())
+        let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT r.status, {STUCK_SQL} AS stuck \
+             FROM mail_receipts r WHERE r.workspace_id = $1 AND r.id = $3"
+        )))
         .bind(workspace_id.to_string())
+        .bind(now.as_millis() - STUCK_RECEIPT_MS)
+        .bind(receipt_id.to_string())
         .fetch_optional(&mut *transaction)
-        .await?;
-        match status.as_deref() {
-            None => return Err(MailError::NotFound),
-            Some("failed") => {}
-            Some(_) => return Err(MailError::Conflict("receipt_not_failed")),
+        .await?
+        .ok_or(MailError::NotFound)?;
+        let status: String = row.try_get("status")?;
+        let stuck: bool = row.try_get("stuck")?;
+        if status != "failed" && !stuck {
+            return Err(MailError::Conflict("receipt_not_failed"));
         }
         sqlx::query(
             "UPDATE mail_receipts SET status = 'pending', attempts = 0, error = NULL, \

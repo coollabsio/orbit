@@ -155,14 +155,20 @@ pub struct MailAuthSummary {
 }
 
 impl MailAuthSummary {
+    /// The summary of a check result (the health card's test message).
+    #[must_use]
+    pub fn from_outcome(outcome: AuthOutcome) -> Self {
+        Self {
+            spf: outcome.spf.into(),
+            dkim: outcome.dkim.into(),
+            dmarc: outcome.dmarc.into(),
+            aligned_domain: outcome.aligned_domain,
+        }
+    }
+
     fn of(auth: &str) -> Self {
         match serde_json::from_str::<AuthOutcome>(auth) {
-            Ok(outcome) => Self {
-                spf: outcome.spf.into(),
-                dkim: outcome.dkim.into(),
-                dmarc: outcome.dmarc.into(),
-                aligned_domain: outcome.aligned_domain,
-            },
+            Ok(outcome) => Self::from_outcome(outcome),
             Err(_) => Self {
                 spf: MailAuthResult::None,
                 dkim: MailAuthResult::None,

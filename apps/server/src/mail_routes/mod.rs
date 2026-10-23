@@ -1,6 +1,8 @@
 //! Mail (`/mail`), session-authenticated. Management routes need `mail.manage` (workspace
-//! owners and admins); an outsider of the workspace gets `mail_not_found`.
+//! owners and admins); an outsider of the workspace gets `mail_not_found`. `/api/v1/admin/mail/*`
+//! is for instance admins only.
 
+pub(crate) mod admin;
 pub(crate) mod content;
 pub(crate) mod domains;
 pub(crate) mod labels;
@@ -18,7 +20,9 @@ use orbit_platform::{Id, JobStore, MailMode, RequestId};
 pub use content::{ViewGrant, ViewKey, ViewPurpose};
 
 use crate::auth_routes::CookieMode;
+use crate::mail_dns::{DnsLookup, HickoryDns};
 use crate::mail_image_proxy::ImageProxy;
+use crate::mail_listener::MailListenerStatus;
 use crate::repositories::identity::IdentityRepository;
 use crate::repositories::mail::{MailError, MailRepository};
 use crate::task_routes::{ApiError, authenticate_session, request_id_value, validation};
@@ -26,6 +30,8 @@ use crate::task_routes::{ApiError, authenticate_session, request_id_value, valid
 /// What the setup page needs from the mail configuration.
 #[derive(Clone, Debug, Default)]
 pub struct MailSettings {
+    /// `ORBIT_MAIL_ENABLED`: this server runs the SMTP listener.
+    pub enabled: bool,
     /// `ORBIT_MAIL_HOSTNAME`: the MX target.
     pub hostname: Option<String>,
     pub mode: MailMode,
@@ -45,6 +51,10 @@ pub struct MailState {
     /// `ORBIT_MAIL_CONTENT_ORIGIN`: where mail content is served, when set.
     pub(crate) content_origin: Option<String>,
     pub(crate) image_proxy: Arc<ImageProxy>,
+    /// This server's SMTP listener, for the health card.
+    pub(crate) listener: Arc<MailListenerStatus>,
+    /// The health card's PTR lookups.
+    pub(crate) dns: Arc<dyn DnsLookup>,
 }
 
 impl MailState {
@@ -65,7 +75,21 @@ impl MailState {
             public_origin: String::new(),
             content_origin: None,
             image_proxy: Arc::new(ImageProxy::new()),
+            listener: Arc::default(),
+            dns: Arc::new(HickoryDns::new(None)),
         }
+    }
+
+    /// The listener the health card reports, and the resolver of its PTR check.
+    #[must_use]
+    pub fn with_health(
+        mut self,
+        listener: Arc<MailListenerStatus>,
+        dns: Arc<dyn DnsLookup>,
+    ) -> Self {
+        self.listener = listener;
+        self.dns = dns;
+        self
     }
 
     /// The app's public origin (frames mail content) and the origin that serves mail content
@@ -215,6 +239,26 @@ pub fn mail_router(state: MailState) -> Router {
         )
         .route("/api/v1/mail/image", get(content::get_mail_image))
         .route(
+            "/api/v1/workspaces/{workspace_id}/mail/receipts",
+            get(admin::list_failed_mail_receipts),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/receipts/{receipt_id}/retry",
+            post(admin::retry_mail_receipt),
+        )
+        .route(
+            "/api/v1/admin/mail",
+            get(admin::get_mail_admin).put(admin::set_mail_admin),
+        )
+        .route(
+            "/api/v1/admin/mail/test-address",
+            post(admin::create_mail_test_address),
+        )
+        .route(
+            "/api/v1/admin/mail/test-address/{test_id}",
+            get(admin::get_mail_test_address),
+        )
+        .route(
             "/api/v1/admin/mail/domains/{name}/workspace",
             put(domains::move_mail_domain),
         )
@@ -303,6 +347,10 @@ fn detail(code: &'static str) -> &'static str {
             "The owner of this personal mailbox left the workspace. It stays suspended; delete it when it is no longer needed."
         }
         "label_exists" => "A label with this name exists already.",
+        "receipt_not_failed" => {
+            "Only a failed message, or one that has waited for over an hour, can be retried."
+        }
+        "domain_not_verified" => "A test message needs a verified domain.",
         _ => "This action is not possible.",
     }
 }
