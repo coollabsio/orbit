@@ -27,6 +27,8 @@ use crate::export_routes::ExportState;
 use crate::import_routes::ImportState;
 use crate::integration_routes::IntegrationState;
 use crate::mail_dns::{DnsChecker, HickoryDns};
+use crate::mail_intake::MailIntake;
+use crate::mail_listener::{MailListener, MailListenerStatus, TRACE_HEADROOM};
 use crate::mail_routes::{MailSettings, MailState};
 use crate::metrics::Metrics;
 use crate::notion::client::NotionClientConfig;
@@ -72,6 +74,9 @@ pub struct App {
     production_services: Option<ProductionServices>,
     /// Set when the server stops: readiness fails, so a load balancer takes it out.
     draining: Arc<AtomicBool>,
+    /// Built when `ORBIT_MAIL_ENABLED=true`; `serve` binds and runs it.
+    mail_listener: Option<MailListener>,
+    mail_status: Arc<MailListenerStatus>,
 }
 
 struct ProductionServices {
@@ -261,6 +266,22 @@ impl App {
             attachment_state.uploads.clone(),
             mail_key,
         ));
+        let mail_listener = if config.mail.enabled {
+            let intake = MailIntake::new(
+                Arc::clone(&mail),
+                JobStore::new(database.clone()),
+                config.mail.max_message_bytes + TRACE_HEADROOM,
+            );
+            Some(
+                MailListener::new(config.mail.clone(), intake, Arc::clone(&mail))
+                    .map_err(|error| AppError::Config(format!("mail listener: {error}")))?,
+            )
+        } else {
+            None
+        };
+        let mail_status = mail_listener
+            .as_ref()
+            .map_or_else(Arc::default, MailListener::status);
         let dns_checker = DnsChecker::new(
             Arc::clone(&mail),
             Arc::new(HickoryDns::new(config.mail.dns_resolver)),
@@ -405,7 +426,25 @@ impl App {
             blob_store,
             production_services: Some(production_services),
             draining,
+            mail_listener,
+            mail_status,
         })
+    }
+
+    /// The SMTP listener's state for the health card.
+    #[must_use]
+    pub fn mail_listener_status(&self) -> Arc<MailListenerStatus> {
+        Arc::clone(&self.mail_status)
+    }
+
+    /// Replaces the SPF, DKIM and DMARC checker of the direct mode listener (tests use fixed DNS
+    /// answers).
+    #[must_use]
+    pub fn with_mail_authenticator(mut self, authenticator: orbit_mail::Authenticator) -> Self {
+        if let Some(listener) = &mut self.mail_listener {
+            listener.set_authenticator(authenticator);
+        }
+        self
     }
 
     pub fn router(&self) -> Router {
@@ -526,6 +565,14 @@ impl App {
                 .await
                 .map_err(|error| error.to_string())
         });
+        if let Some(mail) = self.mail_listener.take() {
+            let address = SocketAddr::new(self.config.mail.smtp_bind, self.config.mail.smtp_port);
+            let listener = MailListener::bind(&self.config.mail)
+                .await
+                .map_err(|source| AppError::Bind { address, source })?;
+            let token = service_shutdown.clone();
+            services.spawn(async move { mail.run(listener, token, BACKGROUND_DRAIN).await });
+        }
         let http_shutdown = CancellationToken::new();
         // Small y-sync frames otherwise wait for Nagle + delayed ACK (~40 ms stalls).
         let listener = listener.tap_io(|stream| {
