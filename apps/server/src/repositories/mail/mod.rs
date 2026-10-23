@@ -9,6 +9,7 @@ mod domains;
 mod keys;
 mod labels;
 mod mailboxes;
+mod receipts;
 
 use orbit_platform::{Database, Id, TimestampMillis, UploadError, UploadService};
 use sqlx::{Any, Transaction};
@@ -24,6 +25,10 @@ pub(crate) use mailboxes::suspend_owned_mailboxes;
 pub use mailboxes::{
     AddressKind, BulkResult, MailAddress, Mailbox, MailboxKind, MailboxStatus, NamePattern,
     NewMailbox, Proposal, RecipientLookup, local_part_for, lookup_recipient,
+};
+pub use receipts::{INGEST_JOB, mail_ingest_kind};
+pub(crate) use receipts::{
+    NewReceipt, insert_receipt, insert_receipt_recipient, record_health_test,
 };
 
 #[derive(Debug, Error)]

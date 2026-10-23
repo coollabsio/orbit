@@ -30,6 +30,7 @@ use mail_auth::{
     Error as MailAuthError, MX, MessageAuthenticator, Parameters, RecordSet, ResolverCache,
     SpfResult, Txt,
 };
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// SPF `%{r}` macro value: RFC 7208 §7.3 allows `unknown` when the checking host has no name to give.
@@ -41,8 +42,9 @@ pub enum AuthError {
     Resolver(String),
 }
 
-/// The result of one SPF or DKIM check (RFC 8601 result names).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The result of one SPF or DKIM check (RFC 8601 result names; serialized as `"pass"`, `"softfail"`, …).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Verdict {
     Pass,
     Fail,
@@ -54,15 +56,18 @@ pub enum Verdict {
 }
 
 /// The policy of a DMARC record that failed. `t=y` (test mode) is already applied: it lowers the policy one step.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum DmarcPolicy {
     None,
     Quarantine,
     Reject,
 }
 
-/// The DMARC result. A broken record (permerror) counts as no record.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// The DMARC result. A broken record (permerror) counts as no record. Serialized as
+/// `{"result": "pass"}` or `{"result": "fail", "policy": "reject"}`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "result", rename_all = "lowercase")]
 pub enum DmarcVerdict {
     Pass,
     Fail { policy: DmarcPolicy },
@@ -70,8 +75,8 @@ pub enum DmarcVerdict {
     TempError,
 }
 
-/// What the checks found for one message.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// What the checks found for one message; the server stores it as the receipt's `auth` JSON.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AuthOutcome {
     pub spf: Verdict,
     pub dkim: Verdict,

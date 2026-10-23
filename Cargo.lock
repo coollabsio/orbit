@@ -2667,6 +2667,7 @@ dependencies = [
  "rcgen",
  "rsa",
  "rustls",
+ "serde",
  "smtp-proto",
  "thiserror 2.0.20",
  "tokio",

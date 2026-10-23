@@ -15,6 +15,7 @@ pub mod link_preview;
 pub mod live;
 pub mod mail;
 pub mod mail_dns;
+pub mod mail_intake;
 pub mod mail_routes;
 pub mod mcp;
 pub mod metrics;

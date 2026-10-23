@@ -126,7 +126,7 @@ impl fmt::Display for Reply {
 }
 
 /// The negotiated TLS parameters, recorded with the message.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TlsInfo {
     pub version: String,
     pub cipher: String,
