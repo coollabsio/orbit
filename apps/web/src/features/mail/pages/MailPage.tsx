@@ -10,6 +10,7 @@ import { useBulkUpdateThreads, useUpdateThread, type ThreadChange } from '@/feat
 import { useMailCounts, useMailMe, useMailSearch, useThread, useThreads } from '@/features/mail/api/queries'
 import { FolderRail } from '@/features/mail/components/FolderRail'
 import { MailEmptyState } from '@/features/mail/components/MailEmptyState'
+import { MailboxNotice } from '@/features/mail/components/MailboxNotice'
 import { MailSearch } from '@/features/mail/components/MailSearch'
 import { ThreadList } from '@/features/mail/components/ThreadList'
 import { LabelMenu, ThreadView, type LabelState } from '@/features/mail/components/ThreadView'
@@ -309,6 +310,12 @@ function MailApp({ view, threadId }: { view: MailView; threadId: string | null }
           />
         }
         bulkBar={bulkBar}
+        notice={
+          <MailboxNotice
+            mailboxes={view.kind === 'folder' && view.mailboxId ? mailboxes.filter((mailbox) => mailbox.id === view.mailboxId) : mailboxes}
+            canManage={me.data?.can_manage ?? false}
+          />
+        }
         onOpen={open}
         onSelect={toggleSelect}
         onStar={(thread) => star([thread])}

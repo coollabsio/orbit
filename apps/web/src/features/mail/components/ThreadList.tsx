@@ -32,6 +32,8 @@ interface ThreadListProps {
   search: ReactNode
   /** Replaces the header while threads are selected. */
   bulkBar: ReactNode
+  /** Over the list, e.g. a suspended mailbox. */
+  notice?: ReactNode
   onOpen: (threadId: string) => void
   onSelect: (threadId: string) => void
   onStar: (thread: MailThreadSummary) => void
@@ -60,6 +62,7 @@ export function ThreadList({
   empty,
   search,
   bulkBar,
+  notice,
   onOpen,
   onSelect,
   onStar,
@@ -113,6 +116,7 @@ export function ThreadList({
           </Button>
         ))}
       </div>
+      {notice}
       {status === 'pending' ? (
         <div className="flex flex-col gap-3 p-3" aria-busy="true" aria-label="Loading conversations">
           {[0, 1, 2, 3, 4].map((index) => (
