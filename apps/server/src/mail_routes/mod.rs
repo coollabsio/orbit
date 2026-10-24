@@ -113,6 +113,21 @@ impl MailState {
         self
     }
 
+    /// With a content origin, only its host serves mail content (the view document, its parts and images): the app
+    /// origin answers 404, so mail stays off the app's origin even if a URL is rewritten.
+    pub(crate) fn serves_content(&self, headers: &HeaderMap) -> bool {
+        let Some(origin) = &self.content_origin else {
+            return true;
+        };
+        let content_host = origin
+            .split_once("://")
+            .map_or(origin.as_str(), |(_, host)| host);
+        headers
+            .get(axum::http::header::HOST)
+            .and_then(|host| host.to_str().ok())
+            .is_some_and(|host| host.eq_ignore_ascii_case(content_host))
+    }
+
     /// The origin in mail content URLs (empty: root-relative URLs).
     pub(crate) fn content_base(&self) -> &str {
         self.content_origin

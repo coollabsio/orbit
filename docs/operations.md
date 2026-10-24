@@ -221,7 +221,7 @@ Orbit is its own mail server for incoming mail: an SMTP listener receives mail f
 | `ORBIT_MAIL_TLS_CERT` / `ORBIT_MAIL_TLS_KEY` | none | PEM files. Direct mode: required. Relay mode: optional; with them, Orbit offers STARTTLS. |
 | `ORBIT_MAIL_MAX_MESSAGE_BYTES` | `52428800` (50 MB) | The raw size limit, at least 1 MiB. 50 MB holds about 37 MB of attachments. |
 | `ORBIT_MAIL_DNS_RESOLVER` | system | A resolver address (`ip:port`) for the SPF, DKIM, DMARC and domain checks. |
-| `ORBIT_MAIL_CONTENT_ORIGIN` | public origin | An optional separate origin for mail HTML and attachments. |
+| `ORBIT_MAIL_CONTENT_ORIGIN` | public origin | An optional separate origin for mail HTML and its images. When set, only this host serves them; the public origin answers 404. Point it at the same server and keep the original `Host` header in the proxy. |
 
 The root user lets workspaces add mail domains in **Admin → Mail**. Workspace admins then add domains and mailboxes in **Settings → Mail**.
 

@@ -337,9 +337,13 @@ pub(crate) async fn create_mail_view_url(
 pub(crate) async fn get_mail_content(
     State(state): State<MailState>,
     Path(token): Path<String>,
+    headers: HeaderMap,
     request_id: RequestIdExtension,
 ) -> Result<Response, ApiError> {
     let instance = "/api/v1/mail/content";
+    if !state.serves_content(&headers) {
+        return Err(not_found(instance, &request_id));
+    }
     let now = TimestampMillis::now();
     let grant = state
         .view_key
@@ -429,9 +433,13 @@ pub(crate) async fn get_mail_content(
 pub(crate) async fn get_mail_part(
     State(state): State<MailState>,
     Path((token, attachment)): Path<(String, String)>,
+    headers: HeaderMap,
     request_id: RequestIdExtension,
 ) -> Result<Response, ApiError> {
     let instance = "/api/v1/mail/parts";
+    if !state.serves_content(&headers) {
+        return Err(not_found(instance, &request_id));
+    }
     let grant = state
         .view_key
         .verify(ViewPurpose::Part, &token, "", TimestampMillis::now())
@@ -460,10 +468,14 @@ pub(crate) async fn get_mail_part(
 #[utoipa::path(get, path = "/api/v1/mail/image", params(MailImageQuery), responses((status = 200, body = MailBytes, content_type = "application/octet-stream")))]
 pub(crate) async fn get_mail_image(
     State(state): State<MailState>,
+    headers: HeaderMap,
     request_id: RequestIdExtension,
     ApiQuery(query): ApiQuery<MailImageQuery>,
 ) -> Result<Response, ApiError> {
     let instance = "/api/v1/mail/image";
+    if !state.serves_content(&headers) {
+        return Err(not_found(instance, &request_id));
+    }
     let grant = state
         .view_key
         .verify(

@@ -348,18 +348,27 @@ async fn reply(response: axum::response::Response) -> Reply {
     }
 }
 
-/// A cookie-less GET of an absolute or root-relative URL (the sandboxed frame sends no cookies).
+/// A cookie-less GET of an absolute or root-relative URL (the sandboxed frame sends no cookies). An absolute URL
+/// sends its host as `Host`, as a browser does.
 async fn get(app: &axum::Router, url: &str) -> Reply {
-    let path = url.strip_prefix(ORIGIN).unwrap_or(url);
-    let path = path
-        .strip_prefix("https://content.orbit.test")
-        .unwrap_or(path);
-    let request = Request::builder()
-        .method("GET")
-        .uri(path)
-        .body(Body::empty())
-        .unwrap();
-    reply(app.clone().oneshot(request).await.unwrap()).await
+    let (host, path) = if let Some(path) = url.strip_prefix(ORIGIN) {
+        (Some("orbit.test"), path)
+    } else if let Some(path) = url.strip_prefix("https://content.orbit.test") {
+        (Some("content.orbit.test"), path)
+    } else {
+        (None, url)
+    };
+    let mut request = Request::builder().method("GET").uri(path);
+    if let Some(host) = host {
+        request = request.header("host", host);
+    }
+    reply(
+        app.clone()
+            .oneshot(request.body(Body::empty()).unwrap())
+            .await
+            .unwrap(),
+    )
+    .await
 }
 
 fn auth(dmarc: DmarcVerdict) -> AuthOutcome {
@@ -574,6 +583,13 @@ async fn the_content_origin_serves_the_view_and_the_app_frames_it() {
     assert!(
         sources[0].starts_with("https://content.orbit.test/api/v1/mail/parts/"),
         "{sources:?}"
+    );
+    // with a content origin, the app origin does not serve mail content
+    let on_app = |url: &str| url.replace("https://content.orbit.test", ORIGIN);
+    assert_eq!(get(&app, &on_app(&url)).await.status, StatusCode::NOT_FOUND);
+    assert_eq!(
+        get(&app, &on_app(&sources[0])).await.status,
+        StatusCode::NOT_FOUND
     );
 }
 
