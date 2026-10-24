@@ -114,6 +114,11 @@ export function useMailCounts() {
   })
 }
 
+/** Unread threads in the Inbox of every mailbox the user reads (the Mail badge, like a mail app's dock badge). */
+export function useMailInboxUnread(): number {
+  return useMailCounts().data?.mailboxes.reduce((total, mailbox) => total + mailbox.inbox, 0) ?? 0
+}
+
 /**
  * The short-lived URL of a message's sandboxed view document (`{ url, expires_at }`). It is not read again while the
  * frame shows it (a new URL reloads the frame); a frame that mounts after 4 minutes gets a new one.

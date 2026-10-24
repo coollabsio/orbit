@@ -9,6 +9,7 @@ import { useContext, useEffect, useLayoutEffect, useState } from 'react'
 import { useWorkspaceEvents } from '@/features/realtime/useWorkspaceEvents'
 import { ChatProvider } from '@/features/chat/api/ChatProvider'
 import { emitMailEvent, resyncMail } from '@/features/mail/api/events'
+import { useMailInboxUnread } from '@/features/mail/api/queries'
 import { useChatBadgeCount } from '@/features/chat/api/queries'
 import { useHasUnreadNotifications } from '@/features/inbox/api'
 import { startPushWorker } from '@/features/realtime/push'
@@ -55,10 +56,11 @@ function Shell() {
   const { workspace } = useWorkspace()
   const live = useWorkspaceEvents(workspace.id)
   const chatBadge = useChatBadgeCount()
-  // The tab icon gets a dot while chat or the Inbox has something unread.
+  const mailBadge = useMailInboxUnread()
+  // The tab icon gets a dot while chat, mail or the Inbox has something unread.
   const inboxUnread = useHasUnreadNotifications(workspace.id).data === true
   const isRoot = useIsInstallationAdmin()
-  useUnreadFavicon(chatBadge + (inboxUnread ? 1 : 0))
+  useUnreadFavicon(chatBadge + mailBadge + (inboxUnread ? 1 : 0))
   // Signed in: the worker that shows notifications may run. This asks for no permission.
   useEffect(() => startPushWorker(), [])
   // The rich text editor (tasks, comments, docs, the new task dialog) is ready before its first use.
@@ -130,7 +132,7 @@ function Shell() {
         >
           <WorkspaceSwitcher collapsed={sidebarCollapsed} />
         </div>
-        <SidebarNav collapsed={sidebarCollapsed} chatBadge={chatBadge} inboxUnread={inboxUnread} isRoot={isRoot} />
+        <SidebarNav collapsed={sidebarCollapsed} chatBadge={chatBadge} mailBadge={mailBadge} inboxUnread={inboxUnread} isRoot={isRoot} />
         <div
           className={cn(
             'flex shrink-0 items-center gap-2 border-t border-border pt-2',
@@ -159,7 +161,7 @@ function Shell() {
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <Outlet />
         </div>
-        <MobileDock chatBadge={chatBadge} />
+        <MobileDock chatBadge={chatBadge} mailBadge={mailBadge} />
       </div>
 
       <SideSheet open={drawerOpen} onOpenChange={setDrawerOpen}>
@@ -171,7 +173,7 @@ function Shell() {
           <div className="mb-2 flex h-12 shrink-0 items-center justify-start gap-2 px-1.5">
             <WorkspaceSwitcher onSelect={() => setDrawerOpen(false)} />
           </div>
-          <SidebarNav onNavigate={() => setDrawerOpen(false)} chatBadge={chatBadge} inboxUnread={inboxUnread} isRoot={isRoot} />
+          <SidebarNav onNavigate={() => setDrawerOpen(false)} chatBadge={chatBadge} mailBadge={mailBadge} inboxUnread={inboxUnread} isRoot={isRoot} />
           <div className="flex shrink-0 items-center gap-2 border-t border-border pt-2">
             <UserMenu />
           </div>

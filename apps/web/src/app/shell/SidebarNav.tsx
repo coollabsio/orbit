@@ -146,6 +146,7 @@ export function SidebarNav({
   onNavigate,
   collapsed = false,
   chatBadge,
+  mailBadge,
   inboxUnread,
   chatEnabled: chat = chatEnabled,
   isRoot = false,
@@ -154,6 +155,8 @@ export function SidebarNav({
   collapsed?: boolean
   /** Unread count on the Chat item. */
   chatBadge?: number
+  /** Unread Inbox threads on the Mail item. */
+  mailBadge?: number
   /** Activity has an unread notification. */
   inboxUnread?: boolean
   /** Chat is a link instead of "Coming soon". Defaults to the build's setting. */
@@ -215,7 +218,7 @@ export function SidebarNav({
                 icon={link.icon}
                 label={link.label}
                 tag={link.tag}
-                badge={link.to === '/chat' ? chatBadge : undefined}
+                badge={link.to === '/chat' ? chatBadge : link.to === '/mail' ? mailBadge : undefined}
                 onClick={onNavigate}
               />
               {/* saved views belong to Tasks, so they nest under it instead of sitting beside the other apps;
