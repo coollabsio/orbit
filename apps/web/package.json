@@ -29,6 +29,7 @@
     "date-fns": "^4.4.0",
     "frimousse": "0.4.0",
     "mermaid": "^12.0.0",
+    "pdfjs-dist": "6.4.299",
     "prosemirror-highlight": "0.15.3",
     "react": "^19.2.8",
     "react-day-picker": "^10.0.1",

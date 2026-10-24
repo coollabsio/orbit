@@ -1,14 +1,18 @@
 // Port of the chat reference Attachments: image grid (1 / 2 / 3-hero / 4+N) that opens the ImageViewer,
-// plus file cards for non-images (paperclip, name, size, download on hover). Self-contained Tailwind styling.
-import { useState } from 'react'
-import { Download, Paperclip2 as Paperclip, Xmark as X } from 'reicon-react'
-import { formatSize, isImage, type Attachment } from '@/lib/attachmentLib'
+// plus file cards for non-images (paperclip, name, size, download on hover; a PDF opens the PdfViewer).
+// Self-contained Tailwind styling.
+import { lazy, Suspense, useState, type ReactNode } from 'react'
+import { Download, Eye, Paperclip2 as Paperclip, Xmark as X } from 'reicon-react'
+import { formatSize, isImage, isPdf, type Attachment } from '@/lib/attachmentLib'
 import { ImageViewer } from './ImageViewer'
 import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
 import { cn } from 'cn'
 
 const SINGLE_IMAGE_MAX_HEIGHT = 300
+
+/** pdf.js is about 1.7 MB with its worker (about 500 KB compressed): it loads when a PDF is opened. */
+const PdfViewer = lazy(() => import('./PdfViewer').then((module) => ({ default: module.PdfViewer })))
 
 /** Dark round × over an attachment. With a mouse it shows on hover or keyboard focus; on touch it is always visible.
     `after:` grows the 22px circle to a 30px hit area. */
@@ -40,6 +44,7 @@ export function Attachments({
   onRemove?: (attachmentId: string) => void
 }) {
   const [viewerImage, setViewerImage] = useState<Attachment | null>(null)
+  const [viewerPdf, setViewerPdf] = useState<Attachment | null>(null)
   if (attachments.length === 0) return null
 
   const images = attachments.filter(isImage)
@@ -96,16 +101,20 @@ export function Attachments({
         <div className="flex max-w-md flex-col gap-2">
           {otherFiles.map((att) => (
             <span key={att.id} className="group relative block">
-              <a href={att.url} download={att.fileName} className="group/card flex items-center gap-3 rounded-lg border border-border bg-background p-3 text-muted-foreground shadow-sm transition-colors hover:bg-muted">
-                <Paperclip className="size-10 shrink-0" />
-                <span className="flex min-w-0 flex-1 flex-col">
-                  <span className="truncate text-sm font-medium text-foreground">{att.fileName}</span>
-                  <span className="text-xs text-muted-foreground">{formatSize(att.fileSize)}</span>
-                </span>
-                <span className="transition-opacity duration-150 group-focus-visible/card:opacity-100 hover-fine:opacity-0 hover-fine:group-hover/card:opacity-100">
-                  <Download className="size-5" />
-                </span>
-              </a>
+              {isPdf(att) ? (
+                <button
+                  type="button"
+                  aria-label={`Open ${att.fileName}`}
+                  onClick={() => setViewerPdf(att)}
+                  className="group/card flex w-full cursor-pointer items-center gap-3 rounded-lg border border-border bg-background p-3 text-left text-muted-foreground shadow-sm transition-colors hover:bg-muted"
+                >
+                  <FileCardBody attachment={att} icon={<Eye className="size-5" />} />
+                </button>
+              ) : (
+                <a href={att.url} download={att.fileName} className="group/card flex items-center gap-3 rounded-lg border border-border bg-background p-3 text-muted-foreground shadow-sm transition-colors hover:bg-muted">
+                  <FileCardBody attachment={att} icon={<Download className="size-5" />} />
+                </a>
+              )}
               {onRemove ? (
                 <RemoveAttachmentButton attachment={att} onRemove={onRemove} />
               ) : null}
@@ -115,6 +124,27 @@ export function Attachments({
       ) : null}
 
       {viewerImage ? <ImageViewer attachment={viewerImage} onClose={() => setViewerImage(null)} /> : null}
+      {viewerPdf ? (
+        <Suspense fallback={null}>
+          <PdfViewer attachment={viewerPdf} onClose={() => setViewerPdf(null)} />
+        </Suspense>
+      ) : null}
     </div>
+  )
+}
+
+/** The inside of a file card: paperclip, name, size, and the action icon that shows on hover. */
+function FileCardBody({ attachment, icon }: { attachment: Attachment; icon: ReactNode }) {
+  return (
+    <>
+      <Paperclip className="size-10 shrink-0" />
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-sm font-medium text-foreground">{attachment.fileName}</span>
+        <span className="text-xs text-muted-foreground">{formatSize(attachment.fileSize)}</span>
+      </span>
+      <span className="transition-opacity duration-150 group-focus-visible/card:opacity-100 hover-fine:opacity-0 hover-fine:group-hover/card:opacity-100">
+        {icon}
+      </span>
+    </>
   )
 }

@@ -175,8 +175,8 @@ export function mailAttachment(workspaceId: string, attachment: MailAttachmentVi
   return {
     id: attachment.id,
     fileName: attachment.filename?.trim() || 'attachment',
-    // a type the route will not show inline must not reach an <img>
-    mimeType: image ? attachment.content_type : 'application/octet-stream',
+    // a type the route will not show inline must not reach an <img>; a PDF opens in the viewer (pdf.js, no scripts)
+    mimeType: image || attachment.content_type === 'application/pdf' ? attachment.content_type : 'application/octet-stream',
     fileSize: attachment.size,
     url: image ? `${url}?inline=1` : url,
   }

@@ -15,7 +15,7 @@ if (!bootstrapScript) throw new Error('theme bootstrap script is missing')
 const cspScriptHash = `sha256-${createHash('sha256').update(bootstrapScript).digest('base64')}`
 
 /**
- * Emoji files that Orbit serves itself (the production CSP has no CDN): the Twemoji images at `/assets/twemoji-<version>/<code>.svg`
+ * Package files that Orbit serves itself (the production CSP has no CDN). Emoji: the Twemoji images at `/assets/twemoji-<version>/<code>.svg`
  * and the emoji data at `/assets/emojibase-<version>/en/…`. The version in the path makes them immutable: the server
  * caches `/assets` for a year, so a browser downloads each file once. They stay in `node_modules`: the dev server
  * reads them from there and the build copies them into `dist`. The versions are those of the installed packages, as in
@@ -25,10 +25,13 @@ const packageVersion = (name: string): string =>
   JSON.parse(readFileSync(new URL(`./node_modules/${name}/package.json`, import.meta.url), 'utf8')).version
 const twemojiVersion = packageVersion('twemoji-assets')
 const emojibaseVersion = packageVersion('emojibase-data')
-const emojiAssets = [
+const pdfjsVersion = packageVersion('pdfjs-dist')
+const packageAssets = [
   { url: `/assets/twemoji-${twemojiVersion}/`, dir: fileURLToPath(new URL('./node_modules/twemoji-assets/assets/svg/', import.meta.url)), files: /^[0-9a-f-]+\.svg$/, type: 'image/svg+xml' },
   { url: `/assets/emojibase-${emojibaseVersion}/en/shortcodes/`, dir: fileURLToPath(new URL('./node_modules/emojibase-data/en/shortcodes/', import.meta.url)), files: /^github\.json$/, type: 'application/json' },
   { url: `/assets/emojibase-${emojibaseVersion}/en/`, dir: fileURLToPath(new URL('./node_modules/emojibase-data/en/', import.meta.url)), files: /^(data|messages)\.json$/, type: 'application/json' },
+  // pdf.js decoders for JPEG 2000 and JBIG2 images (scans): the JavaScript builds, as the CSP does not allow WebAssembly
+  { url: `/assets/pdfjs-${pdfjsVersion}/wasm/`, dir: fileURLToPath(new URL('./node_modules/pdfjs-dist/wasm/', import.meta.url)), files: /^(openjpeg|jbig2)_nowasm_fallback\.js$/, type: 'text/javascript' },
 ]
 
 // https://vite.dev/config/
@@ -46,11 +49,11 @@ export default defineConfig({
     tailwindcss(),
     babel({ presets: [reactCompilerPreset()] }),
     {
-      name: 'orbit-emoji-assets',
+      name: 'orbit-package-assets',
       configureServer(server) {
         server.middlewares.use((request, response, next) => {
           const path = (request.url ?? '').split('?')[0]
-          const asset = emojiAssets.find((candidate) => path.startsWith(candidate.url))
+          const asset = packageAssets.find((candidate) => path.startsWith(candidate.url))
           const name = asset ? basename(path) : ''
           if (!asset || !asset.files.test(name) || !existsSync(asset.dir + name)) return next()
           response.setHeader('Content-Type', asset.type)
@@ -60,7 +63,7 @@ export default defineConfig({
         })
       },
       writeBundle(options) {
-        for (const asset of emojiAssets) {
+        for (const asset of packageAssets) {
           const target = `${options.dir}${asset.url}`
           mkdirSync(target, { recursive: true })
           cpSync(asset.dir, target, { recursive: true, filter: (source) => source === asset.dir || asset.files.test(basename(source)) })
