@@ -47,19 +47,20 @@ const CLOSE_WAIT: Duration = Duration::from_secs(5);
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "to", content = "users", rename_all = "snake_case")]
 pub enum Recipients {
-    /// Every workspace member.
+    /// Every workspace member. Guests are left out: they only get the events of their own
+    /// conversations.
     Workspace,
-    /// Every workspace member but these.
+    /// Every workspace member but these; guests are left out too.
     WorkspaceExcept(Vec<Id>),
     Users(Vec<Id>),
 }
 
 impl Recipients {
     #[must_use]
-    pub fn includes(&self, user_id: Id) -> bool {
+    pub fn includes(&self, user_id: Id, guest: bool) -> bool {
         match self {
-            Self::Workspace => true,
-            Self::WorkspaceExcept(users) => !users.contains(&user_id),
+            Self::Workspace => !guest,
+            Self::WorkspaceExcept(users) => !guest && !users.contains(&user_id),
             Self::Users(users) => users.contains(&user_id),
         }
     }
@@ -175,6 +176,9 @@ struct Workspace {
 
 struct Connection {
     user_id: Id,
+    /// The member was a guest when it connected; the socket closes (and the client reconnects)
+    /// when the role changes.
+    guest: bool,
     sender: mpsc::Sender<Frame>,
     /// The tab had no input for a while.
     idle: bool,
@@ -252,7 +256,7 @@ impl Workspace {
     /// (or whose socket is gone) is dropped: its socket task sees the closed queue and ends.
     fn deliver(&mut self, recipients: &Recipients, frame: &Frame) {
         self.connections.retain(|_, connection| {
-            !recipients.includes(connection.user_id)
+            !recipients.includes(connection.user_id, connection.guest)
                 || connection.sender.try_send(frame.clone()).is_ok()
         });
     }
@@ -849,8 +853,15 @@ impl LiveHub {
         }
     }
 
-    /// Adds a connection. `status` is what the user set for themselves.
-    pub fn connect(&self, workspace_id: Id, user_id: Id, status: UserStatus) -> Attached {
+    /// Adds a connection. `status` is what the user set for themselves. A guest gets no presence
+    /// list: it must not see who is in the workspace.
+    pub fn connect(
+        &self,
+        workspace_id: Id,
+        user_id: Id,
+        guest: bool,
+        status: UserStatus,
+    ) -> Attached {
         let (sender, frames) = mpsc::channel(QUEUED_FRAMES);
         let id = self.inner.next_connection.fetch_add(1, Ordering::Relaxed);
         let mut workspaces = self.inner.workspaces();
@@ -865,6 +876,7 @@ impl LiveHub {
             .change(workspace_id, workspace, user_id, |workspace| {
                 let connection = Connection {
                     user_id,
+                    guest,
                     sender,
                     idle: false,
                     away: false,
@@ -875,7 +887,11 @@ impl LiveHub {
         Attached {
             id,
             frames,
-            presence: workspace.all_shown(),
+            presence: if guest {
+                Vec::new()
+            } else {
+                workspace.all_shown()
+            },
         }
     }
 
@@ -950,8 +966,8 @@ mod tests {
         page_collab_generation(&database).await;
         let hub = LiveHub::of(&database);
         let (workspace, ada, bob) = (Id::new_v7(), Id::new_v7(), Id::new_v7());
-        let mut ada_tab = hub.connect(workspace, ada, UserStatus::default());
-        let mut bob_tab = hub.connect(workspace, bob, UserStatus::default());
+        let mut ada_tab = hub.connect(workspace, ada, false, UserStatus::default());
+        let mut bob_tab = hub.connect(workspace, bob, false, UserStatus::default());
         hub.start_delivery(workspace, 0).await;
         // Ada saw Bob come online; nobody is told about themselves.
         assert_eq!(frames(&mut ada_tab)[0]["event"]["status"], "online");
@@ -990,7 +1006,7 @@ mod tests {
             kept.iter().map(|event| event.seq).collect::<Vec<_>>(),
             [2, 3]
         );
-        assert!(!kept[0].recipients.includes(bob));
+        assert!(!kept[0].recipients.includes(bob, false));
         assert_eq!(
             events::range(database.pool(), workspace).await.unwrap(),
             (1, 3)
@@ -1020,13 +1036,13 @@ mod tests {
         let database = TestDatabase::new().await.unwrap();
         let hub = LiveHub::with_offline_grace(&database, Duration::from_millis(40));
         let (workspace, ada, bob) = (Id::new_v7(), Id::new_v7(), Id::new_v7());
-        let mut ada_tab = hub.connect(workspace, ada, UserStatus::default());
-        let bob_tab = hub.connect(workspace, bob, UserStatus::default());
+        let mut ada_tab = hub.connect(workspace, ada, false, UserStatus::default());
+        let bob_tab = hub.connect(workspace, bob, false, UserStatus::default());
         frames(&mut ada_tab);
 
         // A reload: the connection closes and a new one opens inside the delay.
         hub.disconnect(workspace, bob_tab.id, bob);
-        let bob_tab = hub.connect(workspace, bob, UserStatus::default());
+        let bob_tab = hub.connect(workspace, bob, false, UserStatus::default());
         tokio::time::sleep(Duration::from_millis(80)).await;
         assert!(frames(&mut ada_tab).is_empty());
         assert_eq!(hub.online(workspace).len(), 2);
@@ -1052,7 +1068,7 @@ mod tests {
         let database = TestDatabase::new().await.unwrap();
         let hub = LiveHub::of(&database);
         let (workspace, ada, bob) = (Id::new_v7(), Id::new_v7(), Id::new_v7());
-        let mut ada_tab = hub.connect(workspace, ada, UserStatus::default());
+        let mut ada_tab = hub.connect(workspace, ada, false, UserStatus::default());
         let status = |presence| UserStatus {
             presence,
             text: Some("Lunch".to_owned()),
@@ -1067,7 +1083,7 @@ mod tests {
         };
 
         // Invisible: Bob connects and nobody is told; the presence list does not have him.
-        let first = hub.connect(workspace, bob, status(Presence::Invisible));
+        let first = hub.connect(workspace, bob, false, status(Presence::Invisible));
         assert_eq!(first.presence.len(), 1);
         assert!(seen(&mut ada_tab).is_empty());
         // `@here` and the per-member events still count him as connected.
@@ -1085,7 +1101,7 @@ mod tests {
         // Online with two tabs: idle only when both are, online again when one has input, and
         // idle again when the tab with input closes.
         hub.set_status(bob, &UserStatus::default());
-        let second = hub.connect(workspace, bob, UserStatus::default());
+        let second = hub.connect(workspace, bob, false, UserStatus::default());
         assert_eq!(seen(&mut ada_tab)[0]["status"], "online");
         hub.set_idle(workspace, first.id, bob, true);
         assert!(seen(&mut ada_tab).is_empty());
@@ -1119,8 +1135,8 @@ mod tests {
             )),
             ..UserStatus::default()
         };
-        let bob_tab = hub.connect(workspace, bob, lunch);
-        let mut ada_tab = hub.connect(workspace, ada, UserStatus::default());
+        let bob_tab = hub.connect(workspace, bob, false, lunch);
+        let mut ada_tab = hub.connect(workspace, ada, false, UserStatus::default());
         let bob_in = |presence: &[Shown]| -> Value {
             presence
                 .iter()
@@ -1133,7 +1149,7 @@ mod tests {
         // It ends while Bob is connected: a later presence list and a later event do not carry
         // it.
         tokio::time::sleep(Duration::from_millis(450)).await;
-        let later = hub.connect(workspace, ada, UserStatus::default());
+        let later = hub.connect(workspace, ada, false, UserStatus::default());
         assert_eq!(
             bob_in(&later.presence),
             json!({ "user_id": bob, "status": "online", "emoji": null, "text": null, "expires_at": null })
@@ -1153,7 +1169,7 @@ mod tests {
         let database = TestDatabase::new().await.unwrap();
         let hub = LiveHub::with_heard_window(&database, Duration::from_millis(60));
         let (workspace, ada) = (Id::new_v7(), Id::new_v7());
-        let mut tab = hub.connect(workspace, ada, UserStatus::default());
+        let mut tab = hub.connect(workspace, ada, false, UserStatus::default());
         let at_a_tab = || hub.signal_user(ada, true, "notify", &json!({}));
         assert!(at_a_tab(), "a new connection was heard from");
 
@@ -1175,10 +1191,10 @@ mod tests {
         let hub = LiveHub::with_offline_grace(&database, Duration::from_millis(200));
         let (workspace, ada) = (Id::new_v7(), Id::new_v7());
 
-        let first = hub.connect(workspace, ada, UserStatus::default());
+        let first = hub.connect(workspace, ada, false, UserStatus::default());
         hub.disconnect(workspace, first.id, ada);
         tokio::time::sleep(Duration::from_millis(120)).await;
-        let second = hub.connect(workspace, ada, UserStatus::default());
+        let second = hub.connect(workspace, ada, false, UserStatus::default());
         hub.disconnect(workspace, second.id, ada);
 
         // The first timer ends here; the second delay has only started.
@@ -1223,7 +1239,7 @@ mod tests {
         let database = TestDatabase::new().await.unwrap();
         let hub = LiveHub::of(&database);
         let (workspace, ada) = (Id::new_v7(), Id::new_v7());
-        let mut slow = hub.connect(workspace, ada, UserStatus::default());
+        let mut slow = hub.connect(workspace, ada, false, UserStatus::default());
         hub.start_delivery(workspace, 0).await;
         let batch: Vec<NewEvent> = (0..=QUEUED_FRAMES)
             .map(|n| event(Recipients::Workspace, u64::try_from(n).unwrap()))

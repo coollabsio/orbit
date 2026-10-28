@@ -13,6 +13,7 @@ use super::{
     MessageRecord, ReplyToRecord, StickerRecord, ThreadMember, ThreadPage, Written, current_state,
     finish, hydrate, id_list, in_ids, json_values, load_access, load_actor, load_message,
     load_message_access, load_thread_member, mentioned_user_ids, parse_id, parse_optional_id,
+    public_for,
 };
 
 const DEFAULT_PAGE: usize = 50;
@@ -177,18 +178,19 @@ impl ChatRepository {
     ) -> Result<Vec<FollowedThreadRecord>, ChatError> {
         let mut tx = self.database.pool().begin().await?;
         load_actor(&mut tx, workspace_id, actor_id).await?;
-        let follows = sqlx::query(
+        let follows = sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT t.root_id, t.last_read_reply_id, t.read_reply_count, t.mention_count, \
              r.last_reply_id \
              FROM chat_thread_members t \
              JOIN chat_messages r ON r.id = t.root_id \
              JOIN chat_conversations c ON c.id = t.conversation_id \
              WHERE t.workspace_id = $1 AND t.user_id = $2 AND t.following = 1 \
-             AND (c.kind = 'public' OR EXISTS (SELECT 1 FROM chat_members \
+             AND ({} OR EXISTS (SELECT 1 FROM chat_members \
                   WHERE chat_members.conversation_id = c.id AND chat_members.user_id = t.user_id)) \
              ORDER BY (r.reply_count > t.read_reply_count) DESC, r.last_reply_id DESC, r.id DESC \
              LIMIT $3",
-        )
+            public_for("t.user_id")
+        )))
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
         .bind(FOLLOWED_LIMIT)

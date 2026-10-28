@@ -488,12 +488,14 @@ pub struct Written<T> {
 }
 
 impl<T> Written<T> {
-    /// The events the caller itself sees.
+    /// The events the caller itself sees. Only managers write workspace-wide events (emoji,
+    /// stickers, categories) and guests only write in their own conversations, so the caller
+    /// counts as a member here.
     #[must_use]
     pub fn events_for(&self, user_id: Id) -> Vec<ChatEvent> {
         self.events
             .iter()
-            .filter(|emitted| emitted.recipients.includes(user_id))
+            .filter(|emitted| emitted.recipients.includes(user_id, false))
             .map(|emitted| emitted.event.clone())
             .collect()
     }
@@ -785,7 +787,8 @@ async fn load_member(
     .transpose()
 }
 
-/// A private channel or DM that the caller is not in does not exist for the caller.
+/// A private channel or DM that the caller is not in does not exist for the caller. Neither does
+/// a public channel for a guest: guests only see the conversations they are in.
 async fn load_access(
     conn: &mut AnyConnection,
     workspace_id: Id,
@@ -797,7 +800,7 @@ async fn load_access(
         .await?
         .ok_or(ChatError::NotFound)?;
     let member = load_member(conn, conversation_id, user_id).await?;
-    if member.is_none() && conversation.kind != ConversationKind::Public {
+    if member.is_none() && (conversation.kind != ConversationKind::Public || actor.is_guest()) {
         return Err(ChatError::NotFound);
     }
     Ok(Access {
@@ -822,7 +825,7 @@ async fn member_ids(conn: &mut AnyConnection, conversation_id: Id) -> Result<Vec
 /// Puts a new workspace member into every live public channel, with everything read, the way
 /// the `chat_default_channel_for_member` trigger does for `#general`. Every insert into
 /// `memberships` calls this in the same transaction, so a public channel always has every
-/// workspace member. Channels the member is in already stay as they are.
+/// workspace member. Channels the member is in already stay as they are. Guests join none.
 pub async fn join_public_channels(
     conn: &mut AnyConnection,
     workspace_id: Id,
@@ -837,6 +840,8 @@ pub async fn join_public_channels(
                 c.message_count, $2 \
          FROM chat_conversations c \
          WHERE c.workspace_id = $3 AND c.kind = 'public' AND c.archived_at IS NULL \
+         AND EXISTS (SELECT 1 FROM memberships WHERE memberships.workspace_id = c.workspace_id \
+                     AND memberships.user_id = $1 AND memberships.role <> 'guest') \
          ON CONFLICT (conversation_id, user_id) DO NOTHING",
     )
     .bind(user_id.to_string())
@@ -847,15 +852,45 @@ pub async fn join_public_channels(
     Ok(())
 }
 
-/// Every member of the workspace.
+/// Every member of the workspace who is in its public channels: everyone but guests.
 async fn workspace_member_ids(
     conn: &mut AnyConnection,
     workspace_id: Id,
 ) -> Result<Vec<Id>, ChatError> {
     sqlx::query_scalar::<_, String>(
-        "SELECT user_id FROM memberships WHERE workspace_id = $1 ORDER BY created_at, user_id",
+        "SELECT user_id FROM memberships WHERE workspace_id = $1 AND role <> 'guest' \
+         ORDER BY created_at, user_id",
     )
     .bind(workspace_id.to_string())
+    .fetch_all(&mut *conn)
+    .await?
+    .into_iter()
+    .map(parse_id)
+    .collect()
+}
+
+/// SQL: the conversation `c` is public, and `user_id` (an SQL expression) is no guest, so it
+/// may read it without being in it.
+fn public_for(user_id: &str) -> String {
+    format!(
+        "(c.kind = 'public' AND EXISTS (SELECT 1 FROM memberships reader \
+         WHERE reader.workspace_id = c.workspace_id AND reader.user_id = {user_id} \
+         AND reader.role <> 'guest'))"
+    )
+}
+
+/// The guests among `user_ids`, which has no duplicates.
+async fn guest_ids(
+    conn: &mut AnyConnection,
+    workspace_id: Id,
+    user_ids: &[Id],
+) -> Result<Vec<Id>, ChatError> {
+    sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
+        "SELECT user_id FROM memberships WHERE workspace_id = $1 AND role = 'guest' AND user_id {}",
+        in_ids(&*conn, 2)
+    )))
+    .bind(workspace_id.to_string())
+    .bind(id_list(user_ids.iter().copied()))
     .fetch_all(&mut *conn)
     .await?
     .into_iter()

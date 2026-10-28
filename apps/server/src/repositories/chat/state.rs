@@ -15,7 +15,7 @@ use super::{
     ConversationStateRecord, Events, MEMBER_COLUMNS, MessageRecord, NotifyLevel, Recipients,
     ThreadMember, ThreadStateRecord, Written, conversation_from_row, current_state, finish,
     id_list, in_ids, load_access, load_actor, load_message, load_message_access,
-    load_thread_member, member_from_row, member_ids, parse_id, parse_optional_id,
+    load_thread_member, member_from_row, member_ids, parse_id, parse_optional_id, public_for,
 };
 
 /// Cursors that one `restore_read` call may put back.
@@ -469,10 +469,11 @@ impl ChatRepository {
              AND user_id {} \
              AND EXISTS (SELECT 1 FROM chat_conversations c \
                          WHERE c.id = chat_thread_members.conversation_id \
-                           AND (c.kind = 'public' OR EXISTS ( \
+                           AND ({} OR EXISTS ( \
                                SELECT 1 FROM chat_members m WHERE m.conversation_id = c.id \
                                  AND m.user_id = chat_thread_members.user_id)))",
-            in_ids(&*conn, 2)
+            in_ids(&*conn, 2),
+            public_for("chat_thread_members.user_id")
         )))
         .bind(root_id.to_string())
         .bind(id_list(user_ids.iter().copied()))

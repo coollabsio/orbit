@@ -131,7 +131,10 @@ async fn serve(
         .status(user_id, TimestampMillis::now())
         .await
         .unwrap_or_default();
-    let mut attached = state.hub.connect(workspace_id, user_id, status.clone());
+    let guest = is_guest(&database, workspace_id, user_id).await;
+    let mut attached = state
+        .hub
+        .connect(workspace_id, user_id, guest, status.clone());
     let connection_id = attached.id;
     // A status change between the read and the connect did not reach the hub: the user had no
     // status there yet. One after the connect does, so the status is read once more.
@@ -141,7 +144,7 @@ async fn serve(
         state.hub.correct_status(user_id, &current);
     }
     // Read after the connection was added: an event after `newest` reaches it as a frame.
-    let close = match opening(&database, workspace_id, user_id, &resume, &attached).await {
+    let close = match opening(&database, workspace_id, user_id, guest, &resume, &attached).await {
         Ok(opening) => {
             state.hub.start_delivery(workspace_id, opening.newest).await;
             run(
@@ -151,6 +154,7 @@ async fn serve(
                 workspace_id,
                 session_id,
                 user_id,
+                guest,
                 &mut attached,
                 opening,
             )
@@ -169,6 +173,13 @@ async fn serve(
     let _ = send(&mut socket, Message::Close(frame)).await;
 }
 
+/// A failed read counts as a guest: the connection then gets the fewest events.
+async fn is_guest(database: &orbit_platform::Database, workspace_id: Id, user_id: Id) -> bool {
+    crate::repositories::membership::chat_actor(database.pool(), workspace_id, user_id)
+        .await
+        .map_or(true, |actor| actor.is_none_or(|actor| actor.is_guest()))
+}
+
 /// What a connection gets first.
 struct Opening {
     hello: String,
@@ -182,6 +193,7 @@ async fn opening(
     database: &orbit_platform::Database,
     workspace_id: Id,
     user_id: Id,
+    guest: bool,
     resume: &Resume,
     attached: &super::hub::Attached,
 ) -> Result<Opening, sqlx::Error> {
@@ -200,7 +212,7 @@ async fn opening(
                 events::after(pool, workspace_id, after)
                     .await?
                     .into_iter()
-                    .filter(|event| event.recipients.includes(user_id))
+                    .filter(|event| event.recipients.includes(user_id, guest))
                     .map(|event| event.frame)
                     .collect(),
             )
@@ -230,6 +242,7 @@ async fn run(
     workspace_id: Id,
     session_id: Id,
     user_id: Id,
+    guest: bool,
     attached: &mut super::hub::Attached,
     opening: Opening,
 ) -> Option<(u16, &'static str)> {
@@ -286,6 +299,10 @@ async fn run(
             _ = recheck.tick() => {
                 if !authorized(database, workspace_id, session_id).await.unwrap_or(false) {
                     return Some((close::SESSION, "session or access ended"));
+                }
+                // A guest who became a member reconnects to get the whole workspace's events.
+                if is_guest(database, workspace_id, user_id).await != guest {
+                    return Some((close::RESTART, "role changed"));
                 }
             }
             message = socket.recv() => match message {

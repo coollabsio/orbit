@@ -144,14 +144,30 @@ impl Server {
     }
 }
 
-/// What a guest may call. Chat checks each conversation itself (see `chat_api.rs`); the
-/// people directory filters its rows for a guest (see `workspaces_api.rs`).
-fn guest_may_use(path: &str, operation: &str) -> bool {
-    path.starts_with(&format!("{PREFIX}/chat/"))
-        || matches!(
-            operation,
-            "get_workspace" | "list_members" | "get_member_profile" | "put_member_note"
-        )
+/// What a guest may call. Every other chat route names a public record here (`#general`, a
+/// message in it) or needs a permission, so it must fail too.
+fn guest_may_use(operation: &str) -> bool {
+    matches!(
+        operation,
+        "get_workspace"
+            | "list_members"
+            | "get_member_profile"
+            | "put_member_note"
+            | "list_chat_conversations"
+            | "list_chat_categories"
+            | "list_chat_emoji"
+            | "get_chat_emoji_image"
+            | "list_chat_stickers"
+            | "get_chat_sticker_image"
+            | "upload_chat_file"
+            | "download_chat_file"
+            | "get_chat_link_preview"
+            | "read_all_chat"
+            | "restore_chat_read"
+            | "list_chat_search"
+            | "list_chat_states"
+            | "list_followed_chat_threads"
+    )
 }
 
 /// Real records of the workspace, by the name of the path or body field that holds their id.
@@ -623,7 +639,7 @@ async fn a_guest_reaches_only_chat() {
                 operation.body.as_ref(),
             )
             .await;
-        if status < 400 && !guest_may_use(&operation.template, &operation.id) {
+        if status < 400 && !guest_may_use(&operation.id) {
             reached.push(format!(
                 "{} {} ({}): {status} {body}",
                 operation.method, operation.template, operation.id
@@ -643,9 +659,7 @@ async fn a_guest_reaches_only_chat() {
                 operation.body.as_ref(),
             )
             .await;
-        if !(status < 400 || status == 403 || status == 409)
-            && !guest_may_use(&operation.template, &operation.id)
-        {
+        if !(status < 400 || status == 403 || status == 409) && !guest_may_use(&operation.id) {
             unproven.push(format!(
                 "{} {} ({status} {})",
                 operation.method,
@@ -656,7 +670,7 @@ async fn a_guest_reaches_only_chat() {
     }
     let denied = operations
         .iter()
-        .filter(|operation| !guest_may_use(&operation.template, &operation.id))
+        .filter(|operation| !guest_may_use(&operation.id))
         .count();
     eprintln!(
         "guest sweep: {denied} operations denied, {} not reached by an admin either:\n{}",

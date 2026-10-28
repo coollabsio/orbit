@@ -204,7 +204,7 @@ impl ChatRepository {
                      LEFT JOIN chat_conversations c ON c.id = f.conversation_id \
                      WHERE f.id = $2 AND f.workspace_id = $3 AND ( \
                          (f.message_id IS NULL AND f.uploaded_by = me.user_id) \
-                         OR c.kind = 'public' \
+                         OR (c.kind = 'public' AND me.role <> 'guest') \
                          OR EXISTS (SELECT 1 FROM chat_members cm \
                                     WHERE cm.conversation_id = c.id AND cm.user_id = me.user_id))",
                 )
