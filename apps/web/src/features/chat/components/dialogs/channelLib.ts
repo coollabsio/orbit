@@ -52,6 +52,16 @@ export function pickablePeople<T extends Person & { name: string }>(
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
+/** Who "Add people" offers for a channel: the people not in it yet, and never a guest for a public channel. */
+export function addablePeople<T extends Person & { name: string }>(
+  conversation: Pick<Conversation, 'kind' | 'memberIds'>,
+  members: readonly T[],
+  currentUserId: string | null,
+): T[] {
+  const allowed = conversation.kind === 'public' ? members.filter((member) => member.role !== 'Guest') : members
+  return pickablePeople(allowed, currentUserId, conversation.memberIds)
+}
+
 /** People a new message can go to: yourself first, as "Name (you)" (the DM with yourself), then `pickablePeople`. */
 export function messageablePeople<T extends Person & { name: string }>(members: readonly T[], currentUserId: string | null): T[] {
   const me = members.find((member) => member.id === currentUserId)

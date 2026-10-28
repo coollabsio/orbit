@@ -20,6 +20,7 @@ import { ConversationIcon } from './sidebar/ConversationIcon'
 import { ConversationMenuItems } from './sidebar/ConversationMenuItems'
 import { useConversationActions } from './sidebar/useConversationActions'
 import { ProfileTrigger } from '@/components/common/ProfileTrigger'
+import { Badge } from '@/components/ui/badge'
 
 /** A header button that shows a right pane and closes it again; pressed while its pane is open. */
 function PaneToggle({ label, pressed, className, onToggle, children }: { label: string; pressed: boolean; className?: string; onToggle: () => void; children: ReactNode }) {
@@ -57,6 +58,8 @@ export function ConversationHeader({ conversation }: { conversation: Conversatio
   const title = conversationTitle(conversation, people, currentUserId ?? '')
   const channel = conversation.kind !== 'dm'
   const dmPerson = dmProfilePerson(conversation, people, currentUserId)
+  const guestIds = new Set(people.filter((person) => person.role === 'Guest').map((person) => person.id))
+  const hasGuests = channel && conversation.memberIds.some((id) => guestIds.has(id))
   const toggle = (pane: ChatPane) => () => navigation.togglePane(pane)
 
   return (
@@ -72,6 +75,13 @@ export function ConversationHeader({ conversation }: { conversation: Conversatio
             {title}
           </ProfileTrigger>
         </PaneTitle>
+        {hasGuests ? (
+          <Tip label="This channel has guests: people from outside the workspace" side="bottom">
+            <Badge data-slot="conversation-guests" variant="outline" tabIndex={0} className="text-muted-foreground">
+              Has guests
+            </Badge>
+          </Tip>
+        ) : null}
         {channel && conversation.topic ? (
           <Tooltip>
             <TooltipTrigger render={<span tabIndex={0} className="min-w-0 truncate rounded-sm text-xs text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50 @max-[620px]/header:hidden" />}>

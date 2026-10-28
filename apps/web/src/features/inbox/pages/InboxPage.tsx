@@ -9,7 +9,7 @@ import { EmptyState } from '@/components/common/EmptyState'
 import { VirtualList } from '@/components/common/VirtualList'
 import { Pane, PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
-import { useMembers } from '@/features/workspaces/api'
+import { useTeamMembers } from '@/features/workspaces/api'
 import { isMention, notificationCopy, notificationTarget, useMarkAllNotificationsRead, useMarkNotificationRead, useNotifications } from '@/features/inbox/api'
 import { usePageTree } from '@/features/docs/api/pages'
 import { useSlowPending } from '@/lib/useDebouncedValue'
@@ -33,7 +33,7 @@ export function InboxPage() {
   }, { replace: true })
   const allQuery = useNotifications(workspace.id, false)
   const unreadQuery = useNotifications(workspace.id, true)
-  const members = useMembers(workspace.id)
+  const members = useTeamMembers(workspace.id)
   const hasPageMentions = (allQuery.data ?? []).some((notification) => notification.page_id)
   const pageTree = usePageTree(workspace.id, hasPageMentions)
   const markRead = useMarkNotificationRead(workspace.id)

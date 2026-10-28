@@ -9,7 +9,19 @@ import {
   mobileDockPaths,
   mobileDockPathsFor,
   primaryProductPath,
+  guestHomePath,
+  guestMayOpen,
 } from './productNavigation'
+
+test('a guest opens only chat and its own account settings', () => {
+  expect(guestMayOpen(guestHomePath)).toBeTrue()
+  for (const path of ['/chat', '/chat/c1', '/chat/c1/thread/m1', '/chat/unreads', '/profile', '/profile/appearance', '/admin']) {
+    expect(guestMayOpen(path)).toBeTrue()
+  }
+  for (const path of ['/', '/tasks', '/tasks/t1', '/docs', '/views', '/activity', '/settings', '/settings/members', '/chatroom', '/profiles']) {
+    expect(guestMayOpen(path)).toBeFalse()
+  }
+})
 
 test('tasks are the landing page, docs are enabled and mock product routes are disabled', () => {
   expect(primaryProductPath).toBe('/tasks')

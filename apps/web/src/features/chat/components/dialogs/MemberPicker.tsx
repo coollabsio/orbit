@@ -7,6 +7,7 @@ import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from '@
 import { presenceOf, usePresence } from '@/features/realtime/presence'
 import type { User } from '@/features/workspaces/models'
 import { matchPeople } from './channelLib'
+import { GuestBadge } from '@/components/common/GuestBadge'
 
 interface MemberPickerProps {
   /** The people on offer, in the order to show them (see `pickablePeople`). */
@@ -75,6 +76,7 @@ export function MemberPicker({ people, selectedIds, onChange, label, placeholder
             >
               <UserAvatar user={person} size={24} status={presenceOf(presence, person.id).status} />
               <span className="truncate">{person.name}</span>
+              {person.role === 'Guest' ? <GuestBadge /> : null}
               <span className="truncate text-xs text-muted-foreground">@{person.handle}</span>
               {chosen ? <span className="sr-only">Chosen</span> : null}
             </CommandItem>

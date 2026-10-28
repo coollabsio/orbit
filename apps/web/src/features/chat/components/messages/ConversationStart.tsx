@@ -6,6 +6,7 @@ import { fullTimestamp } from '../../lib/time'
 import { useChatNavigation, useOpenPane } from '../../useChatNavigation'
 import { conversationTitle, useChatPeople } from './people'
 import { ProfileTrigger } from '@/components/common/ProfileTrigger'
+import { canAddPeople } from '../dialogs/channelLib'
 
 /** The block above the first message of a conversation. */
 export function ConversationStart({ conversation }: { conversation: Conversation }) {
@@ -50,7 +51,7 @@ export function ConversationStart({ conversation }: { conversation: Conversation
           `Created on ${fullTimestamp(conversation.createdAt)}`
         )}
       </p>
-      {conversation.isMember && !conversation.archived && !membersOpen ? (
+      {canAddPeople(conversation, currentUserId ? people.byId.get(currentUserId) : undefined) && !membersOpen ? (
         <Button variant="outline" size="sm" className="mt-2" onClick={() => togglePane('members')}>
           Add people
         </Button>

@@ -27,7 +27,7 @@ import { uploadInlineFile } from '@/features/tasks/api/inlineFiles'
 import { fileBlock, isEmptyRichText } from '@/features/tasks/lib/richText'
 // Type-only import: erased at build time, so the BlockNote chunk stays lazy.
 import type { PageEditorHandle } from '@/features/docs/editor/PageEditor'
-import { useMembers } from '@/features/workspaces/api'
+import { useTeamMembers } from '@/features/workspaces/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useLabels } from '@/features/tasks/api/labels'
 import { taskIdentifier, type Task, type TaskPriority } from '@/features/tasks/api/models'
@@ -68,7 +68,7 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
   const { workspace } = useWorkspace()
   const projects = useProjects(workspace.id).data ?? []
   const statuses = useAllStatuses(workspace.id, projects).data
-  const members = useMembers(workspace.id).data ?? []
+  const members = useTeamMembers(workspace.id).data ?? []
   const labelsQuery = useLabels(workspace.id)
   const labels = labelsQuery.data ?? []
   const createTask = useCreateTask(workspace.id)

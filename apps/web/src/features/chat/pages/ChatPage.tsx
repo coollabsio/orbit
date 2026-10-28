@@ -39,6 +39,7 @@ import { ChatLinkCard, ChatLinkChip } from './ChatLinkCard'
 import { homeConversation, orbitLinkTarget, PANE_WIDTH, paneLayout, rightPaneOf, taskTitleFromMessage, type RightPane } from './chatPageLib'
 import { openedByPointer, useElementWidth, useInputModality, useIsPhone } from './useChatViewport'
 import { loadFailed } from '@/lib/connection'
+import { useIsGuest } from '@/features/workspaces/permissions'
 
 const PANE_LABEL: Record<RightPane['kind'], string> = { thread: 'Thread', search: 'Search', members: 'Members', pins: 'Pinned messages', files: 'Files', threads: 'Threads' }
 
@@ -175,7 +176,9 @@ export function ChatPage() {
   const conversations = useConversations()
   const people = useMembers(workspaceId).data
   const openNewTask = useOpenNewTask()
-  const projects = useProjects(workspaceId).data
+  // a guest has no tasks or docs: no task keys, no Orbit link cards, no "Create task"
+  const guest = useIsGuest()
+  const projects = useProjects(workspaceId, !guest).data
   const phone = useIsPhone()
   const [areaRef, areaWidth] = useElementWidth()
   const [paneWidth, setPaneWidth] = useStoredWidth('orbit:chat:pane_width', PANE_WIDTH)
@@ -191,15 +194,15 @@ export function ChatPage() {
 
   const host: ChatHost = {
     renderLinkCard: (url) => {
-      const target = orbitLinkTarget(url, window.location.origin)
+      const target = guest ? null : orbitLinkTarget(url, window.location.origin)
       return target ? <ChatLinkCard kind={target.kind} id={target.id} /> : null
     },
     renderLink: (url, plain, hidden) => {
-      const target = orbitLinkTarget(url, window.location.origin)
+      const target = guest ? null : orbitLinkTarget(url, window.location.origin)
       return target ? <ChatLinkChip kind={target.kind} id={target.id} hidden={hidden}>{plain}</ChatLinkChip> : plain
     },
     taskKeys: (projects ?? []).map((project) => project.key),
-    createTask: (message: ChatMessage) => {
+    createTask: guest ? undefined : (message: ChatMessage) => {
       const source = conversations.data?.find((candidate) => candidate.id === message.conversationId)
       const text = decodeMentions(message.body, people ?? [], conversations.data ?? [])
       const where = source && source.kind !== 'dm' ? `a message in #${source.name}` : 'a direct message'

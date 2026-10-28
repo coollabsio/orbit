@@ -2,7 +2,8 @@ import { useNavigate } from 'react-router'
 import { useTheme } from '@/lib/themeContext'
 import type { CommandId } from '@/shortcuts/commands'
 import { useCommand } from '@/shortcuts/useCommand'
-import { chatEnabled, docsHidden } from './productNavigation'
+import { useIsGuest } from '@/features/workspaces/permissions'
+import { chatEnabled, docsHidden, guestMayOpen } from './productNavigation'
 
 /** Where each navigation command goes. */
 export const NAVIGATION: ReadonlyArray<{ id: CommandId; to: string }> = [
@@ -27,15 +28,18 @@ function NavigationCommand({ id, to }: { id: CommandId; to: string }) {
 
 /** Mounts the navigation commands; one component each, so the list can change without breaking the rules of hooks. */
 export function NavigationCommands() {
-  return NAVIGATION.filter(({ id }) => !(docsHidden && id === 'nav.docs') && !(id === 'nav.chat' && !chatEnabled)).map((entry) => <NavigationCommand key={entry.id} {...entry} />)
+  const guest = useIsGuest()
+  return NAVIGATION.filter(({ id, to }) => !(docsHidden && id === 'nav.docs') && !(id === 'nav.chat' && !chatEnabled) && !(guest && !guestMayOpen(to))).map((entry) => <NavigationCommand key={entry.id} {...entry} />)
 }
 
 /** The commands that work on every page of the app shell. */
 export function useGlobalCommands({ openPalette, openHelp }: { openPalette: () => void; openHelp: () => void }) {
   const navigate = useNavigate()
   const { toggleTheme } = useTheme()
+  // a guest has no workspace settings
+  const guest = useIsGuest()
   useCommand('search.open', openPalette)
   useCommand('help.open', openHelp)
-  useCommand('settings.open', () => navigate('/settings'))
+  useCommand('settings.open', () => navigate(guest ? '/profile' : '/settings'))
   useCommand('theme.toggle', toggleTheme)
 }

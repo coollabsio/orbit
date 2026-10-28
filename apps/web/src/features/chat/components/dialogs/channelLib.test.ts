@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { ChatError } from '@/features/chat/api/types'
-import { canAddPeople, canManageChannel, channelNameFinal, channelNameInput, chatErrorMessage, matchPeople, messageablePeople, pickablePeople } from './channelLib'
+import { addablePeople, canAddPeople, canManageChannel, channelNameFinal, channelNameInput, chatErrorMessage, matchPeople, messageablePeople, pickablePeople } from './channelLib'
 
 test('a channel name is lowercase and spaces become hyphens while it is typed', () => {
   expect(channelNameInput('Design Team')).toBe('design-team')
@@ -76,4 +76,16 @@ test('a chat error becomes the sentence of the action, a general one, or the fal
   expect(chatErrorMessage(new ChatError('forbidden', 'x'), fallback)).toBe('You do not have permission to do this.')
   expect(chatErrorMessage(new ChatError('not_found', 'x'), fallback)).toBe(fallback)
   expect(chatErrorMessage(new Error('network'), fallback)).toBe(fallback)
+})
+
+test('"Add people" never offers a guest for a public channel, and does for a private one', () => {
+  const people = [
+    { id: 'u1', name: 'Me', role: 'Member' as const },
+    { id: 'u2', name: 'Gus', role: 'Guest' as const },
+    { id: 'u3', name: 'Ann', role: 'Member' as const },
+    { id: 'u4', name: 'In', role: 'Member' as const },
+  ]
+  const ids = (kind: 'public' | 'private') => addablePeople({ kind, memberIds: ['u4'] }, people, 'u1').map((person) => person.id)
+  expect(ids('public')).toEqual(['u3'])
+  expect(ids('private')).toEqual(['u3', 'u2'])
 })

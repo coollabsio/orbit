@@ -15,6 +15,7 @@ import { MessageToolbar } from './MessageToolbar'
 import { ReplySummary } from './ReplySummary'
 import { pointAnchor } from './useMessageActions'
 import { ProfileTrigger } from '@/components/common/ProfileTrigger'
+import { GuestBadge } from '@/components/common/GuestBadge'
 
 const LONG_PRESS = 500
 /** A finger that moves this far is scrolling, not pressing. */
@@ -149,6 +150,7 @@ export function MessageItem({ message, groupStart, editing, active, tone, menuOp
               <ProfileTrigger userId={author?.id} name={author?.name ?? 'Unknown'} tabIndex={active ? 0 : -1} className="truncate font-medium text-foreground">
                 <span data-slot="message-author">{author?.name ?? 'Unknown'}</span>
               </ProfileTrigger>
+              {author?.role === 'Guest' ? <GuestBadge className="self-center" /> : null}
               <time dateTime={iso} title={fullTimestamp(message.createdAt)} className="shrink-0 text-xs text-muted-foreground">
                 {messageTime(message.createdAt)}
               </time>

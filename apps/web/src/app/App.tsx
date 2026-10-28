@@ -48,6 +48,7 @@ import { RegisterPage } from '@/features/auth/pages/RegisterPage'
 import { SetupPage } from '@/features/auth/pages/SetupPage'
 import { OnboardingPage } from '@/features/onboarding/OnboardingPage'
 import { WorkspaceProvider } from '@/features/workspaces/WorkspaceProvider'
+import { GuestWorkspaceGate } from '@/features/workspaces/GuestWorkspaceGate'
 import { ViewsPage } from '@/features/views/ViewsPage'
 
 /** Hands the router's navigate function to non-component code (markdown links). */
@@ -86,70 +87,72 @@ export default function App() {
           <Route path="onboarding" element={<OnboardingPage />} />
           <Route element={<WorkspaceProvider><Outlet /></WorkspaceProvider>}>
             <Route element={<AppShell />}>
-              <Route index element={<HomePage />} />
-              <Route path="tasks" element={<TasksPage />} />
-              <Route path="tasks/projects/:projectId/settings" element={<ProjectSettingsPage />} />
-              <Route path="tasks/:taskId" element={<TasksPage />} />
-              <Route path="tasks-trash" element={<TaskTrashPage />} />
-              <Route path="views" element={<ViewsPage />} />
-              <Route path="views/:viewId" element={<TasksPage />} />
-              <Route path="views/:viewId/:taskId" element={<TasksPage />} />
-              <Route path="docs/trash" element={<DocsPage view="trash" />} />
-              <Route path="docs/import/:importId?" element={<DocsPage view="import" />} />
-              <Route path="docs/:pageId?" element={<DocsPage />} />
-              <Route path="mail/*" element={<Navigate to="/tasks" replace />} />
-              {chatEnabled ? (
-                <>
-                  <Route path="chat" element={<ChatPage />} />
-                  <Route path="chat/unreads" element={<ChatPage />} />
-                  <Route path="chat/threads" element={<ChatPage />} />
-                  <Route path="chat/:conversationId" element={<ChatPage />} />
-                  <Route path="chat/:conversationId/thread/:messageId" element={<ChatPage />} />
-                </>
-              ) : (
-                <Route path="chat/*" element={<Navigate to="/tasks" replace />} />
-              )}
-              <Route path="dm/*" element={<Navigate to={chatEnabled ? '/chat' : '/tasks'} replace />} />
-              <Route path="activity" element={<InboxPage />} />
-              <Route path="inbox" element={<MovedTo path="/activity" />} />
-              <Route path="profile" element={<AccountLayout />}>
-                <Route index element={<ProfilePage />} />
-                <Route path="appearance" element={<AppearancePage />} />
-                <Route path="notifications" element={<NotificationsPage />} />
-                <Route path="security" element={<SecurityPage />} />
-                <Route path="sessions" element={<SessionsPage />} />
-                <Route path="shortcuts" element={<ShortcutsPage />} />
-                <Route path="storage" element={<StoragePage />} />
+              <Route element={<GuestWorkspaceGate />}>
+                <Route index element={<HomePage />} />
+                <Route path="tasks" element={<TasksPage />} />
+                <Route path="tasks/projects/:projectId/settings" element={<ProjectSettingsPage />} />
+                <Route path="tasks/:taskId" element={<TasksPage />} />
+                <Route path="tasks-trash" element={<TaskTrashPage />} />
+                <Route path="views" element={<ViewsPage />} />
+                <Route path="views/:viewId" element={<TasksPage />} />
+                <Route path="views/:viewId/:taskId" element={<TasksPage />} />
+                <Route path="docs/trash" element={<DocsPage view="trash" />} />
+                <Route path="docs/import/:importId?" element={<DocsPage view="import" />} />
+                <Route path="docs/:pageId?" element={<DocsPage />} />
+                <Route path="mail/*" element={<Navigate to="/tasks" replace />} />
+                {chatEnabled ? (
+                  <>
+                    <Route path="chat" element={<ChatPage />} />
+                    <Route path="chat/unreads" element={<ChatPage />} />
+                    <Route path="chat/threads" element={<ChatPage />} />
+                    <Route path="chat/:conversationId" element={<ChatPage />} />
+                    <Route path="chat/:conversationId/thread/:messageId" element={<ChatPage />} />
+                  </>
+                ) : (
+                  <Route path="chat/*" element={<Navigate to="/tasks" replace />} />
+                )}
+                <Route path="dm/*" element={<Navigate to={chatEnabled ? '/chat' : '/tasks'} replace />} />
+                <Route path="activity" element={<InboxPage />} />
+                <Route path="inbox" element={<MovedTo path="/activity" />} />
+                <Route path="profile" element={<AccountLayout />}>
+                  <Route index element={<ProfilePage />} />
+                  <Route path="appearance" element={<AppearancePage />} />
+                  <Route path="notifications" element={<NotificationsPage />} />
+                  <Route path="security" element={<SecurityPage />} />
+                  <Route path="sessions" element={<SessionsPage />} />
+                  <Route path="shortcuts" element={<ShortcutsPage />} />
+                  <Route path="storage" element={<StoragePage />} />
+                </Route>
+                <Route path="admin" element={<AdminLayout />}>
+                  <Route index element={<AdminSettingsPage />} />
+                  <Route path="users" element={<AdminUsersPage />} />
+                  <Route path="email" element={<AdminEmailPage />} />
+                  <Route path="limits" element={<AdminLimitsPage />} />
+                  <Route path="audit" element={<AdminAuditPage />} />
+                  <Route path="storage" element={<AdminStoragePage />} />
+                  <Route path="backups" element={<AdminBackupsPage />} />
+                  <Route path="jobs" element={<AdminJobsPage />} />
+                </Route>
+                <Route path="settings" element={<SettingsLayout />}>
+                  <Route index element={<GeneralPage />} />
+                  {/* labels belong to a project now: each project's settings has them */}
+                  <Route path="labels" element={<Navigate to="/tasks" replace />} />
+                  <Route path="emoji" element={<EmojiPage />} />
+                  <Route path="stickers" element={<StickersPage />} />
+                  <Route path="github" element={<GithubPage />} />
+                  <Route path="billing" element={<BillingPage />} />
+                  <Route path="danger-zone" element={<DangerZonePage />} />
+                  <Route path="members" element={<MembersPage />} />
+                  <Route path="invitations" element={<Navigate to="/settings/members" replace />} />
+                  {/* these moved to the account settings; old links and bookmarks still work */}
+                  <Route path="sessions" element={<MovedTo path="/profile/sessions" />} />
+                  <Route path="shortcuts" element={<MovedTo path="/profile/shortcuts" />} />
+                  <Route path="notifications" element={<MovedTo path="/profile/notifications" />} />
+                  <Route path="api-tokens" element={<ApiTokensPage />} />
+                  <Route path="file-storage" element={<FileStoragePage />} />
+                </Route>
+                <Route path="*" element={<Navigate to="/tasks" replace />} />
               </Route>
-              <Route path="admin" element={<AdminLayout />}>
-                <Route index element={<AdminSettingsPage />} />
-                <Route path="users" element={<AdminUsersPage />} />
-                <Route path="email" element={<AdminEmailPage />} />
-                <Route path="limits" element={<AdminLimitsPage />} />
-                <Route path="audit" element={<AdminAuditPage />} />
-                <Route path="storage" element={<AdminStoragePage />} />
-                <Route path="backups" element={<AdminBackupsPage />} />
-                <Route path="jobs" element={<AdminJobsPage />} />
-              </Route>
-              <Route path="settings" element={<SettingsLayout />}>
-                <Route index element={<GeneralPage />} />
-                {/* labels belong to a project now: each project's settings has them */}
-                <Route path="labels" element={<Navigate to="/tasks" replace />} />
-                <Route path="emoji" element={<EmojiPage />} />
-                <Route path="stickers" element={<StickersPage />} />
-                <Route path="github" element={<GithubPage />} />
-                <Route path="billing" element={<BillingPage />} />
-                <Route path="danger-zone" element={<DangerZonePage />} />
-                <Route path="members" element={<MembersPage />} />
-                <Route path="invitations" element={<Navigate to="/settings/members" replace />} />
-                {/* these moved to the account settings; old links and bookmarks still work */}
-                <Route path="sessions" element={<MovedTo path="/profile/sessions" />} />
-                <Route path="shortcuts" element={<MovedTo path="/profile/shortcuts" />} />
-                <Route path="notifications" element={<MovedTo path="/profile/notifications" />} />
-                <Route path="api-tokens" element={<ApiTokensPage />} />
-                <Route path="file-storage" element={<FileStoragePage />} />
-              </Route>
-              <Route path="*" element={<Navigate to="/tasks" replace />} />
             </Route>
           </Route>
         </Route>

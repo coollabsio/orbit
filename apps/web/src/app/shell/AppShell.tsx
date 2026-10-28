@@ -20,7 +20,7 @@ import { cn } from 'cn'
 import { SideSheet, SideSheetContent } from '@/components/common/SideSheet'
 import { Tip } from '@/components/common/Tip'
 import { useWorkspace, WorkspaceContext } from '@/features/workspaces/workspaceContext'
-import { useIsInstallationAdmin } from '@/features/workspaces/permissions'
+import { useIsGuest, useIsInstallationAdmin } from '@/features/workspaces/permissions'
 import { WorkspaceSwitcher } from './WorkspaceSwitcher'
 import { CommandPalette } from './CommandPalette'
 import { ConnectionBanner } from './ConnectionBanner'
@@ -65,16 +65,18 @@ function WorkspaceShell() {
 
 function Shell() {
   const { workspace } = useWorkspace()
+  const guest = useIsGuest()
   const live = useWorkspaceEvents(workspace.id)
   const { total: chatBadge, unread: chatUnread } = useChatBadges()
-  // The tab icon gets a dot while chat or the Inbox has something unread.
-  const inboxUnread = useHasUnreadNotifications(workspace.id).data === true
+  // The tab icon gets a dot while chat or the Inbox has something unread. A guest has only chat.
+  const inboxUnread = useHasUnreadNotifications(workspace.id, !guest).data === true
   const isRoot = useIsInstallationAdmin()
   useUnreadFavicon(chatBadge + (inboxUnread ? 1 : 0))
   // Signed in: the worker that shows notifications may run. This asks for no permission.
   useEffect(() => startPushWorker(), [])
-  // The rich text editor (tasks, comments, docs, the new task dialog) is ready before its first use.
-  useEffect(() => preloadPageEditorWhenIdle(), [])
+  // The rich text editor (tasks, comments, docs, the new task dialog) is ready before its first use. A guest
+  // never opens them.
+  useEffect(() => (guest ? undefined : preloadPageEditorWhenIdle()), [guest])
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   // One saved preference for every page, so collapsing the sidebar in chat keeps it collapsed in tasks too.
@@ -196,7 +198,8 @@ function Shell() {
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background min-[900px]:floating:overflow-hidden min-[900px]:floating:rounded-lg min-[900px]:floating:border">
         <ConnectionBanner live={live} />
         <ReadOnlyBanner />
-        <Topbar onOpenDrawer={() => setDrawerOpen(true)} onOpenPalette={() => setPaletteOpen(true)} />
+        {/* the phone header loads tasks and projects; a guest has its dock (Chat, Settings) instead */}
+        {guest ? null : <Topbar onOpenDrawer={() => setDrawerOpen(true)} onOpenPalette={() => setPaletteOpen(true)} />}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <Outlet />
         </div>
@@ -222,7 +225,8 @@ function Shell() {
         </SideSheetContent>
       </SideSheet>
 
-      {paletteOpen ? <CommandPalette onClose={() => setPaletteOpen(false)} /> : null}
+      {/* a guest has nothing the palette searches (tasks, docs) */}
+      {paletteOpen && !guest ? <CommandPalette onClose={() => setPaletteOpen(false)} /> : null}
       {helpOpen ? <ShortcutHelpDialog onClose={() => setHelpOpen(false)} /> : null}
       <NavigationCommands />
       <SequenceHint />

@@ -77,7 +77,18 @@ export function useWorkspaces() {
 }
 
 export function useMembers(workspaceId: string | null) {
-  return useQuery({
+  return useQuery(membersQueryOptions(workspaceId))
+}
+
+const withoutGuests = (members: User[]) => members.filter((member) => member.role !== 'Guest')
+
+/** The members without guests: the people tasks and docs show and offer (assignees, mentions). Guests have only chat. */
+export function useTeamMembers(workspaceId: string | null) {
+  return useQuery({ ...membersQueryOptions(workspaceId), select: withoutGuests })
+}
+
+function membersQueryOptions(workspaceId: string | null) {
+  return {
     queryKey: queryKeys.members(workspaceId ?? ''),
     enabled: Boolean(workspaceId),
     queryFn: async () => {
@@ -92,7 +103,7 @@ export function useMembers(workspaceId: string | null) {
       })
       return page.items.map(memberFromRecord)
     },
-  })
+  }
 }
 
 export function useInvitations(workspaceId: string | null) {

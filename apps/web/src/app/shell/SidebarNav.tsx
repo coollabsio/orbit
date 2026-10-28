@@ -15,6 +15,7 @@ import { useProjects } from '@/features/tasks/api/projects'
 import { NewProjectModal } from '@/features/tasks/components/NewProjectModal'
 import { savedViewsQueryOptions } from '@/features/views/api/views'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
+import { useIsGuest } from '@/features/workspaces/permissions'
 import { settingsAreaOf, useSettingsArea, type SettingsAreaName } from '@/features/settings/settingsNav'
 import { chatEnabled, docsHidden } from './productNavigation'
 import { hostsPageList } from './sidebarSlot'
@@ -390,7 +391,9 @@ export function SidebarNav({
   pageListRef?: (element: HTMLDivElement | null) => void
 }) {
   const location = useLocation()
-  const pageArea: SidebarArea | null = contextual ? (settingsAreaOf(location.pathname) ?? (isTasksPath(location.pathname) ? 'tasks' : null)) : null
+  // a guest has Chat and its account settings only (`GuestWorkspaceGate`)
+  const guest = useIsGuest()
+  const pageArea: SidebarArea | null = contextual ? (settingsAreaOf(location.pathname) ?? (isTasksPath(location.pathname) && !guest ? 'tasks' : null)) : null
   // the area whose Back was pressed in the drawer: the main menu shows until the page moves to another area
   const [mainMenuFor, setMainMenuFor] = useState<SidebarArea | null>(null)
   const area = pageArea && pageArea === mainMenuFor ? null : pageArea
@@ -438,6 +441,7 @@ export function SidebarNav({
   return (
     <SidebarNavCollapsed.Provider value={collapsed}>
       <div data-slot="sidebar-nav" data-collapsed={collapsed} className="group/sidebar-nav flex min-h-0 flex-1 flex-col">
+        {guest ? null : (
         <div className="px-1 pb-3">
         <Tip label={collapsed ? 'Search' : undefined} side="right">
           {collapsed ? (
@@ -461,6 +465,7 @@ export function SidebarNav({
           )}
         </Tip>
         </div>
+        )}
         {/* a new area slides in: forward from the right, back to the app links from the left */}
         <div
           key={content}
@@ -476,7 +481,17 @@ export function SidebarNav({
             </>
           ) : (
             <div className="-mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overscroll-contain px-1 pb-2">
-              {area === 'tasks' ? <TasksAreaNav onNavigate={onNavigate} onBack={backShowsMenu ? () => setMainMenuFor(area) : undefined} /> : area ? <SettingsAreaNav area={area} onNavigate={onNavigate} onBack={backShowsMenu ? () => setMainMenuFor(area) : undefined} /> : (
+              {area === 'tasks' ? <TasksAreaNav onNavigate={onNavigate} onBack={backShowsMenu ? () => setMainMenuFor(area) : undefined} /> : area ? <SettingsAreaNav area={area} onNavigate={onNavigate} onBack={backShowsMenu ? () => setMainMenuFor(area) : undefined} /> : guest ? (
+                <>
+                  <SidebarNavItem to="/chat" icon={MessageSquare} label="Chat" badge={chatBadge} unread={chatUnread} onClick={onNavigate} />
+                  {isRoot ? (
+                    <>
+                      <div className="flex-1" aria-hidden="true" />
+                      <SidebarNavItem to="/admin" icon={SecurityUser} tone="neutral" label="Admin" onClick={onNavigate} />
+                    </>
+                  ) : null}
+                </>
+              ) : (
                 <>
                   {WORKSPACE_LINKS.map((link) => link.enabled || (link.to === '/chat' && chat) ? (
                     <Fragment key={link.to}>
