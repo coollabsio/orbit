@@ -4,6 +4,7 @@ import { Pressable, ScrollView, View } from 'react-native'
 
 import { AddPeopleSheet } from '../../../components/chat/ChannelSheets'
 import { ChatPane } from '../../../components/chat/Pane'
+import { Badge } from '../../../components/settings/Shell'
 import { conversationPermissions, conversationTitle } from '../../../data/chat'
 import * as chat from '../../../data/chat-api'
 import { confirmAction, useChatWrite, useIsChatAdmin } from '../../../hooks/chat'
@@ -78,6 +79,7 @@ function MembersScreenContent() {
                 </Text>
                 {/* the web's amber-500 crown, the same colour as the idle mark */}
                 {member.role === 'owner' ? <Icon name="crown" size={14} color={presenceColors.idle} /> : null}
+                {member.role === 'guest' ? <Badge label="Guest" tone="outline" /> : null}
               </Pressable>
               {permissions?.canRemovePeople && member.user_id !== user.id ? <Button label="Remove" variant="ghost" size="sm" onPress={() => void remove(member.user_id, member.display_name)} /> : null}
             </View>

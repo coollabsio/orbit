@@ -244,10 +244,14 @@ export const roleLabel = (role: WorkspaceRole | string) => role.charAt(0).toUppe
 
 export type MemberAction = { kind: 'role'; role: 'admin' | 'member' } | { kind: 'transfer' } | { kind: 'remove' }
 
-/** What the Manage menu offers on a member's row: none on your own row; the server decides the rest. */
+/**
+ * What the Manage menu offers on a member's row: none on your own row; the server decides the rest. A guest can only
+ * become a member ("Convert to member"); nobody becomes a guest.
+ */
 export function memberActions(member: MemberRecord, myUserId: string): MemberAction[] {
   if (member.user_id === myUserId) return []
-  const roles = member.can_change_role ? (['admin', 'member'] as const).filter((role) => role !== member.role) : []
+  const choices = member.role === 'guest' ? (['member'] as const) : (['admin', 'member'] as const)
+  const roles = member.can_change_role ? choices.filter((role) => role !== member.role) : []
   return [
     ...roles.map((role): MemberAction => ({ kind: 'role', role })),
     ...(member.can_transfer_ownership ? [{ kind: 'transfer' } as const] : []),
@@ -287,8 +291,17 @@ export async function pendingInvitations(client: OrbitClient, workspaceId: strin
 }
 
 /** `manual` answers with the link to share; `smtp` emails it. */
-export async function invite(client: OrbitClient, workspaceId: string, email: string, role: 'admin' | 'member', delivery: 'manual' | 'smtp'): Promise<{ invitation: InvitationRecord; url: string | null }> {
-  const { data } = await createInvitation({ client, path: { workspace_id: workspaceId }, body: { email, role, delivery }, throwOnError: true })
+export type InviteRole = 'admin' | 'member' | 'guest'
+
+/** Why an invitation cannot be sent yet: a guest needs one or more private channels. */
+export function invitationProblem(role: InviteRole, channelIds: readonly string[]): string | null {
+  return role === 'guest' && channelIds.length === 0 ? 'Choose one or more channels for the guest.' : null
+}
+
+/** Invites `email`. A guest invitation names its private channels; the other roles send none. */
+export async function invite(client: OrbitClient, workspaceId: string, email: string, role: InviteRole, channelIds: readonly string[], delivery: 'manual' | 'smtp'): Promise<{ invitation: InvitationRecord; url: string | null }> {
+  const body = role === 'guest' ? { email, role, delivery, conversation_ids: [...channelIds] } : { email, role, delivery }
+  const { data } = await createInvitation({ client, path: { workspace_id: workspaceId }, body, throwOnError: true })
   return { invitation: data.invitation, url: data.url ?? null }
 }
 

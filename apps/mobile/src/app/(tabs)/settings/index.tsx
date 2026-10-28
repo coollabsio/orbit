@@ -8,7 +8,7 @@ import { ConfirmDialog, type ConfirmRequest } from '../../../components/settings
 import { ACCOUNT_NAV, Note, RowIcon, RowText, SettingsCard, SettingsRow, SettingsShell, WORKSPACE_NAV } from '../../../components/settings/Shell'
 import { formatBytes, storageUse } from '../../../data/account-api'
 import { useDeleteStorageFile, useMemberWrites, useRenameWorkspace, useWorkspaceStorage } from '../../../hooks/account'
-import { useOrbit } from '../../../orbit-context'
+import { useIsGuest, useOrbit } from '../../../orbit-context'
 import { useMembers } from '../../../queries'
 import { errorMessage } from '../../../session-context'
 import { useTheme } from '../../../theme'
@@ -22,7 +22,9 @@ export default function GeneralScreen() {
   const { workspace, session, user, signOut } = useOrbit()
   const { colors } = useTheme()
   const [offset, setOffset] = useState(0)
-  const storage = useWorkspaceStorage(offset)
+  // a guest has no workspace storage to see
+  const guest = useIsGuest()
+  const storage = useWorkspaceStorage(offset, !guest)
   const files = storage.data?.largest_files ?? []
   const page = storageFilesPage(offset, files.length, storage.data?.file_count ?? 0)
   // a delete emptied the last page: go back one
@@ -34,7 +36,7 @@ export default function GeneralScreen() {
     <SettingsShell title="Settings" nav={WORKSPACE_NAV} refreshing={storage.isRefetching} onRefresh={() => void storage.refetch()}>
       {workspace.permissions.includes('workspace.update') ? <WorkspaceName key={workspace.id} /> : null}
 
-      <SettingsCard
+      {guest ? null : <SettingsCard
         title="Storage"
         description="Files, emoji and stickers of this workspace. A file attached more than once counts once; a deleted file stops counting about a day after the trash is emptied."
         actions={workspace.permissions.includes('storage.manage') ? <Button label="Use your own bucket" variant="outline" size="sm" onPress={() => router.push('/settings/file-storage')} /> : undefined}
@@ -43,7 +45,7 @@ export default function GeneralScreen() {
         {files.length ? (
           <LargestFiles files={files} page={page} loading={storage.isFetching} onPage={setOffset} />
         ) : null}
-      </SettingsCard>
+      </SettingsCard>}
 
       <SettingsCard title="Account" description={`${user.email} on ${session.server}`} flush>
         {ACCOUNT_NAV.map((item, index) => (

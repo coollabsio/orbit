@@ -8,13 +8,13 @@ import { AddPeopleSheet } from '../../components/chat/ChannelSheets'
 import { Composer, useComposer } from '../../components/chat/Composer'
 import { ConversationOptions } from '../../components/chat/ConversationOptions'
 import { type ListRow, MessageList, useMessageSheet } from '../../components/chat/MessageList'
-import { buildMessageRows, conversationPermissions, conversationTitle } from '../../data/chat'
+import { buildMessageRows, conversationPermissions, conversationTitle, hasGuests } from '../../data/chat'
 import * as chat from '../../data/chat-api'
 import { fullDate, timeOfDay } from '../../data/format'
 import type { ConversationRecord } from '../../data/orbit'
 import { useChatWrite, useIsChatAdmin, useMessages } from '../../hooks/chat'
 import { useOrbit } from '../../orbit-context'
-import { useChatStates, useConversations, usePeople } from '../../queries'
+import { useChatStates, useConversations, useMembers, usePeople } from '../../queries'
 import { useTheme } from '../../theme'
 import { Avatar, Button, ErrorView, Icon, IconButton, LoadingView, SafeAreaView, Text } from '../../ui'
 import { ChatColorScope } from '../../components/chat/ChatColorScope'
@@ -37,6 +37,7 @@ function ConversationScreenContent() {
   const queryClient = useQueryClient()
   const { colors } = useTheme()
   const people = usePeople()
+  const members = useMembers().data
   const conversations = useConversations()
   const states = useChatStates()
   const admin = useIsChatAdmin()
@@ -120,7 +121,7 @@ function ConversationScreenContent() {
             }}
             start={
               !messages.hasPreviousPage && conversation ? (
-                <ConversationStart conversation={conversation} title={name} creator={handlers.nameOf(conversation.created_by)} onAddPeople={permissions?.canAddPeople ? () => setAddPeople(true) : undefined} />
+                <ConversationStart conversation={conversation} title={name} creator={handlers.nameOf(conversation.created_by)} hasGuests={hasGuests(conversation, members ?? [])} onAddPeople={permissions?.canAddPeople ? () => setAddPeople(true) : undefined} />
               ) : undefined
             }
           />
@@ -157,7 +158,7 @@ function Notice({ text }: { text: string }) {
 }
 
 /** The block above the first message: who made the channel and when, and "Add people" for those who may. */
-function ConversationStart({ conversation, title, creator, onAddPeople }: { conversation: ConversationRecord; title: string; creator: string; onAddPeople?: () => void }) {
+function ConversationStart({ conversation, title, creator, hasGuests, onAddPeople }: { conversation: ConversationRecord; title: string; creator: string; hasGuests: boolean; onAddPeople?: () => void }) {
   if (conversation.kind === 'dm') {
     return (
       <View className="px-3 pt-8 pb-4">
@@ -172,6 +173,8 @@ function ConversationStart({ conversation, title, creator, onAddPeople }: { conv
       <Text className="text-[12px] leading-[16px] text-muted-foreground">
         Created by <Text className="font-noto-medium text-[12px] leading-[16px] text-foreground/85">{creator}</Text> on {fullDate(conversation.created_at)}, {timeOfDay(conversation.created_at)}
       </Text>
+      {/* the web shows "Has guests" in the header; the phone's header has no room, so the start says it */}
+      {hasGuests ? <Text className="text-[12px] leading-[16px] text-muted-foreground">This channel has guests: people from outside the workspace.</Text> : null}
       {onAddPeople ? (
         <View className="mt-2">
           <Button label="Add people" variant="outline" size="sm" icon="userAdd" onPress={onAddPeople} />

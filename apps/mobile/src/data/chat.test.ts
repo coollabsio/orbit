@@ -19,6 +19,8 @@ import {
   messageablePeople,
   type MessagePages,
   pickablePeople,
+  addablePeople,
+  hasGuests,
   quickReactions,
   removeMessage,
   searchEmoji,
@@ -326,4 +328,17 @@ test('emoji groups come from emojibase in order, without components or newer emo
 
 test('file sizes read like the web', () => {
   expect([fileSize(512), fileSize(12_800), fileSize(3_565_158)]).toEqual(['512 B', '13 KB', '3.4 MB'])
+})
+
+test('"Add people" never offers a guest for a public channel, and a channel with one has guests', () => {
+  const people = [
+    { user_id: 'me', display_name: 'Me', role: 'member' },
+    { user_id: 'gus', display_name: 'Gus', role: 'guest' },
+    { user_id: 'ann', display_name: 'Ann', role: 'member' },
+  ] as unknown as MemberRecord[]
+  expect(addablePeople({ kind: 'public', member_ids: ['me'] }, people, 'me')).toEqual([{ id: 'ann', name: 'Ann' }])
+  expect(addablePeople({ kind: 'private', member_ids: ['me'] }, people, 'me')).toEqual([{ id: 'ann', name: 'Ann' }, { id: 'gus', name: 'Gus' }])
+  expect(hasGuests({ kind: 'private', member_ids: ['me', 'gus'] }, people)).toBe(true)
+  expect(hasGuests({ kind: 'private', member_ids: ['me', 'ann'] }, people)).toBe(false)
+  expect(hasGuests({ kind: 'dm', member_ids: ['me', 'gus'] }, people)).toBe(false)
 })

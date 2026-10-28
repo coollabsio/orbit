@@ -3,6 +3,7 @@ import type { BottomTabBarProps } from 'expo-router/js-tabs'
 import { Pressable, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
+import { useIsGuest } from '../orbit-context'
 import { useChatBadge } from '../queries'
 import { alpha, useTheme } from '../theme'
 import { CountBadge, Icon, type IconName, Text } from '../ui'
@@ -17,14 +18,18 @@ const ITEMS: { route: string | null; href: Href; label: string; icon: IconName }
   { route: 'settings', href: '/settings', label: 'Settings', icon: 'settings' },
 ]
 
+/** A guest's dock: Chat and its own settings. */
+const GUEST_ITEMS = ITEMS.filter((item) => item.route === 'chat' || item.route === 'settings')
+
 export function Dock({ state }: BottomTabBarProps) {
   const { colors } = useTheme()
+  const items = useIsGuest() ? GUEST_ITEMS : ITEMS
   const insets = useSafeAreaInsets()
   const chatBadge = useChatBadge()
   const current = state.routes[state.index]?.name
   return (
     <View accessibilityRole="tablist" className="flex-row min-h-14 pt-3 bg-background" style={{ paddingBottom: insets.bottom }}>
-      {ITEMS.map((item) => {
+      {items.map((item) => {
         const enabled = item.route !== null
         const active = enabled && item.route === current
         const count = item.route === 'chat' ? chatBadge.count : 0

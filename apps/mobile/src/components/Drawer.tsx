@@ -16,6 +16,7 @@ import { AccountMenu } from './AccountMenu'
 import { NewProjectSheet } from './NewProjectSheet'
 import { DRAWER_AREA_TITLES, type DrawerArea, drawerAreaOf, drawerSections, TASK_PRESETS, tasksHref } from './drawerAreas'
 import { ACCOUNT_NAV, ADMIN_NAV, allowedNav, WORKSPACE_NAV } from './settings/Shell'
+import { isGuestRole } from '../data/guest'
 
 const DrawerContext = createContext<(() => void) | null>(null)
 
@@ -178,14 +179,17 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
   const pathname = usePathname()
   const { view, project } = useGlobalSearchParams<{ view?: string; project?: string }>()
   const chatBadge = useChatBadge()
-  const inboxUnread = (useUnreadNotifications().data?.length ?? 0) > 0
+  // a guest has Chat and its account settings only
+  const guest = isGuestRole(workspace.role)
+  const inboxUnread = (useUnreadNotifications(!guest).data?.length ?? 0) > 0
   const [switching, setSwitching] = useState(false)
   const [accountOpen, setAccountOpen] = useState(false)
   const newUi = useLayout() === 'new'
   const reduceMotion = useReduceMotion()
 
   const navs = areaNavs()
-  const pageArea = newUi ? drawerAreaOf(pathname, navs) : null
+  const routeArea = newUi ? drawerAreaOf(pathname, navs) : null
+  const pageArea = guest && routeArea === 'tasks' ? null : routeArea
   // the area whose Back was pressed: the app links show until the page moves to another area or the drawer closes
   const [mainMenuFor, setMainMenuFor] = useState<DrawerArea | null>(null)
   if (!mounted && mainMenuFor) setMainMenuFor(null)
@@ -234,7 +238,7 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
         <Icon name="chevronDown" size={13} color={alpha(colors.mutedForeground, 0.7)} />
       </Pressable>
 
-      <View className="px-1 pb-3">
+      {guest ? null : <View className="px-1 pb-3">
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Search"
@@ -244,7 +248,7 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
           <Icon name="search" size={16} color={alpha(colors.mutedForeground, 0.9)} />
           <RNText className="font-noto-medium text-[13px] text-muted-foreground">Search</RNText>
         </Pressable>
-      </View>
+      </View>}
 
       <SlideIn key={content} from={reduceMotion ? null : enter}>
         <ScrollView className="-mx-1 flex-1" contentContainerClassName="grow gap-0.5 px-1 pb-2">
@@ -253,7 +257,7 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
           ) : area ? (
             <>
               <BackRow label={DRAWER_AREA_TITLES[area]} onPress={() => setMainMenuFor(area)} />
-              {drawerSections(area, allowedNav(navs[area], workspace.permissions)).map((section) => (
+              {drawerSections(area, allowedNav(navs[area], workspace.permissions, guest)).map((section) => (
                 <Fragment key={section.label}>
                   <Section label={section.label} />
                   {section.items.map((item) => (
@@ -261,6 +265,17 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
                   ))}
                 </Fragment>
               ))}
+            </>
+          ) : guest ? (
+            <>
+              <NavRow link={{ label: 'Chat', icon: 'chat', href: '/chat', active: pathname.startsWith('/chat'), badge: chatBadge.count, dot: chatBadge.unread }} onPress={() => go('/chat')} />
+              <NavRow link={{ label: 'Settings', icon: 'settings', href: '/settings', active: onSettings && !onAdmin }} onPress={() => go('/settings')} />
+              {user.installation_admin ? (
+                <>
+                  <View className="flex-1" />
+                  <NavRow link={{ label: 'Admin', icon: 'admin', href: '/settings/admin', active: onAdmin }} tone="neutral" onPress={() => go('/settings/admin')} />
+                </>
+              ) : null}
             </>
           ) : (
             <>

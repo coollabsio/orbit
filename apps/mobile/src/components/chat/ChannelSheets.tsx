@@ -7,7 +7,7 @@ import { router } from 'expo-router'
 import { useState } from 'react'
 import { Pressable, Switch, View } from 'react-native'
 
-import { CHANNEL_NAME_MAX, channelNameFinal, channelNameInput, matchPeople, messageablePeople, type Person, pickablePeople } from '../../data/chat'
+import { addablePeople, CHANNEL_NAME_MAX, channelNameFinal, channelNameInput, matchPeople, messageablePeople, type Person, pickablePeople } from '../../data/chat'
 import * as chat from '../../data/chat-api'
 import type { CategoryRecord, ConversationRecord } from '../../data/orbit'
 import { useChatWrite } from '../../hooks/chat'
@@ -257,7 +257,7 @@ export function AddPeopleSheet({ conversation, onClose }: { conversation: Conver
       onSubmit={() => void submit()}
       onClose={onClose}
     >
-      <MemberPicker autoFocus people={pickablePeople(members, user.id, conversation.member_ids)} selectedIds={selectedIds} onChange={setSelectedIds} />
+      <MemberPicker autoFocus people={addablePeople(conversation, members, user.id)} selectedIds={selectedIds} onChange={setSelectedIds} />
     </FormSheet>
   )
 }

@@ -7,6 +7,7 @@ import { useOrbit } from '../../orbit-context'
 import { alpha, cssColors, setSchemePreference, useLayout, useTheme } from '../../theme'
 import { Icon, type IconName, IconButton, PaneHeader, SafeAreaView, Text } from '../../ui'
 import { MenuButton } from '../Drawer'
+import { guestMayOpen, isGuestRole } from '../../data/guest'
 
 export interface SettingsNavItem {
   href: Href & string
@@ -27,8 +28,9 @@ export const WORKSPACE_NAV: readonly SettingsNavItem[] = [
 ]
 
 /** The links of `nav` this workspace role may open. */
-export function allowedNav<T extends SettingsNavItem>(nav: readonly T[], permissions: readonly Permission[]): T[] {
-  return nav.filter((item) => !item.permission || permissions.includes(item.permission))
+/** The links this person may open: by permission, and for a guest only its own settings (`guestMayOpen`). */
+export function allowedNav<T extends SettingsNavItem>(nav: readonly T[], permissions: readonly Permission[], guest = false): T[] {
+  return nav.filter((item) => (!item.permission || permissions.includes(item.permission)) && (!guest || guestMayOpen(item.href)))
 }
 
 export const ACCOUNT_NAV: readonly SettingsNavItem[] = [
@@ -84,7 +86,7 @@ export function SettingsShell({ title, nav, children, refreshing, onRefresh }: {
         >
           {newUi ? null : (
             <View accessibilityRole="tablist" accessibilityLabel={title} className="flex-row flex-wrap gap-0.5 py-3 border-t border-b border-border">
-              {allowedNav(nav, workspace.permissions).map((item) => {
+              {allowedNav(nav, workspace.permissions, isGuestRole(workspace.role)).map((item) => {
                 const active = pathname === item.href
                 return (
                   <Pressable
