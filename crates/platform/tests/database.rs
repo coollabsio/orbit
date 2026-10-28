@@ -74,7 +74,7 @@ async fn github_schema_is_in_one_draft_migration() {
         db.scalar::<i64>("SELECT MAX(version) FROM schema_migrations")
             .await
             .unwrap(),
-        60
+        61
     );
     assert_eq!(
         db.scalar::<i64>("SELECT COUNT(*) FROM pragma_table_info('github_issue_links') WHERE name IN ('kind', 'pull_state', 'sync_paused')")
@@ -211,7 +211,7 @@ async fn rejects_a_schema_newer_than_the_binary() {
         error,
         MigrationError::SchemaNewer {
             database_version: 999,
-            binary_version: 60
+            binary_version: 61
         }
     ));
 }
@@ -2586,4 +2586,231 @@ async fn project_labels_migration_copies_labels_into_every_project() {
     .unwrap();
     assert_eq!(count("SELECT COUNT(*) FROM labels".into()).await, 3);
     assert_eq!(count("SELECT COUNT(*) FROM task_labels".into()).await, 0);
+}
+
+#[tokio::test]
+async fn guests_migration_keeps_every_membership_child_row() {
+    let directory = tempfile::tempdir().unwrap();
+    let db = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
+        .await
+        .unwrap();
+    MigrationRunner::embedded_through("test", 60)
+        .run(&db)
+        .await
+        .unwrap();
+    let [user, member, guest, late, workspace, owner, membership] =
+        std::array::from_fn::<Id, 7, _>(|_| Id::new_v7());
+    let [project, status, task, secret, root] = std::array::from_fn::<Id, 5, _>(|_| Id::new_v7());
+    db.execute(&format!(
+        "BEGIN;
+         INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at)
+         VALUES ('{user}', 'owner@example.com', 'owner@example.com', 'Owner', 'x', 1, 1),
+                ('{member}', 'member@example.com', 'member@example.com', 'Member', 'x', 1, 1),
+                ('{guest}', 'guest@example.com', 'guest@example.com', 'Guest', 'x', 1, 1),
+                ('{late}', 'late@example.com', 'late@example.com', 'Late', 'x', 1, 1);
+         INSERT INTO workspaces (id, name, owner_membership_id, created_at, updated_at)
+         VALUES ('{workspace}', 'W', '{owner}', 1, 1);
+         INSERT INTO memberships (id, workspace_id, user_id, role, created_at, updated_at)
+         VALUES ('{owner}', '{workspace}', '{user}', 'owner', 1, 1);
+         INSERT INTO memberships (id, workspace_id, user_id, role, created_at, updated_at)
+         VALUES ('{membership}', '{workspace}', '{member}', 'member', 2, 2);
+         INSERT INTO projects (id, workspace_id, name, project_key, color, created_at, updated_at)
+         VALUES ('{project}', '{workspace}', 'P', 'P', '#111111', 1, 1);
+         INSERT INTO task_statuses (id, workspace_id, project_id, name, description, color, category, position, created_at, updated_at)
+         VALUES ('{status}', '{workspace}', '{project}', 'Todo', '', '#000000', 'unstarted', 0, 1, 1);
+         INSERT INTO tasks (id, workspace_id, project_id, status_id, title, creator_id, created_at, updated_at)
+         VALUES ('{task}', '{workspace}', '{project}', '{status}', 'T', '{user}', 1, 1);
+         INSERT INTO task_assignees (task_id, membership_id, user_id)
+         VALUES ('{task}', '{membership}', '{member}');
+         INSERT INTO chat_conversations (id, workspace_id, kind, name, created_by, created_at, updated_at, message_count)
+         VALUES ('{secret}', '{workspace}', 'private', 'secret', '{user}', 3, 3, 1);
+         INSERT INTO chat_members (conversation_id, user_id, workspace_id, notify, favorite, read_count, mention_count, joined_at)
+         VALUES ('{secret}', '{user}', '{workspace}', 'all', 1, 1, 0, 3),
+                ('{secret}', '{member}', '{workspace}', 'muted', 0, 0, 1, 4);
+         INSERT INTO chat_messages (id, conversation_id, kind, author_id, body, created_at, reply_count)
+         VALUES ('{root}', '{secret}', 'message', '{user}', 'hi', 5, 1);
+         INSERT INTO chat_thread_members (root_id, user_id, workspace_id, conversation_id, following, read_reply_count, mention_count)
+         VALUES ('{root}', '{user}', '{workspace}', '{secret}', 1, 1, 0),
+                ('{root}', '{member}', '{workspace}', '{secret}', 0, 0, 1);
+         COMMIT;"
+    ))
+    .await
+    .unwrap();
+    let snapshot = || async {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT 'a ' || task_id || ' ' || membership_id || ' ' || user_id FROM task_assignees
+             UNION ALL
+             SELECT 'c ' || conversation_id || ' ' || user_id || ' ' || notify || ' '
+                 || CAST(favorite AS TEXT) || ' ' || CAST(read_count AS TEXT) || ' '
+                 || CAST(mention_count AS TEXT) || ' ' || CAST(joined_at AS TEXT) FROM chat_members
+             UNION ALL
+             SELECT 't ' || root_id || ' ' || user_id || ' ' || CAST(following AS TEXT) || ' '
+                 || CAST(read_reply_count AS TEXT) || ' ' || CAST(mention_count AS TEXT)
+             FROM chat_thread_members
+             UNION ALL
+             SELECT 'm ' || id || ' ' || role || ' ' || CAST(version AS TEXT) FROM memberships
+             ORDER BY 1",
+        )
+        .fetch_all(db.pool())
+        .await
+        .unwrap();
+        rows
+    };
+    let before = snapshot().await;
+    // 1 assignee, 2 #general + 2 private channel members, 2 thread members, 2 memberships.
+    assert_eq!(before.len(), 9);
+
+    MigrationRunner::embedded("test").run(&db).await.unwrap();
+
+    assert_eq!(snapshot().await, before);
+
+    // A guest gets no #general; a member still does.
+    let general = |user: Id| {
+        format!(
+            "SELECT COUNT(*) FROM chat_members JOIN chat_conversations \
+             ON chat_conversations.id = chat_members.conversation_id \
+             WHERE chat_members.user_id = '{user}' AND chat_conversations.is_default = 1"
+        )
+    };
+    db.execute(&format!(
+        "INSERT INTO memberships (id, workspace_id, user_id, role, created_at, updated_at)
+         VALUES ('{}', '{workspace}', '{guest}', 'guest', 6, 6);
+         INSERT INTO memberships (id, workspace_id, user_id, role, created_at, updated_at)
+         VALUES ('{}', '{workspace}', '{late}', 'member', 7, 7);",
+        Id::new_v7(),
+        Id::new_v7()
+    ))
+    .await
+    .unwrap();
+    assert_eq!(db.scalar::<i64>(&general(guest)).await.unwrap(), 0);
+    assert_eq!(db.scalar::<i64>(&general(late)).await.unwrap(), 1);
+
+    // The CHECK, the owner triggers and the identity trigger came back.
+    assert!(
+        db.execute(&format!(
+            "UPDATE memberships SET role = 'visitor' WHERE id = '{membership}'"
+        ))
+        .await
+        .is_err()
+    );
+    let error = db
+        .execute(&format!(
+            "UPDATE memberships SET role = 'owner' WHERE id = '{membership}'"
+        ))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("owner role must match"), "{error}");
+    let error = db
+        .execute(&format!(
+            "UPDATE memberships SET role = 'member' WHERE id = '{owner}'"
+        ))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("owner role is protected"), "{error}");
+    let error = db
+        .execute(&format!(
+            "UPDATE memberships SET user_id = '{late}' WHERE id = '{membership}'"
+        ))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("identity is immutable"), "{error}");
+    assert!(
+        db.execute(&format!(
+            "INSERT INTO memberships (id, workspace_id, user_id, role, created_at, updated_at)
+             VALUES ('{}', '{workspace}', '{late}', 'member', 8, 8)",
+            Id::new_v7()
+        ))
+        .await
+        .is_err(),
+        "one membership per user and workspace"
+    );
+
+    // A guest invitation names its channels; they go with the invitation or the channel.
+    let invitation = Id::new_v7();
+    db.execute(&format!(
+        "INSERT INTO workspace_invitations (id, workspace_id, email, normalized_email, role, delivery,
+             token_hash, invited_by, expires_at, created_at)
+         VALUES ('{invitation}', '{workspace}', 'x@example.com', 'x@example.com', 'guest', 'manual',
+             {}, '{user}', 10, 1);
+         INSERT INTO workspace_invitation_conversations (invitation_id, conversation_id)
+         VALUES ('{invitation}', '{secret}');",
+        match db.backend() {
+            Backend::Sqlite => format!("X'{}'", "00".repeat(32)),
+            Backend::Postgres => format!("'\\x{}'::BYTEA", "00".repeat(32)),
+        }
+    ))
+    .await
+    .unwrap();
+    assert!(
+        db.execute(&format!(
+            "UPDATE workspace_invitations SET role = 'owner' WHERE id = '{invitation}'"
+        ))
+        .await
+        .is_err()
+    );
+    db.execute(&format!(
+        "DELETE FROM chat_conversations WHERE id = '{secret}'"
+    ))
+    .await
+    .unwrap();
+    assert_eq!(
+        db.scalar::<i64>("SELECT COUNT(*) FROM workspace_invitation_conversations")
+            .await
+            .unwrap(),
+        0
+    );
+
+    // Leaving still leaves every conversation and task; the purge still cascades.
+    db.execute(&format!(
+        "DELETE FROM memberships WHERE id = '{membership}'"
+    ))
+    .await
+    .unwrap();
+    assert_eq!(
+        db.scalar::<i64>(&format!(
+            "SELECT COUNT(*) FROM task_assignees WHERE user_id = '{member}'"
+        ))
+        .await
+        .unwrap(),
+        0
+    );
+    db.execute(&format!(
+        "BEGIN;
+         DELETE FROM tasks WHERE workspace_id = '{workspace}';
+         DELETE FROM pages WHERE workspace_id = '{workspace}';
+         DELETE FROM teamspaces WHERE workspace_id = '{workspace}';
+         DELETE FROM workspaces WHERE id = '{workspace}';
+         COMMIT;"
+    ))
+    .await
+    .unwrap();
+    for table in [
+        "memberships",
+        "chat_members",
+        "chat_conversations",
+        "workspace_invitations",
+    ] {
+        assert_eq!(
+            db.scalar::<i64>(&format!("SELECT COUNT(*) FROM {table}"))
+                .await
+                .unwrap(),
+            0,
+            "{table}"
+        );
+    }
+    if db.backend() == Backend::Sqlite {
+        assert_eq!(
+            db.scalar::<i64>("SELECT COUNT(*) FROM pragma_foreign_key_check")
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            db.scalar::<String>("PRAGMA integrity_check").await.unwrap(),
+            "ok"
+        );
+    }
 }
