@@ -2618,3 +2618,195 @@ async fn an_account_owns_at_most_the_instance_limit_of_workspaces() {
         StatusCode::CREATED
     );
 }
+
+/// A guest membership and a private channel of the owner and the guest, made in SQL.
+async fn guest_in_a_channel(
+    database: &TestDatabase,
+    identity: &IdentityRepository,
+    workspace_id: &str,
+) -> (Id, String) {
+    let (guest, cookie) = create_user(database, identity, "guest@example.com", "Guest").await;
+    let owner: String = sqlx::query_scalar(
+        "SELECT user_id FROM memberships WHERE workspace_id = $1 AND role = 'owner'",
+    )
+    .bind(workspace_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let channel = Id::new_v7().to_string();
+    let now = TimestampMillis::now().as_millis();
+    sqlx::query(
+        "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
+         VALUES ($1, $2, $3, 'guest', 0, $4, $4)",
+    )
+    .bind(Id::new_v7().to_string())
+    .bind(workspace_id)
+    .bind(guest.to_string())
+    .bind(now)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO chat_conversations (id, workspace_id, kind, name, created_by, created_at, updated_at) \
+         VALUES ($1, $2, 'private', 'with-guest', $3, $4, $4)",
+    )
+    .bind(&channel)
+    .bind(workspace_id)
+    .bind(&owner)
+    .bind(now)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    for user in [owner, guest.to_string()] {
+        sqlx::query(
+            "INSERT INTO chat_members (conversation_id, user_id, workspace_id, notify, joined_at) \
+             VALUES ($1, $2, $3, 'all', $4)",
+        )
+        .bind(&channel)
+        .bind(user)
+        .bind(workspace_id)
+        .bind(now)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    }
+    (guest, cookie)
+}
+
+#[tokio::test]
+async fn a_guest_sees_only_the_people_of_its_channels() {
+    let database = TestDatabase::new().await.unwrap();
+    let identity = Arc::new(IdentityRepository::new((*database).clone()));
+    let (workspace, owner_token) = setup_owner(&identity).await;
+    let owner_cookie = format!("__Host-orbit_session={owner_token}");
+    let app = workspace_router(WorkspaceState::new(
+        Arc::clone(&identity),
+        "https://orbit.test".to_owned(),
+        CookieMode::secure(),
+    ))
+    .layer(HttpPlatformLayer::new(OriginPolicy::new(
+        "https://orbit.test",
+    )));
+    let (stranger, stranger_cookie) =
+        create_user(&database, &identity, "stranger@example.com", "Stranger").await;
+    invite_and_accept(
+        &app,
+        &workspace,
+        &owner_cookie,
+        "stranger@example.com",
+        "member",
+        &stranger_cookie,
+    )
+    .await;
+    let (guest, guest_cookie) = guest_in_a_channel(&database, &identity, &workspace).await;
+    let owner: String = sqlx::query_scalar(
+        "SELECT user_id FROM memberships WHERE workspace_id = $1 AND role = 'owner'",
+    )
+    .bind(&workspace)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let get = |cookie: &str, path: &str| {
+        app.clone().oneshot(cookie_request(
+            "GET",
+            &format!("/api/v1/workspaces/{workspace}{path}"),
+            cookie,
+        ))
+    };
+
+    // The guest: itself and the owner it shares a channel with, without the owner's email.
+    let members = response_json(get(&guest_cookie, "/members").await.unwrap()).await;
+    let rows: Vec<(&str, &str, &str)> = members["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|member| {
+            (
+                member["user_id"].as_str().unwrap(),
+                member["role"].as_str().unwrap(),
+                member["email"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    let guest_text = guest.to_string();
+    let mut expected = vec![
+        (owner.as_str(), "owner", ""),
+        (guest_text.as_str(), "guest", "guest@example.com"),
+    ];
+    expected.sort_unstable();
+    let mut rows = rows;
+    rows.sort_unstable();
+    assert_eq!(rows, expected);
+    // It changes nobody's role and removes nobody, but it may leave.
+    for member in members["items"].as_array().unwrap() {
+        assert_eq!(member["can_change_role"], false);
+        assert_eq!(
+            member["can_remove"],
+            member["user_id"] == guest_text.as_str()
+        );
+    }
+
+    // Profiles and notes: only of the people it shares a channel with.
+    let profile = |user: &str| format!("/profiles/{user}");
+    assert_eq!(
+        get(&guest_cookie, &profile(&owner)).await.unwrap().status(),
+        StatusCode::OK
+    );
+    assert_eq!(
+        get(&guest_cookie, &profile(&stranger.to_string()))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NOT_FOUND
+    );
+    let note = |user: &str| {
+        app.clone().oneshot(json_request(
+            "PUT",
+            &format!("/api/v1/workspaces/{workspace}/profiles/{user}/note"),
+            &guest_cookie,
+            json!({"body": "Met at the fair"}),
+        ))
+    };
+    assert_eq!(note(&owner).await.unwrap().status(), StatusCode::NO_CONTENT);
+    assert_eq!(
+        note(&stranger.to_string()).await.unwrap().status(),
+        StatusCode::NOT_FOUND
+    );
+
+    // A member sees everyone, the guest as a guest, and its profile.
+    let members = response_json(get(&stranger_cookie, "/members").await.unwrap()).await;
+    let roles: Vec<&str> = members["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|member| member["role"].as_str().unwrap())
+        .collect();
+    assert_eq!(roles.len(), 3);
+    assert!(roles.contains(&"guest"));
+    assert_eq!(
+        get(&stranger_cookie, &profile(&guest_text))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+
+    // The guest leaves.
+    let membership: String =
+        sqlx::query_scalar("SELECT id FROM memberships WHERE workspace_id = $1 AND user_id = $2")
+            .bind(&workspace)
+            .bind(&guest_text)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    let left = app
+        .clone()
+        .oneshot(cookie_request(
+            "DELETE",
+            &format!("/api/v1/workspaces/{workspace}/members/{membership}?expected_version=0"),
+            &guest_cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(left.status(), StatusCode::NO_CONTENT);
+}

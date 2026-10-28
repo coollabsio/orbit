@@ -4,8 +4,8 @@ use std::time::Duration;
 
 use orbit_domain::{Actor, MembershipDenied, Permission, Policy, WorkspaceDefaults, WorkspaceRole};
 use orbit_platform::{
-    AttachmentMutationCoordinator, BLOB_REFERENCE_COUNT, BlobStore, BlobStoreError, Database, Id,
-    IssuedSession, Job, JobError, JobKind, JobKindRegistrationError, JobStore, LocalBlobStore,
+    AttachmentMutationCoordinator, BLOB_REFERENCE_COUNT, BlobStore, BlobStoreError, Database, Flag,
+    Id, IssuedSession, Job, JobError, JobKind, JobKindRegistrationError, JobStore, LocalBlobStore,
     RecurringSchedule, Row, ScheduleError, Scheduler, TimestampMillis, UploadError, UploadService,
     WORKSPACE_STORAGE_USED, Worker, WorkerConfig, WorkerError, generate_opaque_token,
     normalize_email,
@@ -13,7 +13,7 @@ use orbit_platform::{
 use serde::Serialize;
 use serde_json::json;
 use sha2::{Digest, Sha256};
-use sqlx::{Any, Transaction};
+use sqlx::{Any, AnyConnection, Transaction};
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use utoipa::ToSchema;
@@ -633,6 +633,8 @@ impl WorkspaceRepository {
         })
     }
 
+    /// The workspace's members. A guest gets itself and the people it shares a conversation
+    /// with, without their email address.
     pub async fn members(
         &self,
         workspace_id: Id,
@@ -640,7 +642,7 @@ impl WorkspaceRepository {
         cursor: Option<Id>,
         limit: usize,
     ) -> Result<(Vec<MemberRecord>, Option<Id>), WorkspaceError> {
-        let actor = require_actor(self.database.pool(), workspace_id, actor_id).await?;
+        let actor = require_chat_actor(self.database.pool(), workspace_id, actor_id).await?;
         let rows = sqlx::query(
             "SELECT memberships.id, memberships.user_id, memberships.role, memberships.version, \
              memberships.created_at, users.email, users.display_name, users.suspended_at, \
@@ -649,12 +651,20 @@ impl WorkspaceRepository {
              JOIN users ON users.id = memberships.user_id \
              LEFT JOIN user_avatars ON user_avatars.user_id = memberships.user_id \
              WHERE memberships.workspace_id = $1 \
-             AND ($2 IS NULL OR memberships.id > $3) ORDER BY memberships.id LIMIT $4",
+             AND ($2 IS NULL OR memberships.id > $3) \
+             AND ($5 = 0 OR memberships.user_id = $6 OR EXISTS ( \
+                 SELECT 1 FROM chat_members own JOIN chat_members theirs \
+                 ON theirs.conversation_id = own.conversation_id \
+                 WHERE own.workspace_id = $1 AND own.user_id = $6 \
+                 AND theirs.user_id = memberships.user_id)) \
+             ORDER BY memberships.id LIMIT $4",
         )
         .bind(workspace_id.to_string())
         .bind(cursor.map(|id| id.to_string()))
         .bind(cursor.map(|id| id.to_string()))
         .bind(page_size(limit).saturating_add(1) as i64)
+        .bind(i64::from(actor.is_guest()))
+        .bind(actor_id.to_string())
         .fetch_all(self.database.pool())
         .await?;
         page(rows, limit, |row| member_from_row(row, actor))
@@ -667,7 +677,9 @@ impl WorkspaceRepository {
         actor_id: Id,
         user_id: Id,
     ) -> Result<MemberProfile, WorkspaceError> {
-        require_actor(self.database.pool(), workspace_id, actor_id).await?;
+        let mut connection = self.database.pool().acquire().await?;
+        let actor = require_chat_actor(&mut *connection, workspace_id, actor_id).await?;
+        require_visible(&mut connection, workspace_id, actor, user_id).await?;
         let row = sqlx::query(
             "SELECT users.title, users.pronouns, users.timezone, users.bio, users.phone, \
              user_notes.body AS note \
@@ -703,8 +715,9 @@ impl WorkspaceRepository {
         now: TimestampMillis,
     ) -> Result<(), WorkspaceError> {
         let mut transaction = self.database.immediate_transaction().await?;
-        require_actor(&mut *transaction, workspace_id, actor_id).await?;
-        require_actor(&mut *transaction, workspace_id, user_id).await?;
+        let actor = require_chat_actor(&mut *transaction, workspace_id, actor_id).await?;
+        require_chat_actor(&mut *transaction, workspace_id, user_id).await?;
+        require_visible(&mut transaction, workspace_id, actor, user_id).await?;
         if body.is_empty() {
             sqlx::query("DELETE FROM user_notes WHERE author_id = $1 AND subject_id = $2")
                 .bind(actor_id.to_string())
@@ -1486,7 +1499,8 @@ impl WorkspaceRepository {
         now: TimestampMillis,
     ) -> Result<(), WorkspaceError> {
         let mut transaction = self.database.immediate_transaction().await?;
-        let actor = require_actor(&mut *transaction, workspace_id, actor_id).await?;
+        // A guest may leave too; the policy lets it remove nobody else.
+        let actor = require_chat_actor(&mut *transaction, workspace_id, actor_id).await?;
         let target = target_membership(&mut transaction, workspace_id, membership_id).await?;
         if target.version != expected_version {
             return Err(WorkspaceError::VersionConflict {
@@ -2349,7 +2363,12 @@ fn member_from_row(row: sqlx::any::AnyRow, actor: Actor) -> Result<MemberRecord,
     Ok(MemberRecord {
         id: parse_id(row.get("id"))?,
         user_id,
-        email: row.get("email"),
+        // A guest does not learn the addresses of the people in its channels.
+        email: if actor.is_guest() && user_id != actor.user_id {
+            String::new()
+        } else {
+            row.get("email")
+        },
         display_name: row.get("display_name"),
         avatar_url: crate::auth_routes::avatar_url(user_id, row.get("avatar_updated_at")),
         role,
@@ -2407,6 +2426,47 @@ where
     membership::actor(executor, workspace_id, actor_id)
         .await?
         .ok_or(WorkspaceError::NotFound)
+}
+
+/// As `require_actor`, but guests too: for the people directory, which filters for them.
+async fn require_chat_actor<'e, E>(
+    executor: E,
+    workspace_id: Id,
+    actor_id: Id,
+) -> Result<Actor, WorkspaceError>
+where
+    E: sqlx::Executor<'e, Database = Any>,
+{
+    membership::chat_actor(executor, workspace_id, actor_id)
+        .await?
+        .ok_or(WorkspaceError::NotFound)
+}
+
+/// A guest sees itself and the people it shares a conversation with; nobody else exists for it.
+async fn require_visible(
+    connection: &mut AnyConnection,
+    workspace_id: Id,
+    actor: Actor,
+    user_id: Id,
+) -> Result<(), WorkspaceError> {
+    if !actor.is_guest() || actor.user_id == user_id {
+        return Ok(());
+    }
+    let Flag(shared) = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM chat_members own JOIN chat_members theirs \
+         ON theirs.conversation_id = own.conversation_id \
+         WHERE own.workspace_id = $1 AND own.user_id = $2 AND theirs.user_id = $3)",
+    )
+    .bind(workspace_id.to_string())
+    .bind(actor.user_id.to_string())
+    .bind(user_id.to_string())
+    .fetch_one(&mut *connection)
+    .await?;
+    if shared {
+        Ok(())
+    } else {
+        Err(WorkspaceError::NotFound)
+    }
 }
 
 pub(super) async fn require_permission(

@@ -145,14 +145,14 @@ impl Server {
 }
 
 /// What a guest may call. Every other chat route names a public record here (`#general`, a
-/// message in it) or needs a permission, so it must fail too.
+/// message in it) or needs a permission, and the profile routes name a member the guest shares
+/// no conversation with, so they must fail too. The member list filters its rows for a guest
+/// (see `workspaces_api.rs`).
 fn guest_may_use(operation: &str) -> bool {
     matches!(
         operation,
         "get_workspace"
             | "list_members"
-            | "get_member_profile"
-            | "put_member_note"
             | "list_chat_conversations"
             | "list_chat_categories"
             | "list_chat_emoji"
