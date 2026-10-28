@@ -1402,6 +1402,7 @@ impl WorkspaceRepository {
                     "ownership_transfer_required"
                 }
                 MembershipDenied::TransferRequired => "owner_protected",
+                MembershipDenied::GuestDowngrade => "guest_downgrade",
             };
             audit::record(
                 &mut transaction,
@@ -2424,7 +2425,9 @@ impl From<MembershipDenied> for WorkspaceError {
     fn from(denied: MembershipDenied) -> Self {
         match denied {
             MembershipDenied::TransferRequired => Self::TransferRequired,
-            MembershipDenied::RoleForbidden | MembershipDenied::OwnerProtected => Self::Forbidden,
+            MembershipDenied::RoleForbidden
+            | MembershipDenied::OwnerProtected
+            | MembershipDenied::GuestDowngrade => Self::Forbidden,
         }
     }
 }
