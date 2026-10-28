@@ -18,7 +18,10 @@ use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use utoipa::ToSchema;
 
-use super::chat::join_public_channels;
+use super::chat::{
+    ChatError, MAX_GUEST_CHANNELS, join_invited_channels, join_public_channels,
+    require_guest_channels,
+};
 use super::membership;
 use super::page_versions;
 use super::task_relations;
@@ -119,6 +122,8 @@ pub struct InvitationRecord {
 pub struct InvitationPreview {
     pub email: String,
     pub workspace_name: String,
+    /// The private channels a guest invitation adds the guest to; empty for other roles.
+    pub channels: Vec<String>,
 }
 
 #[derive(Clone, Eq, PartialEq)]
@@ -249,6 +254,10 @@ pub enum WorkspaceError {
     RegistrationRequiresSignIn,
     #[error("workspace operation conflicts with current state")]
     Conflict,
+    /// A guest invitation needs open private channels that the inviter manages; other roles
+    /// take none.
+    #[error("the invitation's channels are invalid")]
+    GuestChannels,
     #[error("stale version; current version is {current_version}")]
     VersionConflict { current_version: u64 },
     #[error("the account already owns {limit} workspaces, the most the instance allows")]
@@ -768,16 +777,27 @@ impl WorkspaceRepository {
     }
 
     #[allow(clippy::too_many_arguments)]
+    /// Invites `email` with `role`. A guest invitation names the private channels the guest
+    /// joins (`conversation_ids`); other roles name none.
     pub async fn invite(
         &self,
         workspace_id: Id,
         actor_id: Id,
         email: String,
         role: WorkspaceRole,
+        conversation_ids: &[Id],
         delivery: InvitationDelivery,
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<IssuedInvitation, WorkspaceError> {
+        let mut conversation_ids = conversation_ids.to_vec();
+        conversation_ids.sort_unstable();
+        conversation_ids.dedup();
+        if (role == WorkspaceRole::Guest) == conversation_ids.is_empty()
+            || conversation_ids.len() > MAX_GUEST_CHANNELS
+        {
+            return Err(WorkspaceError::GuestChannels);
+        }
         let id = Id::new_v7();
         let token = generate_opaque_token();
         let normalized_email = normalize_email(&email);
@@ -819,6 +839,11 @@ impl WorkspaceRepository {
         if already_member {
             return Err(WorkspaceError::Conflict);
         }
+        if role == WorkspaceRole::Guest {
+            require_guest_channels(&mut transaction, workspace_id, actor, &conversation_ids)
+                .await
+                .map_err(from_chat)?;
+        }
         sqlx::query(
             "UPDATE workspace_invitations SET replaced_at = $1 WHERE workspace_id = $2 \
              AND normalized_email = $3 AND accepted_at IS NULL AND revoked_at IS NULL AND replaced_at IS NULL",
@@ -844,6 +869,16 @@ impl WorkspaceRepository {
         .bind(now.as_millis())
         .execute(&mut *transaction)
         .await?;
+        for conversation_id in &conversation_ids {
+            sqlx::query(
+                "INSERT INTO workspace_invitation_conversations (invitation_id, conversation_id) \
+                 VALUES ($1, $2)",
+            )
+            .bind(id.to_string())
+            .bind(conversation_id.to_string())
+            .execute(&mut *transaction)
+            .await?;
+        }
         audit::record(
             &mut transaction,
             workspace_id,
@@ -1040,6 +1075,9 @@ impl WorkspaceRepository {
             .execute(&mut *transaction)
             .await?;
             join_public_channels(&mut transaction, workspace_id, user_id, now).await?;
+            join_invited_channels(&mut transaction, invitation_id, user_id, now)
+                .await
+                .map_err(from_chat)?;
             (id, true)
         };
         sqlx::query(
@@ -1203,6 +1241,9 @@ impl WorkspaceRepository {
         .execute(&mut *transaction)
         .await?;
         join_public_channels(&mut transaction, workspace_id, user_id, now).await?;
+        join_invited_channels(&mut transaction, invitation_id, user_id, now)
+            .await
+            .map_err(from_chat)?;
         sqlx::query(
             "UPDATE workspace_invitations SET accepted_at = $1 WHERE id = $2 AND workspace_id = $3",
         )
@@ -1260,7 +1301,7 @@ impl WorkspaceRepository {
         now: TimestampMillis,
     ) -> Result<InvitationPreview, WorkspaceError> {
         let row = sqlx::query(
-            "SELECT invitations.email, workspaces.name AS workspace_name \
+            "SELECT invitations.id, invitations.email, workspaces.name AS workspace_name \
              FROM workspace_invitations AS invitations \
              JOIN workspaces ON workspaces.id = invitations.workspace_id \
              WHERE invitations.token_hash = $1 AND invitations.expires_at > $2 \
@@ -1272,9 +1313,19 @@ impl WorkspaceRepository {
         .fetch_optional(self.database.pool())
         .await?
         .ok_or(WorkspaceError::InvalidInvitation)?;
+        let channels = sqlx::query_scalar(
+            "SELECT c.name FROM workspace_invitation_conversations i \
+             JOIN chat_conversations c ON c.id = i.conversation_id \
+             WHERE i.invitation_id = $1 AND c.kind = 'private' AND c.archived_at IS NULL \
+             ORDER BY c.name",
+        )
+        .bind(row.get::<String, _>("id"))
+        .fetch_all(self.database.pool())
+        .await?;
         Ok(InvitationPreview {
             email: row.get("email"),
             workspace_name: row.get("workspace_name"),
+            channels,
         })
     }
 
@@ -1447,6 +1498,13 @@ impl WorkspaceRepository {
         .bind(expected_version as i64)
         .execute(&mut *transaction)
         .await?;
+        // A guest who becomes a member joins #general and every public channel. Every other
+        // member is in them already, so for them this changes nothing.
+        let user_id: String = sqlx::query_scalar("SELECT user_id FROM memberships WHERE id = $1")
+            .bind(membership_id.to_string())
+            .fetch_one(&mut *transaction)
+            .await?;
+        join_public_channels(&mut transaction, workspace_id, parse_id(user_id)?, now).await?;
         audit::record(
             &mut transaction,
             workspace_id,
@@ -2482,6 +2540,15 @@ pub(super) async fn require_permission(
         return Err(WorkspaceError::Forbidden);
     }
     Ok(())
+}
+
+fn from_chat(error: ChatError) -> WorkspaceError {
+    match error {
+        ChatError::Invalid { .. } | ChatError::NotFound => WorkspaceError::GuestChannels,
+        ChatError::Forbidden(_) => WorkspaceError::Forbidden,
+        ChatError::Unavailable(error) => WorkspaceError::Unavailable(error),
+        _ => WorkspaceError::Conflict,
+    }
 }
 
 impl From<MembershipDenied> for WorkspaceError {

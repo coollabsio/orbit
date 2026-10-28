@@ -772,6 +772,7 @@ enum RoleBody {
     Owner,
     Admin,
     Member,
+    Guest,
 }
 
 impl From<RoleBody> for WorkspaceRole {
@@ -780,6 +781,7 @@ impl From<RoleBody> for WorkspaceRole {
             RoleBody::Owner => Self::Owner,
             RoleBody::Admin => Self::Admin,
             RoleBody::Member => Self::Member,
+            RoleBody::Guest => Self::Guest,
         }
     }
 }
@@ -896,6 +898,10 @@ struct InvitationBody {
     email: String,
     role: RoleBody,
     delivery: DeliveryBody,
+    /// The private channels a guest joins; required (one or more) for `guest`, refused for
+    /// other roles.
+    #[serde(default)]
+    conversation_ids: Vec<String>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -926,6 +932,18 @@ async fn create_invitation(
             request_id.as_ref(),
         ));
     }
+    let conversation_ids = body
+        .conversation_ids
+        .iter()
+        .map(|id| id.parse())
+        .collect::<Result<Vec<Id>, _>>()
+        .map_err(|_| {
+            workspace_problem(
+                WorkspaceError::GuestChannels,
+                &instance,
+                request_id.as_ref(),
+            )
+        })?;
     let delivery = match body.delivery {
         DeliveryBody::Manual => InvitationDelivery::Manual,
         DeliveryBody::Smtp => InvitationDelivery::Smtp,
@@ -946,6 +964,7 @@ async fn create_invitation(
             session.user.id,
             body.email.trim().to_owned(),
             body.role.into(),
+            &conversation_ids,
             delivery,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
@@ -985,16 +1004,17 @@ async fn create_invitation(
                     request_id.as_ref(),
                 ));
             }
-            let workspace_name = state
+            let (workspace_name, channels) = state
                 .workspaces
                 .preview_invitation(&issued.token, now)
                 .await
-                .map(|preview| preview.workspace_name)
-                .unwrap_or_else(|_| "Orbit".to_owned());
+                .map(|preview| (preview.workspace_name, preview.channels))
+                .unwrap_or_else(|_| ("Orbit".to_owned(), Vec::new()));
             mailer
                 .send(mail::templates::invitation(
                     &issued.invitation.email,
                     &workspace_name,
+                    &channels,
                     &link,
                 ))
                 .await
@@ -3296,6 +3316,14 @@ fn workspace_problem(
             "authentication_required",
             "Authentication required",
             "The invited account already exists. Sign in to accept this invitation.",
+            instance,
+            request_id,
+        ),
+        WorkspaceError::GuestChannels => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_guest_channels",
+            "Invalid guest channels",
+            "A guest needs one or more open private channels that you manage; other roles take none.",
             instance,
             request_id,
         ),

@@ -32,7 +32,9 @@ use utoipa::ToSchema;
 use super::membership;
 pub use crate::live::Recipients;
 
-pub use conversations::{ChannelCreate, ChannelUpdate};
+pub use conversations::{
+    ChannelCreate, ChannelUpdate, MAX_GUEST_CHANNELS, join_invited_channels, require_guest_channels,
+};
 pub use emoji::{CustomEmojiImage, CustomEmojiRecord, EMOJI_MAX_BYTES};
 pub use messages::{ForwardInput, MessageCursor, SendInput};
 pub use search::{SearchHitRecord, SearchInput, SearchPage};

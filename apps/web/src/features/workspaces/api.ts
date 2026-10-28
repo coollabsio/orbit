@@ -44,7 +44,7 @@ export function workspacesQueryOptions(client: ApiClient = apiClient) {
   }
 }
 
-const ROLE_LABELS = { owner: 'Owner', admin: 'Admin', member: 'Member' } as const
+const ROLE_LABELS = { owner: 'Owner', admin: 'Admin', member: 'Member', guest: 'Guest' } as const
 
 /** A stable color per user, for the initials of people without a profile picture. */
 export function userColor(userId: string) {
@@ -57,7 +57,8 @@ export function memberFromRecord(member: MemberRecord): User {
     id: member.user_id,
     membershipId: member.id,
     name: member.display_name,
-    handle: member.email.split('@')[0] ?? member.email,
+    // a guest gets no address of the others: their handle is their name then
+    handle: member.email.split('@')[0] || member.display_name,
     email: member.email,
     role: ROLE_LABELS[member.role],
     color: userColor(member.user_id),

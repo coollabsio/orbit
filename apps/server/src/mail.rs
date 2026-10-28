@@ -172,18 +172,28 @@ fn transport(
 pub mod templates {
     use super::OutgoingEmail;
 
-    /// The subject is fixed and the body names only the workspace, cleaned up: the names come from
-    /// users, and a name must not make the email say something Orbit does not.
+    /// The subject is fixed and the body names only the workspace and, for a guest, its
+    /// channels, cleaned up: the names come from users, and a name must not make the email say
+    /// something Orbit does not.
     #[must_use]
-    pub fn invitation(to: &str, workspace: &str, url: &str) -> OutgoingEmail {
+    pub fn invitation(to: &str, workspace: &str, channels: &[String], url: &str) -> OutgoingEmail {
+        let invited = if channels.is_empty() {
+            format!("to join the workspace {}", quoted_name(workspace))
+        } else {
+            let channels: Vec<String> = channels.iter().map(|name| quoted_name(name)).collect();
+            format!(
+                "as a guest to the channels {} of the workspace {}",
+                channels.join(", "),
+                quoted_name(workspace)
+            )
+        };
         OutgoingEmail {
             to: to.to_owned(),
             subject: "You have been invited to Orbit".to_owned(),
             body: format!(
-                "You have been invited to join the workspace {} on Orbit.\n\n\
+                "You have been invited {invited} on Orbit.\n\n\
                  Accept the invitation:\n{url}\n\n\
-                 The link expires in 7 days. If you did not expect this invitation, ignore this email.\n",
-                quoted_name(workspace)
+                 The link expires in 7 days. If you did not expect this invitation, ignore this email.\n"
             ),
         }
     }
@@ -256,14 +266,24 @@ pub mod templates {
             let email = super::invitation(
                 "guest@example.com",
                 "Acme\n\nYour account is locked: \"visit\" evil.example\u{202E}",
+                &[],
                 "https://orbit.test/accept-invitation?token=t",
             );
             assert_eq!(email.subject, "You have been invited to Orbit");
             assert!(email.body.starts_with(
                 "You have been invited to join the workspace \"Acme Your account is locked: 'visit' evil.example\" on Orbit.\n\n"
             ));
-            let long = super::invitation("g@example.com", &"x".repeat(100), "u");
+            let long = super::invitation("g@example.com", &"x".repeat(100), &[], "u");
             assert!(long.body.contains(&format!("\"{}…\"", "x".repeat(60))));
+            let guest = super::invitation(
+                "g@example.com",
+                "Acme",
+                &["launch".to_owned(), "press\nnews".to_owned()],
+                "u",
+            );
+            assert!(guest.body.starts_with(
+                "You have been invited as a guest to the channels \"launch\", \"press news\" of the workspace \"Acme\" on Orbit.\n\n"
+            ));
         }
     }
 }

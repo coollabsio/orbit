@@ -818,6 +818,71 @@ async fn require_category(
 
 const GUESTS_ONLY_PRIVATE: &str = "Guests can only be in private channels.";
 
+/// How many channels one guest invitation may name.
+pub const MAX_GUEST_CHANNELS: usize = 50;
+
+/// The channels of a guest invitation: open private channels of the workspace that `actor`
+/// manages (see `Access::require_manage`). `conversation_ids` has no duplicates.
+pub async fn require_guest_channels(
+    conn: &mut AnyConnection,
+    workspace_id: Id,
+    actor: Actor,
+    conversation_ids: &[Id],
+) -> Result<(), ChatError> {
+    if conversation_ids.is_empty() || conversation_ids.len() > MAX_GUEST_CHANNELS {
+        return Err(ChatError::Invalid {
+            field: "conversation_ids",
+        });
+    }
+    for conversation_id in conversation_ids {
+        let created_by: Option<String> = sqlx::query_scalar(
+            "SELECT created_by FROM chat_conversations WHERE id = $1 AND workspace_id = $2 \
+             AND kind = 'private' AND archived_at IS NULL",
+        )
+        .bind(conversation_id.to_string())
+        .bind(workspace_id.to_string())
+        .fetch_optional(&mut *conn)
+        .await?;
+        let created_by = created_by
+            .map(parse_id)
+            .transpose()?
+            .ok_or(ChatError::Invalid {
+                field: "conversation_ids",
+            })?;
+        if !actor.can_manage_chat_channel(created_by) {
+            return Err(ChatError::Forbidden(
+                "Only the channel's creator and workspace owners and admins can do this.",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Puts a guest who accepted its invitation into the invitation's channels that are still
+/// private and open, with a `join` row in each, as adding a member does.
+pub async fn join_invited_channels(
+    conn: &mut AnyConnection,
+    invitation_id: Id,
+    user_id: Id,
+    now: TimestampMillis,
+) -> Result<(), ChatError> {
+    let channels: Vec<String> = sqlx::query_scalar(
+        "SELECT c.id FROM workspace_invitation_conversations i \
+         JOIN chat_conversations c ON c.id = i.conversation_id \
+         WHERE i.invitation_id = $1 AND c.kind = 'private' AND c.archived_at IS NULL \
+         ORDER BY c.id",
+    )
+    .bind(invitation_id.to_string())
+    .fetch_all(&mut *conn)
+    .await?;
+    for channel in channels {
+        let channel = parse_id(channel)?;
+        add_members(conn, channel, &[user_id], NotifyLevel::Mentions, now).await?;
+        add_system_row(conn, channel, MessageKind::Join, user_id, now).await?;
+    }
+    Ok(())
+}
+
 /// A guest only reaches the people of its channels: in a DM, every guest must share an open
 /// channel with every other member. Otherwise the DM does not exist for the caller.
 async fn require_guests_share_a_channel(

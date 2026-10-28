@@ -22,7 +22,7 @@ export function channelNameFinal(value: string): string {
 
 interface Person {
   id: string
-  role: 'Owner' | 'Admin' | 'Member'
+  role: 'Owner' | 'Admin' | 'Member' | 'Guest'
   suspended?: boolean
 }
 

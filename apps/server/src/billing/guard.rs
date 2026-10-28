@@ -177,6 +177,14 @@ async fn guard(State(state): State<GuardState>, mut request: Request, next: Next
         }
         (Check::Write(_) | Check::Create(..), WorkspaceAccess::ReadOnly) => Refusal::ReadOnly,
         (Check::Create(_, limit), WorkspaceAccess::Trial) => {
+            // Guests do not count as members, so a guest invitation passes the members limit.
+            if limit == TrialLimit::Members {
+                let (guest, read) = invites_a_guest(request).await;
+                request = read;
+                if guest {
+                    return next.run(request).await;
+                }
+            }
             // Counted before the handler runs, so concurrent creates can pass the limit by a few:
             // a trial limit, not a security boundary.
             match repository::trial_usage(database, workspace_id, limit, TimestampMillis::now())
@@ -205,6 +213,20 @@ async fn guard(State(state): State<GuardState>, mut request: Request, next: Next
             problem(&request, StatusCode::SERVICE_UNAVAILABLE, unavailable())
         }
     }
+}
+
+/// The largest invitation body the guard reads; a larger one reaches the handler empty.
+const INVITATION_BODY_BYTES: usize = 64 * 1024;
+
+/// Whether an invitation request asks for the guest role, and the request with its body again.
+async fn invites_a_guest(request: Request) -> (bool, Request) {
+    let (parts, body) = request.into_parts();
+    let bytes = axum::body::to_bytes(body, INVITATION_BODY_BYTES)
+        .await
+        .unwrap_or_default();
+    let guest = serde_json::from_slice::<serde_json::Value>(&bytes)
+        .is_ok_and(|body| body["role"] == "guest");
+    (guest, Request::from_parts(parts, Body::from(bytes)))
 }
 
 enum Refusal {

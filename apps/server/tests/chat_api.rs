@@ -185,6 +185,7 @@ impl Fixture {
                 self.owner.id,
                 email.clone(),
                 WorkspaceRole::Member,
+                &[],
                 InvitationDelivery::Manual,
                 "invite",
                 now,

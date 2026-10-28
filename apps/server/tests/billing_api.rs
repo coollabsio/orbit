@@ -967,6 +967,30 @@ async fn a_new_workspace_is_on_a_trial_with_limits() {
             &json!("The trial allows 3 members. Choose a plan to add more.")
         )
     );
+    // Guests are no members: one is invited at the limit and does not count.
+    let (status, channel) = server
+        .call(
+            "POST",
+            &server.workspace("/chat/conversations"),
+            Some(json!({"name": "with-guests", "kind": "private", "member_ids": []})),
+        )
+        .await;
+    assert_eq!(status, 200, "{channel}");
+    let (status, invitation) = server
+        .call(
+            "POST",
+            &server.workspace("/invitations"),
+            Some(
+                json!({"email": "guest@example.com", "role": "guest", "delivery": "manual",
+                        "conversation_ids": [channel["result"]["id"]]}),
+            ),
+        )
+        .await;
+    assert_eq!(status, 201, "{invitation}");
+    let (_, billing) = server
+        .call("GET", &server.workspace("/billing"), None)
+        .await;
+    assert_eq!(billing["trial"]["members"], json!({"used": 3, "limit": 3}));
 
     // A stranger learns nothing about the trial: the handler refuses them as on any workspace.
     let stranger = server.add_user("stranger@example.com", false).await;

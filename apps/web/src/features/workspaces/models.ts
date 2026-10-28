@@ -14,7 +14,7 @@ export interface User {
   name: string
   handle: string
   email: string
-  role: 'Owner' | 'Admin' | 'Member'
+  role: 'Owner' | 'Admin' | 'Member' | 'Guest'
   color: string
   /** Profile picture URL; initials on `color` show while it is absent or loading. */
   avatarUrl?: string | null
