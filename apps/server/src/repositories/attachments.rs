@@ -369,7 +369,8 @@ impl AttachmentRepository {
              JOIN projects ON projects.id = tasks.project_id \
              JOIN workspaces ON workspaces.id = tasks.workspace_id \
              JOIN memberships ON memberships.workspace_id = tasks.workspace_id \
-             AND memberships.user_id = $1 JOIN users ON users.id = memberships.user_id \
+             AND memberships.user_id = $1 AND memberships.role <> 'guest' \
+             JOIN users ON users.id = memberships.user_id \
              JOIN sessions ON sessions.id = $2 AND sessions.user_id = users.id \
              WHERE attachment_references.id = $3 AND attachment_references.workspace_id = $4 \
              AND attachment_references.task_id = $5 AND attachment_references.comment_id IS NOT DISTINCT FROM $6 \
@@ -575,6 +576,7 @@ where
     sqlx::query_scalar(
         "SELECT COUNT(*) FROM sessions JOIN users ON users.id = sessions.user_id \
          JOIN memberships ON memberships.user_id = users.id AND memberships.workspace_id = $1 \
+         AND memberships.role <> 'guest' \
          JOIN tasks ON tasks.workspace_id = memberships.workspace_id AND tasks.id = $2 \
          JOIN projects ON projects.id = tasks.project_id \
          JOIN workspaces ON workspaces.id = tasks.workspace_id \

@@ -432,6 +432,9 @@ impl WorkspaceRepository {
         file_offset: u32,
     ) -> Result<WorkspaceStorage, WorkspaceError> {
         let workspace = self.get(workspace_id, actor_id).await?;
+        if workspace.role == WorkspaceRole::Guest {
+            return Err(WorkspaceError::NotFound);
+        }
         let row = sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT ({WORKSPACE_STORAGE_USED}) AS used, workspace_storage_quota_bytes AS quota, \
              (SELECT COUNT(*) FROM attachment_blobs WHERE workspace_id = $1 AND deleted_at IS NULL) AS files \

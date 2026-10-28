@@ -1306,6 +1306,7 @@ impl IdentityRepository {
     }
 
     /// The user's profile picture, for the user and for people who share a workspace with them.
+    /// A guest only sees the people it shares a conversation with.
     pub async fn avatar(
         &self,
         uploads: &UploadService,
@@ -1318,7 +1319,10 @@ impl IdentityRepository {
              WHERE a.user_id = $1 AND ($1 = $2 OR EXISTS ( \
              SELECT 1 FROM memberships AS theirs JOIN memberships AS mine \
              ON mine.workspace_id = theirs.workspace_id \
-             WHERE theirs.user_id = $1 AND mine.user_id = $2))",
+             WHERE theirs.user_id = $1 AND mine.user_id = $2 AND (mine.role <> 'guest' OR EXISTS ( \
+             SELECT 1 FROM chat_members AS shared JOIN chat_members AS own \
+             ON own.conversation_id = shared.conversation_id \
+             WHERE shared.user_id = $1 AND own.user_id = $2 AND own.workspace_id = mine.workspace_id))))",
         )
         .bind(user_id.to_string())
         .bind(viewer_id.to_string())

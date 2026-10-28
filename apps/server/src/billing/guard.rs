@@ -213,7 +213,8 @@ enum Refusal {
 }
 
 /// Whether the request carries the session of a member of the workspace, as the handlers decide
-/// it (session cookie, then membership of a live workspace). Workspace routes take no API tokens.
+/// it (session cookie, then membership of a live workspace). Guests count: they write in chat.
+/// Workspace routes take no API tokens.
 async fn caller_is_member(
     state: &GuardState,
     workspace_id: Id,
@@ -222,7 +223,7 @@ async fn caller_is_member(
     let Some(session) = request_session(&state.identity, state.cookie_mode, headers).await else {
         return Ok(false);
     };
-    membership::actor(
+    membership::chat_actor(
         state.billing.database().pool(),
         workspace_id,
         session.user.id,

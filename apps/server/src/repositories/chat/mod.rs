@@ -739,13 +739,14 @@ impl Access {
     }
 }
 
-/// Non-members of the workspace and trashed workspaces are `NotFound`.
+/// Non-members of the workspace and trashed workspaces are `NotFound`. Guests pass: every
+/// conversation check below decides what a guest may see.
 async fn load_actor(
     conn: &mut AnyConnection,
     workspace_id: Id,
     user_id: Id,
 ) -> Result<Actor, ChatError> {
-    membership::actor(&mut *conn, workspace_id, user_id)
+    membership::chat_actor(&mut *conn, workspace_id, user_id)
         .await?
         .ok_or(ChatError::NotFound)
 }

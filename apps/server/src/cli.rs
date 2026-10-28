@@ -845,7 +845,8 @@ async fn install_seed_data(database: Database) -> Result<String, CliError> {
         Some(setup) => setup.workspace_id,
         None => {
             let workspace = sqlx::query_scalar::<_, String>(
-                "SELECT workspace_id FROM memberships WHERE user_id = $1 ORDER BY created_at LIMIT 1",
+                "SELECT workspace_id FROM memberships WHERE user_id = $1 AND role <> 'guest' \
+                 ORDER BY created_at LIMIT 1",
             )
             .bind(user_id.to_string())
             .fetch_optional(database.pool())

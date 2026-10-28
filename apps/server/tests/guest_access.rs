@@ -1,0 +1,702 @@
+//! A guest only reaches chat. Every workspace operation of the OpenAPI document is called as a
+//! guest with the ids of real records; each must fail unless `guest_may_use` names it. A new route
+//! fails this test until someone decides whether guests may use it.
+
+use std::collections::{BTreeMap, BTreeSet};
+
+use orbit_platform::{
+    AuthenticatedUser, Config, EnvironmentMode, Id, PasswordService, TimestampMillis,
+};
+use orbit_server::app::App;
+use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
+use serde_json::{Value, json};
+use tempfile::TempDir;
+use tokio_util::sync::CancellationToken;
+
+const COOKIE: &str = "orbit_session_dev";
+const PREFIX: &str = "/api/v1/workspaces/{workspace_id}";
+
+struct Server {
+    base: String,
+    database: orbit_platform::Database,
+    shutdown: CancellationToken,
+    task: tokio::task::JoinHandle<()>,
+    http: reqwest::Client,
+    _root: TempDir,
+}
+
+impl Server {
+    async fn start() -> Self {
+        let root = tempfile::tempdir().unwrap();
+        let mut config = Config {
+            environment: EnvironmentMode::Development,
+            app_key: Some(orbit_platform::AppKey::new([1; 32])),
+            ..Config::default()
+        };
+        config.data.database = root.path().join("data/orbit.sqlite");
+        config.data.attachments = root.path().join("data/attachments");
+        config.data.backups = root.path().join("backups");
+        config.rate_limits.general_per_minute = 100_000;
+        let app = App::build(config).await.unwrap();
+        let database = app.database().clone();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let shutdown = CancellationToken::new();
+        let token = shutdown.clone();
+        let task = tokio::spawn(async move {
+            app.serve(listener, token).await.unwrap();
+        });
+        Self {
+            base,
+            database,
+            shutdown,
+            task,
+            http: reqwest::Client::new(),
+            _root: root,
+        }
+    }
+
+    async fn stop(self) {
+        self.shutdown.cancel();
+        self.task.await.unwrap();
+    }
+
+    async fn call(
+        &self,
+        session: &str,
+        method: &str,
+        path: &str,
+        body: Option<&Value>,
+    ) -> (u16, Value) {
+        let mut request = self
+            .http
+            .request(method.parse().unwrap(), format!("{}{path}", self.base))
+            .header("origin", &self.base)
+            .header("cookie", format!("{COOKIE}={session}"));
+        if let Some(body) = body {
+            request = request.json(body);
+        }
+        let response = request.send().await.unwrap();
+        let status = response.status().as_u16();
+        let text = response.text().await.unwrap_or_default();
+        (
+            status,
+            serde_json::from_str(&text).unwrap_or(Value::String(text)),
+        )
+    }
+
+    /// A call that must succeed; returns its body.
+    async fn ok(&self, session: &str, method: &str, path: &str, body: Value) -> Value {
+        let body = (method != "GET").then_some(body);
+        let (status, response) = self.call(session, method, path, body.as_ref()).await;
+        assert!(
+            (200..300).contains(&status),
+            "{method} {path}: {status} {response}"
+        );
+        response
+    }
+
+    /// A user with a session and, unless `role` is `None`, a membership row.
+    async fn person(&self, workspace: &str, name: &str, role: Option<&str>) -> (Id, String) {
+        let id = Id::new_v7();
+        let now = TimestampMillis::now().as_millis();
+        let email = format!("{name}@example.com");
+        sqlx::query(
+            "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, 'unused', $5, $6)",
+        )
+        .bind(id.to_string())
+        .bind(&email)
+        .bind(&email)
+        .bind(name)
+        .bind(now)
+        .bind(now)
+        .execute(self.database.pool())
+        .await
+        .unwrap();
+        if let Some(role) = role {
+            sqlx::query(
+                "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
+                 VALUES ($1, $2, $3, $4, 0, $5, $6)",
+            )
+            .bind(Id::new_v7().to_string())
+            .bind(workspace)
+            .bind(id.to_string())
+            .bind(role)
+            .bind(now)
+            .bind(now)
+            .execute(self.database.pool())
+            .await
+            .unwrap();
+        }
+        let session = IdentityRepository::new(self.database.clone())
+            .create_session(
+                &AuthenticatedUser {
+                    id,
+                    email,
+                    display_name: name.to_owned(),
+                },
+                TimestampMillis::now(),
+            )
+            .await
+            .unwrap();
+        (id, session.token)
+    }
+}
+
+/// What a guest may call. Chat checks each conversation itself (see `chat_api.rs`); the
+/// people directory filters its rows for a guest (see `workspaces_api.rs`).
+fn guest_may_use(path: &str, operation: &str) -> bool {
+    path.starts_with(&format!("{PREFIX}/chat/"))
+        || matches!(
+            operation,
+            "get_workspace" | "list_members" | "get_member_profile" | "put_member_note"
+        )
+}
+
+/// Real records of the workspace, by the name of the path or body field that holds their id.
+struct Records {
+    ids: BTreeMap<&'static str, String>,
+}
+
+impl Records {
+    fn id(&self, name: &str, path: &str) -> String {
+        let key = match name {
+            "comment_id" if path.contains("/pages/") => "page_comment_id",
+            "user_id" | "user_ids" | "member_ids" | "assignee_ids" | "mentioned_user_ids" => {
+                "user_id"
+            }
+            "id" => "random",
+            other => other,
+        };
+        self.ids
+            .get(key)
+            .cloned()
+            .unwrap_or_else(|| Id::new_v7().to_string())
+    }
+}
+
+fn resolve<'a>(document: &'a Value, schema: &'a Value) -> &'a Value {
+    match schema["$ref"].as_str() {
+        Some(reference) => {
+            let name = reference.rsplit('/').next().unwrap();
+            resolve(document, &document["components"]["schemas"][name])
+        }
+        None => schema,
+    }
+}
+
+/// A value that passes the schema, with real ids where a field names a record.
+fn example(document: &Value, schema: &Value, field: &str, path: &str, records: &Records) -> Value {
+    if schema["$ref"] == "#/components/schemas/ViewState" {
+        return view_state();
+    }
+    let schema = resolve(document, schema);
+    for key in ["oneOf", "anyOf", "allOf"] {
+        if let Some(variants) = schema[key].as_array() {
+            let variant = variants
+                .iter()
+                .find(|variant| resolve(document, variant)["type"] != "null")
+                .unwrap_or(&variants[0]);
+            return example(document, variant, field, path, records);
+        }
+    }
+    if let Some(values) = schema["enum"].as_array() {
+        return values[0].clone();
+    }
+    let kind = match &schema["type"] {
+        Value::Array(kinds) => kinds
+            .iter()
+            .find(|kind| *kind != "null")
+            .cloned()
+            .unwrap_or(Value::Null),
+        kind => kind.clone(),
+    };
+    match kind.as_str().unwrap_or("object") {
+        "string" => {
+            if schema["format"] == "uuid" || field.ends_with("_id") || field.ends_with("_ids") {
+                Value::String(records.id(field, path))
+            } else {
+                Value::String(
+                    match field {
+                        "email" => "someone@example.com",
+                        "color" => "#336699",
+                        "emoji" => "👍",
+                        _ => "guest sweep",
+                    }
+                    .to_owned(),
+                )
+            }
+        }
+        "integer" | "number" if field.contains("version") => 0.into(),
+        "integer" | "number" => schema["minimum"]
+            .clone()
+            .as_i64()
+            .unwrap_or(1)
+            .max(1)
+            .into(),
+        "boolean" => Value::Bool(false),
+        "array" => {
+            if schema["minItems"].as_u64().unwrap_or(0) > 0 || field.ends_with("_ids") {
+                json!([example(document, &schema["items"], field, path, records)])
+            } else {
+                json!([])
+            }
+        }
+        _ => {
+            let required: BTreeSet<&str> = schema["required"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .collect();
+            let mut object = serde_json::Map::new();
+            for (name, property) in schema["properties"].as_object().into_iter().flatten() {
+                if required.contains(name.as_str()) {
+                    object.insert(
+                        name.clone(),
+                        example(document, property, name, path, records),
+                    );
+                }
+            }
+            Value::Object(object)
+        }
+    }
+}
+
+fn view_state() -> Value {
+    json!({
+        "filter": {"op": "and", "children": []},
+        "display": {
+            "layout": "list",
+            "group_by": "status",
+            "sub_group_by": "none",
+            "order_by": "manual",
+            "order_direction": "asc",
+            "properties": ["id", "status"],
+            "show_completed": "all",
+            "show_empty_groups": false,
+            "sub_issues": "nested"
+        }
+    })
+}
+
+/// The id of a created record, bare or wrapped in an object.
+fn id_of(created: &Value) -> String {
+    created["id"]
+        .as_str()
+        .or_else(|| {
+            created
+                .as_object()?
+                .values()
+                .find_map(|value| value["id"].as_str())
+        })
+        .unwrap_or_else(|| panic!("no id: {created}"))
+        .to_owned()
+}
+
+/// The id of the first row of a list, bare or wrapped in an object.
+fn first_id(list: &Value) -> String {
+    let rows = list
+        .as_array()
+        .or_else(|| list.as_object()?.values().find_map(Value::as_array))
+        .unwrap_or_else(|| panic!("not a list: {list}"));
+    rows[0]["id"].as_str().unwrap().to_owned()
+}
+
+struct Operation {
+    method: String,
+    template: String,
+    id: String,
+    path: String,
+    body: Option<Value>,
+}
+
+/// Every operation in the workspace scope, with real ids in the path and a body that passes its
+/// schema. Deletes come last so that the member's run reaches as many records as possible.
+fn operations(document: &Value, records: &Records) -> Vec<Operation> {
+    let mut operations = Vec::new();
+    for (template, item) in document["paths"].as_object().unwrap() {
+        if !template.starts_with(PREFIX) {
+            continue;
+        }
+        for (method, operation) in item.as_object().unwrap() {
+            if !["get", "post", "patch", "put", "delete"].contains(&method.as_str()) {
+                continue;
+            }
+            let mut path = template.clone();
+            let mut query = Vec::new();
+            for parameter in operation["parameters"].as_array().into_iter().flatten() {
+                let parameter = resolve(document, parameter);
+                let name = parameter["name"].as_str().unwrap();
+                let value = match example(document, &parameter["schema"], name, template, records) {
+                    Value::String(value) => value,
+                    other => other.to_string(),
+                };
+                if parameter["in"] == "path" {
+                    path = path.replace(&format!("{{{name}}}"), &value);
+                } else if parameter["in"] == "query" && parameter["required"] == true {
+                    query.push(format!("{name}={value}"));
+                }
+            }
+            if !query.is_empty() {
+                path = format!("{path}?{}", query.join("&"));
+            }
+            let body = operation["requestBody"]["content"]["application/json"]["schema"]
+                .is_object()
+                .then(|| match operation["operationId"].as_str().unwrap() {
+                    "create_comment" | "update_comment" => json!({"body": "guest sweep"}),
+                    "create_page_thread" | "create_page_comment" | "update_page_comment" => {
+                        json!({"body": [{
+                            "type": "paragraph",
+                            "content": [{"type": "text", "text": "guest sweep", "styles": {}}]
+                        }]})
+                    }
+                    _ => example(
+                        document,
+                        &operation["requestBody"]["content"]["application/json"]["schema"],
+                        "",
+                        template,
+                        records,
+                    ),
+                });
+            operations.push(Operation {
+                method: method.to_uppercase(),
+                template: template.clone(),
+                id: operation["operationId"].as_str().unwrap().to_owned(),
+                path,
+                body,
+            });
+        }
+    }
+    operations.sort_by_key(|operation| operation.method == "DELETE");
+    operations
+}
+
+#[tokio::test]
+async fn a_guest_reaches_only_chat() {
+    let server = Server::start().await;
+    let identity = IdentityRepository::new(server.database.clone());
+    let now = TimestampMillis::now();
+    identity
+        .store_setup_token(
+            "guest-sweep",
+            TimestampMillis::from_millis(now.as_millis() + 60_000),
+        )
+        .await
+        .unwrap();
+    let setup = identity
+        .complete_setup(
+            SetupRequest {
+                token: "guest-sweep".to_owned(),
+                email: "owner@example.com".to_owned(),
+                display_name: "Owner".to_owned(),
+                password_hash: PasswordService::default()
+                    .hash("correct horse battery")
+                    .unwrap(),
+                workspace_name: "Orbit".to_owned(),
+                project_name: "General".to_owned(),
+            },
+            now,
+        )
+        .await
+        .unwrap();
+    let owner = setup.session.token.clone();
+    let workspace = setup.workspace_id.to_string();
+    let base = format!("/api/v1/workspaces/{workspace}");
+    let (member_id, _) = server.person(&workspace, "member", Some("member")).await;
+    let (_, admin) = server.person(&workspace, "admin", Some("admin")).await;
+    let (guest_id, guest) = server.person(&workspace, "guest", Some("guest")).await;
+
+    // Records the guest must not reach, made by the owner.
+    let project = first_id(
+        &server
+            .ok(&owner, "GET", &format!("{base}/projects"), Value::Null)
+            .await,
+    );
+    let status = first_id(
+        &server
+            .ok(
+                &owner,
+                "GET",
+                &format!("{base}/projects/{project}/statuses"),
+                Value::Null,
+            )
+            .await,
+    );
+    let task = id_of(
+        &server
+            .ok(
+                &owner,
+                "POST",
+                &format!("{base}/tasks"),
+                json!({"project_id": project, "status_id": status, "title": "Secret task"}),
+            )
+            .await,
+    );
+    let comment = id_of(
+        &server
+            .ok(
+                &owner,
+                "POST",
+                &format!("{base}/tasks/{task}/comments"),
+                json!({"body": "Secret comment"}),
+            )
+            .await,
+    );
+    let label = id_of(
+        &server
+            .ok(
+                &owner,
+                "POST",
+                &format!("{base}/projects/{project}/labels"),
+                json!({"name": "Secret", "color": "#336699"}),
+            )
+            .await,
+    );
+    let teamspace = first_id(
+        &server
+            .ok(&owner, "GET", &format!("{base}/teamspaces"), Value::Null)
+            .await,
+    );
+    let page = id_of(
+        &server
+            .ok(
+                &owner,
+                "POST",
+                &format!("{base}/pages"),
+                json!({"title": "Secret page", "teamspace_id": teamspace}),
+            )
+            .await,
+    );
+    let thread = server
+        .ok(
+            &owner,
+            "POST",
+            &format!("{base}/pages/{page}/threads"),
+            json!({"body": [{
+                "type": "paragraph",
+                "content": [{"type": "text", "text": "Secret thread", "styles": {}}]
+            }]}),
+        )
+        .await;
+    let view = id_of(
+        &server
+            .ok(
+                &owner,
+                "POST",
+                &format!("{base}/views"),
+                json!({"name": "Secret view", "visibility": "workspace", "state": view_state()}),
+            )
+            .await,
+    );
+    let invitation = id_of(
+        &server
+            .ok(
+                &owner,
+                "POST",
+                &format!("{base}/invitations"),
+                json!({"email": "invited@example.com", "role": "member", "delivery": "manual"}),
+            )
+            .await,
+    );
+    let membership: String =
+        sqlx::query_scalar("SELECT id FROM memberships WHERE workspace_id = $1 AND user_id = $2")
+            .bind(&workspace)
+            .bind(member_id.to_string())
+            .fetch_one(server.database.pool())
+            .await
+            .unwrap();
+    let conversations = server
+        .ok(
+            &owner,
+            "GET",
+            &format!("{base}/chat/conversations"),
+            Value::Null,
+        )
+        .await;
+    let general = conversations
+        .as_array()
+        .or_else(|| {
+            conversations
+                .as_object()?
+                .values()
+                .find_map(Value::as_array)
+        })
+        .unwrap()
+        .iter()
+        .find(|conversation| conversation["name"] == "general")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let message = id_of(
+        &server
+            .ok(
+                &owner,
+                "POST",
+                &format!("{base}/chat/conversations/{general}/messages"),
+                json!({"body": "Public news", "nonce": "sweep-1"}),
+            )
+            .await,
+    );
+    // The guest's own private channel.
+    let private = id_of(&server
+        .ok(
+            &owner,
+            "POST",
+            &format!("{base}/chat/conversations"),
+            json!({"name": "with-guest", "kind": "private", "member_ids": [guest_id.to_string()]}),
+        )
+        .await);
+
+    let records = Records {
+        ids: BTreeMap::from([
+            ("workspace_id", workspace.clone()),
+            ("project_id", project),
+            ("status_id", status),
+            ("task_id", task.clone()),
+            ("task_ids", task),
+            ("parent_task_id", Id::new_v7().to_string()),
+            ("comment_id", comment),
+            ("label_id", label.clone()),
+            ("label_ids", label),
+            ("teamspace_id", teamspace),
+            ("page_id", page.clone()),
+            ("parent_id", page),
+            ("thread_id", thread["id"].as_str().unwrap().to_owned()),
+            (
+                "page_comment_id",
+                thread["comments"][0]["id"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned(),
+            ),
+            ("view_id", view),
+            ("invitation_id", invitation),
+            ("membership_id", membership),
+            ("user_id", member_id.to_string()),
+            ("conversation_id", general),
+            ("message_id", message.clone()),
+            ("root_id", message),
+            ("page_key", "tasks".to_owned()),
+        ]),
+    };
+    // A guest sees the avatar of someone in its channel, not of someone it shares nothing with.
+    for user in [setup.user_id, member_id] {
+        sqlx::query(
+            "INSERT INTO user_avatars (user_id, mime_type, bytes, updated_at) VALUES ($1, 'image/png', $2, 1)",
+        )
+        .bind(user.to_string())
+        .bind(vec![1_u8; 8])
+        .execute(server.database.pool())
+        .await
+        .unwrap();
+    }
+    let avatar = |user: Id| format!("/api/v1/users/{user}/avatar");
+    assert_eq!(
+        server
+            .call(&guest, "GET", &avatar(setup.user_id), None)
+            .await
+            .0,
+        200
+    );
+    assert_eq!(
+        server.call(&guest, "GET", &avatar(member_id), None).await.0,
+        404
+    );
+    assert_eq!(
+        server.call(&admin, "GET", &avatar(member_id), None).await.0,
+        200
+    );
+    let document: Value =
+        serde_json::from_str(&orbit_server::openapi::openapi_json().unwrap()).unwrap();
+    let operations = operations(&document, &records);
+
+    let mut reached = Vec::new();
+    for operation in &operations {
+        let (status, body) = server
+            .call(
+                &guest,
+                &operation.method,
+                &operation.path,
+                operation.body.as_ref(),
+            )
+            .await;
+        if status < 400 && !guest_may_use(&operation.template, &operation.id) {
+            reached.push(format!(
+                "{} {} ({}): {status} {body}",
+                operation.method, operation.template, operation.id
+            ));
+        }
+    }
+
+    // The same calls as an admin show that each one reaches its access check: success, or a
+    // refusal by a later rule (403, 409). A missing record or a refused body proves nothing.
+    let mut unproven = Vec::new();
+    for operation in &operations {
+        let (status, body) = server
+            .call(
+                &admin,
+                &operation.method,
+                &operation.path,
+                operation.body.as_ref(),
+            )
+            .await;
+        if !(status < 400 || status == 403 || status == 409)
+            && !guest_may_use(&operation.template, &operation.id)
+        {
+            unproven.push(format!(
+                "{} {} ({status} {})",
+                operation.method,
+                operation.template,
+                body["code"].as_str().unwrap_or_default()
+            ));
+        }
+    }
+    let denied = operations
+        .iter()
+        .filter(|operation| !guest_may_use(&operation.template, &operation.id))
+        .count();
+    eprintln!(
+        "guest sweep: {denied} operations denied, {} not reached by an admin either:\n{}",
+        unproven.len(),
+        unproven.join("\n")
+    );
+    assert!(
+        reached.is_empty(),
+        "a guest reached {} operations:\n{}",
+        reached.len(),
+        reached.join("\n")
+    );
+    assert!(
+        unproven.len() * 2 < denied,
+        "too few operations reach their access check as an admin"
+    );
+
+    // The guest still sees its workspace, as a guest with no permission.
+    let own = server.ok(&guest, "GET", &base, Value::Null).await;
+    assert_eq!(own["role"], "guest");
+    assert_eq!(own["permissions"], json!([]));
+    let listed = server
+        .ok(&guest, "GET", "/api/v1/workspaces", Value::Null)
+        .await;
+    assert!(
+        listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|listed| listed["id"] == workspace.as_str())
+    );
+    // And its private channel.
+    let (status, _) = server
+        .call(
+            &guest,
+            "GET",
+            &format!("{base}/chat/conversations/{private}/messages"),
+            None,
+        )
+        .await;
+    assert_eq!(status, 200);
+    server.stop().await;
+}

@@ -137,8 +137,8 @@ pub async fn trial_usage(
         )
         .bind(workspace_id.to_string()),
         TrialLimit::Members => sqlx::query_scalar(
-            "SELECT CAST((SELECT COUNT(*) FROM memberships WHERE workspace_id = $1) \
-             + (SELECT COUNT(*) FROM workspace_invitations WHERE workspace_id = $1 \
+            "SELECT CAST((SELECT COUNT(*) FROM memberships WHERE workspace_id = $1 AND role <> 'guest') \
+             + (SELECT COUNT(*) FROM workspace_invitations WHERE workspace_id = $1 AND role <> 'guest' \
              AND accepted_at IS NULL AND revoked_at IS NULL AND replaced_at IS NULL \
              AND expires_at > $2) AS BIGINT)",
         )
