@@ -3,6 +3,9 @@
 Orbit serves a read-only MCP endpoint at `<public origin>/mcp`. It uses
 Streamable HTTP in the existing server. No separate process is needed.
 
+In Orbit, open **Account settings → Agentic** to copy the endpoint and the setup
+command for each client below.
+
 ## Client setup
 
 ### Claude
@@ -96,7 +99,7 @@ alternative.
 
 ### Disconnect and troubleshooting
 
-- To revoke access, open **Settings → Sessions → Connected apps** in Orbit and
+- To revoke access, open **Account settings → Agentic → Connected apps** in Orbit and
   disconnect the client.
 - If the protected-resource address does not match, correct
   `ORBIT_PUBLIC_ORIGIN`, restart Orbit, then authenticate again.
@@ -122,7 +125,7 @@ last 30 days and rotate on every successful refresh. Reuse of a consumed refresh
 token revokes the entire connection. Authorization codes last one minute, can
 be used once, and require the exact client and registered callback URI.
 
-Open **Settings → Sessions → Connected apps** to disconnect a client. This stops
+Open **Account settings → Agentic → Connected apps** to disconnect a client. This stops
 all its access and refresh tokens. Current workspace membership, account
 suspension, project availability, token expiry, audience, and revocation are
 checked on every MCP request. Removing a project does not grant access to any

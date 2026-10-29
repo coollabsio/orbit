@@ -138,6 +138,20 @@ export function useRevokeSessions() {
   })
 }
 
+export function useOAuthConnections() {
+  const { client } = useOrbit()
+  return useQuery({ queryKey: account.accountKeys.oauthConnections, queryFn: () => account.oauthConnections(client) })
+}
+
+export function useDisconnectOAuth() {
+  const { client } = useOrbit()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => account.disconnectOAuth(client, id),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: account.accountKeys.oauthConnections }),
+  })
+}
+
 export function useTwoFactor() {
   const { client } = useOrbit()
   return useQuery({ queryKey: account.accountKeys.twoFactor, queryFn: () => account.twoFactor(client) })

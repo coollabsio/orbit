@@ -207,6 +207,7 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
   const onTasks = pathname === '/tasks' || pathname.startsWith('/tasks/')
   const onSettings = pathname === '/settings' || pathname.startsWith('/settings/')
   const onAdmin = pathname.startsWith('/settings/admin')
+  const onAgentic = pathname === '/settings/agentic'
   const taskView = (name: string) => pathname === '/tasks' && view === name
   const workspaceLinks: NavLink[] = [
     { label: 'Home', icon: 'home', href: '/', active: pathname === '/' },
@@ -214,6 +215,7 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
   ]
   const personal: NavLink[] = [
     { label: 'Activity', icon: 'inbox', href: '/activity', active: pathname === '/activity', dot: inboxUnread },
+    { label: 'Agentic', icon: 'robot', href: '/settings/agentic', active: onAgentic },
     // the new UI keeps the task presets in the Tasks area
     ...(newUi ? [] : TASK_PRESETS.map((preset) => ({ label: preset.label, icon: preset.icon, href: tasksHref({ project }, { view: preset.view }), active: taskView(preset.view) }))),
   ]
@@ -276,7 +278,7 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
                 <NavRow key={link.label} link={link} onPress={() => go(link.href)} />
               ))}
               <Section label="Manage" />
-              <NavRow link={{ label: 'Settings', icon: 'settings', href: '/settings', active: onSettings && !onAdmin }} onPress={() => go('/settings')} />
+              <NavRow link={{ label: 'Settings', icon: 'settings', href: '/settings', active: onSettings && !onAdmin && !onAgentic }} onPress={() => go('/settings')} />
               {user.installation_admin ? (
                 <>
                   {/* the installation, not the workspace: it sits apart at the bottom */}

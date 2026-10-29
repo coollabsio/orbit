@@ -1,6 +1,7 @@
 import { useContext, type ComponentType } from 'react'
 import { ArchiveBox, Brush, Card, Chart, ClipboardText, CloudConnection, Cpu, SecurityUser, Driver, Key, Keyboard, Link2, Lock, Login, Notification as Bell, Setting2 as Settings, ShieldTick as ShieldCheck, SmileCircle, Sms as Mail, Sticker, Danger as TriangleAlert, User, People as Users } from 'reicon-react'
 import type { Permission } from '@orbit/api/generated/types.gen'
+import { RobotIcon } from '@/components/common/icons/RobotIcon'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { useBillingEnabled } from '@/features/workspaces/billing'
 
@@ -78,6 +79,7 @@ const AREAS: Record<SettingsAreaName, SettingsArea> = {
           { to: '/profile/notifications', label: 'Notifications', icon: Bell },
           { to: '/profile/security', label: 'Security', icon: Lock },
           { to: '/profile/sessions', label: 'Sessions', icon: ShieldCheck },
+          { to: '/profile/agentic', label: 'Agentic', icon: RobotIcon },
           { to: '/profile/shortcuts', label: 'Keyboard shortcuts', icon: Keyboard },
           { to: '/profile/storage', label: 'Storage', icon: Driver },
         ],

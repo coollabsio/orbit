@@ -46,6 +46,7 @@ import type {
 } from '@orbit/api/generated/types.gen'
 
 import type { MemberRecord, OrbitClient, User, WorkspaceRecord } from './orbit'
+import type { OAuthConnection } from '@orbit/api/mcp'
 import { STORAGE_FILES_PAGE } from '@orbit/api/storage'
 
 export type { InvitationRecord, NotificationPrefs, SessionRecord, TotpSetup, TwoFactorStatus, WorkspaceBucketView, WorkspaceStorage }
@@ -56,6 +57,7 @@ export const accountKeys = {
   sessions: ['account', 'sessions'] as const,
   twoFactor: ['account', 'two-factor'] as const,
   connectedAccounts: ['account', 'connected-accounts'] as const,
+  oauthConnections: ['account', 'oauth-connections'] as const,
   /** Under the `members` prefix, so the workspace events socket refreshes it with the members. */
   invitations: (workspaceId: string) => ['members', workspaceId, 'invitations'] as const,
   storage: (workspaceId: string) => ['workspace-storage', workspaceId] as const,
@@ -150,6 +152,16 @@ export async function sessions(client: OrbitClient): Promise<SessionRecord[]> {
 
 export async function revokeSession(client: OrbitClient, id: string): Promise<void> {
   await revokeSessionRequest({ client, path: { id }, throwOnError: true })
+}
+
+/** The MCP clients this person approved. The OAuth routes are not in the OpenAPI contract, so they have no SDK function. */
+export async function oauthConnections(client: OrbitClient): Promise<OAuthConnection[]> {
+  return (await client.get<{ 200: { items: OAuthConnection[] } }, unknown, true>({ url: '/api/v1/oauth/grants', throwOnError: true })).data.items
+}
+
+/** Stops the client's access and refresh tokens. */
+export async function disconnectOAuth(client: OrbitClient, id: string): Promise<void> {
+  await client.delete({ url: '/api/v1/oauth/grants/{id}', path: { id }, throwOnError: true })
 }
 
 /** The current session first, then the most recently active. */

@@ -5,6 +5,7 @@ import { cn } from 'cn'
 import { useAppSidebarTheme } from '@/lib/customTheme'
 import { DocumentText as FileText, Home2 as Home, Message as MessageSquare, Notification as Bell, People as Users, Setting2 as Settings, ShieldTick as ShieldCheck, TaskSquare as SquareCheck, Trash as Trash2 } from 'reicon-react'
 import type { IconComponent as LucideIcon } from 'reicon-react'
+import { RobotIcon } from '@/components/common/icons/RobotIcon'
 import {
   Command,
   CommandDialog,
@@ -161,6 +162,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       { id: 'nav_settings', icon: Settings, title: 'Go to Settings', meta: 'Navigation', to: '/settings', command: 'nav.settings', keywords: 'settings preferences' },
       { id: 'nav_members', icon: Users, title: 'Go to Members', meta: 'Navigation', to: '/settings/members', keywords: 'members invitations people' },
       { id: 'nav_sessions', icon: ShieldCheck, title: 'Go to Sessions', meta: 'Navigation', to: '/profile/sessions', keywords: 'sessions devices' },
+      { id: 'nav_agentic', icon: RobotIcon, title: 'Go to Agentic', meta: 'Navigation', to: '/profile/agentic', keywords: 'agentic mcp ai claude codex grok connected apps' },
       { id: 'nav_notifications', icon: Settings, title: 'Go to Notification settings', meta: 'Navigation', to: '/profile/notifications', keywords: 'notifications push sounds alerts' },
       { id: 'nav_trash', icon: Trash2, title: 'Go to Task trash', meta: 'Navigation', to: '/tasks-trash', command: 'nav.trash', keywords: 'trash deleted tasks' },
       { id: 'nav_page_trash', icon: Trash2, title: 'Go to Page trash', meta: 'Navigation', to: '/docs/trash', keywords: 'trash deleted pages docs' },

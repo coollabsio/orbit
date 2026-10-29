@@ -7,7 +7,6 @@ import { SessionRevocationError, useRevokeSessions, useSessions } from '@/featur
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { useSlowPending } from '@/lib/useDebouncedValue'
 import { RowIcon, SettingsRow } from '@/features/settings/components/SettingsParts'
-import { OAuthConnections } from '@/features/auth/components/OAuthConnections'
 
 /** Account view: the current user's signed-in devices. */
 export function SessionsPage() {
@@ -66,7 +65,6 @@ export function SessionsPage() {
           {revoking ? <SettingsRow role="status">Revoking {revokeSessions.variables?.length ?? 1} session{revokeSessions.variables?.length === 1 ? '' : 's'}…</SettingsRow> : null}
         </div>
       </SettingsCard>
-      <OAuthConnections />
     </>
   )
 }

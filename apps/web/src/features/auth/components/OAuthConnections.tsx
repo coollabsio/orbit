@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { SettingsCard } from '@/components/common/SettingsCard'
-import { oauthRequest, type OAuthConnection } from '@/features/auth/oauth'
+import type { OAuthConnection } from '@orbit/api/mcp'
+import { oauthRequest } from '@/features/auth/oauth'
 
 export function OAuthConnections() {
   const queryClient = useQueryClient()

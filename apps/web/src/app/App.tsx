@@ -31,6 +31,7 @@ import { BillingPage } from '@/features/settings/pages/BillingPage'
 import { MembersPage } from '@/features/settings/pages/MembersPage'
 import { SecurityPage } from '@/features/settings/pages/SecurityPage'
 import { SessionsPage } from '@/features/settings/pages/SessionsPage'
+import { AgenticPage } from '@/features/settings/pages/AgenticPage'
 import { ShortcutsPage } from '@/features/settings/pages/ShortcutsPage'
 import { StickersPage } from '@/features/settings/pages/StickersPage'
 import { StoragePage } from '@/features/settings/pages/StoragePage'
@@ -122,6 +123,7 @@ export default function App() {
                 <Route path="notifications" element={<NotificationsPage />} />
                 <Route path="security" element={<SecurityPage />} />
                 <Route path="sessions" element={<SessionsPage />} />
+                <Route path="agentic" element={<AgenticPage />} />
                 <Route path="shortcuts" element={<ShortcutsPage />} />
                 <Route path="storage" element={<StoragePage />} />
               </Route>
