@@ -159,7 +159,7 @@ pub struct JobKindLimits {
 
 #[derive(Clone, Debug)]
 pub struct InstanceSettingsRepository {
-    database: Database,
+    pub(super) database: Database,
 }
 
 impl InstanceSettingsRepository {
@@ -209,9 +209,11 @@ impl InstanceSettingsRepository {
         now: TimestampMillis,
     ) -> Result<(), InstanceSettingsError> {
         let mut transaction = self.database.immediate_transaction().await?;
+        // Sign-up needs a way to prove the email: an emailed link, or a sign-in provider that verified it.
         if open {
             let configured = sqlx::query_scalar::<_, i64>(
-                "SELECT COUNT(*) FROM instance_settings WHERE id = 1 AND smtp_host IS NOT NULL",
+                "SELECT (SELECT COUNT(*) FROM instance_settings WHERE id = 1 AND smtp_host IS NOT NULL) \
+                 + (SELECT COUNT(*) FROM sign_in_providers)",
             )
             .fetch_one(&mut *transaction)
             .await?;

@@ -29,7 +29,8 @@
       "expo-router",
       "expo-font",
       "expo-system-ui",
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-web-browser"
     ],
     "backgroundColor": "#0a0a0a"
   }

@@ -3,8 +3,9 @@ import { flushSync } from 'react-dom'
 import { toast } from 'sonner'
 import { Copy, DocumentDownload, FingerScan, Mobile } from 'reicon-react'
 import { ApiProblem } from '@orbit/api/problem'
-import type { PasskeyRecord, TotpSetup } from '@orbit/api/generated/types.gen'
+import type { ConnectedAccount, PasskeyRecord, Provider, TotpSetup } from '@orbit/api/generated/types.gen'
 import { confirmAction } from '@/components/common/confirmAction'
+import { ProviderMark } from '@/components/common/icons/ProviderMark'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -12,8 +13,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { PasswordInput } from '@/components/ui/password-input'
-import { useAuthOptions } from '@/features/auth/api'
+import { useAuthOptions, useConnectedAccounts, useCurrentUser, useDisconnectAccount, useStartProviderSignIn } from '@/features/auth/api'
+import { ConfirmWithProvider } from '@/features/auth/components/ConfirmWithProvider'
 import { defaultPasskeyName, isPasskeyCancel, passkeysSupported } from '@/features/auth/passkey'
+import { PROVIDER_NAMES } from '@/features/auth/providerSignIn'
 import {
   useAddPasskey,
   useDeletePasskey,
@@ -38,12 +41,21 @@ function ago(iso: string) {
   return /^\d+[mhd]$/.test(relative) ? `${relative} ago` : `on ${relative}`
 }
 
-/** Account view: the authenticator app, recovery codes and passkeys. */
+/** Where `connect` and `confirm` flows come back to. */
+const SECURITY_PATH = '/profile/security'
+
+/** Accounts created with Google or GitHub have no password until they set one. */
+function useHasPassword() {
+  return useCurrentUser().data?.has_password !== false
+}
+
+/** Account view: the authenticator app, recovery codes, passkeys and connected Google / GitHub accounts. */
 export function SecurityPage() {
   return (
     <>
       <AuthenticatorCard />
       <PasskeysCard />
+      <ConnectedAccountsCard />
     </>
   )
 }
@@ -97,14 +109,22 @@ function AuthenticatorCard() {
   )
 }
 
-/** The current password, asked again before a change to how the account signs in. */
-function PasswordField({ value, onChange, error }: { value: string; onChange: (value: string) => void; error?: string | null }) {
+/**
+ * The current password, asked again before a change to how the account signs in. An account without one has no
+ * field: when its sign-in is too old, the server asks for a fresh provider sign-in instead.
+ */
+function CurrentPassword({ hasPassword, value, onChange, error, fallback }: { hasPassword: boolean; value: string; onChange: (value: string) => void; error: unknown; fallback: string }) {
   const id = useId()
+  const message = error ? problemDetail(error, fallback) : null
+  if (!hasPassword) {
+    if (error instanceof ApiProblem && error.code === 'reauthentication_required') return <ConfirmWithProvider returnTo={SECURITY_PATH} />
+    return message ? <p role="alert" className="text-[13px] text-destructive">{message}</p> : null
+  }
   return (
-    <Field data-invalid={error ? true : undefined}>
+    <Field data-invalid={message ? true : undefined}>
       <FieldLabel htmlFor={id}>Current password</FieldLabel>
-      <PasswordInput id={id} required autoFocus autoComplete="current-password" aria-invalid={error ? true : undefined} value={value} onChange={(event) => onChange(event.target.value)} />
-      {error ? <FieldError>{error}</FieldError> : null}
+      <PasswordInput id={id} required autoFocus autoComplete="current-password" aria-invalid={message ? true : undefined} value={value} onChange={(event) => onChange(event.target.value)} />
+      {message ? <FieldError>{message}</FieldError> : null}
     </Field>
   )
 }
@@ -112,6 +132,7 @@ function PasswordField({ value, onChange, error }: { value: string; onChange: (v
 function SetupTotpDialog({ onClose }: { onClose: () => void }) {
   const setup = useSetupTotp()
   const enable = useEnableTotp()
+  const hasPassword = useHasPassword()
   const [password, setPassword] = useState('')
   const [code, setCode] = useState('')
   const [secret, setSecret] = useState<TotpSetup | null>(null)
@@ -147,16 +168,16 @@ function SetupTotpDialog({ onClose }: { onClose: () => void }) {
         ) : (
           <form className="grid gap-4" onSubmit={(event) => {
             event.preventDefault()
-            setup.mutate(password, { onSuccess: setSecret })
+            setup.mutate(hasPassword ? password : null, { onSuccess: setSecret })
           }}>
             <DialogHeader>
               <DialogTitle>Set up an authenticator app</DialogTitle>
-              <DialogDescription>Confirm your password to start.</DialogDescription>
+              <DialogDescription>{hasPassword ? 'Confirm your password to start.' : 'Orbit makes a key for your authenticator app.'}</DialogDescription>
             </DialogHeader>
-            <PasswordField value={password} onChange={setPassword} error={setup.isError ? problemDetail(setup.error, 'The setup could not start.') : null} />
+            <CurrentPassword hasPassword={hasPassword} value={password} onChange={setPassword} error={setup.error} fallback="The setup could not start." />
             <DialogFooter>
               <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-              <Button type="submit" disabled={setup.isPending || !password}>{setup.isPending ? 'Please wait…' : 'Continue'}</Button>
+              <Button type="submit" disabled={setup.isPending || (hasPassword && !password)}>{setup.isPending ? 'Please wait…' : 'Continue'}</Button>
             </DialogFooter>
           </form>
         )}
@@ -167,6 +188,7 @@ function SetupTotpDialog({ onClose }: { onClose: () => void }) {
 
 function RegenerateCodesDialog({ onClose }: { onClose: () => void }) {
   const regenerate = useRegenerateRecoveryCodes()
+  const hasPassword = useHasPassword()
   const [password, setPassword] = useState('')
   const [codes, setCodes] = useState<string[] | null>(null)
   return (
@@ -177,16 +199,16 @@ function RegenerateCodesDialog({ onClose }: { onClose: () => void }) {
         ) : (
           <form className="grid gap-4" onSubmit={(event) => {
             event.preventDefault()
-            regenerate.mutate(password, { onSuccess: setCodes })
+            regenerate.mutate(hasPassword ? password : null, { onSuccess: setCodes })
           }}>
             <DialogHeader>
               <DialogTitle>New recovery codes</DialogTitle>
               <DialogDescription>Your current recovery codes stop working.</DialogDescription>
             </DialogHeader>
-            <PasswordField value={password} onChange={setPassword} error={regenerate.isError ? problemDetail(regenerate.error, 'New recovery codes could not be made.') : null} />
+            <CurrentPassword hasPassword={hasPassword} value={password} onChange={setPassword} error={regenerate.error} fallback="New recovery codes could not be made." />
             <DialogFooter>
               <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-              <Button type="submit" disabled={regenerate.isPending || !password}>{regenerate.isPending ? 'Please wait…' : 'Make new codes'}</Button>
+              <Button type="submit" disabled={regenerate.isPending || (hasPassword && !password)}>{regenerate.isPending ? 'Please wait…' : 'Make new codes'}</Button>
             </DialogFooter>
           </form>
         )}
@@ -197,13 +219,14 @@ function RegenerateCodesDialog({ onClose }: { onClose: () => void }) {
 
 function DisableTwoFactorDialog({ onClose }: { onClose: () => void }) {
   const disable = useDisableTwoFactor()
+  const hasPassword = useHasPassword()
   const [password, setPassword] = useState('')
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent>
         <form className="grid gap-4" onSubmit={(event) => {
           event.preventDefault()
-          disable.mutate(password, {
+          disable.mutate(hasPassword ? password : null, {
             onSuccess: () => {
               toast('Two-factor sign-in is off')
               onClose()
@@ -212,12 +235,12 @@ function DisableTwoFactorDialog({ onClose }: { onClose: () => void }) {
         }}>
           <DialogHeader>
             <DialogTitle>Turn off two-factor sign-in?</DialogTitle>
-            <DialogDescription>Sign-in asks only for your password again, and your recovery codes stop working.</DialogDescription>
+            <DialogDescription>Sign-in no longer asks for a code, and your recovery codes stop working.</DialogDescription>
           </DialogHeader>
-          <PasswordField value={password} onChange={setPassword} error={disable.isError ? problemDetail(disable.error, 'Two-factor sign-in could not be turned off.') : null} />
+          <CurrentPassword hasPassword={hasPassword} value={password} onChange={setPassword} error={disable.error} fallback="Two-factor sign-in could not be turned off." />
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-            <Button type="submit" variant="destructive" disabled={disable.isPending || !password}>{disable.isPending ? 'Turning off…' : 'Turn off'}</Button>
+            <Button type="submit" variant="destructive" disabled={disable.isPending || (hasPassword && !password)}>{disable.isPending ? 'Turning off…' : 'Turn off'}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -290,7 +313,7 @@ function PasskeysCard() {
   // Closing the browser prompt is a choice, not a failure.
   const addError = !adding && add.isError && !isPasskeyCancel(add.error) ? problemDetail(add.error, add.error instanceof Error ? add.error.message : 'The passkey could not be added.') : null
 
-  function addPasskey(name: string, password: string) {
+  function addPasskey(name: string, password: string | null) {
     add.mutate({
       name,
       password,
@@ -354,19 +377,18 @@ function PasskeysCard() {
   )
 }
 
-/** Asks for the name and the password. It closes before the browser prompt opens (see `useAddPasskey`). */
-function AddPasskeyDialog({ add, onAdd, onClose }: { add: ReturnType<typeof useAddPasskey>; onAdd: (name: string, password: string) => void; onClose: () => void }) {
+/** Asks for the name and the password (if the account has one). It closes before the browser prompt opens (see `useAddPasskey`). */
+function AddPasskeyDialog({ add, onAdd, onClose }: { add: ReturnType<typeof useAddPasskey>; onAdd: (name: string, password: string | null) => void; onClose: () => void }) {
+  const hasPassword = useHasPassword()
   const [name, setName] = useState(() => defaultPasskeyName())
   const [password, setPassword] = useState('')
   const nameId = useId()
-  // Only the password check fails while the dialog is open.
-  const error = add.isError ? problemDetail(add.error, 'The passkey could not be added.') : null
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent>
         <form className="grid gap-4" onSubmit={(event) => {
           event.preventDefault()
-          onAdd(name.trim(), password)
+          onAdd(name.trim(), hasPassword ? password : null)
         }}>
           <DialogHeader>
             <DialogTitle>Add a passkey</DialogTitle>
@@ -378,15 +400,108 @@ function AddPasskeyDialog({ add, onAdd, onClose }: { add: ReturnType<typeof useA
               <Input id={nameId} required maxLength={64} value={name} onChange={(event) => setName(event.target.value)} />
               <FieldDescription>So you can tell your passkeys apart, e.g. "MacBook" or "YubiKey".</FieldDescription>
             </Field>
-            <PasswordField value={password} onChange={setPassword} />
+            {/* Only the password check fails while the dialog is open. */}
+            <CurrentPassword hasPassword={hasPassword} value={password} onChange={setPassword} error={add.error} fallback="The passkey could not be added." />
           </FieldGroup>
-          {error ? <p role="alert" className="text-[13px] text-destructive">{error}</p> : null}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
-            <Button type="submit" disabled={add.isPending || !password || !name.trim()}>{add.isPending ? 'Checking…' : 'Add passkey'}</Button>
+            <Button type="submit" disabled={add.isPending || (hasPassword && !password) || !name.trim()}>{add.isPending ? 'Checking…' : 'Add passkey'}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/** A connected account is a new way into the account, so an account with a password confirms it first. */
+function ConnectProviderDialog({ provider, onClose }: { provider: Provider; onClose: () => void }) {
+  const connect = useStartProviderSignIn()
+  const [password, setPassword] = useState('')
+  const name = PROVIDER_NAMES[provider]
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+      <DialogContent>
+        <form className="grid gap-4" onSubmit={(event) => {
+          event.preventDefault()
+          connect.mutate({ provider, intent: 'connect', returnTo: SECURITY_PATH, password })
+        }}>
+          <DialogHeader>
+            <DialogTitle>Connect {name}</DialogTitle>
+            <DialogDescription>Confirm your password, then sign in with {name}.</DialogDescription>
+          </DialogHeader>
+          <CurrentPassword hasPassword value={password} onChange={setPassword} error={connect.error} fallback="The connection could not start." />
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+            <Button type="submit" disabled={connect.isPending || connect.isSuccess || !password}>{connect.isPending ? 'Please wait…' : 'Continue'}</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function ConnectedAccountsCard() {
+  const options = useAuthOptions()
+  const accounts = useConnectedAccounts()
+  const hasPassword = useHasPassword()
+  const connect = useStartProviderSignIn()
+  const disconnect = useDisconnectAccount()
+  const [confirming, setConfirming] = useState<Provider | null>(null)
+  const configured = options.data?.providers ?? []
+  const connected = accounts.data ?? []
+  // An account stays listed after an admin removes its provider, so it can still be disconnected.
+  const providers = [...configured, ...connected.map((account) => account.provider).filter((provider) => !configured.includes(provider))]
+  if (providers.length === 0) return null
+
+  async function confirmDisconnect(account: ConnectedAccount) {
+    const name = PROVIDER_NAMES[account.provider]
+    const confirmed = await confirmAction({
+      title: `Disconnect ${name}?`,
+      description: `You can no longer sign in with this ${name} account.`,
+      confirmLabel: 'Disconnect',
+      danger: true,
+    })
+    if (!confirmed) return
+    connect.reset()
+    disconnect.mutate(account.provider, { onSuccess: () => toast(`${name} is disconnected`) })
+  }
+
+  function connectProvider(provider: Provider) {
+    disconnect.reset()
+    if (hasPassword) setConfirming(provider)
+    else connect.mutate({ provider, intent: 'connect', returnTo: SECURITY_PATH })
+  }
+
+  return (
+    <SettingsCard title="Connected accounts" description="Sign in to Orbit with an account you already have." flush>
+      <div className="flex flex-col divide-y">
+        {disconnect.isError ? <SettingsRow role="alert" className="text-[13px] text-destructive">{problemDetail(disconnect.error, 'The account could not be disconnected.')}</SettingsRow> : null}
+        {connect.error instanceof ApiProblem && connect.error.code === 'reauthentication_required'
+          ? <SettingsRow><ConfirmWithProvider returnTo={SECURITY_PATH} /></SettingsRow>
+          : connect.isError ? <SettingsRow role="alert" className="text-[13px] text-destructive">{problemDetail(connect.error, 'The connection could not start.')}</SettingsRow> : null}
+        {accounts.isError ? <SettingsRow role="alert">Connected accounts could not be loaded. <Button variant="ghost" onClick={() => void accounts.refetch()}>Retry</Button></SettingsRow> : null}
+        {providers.map((provider) => {
+          const account = connected.find((item) => item.provider === provider)
+          const name = PROVIDER_NAMES[provider]
+          return (
+            <SettingsRow key={provider} className="flex-nowrap" data-provider={provider}>
+              <RowIcon className="text-foreground"><ProviderMark provider={provider} /></RowIcon>
+              <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                <span className="text-[13px] font-medium text-foreground">{name}</span>
+                <span className="truncate text-xs text-muted-foreground/70">
+                  {account ? `${account.email ? `${account.email} · ` : ''}Connected ${ago(account.created_at)}` : 'Not connected'}
+                </span>
+              </div>
+              {account ? (
+                <Button type="button" variant="ghost" aria-label={`Disconnect ${name}`} disabled={disconnect.isPending} onClick={() => void confirmDisconnect(account)}>Disconnect</Button>
+              ) : accounts.isSuccess && configured.includes(provider) ? (
+                <Button type="button" variant="outline" aria-label={`Connect ${name}`} disabled={connect.isPending || connect.isSuccess} onClick={() => connectProvider(provider)}>Connect</Button>
+              ) : null}
+            </SettingsRow>
+          )
+        })}
+      </div>
+      {confirming ? <ConnectProviderDialog provider={confirming} onClose={() => setConfirming(null)} /> : null}
+    </SettingsCard>
   )
 }

@@ -103,11 +103,49 @@ docker compose --env-file deploy/.env -f deploy/compose.yaml start orbit
 
 Orbit sends email only for invitations, open-registration sign-up links and password reset links. The root user saves the SMTP server in **Admin → Settings → Email** and checks it with **Send test email**. Without a mail server, invitations are shared as links and password recovery works as described below.
 
-Registration is closed after setup: people join only by invitation. The root user can turn on **Open registration** in **Admin → Settings** once a mail server is saved. A new person then enters their email, opens the emailed link (60 minutes, one use) and chooses a name and password. Removing the mail server closes registration.
+Registration is closed after setup: people join only by invitation. The root user can turn on **Open registration** in **Admin → Settings** once a mail server or a [sign-in provider](#sign-in-with-google-and-github) is saved. A new person then enters their email, opens the emailed link (60 minutes, one use) and chooses a name and password. Removing the mail server closes registration.
 
 Saved secrets (the SMTP password, GitHub App keys, Notion import tokens) are encrypted with the app key. `ORBIT_APP_KEY` (base64 of 32 random bytes, from `openssl rand -base64 32`) is required. Orbit does not create a key. Keep a copy outside the server and its backups: a database restored without the same key cannot read its saved secrets, and the root user must enter them again. Users with two-factor authentication must set it up again.
 
 Older versions created an `app.key` file beside the SQLite database. If that file still exists, Orbit starts only when `ORBIT_APP_KEY` holds the same key. Set `ORBIT_APP_KEY` to the contents of the file, start Orbit, and then you can delete the file.
+
+## Sign in with Google and GitHub
+
+People can sign in with a Google or GitHub account when the root user configures the provider. A provider that is not configured does not show on the sign-in pages.
+
+Each provider needs an OAuth client. Register this callback URL at the provider. Replace `{ORBIT_PUBLIC_ORIGIN}` with the public origin of the server:
+
+- Google: `{ORBIT_PUBLIC_ORIGIN}/api/v1/auth/providers/google/callback`
+- GitHub: `{ORBIT_PUBLIC_ORIGIN}/api/v1/auth/providers/github/callback`
+
+To create the Google client:
+
+1. Open the Google Cloud console and select or create a project.
+2. Go to **APIs & Services → OAuth consent screen**. Configure the app name and the support email. Add the scopes `openid`, `email` and `profile`.
+3. Go to **APIs & Services → Credentials → Create credentials → OAuth client ID**.
+4. Select **Web application**. Add the Google callback URL to **Authorized redirect URIs**.
+5. Copy the client ID and the client secret.
+
+To create the GitHub client:
+
+1. Open GitHub **Settings → Developer settings → OAuth Apps → New OAuth App**. For an organization, use the organization settings.
+2. Set **Homepage URL** to the public origin. Set **Authorization callback URL** to the GitHub callback URL.
+3. Register the app. Generate a client secret.
+4. Copy the client ID and the client secret.
+
+Then open **Admin → Sign-in providers**. Enter the client ID and the client secret, and save. Orbit encrypts the secret with the app key. To change only the client ID, leave the secret empty: Orbit keeps the saved secret. **Remove** stops the provider. Accounts keep their connections, so if you save the provider again, these accounts can sign in with it again.
+
+Orbit uses these rules:
+
+- Orbit finds an account by the provider account ID, not by the email. A changed provider email does not change the account.
+- A first sign-in connects to the Orbit account with the same email only if the provider verified that email. Google must report the email as verified. GitHub must have a verified primary email.
+- If no account has that email, Orbit creates an account only when **Open registration** is on. Open registration does not need a mail server when a sign-in provider is configured. A new account has no password. The person can add one in the profile settings within 10 minutes of a sign-in.
+- An account with two-factor authentication must still enter its code after the provider sign-in.
+- People connect and disconnect providers in their security settings. Orbit does not let a person remove the last sign-in method (password, passkey or provider).
+
+### Native app redirects
+
+The mobile app receives the result at `orbit://auth/callback`. Orbit accepts no other redirect in production. For Expo Go in development, set `ORBIT_DEV_NATIVE_REDIRECTS` to the exact Expo URLs, separated by commas, for example `exp://100.64.0.5:8082/--/auth/callback`. Orbit compares each URL exactly. Orbit does not start when `ORBIT_ENV=production` and this variable is set.
 
 ## Postgres
 

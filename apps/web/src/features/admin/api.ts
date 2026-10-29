@@ -1,8 +1,8 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
-import { createBackup, createRecoveryLink, deleteBackup, getInstanceSettings, getJobLimits, saveJobLimits, listAdminUsers, listBackups, listGlobalAudit, removeS3, removeSmtp, resetTwoFactor, saveLimits, saveS3, saveStorageOptions, setInstanceAdmin, startImageCompression, saveSmtp, sendTestEmail, setAccountSuspension, setRegistration } from '@orbit/api/generated/sdk.gen'
-import type { InstanceSettingsView, JobLimitsBody, LimitsView, S3Body, SmtpBody, StorageOptionsBody } from '@orbit/api/generated/types.gen'
+import { createBackup, createRecoveryLink, deleteBackup, getInstanceSettings, getJobLimits, saveJobLimits, listAdminUsers, listBackups, listGlobalAudit, removeS3, removeSignInProvider, removeSmtp, resetTwoFactor, saveLimits, saveS3, saveSignInProvider, saveStorageOptions, setInstanceAdmin, startImageCompression, saveSmtp, sendTestEmail, setAccountSuspension, setRegistration } from '@orbit/api/generated/sdk.gen'
+import type { InstanceSettingsView, JobLimitsBody, LimitsView, Provider, S3Body, SignInProviderBody, SmtpBody, StorageOptionsBody } from '@orbit/api/generated/types.gen'
 
 /** Accounts on this instance in cursor pages; `search` matches part of the name or email. Admins only. */
 export function useAdminUsers(search: string) {
@@ -183,6 +183,21 @@ export function useSaveS3() {
 export function useRemoveS3() {
   return useSettingsWrite(async () => {
     const { data } = await removeS3({ client: apiClient, throwOnError: true })
+    return data
+  })
+}
+
+/** Saves a Google or GitHub client; an empty `client_secret` keeps the saved one. */
+export function useSaveSignInProvider() {
+  return useSettingsWrite(async ({ provider, body }: { provider: Provider; body: SignInProviderBody }) => {
+    const { data } = await saveSignInProvider({ client: apiClient, throwOnError: true, path: { provider }, body })
+    return data
+  })
+}
+
+export function useRemoveSignInProvider() {
+  return useSettingsWrite(async (provider: Provider) => {
+    const { data } = await removeSignInProvider({ client: apiClient, throwOnError: true, path: { provider } })
     return data
   })
 }

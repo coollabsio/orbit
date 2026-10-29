@@ -1,10 +1,13 @@
 import type { ColorValue } from 'react-native'
 import { SvgXml } from 'react-native-svg'
 
-import { type IconName, icons } from './icons.gen'
+import { brandIcons } from './brand-icons'
+import { icons as reicons } from './icons.gen'
 import { useTheme } from '../theme'
 
-export type { IconName }
+const icons = { ...reicons, ...brandIcons }
+
+export type IconName = keyof typeof icons
 
 export interface IconProps {
   name: IconName

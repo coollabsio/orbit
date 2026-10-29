@@ -303,6 +303,10 @@ pub(super) fn endpoint_class(method: &Method, path: &str) -> Option<EndpointClas
     if path != "/api" && !path.starts_with("/api/") {
         return None;
     }
+    // The provider callback is a GET that calls out to Google or GitHub; the generic rules below miss it.
+    if path.starts_with("/api/v1/auth/providers/") {
+        return Some(EndpointClass::Authentication);
+    }
     // Both send email to an address anyone can type, so they share the strict recovery limit.
     if path.contains("/recovery") || path.contains("/auth/register") {
         Some(EndpointClass::Recovery)
@@ -496,6 +500,21 @@ mod tests {
         assert!(!permits(&limiter, client, &Method::GET, chat).await);
         // Exhausted chat leaves the other apps alone.
         assert!(permits(&limiter, client, &Method::GET, "/api/v1/workspaces/w/tasks").await);
+    }
+
+    #[test]
+    fn provider_sign_in_routes_are_authentication_requests() {
+        for (method, path) in [
+            (Method::POST, "/api/v1/auth/providers/google/start"),
+            (Method::GET, "/api/v1/auth/providers/github/callback"),
+            (Method::POST, "/api/v1/auth/providers/exchange"),
+        ] {
+            assert_eq!(
+                endpoint_class(&method, path),
+                Some(EndpointClass::Authentication),
+                "{path}"
+            );
+        }
     }
 
     #[tokio::test]

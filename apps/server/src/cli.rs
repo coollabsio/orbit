@@ -1878,7 +1878,7 @@ mod tests {
         assert_eq!(developer.display_name, "Edited Developer");
         assert!(
             orbit_platform::PasswordService::default()
-                .verify("password", &developer.password_hash)
+                .verify("password", developer.password_hash.as_deref().unwrap())
                 .unwrap()
                 .valid
         );
@@ -1890,7 +1890,7 @@ mod tests {
         assert_eq!(member.display_name, "Orbit Member");
         assert!(
             orbit_platform::PasswordService::default()
-                .verify("password", &member.password_hash)
+                .verify("password", member.password_hash.as_deref().unwrap())
                 .unwrap()
                 .valid
         );
@@ -1971,7 +1971,7 @@ mod tests {
             .unwrap();
         assert_eq!(owner.id, original.user_id);
         assert_eq!(owner.display_name, "Existing Owner");
-        assert_eq!(owner.password_hash, original_hash);
+        assert_eq!(owner.password_hash, Some(original_hash));
         assert!(
             identity
                 .find_by_email("test@example.com")

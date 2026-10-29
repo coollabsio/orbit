@@ -28,6 +28,8 @@ Every action runs in the app; nothing opens the web.
 - `POST /api/v1/auth/login` (and `/login/two-factor` when 2FA is on) returns `session_token` in the body. No cookie is set.
 - The app keeps the token in the device keychain (`expo-secure-store`). It sends the token as `Authorization: Bearer <token>` on every request and on the WebSocket upgrade.
 - The token is a normal Orbit session. It shows in Account → Sessions, and you can revoke it there.
+- **Continue with Google / GitHub** shows on the sign-in screen for each provider the server's admin set up (`providers` in `GET /api/v1/auth/options`). The app starts the flow (`POST /api/v1/auth/providers/{provider}/start` with a PKCE challenge), opens the provider in the system browser's auth session (`expo-web-browser`), and gets back a one-time `handoff` on its redirect URL. It exchanges the handoff and the PKCE verifier for the session token (`POST /api/v1/auth/providers/exchange`). The token never goes in a URL. Two-factor sign-in still asks for the code after this.
+- Security → Connected accounts connects and disconnects providers. An account without a password confirms authenticator changes with a fresh provider sign-in when the server answers `reauthentication_required`.
 
 The server side lives in `apps/server` of the same repo.
 
@@ -71,7 +73,15 @@ Requirements: Bun, the Orbit dev server (`just dev` at the repo root), and a pho
 
    `just mobile` sets `REACT_NATIVE_PACKAGER_HOSTNAME` from `ORBIT_MOBILE_HOST`, so Metro tells the phone to load the app from that host.
 
-6. Sign in with a seed account: `member@example.com` / `password` (create it with `just seed`).
+6. Optional: to test Google or GitHub sign-in in Expo Go, allow the app's Expo Go redirect on the server. A development or store build sends `orbit://auth/callback`, which every server accepts. Expo Go sends its own URL instead, for example `exp://devserver.tail661ee3.ts.net:8082/--/auth/callback` (the Metro host and port, then `/--/auth/callback`). Add that exact value to the server's environment and restart it:
+
+   ```bash
+   ORBIT_DEV_NATIVE_REDIRECTS=exp://devserver.tail661ee3.ts.net:8082/--/auth/callback
+   ```
+
+   The variable takes a comma-separated list, and production configurations ignore it. Without it, the start request fails with `invalid_redirect`.
+
+7. Sign in with a seed account: `member@example.com` / `password` (create it with `just seed`).
 
 You should see the Home tab. Settings shows your profile and the server, and signs you out.
 
@@ -105,4 +115,4 @@ To add an icon, add its reicon name to `ICONS` in `scripts/generate-icons.ts` an
 ## Next steps
 
 - Move to a development build (`bunx expo run:ios|android`, or EAS) when the app needs native modules that Expo Go does not include, for example APNs/FCM push.
-- Browser-sheet sign-in for passkeys and SSO.
+- Browser-sheet sign-in for passkeys. Admin → Sign-in providers (client ID and secret) is web-only.

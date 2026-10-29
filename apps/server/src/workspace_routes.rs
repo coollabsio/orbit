@@ -39,8 +39,10 @@ use crate::repositories::instance_settings::{
     PasswordChange, S3Settings, SmtpSecurity, SmtpSettings, StorageSettingsError,
     adjustable_job_kinds,
 };
+use crate::repositories::sign_in_providers::SaveSignInProviderError;
 use crate::repositories::workspace_storage::{WorkspaceStorageError, WorkspaceStorageRepository};
 use crate::repositories::workspaces::{InvitationDelivery, WorkspaceError, WorkspaceRepository};
+use crate::sign_in_providers::Provider;
 
 #[derive(Clone)]
 pub struct WorkspaceState {
@@ -248,6 +250,10 @@ pub fn workspace_router(state: WorkspaceState) -> Router {
         )
         .route("/api/v1/admin/settings/smtp/test", post(send_test_email))
         .route("/api/v1/admin/settings/s3", put(save_s3).delete(remove_s3))
+        .route(
+            "/api/v1/admin/settings/sign-in-providers/{provider}",
+            put(save_sign_in_provider).delete(remove_sign_in_provider),
+        )
         .route("/api/v1/admin/settings/storage", put(save_storage_options))
         .route("/api/v1/admin/settings/limits", put(save_limits))
         .route(
@@ -466,7 +472,11 @@ async fn delete_storage_file(
     let workspace_id = parse_id(&workspace_id, &instance, request_id.as_ref())?;
     let file_id = parse_id(&file_id, &instance, request_id.as_ref())?;
     let Some(uploads) = &state.uploads else {
-        return Err(workspace_problem(WorkspaceError::NotFound, instance, request_id.as_ref()));
+        return Err(workspace_problem(
+            WorkspaceError::NotFound,
+            instance,
+            request_id.as_ref(),
+        ));
     };
     state
         .workspaces
@@ -1614,6 +1624,18 @@ struct InstanceSettingsView {
     smtp: Option<SmtpView>,
     storage: StorageView,
     limits: LimitsView,
+    /// The Google and GitHub OAuth clients that are saved. A provider that is not listed is off.
+    sign_in_providers: Vec<SignInProviderView>,
+}
+
+#[derive(Serialize, ToSchema)]
+struct SignInProviderView {
+    provider: Provider,
+    client_id: String,
+    /// A client secret is saved. The secret itself is never returned.
+    secret_set: bool,
+    /// The redirect URI to register at the provider.
+    callback_url: String,
 }
 
 /// Limits for a shared installation. `null` is unlimited.
@@ -1654,12 +1676,25 @@ async fn settings_view(
         .limits()
         .await
         .map_err(|_| internal(instance, request_id))?;
+    let sign_in_providers = repository
+        .sign_in_providers()
+        .await
+        .map_err(|_| internal(instance, request_id))?
+        .into_iter()
+        .map(|saved| SignInProviderView {
+            provider: saved.provider,
+            client_id: saved.client_id,
+            secret_set: !saved.client_secret.is_empty(),
+            callback_url: saved.provider.callback_url(&state.public_origin),
+        })
+        .collect();
     let moving = state
         .object_storage
         .as_ref()
         .map(|(_, store)| store.status())
         .unwrap_or_default();
     Ok(Json(InstanceSettingsView {
+        sign_in_providers,
         storage: StorageView {
             s3: storage.s3.map(|s3| S3View {
                 endpoint: s3.endpoint,
@@ -2085,6 +2120,131 @@ async fn reload_storage(
     // The other servers of the database use them too.
     crate::cluster::Cluster::of(database).send(crate::cluster::Message::StorageChanged);
     Ok(())
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct SignInProviderBody {
+    /// The OAuth client ID from Google Cloud or the GitHub OAuth App.
+    client_id: String,
+    /// Absent or empty: keep the saved secret. Required the first time.
+    client_secret: Option<String>,
+}
+
+fn invalid_sign_in_provider(
+    detail: &'static str,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> ApiError {
+    ApiError::new(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "invalid_sign_in_provider",
+        "Invalid sign-in provider",
+        detail,
+        instance,
+        request_id,
+    )
+}
+
+fn sign_in_provider_not_found(
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> ApiError {
+    ApiError::new(
+        StatusCode::NOT_FOUND,
+        "provider_not_found",
+        "Unknown provider",
+        "Orbit can sign in with google or github.",
+        instance,
+        request_id,
+    )
+}
+
+/// Saves the OAuth client of a sign-in provider; the sign-in pages offer it from then on. The secret is encrypted
+/// under the app key.
+#[utoipa::path(put, path = "/api/v1/admin/settings/sign-in-providers/{provider}", params(("provider" = Provider, Path)), request_body = SignInProviderBody, responses((status = 200, body = InstanceSettingsView)))]
+async fn save_sign_in_provider(
+    State(state): State<WorkspaceState>,
+    headers: HeaderMap,
+    Path(provider): Path<String>,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<SignInProviderBody>,
+) -> Result<Json<InstanceSettingsView>, ApiError> {
+    let instance = "/api/v1/admin/settings/sign-in-providers/{provider}";
+    let rid = request_id.as_ref();
+    let session = require_root(&state, &headers, instance, rid).await?;
+    let provider =
+        Provider::parse(&provider).ok_or_else(|| sign_in_provider_not_found(instance, rid))?;
+    let client_id = body.client_id.trim();
+    if client_id.is_empty() || client_id.len() > 256 {
+        return Err(invalid_sign_in_provider(
+            "client_id: enter the client ID (at most 256 characters).",
+            instance,
+            rid,
+        ));
+    }
+    let key = state
+        .mailer
+        .as_ref()
+        .and_then(Mailer::app_key)
+        .ok_or_else(|| app_key_missing(instance, rid))?;
+    let secret = body
+        .client_secret
+        .map(|secret| secret.trim().to_owned())
+        .filter(|secret| !secret.is_empty());
+    if secret.as_ref().is_some_and(|secret| secret.len() > 512) {
+        return Err(invalid_sign_in_provider(
+            "client_secret: at most 512 characters.",
+            instance,
+            rid,
+        ));
+    }
+    let encrypted = secret
+        .map(|secret| crate::secret_box::encrypt_secret(key, &secret))
+        .transpose()
+        .map_err(|()| internal(instance, rid))?;
+    InstanceSettingsRepository::new(state.identity.database().clone())
+        .save_sign_in_provider(
+            session.user.id,
+            provider,
+            client_id,
+            encrypted,
+            request_id_value(rid),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|error| match error {
+            SaveSignInProviderError::SecretRequired => {
+                invalid_sign_in_provider("client_secret: enter the client secret.", instance, rid)
+            }
+            SaveSignInProviderError::Database(_) => internal(instance, rid),
+        })?;
+    settings_view(&state, instance, rid).await
+}
+
+/// Stops offering a sign-in provider. Accounts keep their connections, so saving it again restores them.
+#[utoipa::path(delete, path = "/api/v1/admin/settings/sign-in-providers/{provider}", params(("provider" = Provider, Path)), responses((status = 200, body = InstanceSettingsView)))]
+async fn remove_sign_in_provider(
+    State(state): State<WorkspaceState>,
+    headers: HeaderMap,
+    Path(provider): Path<String>,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<InstanceSettingsView>, ApiError> {
+    let instance = "/api/v1/admin/settings/sign-in-providers/{provider}";
+    let rid = request_id.as_ref();
+    let session = require_root(&state, &headers, instance, rid).await?;
+    let provider =
+        Provider::parse(&provider).ok_or_else(|| sign_in_provider_not_found(instance, rid))?;
+    InstanceSettingsRepository::new(state.identity.database().clone())
+        .remove_sign_in_provider(
+            session.user.id,
+            provider,
+            request_id_value(rid),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|_| internal(instance, rid))?;
+    settings_view(&state, instance, rid).await
 }
 
 #[derive(Deserialize, ToSchema)]

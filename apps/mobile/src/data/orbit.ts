@@ -104,7 +104,8 @@ export function createClient(server: string, token: () => string | null, onUnaut
 
 export type SignIn = { kind: 'signed_in'; token: string; user: User } | { kind: 'two_factor'; twoFactorToken: string }
 
-function signedIn(body: LoginResponse | { two_factor_token: string }): SignIn {
+/** A sign-in answer (password, second factor or provider exchange) as the app's `SignIn`. */
+export function signedIn(body: LoginResponse | { two_factor_token: string }): SignIn {
   if ('two_factor_token' in body) return { kind: 'two_factor', twoFactorToken: body.two_factor_token }
   if (!body.session_token) throw new Error('The server did not return a session token. Update the Orbit server.')
   return { kind: 'signed_in', token: body.session_token, user: body.user }

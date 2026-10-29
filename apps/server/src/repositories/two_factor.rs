@@ -12,6 +12,7 @@ use webauthn_rs::prelude::Passkey;
 use super::identity::{
     AdminAccountError, IdentityError, IdentityRepository, insert_session, token_hash,
 };
+use super::sign_in_providers::sign_in_methods;
 use crate::audit::{self, AuditOutcome};
 
 /// How many recovery codes a user gets at a time.
@@ -24,6 +25,14 @@ pub struct TwoFactorStatus {
     pub totp_enabled: bool,
     /// Unused recovery codes.
     pub recovery_codes_left: i64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PasskeyRemoval {
+    Removed,
+    NotFound,
+    /// Refused: the account would have no password, passkey or provider left.
+    LastSignInMethod,
 }
 
 /// A passkey as the account's Security page lists it.
@@ -423,38 +432,41 @@ impl IdentityRepository {
         })
     }
 
-    /// Deletes one of the user's passkeys. False when the user has no passkey with this ID.
+    /// Deletes one of the user's passkeys, unless it is the account's last way to sign in.
     pub async fn delete_passkey(
         &self,
         user_id: Id,
         passkey_id: Id,
         request_id: &str,
         now: TimestampMillis,
-    ) -> Result<bool, IdentityError> {
+    ) -> Result<PasskeyRemoval, IdentityError> {
         let mut transaction = self.database().immediate_transaction().await?;
         let deleted = sqlx::query("DELETE FROM user_passkeys WHERE id = $1 AND user_id = $2")
             .bind(passkey_id.to_string())
             .bind(user_id.to_string())
             .execute(&mut *transaction)
             .await?
-            .rows_affected()
-            == 1;
-        if deleted {
-            audit::record_global(
-                &mut transaction,
-                Some(user_id),
-                "passkey.removed",
-                AuditOutcome::Success,
-                "passkey",
-                Some(passkey_id),
-                request_id,
-                serde_json::json!({}),
-                now,
-            )
-            .await?;
+            .rows_affected();
+        if deleted != 1 {
+            return Ok(PasskeyRemoval::NotFound);
         }
+        if sign_in_methods(&mut transaction, user_id).await? == 0 {
+            return Ok(PasskeyRemoval::LastSignInMethod);
+        }
+        audit::record_global(
+            &mut transaction,
+            Some(user_id),
+            "passkey.removed",
+            AuditOutcome::Success,
+            "passkey",
+            Some(passkey_id),
+            request_id,
+            serde_json::json!({}),
+            now,
+        )
+        .await?;
         transaction.commit().await?;
-        Ok(deleted)
+        Ok(PasskeyRemoval::Removed)
     }
 
     pub async fn passkey_by_credential(

@@ -18,14 +18,17 @@ use totp_rs::{Builder, Secret, Totp};
 use utoipa::ToSchema;
 use webauthn_rs::prelude::{DiscoverableAuthentication, PasskeyRegistration};
 
+use super::providers::ProviderFlow;
 use super::{
     ApiError, ApiJson, AuthState, LoginResponse, ProblemBody, SessionDelivery, authenticate,
     request_id_value, signed_in_response,
 };
 use crate::audit::AuditOutcome;
 use crate::repositories::identity::{AuthenticatedSession, IdentityError};
+use crate::repositories::sign_in_providers::ProviderSignInError;
 use crate::repositories::two_factor::TwoFactorStatus;
 use crate::secret_box::{decrypt_secret, encrypt_secret};
+use crate::sign_in_providers::{ProviderFailure, ProviderProfile};
 
 /// How long a sign-in waits for its second factor, and a passkey ceremony for the browser.
 const PENDING_LIFETIME_MILLIS: i64 = 5 * 60 * 1_000;
@@ -33,17 +36,18 @@ const PENDING_LIFETIME_MILLIS: i64 = 5 * 60 * 1_000;
 const MAX_PENDING: usize = 10_000;
 /// Wrong codes one sign-in may try before the password is needed again.
 const MAX_CODE_ATTEMPTS: u8 = 5;
+/// How long after a sign-in (or a provider confirmation) an account without a password may change how it signs in.
+pub(super) const FRESH_SIGN_IN_MILLIS: i64 = 10 * 60 * 1_000;
 
 /// Something the server waits on between two requests. Kept in the database, so the next request
 /// can go to any server.
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(super) enum Pending {
-    /// The password was right; the session waits for a code.
+    /// The first factor was right; the session waits for a code.
     Login {
         user: AuthenticatedUser,
-        password_hash: String,
-        replacement_hash: Option<String>,
+        first_factor: FirstFactor,
         attempts: u8,
     },
     PasskeyRegistration {
@@ -52,6 +56,33 @@ pub(super) enum Pending {
     },
     PasskeyLogin {
         state: Box<DiscoverableAuthentication>,
+    },
+    /// Keyed by the OAuth `state`: waiting for the provider to send the browser back.
+    ProviderAuthorization {
+        flow: ProviderFlow,
+        /// Orbit's PKCE verifier for the provider leg. It never leaves the server.
+        pkce_verifier: String,
+    },
+    /// Keyed by the one-time handoff code: the provider step is over, the client that started picks up the result.
+    ProviderHandoff {
+        flow: ProviderFlow,
+        outcome: Result<ProviderProfile, ProviderFailure>,
+    },
+}
+
+/// What the first step of a sign-in proved, so the second factor can finish it.
+#[derive(Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub(super) enum FirstFactor {
+    Password {
+        password_hash: String,
+        replacement_hash: Option<String>,
+    },
+    /// `link`: the identity is new and is written only once the code passes, so a provider account that fails the
+    /// second factor does not stay connected.
+    Provider {
+        profile: ProviderProfile,
+        link: bool,
     },
 }
 
@@ -72,8 +103,17 @@ impl PendingStore {
         Self { database }
     }
 
-    /// Keeps `pending` under a new random token. `None` when the store is full.
+    /// Keeps `pending` under a new random token for five minutes. `None` when the store is full.
     pub(super) async fn insert(&self, pending: Pending) -> Result<Option<String>, sqlx::Error> {
+        self.insert_for(pending, PENDING_LIFETIME_MILLIS).await
+    }
+
+    /// [`Self::insert`] with its own lifetime.
+    pub(super) async fn insert_for(
+        &self,
+        pending: Pending,
+        lifetime_millis: i64,
+    ) -> Result<Option<String>, sqlx::Error> {
         let payload = encode(&pending)?;
         let now = TimestampMillis::now();
         let mut transaction = self.database.immediate_transaction().await?;
@@ -92,7 +132,7 @@ impl PendingStore {
             "INSERT INTO auth_pending (token_hash, expires_at, payload_json) VALUES ($1, $2, $3)",
         )
         .bind(token_hash(&token))
-        .bind(now.as_millis() + PENDING_LIFETIME_MILLIS)
+        .bind(now.as_millis() + lifetime_millis)
         .bind(payload)
         .execute(&mut *transaction)
         .await?;
@@ -121,9 +161,10 @@ impl PendingStore {
         if expires_at <= TimestampMillis::now() {
             return Ok(None);
         }
-        let pending = serde_json::from_str(&row.get::<String, _>("payload_json"))
-            .map_err(|error| sqlx::Error::Decode(Box::new(error)))?;
-        Ok(Some((expires_at, pending)))
+        // An entry an older version wrote in another shape is as good as expired.
+        Ok(serde_json::from_str(&row.get::<String, _>("payload_json"))
+            .ok()
+            .map(|pending| (expires_at, pending)))
     }
 
     /// Puts an entry back under its token with its first expiry, for another try.
@@ -158,21 +199,20 @@ pub(super) struct TwoFactorChallenge {
 pub(super) async fn challenge(
     state: &AuthState,
     user: AuthenticatedUser,
-    password_hash: String,
-    replacement_hash: Option<String>,
+    first_factor: FirstFactor,
+    instance: &'static str,
     request_id: Option<&Extension<RequestId>>,
 ) -> Result<Response, ApiError> {
     let token = state
         .pending
         .insert(Pending::Login {
             user,
-            password_hash,
-            replacement_hash,
+            first_factor,
             attempts: 0,
         })
         .await
-        .map_err(|_| ApiError::internal("/api/v1/auth/login", request_id))?
-        .ok_or_else(|| busy("/api/v1/auth/login", request_id))?;
+        .map_err(|_| ApiError::internal(instance, request_id))?
+        .ok_or_else(|| busy(instance, request_id))?;
     Ok((
         StatusCode::ACCEPTED,
         Json(TwoFactorChallenge {
@@ -225,8 +265,7 @@ pub(super) async fn login_second_factor(
         expires_at,
         Pending::Login {
             user,
-            password_hash,
-            replacement_hash,
+            first_factor,
             attempts,
         },
     )) = state
@@ -256,8 +295,7 @@ pub(super) async fn login_second_factor(
                     expires_at,
                     Pending::Login {
                         user,
-                        password_hash,
-                        replacement_hash,
+                        first_factor,
                         attempts,
                     },
                 )
@@ -303,8 +341,7 @@ pub(super) async fn login_second_factor(
                     expires_at,
                     Pending::Login {
                         user,
-                        password_hash,
-                        replacement_hash,
+                        first_factor,
                         attempts: attempts + 1,
                     },
                 )
@@ -322,28 +359,44 @@ pub(super) async fn login_second_factor(
     }
     state.throttler.finish_success(reservation).await;
 
-    let session = state
-        .repository
-        .create_session_audited(
-            &user,
-            &password_hash,
-            replacement_hash.as_deref(),
-            request_id_value(request_id.as_ref()),
-            TimestampMillis::now(),
-        )
-        .await;
-    match session {
-        Ok(session) => Ok(signed_in_response(
-            &state,
-            user,
-            &session,
-            SessionDelivery::for_request(&headers),
-        )
-        .await),
-        // The password changed or the account was suspended after the first step.
-        Err(IdentityError::InvalidCredential) => Err(expired()),
-        Err(_) => Err(ApiError::internal(instance, request_id.as_ref())),
-    }
+    let rid = request_id_value(request_id.as_ref());
+    let session = match &first_factor {
+        FirstFactor::Password {
+            password_hash,
+            replacement_hash,
+        } => state
+            .repository
+            .create_session_audited(
+                &user,
+                password_hash,
+                replacement_hash.as_deref(),
+                rid,
+                TimestampMillis::now(),
+            )
+            .await
+            .map_err(|error| match error {
+                // The password changed or the account was suspended after the first step.
+                IdentityError::InvalidCredential => expired(),
+                _ => ApiError::internal(instance, request_id.as_ref()),
+            })?,
+        FirstFactor::Provider { profile, link } => state
+            .repository
+            .create_provider_session_audited(&user, profile, *link, rid, TimestampMillis::now())
+            .await
+            .map_err(|error| match error {
+                ProviderSignInError::Refused(_) => expired(),
+                ProviderSignInError::Database(_) => {
+                    ApiError::internal(instance, request_id.as_ref())
+                }
+            })?,
+    };
+    Ok(signed_in_response(
+        &state,
+        user,
+        &session,
+        SessionDelivery::for_request(&headers),
+    )
+    .await)
 }
 
 /// Whether `code` is a fresh authenticator app code or an unused recovery code of the user. Uses it up.
@@ -422,8 +475,9 @@ pub(super) async fn get_two_factor(
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct PasswordConfirmationBody {
-    /// The current password: changing how the account signs in asks for it again.
-    password: String,
+    /// The current password: changing how the account signs in asks for it again. Leave it out when the account has
+    /// none: then the session must have signed in or confirmed with a provider in the last 10 minutes.
+    password: Option<String>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -438,7 +492,7 @@ pub(super) struct TotpSetup {
 
 /// Starts the authenticator app setup: a new secret to scan. Two-factor sign-in stays off until a code from the app
 /// confirms it.
-#[utoipa::path(post, path = "/api/v1/auth/two-factor/totp/setup", request_body = PasswordConfirmationBody, responses((status = 200, body = TotpSetup), (status = 401, description = "authentication_required or invalid_credentials", body = ProblemBody, content_type = "application/problem+json"), (status = 409, description = "two_factor_enabled", body = ProblemBody, content_type = "application/problem+json"), (status = 429, description = "authentication_throttled", body = ProblemBody, content_type = "application/problem+json")))]
+#[utoipa::path(post, path = "/api/v1/auth/two-factor/totp/setup", request_body = PasswordConfirmationBody, responses((status = 200, body = TotpSetup), (status = 401, description = "authentication_required, invalid_credentials, password_required or reauthentication_required", body = ProblemBody, content_type = "application/problem+json"), (status = 409, description = "two_factor_enabled", body = ProblemBody, content_type = "application/problem+json"), (status = 429, description = "authentication_throttled", body = ProblemBody, content_type = "application/problem+json")))]
 pub(super) async fn setup_totp(
     State(state): State<AuthState>,
     headers: HeaderMap,
@@ -448,7 +502,7 @@ pub(super) async fn setup_totp(
 ) -> Result<Json<TotpSetup>, ApiError> {
     let instance = "/api/v1/auth/two-factor/totp/setup";
     let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
-    confirm_password(
+    confirm_identity(
         &state,
         &session,
         body.password,
@@ -564,7 +618,7 @@ pub(super) async fn enable_totp(
 }
 
 /// Turns two-factor sign-in off and deletes the recovery codes. Passkeys stay.
-#[utoipa::path(post, path = "/api/v1/auth/two-factor/disable", request_body = PasswordConfirmationBody, responses((status = 204), (status = 401, description = "authentication_required or invalid_credentials", body = ProblemBody, content_type = "application/problem+json"), (status = 429, description = "authentication_throttled", body = ProblemBody, content_type = "application/problem+json")))]
+#[utoipa::path(post, path = "/api/v1/auth/two-factor/disable", request_body = PasswordConfirmationBody, responses((status = 204), (status = 401, description = "authentication_required, invalid_credentials, password_required or reauthentication_required", body = ProblemBody, content_type = "application/problem+json"), (status = 429, description = "authentication_throttled", body = ProblemBody, content_type = "application/problem+json")))]
 pub(super) async fn disable_two_factor(
     State(state): State<AuthState>,
     headers: HeaderMap,
@@ -574,7 +628,7 @@ pub(super) async fn disable_two_factor(
 ) -> Result<StatusCode, ApiError> {
     let instance = "/api/v1/auth/two-factor/disable";
     let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
-    confirm_password(
+    confirm_identity(
         &state,
         &session,
         body.password,
@@ -596,7 +650,7 @@ pub(super) async fn disable_two_factor(
 }
 
 /// New recovery codes in place of all the old ones.
-#[utoipa::path(post, path = "/api/v1/auth/two-factor/recovery-codes", request_body = PasswordConfirmationBody, responses((status = 200, body = RecoveryCodes), (status = 401, description = "authentication_required or invalid_credentials", body = ProblemBody, content_type = "application/problem+json"), (status = 409, description = "two_factor_disabled", body = ProblemBody, content_type = "application/problem+json"), (status = 429, description = "authentication_throttled", body = ProblemBody, content_type = "application/problem+json")))]
+#[utoipa::path(post, path = "/api/v1/auth/two-factor/recovery-codes", request_body = PasswordConfirmationBody, responses((status = 200, body = RecoveryCodes), (status = 401, description = "authentication_required, invalid_credentials, password_required or reauthentication_required", body = ProblemBody, content_type = "application/problem+json"), (status = 409, description = "two_factor_disabled", body = ProblemBody, content_type = "application/problem+json"), (status = 429, description = "authentication_throttled", body = ProblemBody, content_type = "application/problem+json")))]
 pub(super) async fn regenerate_recovery_codes(
     State(state): State<AuthState>,
     headers: HeaderMap,
@@ -606,7 +660,7 @@ pub(super) async fn regenerate_recovery_codes(
 ) -> Result<Json<RecoveryCodes>, ApiError> {
     let instance = "/api/v1/auth/two-factor/recovery-codes";
     let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
-    confirm_password(
+    confirm_identity(
         &state,
         &session,
         body.password,
@@ -650,16 +704,56 @@ fn already_enabled(instance: &'static str, request_id: Option<&Extension<Request
     )
 }
 
-/// Checks the signed-in user's password again before a change to how the account signs in. Wrong passwords count
-/// toward the sign-in throttle, so a stolen session cannot guess it quickly.
-pub(super) async fn confirm_password(
+/// Checks that the person at this session is the account owner, before a change to how the account signs in.
+///
+/// An account with a password sends it again; wrong passwords count toward the sign-in throttle, so a stolen
+/// session cannot guess it quickly. An account without one passes when the session signed in, or confirmed with a
+/// provider, in the last 10 minutes; otherwise 401 `reauthentication_required` and the client runs a `confirm`
+/// provider flow, then retries.
+pub(super) async fn confirm_identity(
     state: &AuthState,
     session: &AuthenticatedSession,
-    password: String,
+    password: Option<String>,
     client_ip: Option<Extension<ClientIp>>,
     instance: &'static str,
     request_id: Option<&Extension<RequestId>>,
 ) -> Result<(), ApiError> {
+    let identity = state
+        .repository
+        .find_by_email(&session.user.email)
+        .await
+        .map_err(|_| ApiError::internal(instance, request_id))?
+        .ok_or_else(|| ApiError::internal(instance, request_id))?;
+    let Some(password_hash) = identity.password_hash else {
+        let since =
+            TimestampMillis::from_millis(TimestampMillis::now().as_millis() - FRESH_SIGN_IN_MILLIS);
+        let fresh = state
+            .repository
+            .session_fresh_since(session.id, since)
+            .await
+            .map_err(|_| ApiError::internal(instance, request_id))?;
+        if fresh {
+            return Ok(());
+        }
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "reauthentication_required",
+            "Confirm it is you",
+            "Sign in with your connected account again to confirm this change.",
+            instance,
+            request_id,
+        ));
+    };
+    let Some(password) = password else {
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "password_required",
+            "Password required",
+            "Enter your current password.",
+            instance,
+            request_id,
+        ));
+    };
     let ip = client_ip
         .map(|Extension(client_ip)| client_ip.0)
         .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
@@ -671,15 +765,9 @@ pub(super) async fn confirm_password(
             ThrottleDecision::RetryAfter(delay) => ApiError::throttled(delay, instance, request_id),
             ThrottleDecision::Allowed => ApiError::internal(instance, request_id),
         })?;
-    let identity = state
-        .repository
-        .find_by_email(&session.user.email)
-        .await
-        .map_err(|_| ApiError::internal(instance, request_id))?
-        .ok_or_else(|| ApiError::internal(instance, request_id))?;
     let valid = state
         .passwords
-        .verify(password, identity.password_hash)
+        .verify(password, password_hash)
         .await
         .map_err(|_| ApiError::internal(instance, request_id))?
         .valid;

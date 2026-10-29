@@ -7,6 +7,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { PasswordInput } from '@/components/ui/password-input'
 import { Button } from '@/components/ui/button'
 import { useChangePassword, useCurrentUser, useSetAvatar, useUpdateProfile } from '@/features/auth/api'
+import { ConfirmWithProvider } from '@/features/auth/components/ConfirmWithProvider'
 import { userColor } from '@/features/workspaces/api'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { avatarImage } from '@/features/profile/avatarImage'
@@ -112,6 +113,8 @@ export function ProfilePage() {
   const me = user.data
   const updateProfile = useUpdateProfile()
   const changePasswordMutation = useChangePassword()
+  // Accounts created with Google or GitHub set their first password without a current one.
+  const hasPassword = me?.has_password !== false
 
   const formRef = useRef<HTMLFormElement>(null)
   const saved = profileFormOf(me)
@@ -148,7 +151,7 @@ export function ProfilePage() {
     }
     setPasswordError(null)
     changePasswordMutation.mutate(
-      { current_password: currentPassword, new_password: newPassword },
+      { current_password: hasPassword ? currentPassword : null, new_password: newPassword },
       {
         onSuccess: () => {
           setCurrentPassword('')
@@ -163,6 +166,7 @@ export function ProfilePage() {
     ?? (changePasswordMutation.isError
       ? errorDetail(changePasswordMutation.error, 'Password could not be changed.')
       : null)
+  const reauthenticate = changePasswordMutation.error instanceof ApiProblem && changePasswordMutation.error.code === 'reauthentication_required'
 
   // Shown in `AccountLayout`, which has the pane, the header and the scrolling column.
   return (
@@ -239,24 +243,26 @@ export function ProfilePage() {
 
             <form onSubmit={submitPassword}>
               <SettingsCard
-                title="Password"
-                description="Other devices will be signed out."
+                title={hasPassword ? 'Password' : 'Set a password'}
+                description={hasPassword ? 'Other devices will be signed out.' : 'Sign in with your email and a password as well as your connected account.'}
                 actions={
                   <Button type="submit" variant="outline" disabled={changePasswordMutation.isPending}>
-                    {changePasswordMutation.isPending ? 'Changing…' : 'Change password'}
+                    {changePasswordMutation.isPending ? 'Saving…' : hasPassword ? 'Change password' : 'Set password'}
                   </Button>
                 }
               >
                 <FieldGrid>
-                  <div className="min-[900px]:col-span-2">
-                    <PasswordField
-                      id="current-password"
-                      label="Current password"
-                      autoComplete="current-password"
-                      value={currentPassword}
-                      onChange={setCurrentPassword}
-                    />
-                  </div>
+                  {hasPassword ? (
+                    <div className="min-[900px]:col-span-2">
+                      <PasswordField
+                        id="current-password"
+                        label="Current password"
+                        autoComplete="current-password"
+                        value={currentPassword}
+                        onChange={setCurrentPassword}
+                      />
+                    </div>
+                  ) : null}
                   <PasswordField
                     id="new-password"
                     label="New password"
@@ -271,7 +277,9 @@ export function ProfilePage() {
                     value={confirmPassword}
                     onChange={setConfirmPassword}
                   />
-                  {passwordAlert ? (
+                  {reauthenticate ? (
+                    <div className="min-[900px]:col-span-2"><ConfirmWithProvider returnTo="/profile" /></div>
+                  ) : passwordAlert ? (
                     <p className="text-xs text-destructive min-[900px]:col-span-2" role="alert">
                       {passwordAlert}
                     </p>

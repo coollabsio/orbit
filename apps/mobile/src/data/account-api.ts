@@ -55,6 +55,7 @@ export const accountKeys = {
   notificationPrefs: ['account', 'notification-prefs'] as const,
   sessions: ['account', 'sessions'] as const,
   twoFactor: ['account', 'two-factor'] as const,
+  connectedAccounts: ['account', 'connected-accounts'] as const,
   /** Under the `members` prefix, so the workspace events socket refreshes it with the members. */
   invitations: (workspaceId: string) => ['members', workspaceId, 'invitations'] as const,
   storage: (workspaceId: string) => ['workspace-storage', workspaceId] as const,
@@ -116,7 +117,8 @@ export async function twoFactor(client: OrbitClient): Promise<TwoFactorStatus> {
   return (await getTwoFactor({ client, throwOnError: true })).data
 }
 
-export async function startTotpSetup(client: OrbitClient, password: string): Promise<TotpSetup> {
+/** `password` is left out for an account without one (see `withReauthentication`). */
+export async function startTotpSetup(client: OrbitClient, password?: string): Promise<TotpSetup> {
   return (await setupTotp({ client, body: { password }, throwOnError: true })).data
 }
 
@@ -125,11 +127,11 @@ export async function turnOnTotp(client: OrbitClient, code: string): Promise<str
   return (await enableTotp({ client, body: { code }, throwOnError: true })).data.recovery_codes
 }
 
-export async function turnOffTwoFactor(client: OrbitClient, password: string): Promise<void> {
+export async function turnOffTwoFactor(client: OrbitClient, password?: string): Promise<void> {
   await disableTwoFactor({ client, body: { password }, throwOnError: true })
 }
 
-export async function newRecoveryCodes(client: OrbitClient, password: string): Promise<string[]> {
+export async function newRecoveryCodes(client: OrbitClient, password?: string): Promise<string[]> {
   return (await regenerateRecoveryCodes({ client, body: { password }, throwOnError: true })).data.recovery_codes
 }
 

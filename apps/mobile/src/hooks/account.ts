@@ -7,6 +7,7 @@ import { Alert } from 'react-native'
 import * as account from '../data/account-api'
 import { keys } from '../data/keys'
 import type { MemberRecord, User } from '../data/orbit'
+import * as providers from '../data/sign-in-provider'
 import { currentStatus, type OwnStatus, type UserStatus } from '../data/status'
 import { useOrbit } from '../orbit-context'
 import { uploadPart } from '../upload-part'
@@ -142,17 +143,31 @@ export function useTwoFactor() {
   return useQuery({ queryKey: account.accountKeys.twoFactor, queryFn: () => account.twoFactor(client) })
 }
 
-/** The password-confirmed two-factor writes: each refreshes the status. */
+/** The two-factor writes, confirmed with the password (or a fresh provider sign-in without one): each refreshes the status. */
 export function useTwoFactorWrites() {
   const { client } = useOrbit()
   const queryClient = useQueryClient()
   const onSuccess = () => void queryClient.invalidateQueries({ queryKey: account.accountKeys.twoFactor })
   return {
-    setup: useMutation({ mutationFn: (password: string) => account.startTotpSetup(client, password) }),
+    setup: useMutation({ mutationFn: (password?: string) => account.startTotpSetup(client, password) }),
     enable: useMutation({ mutationFn: (code: string) => account.turnOnTotp(client, code), onSuccess }),
-    disable: useMutation({ mutationFn: (password: string) => account.turnOffTwoFactor(client, password), onSuccess }),
-    regenerate: useMutation({ mutationFn: (password: string) => account.newRecoveryCodes(client, password), onSuccess }),
+    disable: useMutation({ mutationFn: (password?: string) => account.turnOffTwoFactor(client, password), onSuccess }),
+    regenerate: useMutation({ mutationFn: (password?: string) => account.newRecoveryCodes(client, password), onSuccess }),
   }
+}
+
+export function useConnectedAccounts() {
+  const { client } = useOrbit()
+  return useQuery({ queryKey: account.accountKeys.connectedAccounts, queryFn: () => providers.connectedAccounts(client) })
+}
+
+export function useDisconnectAccount() {
+  const { client } = useOrbit()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (provider: providers.Provider) => providers.disconnect(client, provider),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: account.accountKeys.connectedAccounts }),
+  })
 }
 
 export function useWorkspaceStorage(offset = 0) {

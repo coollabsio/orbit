@@ -16,6 +16,7 @@ const HTTP_BIND_ENV: &str = "ORBIT_BIND";
 const HTTP_PUBLIC_ORIGIN_ENV: &str = "ORBIT_PUBLIC_ORIGIN";
 const HTTP_TRUSTED_PROXIES_ENV: &str = "ORBIT_TRUSTED_PROXIES";
 const HTTP_SHUTDOWN_DELAY_ENV: &str = "ORBIT_SHUTDOWN_DELAY_SECONDS";
+const HTTP_DEV_NATIVE_REDIRECTS_ENV: &str = "ORBIT_DEV_NATIVE_REDIRECTS";
 const ENVIRONMENT_ENV: &str = "ORBIT_ENV";
 const DATA_DATABASE_ENV: &str = "ORBIT_DATABASE_PATH";
 const DATA_DATABASE_URL_ENV: &str = "ORBIT_DATABASE_URL";
@@ -98,6 +99,9 @@ pub struct HttpConfig {
     /// How long the server still serves after a stop signal while `/health/ready` reports 503,
     /// so a load balancer takes it out first.
     pub shutdown_delay_seconds: u64,
+    /// Extra redirect URIs a native sign-in may return to, besides `orbit://auth/callback`
+    /// (`ORBIT_DEV_NATIVE_REDIRECTS`, comma-separated), for Expo Go. Refused in production.
+    pub dev_native_redirects: Vec<String>,
 }
 
 impl Default for HttpConfig {
@@ -108,6 +112,7 @@ impl Default for HttpConfig {
             public_origin: "http://127.0.0.1:8080".to_owned(),
             trusted_proxies: Vec::new(),
             shutdown_delay_seconds: 0,
+            dev_native_redirects: Vec::new(),
         }
     }
 }
@@ -704,6 +709,13 @@ impl Config {
                     ),
                 });
             }
+            EnvironmentMode::Production if !self.http.dev_native_redirects.is_empty() => {
+                return Err(ConfigError::InvalidSetting {
+                    key: HTTP_DEV_NATIVE_REDIRECTS_ENV,
+                    detail: "is for development only and cannot be set in production mode"
+                        .to_owned(),
+                });
+            }
             EnvironmentMode::Production if self.http.trusted_proxies.is_empty() => {
                 return Err(ConfigError::InvalidSetting {
                     key: HTTP_TRUSTED_PROXIES_ENV,
@@ -798,6 +810,13 @@ fn apply_environment(
                 .filter(|value| !value.is_empty())
                 .map(|value| parse_environment(key, value))
                 .collect::<Result<Vec<_>, _>>()?;
+        } else if key == HTTP_DEV_NATIVE_REDIRECTS_ENV {
+            config.http.dev_native_redirects = value
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+                .collect();
         } else if key == HTTP_SHUTDOWN_DELAY_ENV {
             config.http.shutdown_delay_seconds = parse_environment(key, value)?;
         } else if key == DATA_DATABASE_ENV {

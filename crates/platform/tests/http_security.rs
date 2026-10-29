@@ -887,3 +887,46 @@ async fn oauth_protocol_and_mcp_requests_are_rate_limited_without_session_origin
         StatusCode::TOO_MANY_REQUESTS
     );
 }
+
+#[tokio::test]
+async fn native_provider_sign_in_posts_need_no_origin_but_other_paths_do() {
+    let app = Router::new()
+        .route(
+            "/api/v1/auth/providers/{provider}/start",
+            post(|| async { StatusCode::NO_CONTENT }),
+        )
+        .route(
+            "/api/v1/auth/providers/exchange",
+            post(|| async { StatusCode::NO_CONTENT }),
+        )
+        .route(
+            "/api/v1/auth/providers/{provider}/other",
+            post(|| async { StatusCode::NO_CONTENT }),
+        )
+        .route(
+            "/api/v1/auth/connected-accounts",
+            post(|| async { StatusCode::NO_CONTENT }),
+        )
+        .layer(HttpPlatformLayer::new(OriginPolicy::new(
+            "https://orbit.test",
+        )));
+    for (path, status) in [
+        (
+            "/api/v1/auth/providers/google/start",
+            StatusCode::NO_CONTENT,
+        ),
+        ("/api/v1/auth/providers/exchange", StatusCode::NO_CONTENT),
+        ("/api/v1/auth/providers/google/other", StatusCode::FORBIDDEN),
+        ("/api/v1/auth/providers/a/b/start", StatusCode::FORBIDDEN),
+        ("/api/v1/auth/connected-accounts", StatusCode::FORBIDDEN),
+    ] {
+        let response = app.clone().oneshot(request("POST", path)).await.unwrap();
+        assert_eq!(response.status(), status, "{path}");
+    }
+    let mut with_cookie = request("POST", "/api/v1/auth/providers/exchange");
+    with_cookie
+        .headers_mut()
+        .insert("cookie", HeaderValue::from_static("session=browser"));
+    let response = app.oneshot(with_cookie).await.unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}

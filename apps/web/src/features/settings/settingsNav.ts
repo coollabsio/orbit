@@ -1,5 +1,5 @@
 import { useContext, type ComponentType } from 'react'
-import { ArchiveBox, Brush, Card, Chart, ClipboardText, CloudConnection, Cpu, SecurityUser, Driver, Key, Keyboard, Link2, Lock, Notification as Bell, Setting2 as Settings, ShieldTick as ShieldCheck, SmileCircle, Sms as Mail, Sticker, Danger as TriangleAlert, User, People as Users } from 'reicon-react'
+import { ArchiveBox, Brush, Card, Chart, ClipboardText, CloudConnection, Cpu, SecurityUser, Driver, Key, Keyboard, Link2, Lock, Login, Notification as Bell, Setting2 as Settings, ShieldTick as ShieldCheck, SmileCircle, Sms as Mail, Sticker, Danger as TriangleAlert, User, People as Users } from 'reicon-react'
 import type { Permission } from '@orbit/api/generated/types.gen'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { useBillingEnabled } from '@/features/workspaces/billing'
@@ -95,6 +95,7 @@ const AREAS: Record<SettingsAreaName, SettingsArea> = {
           { to: '/admin', label: 'General', icon: Settings, end: true },
           { to: '/admin/users', label: 'Users', icon: Users },
           { to: '/admin/email', label: 'Email', icon: Mail },
+          { to: '/admin/sign-in-providers', label: 'Sign-in providers', icon: Login },
           { to: '/admin/limits', label: 'Limits', icon: Chart },
         ],
       },

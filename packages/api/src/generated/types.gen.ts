@@ -138,6 +138,14 @@ export type AuthOptions = {
      */
     passkeys_enabled: boolean;
     /**
+     * A first sign-in with one of `providers` creates an account (registration is open; no mail server needed).
+     */
+    provider_registration_open: boolean;
+    /**
+     * The sign-in providers an admin configured ("Continue with Google").
+     */
+    providers: Array<Provider>;
+    /**
      * Anyone can create an account with an emailed link.
      */
     registration_open: boolean;
@@ -160,6 +168,11 @@ export type AuthUserResponse = ProfileFields & {
     avatar_url?: string | null;
     display_name: string;
     email: string;
+    /**
+     * The account has a password. Accounts created with Google or GitHub start without one; they confirm security
+     * changes with a fresh provider sign-in instead.
+     */
+    has_password: boolean;
     id: string;
     /**
      * Can open Admin: the root user or an instance admin.
@@ -321,7 +334,11 @@ export type CategoryRecord = {
 };
 
 export type ChangePasswordBody = {
-    current_password: string;
+    /**
+     * Required when the account has a password. An account without one sets its first password with a session
+     * that signed in (or confirmed with a provider) in the last 10 minutes.
+     */
+    current_password?: string | null;
     new_password: string;
 };
 
@@ -848,6 +865,18 @@ export type ConflictMetadata = {
     refresh?: string | null;
 };
 
+/**
+ * A connected provider account, as Security → Connected accounts lists it.
+ */
+export type ConnectedAccount = {
+    created_at: string;
+    /**
+     * The address (or GitHub login) the provider reported when it was connected.
+     */
+    email?: string | null;
+    provider: Provider;
+};
+
 export type ConversationKind = 'public' | 'private' | 'dm';
 
 export type ConversationRecord = {
@@ -1072,6 +1101,17 @@ export type EnableTotpBody = {
     code: string;
 };
 
+export type ExchangeProviderBody = {
+    /**
+     * The verifier whose S256 challenge went to start.
+     */
+    code_verifier: string;
+    /**
+     * The one-time code from the callback redirect.
+     */
+    handoff: string;
+};
+
 export type FilterField = 'status' | 'status_category' | 'assignee' | 'creator' | 'label' | 'priority' | 'project' | 'due_date' | 'created_at' | 'updated_at' | 'text' | 'parent' | 'sub_issues';
 
 /**
@@ -1191,6 +1231,10 @@ export type InstanceAdminBody = {
 export type InstanceSettingsView = {
     limits: LimitsView;
     registration_open: boolean;
+    /**
+     * The Google and GitHub OAuth clients that are saved. A provider that is not listed is off.
+     */
+    sign_in_providers: Array<SignInProviderView>;
     smtp?: null | SmtpView;
     storage: StorageView;
 };
@@ -2437,9 +2481,10 @@ export type PasskeyRecord = {
 
 export type PasswordConfirmationBody = {
     /**
-     * The current password: changing how the account signs in asks for it again.
+     * The current password: changing how the account signs in asks for it again. Leave it out when the account has
+     * none: then the session must have signed in or confirmed with a provider in the last 10 minutes.
      */
-    password: string;
+    password?: string | null;
 };
 
 /**
@@ -2565,6 +2610,8 @@ export type ProjectUpdateBody = {
     key: string;
     name: string;
 };
+
+export type Provider = 'google' | 'github';
 
 export type PushKey = {
     /**
@@ -2907,6 +2954,35 @@ export type ShortcutsBody = {
  */
 export type ShowCompleted = 'all' | 'past_week' | 'past_month' | 'none';
 
+/**
+ * `sign_in` needs no session. `connect` and `confirm` need one and apply only to it.
+ */
+export type SignInIntent = 'sign_in' | 'connect' | 'confirm';
+
+export type SignInProviderBody = {
+    /**
+     * The OAuth client ID from Google Cloud or the GitHub OAuth App.
+     */
+    client_id: string;
+    /**
+     * Absent or empty: keep the saved secret. Required the first time.
+     */
+    client_secret?: string | null;
+};
+
+export type SignInProviderView = {
+    /**
+     * The redirect URI to register at the provider.
+     */
+    callback_url: string;
+    client_id: string;
+    provider: Provider;
+    /**
+     * A client secret is saved. The secret itself is never returned.
+     */
+    secret_set: boolean;
+};
+
 export type SmtpBody = {
     from_address: string;
     from_name?: string | null;
@@ -2950,9 +3026,40 @@ export type StartNotionImportBody = {
 
 export type StartPasskeyRegistrationBody = {
     /**
-     * The current password: a new passkey is a new way into the account.
+     * The current password: a new passkey is a new way into the account. Leave it out when the account has none
+     * (see `reauthentication_required`).
      */
-    password: string;
+    password?: string | null;
+};
+
+export type StartProviderBody = {
+    /**
+     * `base64url(sha256(code_verifier))` of a random verifier the client keeps (43 characters). The same verifier
+     * goes to the exchange.
+     */
+    code_challenge: string;
+    intent: SignInIntent;
+    /**
+     * `connect` only: the current password, since a connected account is a new way into the account. Leave it out
+     * when the account has none (see `reauthentication_required`).
+     */
+    password?: string | null;
+    /**
+     * `web`, or a native redirect URI: `orbit://auth/callback` (development servers can allow more with
+     * `ORBIT_DEV_NATIVE_REDIRECTS`).
+     */
+    redirect: string;
+    /**
+     * A path in Orbit to open afterwards, given back with the handoff.
+     */
+    return_to?: string | null;
+};
+
+export type StartProviderResponse = {
+    /**
+     * Open it in the browser (web: the same tab; mobile: an auth session).
+     */
+    authorize_url: string;
 };
 
 export type StatusBody = {
@@ -4395,6 +4502,130 @@ export type SaveS3Responses = {
 
 export type SaveS3Response = SaveS3Responses[keyof SaveS3Responses];
 
+export type RemoveSignInProviderData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        provider: Provider;
+    };
+    query?: never;
+    url: '/api/v1/admin/settings/sign-in-providers/{provider}';
+};
+
+export type RemoveSignInProviderErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * provider_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type RemoveSignInProviderError = RemoveSignInProviderErrors[keyof RemoveSignInProviderErrors];
+
+export type RemoveSignInProviderResponses = {
+    200: InstanceSettingsView;
+};
+
+export type RemoveSignInProviderResponse = RemoveSignInProviderResponses[keyof RemoveSignInProviderResponses];
+
+export type SaveSignInProviderData = {
+    body: SignInProviderBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        provider: Provider;
+    };
+    query?: never;
+    url: '/api/v1/admin/settings/sign-in-providers/{provider}';
+};
+
+export type SaveSignInProviderErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * provider_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_sign_in_provider
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * app_key_missing
+     */
+    503: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type SaveSignInProviderError = SaveSignInProviderErrors[keyof SaveSignInProviderErrors];
+
+export type SaveSignInProviderResponses = {
+    200: InstanceSettingsView;
+};
+
+export type SaveSignInProviderResponse = SaveSignInProviderResponses[keyof SaveSignInProviderResponses];
+
 export type RemoveSmtpData = {
     body?: never;
     headers?: {
@@ -5013,6 +5244,112 @@ export type UploadAvatarResponses = {
 };
 
 export type UploadAvatarResponse = UploadAvatarResponses[keyof UploadAvatarResponses];
+
+export type ListConnectedAccountsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/connected-accounts';
+};
+
+export type ListConnectedAccountsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type ListConnectedAccountsError = ListConnectedAccountsErrors[keyof ListConnectedAccountsErrors];
+
+export type ListConnectedAccountsResponses = {
+    200: Array<ConnectedAccount>;
+};
+
+export type ListConnectedAccountsResponse = ListConnectedAccountsResponses[keyof ListConnectedAccountsResponses];
+
+export type DisconnectConnectedAccountData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        provider: Provider;
+    };
+    query?: never;
+    url: '/api/v1/auth/connected-accounts/{provider}';
+};
+
+export type DisconnectConnectedAccountErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * identity_not_found
+     */
+    404: AuthProblem;
+    /**
+     * contract_mismatch, last_sign_in_method
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type DisconnectConnectedAccountError = DisconnectConnectedAccountErrors[keyof DisconnectConnectedAccountErrors];
+
+export type DisconnectConnectedAccountResponses = {
+    204: void;
+};
+
+export type DisconnectConnectedAccountResponse = DisconnectConnectedAccountResponses[keyof DisconnectConnectedAccountResponses];
 
 export type LoginData = {
     body: LoginBody;
@@ -5679,7 +6016,7 @@ export type ChangePasswordErrors = {
      */
     400: AuthProblem;
     /**
-     * authentication_required, invalid_credentials
+     * authentication_required, invalid_credentials, reauthentication_required
      */
     401: AuthProblem;
     /**
@@ -5715,6 +6052,201 @@ export type ChangePasswordResponses = {
 };
 
 export type ChangePasswordResponse = ChangePasswordResponses[keyof ChangePasswordResponses];
+
+export type ExchangeProviderSignInData = {
+    body: ExchangeProviderBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/providers/exchange';
+};
+
+export type ExchangeProviderSignInErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request, invalid_handoff, provider_denied
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden, registration_closed, account_suspended, session_mismatch, identity_mismatch
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch, identity_in_use, identity_conflict, provider_already_connected
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * provider_email_unverified
+     */
+    422: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * provider_failed
+     */
+    502: AuthProblem;
+    /**
+     * authentication_busy
+     */
+    503: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type ExchangeProviderSignInError = ExchangeProviderSignInErrors[keyof ExchangeProviderSignInErrors];
+
+export type ExchangeProviderSignInResponses = {
+    200: LoginResponse;
+    /**
+     * The account has two-factor sign-in on: send a code to /api/v1/auth/login/two-factor.
+     */
+    202: TwoFactorChallenge;
+    /**
+     * connect or confirm finished
+     */
+    204: void;
+};
+
+export type ExchangeProviderSignInResponse = ExchangeProviderSignInResponses[keyof ExchangeProviderSignInResponses];
+
+export type ProviderCallbackData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        provider: Provider;
+    };
+    query?: {
+        state?: string;
+        code?: string;
+        error?: string;
+    };
+    url: '/api/v1/auth/providers/{provider}/callback';
+};
+
+export type ProviderCallbackErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type ProviderCallbackError = ProviderCallbackErrors[keyof ProviderCallbackErrors];
+
+export type ProviderCallbackResponses = {
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type ProviderCallbackResponse = ProviderCallbackResponses[keyof ProviderCallbackResponses];
+
+export type StartProviderSignInData = {
+    body: StartProviderBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        provider: Provider;
+    };
+    query?: never;
+    url: '/api/v1/auth/providers/{provider}/start';
+};
+
+export type StartProviderSignInErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * provider_not_configured
+     */
+    404: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * invalid_code_challenge, invalid_redirect, invalid_return_to
+     */
+    422: AuthProblem;
+    /**
+     * authentication_throttled
+     */
+    429: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * authentication_busy
+     */
+    503: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type StartProviderSignInError = StartProviderSignInErrors[keyof StartProviderSignInErrors];
+
+export type StartProviderSignInResponses = {
+    200: StartProviderResponse;
+};
+
+export type StartProviderSignInResponse = StartProviderSignInResponses[keyof StartProviderSignInResponses];
 
 export type RecoveryCompleteData = {
     body: RecoveryCompleteBody;

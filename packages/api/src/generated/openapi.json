@@ -1693,6 +1693,284 @@
         ]
       }
     },
+    "/api/v1/admin/settings/sign-in-providers/{provider}": {
+      "put": {
+        "tags": [
+          "crate::workspace_routes"
+        ],
+        "summary": "Saves the OAuth client of a sign-in provider; the sign-in pages offer it from then on. The secret is encrypted\nunder the app key.",
+        "operationId": "save_sign_in_provider",
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Provider"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignInProviderBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceSettingsView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden, installation_admin_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "provider_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_sign_in_provider",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "app_key_missing",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "crate::workspace_routes"
+        ],
+        "summary": "Stops offering a sign-in provider. Accounts keep their connections, so saving it again restores them.",
+        "operationId": "remove_sign_in_provider",
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Provider"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceSettingsView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden, installation_admin_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "provider_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/settings/smtp": {
       "put": {
         "tags": [
@@ -2976,6 +3254,224 @@
           },
           "409": {
             "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/connected-accounts": {
+      "get": {
+        "tags": [
+          "crate::auth_routes::providers"
+        ],
+        "summary": "The provider accounts connected to the signed-in account.",
+        "operationId": "list_connected_accounts",
+        "parameters": [
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ConnectedAccount"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/connected-accounts/{provider}": {
+      "delete": {
+        "tags": [
+          "crate::auth_routes::providers"
+        ],
+        "summary": "Disconnects a provider. Refused with 409 `last_sign_in_method` when it is the account's only way in.",
+        "operationId": "disconnect_connected_account",
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Provider"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "identity_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, last_sign_in_method",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4441,7 +4937,7 @@
             }
           },
           "401": {
-            "description": "authentication_required, invalid_credentials",
+            "description": "authentication_required, invalid_credentials, reauthentication_required",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -4512,6 +5008,443 @@
           }
         },
         "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/providers/exchange": {
+      "post": {
+        "tags": [
+          "crate::auth_routes::providers"
+        ],
+        "summary": "Where every provider flow ends, for every client and intent. `sign_in`: 200 `LoginResponse` (a cookie for\nbrowsers, `session_token` for requests without Origin) or 202 two-factor challenge, the same answers as\n`/api/v1/auth/login`. `connect` and `confirm`: 204.",
+        "operationId": "exchange_provider_sign_in",
+        "parameters": [
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExchangeProviderBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The account has two-factor sign-in on: send a code to /api/v1/auth/login/two-factor.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TwoFactorChallenge"
+                }
+              }
+            }
+          },
+          "204": {
+            "description": "connect or confirm finished"
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request, invalid_handoff, provider_denied",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden, registration_closed, account_suspended, session_mismatch, identity_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, identity_in_use, identity_conflict, provider_already_connected",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "provider_email_unverified",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "provider_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "authentication_busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {},
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/providers/{provider}/callback": {
+      "get": {
+        "tags": [
+          "crate::auth_routes::providers"
+        ],
+        "summary": "The provider sends the browser here. Talks to the provider and parks the result behind a one-time handoff code;\nnever creates a session, a link or an account. Answers 303 to the client that started: web\n`{public_origin}/login/callback#handoff=…`, native `{redirect}?handoff=…`, and `&return_to=…` when one was\ngiven. An unknown, used or expired `state` answers 303 `/login?sign_in_error=provider_expired`.",
+        "operationId": "provider_callback",
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Provider"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "error",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "303": {
+            "description": "To the client that started the flow, with a handoff code."
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
+    "/api/v1/auth/providers/{provider}/start": {
+      "post": {
+        "tags": [
+          "crate::auth_routes::providers"
+        ],
+        "summary": "Starts a provider flow. Problems: 404 `provider_not_configured`, 422 `invalid_code_challenge`,\n`invalid_redirect` or `invalid_return_to`, 401 `authentication_required` for `connect` and `confirm`, and for\n`connect` 401 `password_required`, `invalid_credentials` or `reauthentication_required` and 429\n`authentication_throttled`.",
+        "operationId": "start_provider_sign_in",
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Provider"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartProviderBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StartProviderResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "provider_not_configured",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_code_challenge, invalid_redirect, invalid_return_to",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "authentication_throttled",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "authentication_busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {},
           {
             "cookieAuth": []
           }
@@ -33742,7 +34675,9 @@
           "registration_open",
           "email_enabled",
           "passkeys_enabled",
-          "billing_enabled"
+          "billing_enabled",
+          "providers",
+          "provider_registration_open"
         ],
         "properties": {
           "billing_enabled": {
@@ -33756,6 +34691,17 @@
           "passkeys_enabled": {
             "type": "boolean",
             "description": "People can add passkeys and sign in with them (the public origin is a domain name)."
+          },
+          "provider_registration_open": {
+            "type": "boolean",
+            "description": "A first sign-in with one of `providers` creates an account (registration is open; no mail server needed)."
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Provider"
+            },
+            "description": "The sign-in providers an admin configured (\"Continue with Google\")."
           },
           "registration_open": {
             "type": "boolean",
@@ -33813,6 +34759,7 @@
               "display_name",
               "installation_admin",
               "root",
+              "has_password",
               "status"
             ],
             "properties": {
@@ -33828,6 +34775,10 @@
               },
               "email": {
                 "type": "string"
+              },
+              "has_password": {
+                "type": "boolean",
+                "description": "The account has a password. Accounts created with Google or GitHub start without one; they confirm security\nchanges with a fresh provider sign-in instead."
               },
               "id": {
                 "type": "string"
@@ -34250,12 +35201,15 @@
       "ChangePasswordBody": {
         "type": "object",
         "required": [
-          "current_password",
           "new_password"
         ],
         "properties": {
           "current_password": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Required when the account has a password. An account without one sets its first password with a session\nthat signed in (or confirmed with a provider) in the last 10 minutes."
           },
           "new_password": {
             "type": "string"
@@ -35654,6 +36608,30 @@
           }
         }
       },
+      "ConnectedAccount": {
+        "type": "object",
+        "description": "A connected provider account, as Security → Connected accounts lists it.",
+        "required": [
+          "provider",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "email": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The address (or GitHub login) the provider reported when it was connected."
+          },
+          "provider": {
+            "$ref": "#/components/schemas/Provider"
+          }
+        }
+      },
       "ConversationKind": {
         "type": "string",
         "enum": [
@@ -36198,6 +37176,24 @@
         },
         "additionalProperties": false
       },
+      "ExchangeProviderBody": {
+        "type": "object",
+        "required": [
+          "handoff",
+          "code_verifier"
+        ],
+        "properties": {
+          "code_verifier": {
+            "type": "string",
+            "description": "The verifier whose S256 challenge went to start."
+          },
+          "handoff": {
+            "type": "string",
+            "description": "The one-time code from the callback redirect."
+          }
+        },
+        "additionalProperties": false
+      },
       "FilterField": {
         "type": "string",
         "enum": [
@@ -36562,7 +37558,8 @@
         "required": [
           "registration_open",
           "storage",
-          "limits"
+          "limits",
+          "sign_in_providers"
         ],
         "properties": {
           "limits": {
@@ -36570,6 +37567,13 @@
           },
           "registration_open": {
             "type": "boolean"
+          },
+          "sign_in_providers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SignInProviderView"
+            },
+            "description": "The Google and GitHub OAuth clients that are saved. A provider that is not listed is off."
           },
           "smtp": {
             "oneOf": [
@@ -39857,13 +40861,13 @@
       },
       "PasswordConfirmationBody": {
         "type": "object",
-        "required": [
-          "password"
-        ],
         "properties": {
           "password": {
-            "type": "string",
-            "description": "The current password: changing how the account signs in asks for it again."
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The current password: changing how the account signs in asks for it again. Leave it out when the account has\nnone: then the session must have signed in or confirmed with a provider in the last 10 minutes."
           }
         },
         "additionalProperties": false
@@ -40188,6 +41192,13 @@
           }
         },
         "additionalProperties": false
+      },
+      "Provider": {
+        "type": "string",
+        "enum": [
+          "google",
+          "github"
+        ]
       },
       "PushKey": {
         "type": "object",
@@ -41043,6 +42054,60 @@
           "none"
         ]
       },
+      "SignInIntent": {
+        "type": "string",
+        "description": "`sign_in` needs no session. `connect` and `confirm` need one and apply only to it.",
+        "enum": [
+          "sign_in",
+          "connect",
+          "confirm"
+        ]
+      },
+      "SignInProviderBody": {
+        "type": "object",
+        "required": [
+          "client_id"
+        ],
+        "properties": {
+          "client_id": {
+            "type": "string",
+            "description": "The OAuth client ID from Google Cloud or the GitHub OAuth App."
+          },
+          "client_secret": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Absent or empty: keep the saved secret. Required the first time."
+          }
+        },
+        "additionalProperties": false
+      },
+      "SignInProviderView": {
+        "type": "object",
+        "required": [
+          "provider",
+          "client_id",
+          "secret_set",
+          "callback_url"
+        ],
+        "properties": {
+          "callback_url": {
+            "type": "string",
+            "description": "The redirect URI to register at the provider."
+          },
+          "client_id": {
+            "type": "string"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/Provider"
+          },
+          "secret_set": {
+            "type": "boolean",
+            "description": "A client secret is saved. The secret itself is never returned."
+          }
+        }
+      },
       "SmtpBody": {
         "type": "object",
         "required": [
@@ -41172,16 +42237,64 @@
       },
       "StartPasskeyRegistrationBody": {
         "type": "object",
-        "required": [
-          "password"
-        ],
         "properties": {
           "password": {
-            "type": "string",
-            "description": "The current password: a new passkey is a new way into the account."
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The current password: a new passkey is a new way into the account. Leave it out when the account has none\n(see `reauthentication_required`)."
           }
         },
         "additionalProperties": false
+      },
+      "StartProviderBody": {
+        "type": "object",
+        "required": [
+          "intent",
+          "code_challenge",
+          "redirect"
+        ],
+        "properties": {
+          "code_challenge": {
+            "type": "string",
+            "description": "`base64url(sha256(code_verifier))` of a random verifier the client keeps (43 characters). The same verifier\ngoes to the exchange."
+          },
+          "intent": {
+            "$ref": "#/components/schemas/SignInIntent"
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`connect` only: the current password, since a connected account is a new way into the account. Leave it out\nwhen the account has none (see `reauthentication_required`)."
+          },
+          "redirect": {
+            "type": "string",
+            "description": "`web`, or a native redirect URI: `orbit://auth/callback` (development servers can allow more with\n`ORBIT_DEV_NATIVE_REDIRECTS`)."
+          },
+          "return_to": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A path in Orbit to open afterwards, given back with the handoff."
+          }
+        },
+        "additionalProperties": false
+      },
+      "StartProviderResponse": {
+        "type": "object",
+        "required": [
+          "authorize_url"
+        ],
+        "properties": {
+          "authorize_url": {
+            "type": "string",
+            "description": "Open it in the browser (web: the same tab; mobile: an auth session)."
+          }
+        }
       },
       "StatusBody": {
         "type": "object",

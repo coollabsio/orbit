@@ -53,13 +53,19 @@ pub struct SetupRequest {
     pub project_name: String,
 }
 
+/// How `users.password_hash` spells "no password" for an account a sign-in provider created. SQLite cannot drop
+/// `NOT NULL` without rebuilding `users`, so the column keeps a value no password verifier accepts. Rows are decoded
+/// into `Option` here; nothing else may compare against it.
+pub(crate) const NO_PASSWORD: &str = "!";
+
 #[derive(Clone, Eq, PartialEq)]
 pub struct StoredIdentity {
     pub id: Id,
     pub email: String,
     pub normalized_email: String,
     pub display_name: String,
-    pub password_hash: String,
+    /// `None`: the account signs in only with a provider or a passkey.
+    pub password_hash: Option<String>,
     pub suspended: bool,
     pub installation_admin: bool,
 }
@@ -618,6 +624,18 @@ impl IdentityRepository {
         .fetch_optional(self.database.pool())
         .await?;
         row.map(decode_identity).transpose()
+    }
+
+    /// Whether the account has a password (provider-created accounts start without one).
+    pub async fn has_password(&self, user_id: Id) -> Result<bool, IdentityError> {
+        Ok(sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM users WHERE id = $1 AND password_hash <> $2",
+        )
+        .bind(user_id.to_string())
+        .bind(NO_PASSWORD)
+        .fetch_one(self.database.pool())
+        .await?
+            == 1)
     }
 
     pub async fn is_installation_admin(&self, user_id: Id) -> Result<bool, IdentityError> {
@@ -2064,7 +2082,8 @@ fn decode_identity(row: sqlx::any::AnyRow) -> Result<StoredIdentity, IdentityErr
         email: row.get("email"),
         normalized_email: row.get("normalized_email"),
         display_name: row.get("display_name"),
-        password_hash: row.get("password_hash"),
+        password_hash: Some(row.get::<String, _>("password_hash"))
+            .filter(|hash| hash != NO_PASSWORD),
         suspended: row.get::<Option<i64>, _>("suspended_at").is_some(),
         installation_admin: row.get("installation_admin"),
     })
@@ -2213,7 +2232,7 @@ mod tests {
                     email: observed.email,
                     display_name: observed.display_name,
                 },
-                &observed.password_hash,
+                observed.password_hash.as_deref().unwrap(),
                 Some("rehash-of-old-password"),
                 "login-request",
                 TimestampMillis::from_millis(3_000),
@@ -2277,7 +2296,7 @@ mod tests {
                     email: observed.email,
                     display_name: observed.display_name,
                 },
-                &observed.password_hash,
+                observed.password_hash.as_deref().unwrap(),
                 None,
                 "login-request",
                 TimestampMillis::from_millis(3_000),

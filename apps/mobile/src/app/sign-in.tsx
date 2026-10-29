@@ -1,8 +1,12 @@
-import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
 import { KeyboardAvoidingView, Linking, Platform, ScrollView, View } from 'react-native'
 
-import { createClient, normalizeServer, signIn as signInWithPassword, signInSecondFactor } from '../data/orbit'
-import { errorMessage, useSession } from '../session-context'
+import { accountKeys, authOptions } from '../data/account-api'
+import { createClient, normalizeServer, type SignIn, signIn as signInWithPassword, signInSecondFactor } from '../data/orbit'
+import { looksLikeServer, type Provider, PROVIDER_LABEL, providerErrorMessage, startProviderSignIn } from '../data/sign-in-provider'
+import { useSession } from '../session-context'
+import { providerDevice } from '../sign-in-provider'
 import { alpha, useTheme } from '../theme'
 import { Button, Input, Text } from '../ui'
 
@@ -18,31 +22,52 @@ export default function SignInScreen() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [code, setCode] = useState('')
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState<'password' | Provider | null>(null)
   const [error, setError] = useState(state.status === 'signed_out' ? state.error : undefined)
+  const current = looksLikeServer(server) ? normalizeServer(server) : null
+  // asks the typed server which providers it offers once typing pauses
+  const typedServer = useDebounced(current, 600)
+  const options = useQuery({
+    queryKey: [...accountKeys.authOptions, typedServer],
+    queryFn: () => authOptions(createClient(typedServer!, () => null)),
+    enabled: typedServer !== null,
+    retry: false,
+    staleTime: 60_000,
+  })
+  const providers = current !== null && current === typedServer ? (options.data?.providers ?? []) : []
 
-  const run = async (action: () => Promise<void>) => {
-    setBusy(true)
+  const run = async (kind: 'password' | Provider, action: () => Promise<void>) => {
+    setBusy(kind)
     setError(undefined)
     try {
       await action()
     } catch (cause) {
-      setError(errorMessage(cause))
+      setError(providerErrorMessage(cause))
     } finally {
-      setBusy(false)
+      setBusy(null)
     }
   }
 
+  const finish = async (normalized: string, result: SignIn) => {
+    if (result.kind === 'two_factor') setStep({ name: 'two_factor', server: normalized, twoFactorToken: result.twoFactorToken })
+    else await signIn({ server: normalized, token: result.token }, result.user)
+  }
+
   const submitCredentials = () =>
-    run(async () => {
+    run('password', async () => {
       const normalized = normalizeServer(server)
-      const result = await signInWithPassword(createClient(normalized, () => null), email.trim(), password)
-      if (result.kind === 'two_factor') setStep({ name: 'two_factor', server: normalized, twoFactorToken: result.twoFactorToken })
-      else await signIn({ server: normalized, token: result.token }, result.user)
+      await finish(normalized, await signInWithPassword(createClient(normalized, () => null), email.trim(), password))
+    })
+
+  const continueWith = (provider: Provider) =>
+    run(provider, async () => {
+      const normalized = normalizeServer(server)
+      const result = await startProviderSignIn(createClient(normalized, () => null), provider, 'sign_in', providerDevice)
+      if (result.kind === 'signed_in' || result.kind === 'two_factor') await finish(normalized, result)
     })
 
   const submitCode = (current: Extract<Step, { name: 'two_factor' }>) =>
-    run(async () => {
+    run('password', async () => {
       const result = await signInSecondFactor(createClient(current.server, () => null), current.twoFactorToken, code.trim())
       if (result.kind === 'signed_in') await signIn({ server: current.server, token: result.token }, result.user)
     })
@@ -87,7 +112,29 @@ export default function SignInScreen() {
                     Forgot password?
                   </Text>
                 ) : null}
-                <Button label="Sign in" size="lg" block loading={busy} disabled={!server || !email || !password} onPress={submitCredentials} />
+                <Button label="Sign in" size="lg" block loading={busy === 'password'} disabled={busy !== null || !server || !email || !password} onPress={submitCredentials} />
+                {providers.length > 0 ? (
+                  <>
+                    <View className="flex-row items-center gap-3">
+                      <View className="h-px flex-1 bg-border" />
+                      <Text className="text-[12px] text-muted-foreground">or</Text>
+                      <View className="h-px flex-1 bg-border" />
+                    </View>
+                    {providers.map((provider) => (
+                      <Button
+                        key={provider}
+                        label={`Continue with ${PROVIDER_LABEL[provider]}`}
+                        icon={provider}
+                        variant="outline"
+                        size="lg"
+                        block
+                        loading={busy === provider}
+                        disabled={busy !== null}
+                        onPress={() => void continueWith(provider)}
+                      />
+                    ))}
+                  </>
+                ) : null}
               </>
             ) : (
               <>
@@ -106,13 +153,13 @@ export default function SignInScreen() {
                   error={error}
                 />
                 <View className="gap-3">
-                  <Button label="Verify" size="lg" block loading={busy} disabled={!code.trim()} onPress={() => submitCode(step)} />
+                  <Button label="Verify" size="lg" block loading={busy !== null} disabled={!code.trim()} onPress={() => submitCode(step)} />
                   <Button
                     label="Back"
                     variant="outline"
                     size="lg"
                     block
-                    disabled={busy}
+                    disabled={busy !== null}
                     onPress={() => {
                       setStep({ name: 'credentials' })
                       setCode('')
@@ -127,4 +174,14 @@ export default function SignInScreen() {
       </ScrollView>
     </KeyboardAvoidingView>
   )
+}
+
+/** `value`, once it has stayed the same for `delay` ms. */
+function useDebounced<T>(value: T, delay: number): T {
+  const [settled, setSettled] = useState(value)
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(value), delay)
+    return () => clearTimeout(timer)
+  }, [value, delay])
+  return settled
 }

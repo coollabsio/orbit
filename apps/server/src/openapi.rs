@@ -62,6 +62,11 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::auth_routes::passkeys::delete_passkey,
         crate::auth_routes::passkeys::start_passkey_login,
         crate::auth_routes::passkeys::finish_passkey_login,
+        crate::auth_routes::providers::start_provider_sign_in,
+        crate::auth_routes::providers::provider_callback,
+        crate::auth_routes::providers::exchange_provider_sign_in,
+        crate::auth_routes::providers::list_connected_accounts,
+        crate::auth_routes::providers::disconnect_connected_account,
         crate::workspace_routes::create_workspace,
         crate::workspace_routes::list_workspaces,
         crate::workspace_routes::get_workspace,
@@ -97,6 +102,8 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::workspace_routes::send_test_email,
         crate::workspace_routes::save_s3,
         crate::workspace_routes::remove_s3,
+        crate::workspace_routes::save_sign_in_provider,
+        crate::workspace_routes::remove_sign_in_provider,
         crate::workspace_routes::save_storage_options,
         crate::workspace_routes::save_limits,
         crate::workspace_routes::get_job_limits,
@@ -338,7 +345,10 @@ impl Modify for ProblemDetails {
                     vec![SecurityRequirement::new("bearerAuth", Vec::<String>::new())]
                 } else if public_operation(&operation_id) {
                     vec![SecurityRequirement::default()]
-                } else if operation_id == "accept_invitation" {
+                } else if matches!(
+                    operation_id.as_str(),
+                    "accept_invitation" | "start_provider_sign_in" | "exchange_provider_sign_in"
+                ) {
                     vec![
                         SecurityRequirement::default(),
                         SecurityRequirement::new("cookieAuth", Vec::<String>::new()),
@@ -415,6 +425,7 @@ fn public_operation(operation_id: &str) -> bool {
             | "github_webhook"
             | "github_manifest_callback"
             | "stripe_webhook"
+            | "provider_callback"
     )
 }
 
@@ -473,7 +484,45 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         "put_shortcuts" => add_code(&mut responses, "422", "invalid_shortcuts"),
         "change_password" => {
             add_code(&mut responses, "401", "invalid_credentials");
+            add_code(&mut responses, "401", "reauthentication_required");
             add_code(&mut responses, "422", "invalid_password");
+        }
+        "start_provider_sign_in" => {
+            add_code(&mut responses, "401", "authentication_required");
+            add_code(&mut responses, "404", "provider_not_configured");
+            add_code(&mut responses, "422", "invalid_code_challenge");
+            add_code(&mut responses, "422", "invalid_redirect");
+            add_code(&mut responses, "422", "invalid_return_to");
+            add_code(&mut responses, "503", "authentication_busy");
+        }
+        "exchange_provider_sign_in" => {
+            add_code(&mut responses, "400", "invalid_handoff");
+            add_code(&mut responses, "400", "provider_denied");
+            add_code(&mut responses, "401", "authentication_required");
+            add_code(&mut responses, "403", "registration_closed");
+            add_code(&mut responses, "403", "account_suspended");
+            add_code(&mut responses, "403", "session_mismatch");
+            add_code(&mut responses, "403", "identity_mismatch");
+            add_code(&mut responses, "409", "identity_in_use");
+            add_code(&mut responses, "409", "identity_conflict");
+            add_code(&mut responses, "409", "provider_already_connected");
+            add_code(&mut responses, "422", "provider_email_unverified");
+            add_code(&mut responses, "502", "provider_failed");
+            add_code(&mut responses, "503", "authentication_busy");
+        }
+        "disconnect_connected_account" => {
+            add_code(&mut responses, "404", "identity_not_found");
+            add_code(&mut responses, "409", "last_sign_in_method");
+        }
+        "save_sign_in_provider" => {
+            add_code(&mut responses, "403", "installation_admin_required");
+            add_code(&mut responses, "404", "provider_not_found");
+            add_code(&mut responses, "422", "invalid_sign_in_provider");
+            add_code(&mut responses, "503", "app_key_missing");
+        }
+        "remove_sign_in_provider" => {
+            add_code(&mut responses, "403", "installation_admin_required");
+            add_code(&mut responses, "404", "provider_not_found");
         }
         "revoke_session" => add_code(&mut responses, "404", "session_not_found"),
         "preview_invitation" => add_code(&mut responses, "404", "invitation_not_found"),
@@ -759,7 +808,7 @@ fn unsafe_operation(operation_id: &str) -> bool {
         || operation_id.starts_with("download_")
         || matches!(
             operation_id,
-            "me" | "setup_status" | "export_global_audit" | "search_pages"
+            "me" | "setup_status" | "export_global_audit" | "search_pages" | "provider_callback"
         ))
 }
 
@@ -783,6 +832,9 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "set_registration"
             | "save_smtp"
             | "save_s3"
+            | "save_sign_in_provider"
+            | "start_provider_sign_in"
+            | "exchange_provider_sign_in"
             | "save_workspace_bucket"
             | "save_storage_options"
             | "save_limits"

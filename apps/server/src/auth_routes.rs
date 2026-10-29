@@ -33,6 +33,7 @@ use crate::repositories::instance_settings::InstanceSettingsRepository;
 use crate::socket_ticket::SocketTickets;
 
 pub(crate) mod passkeys;
+pub(crate) mod providers;
 pub(crate) mod push;
 pub(crate) mod throttle;
 pub(crate) mod two_factor;
@@ -180,6 +181,12 @@ pub struct AuthState {
     uploads: Option<UploadService>,
     /// Orbit Cloud billing is on (`ORBIT_CLOUD`).
     billing_enabled: bool,
+    /// Where people open Orbit, without a trailing slash: the provider callback URLs and the web return page.
+    public_origin: Arc<str>,
+    /// Google and GitHub over HTTP.
+    providers: crate::sign_in_providers::ProviderClient,
+    /// Where a native provider sign-in may return to.
+    native_redirects: Arc<crate::sign_in_providers::NativeRedirects>,
 }
 
 impl AuthState {
@@ -218,6 +225,24 @@ impl AuthState {
     #[must_use]
     pub fn with_public_origin(mut self, public_origin: &str) -> Self {
         self.webauthn = passkeys::relying_party(public_origin).map(Arc::new);
+        self.public_origin = Arc::from(public_origin.trim_end_matches('/'));
+        self
+    }
+
+    /// Points Google and GitHub at other hosts, for tests.
+    #[must_use]
+    pub fn with_provider_endpoints(
+        mut self,
+        endpoints: crate::sign_in_providers::ProviderEndpoints,
+    ) -> Self {
+        self.providers = crate::sign_in_providers::ProviderClient::new(endpoints);
+        self
+    }
+
+    /// Redirect URIs a native provider sign-in may use besides `orbit://auth/callback` (`ORBIT_DEV_NATIVE_REDIRECTS`).
+    #[must_use]
+    pub fn with_native_redirects(mut self, redirects: &[String]) -> Self {
+        self.native_redirects = Arc::new(crate::sign_in_providers::NativeRedirects::new(redirects));
         self
     }
 
@@ -279,6 +304,9 @@ impl AuthState {
             pending,
             uploads: None,
             billing_enabled: false,
+            public_origin: Arc::from(""),
+            providers: crate::sign_in_providers::ProviderClient::default(),
+            native_redirects: Arc::default(),
         }
     }
 }
@@ -390,6 +418,26 @@ pub fn auth_router(state: AuthState) -> Router {
         )
         .route("/api/v1/auth/recovery/request", post(recovery_request))
         .route("/api/v1/auth/recovery/complete", post(recovery_complete))
+        .route(
+            "/api/v1/auth/providers/{provider}/start",
+            post(providers::start_provider_sign_in),
+        )
+        .route(
+            "/api/v1/auth/providers/{provider}/callback",
+            get(providers::provider_callback),
+        )
+        .route(
+            "/api/v1/auth/providers/exchange",
+            post(providers::exchange_provider_sign_in),
+        )
+        .route(
+            "/api/v1/auth/connected-accounts",
+            get(providers::list_connected_accounts),
+        )
+        .route(
+            "/api/v1/auth/connected-accounts/{provider}",
+            delete(providers::disconnect_connected_account),
+        )
         .route("/api/v1/auth/sessions", get(list_sessions))
         .route("/api/v1/auth/sessions/{id}", delete(revoke_session))
         .with_state(state)
@@ -576,6 +624,9 @@ struct AuthUserResponse {
     installation_admin: bool,
     /// The root user (the account created at setup), who also chooses the instance admins.
     root: bool,
+    /// The account has a password. Accounts created with Google or GitHub start without one; they confirm security
+    /// changes with a fresh provider sign-in instead.
+    has_password: bool,
     /// The profile picture; absent while the user has none. The URL changes with each upload.
     avatar_url: Option<String>,
     /// The presence and custom status the user set for themselves.
@@ -620,6 +671,11 @@ async fn user_response(
         .profile_fields(user.id)
         .await
         .map_err(|_| ApiError::internal(instance, request_id))?;
+    let has_password = state
+        .repository
+        .has_password(user.id)
+        .await
+        .map_err(|_| ApiError::internal(instance, request_id))?;
     Ok(AuthUserResponse {
         status,
         profile,
@@ -629,6 +685,7 @@ async fn user_response(
         display_name: user.display_name,
         installation_admin,
         root,
+        has_password,
     })
 }
 
@@ -679,19 +736,24 @@ async fn login(
         .await
         .ok()
         .flatten();
-    let hash = identity
+    // An unknown email and an account without a password cost the same verification as a wrong password.
+    let password_hash = identity
         .as_ref()
-        .map_or(state.dummy_hash.as_str(), |identity| {
-            identity.password_hash.as_str()
-        });
+        .and_then(|identity| identity.password_hash.clone());
     let verification = state
         .passwords
-        .verify(body.password, hash.to_owned())
+        .verify(
+            body.password,
+            password_hash
+                .clone()
+                .unwrap_or_else(|| state.dummy_hash.clone()),
+        )
         .await
         .ok();
     let valid = identity
         .as_ref()
         .is_some_and(|identity| !identity.suspended)
+        && password_hash.is_some()
         && verification.as_ref().is_some_and(|result| result.valid);
     if !valid {
         state
@@ -724,6 +786,7 @@ async fn login(
     }
 
     let identity = identity.expect("valid login has an identity");
+    let password_hash = password_hash.expect("valid login has a password");
     let replacement_hash = verification.and_then(|result| result.replacement_hash);
     let user = AuthenticatedUser {
         id: identity.id,
@@ -741,8 +804,11 @@ async fn login(
         return two_factor::challenge(
             &state,
             user,
-            identity.password_hash,
-            replacement_hash,
+            two_factor::FirstFactor::Password {
+                password_hash,
+                replacement_hash,
+            },
+            "/api/v1/auth/login",
             request_id.as_ref(),
         )
         .await;
@@ -751,7 +817,7 @@ async fn login(
         .repository
         .create_session_audited(
             &user,
-            &identity.password_hash,
+            &password_hash,
             replacement_hash.as_deref(),
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
@@ -830,6 +896,7 @@ async fn signed_in_response(
             id: user.id.to_string(),
             installation_admin,
             root: state.repository.is_root(user.id).await.unwrap_or(false),
+            has_password: state.repository.has_password(user.id).await.unwrap_or(true),
             email: user.email,
             display_name: user.display_name,
         },
@@ -1376,14 +1443,17 @@ async fn user_avatar(
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct ChangePasswordBody {
-    current_password: String,
+    /// Required when the account has a password. An account without one sets its first password with a session
+    /// that signed in (or confirmed with a provider) in the last 10 minutes.
+    current_password: Option<String>,
     new_password: String,
 }
 
-#[utoipa::path(post, path = "/api/v1/auth/password", request_body = ChangePasswordBody, responses((status = 204), (status = 401, description = "invalid_credentials", body = ProblemBody, content_type = "application/problem+json"), (status = 422, description = "invalid_password", body = ProblemBody, content_type = "application/problem+json")))]
+#[utoipa::path(post, path = "/api/v1/auth/password", request_body = ChangePasswordBody, responses((status = 204), (status = 401, description = "invalid_credentials or reauthentication_required", body = ProblemBody, content_type = "application/problem+json"), (status = 422, description = "invalid_password", body = ProblemBody, content_type = "application/problem+json")))]
 async fn change_password(
     State(state): State<AuthState>,
     headers: HeaderMap,
+    client_ip: Option<Extension<ClientIp>>,
     request_id: Option<Extension<RequestId>>,
     ApiJson(body): ApiJson<ChangePasswordBody>,
 ) -> Result<StatusCode, ApiError> {
@@ -1395,12 +1465,29 @@ async fn change_password(
         .await
         .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
         .ok_or_else(|| ApiError::internal(instance, request_id.as_ref()))?;
-    let verification = state
-        .passwords
-        .verify(body.current_password, identity.password_hash)
-        .await
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
-    if !verification.valid {
+    let valid = match identity.password_hash {
+        Some(password_hash) => {
+            state
+                .passwords
+                .verify(body.current_password.unwrap_or_default(), password_hash)
+                .await
+                .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
+                .valid
+        }
+        None => {
+            two_factor::confirm_identity(
+                &state,
+                &session,
+                None,
+                client_ip,
+                instance,
+                request_id.as_ref(),
+            )
+            .await?;
+            true
+        }
+    };
+    if !valid {
         state
             .repository
             .record_security_event(
@@ -1521,6 +1608,10 @@ struct AuthOptions {
     passkeys_enabled: bool,
     /// Orbit Cloud: workspaces need a subscription (Settings → Billing) to be writable.
     billing_enabled: bool,
+    /// The sign-in providers an admin configured ("Continue with Google").
+    providers: Vec<crate::sign_in_providers::Provider>,
+    /// A first sign-in with one of `providers` creates an account (registration is open; no mail server needed).
+    provider_registration_open: bool,
 }
 
 /// What the sign-in pages offer. Public.
@@ -1534,11 +1625,16 @@ async fn auth_options(
         .get()
         .await
         .map_err(|_| ApiError::internal("/api/v1/auth/options", request_id.as_ref()))?;
+    let providers = providers::configured(&state)
+        .await
+        .map_err(|_| ApiError::internal("/api/v1/auth/options", request_id.as_ref()))?;
     Ok(Json(AuthOptions {
         registration_open: email_enabled && settings.registration_open,
         email_enabled,
         passkeys_enabled: state.webauthn.is_some(),
         billing_enabled: state.billing_enabled,
+        provider_registration_open: settings.registration_open && !providers.is_empty(),
+        providers,
     }))
 }
 
@@ -1855,6 +1951,20 @@ async fn revoke_session(
         );
     }
     Ok(response)
+}
+
+fn last_sign_in_method(
+    instance: &'static str,
+    request_id: Option<&Extension<RequestId>>,
+) -> ApiError {
+    ApiError::new(
+        StatusCode::CONFLICT,
+        "last_sign_in_method",
+        "Last sign-in method",
+        "This is the only way to sign in to your account. Add a password, a passkey or another connected account first.",
+        instance,
+        request_id,
+    )
 }
 
 fn request_id_value(request_id: Option<&Extension<RequestId>>) -> &str {

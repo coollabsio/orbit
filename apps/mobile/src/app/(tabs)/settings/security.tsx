@@ -1,30 +1,114 @@
+import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { Image, Linking, Share, View } from 'react-native'
 
-import { Dialog, PromptDialog, type PromptRequest } from '../../../components/settings/Dialog'
+import { ConfirmDialog, type ConfirmRequest, Dialog, PromptDialog, type PromptRequest } from '../../../components/settings/Dialog'
 import { ACCOUNT_NAV, Badge, Note, RowIcon, RowText, SettingsCard, SettingsRow, SettingsShell } from '../../../components/settings/Shell'
-import { type TotpSetup, twoFactorSummary } from '../../../data/account-api'
-import { useTwoFactor, useTwoFactorWrites } from '../../../hooks/account'
+import { accountKeys, type TotpSetup, twoFactorSummary } from '../../../data/account-api'
+import { type Provider, PROVIDER_LABEL, type ProviderOutcome, providerErrorMessage, providerRows, startProviderSignIn, withReauthentication } from '../../../data/sign-in-provider'
+import { useAuthOptions, useConnectedAccounts, useDisconnectAccount, useTwoFactor, useTwoFactorWrites } from '../../../hooks/account'
+import { useOrbit } from '../../../orbit-context'
 import { errorMessage } from '../../../session-context'
+import { providerDevice } from '../../../sign-in-provider'
 import { Button, Input, Text } from '../../../ui'
 
 /**
- * The web's Security page: the authenticator app (set up, new recovery codes, turn off), each step confirmed with the
- * password. Passkeys need the browser's WebAuthn prompt, which Expo Go does not offer, so they stay on the web.
+ * The web's Security page: the authenticator app (set up, new recovery codes, turn off) and the connected Google and
+ * GitHub accounts. An account with a password confirms each authenticator step with it; one without confirms with a
+ * fresh provider sign-in when the server asks. Passkeys need the browser's WebAuthn prompt, which Expo Go does not
+ * offer, so they stay on the web.
  */
 export default function SecurityScreen() {
+  const { client, user } = useOrbit()
+  const queryClient = useQueryClient()
   const status = useTwoFactor()
   const writes = useTwoFactorWrites()
+  const accounts = useConnectedAccounts()
+  const options = useAuthOptions()
+  const disconnect = useDisconnectAccount()
   const [prompt, setPrompt] = useState<PromptRequest | null>(null)
+  const [confirm, setConfirm] = useState<ConfirmRequest | null>(null)
   const [setup, setSetup] = useState<TotpSetup | null>(null)
   const [codes, setCodes] = useState<{ title: string; codes: string[] } | null>(null)
+  const [twoFactorError, setTwoFactorError] = useState<string | null>(null)
+  const [accountsError, setAccountsError] = useState<string | null>(null)
+  const [pending, setPending] = useState<Provider | 'two_factor' | null>(null)
   const enabled = status.data?.totp_enabled === true
+  const rows = providerRows(options.data?.providers ?? [], accounts.data ?? [])
 
-  const askPassword = (title: string, description: string, confirmLabel: string, then: (password: string) => Promise<unknown>) =>
-    setPrompt({ title, description, label: 'Current password', confirmLabel, secure: true, onSubmit: then })
+  /** A fresh sign-in with a connected provider, for an account without a password. */
+  const confirmIdentity = async () => {
+    const provider = accounts.data?.[0]?.provider
+    if (!provider) throw new Error('Sign out and sign in again to confirm this change.')
+    return (await startProviderSignIn(client, provider, 'confirm', providerDevice)).kind === 'confirmed'
+  }
+
+  const confirmed = (title: string, description: string, confirmLabel: string, then: (password?: string) => Promise<unknown>) => {
+    if (user.has_password) return setPrompt({ title, description, label: 'Current password', confirmLabel, secure: true, onSubmit: then })
+    setConfirm({
+      title,
+      description,
+      confirmLabel,
+      onConfirm: () => {
+        setTwoFactorError(null)
+        setPending('two_factor')
+        withReauthentication(() => then(), confirmIdentity)
+          .catch((error: unknown) => setTwoFactorError(providerErrorMessage(error)))
+          .finally(() => setPending(null))
+      },
+    })
+  }
+
+  const connected = (outcome: ProviderOutcome | null) => {
+    if (outcome?.kind === 'connected') void queryClient.invalidateQueries({ queryKey: accountKeys.connectedAccounts })
+  }
+
+  /** A connected account is a new way into the account: one with a password confirms it first. */
+  const connect = (provider: Provider) => {
+    setAccountsError(null)
+    const label = PROVIDER_LABEL[provider]
+    if (user.has_password) {
+      return setPrompt({
+        title: `Connect ${label}`,
+        description: `Confirm your password, then sign in with ${label}.`,
+        label: 'Current password',
+        confirmLabel: 'Continue',
+        secure: true,
+        onSubmit: (password) =>
+          startProviderSignIn(client, provider, 'connect', providerDevice, password).then(connected, (error: unknown) => {
+            throw new Error(providerErrorMessage(error))
+          }),
+      })
+    }
+    setPending(provider)
+    withReauthentication(() => startProviderSignIn(client, provider, 'connect', providerDevice), confirmIdentity)
+      .then(connected)
+      .catch((error: unknown) => setAccountsError(providerErrorMessage(error)))
+      .finally(() => setPending(null))
+  }
+
+  const askDisconnect = (provider: Provider) =>
+    setConfirm({
+      title: `Disconnect ${PROVIDER_LABEL[provider]}?`,
+      description: `You can no longer sign in to Orbit with ${PROVIDER_LABEL[provider]}.`,
+      confirmLabel: 'Disconnect',
+      danger: true,
+      onConfirm: () => {
+        setAccountsError(null)
+        disconnect.mutate(provider, { onError: (error) => setAccountsError(providerErrorMessage(error)) })
+      },
+    })
 
   return (
-    <SettingsShell title="Account settings" nav={ACCOUNT_NAV} refreshing={status.isRefetching} onRefresh={() => void status.refetch()}>
+    <SettingsShell
+      title="Account settings"
+      nav={ACCOUNT_NAV}
+      refreshing={status.isRefetching || accounts.isRefetching}
+      onRefresh={() => {
+        void status.refetch()
+        void accounts.refetch()
+      }}
+    >
       <SettingsCard
         title="Authenticator app"
         description="Sign-in asks for a code from an app such as 1Password, Authy or Google Authenticator after your password."
@@ -35,8 +119,9 @@ export default function SecurityScreen() {
                 <Button
                   label="New recovery codes"
                   variant="outline"
+                  disabled={pending === 'two_factor'}
                   onPress={() =>
-                    askPassword('New recovery codes', 'Your current recovery codes stop working.', 'Make new codes', async (password) =>
+                    confirmed('New recovery codes', 'Your current recovery codes stop working.', 'Make new codes', async (password) =>
                       setCodes({ title: 'New recovery codes', codes: await writes.regenerate.mutateAsync(password) }),
                     )
                   }
@@ -44,8 +129,9 @@ export default function SecurityScreen() {
                 <Button
                   label="Turn off"
                   variant="destructive"
+                  disabled={pending === 'two_factor'}
                   onPress={() =>
-                    askPassword('Turn off two-factor sign-in?', 'Sign-in asks only for your password again, and your recovery codes stop working.', 'Turn off', (password) =>
+                    confirmed('Turn off two-factor sign-in?', 'Sign-in asks only for your password again, and your recovery codes stop working.', 'Turn off', (password) =>
                       writes.disable.mutateAsync(password),
                     )
                   }
@@ -55,7 +141,12 @@ export default function SecurityScreen() {
               <Button
                 label="Set up"
                 variant="outline"
-                onPress={() => askPassword('Set up an authenticator app', 'Confirm your password to start.', 'Continue', async (password) => setSetup(await writes.setup.mutateAsync(password)))}
+                loading={pending === 'two_factor'}
+                onPress={() =>
+                  confirmed('Set up an authenticator app', user.has_password ? 'Confirm your password to start.' : 'Orbit may ask you to sign in again to start.', 'Continue', async (password) =>
+                    setSetup(await writes.setup.mutateAsync(password)),
+                  )
+                }
               />
             )
           ) : undefined
@@ -70,13 +161,33 @@ export default function SecurityScreen() {
             <RowText title="Two-factor sign-in" subtitle={twoFactorSummary(status.data)} badges={<Badge label={enabled ? 'On' : 'Off'} tone={enabled ? 'primary' : 'secondary'} />} />
           </SettingsRow>
         ) : null}
+        {twoFactorError ? <View className="px-4 pb-4"><Note error>{twoFactorError}</Note></View> : null}
       </SettingsCard>
+
+      {rows.length > 0 ? (
+        <SettingsCard title="Connected accounts" description="Sign in to Orbit with these accounts instead of a password." flush>
+          {rows.map(({ provider, account }, index) => (
+            <SettingsRow key={provider} first={index === 0}>
+              <RowIcon icon={provider} />
+              <RowText title={PROVIDER_LABEL[provider]} subtitle={account ? (account.email ?? 'Connected') : 'Not connected'} />
+              {account ? (
+                <Button label="Disconnect" variant="outline" size="sm" disabled={disconnect.isPending} onPress={() => askDisconnect(provider)} />
+              ) : (
+                <Button label="Connect" variant="outline" size="sm" loading={pending === provider} disabled={pending !== null} onPress={() => connect(provider)} />
+              )}
+            </SettingsRow>
+          ))}
+          {accounts.isError ? <View className="px-4 pb-4"><Note error>Connected accounts could not be loaded.</Note></View> : null}
+          {accountsError ? <View className="px-4 pb-4"><Note error>{accountsError}</Note></View> : null}
+        </SettingsCard>
+      ) : null}
 
       <SettingsCard title="Passkeys" description="Sign in with your fingerprint, face or device screen lock instead of a password.">
         <Note>Add and remove passkeys in Orbit in a browser: creating one needs the browser's passkey prompt.</Note>
       </SettingsCard>
 
       <PromptDialog request={prompt} onClose={() => setPrompt(null)} />
+      <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />
       <SetupDialog
         setup={setup}
         onEnabled={(list) => {

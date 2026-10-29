@@ -115,11 +115,7 @@ impl OriginPolicy {
             }
             return !headers.contains_key(axum::http::header::COOKIE)
                 && (bearer_token(headers).is_some()
-                    || (*method == Method::POST
-                        && matches!(
-                            uri.path(),
-                            "/api/v1/auth/login" | "/api/v1/auth/login/two-factor"
-                        )));
+                    || (*method == Method::POST && is_native_sign_in(uri.path())));
         };
         origins.next().is_none()
             && origin.to_str().ok().is_some_and(|origin| {
@@ -130,6 +126,22 @@ impl OriginPolicy {
                 }
             })
     }
+}
+
+/// The sign-in POSTs a native app sends before it has a session: a password, a second factor, or a provider flow
+/// (`/api/v1/auth/providers/{provider}/start` and the exchange, which needs the verifier the app holds).
+fn is_native_sign_in(path: &str) -> bool {
+    if matches!(
+        path,
+        "/api/v1/auth/login" | "/api/v1/auth/login/two-factor" | "/api/v1/auth/providers/exchange"
+    ) {
+        return true;
+    }
+    path.strip_prefix("/api/v1/auth/providers/")
+        .and_then(|rest| rest.strip_suffix("/start"))
+        .is_some_and(|provider| {
+            !provider.is_empty() && provider.bytes().all(|byte| byte.is_ascii_lowercase())
+        })
 }
 
 /// A co-editing socket opened with a socket ticket and no cookie, from any or no Origin: a

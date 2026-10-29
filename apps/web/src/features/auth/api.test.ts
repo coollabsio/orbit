@@ -7,14 +7,14 @@ test('current user reads the generated endpoint and never falls back to mock ide
   const client = createApiClient({
     fetch: async (request) => {
       path = new URL(request.url).pathname
-      return Response.json({ id: 'user-1', email: 'owner@orbit.test', display_name: 'Owner', installation_admin: true, root: false, status: { presence: 'online' } })
+      return Response.json({ id: 'user-1', email: 'owner@orbit.test', display_name: 'Owner', installation_admin: true, root: false, has_password: true, status: { presence: 'online' } })
     },
   })
 
   const user = await currentUserQueryOptions(client).queryFn()
 
   expect(path).toBe('/api/v1/auth/me')
-  expect(user).toEqual({ id: 'user-1', email: 'owner@orbit.test', display_name: 'Owner', installation_admin: true, root: false, status: { presence: 'online' } })
+  expect(user).toEqual({ id: 'user-1', email: 'owner@orbit.test', display_name: 'Owner', installation_admin: true, root: false, has_password: true, status: { presence: 'online' } })
 })
 
 test('current user exposes server failure instead of mock fallback', async () => {

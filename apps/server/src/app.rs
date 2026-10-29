@@ -297,7 +297,8 @@ impl App {
                         .with_mailer(mailer.clone())
                         .with_rate_limits(config.rate_limits)
                         .with_uploads(attachment_state.uploads.clone())
-                        .with_billing_enabled(billing.is_some());
+                        .with_billing_enabled(billing.is_some())
+                        .with_native_redirects(&config.http.dev_native_redirects);
                     match app_key {
                         Some(app_key) => auth.with_app_key(app_key),
                         None => auth,
