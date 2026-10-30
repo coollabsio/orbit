@@ -76,11 +76,16 @@ pub enum InboundError {
 
 /// `timestamp` (seconds) is within [`REPLAY_WINDOW_SECS`] of `now`.
 pub(crate) fn fresh(timestamp: &str, now: i64) -> Result<(), InboundError> {
+    fresh_within(timestamp, now, REPLAY_WINDOW_SECS)
+}
+
+/// `timestamp` (seconds) is within `window` seconds of `now`.
+pub(crate) fn fresh_within(timestamp: &str, now: i64, window: i64) -> Result<(), InboundError> {
     let timestamp: i64 = timestamp
         .trim()
         .parse()
         .map_err(|_| InboundError::Unauthorized)?;
-    if (now - timestamp).abs() > REPLAY_WINDOW_SECS {
+    if (now - timestamp).abs() > window {
         Err(InboundError::Replay)
     } else {
         Ok(())

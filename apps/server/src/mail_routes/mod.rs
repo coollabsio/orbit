@@ -14,7 +14,7 @@ pub(crate) mod threads;
 use std::sync::Arc;
 
 use axum::Router;
-use axum::extract::{DefaultBodyLimit, Extension};
+use axum::extract::Extension;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::routing::{delete, get, patch, post, put};
 use orbit_platform::{Id, JobStore, MailMode, RequestId};
@@ -156,22 +156,16 @@ impl MailState {
 }
 
 pub fn mail_router(state: MailState) -> Router {
-    // a provider's JSON escapes can double a message; the provider's own check is exact
-    let inbound_limit = state.inbound.as_ref().map_or(1024 * 1024, |inbound| {
-        usize::try_from(inbound.max_message_bytes())
-            .unwrap_or(usize::MAX / 4)
-            .saturating_mul(2)
-            .saturating_add(1024 * 1024)
-    });
     Router::new()
+        // the handler reads the body itself, with a limit for each provider kind
         .route(
             "/api/v1/mail/inbound/{kind}/{provider_id}",
-            post(inbound::post_inbound).layer(DefaultBodyLimit::max(inbound_limit)),
+            post(inbound::post_inbound),
         )
         // Mailgun posts the raw message only to a URL that ends in `mime`
         .route(
             "/api/v1/mail/inbound/{kind}/{provider_id}/mime",
-            post(inbound::post_inbound).layer(DefaultBodyLimit::max(inbound_limit)),
+            post(inbound::post_inbound),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/mail/domains",

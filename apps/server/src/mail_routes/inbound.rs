@@ -5,7 +5,7 @@
 //! Mailgun 406, others 401 or 413).
 
 use axum::Json;
-use axum::body::Bytes;
+use axum::body::{Body, Bytes};
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -29,7 +29,7 @@ pub(crate) async fn post_inbound(
     State(state): State<MailState>,
     Path((kind, provider_id)): Path<(String, String)>,
     headers: HeaderMap,
-    body: Bytes,
+    body: Body,
 ) -> Response {
     let Some(intake) = state.inbound.clone() else {
         return reply(
@@ -54,6 +54,33 @@ pub(crate) async fn post_inbound(
     let max = usize::try_from(intake.max_message_bytes()).unwrap_or(usize::MAX);
     let header = |name: &str| headers.get(name).and_then(|value| value.to_str().ok());
 
+    // what can be checked before the body is read: anyone can post to this URL
+    let signed = match &secrets {
+        ProviderSecrets::Postmark {
+            basic_user,
+            basic_password,
+        } => inbound::postmark::check_auth(
+            header(header::AUTHORIZATION.as_str()),
+            basic_user,
+            basic_password,
+        )
+        .is_ok(),
+        ProviderSecrets::Cloudflare { .. } => {
+            header("x-orbit-signature").is_some() && header("x-orbit-timestamp").is_some()
+        }
+        ProviderSecrets::Resend { .. } => header("svix-signature").is_some(),
+        ProviderSecrets::Mailgun { .. } | ProviderSecrets::Ses { .. } => true,
+    };
+    if !signed {
+        return refused(&intake, &provider, InboundError::Unauthorized, now).await;
+    }
+    let Some(_permit) = intake.body_permit().await else {
+        return reply(StatusCode::SERVICE_UNAVAILABLE, "try again later");
+    };
+    let Ok(body) = axum::body::to_bytes(body, body_limit(kind, max)).await else {
+        return refused(&intake, &provider, InboundError::TooLarge, now).await;
+    };
+
     let parsed = match &secrets {
         ProviderSecrets::Cloudflare { signing_secret } => inbound::cloudflare::verify_and_parse(
             header("x-orbit-timestamp"),
@@ -74,17 +101,36 @@ pub(crate) async fn post_inbound(
             max,
         ),
         ProviderSecrets::Mailgun { signing_key } => {
-            let form: Vec<(String, String)> = url::form_urlencoded::parse(&body)
-                .map(|(key, value)| (key.into_owned(), value.into_owned()))
-                .collect();
-            inbound::mailgun::verify_and_parse(&form, signing_key.as_bytes(), now_secs, max)
-                .and_then(|(delivery, token)| {
-                    if intake.first_use(&token, now_secs) {
-                        Ok(delivery)
-                    } else {
-                        Err(InboundError::Replay)
+            let content_type = header(header::CONTENT_TYPE.as_str()).unwrap_or_default();
+            let form = if content_type.starts_with("multipart/form-data") {
+                match multipart_form(content_type, body).await {
+                    Some(form) => form,
+                    None => {
+                        return refused(&intake, &provider, InboundError::Malformed("form"), now)
+                            .await;
                     }
-                })
+                }
+            } else {
+                inbound::mailgun::parse_urlencoded(&body)
+            };
+            let (delivery, token) = match inbound::mailgun::verify_and_parse(
+                &form,
+                signing_key.as_bytes(),
+                now_secs,
+                max,
+            ) {
+                Ok(parsed) if !intake.token_seen(&parsed.1, now_secs) => parsed,
+                Ok(_) => return refused(&intake, &provider, InboundError::Replay, now).await,
+                Err(error) => return refused(&intake, &provider, error, now).await,
+            };
+            let result = intake.deliver(&provider, delivery, now).await;
+            if matches!(
+                result,
+                DeliveryResult::Stored { .. } | DeliveryResult::NothingDeliverable { .. }
+            ) {
+                intake.remember_token(token, now_secs);
+            }
+            return delivered(kind, result);
         }
         ProviderSecrets::Resend {
             api_key,
@@ -186,6 +232,36 @@ fn delivered(kind: ProviderKind, result: DeliveryResult) -> Response {
             ProviderKind::Mailgun => reply(StatusCode::NOT_ACCEPTABLE, "message too large"),
             _ => reply(StatusCode::PAYLOAD_TOO_LARGE, "message too large"),
         },
+    }
+}
+
+/// The largest body each provider's request may have: base64 (Cloudflare), JSON escapes (Postmark)
+/// and percent-encoding (Mailgun) grow a message; Resend and SES send small JSON events.
+fn body_limit(kind: ProviderKind, max: usize) -> usize {
+    const MIB: usize = 1024 * 1024;
+    match kind {
+        ProviderKind::Cloudflare => (max / 3).saturating_mul(4).saturating_add(64 * 1024),
+        ProviderKind::Postmark => max.saturating_mul(2).saturating_add(MIB),
+        ProviderKind::Mailgun => max.saturating_mul(3).saturating_add(MIB),
+        ProviderKind::Resend | ProviderKind::Ses => 256 * 1024,
+    }
+}
+
+/// A `multipart/form-data` body as name and bytes; `None` when it does not parse.
+async fn multipart_form(content_type: &str, body: Bytes) -> Option<Vec<(String, Vec<u8>)>> {
+    let boundary = multer::parse_boundary(content_type).ok()?;
+    let stream = futures_util::stream::once(async move { Ok::<_, std::io::Error>(body) });
+    let mut multipart = multer::Multipart::new(stream, boundary);
+    let mut form = Vec::new();
+    loop {
+        match multipart.next_field().await {
+            Ok(Some(field)) => {
+                let name = field.name()?.to_owned();
+                form.push((name, field.bytes().await.ok()?.to_vec()));
+            }
+            Ok(None) => return Some(form),
+            Err(_) => return None,
+        }
     }
 }
 

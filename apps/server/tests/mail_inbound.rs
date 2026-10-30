@@ -412,7 +412,64 @@ impl Fixture {
         to: &str,
         raw: &str,
     ) -> (StatusCode, Value) {
+        self.mailgun_at(
+            provider,
+            token,
+            to,
+            raw,
+            TimestampMillis::now().as_millis() / 1000,
+        )
+        .await
+    }
+
+    /// Mailgun's form, multipart as some integrations send it.
+    async fn mailgun_multipart(
+        &self,
+        provider: &Provider,
+        token: &str,
+        to: &str,
+        raw: &[u8],
+    ) -> (StatusCode, Value) {
         let timestamp = (TimestampMillis::now().as_millis() / 1000).to_string();
+        let signature = hmac_hex(
+            MAILGUN_KEY.as_bytes(),
+            format!("{timestamp}{token}").as_bytes(),
+        );
+        let mut body = Vec::new();
+        for (name, value) in [
+            ("timestamp", timestamp.as_bytes()),
+            ("token", token.as_bytes()),
+            ("signature", signature.as_bytes()),
+            ("recipient", to.as_bytes()),
+            ("sender", b"ann@sender.example".as_slice()),
+            ("body-mime", raw),
+        ] {
+            body.extend_from_slice(
+                format!("--XyZ\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n")
+                    .as_bytes(),
+            );
+            body.extend_from_slice(value);
+            body.extend_from_slice(b"\r\n");
+        }
+        body.extend_from_slice(b"--XyZ--\r\n");
+        self.post(
+            &format!("/api/v1/mail/inbound/mailgun/{}/mime", provider.id),
+            "multipart/form-data; boundary=XyZ",
+            &[],
+            body,
+        )
+        .await
+    }
+
+    async fn mailgun_at(
+        &self,
+        provider: &Provider,
+        token: &str,
+        to: &str,
+        raw: &str,
+        timestamp: i64,
+    ) -> (StatusCode, Value) {
+        let timestamp = timestamp.to_string();
         let signature = hmac_hex(
             MAILGUN_KEY.as_bytes(),
             format!("{timestamp}{token}").as_bytes(),
@@ -459,6 +516,7 @@ fn hmac_hex(key: &[u8], message: &[u8]) -> String {
 fn mail(to: &str, body: &str) -> String {
     format!(
         "Received-SPF: pass (provider) envelope-from=\"ann@sender.example\";\r\n\
+         Received: from mx.sender.example by mx.provider.example;\r\n\
          From: Ann <ann@sender.example>\r\nTo: {to}\r\nSubject: Hello\r\n\
          Message-ID: <{body}@sender.example>\r\nDate: Thu, 29 Oct 2026 10:00:00 +0000\r\n\r\n{body}\r\n"
     )
@@ -604,8 +662,13 @@ async fn unknown_address_is_listed_as_rejected() {
             ("typo@two.test".to_owned(), RejectReason::UnknownAddress),
         ]
     );
+    let from_cloudflare = failed
+        .rejected
+        .iter()
+        .find(|entry| entry.recipient == "nobody@one.test")
+        .unwrap();
     assert_eq!(
-        failed.rejected[0].mail_from.as_deref(),
+        from_cloudflare.mail_from.as_deref(),
         Some("ann@sender.example")
     );
 }
@@ -685,16 +748,29 @@ async fn bodies_over_the_limit_are_refused() {
         .postmark(&postmark, true, "box@two.test", &big)
         .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
-    // a body far past the limit is cut off before it is read
+    // a body far past the limit is cut off before it is read (the signature is checked after)
+    let (status, _) = fixture
+        .post(
+            &format!("/api/v1/mail/inbound/cloudflare/{}", cloudflare.id),
+            "application/json",
+            &[
+                ("x-orbit-timestamp", "1".to_owned()),
+                ("x-orbit-signature", "00".to_owned()),
+            ],
+            vec![b'x'; (MAX as usize) * 3 + 2 * 1024 * 1024],
+        )
+        .await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+    // without the signature headers nothing is read at all
     let (status, _) = fixture
         .post(
             &format!("/api/v1/mail/inbound/cloudflare/{}", cloudflare.id),
             "application/json",
             &[],
-            vec![b'x'; (MAX as usize) * 3 + 2 * 1024 * 1024],
+            vec![b'x'; 1024],
         )
         .await;
-    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
     assert!(fixture.receipts().await.is_empty());
 }
 
@@ -1081,4 +1157,113 @@ async fn fetch_targets_must_be_public_provider_hosts() {
         StatusCode::UNAUTHORIZED
     );
     assert!(fixture.receipts().await.is_empty());
+}
+
+// ---------------------------------------------------------------- review fixes
+
+#[tokio::test]
+async fn mailgun_retry_after_a_failure_is_stored() {
+    let mut fixture = Fixture::new().await;
+    let provider = fixture
+        .provider(ProviderKind::Mailgun, &[fixture.one])
+        .await;
+    let raw = mail("box@one.test", "retry");
+    let at = TimestampMillis::now().as_millis() / 1000;
+    fixture.fail.store(true, Ordering::SeqCst);
+    let (status, _) = fixture
+        .mailgun_at(&provider, "token-r", "box@one.test", &raw, at)
+        .await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    // Mailgun sends the same signed request again later
+    fixture.fail.store(false, Ordering::SeqCst);
+    let (status, body) = fixture
+        .mailgun_at(&provider, "token-r", "box@one.test", &raw, at)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(fixture.receipts().await.len(), 1);
+}
+
+#[tokio::test]
+async fn mailgun_multipart_form_is_read() {
+    let mut fixture = Fixture::new().await;
+    let provider = fixture
+        .provider(ProviderKind::Mailgun, &[fixture.one])
+        .await;
+    let mut raw = mail("box@one.test", "latin").into_bytes();
+    raw.extend_from_slice(b"caf\xe9\r\n");
+    let (status, body) = fixture
+        .mailgun_multipart(&provider, "token-m", "box@one.test", &raw)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(fixture.receipts().await.len(), 1);
+}
+
+#[tokio::test]
+async fn small_payload_providers_refuse_big_bodies() {
+    let mut fixture = Fixture::new().await;
+    let provider = fixture.provider(ProviderKind::Resend, &[fixture.one]).await;
+    // a Resend webhook is a small JSON event: a big body is refused before it is read in full
+    let (status, _) = fixture
+        .post(
+            &format!("/api/v1/mail/inbound/resend/{}", provider.id),
+            "application/json",
+            &[("svix-signature", "v1,AA==".to_owned())],
+            vec![b'x'; 512 * 1024],
+        )
+        .await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+#[tokio::test]
+async fn a_workspace_provider_cannot_fill_another_workspaces_list() {
+    let fixture = Fixture::new().await;
+    let other = orbit_server::repositories::workspaces::WorkspaceRepository::new(
+        (*fixture.database).clone(),
+    )
+    .create(
+        fixture.owner,
+        "Other".to_owned(),
+        "request",
+        TimestampMillis::now(),
+    )
+    .await
+    .unwrap()
+    .id;
+    let created = fixture
+        .mail
+        .create_provider(
+            ProviderScope::Workspace(other),
+            fixture.owner,
+            NewProvider {
+                kind: ProviderKind::Cloudflare,
+                name: "Other's".to_owned(),
+                secrets: None,
+                settings: ProviderSettings::default(),
+            },
+            "request",
+        )
+        .await
+        .unwrap();
+    let provider = Provider {
+        id: created.provider.id,
+        secrets: created.generated.unwrap(),
+    };
+    // a signed request of the other workspace's provider names a recipient of this workspace
+    let (status, _) = fixture
+        .cloudflare(&provider, "box@one.test", &mail("box@one.test", "spam"))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let ours = fixture
+        .mail
+        .failed_receipts(fixture.workspace, fixture.owner)
+        .await
+        .unwrap();
+    assert!(ours.rejected.is_empty(), "{:?}", ours.rejected);
+    let theirs = fixture
+        .mail
+        .failed_receipts(other, fixture.owner)
+        .await
+        .unwrap();
+    assert_eq!(theirs.rejected.len(), 1);
+    assert_eq!(theirs.rejected[0].reason, RejectReason::WrongRoute);
 }

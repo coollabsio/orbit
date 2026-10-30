@@ -20,6 +20,7 @@ lettre = { version = "0.11.23", default-features = false, features = ["builder",
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 http-body-util = "0.1"
 include_dir = "0.7"
+multer = "3"
 mime_guess = "2"
 oxide-auth = "=0.6.1"
 url = "2"

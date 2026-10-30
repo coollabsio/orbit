@@ -25,7 +25,9 @@ use crate::repositories::mail::{
 /// The DKIM and DMARC lookups of one message, as for the listener.
 const AUTH_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long a Mailgun token is remembered (its timestamp is valid for 5 minutes).
-const TOKEN_MEMORY_SECS: i64 = 10 * 60;
+const TOKEN_MEMORY_SECS: i64 = orbit_mail::inbound::mailgun::RETRY_WINDOW_SECS + 60 * 60;
+/// Request bodies read at once: a provider's message can be tens of MiB.
+const BODIES_AT_ONCE: usize = 4;
 /// Resend's Receiving API.
 const RESEND_API: &str = "https://api.resend.com/emails/receiving/";
 /// Small answers: Resend's message details, SNS certificates and confirmations.
@@ -67,6 +69,8 @@ pub struct ProviderIntake {
     /// Mailgun tokens seen in the last [`TOKEN_MEMORY_SECS`] (seconds), to refuse a replay. Per
     /// server: in a cluster a replay within the 5-minute timestamp window can reach another server.
     tokens: Mutex<HashMap<String, i64>>,
+    /// Request bodies being read; see [`BODIES_AT_ONCE`].
+    bodies: tokio::sync::Semaphore,
     /// Fetches of Resend downloads and SNS certificates and confirmations.
     fetch: SafeFetch,
     /// Tests only: an S3 endpoint instead of `https://s3.<region>.amazonaws.com`.
@@ -96,6 +100,7 @@ impl ProviderIntake {
             hostname,
             max_message_bytes,
             tokens: Mutex::new(HashMap::new()),
+            bodies: tokio::sync::Semaphore::new(BODIES_AT_ONCE),
             fetch: SafeFetch::new(),
             s3_endpoint: None,
             certs: Mutex::new(HashMap::new()),
@@ -342,14 +347,28 @@ impl ProviderIntake {
         self.max_message_bytes
     }
 
-    /// `false` when `token` was seen in the last ten minutes; remembers it otherwise.
-    pub fn first_use(&self, token: &str, now_secs: i64) -> bool {
+    /// Whether a delivered request had `token` (a replay).
+    pub fn token_seen(&self, token: &str, now_secs: i64) -> bool {
         let mut tokens = self
             .tokens
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         tokens.retain(|_, seen| now_secs - *seen <= TOKEN_MEMORY_SECS);
-        tokens.insert(token.to_owned(), now_secs).is_none()
+        tokens.contains_key(token)
+    }
+
+    /// Remembers the token of a delivered request. A request that failed is not remembered: Mailgun
+    /// sends it again with the same token.
+    pub fn remember_token(&self, token: String, now_secs: i64) {
+        self.tokens
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(token, now_secs);
+    }
+
+    /// Waits until a request body may be read (at most [`BODIES_AT_ONCE`] at a time).
+    pub async fn body_permit(&self) -> Option<tokio::sync::SemaphorePermit<'_>> {
+        self.bodies.acquire().await.ok()
     }
 
     /// Delivers one authenticated message of `provider` to its routed recipients.
@@ -395,7 +414,9 @@ impl ProviderIntake {
             match self.route(provider, rcpt, now).await {
                 Ok(Ok(recipient)) => recipients.push(recipient),
                 Ok(Err((reason, workspace_id))) => rejected.push(NewRejection {
-                    workspace_id: workspace_id.or(provider.workspace_id),
+                    // a workspace provider lists only in its own workspace: its owner signs
+                    // what it sends, and must not write into another workspace's list
+                    workspace_id: provider.workspace_id.or(workspace_id),
                     provider_id: provider.id,
                     mail_from: delivery.mail_from.clone(),
                     recipient: rcpt.clone(),

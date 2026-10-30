@@ -475,12 +475,14 @@ async fn dkim_still_checked_by_orbit() {
     assert_eq!(outcome.dkim, Verdict::Fail);
 }
 
+const PROVIDER_RECEIVED: &str = "Received: from mx.attacker.example (mx.attacker.example [203.0.113.9]) by mx.provider.example;\r\n";
+
 #[test]
 fn only_the_topmost_received_spf_counts() {
     let raw = format!(
         "Received-SPF: fail (provider: domain of ann@example.com does not designate 203.0.113.9) \
          client-ip=203.0.113.9; envelope-from=\"ann@example.com\"; helo=mx.attacker.example;\r\n\
-         Received-SPF: pass (forged) envelope-from=\"ann@example.com\";\r\n{}",
+         Received-SPF: pass (forged) envelope-from=\"ann@example.com\";\r\n{PROVIDER_RECEIVED}{}",
         message("hi")
     );
     let spf = provider_spf(raw.as_bytes(), SpfHeader::ReceivedSpf).unwrap();
@@ -489,10 +491,37 @@ fn only_the_topmost_received_spf_counts() {
 }
 
 #[test]
+fn spf_headers_below_the_providers_received_are_the_senders() {
+    // the provider added no SPF header: the one below its Received came with the message
+    let forged = format!(
+        "{PROVIDER_RECEIVED}Received-SPF: pass (forged) envelope-from=\"ceo@example.com\";\r\n\
+         Authentication-Results: mx.provider.example; spf=pass smtp.mailfrom=ceo@example.com\r\n{}",
+        message("hi")
+    );
+    assert!(provider_spf(forged.as_bytes(), SpfHeader::ReceivedSpf).is_none());
+    assert!(
+        provider_spf(
+            forged.as_bytes(),
+            SpfHeader::AuthResults {
+                authserv_id: "mx.provider.example"
+            }
+        )
+        .is_none()
+    );
+    // without any Received the provider's part cannot be told apart
+    let bare = format!(
+        "Received-SPF: pass envelope-from=\"ceo@example.com\";\r\n{}",
+        message("hi")
+    );
+    assert!(provider_spf(bare.as_bytes(), SpfHeader::ReceivedSpf).is_none());
+}
+
+#[test]
 fn provider_spf_reads_the_providers_authentication_results() {
     let raw = format!(
         "Authentication-Results: mx.provider.example; spf=pass smtp.mailfrom=ann@example.com\r\n\
-         Authentication-Results: mx.provider.example; spf=fail smtp.mailfrom=ann@example.com\r\n{}",
+         Authentication-Results: mx.provider.example; spf=fail smtp.mailfrom=ann@example.com\r\n\
+         {PROVIDER_RECEIVED}{}",
         message("hi")
     );
     let spf = provider_spf(

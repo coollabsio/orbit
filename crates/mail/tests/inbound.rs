@@ -15,6 +15,7 @@ use sha2::Sha256;
 const NOW: i64 = 1_793_000_000;
 const MAX: usize = 1024 * 1024;
 const RAW: &str = "Received-SPF: pass (provider) envelope-from=\"ann@sender.example\";\r\n\
+    Received: from mx.sender.example by mx.provider.example;\r\n\
     From: Ann <ann@sender.example>\r\nTo: team@orbit.example\r\nSubject: Hi\r\n\r\nHello\r\n";
 
 fn hmac_hex(key: &[u8], message: &[u8]) -> String {
@@ -157,6 +158,8 @@ fn postmark_delivery_needs_its_credentials() {
     assert_eq!(delivery.raw, RAW.as_bytes());
     assert_eq!(delivery.recipients, ["bcc-only@orbit.example"]);
     assert_eq!(delivery.spf, SpfSource::Header(SpfHeaderOwned::ReceivedSpf));
+    // Postmark gives no envelope sender; the header From is not one
+    assert_eq!(delivery.mail_from, None);
 
     for authorization in [
         None,
@@ -193,7 +196,7 @@ fn postmark_without_raw_email_explains_the_setting() {
 
 const MG_KEY: &[u8] = b"mailgun-webhook-signing-key";
 
-fn mailgun_form(timestamp: i64, token: &str, key: &[u8], raw: &str) -> Vec<(String, String)> {
+fn mailgun_form(timestamp: i64, token: &str, key: &[u8], raw: &str) -> Vec<(String, Vec<u8>)> {
     let timestamp = timestamp.to_string();
     let signature = hmac_hex(key, format!("{timestamp}{token}").as_bytes());
     [
@@ -206,8 +209,17 @@ fn mailgun_form(timestamp: i64, token: &str, key: &[u8], raw: &str) -> Vec<(Stri
         ("body-mime", raw),
     ]
     .into_iter()
-    .map(|(key, value)| (key.to_owned(), value.to_owned()))
+    .map(|(key, value)| (key.to_owned(), value.as_bytes().to_vec()))
     .collect()
+}
+
+#[test]
+fn mailgun_form_keeps_8bit_bytes() {
+    // a Latin-1 body: percent-encoded bytes that are not UTF-8 must come back as they were
+    let form = mailgun::parse_urlencoded(b"token=t+1&body-mime=caf%E9%0D%0A&empty=");
+    assert_eq!(form[0], ("token".to_owned(), b"t 1".to_vec()));
+    assert_eq!(form[1], ("body-mime".to_owned(), b"caf\xe9\r\n".to_vec()));
+    assert_eq!(form[2], ("empty".to_owned(), Vec::new()));
 }
 
 #[test]
@@ -225,7 +237,10 @@ fn mailgun_refuses_a_wrong_key_an_old_timestamp_and_a_big_message() {
         mailgun::verify_and_parse(&wrong, MG_KEY, NOW, MAX).unwrap_err(),
         InboundError::Unauthorized
     );
-    let old = mailgun_form(NOW - 6 * 60, "token-1", MG_KEY, RAW);
+    // Mailgun retries a 503 for 8 hours with the same signature: only older requests are refused
+    let retried = mailgun_form(NOW - 7 * 60 * 60, "token-1", MG_KEY, RAW);
+    assert!(mailgun::verify_and_parse(&retried, MG_KEY, NOW, MAX).is_ok());
+    let old = mailgun_form(NOW - 10 * 60 * 60, "token-1", MG_KEY, RAW);
     assert_eq!(
         mailgun::verify_and_parse(&old, MG_KEY, NOW, MAX).unwrap_err(),
         InboundError::Replay
@@ -276,6 +291,25 @@ fn resend_webhook_gives_the_email_id_and_envelope_recipients() {
     assert_eq!(event.email_id, "56761188-7520-42d8-8898-ff6fc54ce618");
     assert_eq!(event.recipients, ["bcc-only@orbit.example"]);
     assert_eq!(event.mail_from.as_deref(), Some("ann@sender.example"));
+}
+
+#[test]
+fn resend_without_envelope_recipients_is_refused() {
+    // the headers' To and Cc are not the envelope (Bcc, lists): no `received_for`, no delivery
+    let event = RESEND_EVENT.replace(r#""received_for":["bcc-only@orbit.example"],"#, "");
+    let signature = svix_signature("msg_1", NOW, &event, SVIX_KEY);
+    assert_eq!(
+        resend::verify_webhook(
+            Some("msg_1"),
+            Some(&NOW.to_string()),
+            Some(&signature),
+            event.as_bytes(),
+            &svix_secret(),
+            NOW
+        )
+        .unwrap_err(),
+        InboundError::Malformed("no_envelope")
+    );
 }
 
 #[test]

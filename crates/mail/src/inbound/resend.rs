@@ -13,7 +13,7 @@ use super::{InboundError, address, fresh, recipients};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResendEvent {
     pub email_id: String,
-    /// `received_for` (the envelope); `to`, `cc` and `bcc` when Resend gives none.
+    /// `received_for`: the envelope recipients.
     pub recipients: Vec<String>,
     pub mail_from: Option<String>,
 }
@@ -31,12 +31,6 @@ struct Data {
     from: Option<String>,
     #[serde(default)]
     received_for: Vec<String>,
-    #[serde(default)]
-    to: Vec<String>,
-    #[serde(default)]
-    cc: Vec<String>,
-    #[serde(default)]
-    bcc: Vec<String>,
 }
 
 /// Checks the Svix headers (`svix-id`, `svix-timestamp`, `svix-signature`) with the endpoint secret
@@ -84,12 +78,12 @@ pub fn verify_webhook(
         return Err(InboundError::Malformed("event_type"));
     }
     let data = event.data;
-    let envelope = if data.received_for.is_empty() {
-        [data.to, data.cc, data.bcc].concat()
-    } else {
-        data.received_for
-    };
-    let envelope: Vec<&str> = envelope.iter().map(String::as_str).collect();
+    // the headers' To and Cc are not the envelope (a Bcc copy, a mailing list): without
+    // `received_for` there is nothing to deliver to
+    if data.received_for.is_empty() {
+        return Err(InboundError::Malformed("no_envelope"));
+    }
+    let envelope: Vec<&str> = data.received_for.iter().map(String::as_str).collect();
     Ok(ResendEvent {
         email_id: data.email_id,
         recipients: recipients(&envelope),

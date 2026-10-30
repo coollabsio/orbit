@@ -15,8 +15,27 @@ struct Body {
     raw_email: Option<String>,
     #[serde(default)]
     original_recipient: Option<String>,
-    #[serde(default)]
-    from: Option<String>,
+}
+
+/// Checks the `Authorization` header (`Basic …`) against the credentials, in constant time.
+pub fn check_auth(
+    authorization: Option<&str>,
+    user: &str,
+    password: &str,
+) -> Result<(), InboundError> {
+    let given = authorization
+        .and_then(|value| value.strip_prefix("Basic "))
+        .and_then(|value| {
+            base64::engine::general_purpose::STANDARD
+                .decode(value.trim())
+                .ok()
+        })
+        .ok_or(InboundError::Unauthorized)?;
+    if same(&given, format!("{user}:{password}").as_bytes()) {
+        Ok(())
+    } else {
+        Err(InboundError::Unauthorized)
+    }
 }
 
 /// Checks the `Authorization` header (`Basic …`), then reads the message.
@@ -27,17 +46,7 @@ pub fn verify_and_parse(
     password: &str,
     max_raw: usize,
 ) -> Result<Delivery, InboundError> {
-    let given = authorization
-        .and_then(|value| value.strip_prefix("Basic "))
-        .and_then(|value| {
-            base64::engine::general_purpose::STANDARD
-                .decode(value.trim())
-                .ok()
-        })
-        .ok_or(InboundError::Unauthorized)?;
-    if !same(&given, format!("{user}:{password}").as_bytes()) {
-        return Err(InboundError::Unauthorized);
-    }
+    check_auth(authorization, user, password)?;
     // JSON escapes can double a message's size
     if body.len() > max_raw * 2 + 1024 * 1024 {
         return Err(InboundError::TooLarge);
@@ -55,8 +64,9 @@ pub fn verify_and_parse(
         .ok_or(InboundError::Malformed("original_recipient"))?;
     Ok(Delivery {
         raw,
-        // Postmark gives no envelope sender; `From` is the closest it has (only for display and SPF fallback)
-        mail_from: address(body.from.as_deref()),
+        // Postmark gives no envelope sender, and the header `From` is not one: SPF and DMARC must not
+        // take the sender's own claim as the SPF domain
+        mail_from: None,
         recipients: vec![recipient],
         peer_ip: None,
         helo: None,

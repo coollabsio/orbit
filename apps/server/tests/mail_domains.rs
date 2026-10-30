@@ -1415,3 +1415,31 @@ async fn root_only_instance_routes() {
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert_eq!(refused["code"], "workspace_providers_disabled");
 }
+
+#[tokio::test]
+async fn a_domain_with_a_foreign_provider_is_not_created() {
+    let fixture = Fixture::new().await;
+    let (_, foreign) = fixture
+        .call(
+            &fixture.owner,
+            fixture.second,
+            "POST",
+            "/providers",
+            Some(json!({ "kind": "cloudflare", "name": "Second's" })),
+        )
+        .await;
+    let (status, _) = fixture
+        .call(
+            &fixture.owner,
+            fixture.first,
+            "POST",
+            "/domains",
+            Some(json!({ "name": "example.com", "provider_id": foreign["id"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let (_, domains) = fixture
+        .call(&fixture.owner, fixture.first, "GET", "/domains", None)
+        .await;
+    assert_eq!(domains, json!([]));
+}

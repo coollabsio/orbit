@@ -2733,6 +2733,7 @@ dependencies = [
  "include_dir",
  "lettre",
  "mime_guess",
+ "multer",
  "orbit-domain",
  "orbit-mail",
  "orbit-platform",

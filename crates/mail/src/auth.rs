@@ -778,19 +778,35 @@ pub enum SpfHeader<'a> {
     AuthResults { authserv_id: &'a str },
 }
 
-/// Reads the provider's SPF result from the **topmost** field of that kind (the provider adds its
-/// field on top; lower ones came with the message and may be forged). `None` when there is none.
+/// Reads the provider's SPF result from a field the provider added. The provider puts its own `Received`
+/// field on top of the message (RFC 5321 §4.4), so only fields above the topmost `Received` are the provider's;
+/// everything below came with the message and may be forged. Of those, the topmost field of the kind counts.
+/// `None` without such a field, or without any `Received` field (then nothing can be told apart).
 pub fn provider_spf(raw: &[u8], header: SpfHeader<'_>) -> Option<ProviderSpf> {
+    let fields = header_fields(raw);
+    let top = fields.iter().position(|field| {
+        field
+            .name
+            .trim_ascii_end()
+            .eq_ignore_ascii_case(b"Received")
+    })?;
+    let provider_fields = &fields[..top];
     match header {
         SpfHeader::AuthResults { authserv_id } => {
-            let outcome = trusted_relay_results(raw, authserv_id)?;
+            let wanted = authserv_id.to_ascii_lowercase();
+            let field = provider_fields.iter().find(|field| {
+                is_auth_results(field) && self::authserv_id(field.value).0 == wanted
+            })?;
+            let value = String::from_utf8_lossy(field.value);
+            let (_, after_id) = self::authserv_id(value.as_bytes());
+            let outcome = parse_results(&value[after_id..]);
             Some(ProviderSpf {
                 verdict: outcome.spf,
                 domain: outcome.spf_domain.unwrap_or_default(),
             })
         }
         SpfHeader::ReceivedSpf => {
-            let field = header_fields(raw).into_iter().find(|field| {
+            let field = provider_fields.iter().find(|field| {
                 field
                     .name
                     .trim_ascii_end()

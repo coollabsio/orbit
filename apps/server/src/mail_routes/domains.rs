@@ -10,7 +10,9 @@ use utoipa::ToSchema;
 
 use super::{Call, MailState, RequestIdExtension, problem};
 use crate::mail_dns::{RecordKind, expected_records, txt_strings};
-use crate::repositories::mail::{Domain, DomainProvider, DomainStatus, ProviderKind, RecordStatus};
+use crate::repositories::mail::{
+    Domain, DomainProvider, DomainStatus, MailError, ProviderKind, RecordStatus,
+};
 use crate::task_routes::{ApiError, ApiJson, request_id_value};
 
 /// A mail domain with the records to publish and the result of its last DNS check.
@@ -244,6 +246,19 @@ pub(crate) async fn create_mail_domain(
         .as_deref()
         .map(|id| call.body_id(id, "provider_id"))
         .transpose()?;
+    // checked before the domain exists: a refused route must not leave a domain behind
+    if let Some(provider_id) = provider_id {
+        let usable = state
+            .mail
+            .providers_for_workspace(call.workspace_id, call.actor_id)
+            .await
+            .map_err(|error| call.problem(error))?;
+        if !usable.iter().any(|provider| provider.id == provider_id) {
+            return Err(call.problem(MailError::Invalid {
+                field: "provider_id",
+            }));
+        }
+    }
     let mut domain = state
         .mail
         .create_domain(
