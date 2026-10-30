@@ -6,6 +6,7 @@ mod address;
 mod auth;
 mod dkim;
 mod html;
+pub mod inbound;
 mod parse;
 mod smtp;
 
