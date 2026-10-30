@@ -97,16 +97,19 @@ impl Fixture {
             Some(HOSTNAME.to_owned()),
             MailMode::Direct,
         );
-        let app = mail_router(MailState::new(
-            Arc::clone(&identity),
-            Arc::clone(&mail),
-            CookieMode::secure(),
-            MailSettings {
-                enabled: true,
-                hostname: Some(HOSTNAME.to_owned()),
-                mode: MailMode::Direct,
-            },
-        ));
+        let app = mail_router(
+            MailState::new(
+                Arc::clone(&identity),
+                Arc::clone(&mail),
+                CookieMode::secure(),
+                MailSettings {
+                    enabled: true,
+                    hostname: Some(HOSTNAME.to_owned()),
+                    mode: MailMode::Direct,
+                },
+            )
+            .with_origins("https://orbit.test", None),
+        );
         Self {
             _root: root,
             database,
@@ -1171,4 +1174,244 @@ async fn record_dns_report_ignores_a_removed_domain() {
             .unwrap(),
         None
     );
+}
+
+// ---------------------------------------------------------------- providers and routes
+
+impl Fixture {
+    async fn admin_call(
+        &self,
+        member: &Member,
+        method: &str,
+        path: &str,
+        body: Option<Value>,
+    ) -> (StatusCode, Value) {
+        self.raw(member, method, &format!("/api/v1/admin/mail{path}"), body)
+            .await
+    }
+}
+
+fn mx_values(domain: &Value) -> Vec<String> {
+    domain["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|record| record["kind"] == "mx")
+        .map(|record| record["value"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+#[tokio::test]
+async fn create_returns_setup_once() {
+    let fixture = Fixture::new().await;
+    let (status, created) = fixture
+        .admin_call(
+            &fixture.owner,
+            "POST",
+            "/providers",
+            Some(json!({ "kind": "postmark", "name": "Postmark" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    let password = created["generated_secrets"]["basic_password"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let url = created["setup"]["webhook_url"].as_str().unwrap();
+    assert!(url.contains(&password), "{url}");
+    assert!(url.ends_with(&format!(
+        "/api/v1/mail/inbound/postmark/{}",
+        created["id"].as_str().unwrap()
+    )));
+    assert!(!created["setup"]["steps"].as_array().unwrap().is_empty());
+    assert_eq!(
+        created["secrets_set"],
+        json!(["basic_user", "basic_password"])
+    );
+
+    let (status, listed) = fixture
+        .admin_call(&fixture.owner, "GET", "/providers", None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let listed = &listed["providers"][0];
+    assert!(listed["generated_secrets"].is_null());
+    assert!(!listed.to_string().contains(&password), "{listed}");
+
+    let (status, cloudflare) = fixture
+        .admin_call(
+            &fixture.owner,
+            "POST",
+            "/providers",
+            Some(json!({ "kind": "cloudflare", "name": "Cloudflare" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert!(
+        cloudflare["setup"]["worker_script"]
+            .as_str()
+            .unwrap()
+            .contains("setReject")
+    );
+    // a provider whose secrets come from the provider needs them
+    let (status, _) = fixture
+        .admin_call(
+            &fixture.owner,
+            "POST",
+            "/providers",
+            Some(json!({ "kind": "mailgun", "name": "Mailgun" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn workspace_lists_instance_providers_read_only() {
+    let fixture = Fixture::new().await;
+    let (_, instance) = fixture
+        .admin_call(
+            &fixture.owner,
+            "POST",
+            "/providers",
+            Some(json!({ "kind": "cloudflare", "name": "Shared" })),
+        )
+        .await;
+    let (status, own) = fixture
+        .call(
+            &fixture.owner,
+            fixture.first,
+            "POST",
+            "/providers",
+            Some(json!({ "kind": "mailgun", "name": "Ours", "secrets": { "signing_key": "k" } })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{own}");
+    let (status, listed) = fixture
+        .call(&fixture.owner, fixture.first, "GET", "/providers", None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(listed["workspace_providers_enabled"], true);
+    let providers = listed["providers"].as_array().unwrap();
+    assert_eq!(providers.len(), 2);
+    let shared = providers
+        .iter()
+        .find(|p| p["id"] == instance["id"])
+        .unwrap();
+    assert_eq!(shared["scope"], "instance");
+    // no webhook URL or steps of the instance's account for a workspace
+    assert!(shared["setup"].is_null(), "{shared}");
+    let path = format!("/providers/{}", instance["id"].as_str().unwrap());
+    let (status, _) = fixture
+        .call(&fixture.owner, fixture.first, "DELETE", &path, None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    // the other workspace sees the instance provider only
+    let (_, other) = fixture
+        .call(&fixture.owner, fixture.second, "GET", "/providers", None)
+        .await;
+    assert_eq!(other["providers"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn route_change_updates_the_mx_expectation() {
+    let fixture = Fixture::new().await;
+    let domain = fixture.add(fixture.first, "example.com").await;
+    let (_, provider) = fixture
+        .admin_call(
+            &fixture.owner,
+            "POST",
+            "/providers",
+            Some(json!({ "kind": "cloudflare", "name": "Cloudflare" })),
+        )
+        .await;
+    let path = format!("/domains/{}/route", domain["id"].as_str().unwrap());
+    let (code, routed) = fixture
+        .call(
+            &fixture.owner,
+            fixture.first,
+            "PUT",
+            &path,
+            Some(json!({ "provider_id": provider["id"] })),
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK, "{routed}");
+    assert_eq!(routed["provider"]["kind"], "cloudflare");
+    assert_eq!(
+        mx_values(&routed),
+        vec![
+            "route1.mx.cloudflare.net",
+            "route2.mx.cloudflare.net",
+            "route3.mx.cloudflare.net"
+        ]
+    );
+    fixture
+        .dns
+        .set_mx("example.com", &[(86, "route2.mx.cloudflare.net.")]);
+    fixture.check(&domain, TimestampMillis::now()).await;
+    let read = fixture.get(fixture.first, &domain).await;
+    assert_eq!(status(&read, "mx"), "ok");
+
+    // back to Orbit's listener: the MX must name this server again
+    let (code, smtp) = fixture
+        .call(
+            &fixture.owner,
+            fixture.first,
+            "PUT",
+            &path,
+            Some(json!({ "provider_id": null })),
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK);
+    assert!(smtp["provider"].is_null());
+    assert_eq!(mx_values(&smtp), vec![HOSTNAME.to_owned()]);
+    fixture.check(&domain, TimestampMillis::now()).await;
+    let read = fixture.get(fixture.first, &domain).await;
+    assert_eq!(
+        record(&read, "mx")["status"],
+        json!({ "status": "wrong", "found": "86 route2.mx.cloudflare.net" })
+    );
+}
+
+#[tokio::test]
+async fn root_only_instance_routes() {
+    let fixture = Fixture::new().await;
+    let admin = fixture.user("admin", Some((fixture.first, "admin"))).await;
+    for (method, body) in [
+        ("GET", None),
+        ("POST", Some(json!({ "kind": "cloudflare", "name": "x" }))),
+    ] {
+        let (status, _) = fixture.admin_call(&admin, method, "/providers", body).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{method}");
+    }
+    let (status, _) = fixture
+        .admin_call(
+            &admin,
+            "PUT",
+            "",
+            Some(json!({ "workspace_providers_enabled": false })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // the root user turns workspace providers off: workspaces cannot add one
+    let (status, settings) = fixture
+        .admin_call(
+            &fixture.owner,
+            "PUT",
+            "",
+            Some(json!({ "domains_enabled": true, "workspace_providers_enabled": false })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{settings}");
+    assert_eq!(settings["workspace_providers_enabled"], false);
+    let (status, refused) = fixture
+        .call(
+            &fixture.owner,
+            fixture.first,
+            "POST",
+            "/providers",
+            Some(json!({ "kind": "cloudflare", "name": "Ours" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(refused["code"], "workspace_providers_disabled");
 }

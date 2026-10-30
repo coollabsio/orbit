@@ -8,6 +8,7 @@ pub(crate) mod domains;
 pub(crate) mod inbound;
 pub(crate) mod labels;
 pub(crate) mod mailboxes;
+pub(crate) mod providers;
 pub(crate) mod threads;
 
 use std::sync::Arc;
@@ -15,7 +16,7 @@ use std::sync::Arc;
 use axum::Router;
 use axum::extract::{DefaultBodyLimit, Extension};
 use axum::http::{HeaderMap, StatusCode, Uri};
-use axum::routing::{delete, get, post, put};
+use axum::routing::{delete, get, patch, post, put};
 use orbit_platform::{Id, JobStore, MailMode, RequestId};
 
 pub use content::{ViewGrant, ViewKey, ViewPurpose};
@@ -187,6 +188,30 @@ pub fn mail_router(state: MailState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/mail/domains/{domain_id}/catch-all",
             put(domains::set_mail_domain_catch_all),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/domains/{domain_id}/route",
+            put(domains::set_mail_domain_route),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/providers",
+            get(providers::list_workspace_mail_providers)
+                .post(providers::create_workspace_mail_provider),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/mail/providers/{provider_id}",
+            patch(providers::update_workspace_mail_provider)
+                .delete(providers::delete_workspace_mail_provider),
+        )
+        .route(
+            "/api/v1/admin/mail/providers",
+            get(providers::list_instance_mail_providers)
+                .post(providers::create_instance_mail_provider),
+        )
+        .route(
+            "/api/v1/admin/mail/providers/{provider_id}",
+            patch(providers::update_instance_mail_provider)
+                .delete(providers::delete_instance_mail_provider),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/mail/domains/{domain_id}/enabled",
@@ -400,6 +425,10 @@ fn detail(code: &'static str) -> &'static str {
             "Only a failed message, or one that has waited for over an hour, can be retried."
         }
         "domain_not_verified" => "A test message needs a verified domain.",
+        "workspace_providers_disabled" => {
+            "This Orbit server does not let workspaces add their own mail providers. An instance admin can turn it on."
+        }
+        "provider_in_use" => "Route the domains that use this provider elsewhere first.",
         _ => "This action is not possible.",
     }
 }

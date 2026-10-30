@@ -113,6 +113,8 @@ pub(crate) struct MailTestDomain {
 pub(crate) struct MailAdmin {
     /// Workspaces may add mail domains.
     domains_enabled: bool,
+    /// Workspace admins may set up their own mail providers.
+    workspace_providers_enabled: bool,
     /// `ORBIT_MAIL_ENABLED` on this server.
     enabled: bool,
     /// `ORBIT_MAIL_HOSTNAME`.
@@ -128,7 +130,12 @@ pub(crate) struct MailAdmin {
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct SetMailAdminBody {
-    domains_enabled: bool,
+    /// Absent: unchanged.
+    #[serde(default)]
+    domains_enabled: Option<bool>,
+    /// Absent: unchanged. Off stops new workspace providers; existing ones keep receiving.
+    #[serde(default)]
+    workspace_providers_enabled: Option<bool>,
 }
 
 async fn admin_view(
@@ -137,8 +144,13 @@ async fn admin_view(
     request_id: RequestIdRef<'_>,
 ) -> Result<Json<MailAdmin>, ApiError> {
     let fail = |error: MailError| problem(error, instance, request_id);
-    let domains_enabled = InstanceSettingsRepository::new(state.identity.database().clone())
+    let settings = InstanceSettingsRepository::new(state.identity.database().clone());
+    let domains_enabled = settings
         .mail_domains_enabled()
+        .await
+        .map_err(|error| fail(MailError::Unavailable(error)))?;
+    let workspace_providers_enabled = settings
+        .mail_workspace_providers_enabled()
         .await
         .map_err(|error| fail(MailError::Unavailable(error)))?;
     let test_domains = state.mail.test_domains().await.map_err(fail)?;
@@ -154,6 +166,7 @@ async fn admin_view(
     let ptr = check_ptr(state.dns.as_ref(), hostname.as_deref()).await;
     Ok(Json(MailAdmin {
         domains_enabled,
+        workspace_providers_enabled,
         enabled: state.settings.enabled,
         mode: match state.settings.mode {
             MailMode::Relay => MailAdminMode::Relay,
@@ -203,15 +216,30 @@ pub(crate) async fn set_mail_admin(
 ) -> Result<Json<MailAdmin>, ApiError> {
     let request_id = request_id.as_ref();
     let (actor_id, instance) = require_root(&state, &headers, &uri, request_id).await?;
-    InstanceSettingsRepository::new(state.identity.database().clone())
-        .set_mail_domains_enabled(
-            actor_id,
-            body.domains_enabled,
-            request_id_value(request_id),
-            TimestampMillis::now(),
-        )
-        .await
-        .map_err(|error| problem(MailError::Unavailable(error), &instance, request_id))?;
+    let settings = InstanceSettingsRepository::new(state.identity.database().clone());
+    let fail = |error| problem(MailError::Unavailable(error), &instance, request_id);
+    if let Some(enabled) = body.domains_enabled {
+        settings
+            .set_mail_domains_enabled(
+                actor_id,
+                enabled,
+                request_id_value(request_id),
+                TimestampMillis::now(),
+            )
+            .await
+            .map_err(fail)?;
+    }
+    if let Some(enabled) = body.workspace_providers_enabled {
+        settings
+            .set_mail_workspace_providers_enabled(
+                actor_id,
+                enabled,
+                request_id_value(request_id),
+                TimestampMillis::now(),
+            )
+            .await
+            .map_err(fail)?;
+    }
     admin_view(&state, &instance, request_id).await
 }
 

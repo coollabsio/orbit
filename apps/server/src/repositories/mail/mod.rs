@@ -24,8 +24,9 @@ use thiserror::Error;
 
 pub use content::{MessageContent, MessagePart, PartContent};
 pub use domains::{
-    DAILY_CHECK_MS, DNS_CHECK_JOB, DkimPublic, DnsReport, Domain, DomainStatus, PENDING_CHECK_MS,
-    PENDING_WINDOW_MS, RecordStatus, SUSPENDED_GRACE_MS, dkim_aad, dns_check_job, dns_check_kind,
+    DAILY_CHECK_MS, DNS_CHECK_JOB, DkimPublic, DnsReport, Domain, DomainProvider, DomainStatus,
+    PENDING_CHECK_MS, PENDING_WINDOW_MS, RecordStatus, SUSPENDED_GRACE_MS, dkim_aad, dns_check_job,
+    dns_check_kind,
 };
 pub use health::{HEALTH_TEST_TTL_MS, HealthTest, HealthTestResult, HealthTestStatus, TestDomain};
 pub use ingest::{

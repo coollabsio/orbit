@@ -161,6 +161,19 @@ pub struct Domain {
     pub dkim: Option<DkimPublic>,
     /// Addresses on the domain; the domain can only be removed without any.
     pub address_count: i64,
+    /// The provider that receives the domain's mail; `None`: Orbit's own SMTP listener.
+    pub provider: Option<DomainProvider>,
+}
+
+/// The provider a domain is routed to, with the MX hosts it needs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DomainProvider {
+    pub id: Id,
+    pub kind: super::ProviderKind,
+    pub name: String,
+    pub mx_hosts: Vec<String>,
+    /// An instance provider (else one of the workspace).
+    pub instance: bool,
 }
 
 impl Domain {
@@ -179,11 +192,14 @@ const DOMAIN_COLUMNS: &str = "d.id, d.workspace_id, d.name, d.status, d.verify_t
      d.last_verified_at, d.suspended_at, d.catch_all_mailbox_id, d.dns_report, d.checked_at, \
      d.created_at, d.updated_at, \
      (SELECT COUNT(*) FROM mail_addresses a WHERE a.domain_id = d.id) AS address_count, \
-     k.selector AS dkim_selector, k.public_key AS dkim_public_key, k.status AS dkim_status";
+     k.selector AS dkim_selector, k.public_key AS dkim_public_key, k.status AS dkim_status, \
+     d.provider_id, p.kind AS provider_kind, p.name AS provider_name, \
+     p.settings AS provider_settings, p.workspace_id AS provider_workspace_id";
 
 const DOMAIN_FROM: &str = "mail_domains d LEFT JOIN mail_dkim_keys k ON k.id = (\
      SELECT k2.id FROM mail_dkim_keys k2 WHERE k2.domain_id = d.id \
-     AND k2.status IN ('pending', 'active') ORDER BY k2.created_at DESC, k2.id DESC LIMIT 1)";
+     AND k2.status IN ('pending', 'active') ORDER BY k2.created_at DESC, k2.id DESC LIMIT 1) \
+     LEFT JOIN mail_providers p ON p.id = d.provider_id";
 
 pub(super) fn parse_id(value: &str) -> Result<Id, MailError> {
     value.parse().map_err(|_| MailError::NotFound)
@@ -207,6 +223,27 @@ fn domain(row: &AnyRow) -> Result<Domain, MailError> {
         None => None,
     };
     let catch_all: Option<String> = row.try_get("catch_all_mailbox_id")?;
+    let provider = match row.try_get::<Option<String>, _>("provider_id")? {
+        Some(id) => {
+            let settings: Option<String> = row.try_get("provider_settings")?;
+            let settings: super::ProviderSettings = settings
+                .and_then(|settings| serde_json::from_str(&settings).ok())
+                .unwrap_or_default();
+            Some(DomainProvider {
+                id: parse_id(&id)?,
+                kind: row
+                    .try_get::<String, _>("provider_kind")?
+                    .parse()
+                    .map_err(|()| MailError::Invalid { field: "kind" })?,
+                name: row.try_get("provider_name")?,
+                mx_hosts: settings.mx_hosts,
+                instance: row
+                    .try_get::<Option<String>, _>("provider_workspace_id")?
+                    .is_none(),
+            })
+        }
+        None => None,
+    };
     Ok(Domain {
         id: parse_id(&row.try_get::<String, _>("id")?)?,
         workspace_id: parse_id(&row.try_get::<String, _>("workspace_id")?)?,
@@ -224,6 +261,7 @@ fn domain(row: &AnyRow) -> Result<Domain, MailError> {
         updated_at: TimestampMillis::from_millis(row.try_get("updated_at")?),
         dkim,
         address_count: row.try_get("address_count")?,
+        provider,
     })
 }
 

@@ -269,6 +269,15 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::mail_routes::domains::delete_mail_domain,
         crate::mail_routes::domains::check_mail_domain,
         crate::mail_routes::domains::set_mail_domain_catch_all,
+        crate::mail_routes::domains::set_mail_domain_route,
+        crate::mail_routes::providers::list_instance_mail_providers,
+        crate::mail_routes::providers::create_instance_mail_provider,
+        crate::mail_routes::providers::update_instance_mail_provider,
+        crate::mail_routes::providers::delete_instance_mail_provider,
+        crate::mail_routes::providers::list_workspace_mail_providers,
+        crate::mail_routes::providers::create_workspace_mail_provider,
+        crate::mail_routes::providers::update_workspace_mail_provider,
+        crate::mail_routes::providers::delete_workspace_mail_provider,
         crate::mail_routes::domains::set_mail_domain_enabled,
         crate::mail_routes::domains::move_mail_domain,
         crate::mail_routes::mailboxes::list_mailboxes,
@@ -453,6 +462,7 @@ fn public_operation(operation_id: &str) -> bool {
             | "get_mail_content"
             | "get_mail_part"
             | "get_mail_image"
+            | "post_inbound"
     )
 }
 
@@ -730,6 +740,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         id if teamspace_operation(id) => teamspace_errors(id, &mut responses),
         id if id.contains("chat") => chat_errors(id, &mut responses),
         id if id.contains("mail_domain") => mail_domain_errors(id, &mut responses),
+        id if id.contains("mail_provider") => mail_provider_errors(id, &mut responses),
         id if id.contains("mailbox") || id.contains("mail_label") => {
             mailbox_errors(id, &mut responses);
         }
@@ -1280,6 +1291,7 @@ fn mail_domain_errors(
         "create_mail_domain"
             | "set_mail_domain_catch_all"
             | "set_mail_domain_enabled"
+            | "set_mail_domain_route"
             | "move_mail_domain"
     ) {
         add_code(responses, "400", "invalid_request");
@@ -1302,8 +1314,33 @@ fn mail_domain_errors(
             add_code(responses, "422", "validation_failed");
         }
         "delete_mail_domain" => add_code(responses, "409", "domain_has_mailboxes"),
-        "set_mail_domain_catch_all" => add_code(responses, "422", "validation_failed"),
+        "set_mail_domain_catch_all" | "set_mail_domain_route" => {
+            add_code(responses, "422", "validation_failed");
+        }
         _ => {}
+    }
+}
+
+/// Mail provider routes: the root user's instance providers, or a workspace's (`mail.manage`).
+fn mail_provider_errors(
+    operation_id: &str,
+    responses: &mut BTreeMap<&'static str, Vec<&'static str>>,
+) {
+    if operation_id.contains("instance") {
+        add_code(responses, "403", "installation_admin_required");
+    } else {
+        add_code(responses, "403", "mail_forbidden");
+    }
+    add_code(responses, "404", "mail_not_found");
+    if operation_id.starts_with("create_") || operation_id.starts_with("update_") {
+        add_code(responses, "400", "invalid_request");
+        add_code(responses, "422", "validation_failed");
+    }
+    if operation_id == "create_workspace_mail_provider" {
+        add_code(responses, "403", "workspace_providers_disabled");
+    }
+    if operation_id.starts_with("delete_") {
+        add_code(responses, "409", "provider_in_use");
     }
 }
 

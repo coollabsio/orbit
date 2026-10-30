@@ -10,7 +10,7 @@ use utoipa::ToSchema;
 
 use super::{Call, MailState, RequestIdExtension, problem};
 use crate::mail_dns::{RecordKind, expected_records, txt_strings};
-use crate::repositories::mail::{Domain, DomainStatus, RecordStatus};
+use crate::repositories::mail::{Domain, DomainProvider, DomainStatus, ProviderKind, RecordStatus};
 use crate::task_routes::{ApiError, ApiJson, request_id_value};
 
 /// A mail domain with the records to publish and the result of its last DNS check.
@@ -42,8 +42,22 @@ pub(crate) struct MailDomain {
     dmarc_policy: Option<String>,
     /// The records to publish, each with its status at the last check.
     records: Vec<MailDnsRecord>,
+    /// The provider that receives the domain's mail; `null`: this server's SMTP listener.
+    provider: Option<MailDomainRoute>,
     #[schema(value_type = String, format = DateTime)]
     created_at: TimestampMillis,
+}
+
+/// The provider a domain is routed to.
+#[derive(Serialize, ToSchema)]
+pub(crate) struct MailDomainRoute {
+    #[schema(value_type = String)]
+    id: Id,
+    #[schema(value_type = String)]
+    kind: ProviderKind,
+    name: String,
+    /// An instance provider (set up by the root user).
+    instance: bool,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -138,6 +152,14 @@ fn view(domain: Domain, hostname: Option<&str>) -> MailDomain {
         address_count: domain.address_count,
         dmarc_policy: report.and_then(|report| report.dmarc_policy),
         records,
+        provider: domain
+            .provider
+            .map(|provider: DomainProvider| MailDomainRoute {
+                id: provider.id,
+                kind: provider.kind,
+                name: provider.name,
+                instance: provider.instance,
+            }),
         created_at: domain.created_at,
     }
 }
@@ -147,6 +169,17 @@ fn view(domain: Domain, hostname: Option<&str>) -> MailDomain {
 pub(crate) struct CreateMailDomainBody {
     /// A domain such as `example.com`; Unicode names are stored as A-labels.
     name: String,
+    /// Receive the domain's mail through this provider (an instance provider or one of the
+    /// workspace); `null` or absent: this server's SMTP listener.
+    #[serde(default)]
+    provider_id: Option<String>,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct MailDomainRouteBody {
+    /// An instance provider or one of the workspace; `null`: this server's SMTP listener.
+    provider_id: Option<String>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -206,7 +239,12 @@ pub(crate) async fn create_mail_domain(
     ApiJson(body): ApiJson<CreateMailDomainBody>,
 ) -> Result<(StatusCode, Json<MailDomain>), ApiError> {
     let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
-    let domain = state
+    let provider_id = body
+        .provider_id
+        .as_deref()
+        .map(|id| call.body_id(id, "provider_id"))
+        .transpose()?;
+    let mut domain = state
         .mail
         .create_domain(
             call.workspace_id,
@@ -216,6 +254,24 @@ pub(crate) async fn create_mail_domain(
         )
         .await
         .map_err(|error| call.problem(error))?;
+    if provider_id.is_some() {
+        state
+            .mail
+            .set_domain_route(
+                call.workspace_id,
+                call.actor_id,
+                domain.id,
+                provider_id,
+                call.request_id(),
+            )
+            .await
+            .map_err(|error| call.problem(error))?;
+        domain = state
+            .mail
+            .get_domain(call.workspace_id, call.actor_id, domain.id)
+            .await
+            .map_err(|error| call.problem(error))?;
+    }
     Ok((
         StatusCode::CREATED,
         Json(view(domain, state.settings.hostname.as_deref())),
@@ -315,6 +371,43 @@ pub(crate) async fn set_mail_domain_catch_all(
     Ok(Json(view(domain, state.settings.hostname.as_deref())))
 }
 
+/// Where the domain's mail arrives: through a provider (its MX hosts become the expected MX), or
+/// this server's SMTP listener with `null`.
+#[utoipa::path(put, path = "/api/v1/workspaces/{workspace_id}/mail/domains/{domain_id}/route", params(("workspace_id" = String, Path), ("domain_id" = String, Path)), request_body = MailDomainRouteBody, responses((status = 200, body = MailDomain)))]
+pub(crate) async fn set_mail_domain_route(
+    State(state): State<MailState>,
+    Path((workspace, domain)): Path<(String, String)>,
+    headers: HeaderMap,
+    uri: Uri,
+    request_id: RequestIdExtension,
+    ApiJson(body): ApiJson<MailDomainRouteBody>,
+) -> Result<Json<MailDomain>, ApiError> {
+    let call = Call::enter(&state, &headers, &uri, &workspace, &request_id).await?;
+    let domain_id = call.id(&domain)?;
+    let provider_id = body
+        .provider_id
+        .as_deref()
+        .map(|id| call.body_id(id, "provider_id"))
+        .transpose()?;
+    state
+        .mail
+        .set_domain_route(
+            call.workspace_id,
+            call.actor_id,
+            domain_id,
+            provider_id,
+            call.request_id(),
+        )
+        .await
+        .map_err(|error| call.problem(error))?;
+    let domain = state
+        .mail
+        .get_domain(call.workspace_id, call.actor_id, domain_id)
+        .await
+        .map_err(|error| call.problem(error))?;
+    Ok(Json(view(domain, state.settings.hostname.as_deref())))
+}
+
 /// Disables the domain (all its mail is refused) or enables it again.
 #[utoipa::path(put, path = "/api/v1/workspaces/{workspace_id}/mail/domains/{domain_id}/enabled", params(("workspace_id" = String, Path), ("domain_id" = String, Path)), request_body = MailDomainEnabledBody, responses((status = 200, body = MailDomain)))]
 pub(crate) async fn set_mail_domain_enabled(
@@ -389,6 +482,7 @@ mod tests {
             last_verified_at: None,
             suspended_at: None,
             catch_all_mailbox_id: None,
+            provider: None,
             report: Some(DnsReport::unknown()),
             checked_at: None,
             created_at: TimestampMillis::from_millis(0),

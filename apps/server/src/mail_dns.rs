@@ -505,8 +505,9 @@ pub fn verify_value(token: &str) -> String {
     format!("orbit-verify={token}")
 }
 
-/// The records of the setup page. The MX record is listed only when `hostname` is known
-/// (`ORBIT_MAIL_HOSTNAME`); in relay mode it names the relay instead.
+/// The records of the setup page. A domain routed to a provider gets the provider's MX hosts;
+/// otherwise the MX record is listed only when `hostname` is known (`ORBIT_MAIL_HOSTNAME`); in
+/// relay mode it names the relay instead.
 #[must_use]
 pub fn expected_records(domain: &Domain, hostname: Option<&str>) -> Vec<ExpectedRecord> {
     let mut records = vec![ExpectedRecord {
@@ -516,7 +517,17 @@ pub fn expected_records(domain: &Domain, hostname: Option<&str>) -> Vec<Expected
         value: verify_value(&domain.verify_token),
         priority: None,
     }];
-    if let Some(hostname) = hostname {
+    if let Some(provider) = &domain.provider {
+        for (index, mx) in provider.mx_hosts.iter().enumerate() {
+            records.push(ExpectedRecord {
+                kind: RecordKind::Mx,
+                record_type: "MX",
+                name: domain.name.clone(),
+                value: host(mx),
+                priority: Some(MX_PREFERENCE * (u16::try_from(index).unwrap_or(9) + 1)),
+            });
+        }
+    } else if let Some(hostname) = hostname {
         records.push(ExpectedRecord {
             kind: RecordKind::Mx,
             record_type: "MX",
@@ -619,6 +630,7 @@ fn verify_status(token: &str, result: Result<Vec<String>, DnsError>) -> RecordSt
 fn mx_status(
     hostname: Option<&str>,
     mode: MailMode,
+    provider_hosts: Option<&[String]>,
     result: Result<Vec<(u16, String)>, DnsError>,
 ) -> RecordStatus {
     let records = match lookup_status(result) {
@@ -627,6 +639,22 @@ fn mx_status(
     };
     if records.is_empty() {
         return RecordStatus::Missing;
+    }
+    let wrong = || {
+        let found: Vec<String> = records
+            .iter()
+            .map(|(preference, exchange)| format!("{preference} {exchange}"))
+            .collect();
+        RecordStatus::wrong(&found.join(", "))
+    };
+    // A provider route: mail must reach the provider (any MX when it names no host).
+    if let Some(hosts) = provider_hosts {
+        let hosts: Vec<String> = hosts.iter().map(|mx| host(mx)).collect();
+        return if hosts.is_empty() || records.iter().any(|(_, exchange)| hosts.contains(exchange)) {
+            RecordStatus::Ok
+        } else {
+            wrong()
+        };
     }
     match (mode, hostname) {
         // Direct mode: senders must reach Orbit itself.
@@ -746,7 +774,15 @@ pub async fn inspect(
     let (dmarc, dmarc_policy) = dmarc_status(dmarc);
     DnsReport {
         verify: verify_status(&domain.verify_token, verify),
-        mx: mx_status(hostname, mode, mx),
+        mx: mx_status(
+            hostname,
+            mode,
+            domain
+                .provider
+                .as_ref()
+                .map(|provider| provider.mx_hosts.as_slice()),
+            mx,
+        ),
         dkim: match (&domain.dkim, dkim) {
             (Some(key), Some(result)) => dkim_status(&key.public_key, result),
             _ => RecordStatus::Missing,
@@ -901,6 +937,7 @@ mod tests {
             mx_status(
                 Some("mx.orbit.test."),
                 MailMode::Direct,
+                None,
                 Ok(vec![(10, "mx.orbit.test".to_owned())])
             ),
             RecordStatus::Ok
@@ -909,6 +946,7 @@ mod tests {
             mx_status(
                 Some("mx.orbit.test"),
                 MailMode::Direct,
+                None,
                 Ok(vec![(5, "aspmx.l.google.com".to_owned())])
             ),
             RecordStatus::wrong("5 aspmx.l.google.com")
@@ -917,6 +955,7 @@ mod tests {
             mx_status(
                 Some("mx.orbit.test"),
                 MailMode::Relay,
+                None,
                 Ok(vec![(5, "relay.example".to_owned())])
             ),
             RecordStatus::Ok
