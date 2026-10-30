@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Danger, Global, Refresh } from 'reicon-react'
-import type { MailDomain, MailDomainStatus, MailMailbox } from '@/api/generated/types.gen'
+import type { MailDomain, MailDomainStatus, MailMailbox, MailProviderView } from '@/api/generated/types.gen'
 import { confirmAction } from '@/components/common/confirmAction'
 import { EmptyState } from '@/components/common/EmptyState'
 import { SettingsCard } from '@/components/common/SettingsCard'
@@ -16,13 +16,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@/components/ui/switch'
 import { mailKeys } from '@/features/mail/api/keys'
 import { useCheckDomain, useCreateDomain, useDeleteDomain, useSetCatchAll, useSetDomainEnabled } from '@/features/mail/api/mutations'
-import { useMailboxes, useMailDomain, useMailDomains } from '@/features/mail/api/queries'
+import { useMailboxes, useMailDomain, useMailDomains, useMailProviders } from '@/features/mail/api/queries'
 import { SettingsRow } from '@/features/settings/components/SettingsParts'
 import { useCan } from '@/features/workspaces/permissions'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { shortDate } from '@/lib/format'
+import { DomainRouteRow, RouteSelect } from './DomainRoute'
 import { MailDomainRecords } from './MailDomainRecords'
-import { count, dateTime, isDomainsDisabled, mailProblem, since } from './mailSettingsLib'
+import { count, dateTime, DIRECT, isDomainsDisabled, mailProblem, since } from './mailSettingsLib'
 
 /** **Check now** reads the domain this often until the check job has run, for at most `CHECK_WAIT_MS`. */
 const CHECK_POLL_MS = 2000
@@ -50,8 +51,11 @@ export function MailDomainsPage() {
 function MailDomains() {
   const domains = useMailDomains()
   const mailboxes = useMailboxes()
+  const providerList = useMailProviders('workspace')
+  const providers = providerList.data?.providers ?? []
   const create = useCreateDomain()
   const [name, setName] = useState('')
+  const [route, setRoute] = useState(DIRECT)
   /** The server said the instance switch is off; it stays shown until the page is opened again. */
   const [disabled, setDisabled] = useState(false)
 
@@ -59,7 +63,7 @@ function MailDomains() {
     event.preventDefault()
     const trimmed = name.trim()
     if (!trimmed || create.isPending) return
-    create.mutate(trimmed, {
+    create.mutate({ name: trimmed, providerId: route === DIRECT ? null : route }, {
       onSuccess: (domain) => { setName(''); toast(`${domain.name} added`) },
       onError: (error) => { if (isDomainsDisabled(error)) setDisabled(true) },
     })
@@ -92,6 +96,13 @@ function MailDomains() {
             </div>
             <FieldDescription>A domain belongs to one workspace. A subdomain of a domain of another workspace is refused.</FieldDescription>
           </Field>
+          {providers.length > 0 ? (
+            <Field>
+              <FieldLabel htmlFor="mail-domain-route">Receive mail</FieldLabel>
+              <RouteSelect id="mail-domain-route" label="Where the domain's mail arrives" value={route} providers={providers} disabled={disabled} onChange={setRoute} />
+              <FieldDescription>Through a provider, this server needs no open port 25. You can change it later.</FieldDescription>
+            </Field>
+          ) : null}
           {create.isError && !disabled ? <p role="alert" className="text-xs text-destructive">{mailProblem(create.error, 'The domain could not be added.')}</p> : null}
         </form>
       </SettingsCard>
@@ -104,12 +115,12 @@ function MailDomains() {
       {domains.data?.length === 0 ? (
         <EmptyState icon={Global} title="No mail domains yet" description="Add a domain above, then publish its DNS records." />
       ) : null}
-      {domains.data?.map((domain) => <DomainCard key={domain.id} listed={domain} mailboxes={mailboxes.data ?? []} />)}
+      {domains.data?.map((domain) => <DomainCard key={domain.id} listed={domain} mailboxes={mailboxes.data ?? []} providers={providers} />)}
     </>
   )
 }
 
-function DomainCard({ listed, mailboxes }: { listed: MailDomain; mailboxes: MailMailbox[] }) {
+function DomainCard({ listed, mailboxes, providers }: { listed: MailDomain; mailboxes: MailMailbox[]; providers: MailProviderView[] }) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const workspaceId = useWorkspace().workspace.id
@@ -211,9 +222,10 @@ function DomainCard({ listed, mailboxes }: { listed: MailDomain; mailboxes: Mail
             </Alert>
           </div>
         ) : null}
+        {providers.length > 0 || domain.provider ? <DomainRouteRow domain={domain} providers={providers} /> : null}
         <SettingsRow className="flex-nowrap">
           <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[13px]">
-            <span className="font-medium text-foreground">Receive mail</span>
+            <span className="font-medium text-foreground">Mail on</span>
             <span className="text-xs text-muted-foreground">Off: Orbit refuses all mail for {domain.name}. Mailboxes and their mail stay.</span>
           </div>
           <Switch

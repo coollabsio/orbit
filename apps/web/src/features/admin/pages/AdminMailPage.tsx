@@ -7,10 +7,11 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { useSetAdminMail } from '@/features/mail/api/mutations'
-import { useAdminMail } from '@/features/mail/api/queries'
+import { useAdminMail, useMailProviders } from '@/features/mail/api/queries'
 import { SettingsRow } from '@/features/settings/components/SettingsParts'
 import { dateTime, mailProblem } from '@/features/settings/pages/mail/mailSettingsLib'
 import { MailTestCard } from '@/features/admin/components/MailTestCard'
+import { MailProviders } from '@/features/settings/pages/mail/MailProvidersPage'
 
 type HealthState = 'ok' | 'warning' | 'error' | 'info'
 
@@ -28,6 +29,8 @@ const STATE_WORDS: Record<HealthState, string> = { ok: 'OK', warning: 'Warning',
 /** The instance's mail: whether workspaces can add domains, the listener's health, and a test message. */
 export function AdminMailPage() {
   const admin = useAdminMail()
+  const providers = useMailProviders('instance')
+  const hasProviders = (providers.data?.providers.length ?? 0) > 0
   if (admin.isPending) return <SettingsCard title="Mail"><p role="status">Loading mail settings…</p></SettingsCard>
   if (admin.isError) {
     return <SettingsCard title="Mail"><p role="alert">{mailProblem(admin.error, 'Mail settings could not be loaded.')} <Button variant="ghost" onClick={() => void admin.refetch()}>Retry</Button></p></SettingsCard>
@@ -35,7 +38,8 @@ export function AdminMailPage() {
   return (
     <>
       <DomainsCard admin={admin.data} />
-      <HealthCard admin={admin.data} refreshing={admin.isFetching} onRefresh={() => void admin.refetch()} />
+      <MailProviders scope="instance" />
+      <HealthCard admin={admin.data} hasProviders={hasProviders} refreshing={admin.isFetching} onRefresh={() => void admin.refetch()} />
       <MailTestCard admin={admin.data} />
     </>
   )
@@ -44,7 +48,7 @@ export function AdminMailPage() {
 function DomainsCard({ admin }: { admin: MailAdmin }) {
   const save = useSetAdminMail()
   return (
-    <SettingsCard title="Mail" description="Orbit receives mail for the verified domains of each workspace through its own SMTP listener." flush>
+    <SettingsCard title="Mail" description="Orbit receives mail for the verified domains of each workspace, through its own SMTP listener or through a mail provider." flush>
       <div className="flex flex-col divide-y">
         <SettingsRow className="flex-nowrap">
           <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[13px]">
@@ -55,8 +59,23 @@ function DomainsCard({ admin }: { admin: MailAdmin }) {
             aria-label="Workspaces can add mail domains"
             checked={admin.domains_enabled}
             disabled={save.isPending}
-            onCheckedChange={(checked: boolean) => save.mutate(checked, {
+            onCheckedChange={(checked: boolean) => save.mutate({ domains_enabled: checked }, {
               onSuccess: () => toast(checked ? 'Workspaces can add mail domains' : 'Workspaces cannot add mail domains'),
+              onError: (error) => toast.error(mailProblem(error, 'The setting could not be saved.')),
+            })}
+          />
+        </SettingsRow>
+        <SettingsRow className="flex-nowrap">
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[13px]">
+            <span className="font-medium text-foreground">Workspaces can add their own providers</span>
+            <span className="text-xs text-muted-foreground">Owners and admins connect their own Cloudflare, Postmark, Mailgun, Resend or SES account. Off: no new ones; existing ones keep receiving.</span>
+          </div>
+          <Switch
+            aria-label="Workspaces can add their own providers"
+            checked={admin.workspace_providers_enabled}
+            disabled={save.isPending}
+            onCheckedChange={(checked: boolean) => save.mutate({ workspace_providers_enabled: checked }, {
+              onSuccess: () => toast(checked ? 'Workspaces can add their own providers' : 'Workspaces cannot add their own providers'),
               onError: (error) => toast.error(mailProblem(error, 'The setting could not be saved.')),
             })}
           />
@@ -101,13 +120,20 @@ function ptrItem(ptr: PtrStatus, hostname: string | null | undefined): HealthIte
   }
 }
 
-function healthItems(admin: MailAdmin): HealthItem[] {
+function healthItems(admin: MailAdmin, hasProviders: boolean): HealthItem[] {
+  if (!admin.enabled && hasProviders) {
+    return [{
+      label: 'Mail on this server',
+      state: 'info',
+      detail: 'Mail arrives through providers. The SMTP listener is off, so port 25, the certificate and reverse DNS do not matter here.',
+    }]
+  }
   if (!admin.enabled) {
     return [{
       label: 'Mail on this server',
       state: 'info',
       detail: 'The SMTP listener is off.',
-      fix: 'Set ORBIT_MAIL_ENABLED=true and ORBIT_MAIL_HOSTNAME, then restart Orbit. See the operations guide for the mode and port 25.',
+      fix: 'Add a mail provider above (no port 25 needed), or set ORBIT_MAIL_ENABLED=true and ORBIT_MAIL_HOSTNAME and restart Orbit. See the operations guide.',
     }]
   }
   const { listener } = admin
@@ -144,8 +170,8 @@ function healthItems(admin: MailAdmin): HealthItem[] {
   return items
 }
 
-function HealthCard({ admin, refreshing, onRefresh }: { admin: MailAdmin; refreshing: boolean; onRefresh: () => void }) {
-  const items = healthItems(admin)
+function HealthCard({ admin, hasProviders, refreshing, onRefresh }: { admin: MailAdmin; hasProviders: boolean; refreshing: boolean; onRefresh: () => void }) {
+  const items = healthItems(admin, hasProviders)
   return (
     <SettingsCard
       title="Health"

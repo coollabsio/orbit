@@ -1,4 +1,5 @@
 import { toast } from 'sonner'
+import type { MailProviderKind, MailProviderView } from '@/api/generated/types.gen'
 import { ApiProblem } from '@/api/problem'
 import { fullDate, relativeTime, timeOfDay } from '@/lib/format'
 
@@ -30,3 +31,22 @@ export function since(iso: string): string {
 
 /** `1 address`, `2 addresses`. */
 export const count = (amount: number, one: string, many: string) => `${amount} ${amount === 1 ? one : many}`
+
+export const PROVIDER_LABELS: Record<MailProviderKind, string> = {
+  cloudflare: 'Cloudflare Email Routing',
+  postmark: 'Postmark',
+  mailgun: 'Mailgun',
+  resend: 'Resend',
+  ses: 'Amazon SES',
+}
+
+/** The route value for this server's own SMTP listener. */
+export const DIRECT = 'direct'
+
+/** "Directly (MX to this server)", then each provider the workspace may use. */
+export function routeOptions(providers: MailProviderView[]) {
+  return [
+    { value: DIRECT, label: 'Directly (MX to this server)' },
+    ...providers.map((provider) => ({ value: provider.id, label: `${provider.name} (${PROVIDER_LABELS[provider.kind]})` })),
+  ]
+}

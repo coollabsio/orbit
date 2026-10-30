@@ -32,7 +32,7 @@ type TaskNavigation = { projects: Project[]; tasks: Task[]; statuses: TaskStatus
 type DocsNavigation = { pages?: PageSummary[]; teamspaces?: Teamspace[] }
 
 /** The pages of Settings → Mail, by their path segment. */
-const MAIL_SETTINGS: Record<string, string> = { domains: 'Domains', mailboxes: 'Mailboxes', labels: 'Mail labels', failed: 'Failed messages' }
+const MAIL_SETTINGS: Record<string, string> = { domains: 'Domains', providers: 'Providers', mailboxes: 'Mailboxes', labels: 'Mail labels', failed: 'Failed messages' }
 
 function crumbsFor(pathname: string, taskNavigation: TaskNavigation, docs: DocsNavigation = {}): { crumbs: Crumb[]; status?: React.ReactNode } {
   const [, root, id, sub, subId] = pathname.split('/')

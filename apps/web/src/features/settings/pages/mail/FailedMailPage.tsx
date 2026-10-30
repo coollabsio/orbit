@@ -1,6 +1,6 @@
 import { toast } from 'sonner'
 import { SmsTracking } from 'reicon-react'
-import type { MailFailedReceipt } from '@/api/generated/types.gen'
+import type { MailFailedReceipt, MailRejectedDelivery, MailRejectReason } from '@/api/generated/types.gen'
 import { EmptyState } from '@/components/common/EmptyState'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { Badge } from '@/components/ui/badge'
@@ -32,9 +32,66 @@ function FailedMail() {
       </SettingsCard>
     )
   }
-  const { count: total, receipts: rows } = receipts.data
-  if (total === 0) return <EmptyState icon={SmsTracking} title="No failed messages" description="Every message Orbit accepted reached its mailboxes." />
+  const { count: total, receipts: rows, rejected } = receipts.data
+  if (total === 0 && rejected.length === 0) {
+    return <EmptyState icon={SmsTracking} title="No failed messages" description="Every message Orbit accepted reached its mailboxes." />
+  }
   const shown = rows.length < total ? ` The newest ${rows.length} are shown.` : ''
+  return (
+    <>
+      {total > 0 ? <FailedReceipts total={total} rows={rows} shown={shown} /> : null}
+      {rejected.length > 0 ? <NotDelivered rejected={rejected} /> : null}
+    </>
+  )
+}
+
+const REASON_TEXTS: Record<MailRejectReason, string> = {
+  unknown_address: 'No mailbox has this address',
+  wrong_route: 'This domain does not receive through this provider',
+  domain_unavailable: 'The domain is suspended or disabled',
+  mailbox_suspended: 'The mailbox is suspended',
+}
+
+/**
+ * Mail a provider accepted that Orbit could not deliver, so the sender got no bounce. No body was kept; add an alias
+ * or a catch-all for an address that should exist. Kept for 30 days.
+ */
+function NotDelivered({ rejected }: { rejected: MailRejectedDelivery[] }) {
+  return (
+    <SettingsCard
+      title="Not delivered"
+      description="A provider accepted these messages, but no mailbox could take them, so the sender was not told. Orbit kept no copy. They stay listed for 30 days."
+      flush
+    >
+      <div className="px-2 py-1">
+        <Table aria-label="Messages not delivered">
+          <TableHeader>
+            <TableRow>
+              <TableHead>Received</TableHead>
+              <TableHead>Sender</TableHead>
+              <TableHead>Recipient</TableHead>
+              <TableHead>Reason</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rejected.map((entry) => (
+              <TableRow key={`${entry.received_at}:${entry.recipient}`}>
+                <TableCell className="align-top">{dateTime(entry.received_at)}</TableCell>
+                <TableCell className="max-w-56 truncate align-top" title={entry.mail_from ?? undefined}>{entry.mail_from ?? 'Null sender <>'}</TableCell>
+                <TableCell className="max-w-56 truncate align-top" title={entry.recipient}>{entry.recipient}</TableCell>
+                <TableCell className="max-w-sm align-top whitespace-normal">
+                  <span className="text-xs text-muted-foreground">{REASON_TEXTS[entry.reason]} ({entry.provider_name})</span>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
+    </SettingsCard>
+  )
+}
+
+function FailedReceipts({ total, rows, shown }: { total: number; rows: MailFailedReceipt[]; shown: string }) {
   return (
     <SettingsCard
       title="Failed messages"

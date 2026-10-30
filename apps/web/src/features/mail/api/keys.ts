@@ -36,6 +36,8 @@ export const mailKeys = {
     ['mail', workspaceId, 'mailboxes', 'bulk-preview', domainId, pattern] as const,
   labels: (workspaceId: string) => ['mail', workspaceId, 'labels'] as const,
   receipts: (workspaceId: string) => ['mail', workspaceId, 'receipts'] as const,
+  /** The instance providers and the workspace's own (`GET mail/providers`). */
+  providers: (workspaceId: string) => ['mail', workspaceId, 'providers'] as const,
   /**
    * Outside the `all` prefix: a new URL reloads the message frame, so a resync must not fetch one. The URL is valid
    * for 5 minutes and only for opening the document.

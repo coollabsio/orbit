@@ -1,5 +1,5 @@
 import { Navigate, NavLink, Outlet } from 'react-router'
-import { ArchiveBox, ClipboardText, CloudConnection, Cpu, SecurityUser, DirectInbox, Driver, Global, Key, Keyboard, Link2, Lock, Notification as Bell, Setting2 as Settings, ShieldTick as ShieldCheck, SmileCircle, Sms, SmsTracking, Sticker, Tag, Danger as TriangleAlert, Trash as Trash2, User, People as Users } from 'reicon-react'
+import { ArchiveBox, ClipboardText, Routing, CloudConnection, Cpu, SecurityUser, DirectInbox, Driver, Global, Key, Keyboard, Link2, Lock, Notification as Bell, Setting2 as Settings, ShieldTick as ShieldCheck, SmileCircle, Sms, SmsTracking, Sticker, Tag, Danger as TriangleAlert, Trash as Trash2, User, People as Users } from 'reicon-react'
 import { cn } from 'cn'
 import { buttonVariants } from '@/components/ui/button'
 import { Pane, PaneHeader, PaneTitle } from '@/components/common/Pane'
@@ -38,6 +38,7 @@ const SECTIONS: { label: string; items: NavItem[] }[] = [
     label: 'Mail',
     items: [
       { to: '/settings/mail/domains', label: 'Domains', icon: Global, permission: 'mail.manage' },
+      { to: '/settings/mail/providers', label: 'Providers', icon: Routing, permission: 'mail.manage' },
       { to: '/settings/mail/mailboxes', label: 'Mailboxes', icon: DirectInbox, permission: 'mail.manage' },
       { to: '/settings/mail/labels', label: 'Mail labels', icon: Tag, permission: 'mail.manage' },
       { to: '/settings/mail/failed', label: 'Failed messages', icon: SmsTracking, permission: 'mail.manage' },

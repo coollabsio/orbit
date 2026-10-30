@@ -10,6 +10,8 @@ import {
   downloadMailMessage,
   getMailThread,
   listFailedMailReceipts,
+  listInstanceMailProviders,
+  listWorkspaceMailProviders,
   listMailboxes,
   listMailDomains,
   listMailLabels,
@@ -19,7 +21,8 @@ import {
 } from '@/api/generated/sdk.gen'
 import type { MailDomain, MailNamePattern, MailThreadPage } from '@/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
-import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { useContext } from 'react'
+import { useWorkspace, WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { mailKeys, type ThreadFilter } from './keys'
 
 /** Lists, threads and counts stay current through the `mail` live topic (`emitMailEvent`). */
@@ -35,6 +38,8 @@ function required<T>(data: T | undefined): T {
 }
 
 const useWorkspaceId = () => useWorkspace().workspace.id
+/** The Admin pages can run without a workspace (an operator with none): instance hooks must not need one. */
+const useOptionalWorkspaceId = () => useContext(WorkspaceContext)?.workspace.id ?? ''
 
 const flatten = (data: { pages: MailThreadPage[] }) => data.pages.flatMap((page) => page.items)
 
@@ -243,6 +248,23 @@ export function useFailedReceipts() {
     queryKey: mailKeys.receipts(workspaceId),
     queryFn: async () =>
       required((await listFailedMailReceipts({ client: apiClient, path: { workspace_id: workspaceId }, throwOnError: true })).data),
+  })
+}
+
+/** Whose providers: the root user's (Admin → Mail) or the workspace's, which also lists the instance ones. */
+export type ProviderScope = 'instance' | 'workspace'
+
+/** Mail providers with their setup (`{ providers, workspace_providers_enabled }`). */
+export function useMailProviders(scope: ProviderScope) {
+  const workspaceId = useOptionalWorkspaceId()
+  return useQuery({
+    queryKey: scope === 'instance' ? queryKeys.adminMailProviders : mailKeys.providers(workspaceId),
+    queryFn: async () =>
+      required(
+        scope === 'instance'
+          ? (await listInstanceMailProviders({ client: apiClient, throwOnError: true })).data
+          : (await listWorkspaceMailProviders({ client: apiClient, path: { workspace_id: workspaceId }, throwOnError: true })).data,
+      ),
   })
 }
 

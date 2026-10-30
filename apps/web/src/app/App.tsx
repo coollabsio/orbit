@@ -34,6 +34,7 @@ import { StoragePage } from '@/features/settings/pages/StoragePage'
 import { NotificationsPage } from '@/features/settings/pages/NotificationsPage'
 import { ApiTokensPage } from '@/features/settings/pages/ApiTokensPage'
 import { MailDomainsPage } from '@/features/settings/pages/mail/MailDomainsPage'
+import { MailProvidersPage } from '@/features/settings/pages/mail/MailProvidersPage'
 import { MailMailboxesPage } from '@/features/settings/pages/mail/MailMailboxesPage'
 import { MailLabelsPage } from '@/features/settings/pages/mail/MailLabelsPage'
 import { FailedMailPage } from '@/features/settings/pages/mail/FailedMailPage'
@@ -147,6 +148,7 @@ export default function App() {
                 <Route path="api-tokens" element={<ApiTokensPage />} />
                 <Route path="mail" element={<Navigate to="/settings/mail/domains" replace />} />
                 <Route path="mail/domains" element={<MailDomainsPage />} />
+                <Route path="mail/providers" element={<MailProvidersPage />} />
                 <Route path="mail/mailboxes" element={<MailMailboxesPage />} />
                 <Route path="mail/labels" element={<MailLabelsPage />} />
                 <Route path="mail/failed" element={<FailedMailPage />} />

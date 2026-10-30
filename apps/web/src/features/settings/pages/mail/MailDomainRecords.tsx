@@ -38,7 +38,7 @@ function recordBadge(record: MailDnsRecord, checked: boolean): { label: string; 
   }
 }
 
-function CopyButton({ text, label }: { text: string; label: string }) {
+export function CopyButton({ text, label }: { text: string; label: string }) {
   return (
     <Tip label={`Copy ${label.toLowerCase()}`}>
       <Button type="button" variant="ghost" size="icon-xs" aria-label={`Copy ${label.toLowerCase()}`} onClick={() => copyText(text, label)}>
@@ -65,7 +65,7 @@ export function MailDomainRecords({ records, checked }: { records: MailDnsRecord
           const badge = recordBadge(record, checked)
           const found = record.status.status === 'wrong' ? record.status.found : null
           return (
-            <TableRow key={record.kind}>
+            <TableRow key={`${record.kind}:${record.value}`}>
               <TableCell className="align-top">
                 <div className="flex flex-col gap-0.5">
                   <span className="font-medium">{record.type}</span>
