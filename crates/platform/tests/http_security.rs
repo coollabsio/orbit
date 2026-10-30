@@ -916,3 +916,36 @@ async fn oauth_protocol_and_mcp_requests_are_rate_limited_without_session_origin
         StatusCode::TOO_MANY_REQUESTS
     );
 }
+
+#[tokio::test]
+async fn mail_provider_webhooks_need_no_origin() {
+    // providers post from servers, without an Origin; their signature is checked by the handler
+    let app = Router::new()
+        .route(
+            "/api/v1/mail/inbound/{kind}/{id}",
+            post(|| async { StatusCode::NO_CONTENT }),
+        )
+        .route(
+            "/api/v1/mail/inbound/{kind}/{id}/mime",
+            post(|| async { StatusCode::NO_CONTENT }),
+        )
+        .route(
+            "/api/v1/mail/other",
+            post(|| async { StatusCode::NO_CONTENT }),
+        )
+        .layer(HttpPlatformLayer::new(OriginPolicy::new(
+            "https://orbit.test",
+        )));
+    for path in [
+        "/api/v1/mail/inbound/cloudflare/0190e7a5-0000-7000-8000-000000000001",
+        "/api/v1/mail/inbound/mailgun/0190e7a5-0000-7000-8000-000000000001/mime",
+    ] {
+        let response = app.clone().oneshot(request("POST", path)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT, "{path}");
+    }
+    let response = app
+        .oneshot(request("POST", "/api/v1/mail/other"))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}

@@ -18,7 +18,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-pub use crate::repositories::mail::{INGEST_JOB, mail_ingest_kind};
+pub use crate::repositories::mail::{INGEST_JOB, ProviderKind, mail_ingest_kind};
 use crate::repositories::mail::{
     MailError, MailRepository, NewReceipt, insert_receipt, insert_receipt_recipient, receipt_aad,
     record_health_test, seal_blob,
@@ -26,10 +26,11 @@ use crate::repositories::mail::{
 
 pub type ReceiptId = Id;
 
-/// How a message arrived. Later adapters (IMAP import, Resend, Postmark, SES) add variants.
+/// How a message arrived: Orbit's SMTP listener, or a provider's webhook (provider intake).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Source {
     Smtp,
+    Provider(ProviderKind),
 }
 
 impl Source {
@@ -37,6 +38,7 @@ impl Source {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Smtp => "smtp",
+            Self::Provider(kind) => kind.as_str(),
         }
     }
 }
@@ -62,6 +64,9 @@ pub struct InboundMessage {
     pub source: Source,
     /// The message as received (dot-unstuffed, CRLF line ends), with Orbit's own trace headers.
     pub raw: Vec<u8>,
+    /// The length of the trace headers Orbit put in front of `raw`. The dedupe hash skips them, so
+    /// a sender or provider that sends the same message again (a lost reply) gets one copy.
+    pub trace_len: usize,
     /// `None` for the null sender `<>`.
     pub mail_from: Option<String>,
     pub recipients: Vec<Recipient>,
@@ -147,7 +152,8 @@ impl MailIntake {
             return Ok(Vec::new());
         }
         let size = i64::try_from(message.raw.len()).map_err(|_| IntakeError::TooLarge)?;
-        let raw_sha256 = format!("{:x}", Sha256::digest(&message.raw));
+        let received = message.raw.get(message.trace_len..).unwrap_or(&message.raw);
+        let raw_sha256 = format!("{:x}", Sha256::digest(received));
         let tls = message
             .tls
             .as_ref()

@@ -14,6 +14,7 @@ pub mod integration_routes;
 pub mod link_preview;
 pub mod live;
 pub mod mail;
+pub mod mail_delivery;
 pub mod mail_dns;
 pub mod mail_image_proxy;
 pub mod mail_intake;

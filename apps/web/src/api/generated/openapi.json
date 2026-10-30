@@ -7301,6 +7301,140 @@
         ]
       }
     },
+    "/api/v1/mail/inbound/{kind}/{provider_id}": {
+      "post": {
+        "tags": [
+          "crate::mail_routes::inbound"
+        ],
+        "summary": "A message from a provider's webhook. The body is the provider's own format.",
+        "operationId": "post_inbound",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "description": "cloudflare, postmark, mailgun, resend or ses",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "provider_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "description": "The provider's own payload (JSON; Mailgun: a form)",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": ""
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": ""
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/mail/parts/{token}/{attachment_id}": {
       "get": {
         "tags": [
@@ -42170,7 +42304,8 @@
         "type": "object",
         "required": [
           "count",
-          "receipts"
+          "receipts",
+          "rejected"
         ],
         "properties": {
           "count": {
@@ -42183,6 +42318,13 @@
             "items": {
               "$ref": "#/components/schemas/MailFailedReceipt"
             }
+          },
+          "rejected": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MailRejectedDelivery"
+            },
+            "description": "Mail a provider accepted that Orbit could not deliver (no body was kept), newest 100."
           }
         }
       },
@@ -42611,6 +42753,45 @@
           }
         ],
         "description": "The result of one DNS record check."
+      },
+      "MailRejectReason": {
+        "type": "string",
+        "enum": [
+          "unknown_address",
+          "wrong_route",
+          "domain_unavailable",
+          "mailbox_suspended"
+        ]
+      },
+      "MailRejectedDelivery": {
+        "type": "object",
+        "required": [
+          "provider_name",
+          "recipient",
+          "reason",
+          "received_at"
+        ],
+        "properties": {
+          "mail_from": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "provider_name": {
+            "type": "string"
+          },
+          "reason": {
+            "$ref": "#/components/schemas/MailRejectReason"
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "recipient": {
+            "type": "string"
+          }
+        }
       },
       "MailSenderPref": {
         "type": "object",

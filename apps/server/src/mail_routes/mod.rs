@@ -5,6 +5,7 @@
 pub(crate) mod admin;
 pub(crate) mod content;
 pub(crate) mod domains;
+pub(crate) mod inbound;
 pub(crate) mod labels;
 pub(crate) mod mailboxes;
 pub(crate) mod threads;
@@ -12,7 +13,7 @@ pub(crate) mod threads;
 use std::sync::Arc;
 
 use axum::Router;
-use axum::extract::Extension;
+use axum::extract::{DefaultBodyLimit, Extension};
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::routing::{delete, get, post, put};
 use orbit_platform::{Id, JobStore, MailMode, RequestId};
@@ -20,6 +21,7 @@ use orbit_platform::{Id, JobStore, MailMode, RequestId};
 pub use content::{ViewGrant, ViewKey, ViewPurpose};
 
 use crate::auth_routes::CookieMode;
+use crate::mail_delivery::ProviderIntake;
 use crate::mail_dns::{DnsLookup, HickoryDns};
 use crate::mail_image_proxy::ImageProxy;
 use crate::mail_listener::MailListenerStatus;
@@ -55,6 +57,8 @@ pub struct MailState {
     pub(crate) listener: Arc<MailListenerStatus>,
     /// The health card's PTR lookups.
     pub(crate) dns: Arc<dyn DnsLookup>,
+    /// Mail from providers' webhooks; `None`: the route answers 503.
+    pub(crate) inbound: Option<Arc<ProviderIntake>>,
 }
 
 impl MailState {
@@ -77,7 +81,21 @@ impl MailState {
             image_proxy: Arc::new(ImageProxy::new()),
             listener: Arc::default(),
             dns: Arc::new(HickoryDns::new(None)),
+            inbound: None,
         }
+    }
+
+    /// Receives mail from providers' webhooks.
+    #[must_use]
+    pub fn with_inbound(mut self, inbound: Arc<ProviderIntake>) -> Self {
+        self.inbound = Some(inbound);
+        self
+    }
+
+    #[must_use]
+    pub(crate) fn with_inbound_opt(mut self, inbound: Option<Arc<ProviderIntake>>) -> Self {
+        self.inbound = inbound;
+        self
     }
 
     /// The listener the health card reports, and the resolver of its PTR check.
@@ -137,7 +155,23 @@ impl MailState {
 }
 
 pub fn mail_router(state: MailState) -> Router {
+    // a provider's JSON escapes can double a message; the provider's own check is exact
+    let inbound_limit = state.inbound.as_ref().map_or(1024 * 1024, |inbound| {
+        usize::try_from(inbound.max_message_bytes())
+            .unwrap_or(usize::MAX / 4)
+            .saturating_mul(2)
+            .saturating_add(1024 * 1024)
+    });
     Router::new()
+        .route(
+            "/api/v1/mail/inbound/{kind}/{provider_id}",
+            post(inbound::post_inbound).layer(DefaultBodyLimit::max(inbound_limit)),
+        )
+        // Mailgun posts the raw message only to a URL that ends in `mime`
+        .route(
+            "/api/v1/mail/inbound/{kind}/{provider_id}/mime",
+            post(inbound::post_inbound).layer(DefaultBodyLimit::max(inbound_limit)),
+        )
         .route(
             "/api/v1/workspaces/{workspace_id}/mail/domains",
             get(domains::list_mail_domains).post(domains::create_mail_domain),

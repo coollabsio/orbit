@@ -297,6 +297,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::mail_routes::content::create_mail_view_url,
         crate::mail_routes::content::get_mail_content,
         crate::mail_routes::content::get_mail_part,
+        crate::mail_routes::inbound::post_inbound,
         crate::mail_routes::content::get_mail_image,
         crate::mail_routes::content::download_mail_attachment,
         crate::mail_routes::content::download_mail_message,

@@ -1573,6 +1573,10 @@ export type MailFailedReceipts = {
      */
     count: number;
     receipts: Array<MailFailedReceipt>;
+    /**
+     * Mail a provider accepted that Orbit could not deliver (no body was kept), newest 100.
+     */
+    rejected: Array<MailRejectedDelivery>;
 };
 
 export type MailFolder = 'inbox' | 'archive' | 'spam' | 'trash';
@@ -1749,6 +1753,16 @@ export type MailRecordStatus = {
     status: 'wrong';
 } | {
     status: 'unknown';
+};
+
+export type MailRejectReason = 'unknown_address' | 'wrong_route' | 'domain_unavailable' | 'mailbox_suspended';
+
+export type MailRejectedDelivery = {
+    mail_from?: string | null;
+    provider_name: string;
+    reason: MailRejectReason;
+    received_at: string;
+    recipient: string;
 };
 
 export type MailSenderPref = {
@@ -7610,6 +7624,67 @@ export type GetMailImageResponses = {
 };
 
 export type GetMailImageResponse = GetMailImageResponses[keyof GetMailImageResponses];
+
+export type PostInboundData = {
+    /**
+     * The provider's own payload (JSON; Mailgun: a form)
+     */
+    body: string;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * cloudflare, postmark, mailgun, resend or ses
+         */
+        kind: string;
+        provider_id: string;
+    };
+    query?: never;
+    url: '/api/v1/mail/inbound/{kind}/{provider_id}';
+};
+
+export type PostInboundErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    404: unknown;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    503: unknown;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type PostInboundError = PostInboundErrors[keyof PostInboundErrors];
+
+export type PostInboundResponses = {
+    200: unknown;
+};
 
 export type GetMailPartData = {
     body?: never;

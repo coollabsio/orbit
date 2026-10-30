@@ -276,6 +276,7 @@ impl Fixture {
             .intake
             .accept(InboundMessage {
                 source: Source::Smtp,
+                trace_len: 0,
                 raw: raw.to_vec(),
                 mail_from: Some("ann@sender.test".to_owned()),
                 recipients,

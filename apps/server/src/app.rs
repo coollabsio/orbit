@@ -26,6 +26,7 @@ use crate::chat_routes::ChatState;
 use crate::export_routes::ExportState;
 use crate::import_routes::ImportState;
 use crate::integration_routes::IntegrationState;
+use crate::mail_delivery::ProviderIntake;
 use crate::mail_dns::{DnsChecker, DnsLookup, HickoryDns};
 use crate::mail_intake::MailIntake;
 use crate::mail_listener::{MailListener, MailListenerStatus, TRACE_HEADROOM};
@@ -284,6 +285,33 @@ impl App {
             .as_ref()
             .map_or_else(Arc::default, MailListener::status);
         let mail_dns: Arc<dyn DnsLookup> = Arc::new(HickoryDns::new(config.mail.dns_resolver));
+        // Mail from providers' webhooks works without the listener: no port 25 on this server.
+        let provider_intake = match config.mail.dns_resolver {
+            Some(resolver) => orbit_mail::Authenticator::with_resolver(resolver),
+            None => orbit_mail::Authenticator::system(),
+        }
+        .map(|auth| {
+            let hostname = config.mail.hostname.clone().unwrap_or_else(|| {
+                config
+                    .http
+                    .public_origin
+                    .split_once("://")
+                    .map_or("orbit", |(_, host)| host)
+                    .split([':', '/'])
+                    .next()
+                    .unwrap_or("orbit")
+                    .to_owned()
+            });
+            Arc::new(ProviderIntake::new(
+                Arc::clone(&mail),
+                JobStore::new(database.clone()),
+                config.mail.max_message_bytes,
+                Arc::new(auth),
+                hostname,
+            ))
+        })
+        .inspect_err(|error| tracing::warn!(%error, "mail from providers is off: no DNS resolver"))
+        .ok();
         let dns_checker = DnsChecker::new(
             Arc::clone(&mail),
             Arc::clone(&mail_dns),
@@ -407,7 +435,8 @@ impl App {
                     config.http.public_origin.clone(),
                     config.mail.content_origin.clone(),
                 )
-                .with_health(Arc::clone(&mail_status), mail_dns),
+                .with_health(Arc::clone(&mail_status), mail_dns)
+                .with_inbound_opt(provider_intake),
             },
             health,
             assets,

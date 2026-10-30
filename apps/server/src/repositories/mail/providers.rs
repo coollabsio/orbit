@@ -732,6 +732,26 @@ impl MailRepository {
         Ok(removed)
     }
 
+    /// The workspace of the domain `name` and its provider (`None`: the SMTP route), or `None`
+    /// when no workspace has it.
+    pub async fn domain_route(&self, name: &str) -> Result<Option<(Id, Option<Id>)>, MailError> {
+        let row = sqlx::query(
+            "SELECT workspace_id, provider_id FROM mail_domains WHERE lower(name) = lower($1)",
+        )
+        .bind(name.trim_end_matches('.'))
+        .fetch_optional(self.database.pool())
+        .await?;
+        row.map(|row| {
+            Ok((
+                parse_id(&row.try_get::<String, _>("workspace_id")?)?,
+                row.try_get::<Option<String>, _>("provider_id")?
+                    .map(|id| parse_id(&id))
+                    .transpose()?,
+            ))
+        })
+        .transpose()
+    }
+
     /// Routes the domain's mail through `provider_id` (an instance provider or one of the
     /// workspace), or through Orbit's own listener with `None`.
     pub async fn set_domain_route(

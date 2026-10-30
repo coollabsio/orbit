@@ -443,10 +443,12 @@ impl SessionHandler for MailListener {
         };
 
         let mut message = trace_headers(&self.hostname, ctx, &auth).into_bytes();
+        let trace_len = message.len();
         message.extend_from_slice(&raw);
         let inbound = InboundMessage {
             source: Source::Smtp,
             raw: message,
+            trace_len,
             mail_from: envelope.mail_from.clone(),
             recipients,
             peer_ip: ctx.peer_ip,

@@ -88,7 +88,9 @@ impl OriginPolicy {
                 | "/oauth/register"
                 | "/oauth/token"
                 | "/oauth/revoke"
-        ) {
+        ) || uri.path().starts_with("/api/v1/mail/inbound/")
+        {
+            // webhooks from servers: no Origin, and the handler checks their signature
             return true;
         }
         if matches!(

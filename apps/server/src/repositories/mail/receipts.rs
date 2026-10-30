@@ -6,7 +6,7 @@ use orbit_platform::{Id, JobKind, Row, TimestampMillis};
 use sqlx::{Any, Transaction};
 
 use super::domains::{manager, parse_id};
-use super::{MailError, MailRepository};
+use super::{MailError, MailRepository, RejectReason};
 
 /// A `pending` receipt untouched this long without a waiting or running ingest job is stuck:
 /// the server stopped during its last attempt, so no job will finish it.
@@ -47,6 +47,18 @@ pub struct FailedReceipts {
     /// All of them; `receipts` holds the newest 100.
     pub count: i64,
     pub receipts: Vec<FailedReceipt>,
+    /// Mail a provider accepted that Orbit could not deliver, newest 100 (no body was kept).
+    pub rejected: Vec<RejectedDelivery>,
+}
+
+/// One rejected delivery of a provider.
+#[derive(Clone, Debug)]
+pub struct RejectedDelivery {
+    pub provider_name: String,
+    pub mail_from: Option<String>,
+    pub recipient: String,
+    pub reason: RejectReason,
+    pub received_at: TimestampMillis,
 }
 
 /// The job that parses a receipt into messages and threads.
@@ -171,7 +183,31 @@ impl MailRepository {
         .bind(FAILED_LIST_MAX)
         .fetch_all(&mut *transaction)
         .await?;
+        let rejected_rows = sqlx::query(
+            "SELECT p.name, r.mail_from, r.recipient, r.reason, r.received_at \
+             FROM mail_rejected_deliveries r JOIN mail_providers p ON p.id = r.provider_id \
+             WHERE r.workspace_id = $1 ORDER BY r.received_at DESC, r.id DESC LIMIT $2",
+        )
+        .bind(workspace_id.to_string())
+        .bind(FAILED_LIST_MAX)
+        .fetch_all(&mut *transaction)
+        .await?;
         transaction.commit().await?;
+        let rejected = rejected_rows
+            .iter()
+            .map(|row| {
+                Ok(RejectedDelivery {
+                    provider_name: row.try_get("name")?,
+                    mail_from: row.try_get("mail_from")?,
+                    recipient: row.try_get("recipient")?,
+                    reason: row
+                        .try_get::<String, _>("reason")?
+                        .parse()
+                        .map_err(|()| MailError::Invalid { field: "reason" })?,
+                    received_at: TimestampMillis::from_millis(row.try_get("received_at")?),
+                })
+            })
+            .collect::<Result<_, MailError>>()?;
         let receipts = rows
             .iter()
             .map(|row| {
@@ -192,6 +228,10 @@ impl MailRepository {
                 })
             })
             .collect::<Result<_, MailError>>()?;
-        Ok(FailedReceipts { count, receipts })
+        Ok(FailedReceipts {
+            count,
+            receipts,
+            rejected,
+        })
     }
 }

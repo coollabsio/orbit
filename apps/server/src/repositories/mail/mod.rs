@@ -50,7 +50,8 @@ pub use reading::{
     THREAD_PAGE_DEFAULT, THREAD_PAGE_MAX, ThreadChange, ThreadListInput,
 };
 pub use receipts::{
-    FailedReceipt, FailedReceipts, INGEST_JOB, ReceiptProblem, STUCK_RECEIPT_MS, mail_ingest_kind,
+    FailedReceipt, FailedReceipts, INGEST_JOB, ReceiptProblem, RejectedDelivery, STUCK_RECEIPT_MS,
+    mail_ingest_kind,
 };
 pub(crate) use receipts::{
     NewReceipt, insert_receipt, insert_receipt_recipient, record_health_test,

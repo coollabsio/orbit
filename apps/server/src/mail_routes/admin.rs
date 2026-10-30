@@ -14,6 +14,7 @@ use crate::mail_dns::{PtrStatus, check_ptr};
 use crate::repositories::instance_settings::InstanceSettingsRepository;
 use crate::repositories::mail::{
     FailedReceipt, HealthTest, HealthTestStatus, MailAuthSummary, MailError, ReceiptProblem,
+    RejectReason, RejectedDelivery,
 };
 use crate::task_routes::{ApiError, ApiJson, authenticate_session, request_id_value};
 
@@ -377,6 +378,45 @@ pub(crate) struct MailFailedReceipts {
     /// All failed and stuck receipts; `receipts` holds the newest 100.
     count: i64,
     receipts: Vec<MailFailedReceipt>,
+    /// Mail a provider accepted that Orbit could not deliver (no body was kept), newest 100.
+    rejected: Vec<MailRejectedDelivery>,
+}
+
+#[derive(Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum MailRejectReason {
+    /// No mailbox has the address.
+    UnknownAddress,
+    /// The domain receives through another route.
+    WrongRoute,
+    /// The domain is suspended, disabled or not verified.
+    DomainUnavailable,
+    MailboxSuspended,
+}
+
+#[derive(Serialize, ToSchema)]
+pub(crate) struct MailRejectedDelivery {
+    provider_name: String,
+    mail_from: Option<String>,
+    recipient: String,
+    reason: MailRejectReason,
+    #[schema(value_type = String, format = DateTime)]
+    received_at: TimestampMillis,
+}
+
+fn rejected_view(rejected: RejectedDelivery) -> MailRejectedDelivery {
+    MailRejectedDelivery {
+        provider_name: rejected.provider_name,
+        mail_from: rejected.mail_from,
+        recipient: rejected.recipient,
+        reason: match rejected.reason {
+            RejectReason::UnknownAddress => MailRejectReason::UnknownAddress,
+            RejectReason::WrongRoute => MailRejectReason::WrongRoute,
+            RejectReason::DomainUnavailable => MailRejectReason::DomainUnavailable,
+            RejectReason::MailboxSuspended => MailRejectReason::MailboxSuspended,
+        },
+        received_at: rejected.received_at,
+    }
 }
 
 fn receipt_view(receipt: FailedReceipt) -> MailFailedReceipt {
@@ -413,6 +453,7 @@ pub(crate) async fn list_failed_mail_receipts(
     Ok(Json(MailFailedReceipts {
         count: list.count,
         receipts: list.receipts.into_iter().map(receipt_view).collect(),
+        rejected: list.rejected.into_iter().map(rejected_view).collect(),
     }))
 }
 

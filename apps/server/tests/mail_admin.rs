@@ -310,6 +310,7 @@ fn auth() -> AuthOutcome {
 fn message(raw: &str, recipients: Vec<Recipient>) -> InboundMessage {
     InboundMessage {
         source: Source::Smtp,
+        trace_len: 0,
         raw: raw.as_bytes().to_vec(),
         mail_from: Some("ann@sender.test".to_owned()),
         recipients,
