@@ -6,8 +6,8 @@ use mail_auth::common::crypto::Ed25519Key;
 use mail_auth::common::headers::HeaderWriter as _;
 use mail_auth::dkim::DkimSigner;
 use orbit_mail::{
-    AuthOutcome, Authenticator, DmarcPolicy, DmarcVerdict, StaticDns, Verdict,
-    authentication_results, strip_auth_results, trusted_relay_results,
+    AuthOutcome, Authenticator, DmarcPolicy, DmarcVerdict, ProviderSpf, SpfHeader, StaticDns,
+    Verdict, authentication_results, provider_spf, strip_auth_results, trusted_relay_results,
 };
 
 const ALLOWED_IP: IpAddr = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 10));
@@ -418,4 +418,91 @@ fn trusted_relay_results_reads_none_and_missing() {
 
     let raw = "Authentication-Results: other.example; spf=pass\r\n\r\nAuthentication-Results: relay.example; spf=pass\r\n";
     assert_eq!(trusted_relay_results(raw.as_bytes(), "relay.example"), None);
+}
+
+// ---------------------------------------------------------------- the provider's SPF
+
+async fn check_relayed(dns: StaticDns, raw: &str, spf: Option<ProviderSpf>) -> AuthOutcome {
+    let authenticator = Authenticator::with_static_dns(dns).unwrap();
+    tokio::time::timeout(
+        Duration::from_secs(10),
+        authenticator.check_relayed(
+            raw.as_bytes(),
+            Some("ann@example.com"),
+            "provider.example",
+            spf,
+        ),
+    )
+    .await
+    .expect("the check must not wait on the network")
+}
+
+#[tokio::test]
+async fn provider_spf_pass_aligns_dmarc_without_dkim() {
+    let dns = StaticDns::new().txt("_dmarc.example.com", DMARC_REJECT);
+    let spf = ProviderSpf {
+        verdict: Verdict::Pass,
+        domain: "example.com".to_owned(),
+    };
+    let outcome = check_relayed(dns, &message("hi"), Some(spf)).await;
+    assert_eq!(outcome.spf, Verdict::Pass);
+    assert_eq!(outcome.dkim, Verdict::None);
+    assert_eq!(outcome.dmarc, DmarcVerdict::Pass);
+    assert_eq!(outcome.spf_domain.as_deref(), Some("example.com"));
+}
+
+#[tokio::test]
+async fn provider_spf_none_and_no_dkim_fails_dmarc() {
+    let dns = StaticDns::new().txt("_dmarc.example.com", DMARC_REJECT);
+    let outcome = check_relayed(dns, &message("hi"), None).await;
+    assert_eq!(outcome.spf, Verdict::None);
+    assert_eq!(
+        outcome.dmarc,
+        DmarcVerdict::Fail {
+            policy: DmarcPolicy::Reject
+        }
+    );
+}
+
+#[tokio::test]
+async fn dkim_still_checked_by_orbit() {
+    let (signed, record) = signed(&message("original"));
+    let changed = signed.replace("original", "changed");
+    let dns = StaticDns::new()
+        .txt("s1._domainkey.example.com", &record)
+        .txt("_dmarc.example.com", DMARC_REJECT);
+    let outcome = check_relayed(dns, &changed, None).await;
+    assert_eq!(outcome.dkim, Verdict::Fail);
+}
+
+#[test]
+fn only_the_topmost_received_spf_counts() {
+    let raw = format!(
+        "Received-SPF: fail (provider: domain of ann@example.com does not designate 203.0.113.9) \
+         client-ip=203.0.113.9; envelope-from=\"ann@example.com\"; helo=mx.attacker.example;\r\n\
+         Received-SPF: pass (forged) envelope-from=\"ann@example.com\";\r\n{}",
+        message("hi")
+    );
+    let spf = provider_spf(raw.as_bytes(), SpfHeader::ReceivedSpf).unwrap();
+    assert_eq!(spf.verdict, Verdict::Fail);
+    assert_eq!(spf.domain, "example.com");
+}
+
+#[test]
+fn provider_spf_reads_the_providers_authentication_results() {
+    let raw = format!(
+        "Authentication-Results: mx.provider.example; spf=pass smtp.mailfrom=ann@example.com\r\n\
+         Authentication-Results: mx.provider.example; spf=fail smtp.mailfrom=ann@example.com\r\n{}",
+        message("hi")
+    );
+    let spf = provider_spf(
+        raw.as_bytes(),
+        SpfHeader::AuthResults {
+            authserv_id: "mx.provider.example",
+        },
+    )
+    .unwrap();
+    assert_eq!(spf.verdict, Verdict::Pass);
+    assert_eq!(spf.domain, "example.com");
+    assert!(provider_spf(message("hi").as_bytes(), SpfHeader::ReceivedSpf).is_none());
 }

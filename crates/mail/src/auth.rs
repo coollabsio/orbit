@@ -28,7 +28,7 @@ use mail_auth::spf::verify::SpfParameters;
 use mail_auth::{
     AuthenticatedMessage, DkimOutput, DkimResult, DmarcResult, DnsError, DnssecStatus,
     Error as MailAuthError, MX, MessageAuthenticator, Parameters, RecordSet, ResolverCache,
-    SpfResult, Txt,
+    SpfOutput, SpfResult, Txt,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -381,8 +381,40 @@ impl Authenticator {
             None => SpfParameters::verify_ehlo(peer_ip, helo, HOST_DOMAIN),
         };
         let spf_output = self.inner.verify_spf(self.parameters(spf_params)).await;
-        let spf = spf_verdict(spf_output.result());
+        self.dkim_and_dmarc(raw, &spf_output, spf_domain).await
+    }
 
+    /// Checks a message that a mail provider received and delivered over HTTPS: the provider saw the
+    /// sending server, so its SPF result stands in for Orbit's (`None` → `none`); Orbit verifies DKIM
+    /// and evaluates DMARC itself. `helo` is the SPF domain of last resort, as in [`Self::check`].
+    pub async fn check_relayed(
+        &self,
+        raw: &[u8],
+        mail_from: Option<&str>,
+        helo: &str,
+        spf: Option<ProviderSpf>,
+    ) -> AuthOutcome {
+        let fallback = mail_from
+            .filter(|sender| !sender.is_empty())
+            .and_then(|sender| sender.rsplit_once('@'))
+            .map_or(helo.trim_end_matches('.'), |(_, domain)| domain)
+            .to_ascii_lowercase();
+        let (verdict, domain) = match spf {
+            Some(spf) if !spf.domain.is_empty() => (spf.verdict, spf.domain.to_ascii_lowercase()),
+            Some(spf) => (spf.verdict, fallback),
+            None => (Verdict::None, fallback),
+        };
+        let spf_output = SpfOutput::new(domain.clone()).with_result(spf_result(verdict));
+        self.dkim_and_dmarc(raw, &spf_output, domain).await
+    }
+
+    async fn dkim_and_dmarc(
+        &self,
+        raw: &[u8],
+        spf_output: &SpfOutput,
+        spf_domain: String,
+    ) -> AuthOutcome {
+        let spf = spf_verdict(spf_output.result());
         let Some(message) = AuthenticatedMessage::parse(raw) else {
             // No header section to check: nothing is signed and there is no author domain.
             return AuthOutcome::new(
@@ -404,7 +436,7 @@ impl Authenticator {
                 &message,
                 &dkim_outputs,
                 &spf_domain,
-                &spf_output,
+                spf_output,
             )))
             .await;
         let dmarc = match dmarc_output.result() {
@@ -425,6 +457,18 @@ impl Authenticator {
             });
 
         AuthOutcome::new(spf, dkim, dmarc, Some(spf_domain), dkim_domain, from_domain)
+    }
+}
+
+fn spf_result(verdict: Verdict) -> SpfResult {
+    match verdict {
+        Verdict::Pass => SpfResult::Pass,
+        Verdict::Fail => SpfResult::Fail,
+        Verdict::SoftFail => SpfResult::SoftFail,
+        Verdict::Neutral => SpfResult::Neutral,
+        Verdict::TempError => SpfResult::TempError,
+        Verdict::PermError => SpfResult::PermError,
+        Verdict::None => SpfResult::None,
     }
 }
 
@@ -715,6 +759,66 @@ pub fn trusted_relay_results(raw: &[u8], relay_id: &str) -> Option<AuthOutcome> 
     let value = String::from_utf8_lossy(field.value);
     let (_, after_id) = authserv_id(value.as_bytes());
     Some(parse_results(&value[after_id..]))
+}
+
+/// The SPF result of a mail provider, which saw the sending server.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProviderSpf {
+    pub verdict: Verdict,
+    /// The domain SPF checked (MAIL FROM, else HELO). Empty: the envelope sender's domain is used.
+    pub domain: String,
+}
+
+/// Where a provider writes its SPF result in the message.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SpfHeader<'a> {
+    /// `Received-SPF` (RFC 7208 §9.1).
+    ReceivedSpf,
+    /// `Authentication-Results` with the provider's `authserv-id`.
+    AuthResults { authserv_id: &'a str },
+}
+
+/// Reads the provider's SPF result from the **topmost** field of that kind (the provider adds its
+/// field on top; lower ones came with the message and may be forged). `None` when there is none.
+pub fn provider_spf(raw: &[u8], header: SpfHeader<'_>) -> Option<ProviderSpf> {
+    match header {
+        SpfHeader::AuthResults { authserv_id } => {
+            let outcome = trusted_relay_results(raw, authserv_id)?;
+            Some(ProviderSpf {
+                verdict: outcome.spf,
+                domain: outcome.spf_domain.unwrap_or_default(),
+            })
+        }
+        SpfHeader::ReceivedSpf => {
+            let field = header_fields(raw).into_iter().find(|field| {
+                field
+                    .name
+                    .trim_ascii_end()
+                    .eq_ignore_ascii_case(b"Received-SPF")
+            })?;
+            let value = String::from_utf8_lossy(field.value);
+            let result = value.split_ascii_whitespace().next()?.to_ascii_lowercase();
+            // key=value pairs after the comment: `envelope-from` (else `helo`) names the domain
+            let pair = |key: &str| {
+                value.split(';').find_map(|part| {
+                    let (name, found) = part.trim().rsplit_once('=')?;
+                    let name = name.split_ascii_whitespace().last()?;
+                    name.eq_ignore_ascii_case(key)
+                        .then(|| found.trim().trim_matches('"').to_owned())
+                })
+            };
+            let domain = pair("envelope-from")
+                .and_then(|sender| sender.rsplit_once('@').map(|(_, domain)| domain.to_owned()))
+                .or_else(|| pair("helo"))
+                .unwrap_or_default()
+                .trim_end_matches('.')
+                .to_ascii_lowercase();
+            Some(ProviderSpf {
+                verdict: Verdict::parse(&result),
+                domain,
+            })
+        }
+    }
 }
 
 /// One `method=result` entry with its properties and the text of its comments.
