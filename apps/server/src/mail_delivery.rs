@@ -7,11 +7,15 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use orbit_mail::inbound::{Delivery, SpfSource};
+use orbit_mail::inbound::resend::ResendEvent;
+use orbit_mail::inbound::{Delivery, InboundError, SpfHeaderOwned, SpfSource, ses};
 use orbit_mail::{Authenticator, authentication_results, provider_spf, strip_auth_results};
-use orbit_platform::{JobStore, TimestampMillis};
+use orbit_platform::{JobStore, S3Bucket, S3Config, TimestampMillis};
+use serde::Deserialize;
+
+use crate::mail_image_proxy::{FetchError, SafeFetch};
 
 use crate::mail_intake::{InboundMessage, IntakeError, MailIntake, Recipient, Source};
 use crate::repositories::mail::{
@@ -22,6 +26,15 @@ use crate::repositories::mail::{
 const AUTH_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long a Mailgun token is remembered (its timestamp is valid for 5 minutes).
 const TOKEN_MEMORY_SECS: i64 = 10 * 60;
+/// Resend's Receiving API.
+const RESEND_API: &str = "https://api.resend.com/emails/receiving/";
+/// Small answers: Resend's message details, SNS certificates and confirmations.
+const SMALL_BYTES: usize = 256 * 1024;
+const API_TIMEOUT: Duration = Duration::from_secs(20);
+/// Downloading a raw message (up to the size limit).
+const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
+/// How long an SNS signing certificate is kept.
+const CERT_CACHE: Duration = Duration::from_secs(60 * 60);
 
 /// What became of a delivery.
 #[derive(Debug, PartialEq, Eq)]
@@ -36,6 +49,8 @@ pub enum DeliveryResult {
         reason: RejectReason,
         recipient: String,
     },
+    /// An SNS subscription was confirmed (SES).
+    Confirmed,
     /// Storage, the database or a DNS lookup failed: the provider should send it again.
     Temporary(String),
     TooLarge,
@@ -52,6 +67,12 @@ pub struct ProviderIntake {
     /// Mailgun tokens seen in the last [`TOKEN_MEMORY_SECS`] (seconds), to refuse a replay. Per
     /// server: in a cluster a replay within the 5-minute timestamp window can reach another server.
     tokens: Mutex<HashMap<String, i64>>,
+    /// Fetches of Resend downloads and SNS certificates and confirmations.
+    fetch: SafeFetch,
+    /// Tests only: an S3 endpoint instead of `https://s3.<region>.amazonaws.com`.
+    s3_endpoint: Option<String>,
+    /// SNS signing certificates by URL, with when they were fetched.
+    certs: Mutex<HashMap<String, (Vec<u8>, Instant)>>,
 }
 
 impl ProviderIntake {
@@ -75,7 +96,240 @@ impl ProviderIntake {
             hostname,
             max_message_bytes,
             tokens: Mutex::new(HashMap::new()),
+            fetch: SafeFetch::new(),
+            s3_endpoint: None,
+            certs: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// Tests only: fetches through local servers.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_fetch(mut self, fetch: SafeFetch) -> Self {
+        self.fetch = fetch;
+        self
+    }
+
+    /// Tests only: SES reads S3 at `endpoint` (path style).
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_s3_endpoint(mut self, endpoint: String) -> Self {
+        self.s3_endpoint = Some(endpoint);
+        self
+    }
+
+    /// Resend: fetches the message that the webhook names, then delivers it.
+    pub async fn receive_resend(
+        &self,
+        provider: &MailProvider,
+        api_key: &str,
+        event: ResendEvent,
+        now: TimestampMillis,
+    ) -> DeliveryResult {
+        #[derive(Deserialize)]
+        struct Received {
+            raw: Raw,
+        }
+        #[derive(Deserialize)]
+        struct Raw {
+            download_url: String,
+        }
+        let url = format!("{RESEND_API}{}", event.email_id);
+        let details = match self
+            .fetch
+            .get(
+                &url,
+                SMALL_BYTES,
+                "application/json",
+                Some(api_key),
+                API_TIMEOUT,
+                true,
+            )
+            .await
+        {
+            Ok(details) => details,
+            Err(error) => {
+                return self
+                    .failed(provider, now, format!("Resend API: {error}"))
+                    .await;
+            }
+        };
+        let Ok(received) = serde_json::from_slice::<Received>(&details) else {
+            return self
+                .failed(provider, now, "Resend API: no raw message".to_owned())
+                .await;
+        };
+        let max = usize::try_from(self.max_message_bytes).unwrap_or(usize::MAX);
+        let raw = match self
+            .fetch
+            .get(
+                &received.raw.download_url,
+                max,
+                "message/rfc822, */*",
+                None,
+                DOWNLOAD_TIMEOUT,
+                true,
+            )
+            .await
+        {
+            Ok(raw) => raw,
+            Err(error) => {
+                return self
+                    .failed(provider, now, format!("Resend download: {error}"))
+                    .await;
+            }
+        };
+        let delivery = Delivery {
+            raw,
+            mail_from: event.mail_from,
+            recipients: event.recipients,
+            peer_ip: None,
+            helo: None,
+            spf: SpfSource::Header(SpfHeaderOwned::ReceivedSpf),
+        };
+        self.deliver(provider, delivery, now).await
+    }
+
+    /// Amazon SES through SNS: checks the topic and the SNS signature, then confirms the
+    /// subscription, or reads the message from S3, delivers it and deletes S3's copy.
+    pub async fn receive_ses(
+        &self,
+        provider: &MailProvider,
+        access_key_id: &str,
+        secret_access_key: &str,
+        body: &[u8],
+        now: TimestampMillis,
+    ) -> Result<DeliveryResult, InboundError> {
+        let message = ses::parse_sns(body)?;
+        let settings = &provider.settings;
+        if settings.topic_arn.as_deref() != Some(message.topic_arn()) {
+            return Err(InboundError::Unauthorized);
+        }
+        let cert_url = message.signed().cert_url.clone();
+        if !ses::cert_url_ok(&cert_url) {
+            return Err(InboundError::Unauthorized);
+        }
+        let cert = match self.cert(&cert_url).await {
+            Ok(cert) => cert,
+            Err(error) => {
+                return Ok(self
+                    .failed(provider, now, format!("SNS certificate: {error}"))
+                    .await);
+            }
+        };
+        ses::verify_sns(&message, &cert)?;
+        let receipt = match message {
+            ses::SnsMessage::SubscriptionConfirmation { subscribe_url, .. } => {
+                if !ses::sns_url_ok(&subscribe_url) {
+                    return Err(InboundError::Unauthorized);
+                }
+                let confirmed = self
+                    .fetch
+                    .get(&subscribe_url, SMALL_BYTES, "*/*", None, API_TIMEOUT, true)
+                    .await;
+                return Ok(match confirmed {
+                    Ok(_) => DeliveryResult::Confirmed,
+                    Err(error) => {
+                        self.failed(provider, now, format!("SNS confirmation: {error}"))
+                            .await
+                    }
+                });
+            }
+            ses::SnsMessage::Notification { ses, .. } => ses,
+        };
+        let (Some(bucket), Some(region)) = (&settings.bucket, &settings.region) else {
+            return Err(InboundError::Malformed("bucket"));
+        };
+        let prefix = settings.prefix.as_deref().unwrap_or_default();
+        if receipt.bucket != *bucket || !receipt.key.starts_with(prefix) {
+            return Err(InboundError::Unauthorized);
+        }
+        let s3 = match S3Bucket::new(S3Config {
+            endpoint: self
+                .s3_endpoint
+                .clone()
+                .unwrap_or_else(|| format!("https://s3.{region}.amazonaws.com")),
+            region: region.clone(),
+            bucket: bucket.clone(),
+            prefix: String::new(),
+            access_key_id: access_key_id.to_owned(),
+            secret_access_key: secret_access_key.to_owned(),
+            path_style: self.s3_endpoint.is_some(),
+        }) {
+            Ok(s3) => s3,
+            Err(error) => return Ok(self.failed(provider, now, format!("S3: {error}")).await),
+        };
+        let raw = match s3.get_bytes(&receipt.key).await {
+            Ok(Some(raw)) => raw,
+            Ok(None) => {
+                return Ok(self
+                    .failed(
+                        provider,
+                        now,
+                        "S3: the message object is missing".to_owned(),
+                    )
+                    .await);
+            }
+            Err(error) => return Ok(self.failed(provider, now, format!("S3: {error}")).await),
+        };
+        let delivery = Delivery {
+            raw,
+            mail_from: receipt.mail_from,
+            recipients: receipt.recipients,
+            peer_ip: None,
+            helo: None,
+            spf: SpfSource::Given(receipt.spf),
+        };
+        let result = self.deliver(provider, delivery, now).await;
+        // Orbit is the inbox of record: no plaintext copy stays in the bucket (design P8)
+        if matches!(
+            result,
+            DeliveryResult::Stored { .. } | DeliveryResult::NothingDeliverable { .. }
+        ) && let Err(error) = s3.delete(&receipt.key).await
+        {
+            tracing::warn!(%error, key = receipt.key, "SES message copy not deleted from S3");
+        }
+        Ok(result)
+    }
+
+    /// The PEM certificate at `url`, cached for an hour.
+    async fn cert(&self, url: &str) -> Result<Vec<u8>, FetchError> {
+        let cached = self
+            .certs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(url)
+            .filter(|(_, at)| at.elapsed() < CERT_CACHE)
+            .map(|(cert, _)| cert.clone());
+        if let Some(cert) = cached {
+            return Ok(cert);
+        }
+        let cert = self
+            .fetch
+            .get(url, SMALL_BYTES, "*/*", None, API_TIMEOUT, true)
+            .await?;
+        self.certs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(url.to_owned(), (cert.clone(), Instant::now()));
+        Ok(cert)
+    }
+
+    /// Notes `error` on the provider and asks for the message again.
+    async fn failed(
+        &self,
+        provider: &MailProvider,
+        now: TimestampMillis,
+        error: String,
+    ) -> DeliveryResult {
+        if let Err(problem) = self
+            .mail
+            .record_provider_receipt(provider.id, now, Some(&error))
+            .await
+        {
+            tracing::warn!(error = %problem, "mail provider status not saved");
+        }
+        DeliveryResult::Temporary(error)
     }
 
     #[must_use]

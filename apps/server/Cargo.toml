@@ -56,6 +56,7 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 
 [dev-dependencies]
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
+rustls-pki-types = "1"
 sqlx = { version = "0.9", default-features = false, features = ["postgres"] }
 tempfile = "3"
 tokio-tungstenite = "0.29"

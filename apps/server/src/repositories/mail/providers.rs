@@ -190,6 +190,10 @@ pub struct ProviderSettings {
     pub bucket: Option<String>,
     #[serde(default)]
     pub prefix: Option<String>,
+    /// SES: the SNS topic of the receipt rule. Orbit refuses notifications of any other topic: SNS
+    /// signs every topic's messages, and Orbit confirms subscriptions by itself.
+    #[serde(default)]
+    pub topic_arn: Option<String>,
 }
 
 impl ProviderSettings {
@@ -202,7 +206,8 @@ impl ProviderSettings {
         };
         self.region = clean(self.region).map(|region| region.to_ascii_lowercase());
         self.bucket = clean(self.bucket);
-        self.prefix = clean(self.prefix);
+        self.prefix = clean(self.prefix).map(|prefix| prefix.trim_matches('/').to_owned());
+        self.topic_arn = clean(self.topic_arn);
         let mut hosts = Vec::new();
         for host in &self.mx_hosts {
             let host = host.trim().trim_end_matches('.').to_ascii_lowercase();
@@ -220,8 +225,17 @@ impl ProviderSettings {
         } else {
             hosts
         };
-        if kind == ProviderKind::Ses && (self.bucket.is_none() || self.region.is_none()) {
-            return Err(MailError::Invalid { field: "bucket" });
+        if kind == ProviderKind::Ses {
+            if self.bucket.is_none() || self.region.is_none() {
+                return Err(MailError::Invalid { field: "bucket" });
+            }
+            if !self
+                .topic_arn
+                .as_deref()
+                .is_some_and(|arn| arn.starts_with("arn:aws:sns:"))
+            {
+                return Err(MailError::Invalid { field: "topic_arn" });
+            }
         }
         Ok(self)
     }

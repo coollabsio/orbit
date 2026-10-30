@@ -10,7 +10,7 @@
 //! - a host name is resolved by [`CheckedResolver`], which refuses the name when any of its
 //!   addresses is not public. reqwest connects to exactly the addresses it returns, so there is
 //!   no second lookup a DNS rebind could change;
-//! - reqwest follows no redirect: [`ImageProxy::fetch`] follows up to [`MAX_REDIRECTS`] itself
+//! - reqwest follows no redirect: [`SafeFetch::get`] follows up to [`MAX_REDIRECTS`] itself
 //!   and checks each hop the same way;
 //! - no proxy from the environment (it would resolve the host itself), no cookie store (reqwest's
 //!   `cookies` feature is off), no `Referer`;
@@ -65,6 +65,34 @@ pub enum ImageProxyError {
     Fetch(String),
 }
 
+/// Why [`SafeFetch::get`] failed.
+#[derive(Debug, Error)]
+pub enum FetchError {
+    /// Not an allowed URL, or a target that is not public (also after a redirect).
+    #[error("the URL names a target that is not public")]
+    Refused,
+    #[error("more than {MAX_REDIRECTS} redirects")]
+    TooManyRedirects,
+    #[error("the host answered {0}")]
+    Status(u16),
+    #[error("the response is over the size limit")]
+    TooLarge,
+    #[error("the fetch failed: {0}")]
+    Fetch(String),
+}
+
+impl From<FetchError> for ImageProxyError {
+    fn from(error: FetchError) -> Self {
+        match error {
+            FetchError::Refused => Self::Refused,
+            FetchError::TooManyRedirects => Self::TooManyRedirects,
+            FetchError::Status(status) => Self::Status(status),
+            FetchError::TooLarge => Self::TooLarge,
+            FetchError::Fetch(error) => Self::Fetch(error),
+        }
+    }
+}
+
 /// A fetched image.
 #[derive(Debug)]
 pub struct ProxiedImage {
@@ -73,9 +101,9 @@ pub struct ProxiedImage {
     pub bytes: Vec<u8>,
 }
 
+/// Remote images of a mail, fetched with [`SafeFetch`] and sniffed.
 pub struct ImageProxy {
-    client: reqwest::Client,
-    fetches: Semaphore,
+    fetch: SafeFetch,
 }
 
 impl Default for ImageProxy {
@@ -87,11 +115,63 @@ impl Default for ImageProxy {
 impl ImageProxy {
     #[must_use]
     pub fn new() -> Self {
+        Self {
+            fetch: SafeFetch::new(),
+        }
+    }
+
+    /// Tests only: see [`SafeFetch::with_test_hosts`].
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_test_hosts(hosts: HashMap<String, SocketAddr>) -> Self {
+        Self {
+            fetch: SafeFetch::with_test_hosts(hosts),
+        }
+    }
+
+    /// Fetches the image at `raw` (see the module docs for the rules).
+    pub async fn fetch(&self, raw: &str) -> Result<ProxiedImage, ImageProxyError> {
+        let bytes = self
+            .fetch
+            .get(
+                raw,
+                MAX_IMAGE_BYTES,
+                IMAGE_ACCEPT,
+                None,
+                FETCH_TIMEOUT,
+                false,
+            )
+            .await?;
+        let content_type = orbit_mail::sniff_image(&bytes).ok_or(ImageProxyError::NotImage)?;
+        Ok(ProxiedImage {
+            content_type,
+            bytes,
+        })
+    }
+}
+
+/// An HTTP client for URLs that others pick (mail images, provider downloads): the rules of the
+/// module docs, with a size cap and a time limit for each fetch.
+pub struct SafeFetch {
+    client: reqwest::Client,
+    fetches: Semaphore,
+    test_hosts: Arc<HashMap<String, SocketAddr>>,
+}
+
+impl Default for SafeFetch {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SafeFetch {
+    #[must_use]
+    pub fn new() -> Self {
         Self::build(HashMap::new())
     }
 
     /// Tests only: each host name in `hosts` resolves to its address without the public address
-    /// check (a local test server); every other target is checked as usual.
+    /// check, over plain HTTP (a local test server); every other target is checked as usual.
     #[doc(hidden)]
     #[must_use]
     pub fn with_test_hosts(hosts: HashMap<String, SocketAddr>) -> Self {
@@ -107,77 +187,109 @@ impl ImageProxy {
         );
         let client = reqwest::Client::builder()
             .user_agent(USER_AGENT)
-            .timeout(FETCH_TIMEOUT)
             .connect_timeout(CONNECT_TIMEOUT)
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
             .referer(false)
-            .dns_resolver(Arc::new(CheckedResolver { test_hosts }))
+            .dns_resolver(Arc::new(CheckedResolver {
+                test_hosts: Arc::clone(&test_hosts),
+            }))
             .build()
-            .expect("the image proxy client builds");
+            .expect("the safe fetch client builds");
         Self {
             client,
             fetches: Semaphore::new(MAX_FETCHES),
+            test_hosts,
         }
     }
 
-    /// Fetches the image at `raw` (see the module docs for the rules).
-    pub async fn fetch(&self, raw: &str) -> Result<ProxiedImage, ImageProxyError> {
-        let url = target(raw)?;
+    /// GETs `raw` and its redirects (each checked), and returns at most `max_bytes` of a
+    /// successful body within `timeout`. `bearer` is sent only to the first host; `https_only`
+    /// refuses `http` URLs.
+    pub async fn get(
+        &self,
+        raw: &str,
+        max_bytes: usize,
+        accept: &str,
+        bearer: Option<&str>,
+        timeout: Duration,
+        https_only: bool,
+    ) -> Result<Vec<u8>, FetchError> {
+        let url = target(raw, https_only)?;
         let _permit = self
             .fetches
             .acquire()
             .await
-            .map_err(|_| ImageProxyError::Fetch("the proxy is closed".to_owned()))?;
-        tokio::time::timeout(FETCH_TIMEOUT, self.follow(url))
-            .await
-            .map_err(|_| ImageProxyError::Fetch("timed out".to_owned()))?
+            .map_err(|_| FetchError::Fetch("the client is closed".to_owned()))?;
+        tokio::time::timeout(
+            timeout,
+            self.follow(url, max_bytes, accept, bearer, https_only),
+        )
+        .await
+        .map_err(|_| FetchError::Fetch("timed out".to_owned()))?
     }
 
-    async fn follow(&self, mut url: Url) -> Result<ProxiedImage, ImageProxyError> {
+    async fn follow(
+        &self,
+        mut url: Url,
+        max_bytes: usize,
+        accept: &str,
+        bearer: Option<&str>,
+        https_only: bool,
+    ) -> Result<Vec<u8>, FetchError> {
+        let first_host = url.host_str().map(str::to_owned);
         for hop in 0..=MAX_REDIRECTS {
-            let response = self
-                .client
-                .get(url.clone())
-                .header(ACCEPT, IMAGE_ACCEPT)
-                .send()
-                .await
-                .map_err(fetch_error)?;
+            let mut request_url = url.clone();
+            if request_url
+                .host_str()
+                .is_some_and(|host| self.test_hosts.contains_key(&host.to_ascii_lowercase()))
+            {
+                let _ = request_url.set_scheme("http");
+            }
+            let mut request = self.client.get(request_url).header(ACCEPT, accept);
+            if let Some(token) = bearer
+                && url.host_str().map(str::to_owned) == first_host
+            {
+                request = request.bearer_auth(token);
+            }
+            let response = request.send().await.map_err(fetch_error)?;
             let status = response.status();
             if status.is_redirection() {
                 if hop == MAX_REDIRECTS {
-                    return Err(ImageProxyError::TooManyRedirects);
+                    return Err(FetchError::TooManyRedirects);
                 }
                 let location = response
                     .headers()
                     .get(LOCATION)
                     .and_then(|value| value.to_str().ok())
-                    .ok_or(ImageProxyError::Status(status.as_u16()))?;
-                let next = url.join(location).map_err(|_| ImageProxyError::Refused)?;
-                url = target(next.as_str())?;
+                    .ok_or(FetchError::Status(status.as_u16()))?;
+                let next = url.join(location).map_err(|_| FetchError::Refused)?;
+                url = target(next.as_str(), https_only)?;
                 continue;
             }
             if !status.is_success() {
-                return Err(ImageProxyError::Status(status.as_u16()));
+                return Err(FetchError::Status(status.as_u16()));
             }
-            return read_image(response).await;
+            return read_body(response, max_bytes).await;
         }
-        Err(ImageProxyError::TooManyRedirects)
+        Err(FetchError::TooManyRedirects)
     }
 }
 
 /// `raw` as a URL that may be fetched; a host name is checked when it resolves.
-fn target(raw: &str) -> Result<Url, ImageProxyError> {
+fn target(raw: &str, https_only: bool) -> Result<Url, FetchError> {
     if raw.len() > MAX_URL_BYTES {
-        return Err(ImageProxyError::Refused);
+        return Err(FetchError::Refused);
     }
-    let mut url = Url::parse(raw).map_err(|_| ImageProxyError::Refused)?;
+    let mut url = Url::parse(raw).map_err(|_| FetchError::Refused)?;
     url.set_fragment(None);
-    if !matches!(url.scheme(), "http" | "https")
-        || !url.username().is_empty()
-        || url.password().is_some()
-    {
-        return Err(ImageProxyError::Refused);
+    let scheme_allowed = match url.scheme() {
+        "https" => true,
+        "http" => !https_only,
+        _ => false,
+    };
+    if !scheme_allowed || !url.username().is_empty() || url.password().is_some() {
+        return Err(FetchError::Refused);
     }
     let allowed = match url.host() {
         Some(Host::Domain(_)) => true,
@@ -186,30 +298,29 @@ fn target(raw: &str) -> Result<Url, ImageProxyError> {
         None => false,
     };
     if !allowed {
-        return Err(ImageProxyError::Refused);
+        return Err(FetchError::Refused);
     }
     Ok(url)
 }
 
-async fn read_image(mut response: reqwest::Response) -> Result<ProxiedImage, ImageProxyError> {
+async fn read_body(
+    mut response: reqwest::Response,
+    max_bytes: usize,
+) -> Result<Vec<u8>, FetchError> {
     if response
         .content_length()
-        .is_some_and(|length| length > MAX_IMAGE_BYTES as u64)
+        .is_some_and(|length| length > max_bytes as u64)
     {
-        return Err(ImageProxyError::TooLarge);
+        return Err(FetchError::TooLarge);
     }
     let mut bytes = Vec::new();
     while let Some(chunk) = response.chunk().await.map_err(fetch_error)? {
-        if bytes.len() + chunk.len() > MAX_IMAGE_BYTES {
-            return Err(ImageProxyError::TooLarge);
+        if bytes.len() + chunk.len() > max_bytes {
+            return Err(FetchError::TooLarge);
         }
         bytes.extend_from_slice(&chunk);
     }
-    let content_type = orbit_mail::sniff_image(&bytes).ok_or(ImageProxyError::NotImage)?;
-    Ok(ProxiedImage {
-        content_type,
-        bytes,
-    })
+    Ok(bytes)
 }
 
 /// A refusal by [`CheckedResolver`], found again in the error chain of reqwest.
@@ -217,18 +328,18 @@ async fn read_image(mut response: reqwest::Response) -> Result<ProxiedImage, Ima
 #[error("the host has an address that is not public")]
 struct RefusedAddress;
 
-fn fetch_error(error: reqwest::Error) -> ImageProxyError {
+fn fetch_error(error: reqwest::Error) -> FetchError {
     let mut source = error.source();
     while let Some(cause) = source {
         if cause.downcast_ref::<RefusedAddress>().is_some() {
-            return ImageProxyError::Refused;
+            return FetchError::Refused;
         }
         source = cause.source();
     }
     if error.is_timeout() {
-        ImageProxyError::Fetch("timed out".to_owned())
+        FetchError::Fetch("timed out".to_owned())
     } else {
-        ImageProxyError::Fetch(error.to_string())
+        FetchError::Fetch(error.to_string())
     }
 }
 

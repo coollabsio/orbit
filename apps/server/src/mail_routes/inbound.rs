@@ -86,8 +86,48 @@ pub(crate) async fn post_inbound(
                     }
                 })
         }
-        ProviderSecrets::Resend { .. } | ProviderSecrets::Ses { .. } => {
-            return reply(StatusCode::SERVICE_UNAVAILABLE, "not supported yet");
+        ProviderSecrets::Resend {
+            api_key,
+            webhook_secret,
+        } => {
+            let event = match inbound::resend::verify_webhook(
+                header("svix-id"),
+                header("svix-timestamp"),
+                header("svix-signature"),
+                &body,
+                webhook_secret,
+                now_secs,
+            ) {
+                Ok(event) => event,
+                // a Resend event of another type (sent, bounced, …): nothing to receive
+                Err(InboundError::Malformed("event_type")) => {
+                    return (StatusCode::OK, Json(json!({ "ignored": true }))).into_response();
+                }
+                Err(error) => return refused(&intake, &provider, error, now).await,
+            };
+            if !event
+                .email_id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+            {
+                return refused(&intake, &provider, InboundError::Malformed("email_id"), now).await;
+            }
+            return delivered(
+                kind,
+                intake.receive_resend(&provider, api_key, event, now).await,
+            );
+        }
+        ProviderSecrets::Ses {
+            access_key_id,
+            secret_access_key,
+        } => {
+            return match intake
+                .receive_ses(&provider, access_key_id, secret_access_key, &body, now)
+                .await
+            {
+                Ok(result) => delivered(kind, result),
+                Err(error) => refused(&intake, &provider, error, now).await,
+            };
         }
     };
     let delivery = match parsed {
@@ -134,6 +174,9 @@ fn delivered(kind: ProviderKind, result: DeliveryResult) -> Response {
             Json(json!({ "stored": 0, "reject": reject_text(reason, &recipient) })),
         )
             .into_response(),
+        DeliveryResult::Confirmed => {
+            (StatusCode::OK, Json(json!({ "confirmed": true }))).into_response()
+        }
         DeliveryResult::Temporary(error) => {
             tracing::warn!(%error, provider = kind.as_str(), "provider mail not stored");
             reply(StatusCode::SERVICE_UNAVAILABLE, "try again later")

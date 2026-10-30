@@ -30,6 +30,10 @@ const APP_KEY: [u8; 32] = [6; 32];
 const MAX: u64 = 64 * 1024;
 const HOSTNAME: &str = "mx.orbit.test";
 const MAILGUN_KEY: &str = "mailgun-signing-key";
+const RESEND_KEY: &str = "re_test_key";
+const SVIX_KEY: &[u8] = b"resend-svix-key-0123456789abcdef";
+const TOPIC: &str = "arn:aws:sns:us-east-1:123456789012:orbit-mail";
+const SNS_HOST: &str = "sns.us-east-1.amazonaws.com";
 
 /// The local store; `install` fails while `fail` is set (the blob store is down).
 #[derive(Clone)]
@@ -102,6 +106,11 @@ struct Fixture {
 
 impl Fixture {
     async fn new() -> Self {
+        Self::with(|intake| intake).await
+    }
+
+    /// `customize` adds the test seams (local hosts for fetches, a local S3).
+    async fn with(customize: impl FnOnce(ProviderIntake) -> ProviderIntake) -> Self {
         let database = TestDatabase::new().await.unwrap();
         let identity = Arc::new(IdentityRepository::new((*database).clone()));
         let now = TimestampMillis::now();
@@ -145,6 +154,7 @@ impl Fixture {
             Arc::new(Authenticator::with_static_dns(StaticDns::new()).unwrap()),
             HOSTNAME.to_owned(),
         );
+        let intake = customize(intake);
         let app = mail_router(
             MailState::new(
                 Arc::clone(&identity),
@@ -243,9 +253,30 @@ impl Fixture {
 
     /// An instance provider of `kind`, and `domains` routed to it.
     async fn provider(&mut self, kind: ProviderKind, domains: &[Id]) -> Provider {
+        self.provider_with(kind, domains, ProviderSettings::default())
+            .await
+    }
+
+    async fn provider_with(
+        &mut self,
+        kind: ProviderKind,
+        domains: &[Id],
+        settings: ProviderSettings,
+    ) -> Provider {
         let secrets = match kind {
             ProviderKind::Mailgun => Some(ProviderSecrets::Mailgun {
                 signing_key: MAILGUN_KEY.to_owned(),
+            }),
+            ProviderKind::Resend => Some(ProviderSecrets::Resend {
+                api_key: RESEND_KEY.to_owned(),
+                webhook_secret: format!(
+                    "whsec_{}",
+                    base64::engine::general_purpose::STANDARD.encode(SVIX_KEY)
+                ),
+            }),
+            ProviderKind::Ses => Some(ProviderSecrets::Ses {
+                access_key_id: "AKIDEXAMPLE".to_owned(),
+                secret_access_key: "secret".to_owned(),
             }),
             _ => None,
         };
@@ -258,7 +289,7 @@ impl Fixture {
                     kind,
                     name: kind.as_str().to_owned(),
                     secrets: secrets.clone(),
-                    settings: ProviderSettings::default(),
+                    settings,
                 },
                 "request",
             )
@@ -718,4 +749,336 @@ async fn provider_spf_reaches_the_receipt_auth() {
     let auth: Value = serde_json::from_str(&fixture.receipts().await[0].2).unwrap();
     assert_eq!(auth["spf"], "pass", "{auth}");
     assert_eq!(auth["spf_domain"], "sender.example");
+}
+
+// ---------------------------------------------------------------- Resend and SES (fetching)
+
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::sync::{Mutex, OnceLock};
+
+use axum::response::IntoResponse;
+use orbit_server::mail_image_proxy::SafeFetch;
+use rcgen::SigningKey as _;
+
+/// A local server for every provider host; `deleted` collects S3 deletes, `confirmed` SNS confirmations.
+#[derive(Clone, Default)]
+struct Fake {
+    deleted: Arc<Mutex<Vec<String>>>,
+    confirmed: Arc<Mutex<u32>>,
+}
+
+async fn fake_hosts(fake: Fake) -> SocketAddr {
+    use axum::extract::{Path, Query};
+    use axum::routing::get;
+    let deleted = Arc::clone(&fake.deleted);
+    let confirmed = Arc::clone(&fake.confirmed);
+    let router = axum::Router::new()
+        .route(
+            "/emails/receiving/{id}",
+            get(|Path(id): Path<String>, headers: axum::http::HeaderMap| async move {
+                if headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok())
+                    != Some(&format!("Bearer {RESEND_KEY}"))
+                {
+                    return StatusCode::UNAUTHORIZED.into_response();
+                }
+                let url = match id.as_str() {
+                    "private" => "https://127.0.0.1:9/raw".to_owned(),
+                    "ten" => "https://10.0.0.1/raw".to_owned(),
+                    "metadata" => "https://download.test/to-metadata".to_owned(),
+                    "broken" => "https://download.test/broken".to_owned(),
+                    _ => "https://download.test/raw/1".to_owned(),
+                };
+                axum::Json(json!({ "object": "email", "id": id, "raw": { "download_url": url, "expires_at": "2026-10-30T12:00:00Z" } })).into_response()
+            }),
+        )
+        .route("/raw/1", get(|| async { mail("box@one.test", "resend") }))
+        .route("/broken", get(|| async { StatusCode::INTERNAL_SERVER_ERROR }))
+        .route(
+            "/to-metadata",
+            get(|| async {
+                (StatusCode::FOUND, [(header::LOCATION, "http://169.254.169.254/latest/")]).into_response()
+            }),
+        )
+        .route("/SimpleNotificationService-test.pem", get(|| async { sns_signer().0.clone() }))
+        .route(
+            "/",
+            get(move |Query(query): Query<HashMap<String, String>>| {
+                let confirmed = Arc::clone(&confirmed);
+                async move {
+                    if query.get("Action").map(String::as_str) == Some("ConfirmSubscription") {
+                        *confirmed.lock().unwrap() += 1;
+                    }
+                    StatusCode::OK
+                }
+            }),
+        )
+        .route(
+            "/orbit-mail/{*key}",
+            get(|Path(key): Path<String>| async move {
+                if key == "inbound/o1" {
+                    mail("box@one.test", "ses").into_response()
+                } else {
+                    StatusCode::NOT_FOUND.into_response()
+                }
+            })
+            .delete(move |Path(key): Path<String>| {
+                let deleted = Arc::clone(&deleted);
+                async move {
+                    deleted.lock().unwrap().push(key);
+                    StatusCode::NO_CONTENT
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
+    address
+}
+
+async fn fetching_fixture(fake: Fake) -> Fixture {
+    let address = fake_hosts(fake).await;
+    Fixture::with(move |intake| {
+        let hosts = ["api.resend.com", "download.test", SNS_HOST]
+            .into_iter()
+            .map(|host| (host.to_owned(), address))
+            .collect();
+        intake
+            .with_fetch(SafeFetch::with_test_hosts(hosts))
+            .with_s3_endpoint(format!("http://{address}"))
+    })
+    .await
+}
+
+fn svix_headers(body: &str) -> Vec<(&'static str, String)> {
+    let timestamp = TimestampMillis::now().as_millis() / 1000;
+    let mut mac = Hmac::<Sha256>::new_from_slice(SVIX_KEY).unwrap();
+    mac.update(format!("msg_1.{timestamp}.{body}").as_bytes());
+    vec![
+        ("svix-id", "msg_1".to_owned()),
+        ("svix-timestamp", timestamp.to_string()),
+        (
+            "svix-signature",
+            format!(
+                "v1,{}",
+                base64::engine::general_purpose::STANDARD.encode(mac.finalize().into_bytes())
+            ),
+        ),
+    ]
+}
+
+async fn resend(fixture: &Fixture, provider: &Provider, email_id: &str) -> (StatusCode, Value) {
+    let body = json!({
+        "type": "email.received",
+        "data": { "email_id": email_id, "from": "ann@sender.example", "to": ["box@one.test"], "received_for": ["box@one.test"] }
+    })
+    .to_string();
+    fixture
+        .post(
+            &format!("/api/v1/mail/inbound/resend/{}", provider.id),
+            "application/json",
+            &svix_headers(&body),
+            body.into_bytes(),
+        )
+        .await
+}
+
+#[tokio::test]
+async fn resend_webhook_fetches_and_stores_the_raw_message() {
+    let mut fixture = fetching_fixture(Fake::default()).await;
+    let provider = fixture.provider(ProviderKind::Resend, &[fixture.one]).await;
+    let (status, body) = resend(&fixture, &provider, "56761188").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let receipts = fixture.receipts().await;
+    assert_eq!(receipts.len(), 1);
+    assert_eq!(receipts[0].1, "resend");
+}
+
+#[tokio::test]
+async fn resend_download_failure_is_503_and_stores_nothing() {
+    let mut fixture = fetching_fixture(Fake::default()).await;
+    let provider = fixture.provider(ProviderKind::Resend, &[fixture.one]).await;
+    let (status, _) = resend(&fixture, &provider, "broken").await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(fixture.receipts().await.is_empty());
+}
+
+/// An RSA certificate like SNS's and its key (made once: RSA key generation is slow in debug).
+fn sns_signer() -> &'static (String, rcgen::KeyPair) {
+    static SIGNER: OnceLock<(String, rcgen::KeyPair)> = OnceLock::new();
+    SIGNER.get_or_init(|| {
+        let key = orbit_mail::generate_dkim_key();
+        let pair = rcgen::KeyPair::from_pkcs8_der_and_sign_algo(
+            &rustls_pki_types::PrivatePkcs8KeyDer::from(key.private_pkcs8_der.clone()),
+            &rcgen::PKCS_RSA_SHA256,
+        )
+        .unwrap();
+        let cert = rcgen::CertificateParams::new(vec![SNS_HOST.to_owned()])
+            .unwrap()
+            .self_signed(&pair)
+            .unwrap();
+        (cert.pem(), pair)
+    })
+}
+
+fn sns_body(fields: &[(&str, String)], cert_url: &str, topic: &str) -> String {
+    let fields: Vec<(&str, String)> = fields
+        .iter()
+        .map(|(name, value)| {
+            (
+                *name,
+                if *name == "TopicArn" {
+                    topic.to_owned()
+                } else {
+                    value.clone()
+                },
+            )
+        })
+        .collect();
+    let mut text = String::new();
+    for (name, value) in &fields {
+        text.push_str(&format!("{name}\n{value}\n"));
+    }
+    let signature = sns_signer().1.sign(text.as_bytes()).unwrap();
+    let mut body = json!({
+        "SignatureVersion": "2",
+        "Signature": base64::engine::general_purpose::STANDARD.encode(signature),
+        "SigningCertURL": cert_url,
+    });
+    for (name, value) in fields {
+        body[name] = value.into();
+    }
+    body.to_string()
+}
+
+const CERT_URL: &str = "https://sns.us-east-1.amazonaws.com/SimpleNotificationService-test.pem";
+
+fn ses_notification_fields(key: &str) -> Vec<(&'static str, String)> {
+    let message = json!({
+        "notificationType": "Received",
+        "mail": { "source": "ann@sender.example", "messageId": "o1" },
+        "receipt": {
+            "recipients": ["box@one.test"],
+            "spfVerdict": { "status": "PASS" },
+            "action": { "type": "S3", "bucketName": "orbit-mail", "objectKey": key }
+        }
+    })
+    .to_string();
+    vec![
+        ("Message", message),
+        ("MessageId", "m-1".to_owned()),
+        ("Timestamp", "2026-10-30T10:00:00.000Z".to_owned()),
+        ("TopicArn", TOPIC.to_owned()),
+        ("Type", "Notification".to_owned()),
+    ]
+}
+
+fn ses_settings() -> ProviderSettings {
+    ProviderSettings {
+        region: Some("us-east-1".to_owned()),
+        bucket: Some("orbit-mail".to_owned()),
+        topic_arn: Some(TOPIC.to_owned()),
+        ..ProviderSettings::default()
+    }
+}
+
+async fn ses(fixture: &Fixture, provider: &Provider, body: String) -> (StatusCode, Value) {
+    fixture
+        .post(
+            &format!("/api/v1/mail/inbound/ses/{}", provider.id),
+            "text/plain; charset=UTF-8",
+            &[],
+            body.into_bytes(),
+        )
+        .await
+}
+
+#[tokio::test]
+async fn ses_subscription_is_confirmed() {
+    let fake = Fake::default();
+    let mut fixture = fetching_fixture(fake.clone()).await;
+    let provider = fixture
+        .provider_with(ProviderKind::Ses, &[fixture.one], ses_settings())
+        .await;
+    let fields = vec![
+        ("Message", "You have chosen to subscribe".to_owned()),
+        ("MessageId", "m-2".to_owned()),
+        (
+            "SubscribeURL",
+            format!("https://{SNS_HOST}/?Action=ConfirmSubscription&TopicArn={TOPIC}&Token=t"),
+        ),
+        ("Timestamp", "2026-10-30T10:00:00.000Z".to_owned()),
+        ("Token", "t".to_owned()),
+        ("TopicArn", TOPIC.to_owned()),
+        ("Type", "SubscriptionConfirmation".to_owned()),
+    ];
+    let (status, body) = ses(&fixture, &provider, sns_body(&fields, CERT_URL, TOPIC)).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(*fake.confirmed.lock().unwrap(), 1);
+}
+
+#[tokio::test]
+async fn ses_notification_reads_s3_and_deletes_the_object() {
+    let fake = Fake::default();
+    let mut fixture = fetching_fixture(fake.clone()).await;
+    let provider = fixture
+        .provider_with(ProviderKind::Ses, &[fixture.one], ses_settings())
+        .await;
+    let body = sns_body(&ses_notification_fields("inbound/o1"), CERT_URL, TOPIC);
+    let (status, reply) = ses(&fixture, &provider, body).await;
+    assert_eq!(status, StatusCode::OK, "{reply}");
+    let receipts = fixture.receipts().await;
+    assert_eq!(receipts.len(), 1);
+    assert_eq!(receipts[0].1, "ses");
+    let auth: Value = serde_json::from_str(&receipts[0].2).unwrap();
+    assert_eq!(auth["spf"], "pass");
+    assert_eq!(*fake.deleted.lock().unwrap(), vec!["inbound/o1".to_owned()]);
+}
+
+#[tokio::test]
+async fn ses_bad_signature_or_another_topic_is_401() {
+    let mut fixture = fetching_fixture(Fake::default()).await;
+    let provider = fixture
+        .provider_with(ProviderKind::Ses, &[fixture.one], ses_settings())
+        .await;
+    let forged = sns_body(&ses_notification_fields("inbound/o1"), CERT_URL, TOPIC)
+        .replace("inbound/o1", "inbound/o2");
+    assert_eq!(
+        ses(&fixture, &provider, forged).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    // a valid SNS message from a topic this provider was not set up with
+    let other = sns_body(
+        &ses_notification_fields("inbound/o1"),
+        CERT_URL,
+        "arn:aws:sns:us-east-1:999999999999:attacker",
+    );
+    assert_eq!(
+        ses(&fixture, &provider, other).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    assert!(fixture.receipts().await.is_empty());
+}
+
+#[tokio::test]
+async fn fetch_targets_must_be_public_provider_hosts() {
+    let mut fixture = fetching_fixture(Fake::default()).await;
+    let resend_provider = fixture.provider(ProviderKind::Resend, &[fixture.one]).await;
+    for email_id in ["private", "ten", "metadata"] {
+        let (status, _) = resend(&fixture, &resend_provider, email_id).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{email_id}");
+    }
+    let ses_provider = fixture
+        .provider_with(ProviderKind::Ses, &[fixture.two], ses_settings())
+        .await;
+    let elsewhere = sns_body(
+        &ses_notification_fields("inbound/o1"),
+        "https://evil.example/SimpleNotificationService-test.pem",
+        TOPIC,
+    );
+    assert_eq!(
+        ses(&fixture, &ses_provider, elsewhere).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    assert!(fixture.receipts().await.is_empty());
 }
