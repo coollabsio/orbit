@@ -910,7 +910,11 @@ async fn initialize_production_services(
             worker.with_handler(mail_purge_kind(), move |_| {
                 let mail = Arc::clone(&mail);
                 async move {
-                    mail.purge(TimestampMillis::now())
+                    let now = TimestampMillis::now();
+                    mail.purge(now)
+                        .await
+                        .map_err(|error| JobError::Retryable(error.to_string()))?;
+                    mail.purge_rejected(now)
                         .await
                         .map(|_| ())
                         .map_err(|error| JobError::Retryable(error.to_string()))

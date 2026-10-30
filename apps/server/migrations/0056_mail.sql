@@ -15,6 +15,30 @@
 ALTER TABLE instance_settings ADD COLUMN mail_domains_enabled INTEGER NOT NULL DEFAULT 0
     CHECK (mail_domains_enabled IN (0, 1));
 
+-- Instance switch: whether workspace admins may set up their own mail providers (Orbit Cloud: 0).
+ALTER TABLE instance_settings ADD COLUMN mail_workspace_providers_enabled INTEGER NOT NULL DEFAULT 1
+    CHECK (mail_workspace_providers_enabled IN (0, 1));
+
+-- A mail provider that receives mail for a domain and delivers it to Orbit over HTTPS
+-- (`/api/v1/mail/inbound/<kind>/<id>`). No workspace: an instance provider of the root user, which
+-- every workspace may pick; else a provider that only its workspace may pick.
+CREATE TABLE mail_providers (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE,
+    kind TEXT NOT NULL CHECK (kind IN ('cloudflare', 'postmark', 'mailgun', 'resend', 'ses')),
+    name TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 80),
+    -- JSON of the kind's secrets, sealed with the app key; associated data `mail-provider:<id>`.
+    secrets BLOB NOT NULL,
+    -- MX hosts, region, bucket and prefix (JSON).
+    settings TEXT NOT NULL CHECK (json_valid(settings)),
+    last_received_at INTEGER,
+    last_error TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX mail_providers_workspace ON mail_providers (workspace_id);
+
 CREATE TABLE mailboxes (
     id TEXT PRIMARY KEY,
     workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -52,9 +76,27 @@ CREATE TABLE mail_domains (
     -- The last DNS check: a result for each record (verify, mx, dkim, spf, dmarc).
     dns_report TEXT CHECK (dns_report IS NULL OR json_valid(dns_report)),
     checked_at INTEGER,
+    -- The provider that receives the domain's mail; NULL: Orbit's own SMTP listener. A provider in
+    -- use cannot be deleted (NO ACTION, so a workspace's cascade still removes both).
+    provider_id TEXT REFERENCES mail_providers(id),
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
 );
+
+CREATE INDEX mail_domains_provider ON mail_domains (provider_id) WHERE provider_id IS NOT NULL;
+
+-- A domain may use an instance provider or a provider of its own workspace.
+CREATE TRIGGER mail_domains_provider_scope_insert
+BEFORE INSERT ON mail_domains
+WHEN NEW.provider_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM mail_providers
+    WHERE id = NEW.provider_id AND (workspace_id IS NULL OR workspace_id = NEW.workspace_id))
+BEGIN SELECT RAISE(ABORT, 'mail domain must use a provider of its workspace'); END;
+
+CREATE TRIGGER mail_domains_provider_scope_update
+BEFORE UPDATE OF provider_id, workspace_id ON mail_domains
+WHEN NEW.provider_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM mail_providers
+    WHERE id = NEW.provider_id AND (workspace_id IS NULL OR workspace_id = NEW.workspace_id))
+BEGIN SELECT RAISE(ABORT, 'mail domain must use a provider of its workspace'); END;
 
 -- One owner for each name on the whole instance.
 CREATE UNIQUE INDEX mail_domains_name ON mail_domains (lower(name));
@@ -345,6 +387,23 @@ AFTER DELETE ON mail_threads
 BEGIN
     DELETE FROM mail_search WHERE rowid = OLD.row_id;
 END;
+
+-- Mail that a provider had already accepted but Orbit could not deliver (no mailbox for the
+-- address, another route, a suspended domain or mailbox). No body. Kept for 30 days, for the
+-- Failed messages list. No workspace: the recipient's domain is not on this instance.
+CREATE TABLE mail_rejected_deliveries (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT REFERENCES workspaces(id) ON DELETE CASCADE,
+    provider_id TEXT NOT NULL REFERENCES mail_providers(id) ON DELETE CASCADE,
+    mail_from TEXT,
+    recipient TEXT NOT NULL CHECK (length(recipient) BETWEEN 1 AND 320),
+    reason TEXT NOT NULL CHECK (reason IN ('unknown_address', 'wrong_route', 'domain_unavailable',
+        'mailbox_suspended')),
+    received_at INTEGER NOT NULL
+);
+
+CREATE INDEX mail_rejected_deliveries_workspace ON mail_rejected_deliveries (workspace_id, received_at);
+CREATE INDEX mail_rejected_deliveries_received ON mail_rejected_deliveries (received_at);
 
 -- Test addresses of the Admin health card (`check-…@<domain>`, valid for one hour). Mail to one
 -- records what arrived and never reaches a mailbox.

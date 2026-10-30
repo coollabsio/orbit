@@ -12,6 +12,7 @@ mod ingest;
 mod keys;
 mod labels;
 mod mailboxes;
+mod providers;
 mod reading;
 mod receipts;
 mod search;
@@ -37,6 +38,11 @@ pub(crate) use mailboxes::suspend_owned_mailboxes;
 pub use mailboxes::{
     AddressKind, BulkResult, MailAddress, Mailbox, MailboxKind, MailboxStatus, NamePattern,
     NewMailbox, Proposal, RecipientLookup, local_part_for, lookup_recipient,
+};
+pub use providers::{
+    CreatedProvider, MailProvider, NewProvider, NewRejection, ProviderChange, ProviderKind,
+    ProviderScope, ProviderSecrets, ProviderSettings, REJECTED_RETENTION_MS, RejectReason,
+    provider_aad,
 };
 pub use reading::{
     MailAttachmentView, MailAuthResult, MailAuthSummary, MailCounts, MailFolder, MailMessageView,
