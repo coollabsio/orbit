@@ -205,7 +205,7 @@ Set the same `ORBIT_APP_KEY` on the new server before you start Orbit: without i
 
 ## Mail
 
-Orbit is its own mail server for incoming mail: an SMTP listener receives mail for the verified domains of the workspaces. Members read it in **Mail**. Outgoing mail is not in this release.
+Orbit is its own mail server for incoming mail. Mail for the verified domains of the workspaces arrives in one of two ways: at Orbit's own SMTP listener, or through a mail provider that sends each message to Orbit over HTTPS (no port 25 on this server; see [Receive through a provider](#receive-through-a-provider)). Members read it in **Mail**. Outgoing mail is not in this release.
 
 ### Settings
 
@@ -232,7 +232,27 @@ The root user lets workspaces add mail domains in **Admin → Mail**. Workspace 
 
 In both modes Orbit removes incoming `Authentication-Results` headers with its own ID and adds its own. A DMARC failure does not refuse a message: Orbit puts it in Spam.
 
-Many cloud providers block port 25 (inbound, outbound or both), or open it only on request. Ask your provider, or use relay mode.
+Many cloud providers block port 25 (inbound, outbound or both), or open it only on request. Ask your provider, use relay mode, or receive through a provider.
+
+### Receive through a provider
+
+The domain's MX points to a mail provider, and the provider sends each message to `https://<public origin>/api/v1/mail/inbound/<kind>/<id>`. This server needs no listener, no port 25, no certificate and no PTR record for it. The public origin must be reachable from the internet.
+
+- **Instance providers:** the root user adds them in **Admin → Mail → Mail providers**. Every workspace can route a domain to them.
+- **Workspace providers:** owners and admins add their own in **Settings → Mail → Providers**, with their own provider account. The root user can turn this off (**Workspaces can add their own providers**). Off stops new ones; existing ones keep receiving. Orbit Cloud keeps it off and receives all mail at its own MX.
+- In **Settings → Mail → Domains**, pick where each domain's mail arrives. The MX record on the page then shows the provider's hosts, and the domain check expects them. The verification TXT record stays required.
+- Add the domain at the provider yourself; Orbit shows the steps for each provider after you add it. Orbit makes the secrets of Cloudflare and Postmark and shows them once.
+- Each request must carry the provider's signature or credentials. Orbit refuses requests older than 5 minutes and Mailgun tokens it has seen.
+- Orbit checks DKIM and DMARC itself and takes SPF from the provider (its `Received-SPF` header, or SES's verdict).
+- Mail for an address that no mailbox has: Cloudflare bounces it to the sender. The other providers have already accepted it, so Orbit lists it under **Settings → Mail → Failed messages → Not delivered** for 30 days, without its body.
+
+| Provider | MX | At the provider | Notes |
+|---|---|---|---|
+| Cloudflare Email Routing | `route1/2/3.mx.cloudflare.net` (Cloudflare adds them) | An Email Worker with Orbit's script; variables `ORBIT_WEBHOOK_URL` and the secret `ORBIT_SIGNING_SECRET`; the catch-all rule sends to the Worker. | Messages up to 25 MiB. The Worker runs while the sender is connected, so unknown addresses bounce and Orbit errors make the sender retry. |
+| Postmark | `inbound.postmarkapp.com` | Inbound webhook URL with Orbit's credentials in it, and **Include raw email content in JSON payload** on. | Postmark retries until Orbit stores the message. |
+| Mailgun | `mxa.mailgun.org`, `mxb.mailgun.org` (EU: `mxa/mxb.eu.mailgun.org`) | A receiving route that matches `.*@<domain>` and forwards to Orbit's URL (it ends in `/mime`); the HTTP webhook signing key. | |
+| Resend | the host Resend shows (enter it in the provider) | A webhook for `email.received`; its signing secret and an API key that can read received emails. | Resend keeps its own copy of each message; Orbit cannot delete it. |
+| Amazon SES | `inbound-smtp.<region>.amazonaws.com` | A receipt rule that stores the message in an S3 bucket and notifies an SNS topic with an HTTPS subscription to Orbit's URL. Enter the region, bucket, prefix and topic ARN. | Orbit confirms the subscription, refuses other topics, and deletes each message from the bucket once stored. The IAM user needs `s3:GetObject` and `s3:DeleteObject` on the bucket. As a backstop, add a bucket lifecycle rule that deletes objects after a few days. |
 
 ### Port 25 and the client address
 

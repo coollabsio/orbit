@@ -415,6 +415,9 @@ Design: `docs/superpowers/specs/2026-10-23-mail-slice-1-design.md` (local file).
 
 Slice 1 receives and reads mail; it does not send. Server (migration 0056):
 
+- Provider intake (`mail_delivery.rs`, `mail_routes/{inbound,providers}.rs`, `crates/mail/src/inbound/`): Cloudflare,
+  Postmark, Mailgun, Resend and SES post to `/api/v1/mail/inbound/{kind}/{id}`; instance and workspace providers
+  (`mail_providers`), a route per domain (`mail_domains.provider_id`), rejected deliveries listed for 30 days.
 - SMTP listener on port 2525 when `ORBIT_MAIL_ENABLED=true`, relay mode (default, trusts the relay's
   `Authentication-Results`) or direct mode (own SPF/DKIM/DMARC checks, STARTTLS, certificate reload every 60 s).
 - Domains per workspace, verified by `_orbit-verify` TXT (`mail.dns_check` every 10 min while pending, daily after);
