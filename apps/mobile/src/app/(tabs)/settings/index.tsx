@@ -7,7 +7,7 @@ import { View } from 'react-native'
 import { ConfirmDialog, type ConfirmRequest } from '../../../components/settings/Dialog'
 import { ACCOUNT_NAV, Note, RowIcon, RowText, SettingsCard, SettingsRow, SettingsShell, WORKSPACE_NAV } from '../../../components/settings/Shell'
 import { formatBytes, storageUse } from '../../../data/account-api'
-import { useDeleteStorageFile, useMemberWrites, useRenameWorkspace, useWorkspaceStorage } from '../../../hooks/account'
+import { useAuthOptions, useDeleteStorageFile, useMemberWrites, useRenameWorkspace, useWorkspaceStorage } from '../../../hooks/account'
 import { useOrbit } from '../../../orbit-context'
 import { useMembers } from '../../../queries'
 import { errorMessage } from '../../../session-context'
@@ -170,11 +170,17 @@ function LeaveWorkspace() {
   const { leave } = useMemberWrites()
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null)
   const membership = members.data?.find((member) => member.user_id === user.id)
+  // Orbit Cloud refuses ownership transfer.
+  const billing = useAuthOptions().data?.billing_enabled ?? false
 
   if (membership && !membership.can_remove) {
     return (
       <SettingsCard title="Leave workspace" description="You own this workspace.">
-        <Note>To leave, first transfer ownership to another member in Members.</Note>
+        <Note>
+          {billing
+            ? 'The owner cannot leave. Ownership transfer is not available on Orbit Cloud yet.'
+            : 'To leave, first transfer ownership to another member in Members.'}
+        </Note>
       </SettingsCard>
     )
   }

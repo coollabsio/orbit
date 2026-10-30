@@ -62,6 +62,7 @@
 - Browser-default `text-align: center` on `<button>` inherits into child spans — the base reset must set `text-align: left` on buttons.
 - The production CSP is `style-src 'self'`: a library that adds a `<style>` at runtime (Sonner, Mermaid) works on the Vite dev server and loses its styles in production. Put the rules in `index.css` or a constructed style sheet (`document.adoptedStyleSheets`), and test a production build served with the server's CSP header.
 - Typecheck the web app with `bunx tsc -b` (what `build` runs). `tsc --noEmit -p .` checks nothing: the root `tsconfig.json` only has references, so it passes on broken code.
+- In `apps/web`, run `bun test src` (the `test` script), not bare `bun test`: bare `bun test` also loads the Playwright e2e files and reports false failures.
 - `cargo test --workspace` stops at the first failing test binary; use `--no-fail-fast` to see the whole suite.
 - Playwright rewrites the tracked `apps/web/test-results/.last-run.json` on every run — restore it with `git checkout --` and never commit it.
 - If the Agent Browser fails with a `SingletonLock: File exists` profile error, another session holds the profile. Do not delete the lock; drive the dev server with `playwright-core` from `apps/web/node_modules` instead (script in `/tmp`).

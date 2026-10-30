@@ -17,17 +17,14 @@ const view = (fields: Partial<BillingView>): BillingView => ({
 const trial = (ends_at: string): BillingView['trial'] => ({ ends_at, members: { used: 1, limit: 3 }, pages: { used: 0, limit: 50 }, tasks: { used: 0, limit: 100 } })
 
 test('a trial shows its days left, rounded up and at least one', () => {
-  expect(billingBanner(view({ access: 'trial', trial: trial('2026-11-03T12:00:00Z') }), NOW)).toEqual({ kind: 'trial', text: 'Trial: 7 days left', action: 'Choose a plan' })
+  expect(billingBanner(view({ access: 'trial', trial: trial('2026-11-03T12:00:00Z') }), NOW)).toEqual({ kind: 'trial', text: 'Trial: 7 days left' })
   expect(billingBanner(view({ access: 'trial', trial: trial('2026-10-27T13:00:00Z') }), NOW)?.text).toBe('Trial: 1 day left')
   expect(billingBanner(view({ access: 'trial', trial: trial('2026-10-27T11:00:00Z') }), NOW)?.text).toBe('Trial: 1 day left')
 })
 
-test('read-only shows the lock line; a member who cannot manage gets View billing', () => {
-  expect(billingBanner(view({ access: 'read_only', can_manage: false }), NOW)).toEqual({
-    kind: 'read_only',
-    text: 'This workspace is read-only because it has no active subscription.',
-    action: 'View billing',
-  })
+test('read-only shows the lock line with no billing action for any member', () => {
+  expect(billingBanner(view({ access: 'read_only', can_manage: true }), NOW)).toEqual({ kind: 'read_only', text: 'This workspace is read-only.' })
+  expect(billingBanner(view({ access: 'read_only', can_manage: false }), NOW)).toEqual({ kind: 'read_only', text: 'This workspace is read-only.' })
 })
 
 test('full access, a trial without data and no billing show nothing', () => {

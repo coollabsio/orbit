@@ -72,6 +72,7 @@ export function useAdminUserWrites() {
     setAdmin: useMutation({ mutationFn: ({ userId, isAdmin }: { userId: string; isAdmin: boolean }) => admin.setAdmin(client, userId, isAdmin), onSettled }),
     resetTwoFactor: useMutation({ mutationFn: (userId: string) => admin.clearTwoFactor(client, userId), onSettled }),
     recoveryLink: useMutation({ mutationFn: (userId: string) => admin.recoveryLink(client, userId), onSettled: audit }),
+    changeEmail: useMutation({ mutationFn: ({ userId, email }: { userId: string; email: string }) => admin.changeEmail(client, userId, email), onSettled }),
   }
 }
 

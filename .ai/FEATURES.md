@@ -476,10 +476,51 @@ turns its routes, navigation and shortcuts off.
   with the thread; page body mentions open the page at the mentioned block).
 - Inbox and Profile remain mock-backed.
 - Profile edits the current mock user's name, email, and title.
+- Account → Profile changes the email (`POST /api/v1/auth/me/email`, password or a fresh sign-in; a one-use 60-minute
+  link to the new address, confirmed on `/confirm-email` via `POST /api/v1/auth/email-change/confirm`; other sessions
+  are signed out, the old address gets a notice, and on Orbit Cloud the owned workspaces' Stripe customers get the new
+  address through the `billing.stripe_customer_email` job). Taken addresses get the same answer and no email.
+- Admin → Users → Manage → Change email (web and mobile; `PUT /api/v1/admin/users/{user_id}/email`, admins only,
+  with or without a mail server) sets the new address at once, verified, with no confirmation email. It shares
+  `apply_email_change` (`repositories/account.rs`) with the link confirmation: pending email change and password
+  reset links are deleted, the account is signed out everywhere (an admin changing their own email keeps the current
+  session), Stripe jobs are queued, and the audit event `account.email_changed` has `changed_by: admin` (`self` for
+  the link). The old address gets the notice only when a mail server is saved. Errors: `invalid_email`, `same_email`
+  (422), `email_taken`, `account_deleted`, `root_account` (409), `user_not_found` (404). The menu shows the action on
+  the admin's own row too (only that action); never on deleted accounts.
+- Admin → Users on Orbit Cloud never acts silently (`AccountNotice` in `workspace_routes.rs`): Change email, the
+  recovery link (`POST …/recovery-link`) and Reset two-factor (`POST …/two-factor/reset`) answer 409 `smtp_required`
+  without a mail server (non-admins still get 403), and email the person after the commit (`send_later`, a failed send
+  only logs a warning): the old and the new address (`email_changed`, `email_set_by_admin`), the reset link to the
+  account (`admin_recovery`, 30 minutes; the answer is 202 `{sent_to, expires_at}` with no `url`), and a two-factor
+  notice (`two_factor_reset`). Self-hosted keeps 201 `{url, expires_at}` and its old notices. Web and mobile read
+  `billing_enabled`/`email_enabled` from `/api/v1/auth/options`: on Cloud the item is "Send password reset email" and
+  shows "Sent to …" (web toast, mobile note) instead of the link dialog, and without SMTP the three items are disabled
+  with "Needs a mail server on Orbit Cloud" (mobile `adminActionBlocked`).
+- Orbit Cloud always needs a mail server (`repositories/instance_settings.rs`): `DELETE /api/v1/admin/settings/smtp`
+  answers 409 `smtp_required` and Admin → Email hides Remove (web and mobile; saving a replacement works), and
+  opening registration needs SMTP even with a sign-in provider (409 `email_not_configured`). While Cloud has no mail
+  server (right after setup), installation admins see a red banner linking to Admin → Email (web `MailServerBanner`
+  above the top bar, mobile above the dock; computed from `billing_enabled` and `email_enabled` in `/api/v1/auth/options`),
+  and the server logs one `warn!` at startup. Self-hosted servers keep "SMTP or provider" and can remove SMTP.
+- Account → Profile → Delete account (`DELETE /api/v1/auth/me`, typed email + password or fresh sign-in) anonymizes the
+  account (`users.deleted_at`, "Deleted user", `deleted-<id>@deleted.invalid`) and removes its sign-in methods,
+  sessions, tokens, personal data and memberships; refused with `owns_workspaces` (lists them) and `root_account`.
+  Admin → Users shows it as Deleted and cannot reinstate it. Mobile has both flows in Settings → Profile.
 - Workspace Settings: General, Members, Sessions.
 - Workspace creation, members, invitations, fixed roles, ownership transfer, and sessions use persistent APIs.
 - Sessions lists the current account's active devices. It shows device/browser and last active only, with controls to revoke any non-current session.
 - Chat administration remains separate at `/chat/settings`.
+- Workspace Settings → Advanced → Export (owner/admin, `workspace.export`; also on read-only billing workspaces):
+  `POST /workspaces/{id}/exports` queues a `workspace.export` job (one queued/running export per workspace, else 409
+  `export_in_progress`; adjustable job limits); `GET …/exports` lists unexpired ones (polled while active);
+  `GET …/exports/{export_id}/download` streams the ZIP (owner/admin only, audited `workspace.export_downloaded`).
+  The job (`apps/server/src/workspace_export/`) writes `workspace.json`, `tasks/<KEY>-<n>.json` (comments,
+  attachments, activity, trash flag), `pages/<Teamspace|Private>/…md` (page-export converter) + `pages/comments.json`,
+  `chat/<channel>.json` (public channels plus private channels/DMs the requester is in), `files/<blob>/<name>` and
+  `README.txt`, streamed to a temp file, then stored at `exports/{ws}/{id}.zip` in the attachment tier (workspace
+  bucket, installation bucket, or `<backups>/exports/`). Retention deletes it 7 days after it is ready. Layout:
+  `docs/operations.md` → Workspace export. Mobile has no export screen.
 
 ## Mobile presentation
 

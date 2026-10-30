@@ -27,6 +27,7 @@ import { GeneralPage } from '@/features/settings/pages/GeneralPage'
 import { GithubPage } from '@/features/settings/pages/GithubPage'
 import { EmojiPage } from '@/features/settings/pages/EmojiPage'
 import { DangerZonePage } from '@/features/settings/pages/DangerZonePage'
+import { ExportPage } from '@/features/settings/pages/ExportPage'
 import { BillingPage } from '@/features/settings/pages/BillingPage'
 import { MembersPage } from '@/features/settings/pages/MembersPage'
 import { SecurityPage } from '@/features/settings/pages/SecurityPage'
@@ -47,6 +48,7 @@ import { OAuthConsentPage } from '@/features/auth/pages/OAuthConsentPage'
 import { ProviderCallbackPage } from '@/features/auth/pages/ProviderCallbackPage'
 import { LoginPage } from '@/features/auth/pages/LoginPage'
 import { RecoveryPage } from '@/features/auth/pages/RecoveryPage'
+import { ConfirmEmailPage } from '@/features/auth/pages/ConfirmEmailPage'
 import { RegisterPage } from '@/features/auth/pages/RegisterPage'
 import { SetupPage } from '@/features/auth/pages/SetupPage'
 import { OnboardingPage } from '@/features/onboarding/OnboardingPage'
@@ -87,6 +89,7 @@ export default function App() {
         {/* outside GuestGate: connect and confirm come back here signed in */}
         <Route path="login/callback" element={<ProviderCallbackPage />} />
         <Route path="accept-invitation" element={<AcceptInvitationPage />} />
+        <Route path="confirm-email" element={<ConfirmEmailPage />} />
         <Route element={<AuthGate />}>
           <Route path="onboarding" element={<OnboardingPage />} />
           <Route element={<WorkspaceProvider><Outlet /></WorkspaceProvider>}>
@@ -146,6 +149,7 @@ export default function App() {
                 <Route path="stickers" element={<StickersPage />} />
                 <Route path="github" element={<GithubPage />} />
                 <Route path="billing" element={<BillingPage />} />
+                <Route path="export" element={<ExportPage />} />
                 <Route path="danger-zone" element={<DangerZonePage />} />
                 <Route path="members" element={<MembersPage />} />
                 <Route path="invitations" element={<Navigate to="/settings/members" replace />} />

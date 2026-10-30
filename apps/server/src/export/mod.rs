@@ -183,7 +183,7 @@ impl LinkResolver for Resolver<'_> {
 }
 
 /// Media types that are already compressed; stored as they are.
-fn compressed_type(mime_type: &str) -> bool {
+pub(crate) fn compressed_type(mime_type: &str) -> bool {
     matches!(
         mime_type,
         "image/png"
@@ -214,22 +214,16 @@ pub fn plan(
     let origin = origin.trim_end_matches('/');
     let root = source.pages.first().ok_or(PageExportError::NotFound)?;
     let mut planned: HashMap<Id, PlannedPage> = HashMap::new();
-    // Names per folder, keyed by the page that owns the folder (`None` = archive root).
-    let mut folders: HashMap<Option<Id>, NameSet> = HashMap::new();
+    // Names per folder, keyed by the folder's path.
+    let mut folders: HashMap<Vec<String>, NameSet> = HashMap::new();
     for page in &source.pages {
-        let parent = if page.id == root.id {
-            None
-        } else {
-            page.parent_id
-        };
+        // A page whose parent is not exported (before it in `pages`) is a root.
+        let parent = page.parent_id.and_then(|parent| planned.get(&parent));
         let dir = match parent {
-            None => Vec::new(),
-            Some(parent) => planned
-                .get(&parent)
-                .map(PlannedPage::own_dir)
-                .ok_or(PageExportError::Corrupt)?,
+            None => source.root_dirs.get(&page.id).cloned().unwrap_or_default(),
+            Some(parent) => parent.own_dir(),
         };
-        let names = folders.entry(parent).or_insert_with(|| {
+        let names = folders.entry(dir.clone()).or_insert_with(|| {
             if parent.is_some() {
                 NameSet::with_reserved(&[ASSETS_DIR])
             } else {
@@ -335,7 +329,7 @@ fn civil(millis: i64) -> (i64, u32, u32, u32, u32, u32) {
     )
 }
 
-fn zip_time(at: TimestampMillis) -> zip::DateTime {
+pub(crate) fn zip_time(at: TimestampMillis) -> zip::DateTime {
     let (year, month, day, hour, minute, second) = civil(at.as_millis());
     u16::try_from(year)
         .ok()

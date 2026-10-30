@@ -94,6 +94,8 @@ async fn the_root_user_changes_and_resets_job_limits() {
          "default_concurrency": 2, "default_workspace_concurrency": 1},
         {"kind": "notion.import", "concurrency": 2, "workspace_concurrency": 1,
          "default_concurrency": 2, "default_workspace_concurrency": 1},
+        {"kind": "workspace.export", "concurrency": 2, "workspace_concurrency": 1,
+         "default_concurrency": 2, "default_workspace_concurrency": 1},
     ]});
 
     let (status, view) = call(&app, &cookie, "GET", None).await;

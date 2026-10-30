@@ -6,12 +6,14 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { PasswordInput } from '@/components/ui/password-input'
 import { Button } from '@/components/ui/button'
-import { useChangePassword, useCurrentUser, useSetAvatar, useUpdateProfile } from '@/features/auth/api'
+import { useAuthOptions, useChangePassword, useCurrentUser, useSetAvatar, useUpdateProfile } from '@/features/auth/api'
 import { ConfirmWithProvider } from '@/features/auth/components/ConfirmWithProvider'
 import { userColor } from '@/features/workspaces/api'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { avatarImage } from '@/features/profile/avatarImage'
 import { TimeZonePicker } from '@/features/profile/components/TimeZonePicker'
+import { DeleteAccountCard } from '@/features/profile/components/DeleteAccountCard'
+import { EmailChangeDialog } from '@/features/profile/components/EmailChangeDialog'
 import { PROFILE_LIMITS, phoneValid, profileChanges, profileDirty, profileFormOf, type ProfileForm } from '@/features/profile/profileLib'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { FieldGrid, RequiredMark } from '@/features/settings/components/SettingsParts'
@@ -107,7 +109,7 @@ function AvatarField() {
 /** The bio counter shows from this many characters before the limit. */
 const BIO_COUNTER_FROM = 100
 
-/** Account settings: the profile other members see, and authenticated password change. */
+/** Account settings: the profile other members see, the email, the password, and deleting the account. */
 export function ProfilePage() {
   const user = useCurrentUser()
   const me = user.data
@@ -131,6 +133,10 @@ export function ProfilePage() {
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [passwordError, setPasswordError] = useState<string | null>(null)
+  const options = useAuthOptions()
+  // The new address confirms the change with an emailed link.
+  const emailEnabled = options.data?.email_enabled === true
+  const [changingEmail, setChangingEmail] = useState(false)
 
   const dirty = profileDirty(me, form)
   const bioLeft = PROFILE_LIMITS.bio - form.bio.length
@@ -193,7 +199,11 @@ export function ProfilePage() {
                     <FieldLabel htmlFor="profile-email">
                       Email
                     </FieldLabel>
-                    <Input id="profile-email" value={me?.email ?? ''} readOnly />
+                    <div className="flex gap-2">
+                      <Input id="profile-email" value={me?.email ?? ''} readOnly />
+                      {emailEnabled ? <Button type="button" variant="outline" onClick={() => setChangingEmail(true)}>Change</Button> : null}
+                    </div>
+                    {options.data && !emailEnabled ? <FieldDescription>This Orbit cannot send email, so the email cannot be changed. Ask an administrator.</FieldDescription> : null}
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="profile-title">Title</FieldLabel>
@@ -287,6 +297,8 @@ export function ProfilePage() {
                 </FieldGrid>
               </SettingsCard>
             </form>
+            <DeleteAccountCard />
+            {changingEmail && me ? <EmailChangeDialog currentEmail={me.email} hasPassword={hasPassword} onClose={() => setChangingEmail(false)} /> : null}
         {dirty ? (
           <UnsavedBar
             onReset={() => {

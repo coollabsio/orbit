@@ -47,10 +47,13 @@ pub enum Permission {
     /// Connect the workspace's own S3 bucket for its files.
     #[serde(rename = "storage.manage")]
     StorageManage,
+    /// Export the whole workspace as a ZIP archive and download its exports.
+    #[serde(rename = "workspace.export")]
+    WorkspaceExport,
 }
 
 impl Permission {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::WorkspaceUpdate,
         Self::WorkspaceDelete,
         Self::WorkspaceTransfer,
@@ -65,6 +68,7 @@ impl Permission {
         Self::ChatManage,
         Self::BillingManage,
         Self::StorageManage,
+        Self::WorkspaceExport,
     ];
 }
 
@@ -231,7 +235,8 @@ impl Policy {
             | Permission::ViewsManageShared
             | Permission::CommentsModerate
             | Permission::ChatManage
-            | Permission::StorageManage => {
+            | Permission::StorageManage
+            | Permission::WorkspaceExport => {
                 matches!(role, WorkspaceRole::Owner | WorkspaceRole::Admin)
             }
         }

@@ -2,6 +2,7 @@
 
 use orbit_platform::{Database, Id, Row, TimestampMillis, TrialConfig};
 use serde_json::json;
+use sqlx::{Any, Transaction};
 
 use crate::audit::{self, AuditOutcome};
 use crate::billing::{SubscriptionStatus, TrialLimit, WorkspaceAccess, access, grants_access};
@@ -60,6 +61,38 @@ struct BillingOn(TrialConfig);
 /// Turns the read-only rule on for `database`; [`write_access`] answers `Full` until then.
 pub(crate) fn enable(database: &Database, trial: TrialConfig) {
     database.extension(|| BillingOn(trial));
+}
+
+/// Whether this server runs Orbit Cloud billing.
+pub(crate) fn enabled(database: &Database) -> bool {
+    database.existing_extension::<BillingOn>().is_some()
+}
+
+/// Inside the transaction that moves a workspace to the trash: with billing on, queues the
+/// cancellation of its Stripe subscription unless that has already ended.
+pub(crate) async fn cancel_on_delete(
+    database: &Database,
+    transaction: &mut Transaction<'_, Any>,
+    workspace_id: Id,
+    now: TimestampMillis,
+) -> Result<(), sqlx::Error> {
+    if !enabled(database) {
+        return Ok(());
+    }
+    let subscription_id: Option<String> = sqlx::query_scalar(
+        "SELECT stripe_subscription_id FROM workspace_subscriptions WHERE workspace_id = $1 \
+         AND stripe_subscription_id IS NOT NULL \
+         AND (status IS NULL OR status NOT IN ('canceled', 'incomplete_expired'))",
+    )
+    .bind(workspace_id.to_string())
+    .fetch_optional(&mut **transaction)
+    .await?;
+    if let Some(subscription_id) = subscription_id {
+        crate::billing::enqueue_cancel_in(transaction, workspace_id, &subscription_id, now)
+            .await
+            .map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
+    }
+    Ok(())
 }
 
 /// Whether something may write to the workspace: `Full` on a self-hosted server (no query),

@@ -135,6 +135,8 @@ pub enum PasswordChange {
 pub enum InstanceSettingsError {
     #[error("registration needs a configured mail server")]
     EmailNotConfigured,
+    #[error("Orbit Cloud needs a mail server")]
+    SmtpRequired,
     #[error("instance settings are unavailable")]
     Unavailable(#[from] sqlx::Error),
 }
@@ -142,10 +144,11 @@ pub enum InstanceSettingsError {
 /// The job kinds whose limits the root user can change in Admin: the work that customers start.
 /// Maintenance kinds keep their limit of one.
 #[must_use]
-pub fn adjustable_job_kinds() -> [JobKind; 2] {
+pub fn adjustable_job_kinds() -> [JobKind; 3] {
     [
         crate::notion::import::scan_job_kind(),
         crate::notion::import::import_job_kind(),
+        crate::workspace_export::job_kind(),
     ]
 }
 
@@ -210,10 +213,15 @@ impl InstanceSettingsRepository {
     ) -> Result<(), InstanceSettingsError> {
         let mut transaction = self.database.immediate_transaction().await?;
         // Sign-up needs a way to prove the email: an emailed link, or a sign-in provider that verified it.
+        // Orbit Cloud needs the mail server even with a provider.
         if open {
             let configured = sqlx::query_scalar::<_, i64>(
-                "SELECT (SELECT COUNT(*) FROM instance_settings WHERE id = 1 AND smtp_host IS NOT NULL) \
-                 + (SELECT COUNT(*) FROM sign_in_providers)",
+                if super::billing::enabled(&self.database) {
+                    "SELECT COUNT(*) FROM instance_settings WHERE id = 1 AND smtp_host IS NOT NULL"
+                } else {
+                    "SELECT (SELECT COUNT(*) FROM instance_settings WHERE id = 1 AND smtp_host IS NOT NULL) \
+                     + (SELECT COUNT(*) FROM sign_in_providers)"
+                },
             )
             .fetch_one(&mut *transaction)
             .await?;
@@ -298,12 +306,16 @@ impl InstanceSettingsRepository {
     }
 
     /// Removes the mail server. Registration closes with it, since nobody could finish signing up.
+    /// Orbit Cloud refuses: it always needs one.
     pub async fn clear_smtp(
         &self,
         actor_id: Id,
         request_id: &str,
         now: TimestampMillis,
-    ) -> Result<(), sqlx::Error> {
+    ) -> Result<(), InstanceSettingsError> {
+        if super::billing::enabled(&self.database) {
+            return Err(InstanceSettingsError::SmtpRequired);
+        }
         let mut transaction = self.database.immediate_transaction().await?;
         sqlx::query(
             "UPDATE instance_settings SET smtp_host = NULL, smtp_port = NULL, smtp_security = NULL, \
@@ -325,7 +337,8 @@ impl InstanceSettingsRepository {
             now,
         )
         .await?;
-        transaction.commit().await
+        transaction.commit().await?;
+        Ok(())
     }
 
     pub async fn limits(&self) -> Result<InstanceLimits, sqlx::Error> {

@@ -8,6 +8,7 @@ import {
   changeMemberRole,
   changePassword as changePasswordRequest,
   createInvitation,
+  deleteAccount as deleteAccountRequest,
   deleteStorageFile as deleteStorageFileRequest,
   disableTwoFactor,
   enableTotp,
@@ -24,6 +25,7 @@ import {
   removeMember,
   removeWorkspaceBucket,
   renameWorkspace as renameWorkspaceRequest,
+  requestEmailChange as requestEmailChangeRequest,
   revokeInvitation as revokeInvitationRequest,
   revokeSession as revokeSessionRequest,
   saveWorkspaceBucket,
@@ -33,6 +35,8 @@ import {
 } from '@orbit/api/generated/sdk.gen'
 import type {
   AuthOptions,
+  AuthProblem,
+  OwnedWorkspace,
   InvitationRecord,
   NotificationPrefs,
   S3Body,
@@ -45,11 +49,13 @@ import type {
   WorkspaceStorage,
 } from '@orbit/api/generated/types.gen'
 
+import { ApiProblem } from '@orbit/api/problem'
+
 import type { MemberRecord, OrbitClient, User, WorkspaceRecord } from './orbit'
 import type { OAuthConnection } from '@orbit/api/mcp'
 import { STORAGE_FILES_PAGE } from '@orbit/api/storage'
 
-export type { InvitationRecord, NotificationPrefs, SessionRecord, TotpSetup, TwoFactorStatus, WorkspaceBucketView, WorkspaceStorage }
+export type { InvitationRecord, NotificationPrefs, OwnedWorkspace, SessionRecord, TotpSetup, TwoFactorStatus, WorkspaceBucketView, WorkspaceStorage }
 
 /** Query keys of the account (not per workspace) and of the workspace settings. */
 export const accountKeys = {
@@ -104,6 +110,31 @@ export function passwordProblem(current: string, next: string, confirm: string):
   if (!current || !next || !confirm) return 'Fill in all three fields.'
   if (next !== confirm) return 'The new password confirmation does not match.'
   return null
+}
+
+// ---- email and deleting the account
+
+/**
+ * Emails a link to the new address; the email changes when it is opened (on the web). `password` is left out for an
+ * account without one (see `withReauthentication`).
+ */
+export async function requestEmailChange(client: OrbitClient, email: string, password?: string): Promise<void> {
+  await requestEmailChangeRequest({ client, body: { email, password }, throwOnError: true })
+}
+
+/** Deletes the account for good; `email` is the typed confirmation. Every session ends. */
+export async function deleteAccount(client: OrbitClient, email: string, password?: string): Promise<void> {
+  await deleteAccountRequest({ client, body: { email, password }, throwOnError: true })
+}
+
+/** The typed confirmation matches the account's email, as the server compares them (case and spaces aside). */
+export const confirmsEmail = (typed: string, email: string) => typed.trim().toLowerCase() === email.trim().toLowerCase()
+
+/** 409 `owns_workspaces` lists the workspaces to delete first in the problem body; `null` for any other error. */
+export function ownedWorkspaces(error: unknown): OwnedWorkspace[] | null {
+  if (!(error instanceof ApiProblem) || error.code !== 'owns_workspaces') return null
+  const { workspaces } = error.problem as AuthProblem
+  return Array.isArray(workspaces) ? workspaces : []
 }
 
 // ---- status

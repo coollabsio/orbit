@@ -435,6 +435,16 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0061_sign_in_providers.sql"),
                     false,
                 ),
+                Migration::new(
+                    62,
+                    include_str!("../../../../apps/server/migrations/0062_account_lifecycle.sql"),
+                    false,
+                ),
+                Migration::new(
+                    63,
+                    include_str!("../../../../apps/server/migrations/0063_workspace_exports.sql"),
+                    false,
+                ),
             ],
         );
         runner.postgres = vec![
@@ -521,6 +531,20 @@ impl MigrationRunner {
                 61,
                 include_str!(
                     "../../../../apps/server/migrations/postgres/0061_sign_in_providers.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                62,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0062_account_lifecycle.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                63,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0063_workspace_exports.sql"
                 ),
                 false,
             ),

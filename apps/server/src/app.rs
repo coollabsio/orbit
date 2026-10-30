@@ -42,6 +42,8 @@ use crate::socket_ticket::SocketTickets;
 use crate::static_assets::{FRONTEND_REVISION, StaticAssetError, StaticAssets};
 use crate::task_routes::TaskState;
 use crate::teamspace_routes::TeamspaceState;
+use crate::workspace_export::WorkspaceExportService;
+use crate::workspace_export_routes::WorkspaceExportState;
 use crate::workspace_routes::WorkspaceState;
 
 const BACKGROUND_DRAIN: Duration = Duration::from_secs(30);
@@ -63,6 +65,7 @@ pub struct App {
     workspaces: Arc<WorkspaceRepository>,
     object_storage: ObjectStorage,
     blob_store: TieredBlobStore,
+    workspace_exports: WorkspaceExportService,
     production_services: Option<ProductionServices>,
     /// Set when the server stops: readiness fails, so a load balancer takes it out.
     draining: Arc<AtomicBool>,
@@ -204,6 +207,13 @@ impl App {
             backups.attachment_mutations(),
         );
         let store: Arc<dyn orbit_platform::BlobStore> = Arc::new(blob_store.clone());
+        let workspace_exports = WorkspaceExportService::new(
+            database.clone(),
+            Arc::clone(&store),
+            object_storage.clone(),
+            &config.data.backups,
+            config.http.public_origin.clone(),
+        );
         let workspaces = Arc::new(WorkspaceRepository::with_blob_store_and_mutations(
             database.clone(),
             Arc::clone(&store),
@@ -249,12 +259,27 @@ impl App {
         let billing = config.billing.clone().map(|billing| {
             crate::billing::Billing::new(billing, database.clone(), &config.http.public_origin)
         });
+        if billing.is_some()
+            && crate::repositories::instance_settings::InstanceSettingsRepository::new(
+                database.clone(),
+            )
+            .get()
+            .await
+            .map_err(|error| AppError::Database(error.to_string()))?
+            .smtp
+            .is_none()
+        {
+            tracing::warn!(
+                "Orbit Cloud has no mail server: email change, invitations by email, password reset and sign-up do not work until one is saved in Admin → Email"
+            );
+        }
         let production_services = initialize_production_services(
             &database,
             backups.clone(),
             Arc::clone(&workspaces),
             integrity.clone(),
             notion_imports.clone(),
+            workspace_exports.clone(),
             billing.clone(),
             config.jobs.concurrency,
         )
@@ -337,6 +362,11 @@ impl App {
                     cookie_mode,
                     config.http.public_origin.clone(),
                 ),
+                workspace_exports: WorkspaceExportState::new(
+                    Arc::clone(&identity),
+                    workspace_exports.clone(),
+                    cookie_mode,
+                ),
                 teamspaces: TeamspaceState::new(Arc::clone(&identity), cookie_mode),
                 attachments: attachment_state.clone(),
                 integrations: IntegrationState::new(
@@ -380,6 +410,7 @@ impl App {
             workspaces,
             object_storage,
             blob_store,
+            workspace_exports,
             production_services: Some(production_services),
             draining,
         })
@@ -421,7 +452,17 @@ impl App {
             .map_err(|error| AppError::Background(error.to_string()))
     }
 
+    /// Full workspace exports (start, run a job, expire), for tests and tools.
+    #[must_use]
+    pub fn workspace_exports(&self) -> &WorkspaceExportService {
+        &self.workspace_exports
+    }
+
     pub async fn run_retention_maintenance(&self) -> Result<(), AppError> {
+        self.workspace_exports
+            .expire(orbit_platform::TimestampMillis::now())
+            .await
+            .map_err(|error| AppError::Background(error.to_string()))?;
         self.workspaces
             .run_retention_maintenance()
             .await
@@ -733,12 +774,14 @@ fn health_registry(
     health
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn initialize_production_services(
     database: &Database,
     backups: BackupService,
     workspaces: Arc<WorkspaceRepository>,
     integrity: IntegrityService,
     notion_imports: NotionImportService,
+    workspace_exports: WorkspaceExportService,
     billing: Option<crate::billing::Billing>,
     concurrency: usize,
 ) -> Result<ProductionServices, AppError> {
@@ -747,6 +790,7 @@ async fn initialize_production_services(
     let failure = CancellationToken::new();
     let retention_repository = Arc::clone(&workspaces);
     let retention_database = database.clone();
+    let retention_exports = workspace_exports.clone();
     let integrity_service = integrity;
     let integrity_failure = failure.clone();
     let worker_config = WorkerConfig::new(concurrency)
@@ -755,7 +799,11 @@ async fn initialize_production_services(
         .with_handler(maintenance_kind("workspace.retention"), move |_| {
             let repository = Arc::clone(&retention_repository);
             let database = retention_database.clone();
+            let exports = retention_exports.clone();
             async move {
+                exports.expire(TimestampMillis::now()).await.map_err(|_| {
+                    JobError::Retryable("workspace export cleanup failed".to_owned())
+                })?;
                 repository
                     .run_retention_maintenance()
                     .await
@@ -804,6 +852,7 @@ async fn initialize_production_services(
             })
         })
         .and_then(|worker| crate::notion::import::register_jobs(worker, notion_imports))
+        .and_then(|worker| crate::workspace_export::register_job(worker, workspace_exports))
         .and_then(|worker| match billing {
             Some(billing) => crate::billing::register_jobs(worker, billing),
             None => Ok(worker),

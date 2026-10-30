@@ -141,7 +141,7 @@ function Invite() {
       <View className="gap-4">
         <Input label="Email address" required value={email} onChangeText={setEmail} placeholder="teammate@example.com" keyboardType="email-address" autoCapitalize="none" autoCorrect={false} autoComplete="email" />
         <Segmented label="Role" value={role} options={INVITE_ROLES} onChange={setRole} />
-        {!emailEnabled ? <Note>Email delivery is not configured on this server.</Note> : null}
+        {!emailEnabled ? <Note>Email delivery is not configured. Share the invitation link instead.</Note> : null}
         {link ? (
           <View className="gap-2">
             <Input label={`Invitation link (${roleLabel(role)})`} value={link} editable={false} selectTextOnFocus />

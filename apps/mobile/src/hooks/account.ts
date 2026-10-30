@@ -10,6 +10,7 @@ import type { MemberRecord, User } from '../data/orbit'
 import * as providers from '../data/sign-in-provider'
 import { currentStatus, type OwnStatus, type UserStatus } from '../data/status'
 import { useOrbit } from '../orbit-context'
+import { providerDevice } from '../sign-in-provider'
 import { uploadPart } from '../upload-part'
 
 /**
@@ -173,6 +174,20 @@ export function useTwoFactorWrites() {
 export function useConnectedAccounts() {
   const { client } = useOrbit()
   return useQuery({ queryKey: account.accountKeys.connectedAccounts, queryFn: () => providers.connectedAccounts(client) })
+}
+
+/**
+ * For an account without a password: a fresh sign-in with its connected provider, the answer to 401
+ * `reauthentication_required` (pass it to `withReauthentication`). `false` when the person cancels.
+ */
+export function useConfirmIdentity() {
+  const { client } = useOrbit()
+  const accounts = useConnectedAccounts()
+  return async () => {
+    const provider = accounts.data?.[0]?.provider
+    if (!provider) throw new Error('Sign out and sign in again to confirm this change.')
+    return (await providers.startProviderSignIn(client, provider, 'confirm', providerDevice)).kind === 'confirmed'
+  }
 }
 
 export function useDisconnectAccount() {

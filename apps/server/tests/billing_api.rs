@@ -31,6 +31,8 @@ struct FakeStripe {
     requests: Arc<Mutex<Vec<StripeRequest>>>,
     subscriptions: Arc<Mutex<HashMap<String, Value>>>,
     prices: Arc<Mutex<HashMap<String, Value>>>,
+    /// Checkout Sessions in creation order: id, customer, status.
+    sessions: Arc<Mutex<Vec<(String, String, String)>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -84,6 +86,23 @@ impl FakeStripe {
         );
     }
 
+    fn subscription_status(&self, id: &str) -> Option<String> {
+        self.subscriptions
+            .lock()
+            .unwrap()
+            .get(id)
+            .map(|subscription| subscription["status"].as_str().unwrap().to_owned())
+    }
+
+    fn sessions(&self) -> Vec<(String, String)> {
+        self.sessions
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(id, _, status)| (id.clone(), status.clone()))
+            .collect()
+    }
+
     fn set_price(&self, id: &str, product: (&str, &str), amount: i64, interval: &str) {
         self.prices.lock().unwrap().insert(
             id.to_owned(),
@@ -130,15 +149,94 @@ impl FakeStripe {
                 ),
             )
             .route(
+                "/v1/customers/{id}",
+                post(
+                    |State(stripe): State<FakeStripe>,
+                     headers: HeaderMap,
+                     Path(id): Path<String>,
+                     Form(form): Form<HashMap<String, String>>| async move {
+                        stripe.record(&format!("/v1/customers/{id}"), &headers, form);
+                        Json(json!({"id": id, "object": "customer"}))
+                    },
+                ),
+            )
+            .route(
                 "/v1/checkout/sessions",
                 post(
                     |State(stripe): State<FakeStripe>,
                      headers: HeaderMap,
                      Form(form): Form<HashMap<String, String>>| async move {
+                        let mut sessions = stripe.sessions.lock().unwrap();
+                        let id = format!("cs_{}", sessions.len() + 1);
+                        sessions.push((id.clone(), form["customer"].clone(), "open".to_owned()));
+                        drop(sessions);
                         stripe.record("/v1/checkout/sessions", &headers, form);
-                        Json(
-                            json!({"id": "cs_test", "url": "https://checkout.stripe.test/cs_test"}),
-                        )
+                        Json(json!({"id": id, "url": "https://checkout.stripe.test/cs_test"}))
+                    },
+                )
+                .get(
+                    |State(stripe): State<FakeStripe>,
+                     headers: HeaderMap,
+                     Query(query): Query<HashMap<String, String>>| async move {
+                        let data: Vec<Value> = stripe
+                            .sessions
+                            .lock()
+                            .unwrap()
+                            .iter()
+                            .filter(|(_, customer, status)| {
+                                query.get("customer") == Some(customer)
+                                    && query.get("status").is_none_or(|wanted| wanted == status)
+                            })
+                            .map(|(id, customer, status)| {
+                                json!({"id": id, "object": "checkout.session", "customer": customer, "status": status})
+                            })
+                            .collect();
+                        stripe.record("GET /v1/checkout/sessions", &headers, query);
+                        Json(json!({"object": "list", "has_more": false, "data": data}))
+                    },
+                ),
+            )
+            .route(
+                "/v1/checkout/sessions/{id}/expire",
+                post(
+                    |State(stripe): State<FakeStripe>,
+                     headers: HeaderMap,
+                     Path(id): Path<String>| async move {
+                        stripe.record(&format!("/v1/checkout/sessions/{id}/expire"), &headers, HashMap::new());
+                        let mut sessions = stripe.sessions.lock().unwrap();
+                        match sessions.iter_mut().find(|session| session.0 == id) {
+                            Some(session) if session.2 == "open" => {
+                                session.2 = "expired".to_owned();
+                                (StatusCode::OK, Json(json!({"id": id, "status": "expired"})))
+                            }
+                            _ => (
+                                StatusCode::BAD_REQUEST,
+                                Json(json!({"error": {"message": "Session is not open"}})),
+                            ),
+                        }
+                    },
+                ),
+            )
+            .route(
+                "/v1/subscriptions",
+                get(
+                    |State(stripe): State<FakeStripe>,
+                     headers: HeaderMap,
+                     Query(query): Query<HashMap<String, String>>| async move {
+                        let data: Vec<Value> = stripe
+                            .subscriptions
+                            .lock()
+                            .unwrap()
+                            .values()
+                            .filter(|subscription| {
+                                query.get("customer").map(String::as_str)
+                                    == subscription["customer"].as_str()
+                                    && subscription["status"] != "canceled"
+                            })
+                            .cloned()
+                            .collect();
+                        stripe.record("GET /v1/subscriptions", &headers, query);
+                        Json(json!({"object": "list", "has_more": false, "data": data}))
                     },
                 ),
             )
@@ -162,6 +260,27 @@ impl FakeStripe {
                         stripe.record("/v1/subscriptions", &headers, HashMap::new());
                         match stripe.subscriptions.lock().unwrap().get(&id) {
                             Some(subscription) => (StatusCode::OK, Json(subscription.clone())),
+                            None => (
+                                StatusCode::NOT_FOUND,
+                                Json(json!({"error": {"message": "No such subscription"}})),
+                            ),
+                        }
+                    },
+                )
+                .delete(
+                    |State(stripe): State<FakeStripe>,
+                     headers: HeaderMap,
+                     Path(id): Path<String>| async move {
+                        stripe.record(&format!("DELETE /v1/subscriptions/{id}"), &headers, HashMap::new());
+                        match stripe.subscriptions.lock().unwrap().get_mut(&id) {
+                            Some(subscription) if subscription["status"] != "canceled" => {
+                                subscription["status"] = json!("canceled");
+                                (StatusCode::OK, Json(subscription.clone()))
+                            }
+                            Some(_) => (
+                                StatusCode::BAD_REQUEST,
+                                Json(json!({"error": {"message": "This subscription has already been canceled"}})),
+                            ),
                             None => (
                                 StatusCode::NOT_FOUND,
                                 Json(json!({"error": {"message": "No such subscription"}})),
@@ -410,6 +529,60 @@ impl Server {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
         panic!("billing.stripe_sync jobs did not finish");
+    }
+
+    /// Waits until every job of `kind` finished; panics on a job that failed for good.
+    async fn settle(&self, kind: &str) {
+        for _ in 0..100 {
+            let states: Vec<String> = sqlx::query_scalar("SELECT state FROM jobs WHERE kind = $1")
+                .bind(kind)
+                .fetch_all(self.database.pool())
+                .await
+                .unwrap();
+            assert!(
+                !states.iter().any(|state| state == "dead"),
+                "a {kind} job died"
+            );
+            if states.iter().all(|state| state == "succeeded") {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        panic!("{kind} jobs did not finish");
+    }
+
+    async fn workspace_version(&self) -> i64 {
+        sqlx::query_scalar("SELECT version FROM workspaces WHERE id = $1")
+            .bind(&self.workspace_id)
+            .fetch_one(self.database.pool())
+            .await
+            .unwrap()
+    }
+
+    async fn delete_workspace(&self) -> u16 {
+        let version = self.workspace_version().await;
+        self.call(
+            "DELETE",
+            &format!("{}?expected_version={version}", self.workspace("")),
+            None,
+        )
+        .await
+        .0
+    }
+
+    /// Subscribes the workspace to `subscription` (active) through the webhook path.
+    async fn subscribe(&self, stripe: &FakeStripe, subscription: &str) {
+        stripe.set_subscription(subscription, &self.workspace_id, "active", "price_team");
+        assert_eq!(
+            self.webhook(&checkout_completed(
+                &format!("evt_{subscription}"),
+                subscription,
+                &self.workspace_id
+            ))
+            .await,
+            200
+        );
+        assert_eq!(self.settled_billing().await["status"], "active");
     }
 
     async fn add_member(&self) -> String {
@@ -1273,5 +1446,334 @@ async fn self_hosted_servers_have_no_billing_and_no_guard() {
     assert_eq!(response.status().as_u16(), 404);
     let (_, options) = server.call("GET", "/api/v1/auth/options", None).await;
     assert_eq!(options["billing_enabled"], false);
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn deleting_a_subscribed_workspace_cancels_its_subscription_at_stripe() {
+    let stripe = FakeStripe::default();
+    let server = Server::start(Some(&stripe.start().await)).await;
+    server.age_workspace(30).await;
+    server.subscribe(&stripe, "sub_del").await;
+
+    assert_eq!(server.delete_workspace().await, 204);
+    server.settle("billing.stripe_cancel").await;
+    server.settle("billing.stripe_sync").await;
+    assert_eq!(stripe.requests("DELETE /v1/subscriptions/sub_del").len(), 1);
+    assert_eq!(
+        stripe.requests("DELETE /v1/subscriptions/sub_del")[0].form,
+        HashMap::new(),
+        "no proration and no final invoice"
+    );
+    assert_eq!(
+        stripe.subscription_status("sub_del").as_deref(),
+        Some("canceled")
+    );
+    let stored: String =
+        sqlx::query_scalar("SELECT status FROM workspace_subscriptions WHERE workspace_id = $1")
+            .bind(&server.workspace_id)
+            .fetch_one(server.database.pool())
+            .await
+            .unwrap();
+    assert_eq!(stored, "canceled");
+
+    // Restoring does not resume billing: the old workspace is read-only until it subscribes again.
+    let version = server.workspace_version().await;
+    let (status, _) = server
+        .call(
+            "POST",
+            &server.workspace("/restore"),
+            Some(json!({"expected_version": version})),
+        )
+        .await;
+    assert_eq!(status, 204);
+    let billing = server.settled_billing().await;
+    assert_eq!(
+        (&billing["status"], &billing["access"]),
+        (&json!("canceled"), &json!("read_only"))
+    );
+    let cancel_jobs: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM jobs WHERE kind = 'billing.stripe_cancel'")
+            .fetch_one(server.database.pool())
+            .await
+            .unwrap();
+    assert_eq!(cancel_jobs, 1);
+
+    // Deleting it again queues nothing: its subscription already ended.
+    assert_eq!(server.delete_workspace().await, 204);
+    let cancel_jobs: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM jobs WHERE kind = 'billing.stripe_cancel'")
+            .fetch_one(server.database.pool())
+            .await
+            .unwrap();
+    assert_eq!(cancel_jobs, 1);
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn the_cancel_job_finishes_when_stripe_already_ended_the_subscription_or_the_workspace_is_gone()
+ {
+    let stripe = FakeStripe::default();
+    let server = Server::start(Some(&stripe.start().await)).await;
+    server.subscribe(&stripe, "sub_gone").await;
+    // Cancelled at Stripe while Orbit has not heard of it yet.
+    stripe.set_subscription("sub_gone", &server.workspace_id, "canceled", "price_team");
+    assert_eq!(server.delete_workspace().await, 204);
+    server.settle("billing.stripe_cancel").await;
+    assert_eq!(
+        stripe.requests("DELETE /v1/subscriptions/sub_gone").len(),
+        1
+    );
+
+    // A job for a purged workspace (its id only in the payload) and for an unknown subscription.
+    stripe.set_subscription(
+        "sub_purged",
+        &Id::new_v7().to_string(),
+        "active",
+        "price_team",
+    );
+    for subscription in ["sub_purged", "sub_unknown"] {
+        sqlx::query(
+            "INSERT INTO jobs (id, workspace_id, kind, payload_json, state, priority, attempt_count, \
+             max_attempts, available_at, created_at, updated_at) \
+             VALUES ($1, NULL, 'billing.stripe_cancel', $2, 'queued', 'normal', 0, 10, 0, 0, 0)",
+        )
+        .bind(Id::new_v7().to_string())
+        .bind(
+            json!({"subscription_id": subscription, "workspace_id": Id::new_v7().to_string()})
+                .to_string(),
+        )
+        .execute(server.database.pool())
+        .await
+        .unwrap();
+    }
+    server.settle("billing.stripe_cancel").await;
+    server.settle("billing.stripe_sync").await;
+    assert_eq!(
+        stripe.subscription_status("sub_purged").as_deref(),
+        Some("canceled")
+    );
+    assert_eq!(
+        stripe
+            .requests("DELETE /v1/subscriptions/sub_unknown")
+            .len(),
+        1
+    );
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn checkout_is_refused_while_stripe_has_a_live_subscription_orbit_has_not_stored() {
+    let stripe = FakeStripe::default();
+    let server = Server::start(Some(&stripe.start().await)).await;
+    let checkout = json!({"plan": "team"});
+    let (status, _) = server
+        .call(
+            "POST",
+            &server.workspace("/billing/checkout"),
+            Some(checkout.clone()),
+        )
+        .await;
+    assert_eq!(status, 200);
+    // The customer paid, but the webhook has not arrived.
+    stripe.set_subscription("sub_early", &server.workspace_id, "trialing", "price_team");
+    assert_eq!(server.sync_jobs().await, 0);
+
+    let (status, problem) = server
+        .call(
+            "POST",
+            &server.workspace("/billing/checkout"),
+            Some(checkout),
+        )
+        .await;
+    assert_eq!(
+        (status, &problem["code"]),
+        (409, &json!("subscription_active"))
+    );
+    assert_eq!(stripe.requests("/v1/checkout/sessions").len(), 1);
+    let listed = stripe.requests("GET /v1/subscriptions");
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].form["customer"], "cus_test");
+    // The refusal queued the sync Orbit missed.
+    assert_eq!(server.sync_jobs().await, 1);
+    let billing = server.settled_billing().await;
+    assert_eq!(
+        (&billing["status"], &billing["access"]),
+        (&json!("trialing"), &json!("full"))
+    );
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn a_new_checkout_expires_the_open_sessions_of_the_customer() {
+    let stripe = FakeStripe::default();
+    let server = Server::start(Some(&stripe.start().await)).await;
+    let checkout = json!({"plan": "team"});
+    for _ in 0..3 {
+        let (status, redirect) = server
+            .call(
+                "POST",
+                &server.workspace("/billing/checkout"),
+                Some(checkout.clone()),
+            )
+            .await;
+        assert_eq!(status, 200, "{redirect}");
+    }
+    assert_eq!(
+        stripe.sessions(),
+        [
+            ("cs_1".to_owned(), "expired".to_owned()),
+            ("cs_2".to_owned(), "expired".to_owned()),
+            ("cs_3".to_owned(), "open".to_owned()),
+        ]
+    );
+    let listed = stripe.requests("GET /v1/checkout/sessions");
+    assert_eq!(listed.len(), 2);
+    assert_eq!(listed[0].form["status"], "open");
+    assert_eq!(listed[0].form["customer"], "cus_test");
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn orbit_cloud_refuses_ownership_transfer() {
+    let stripe = FakeStripe::default();
+    let server = Server::start(Some(&stripe.start().await)).await;
+    let member = server.add_member().await;
+    drop(member);
+    let (status, members) = server
+        .call("GET", &server.workspace("/members"), None)
+        .await;
+    assert_eq!(status, 200, "{members}");
+    let items = members["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert!(
+        items
+            .iter()
+            .all(|item| item["can_transfer_ownership"] == false),
+        "{members}"
+    );
+    let target = items.iter().find(|item| item["role"] == "member").unwrap();
+    let version = server.workspace_version().await;
+    let (status, problem) = server
+        .call(
+            "POST",
+            &server.workspace("/transfer-ownership"),
+            Some(json!({
+                "membership_id": target["id"],
+                "expected_version": version,
+                "membership_version": target["version"],
+            })),
+        )
+        .await;
+    assert_eq!(
+        (status, &problem["code"]),
+        (409, &json!("transfer_unavailable"))
+    );
+    let owner: String = sqlx::query_scalar(
+        "SELECT users.email FROM memberships JOIN users ON users.id = memberships.user_id \
+         WHERE memberships.workspace_id = $1 AND memberships.role = 'owner'",
+    )
+    .bind(&server.workspace_id)
+    .fetch_one(server.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(owner, "owner@example.com");
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn a_confirmed_email_change_updates_the_stripe_customer_of_each_owned_workspace() {
+    let stripe = FakeStripe::default();
+    let base = stripe.start().await;
+    let server = Server::start(Some(&base)).await;
+    server.subscribe(&stripe, "sub_email").await;
+    let owner_id: String =
+        sqlx::query_scalar("SELECT id FROM users WHERE normalized_email = 'owner@example.com'")
+            .fetch_one(server.database.pool())
+            .await
+            .unwrap();
+    let now = TimestampMillis::now();
+    server
+        .identity
+        .store_email_change_token(
+            owner_id.parse().unwrap(),
+            "Billing@Acme.example",
+            "email-change-token",
+            TimestampMillis::from_millis(now.as_millis() + 60_000),
+            "test",
+            now,
+        )
+        .await
+        .unwrap();
+    let (status, body) = server
+        .call(
+            "POST",
+            "/api/v1/auth/email-change/confirm",
+            Some(json!({"token": "email-change-token"})),
+        )
+        .await;
+    assert_eq!(
+        (status, body),
+        (200, json!({"email": "Billing@Acme.example"}))
+    );
+    server.settle("billing.stripe_customer_email").await;
+    let updates: Vec<_> = stripe
+        .requests("/v1/customers/cus_test")
+        .into_iter()
+        .map(|request| request.form)
+        .collect();
+    assert_eq!(
+        updates,
+        [HashMap::from([(
+            "email".to_owned(),
+            "Billing@Acme.example".to_owned()
+        )])]
+    );
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn an_admin_email_change_updates_the_stripe_customer_of_each_owned_workspace() {
+    let stripe = FakeStripe::default();
+    let base = stripe.start().await;
+    let server = Server::start(Some(&base)).await;
+    server.subscribe(&stripe, "sub_admin_email").await;
+    let owner_id: String =
+        sqlx::query_scalar("SELECT id FROM users WHERE normalized_email = 'owner@example.com'")
+            .fetch_one(server.database.pool())
+            .await
+            .unwrap();
+    let (status, _) = server
+        .call(
+            "PUT",
+            "/api/v1/admin/settings/smtp",
+            Some(json!({
+                "host": "127.0.0.1", "port": 9, "security": "none",
+                "from_address": "orbit@example.com"
+            })),
+        )
+        .await;
+    assert_eq!(status, 200);
+    let (status, _) = server
+        .call(
+            "PUT",
+            &format!("/api/v1/admin/users/{owner_id}/email"),
+            Some(json!({"email": "Billing@Acme.example"})),
+        )
+        .await;
+    assert_eq!(status, 204);
+    server.settle("billing.stripe_customer_email").await;
+    let updates: Vec<_> = stripe
+        .requests("/v1/customers/cus_test")
+        .into_iter()
+        .map(|request| request.form)
+        .collect();
+    assert_eq!(
+        updates,
+        [HashMap::from([(
+            "email".to_owned(),
+            "Billing@Acme.example".to_owned()
+        )])]
+    );
     server.stop().await;
 }

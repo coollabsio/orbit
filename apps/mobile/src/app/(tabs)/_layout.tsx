@@ -3,6 +3,7 @@ import { Tabs } from 'expo-router/js-tabs'
 import { BillingBanner } from '../../components/BillingBanner'
 import { Dock } from '../../components/Dock'
 import { DrawerProvider } from '../../components/Drawer'
+import { MailServerBanner } from '../../components/MailServerBanner'
 import { useLiveUpdates } from '../../live'
 import { useTheme } from '../../theme'
 
@@ -13,6 +14,7 @@ export default function TabsLayout() {
     <DrawerProvider>
       <Tabs tabBar={(props) => (
           <>
+            <MailServerBanner />
             <BillingBanner />
             <Dock {...props} />
           </>

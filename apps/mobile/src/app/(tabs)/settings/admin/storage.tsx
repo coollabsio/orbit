@@ -83,7 +83,7 @@ function BucketCard({ s3 }: { s3: S3View | null }) {
         <View className="flex-row items-center gap-3">
           <View className="flex-1 min-w-0">
             <FieldLabel>Path-style URLs</FieldLabel>
-            <OptionHint>MinIO and most self-hosted servers.</OptionHint>
+            <OptionHint>MinIO and some other S3-compatible services.</OptionHint>
           </View>
           <Toggle label="Path-style URLs" value={draft.path_style} onChange={(path_style) => edit({ path_style })} />
         </View>

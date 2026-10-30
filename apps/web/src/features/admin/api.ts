@@ -1,7 +1,7 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
-import { createBackup, createRecoveryLink, deleteBackup, getInstanceSettings, getJobLimits, saveJobLimits, listAdminUsers, listBackups, listGlobalAudit, removeS3, removeSignInProvider, removeSmtp, resetTwoFactor, saveLimits, saveS3, saveSignInProvider, saveStorageOptions, setInstanceAdmin, startImageCompression, saveSmtp, sendTestEmail, setAccountSuspension, setRegistration } from '@orbit/api/generated/sdk.gen'
+import { changeUserEmail, createBackup, createRecoveryLink, deleteBackup, getInstanceSettings, getJobLimits, saveJobLimits, listAdminUsers, listBackups, listGlobalAudit, removeS3, removeSignInProvider, removeSmtp, resetTwoFactor, saveLimits, saveS3, saveSignInProvider, saveStorageOptions, setInstanceAdmin, startImageCompression, saveSmtp, sendTestEmail, setAccountSuspension, setRegistration } from '@orbit/api/generated/sdk.gen'
 import type { InstanceSettingsView, JobLimitsBody, LimitsView, Provider, S3Body, SignInProviderBody, SmtpBody, StorageOptionsBody } from '@orbit/api/generated/types.gen'
 
 /** Accounts on this instance in cursor pages; `search` matches part of the name or email. Admins only. */
@@ -67,6 +67,22 @@ export function useCreateRecoveryLink() {
       return data
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.adminAudit }),
+  })
+}
+
+/** Changes an account's email at once, with no confirmation email; the account is signed out everywhere. */
+export function useChangeUserEmail() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ userId, email }: { userId: string; email: string }) => {
+      await changeUserEmail({ client: apiClient, throwOnError: true, path: { user_id: userId }, body: { email } })
+    },
+    onSettled: () => Promise.all([
+      queryClient.invalidateQueries({ queryKey: queryKeys.adminUsers }),
+      queryClient.invalidateQueries({ queryKey: queryKeys.adminAudit }),
+      // An admin may change their own email here.
+      queryClient.invalidateQueries({ queryKey: queryKeys.currentUser }),
+    ]),
   })
 }
 

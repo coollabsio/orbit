@@ -12,7 +12,8 @@ import { Button, Input, Text } from '../ui'
 
 type Step = { name: 'credentials' } | { name: 'two_factor'; server: string; twoFactorToken: string }
 
-const DEFAULT_SERVER = process.env.EXPO_PUBLIC_ORBIT_SERVER ?? ''
+// Orbit Cloud, so cloud users only type their email and password; self-hosted users replace it
+const DEFAULT_SERVER = process.env.EXPO_PUBLIC_ORBIT_SERVER || 'https://app.orbit.so'
 
 export default function SignInScreen() {
   const { state, signIn } = useSession()

@@ -12,6 +12,7 @@ import { SettingsRow } from '@/features/settings/components/SettingsParts'
 const KIND_LABELS: Record<string, string> = {
   'notion.scan': 'Notion scans',
   'notion.import': 'Notion imports',
+  'workspace.export': 'Workspace exports',
 }
 
 type Draft = Record<string, { concurrency: string; workspace_concurrency: string }>

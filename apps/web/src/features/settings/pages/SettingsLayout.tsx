@@ -1,5 +1,5 @@
 import { useContext } from 'react'
-import { Navigate, NavLink, Outlet } from 'react-router'
+import { Navigate, NavLink, Outlet, useLocation } from 'react-router'
 import { cn } from 'cn'
 import { buttonVariants } from '@/components/ui/button'
 import { Pane, PaneHeader, PaneTitle } from '@/components/common/Pane'
@@ -31,15 +31,27 @@ export function AdminLayout() {
 function SettingsShell({ area }: { area: SettingsAreaName }) {
   const { title, icon: Icon, sections } = useSettingsArea(area)
   const newUi = useNewUi()
+  const { pathname } = useLocation()
+  // the link NavLink marks as current; the longest match wins, so `/settings/members` beats `/settings`
+  const page = sections
+    .flatMap((section) => section.items)
+    .filter((item) => pathname === item.to || (!item.end && pathname.startsWith(`${item.to}/`)))
+    .sort((a, b) => b.to.length - a.to.length)[0]
   // the new UI's app sidebar shows these links (`SidebarNav`); the classic one does not
   const inAppShell = useContext(WorkspaceContext) !== null && newUi
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
       <Pane className="relative">
-        {/* hidden on mobile so the shell topbar takes over */}
-        <PaneHeader className="gap-[7px] bg-background pl-[19px] text-muted-foreground max-[899px]:hidden">
+        {/* hidden on mobile so the shell topbar takes over; same left inset as the content column, so the title lines up with the cards */}
+        <PaneHeader className="gap-[7px] bg-background pl-8 text-muted-foreground max-[899px]:hidden xl:pl-10">
           <Icon className="size-[15px] shrink-0" />
-          <PaneTitle className="text-muted-foreground">{title}</PaneTitle>
+          <span className="truncate text-[13px] font-semibold">{title}</span>
+          {page ? (
+            <>
+              <span aria-hidden>/</span>
+              <PaneTitle render={<h1 />}>{page.label}</PaneTitle>
+            </>
+          ) : null}
         </PaneHeader>
         <div className="min-h-0 flex-1 overflow-y-auto">
           <section className={cn('grid w-full min-w-0 grid-cols-1 gap-6 px-5 pt-5 pb-8 min-[900px]:px-8 min-[900px]:pt-6 min-[900px]:pb-10 xl:gap-8 xl:px-10 xl:pt-7', !inAppShell && 'xl:grid-cols-[210px_minmax(0,1fr)]')}>

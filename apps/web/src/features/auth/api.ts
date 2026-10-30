@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { apiClient, createApiClient } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
@@ -9,6 +9,8 @@ import { connectionRetryDelay, retryConnectionFailure } from '@/lib/connection'
 import {
   authOptions,
   changePassword,
+  confirmEmailChange,
+  deleteAccount,
   disconnectConnectedAccount,
   exchangeProviderSignIn,
   finishPasskeyLogin,
@@ -23,6 +25,7 @@ import {
   registrationComplete,
   registrationRequest,
   removeAvatar,
+  requestEmailChange,
   setupComplete,
   setupStatus,
   startPasskeyLogin,
@@ -31,7 +34,9 @@ import {
   uploadAvatar,
 } from '@orbit/api/generated/sdk.gen'
 import type {
+  ChangeEmailBody,
   ChangePasswordBody,
+  DeleteAccountBody,
   ExchangeProviderBody,
   Provider,
   SignInIntent,
@@ -203,12 +208,55 @@ export function useLogout() {
       await disablePushForSignOut()
       await logout({ client: apiClient, throwOnError: true })
     },
-    onSuccess: async () => {
-      queryClient.clear()
-      clearViewSessionEdits()
-      // What this user's chat left on the device does not stay for the next person.
-      await withinTime(clearLocalCache())
+    onSuccess: () => forgetSignedOutUser(queryClient),
+  })
+}
+
+/** The session ended: nothing of this user stays in memory or on the device for the next person. */
+async function forgetSignedOutUser(queryClient: QueryClient) {
+  queryClient.clear()
+  clearViewSessionEdits()
+  // What this user's chat left on the device does not stay for the next person.
+  await withinTime(clearLocalCache())
+}
+
+/**
+ * Deletes the signed-in account for good. Refused with 409 `owns_workspaces` (the problem lists them) or
+ * `root_account`; an account without a password may need a fresh provider sign-in (`reauthentication_required`).
+ */
+export function useDeleteAccount() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (body: DeleteAccountBody) => {
+      await deleteAccount({ client: apiClient, body, throwOnError: true })
     },
+    onSuccess: async () => {
+      // The server has ended every session; this browser only stops listening for push messages.
+      await disablePushForSignOut()
+      await forgetSignedOutUser(queryClient)
+    },
+  })
+}
+
+/** Emails a link to the new address; the email changes when it is opened. */
+export function useRequestEmailChange() {
+  return useMutation({
+    mutationFn: async (body: ChangeEmailBody) => {
+      const { data } = await requestEmailChange({ client: apiClient, body, throwOnError: true })
+      return required(data, 'Email change response was empty.')
+    },
+  })
+}
+
+/** Opens the emailed link; needs no session. Answers with the account's new email. */
+export function useConfirmEmailChange() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (token: string) => {
+      const { data } = await confirmEmailChange({ client: apiClient, body: { token }, throwOnError: true })
+      return required(data, 'Email change response was empty.').email
+    },
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.currentUser }),
   })
 }
 

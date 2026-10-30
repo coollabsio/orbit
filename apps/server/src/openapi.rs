@@ -29,6 +29,9 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::auth_routes::me,
         crate::auth_routes::socket_ticket,
         crate::auth_routes::update_me,
+        crate::auth_routes::account::delete_account,
+        crate::auth_routes::account::request_email_change,
+        crate::auth_routes::account::confirm_email_change,
         crate::auth_routes::put_status,
         crate::auth_routes::push::get_push_key,
         crate::auth_routes::push::list_push_subscriptions,
@@ -112,6 +115,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::workspace_routes::set_account_suspension,
         crate::workspace_routes::create_recovery_link,
         crate::workspace_routes::reset_two_factor,
+        crate::workspace_routes::change_user_email,
         crate::workspace_routes::set_instance_admin,
         crate::workspace_routes::list_global_audit,
         crate::workspace_routes::export_global_audit,
@@ -217,6 +221,9 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::page_comment_routes::resolve_page_thread,
         crate::page_comment_routes::reopen_page_thread,
         crate::export_routes::export_page,
+        crate::workspace_export_routes::create_workspace_export,
+        crate::workspace_export_routes::list_workspace_exports,
+        crate::workspace_export_routes::download_workspace_export,
         crate::billing::routes::get_billing,
         crate::billing::routes::billing_checkout,
         crate::billing::routes::billing_portal,
@@ -615,7 +622,12 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             workspace_resource_errors(&mut responses);
             add_code(&mut responses, "409", "ownership_transfer_required");
         }
-        "transfer_ownership" | "restore_workspace" => {
+        "transfer_ownership" => {
+            workspace_resource_errors(&mut responses);
+            add_code(&mut responses, "409", "workspace_limit_reached");
+            add_code(&mut responses, "409", "transfer_unavailable");
+        }
+        "restore_workspace" => {
             workspace_resource_errors(&mut responses);
             add_code(&mut responses, "409", "workspace_limit_reached");
         }
@@ -722,6 +734,16 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "409", "root_account");
             add_code(&mut responses, "409", "own_account");
         }
+        "change_user_email" => {
+            add_code(&mut responses, "403", "installation_admin_required");
+            add_code(&mut responses, "404", "workspace_resource_not_found");
+            add_code(&mut responses, "404", "user_not_found");
+            add_code(&mut responses, "409", "root_account");
+            add_code(&mut responses, "409", "account_deleted");
+            add_code(&mut responses, "409", "email_taken");
+            add_code(&mut responses, "422", "invalid_email");
+            add_code(&mut responses, "422", "same_email");
+        }
         "list_admin_users" => {
             add_code(&mut responses, "403", "installation_admin_required");
         }
@@ -764,6 +786,13 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "422", "validation_failed");
         }
         "download_page_file" => add_code(&mut responses, "404", "page_file_not_found"),
+        "create_workspace_export" | "list_workspace_exports" | "download_workspace_export" => {
+            add_code(&mut responses, "403", "workspace_action_forbidden");
+            add_code(&mut responses, "404", "workspace_resource_not_found");
+            if operation_id == "create_workspace_export" {
+                add_code(&mut responses, "409", "export_in_progress");
+            }
+        }
         "export_page" => {
             add_code(&mut responses, "404", "page_not_found");
             add_code(&mut responses, "413", "export_too_many_pages");

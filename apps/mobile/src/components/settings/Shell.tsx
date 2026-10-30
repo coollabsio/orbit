@@ -122,19 +122,19 @@ export function AdminShell({ children, refreshing, onRefresh }: { children: Reac
   )
 }
 
-/** The web `SettingsCard`: a muted title strip (with its actions) on the card surface, the body on an inset panel. */
+/** The web `SettingsCard`: a title strip (with its actions) on the card surface, the body on a panel below a hairline. */
 export function SettingsCard({ title, description, actions, flush = false, children }: { title: string; description?: string; actions?: ReactNode; flush?: boolean; children?: ReactNode }) {
   return (
     <View className="rounded-lg bg-card shadow-[0_0_0_1px_var(--color-border)]">
       <View className="min-h-12 justify-center gap-2 py-2.5 pr-2 pl-4">
         <View>
-          <Text className="font-noto-medium text-[14px] leading-[20px] text-muted-foreground">{title}</Text>
+          <Text className="font-noto-medium text-[14px] leading-[20px] text-foreground">{title}</Text>
           {description ? <Text className="font-noto-medium text-[12px] leading-[16px] mt-0.5 text-muted-foreground">{description}</Text> : null}
         </View>
         {actions ? <View className="flex-row flex-wrap gap-2">{actions}</View> : null}
       </View>
       {children !== undefined ? (
-        <View className={`rounded-lg overflow-hidden bg-background shadow-[0_0_0_1px_var(--color-muted)] ${flush ? 'p-0' : 'p-4'}`}>{children}</View>
+        <View className={`rounded-b-lg overflow-hidden border-t border-border bg-background ${flush ? 'p-0' : 'p-4'}`}>{children}</View>
       ) : null}
     </View>
   )

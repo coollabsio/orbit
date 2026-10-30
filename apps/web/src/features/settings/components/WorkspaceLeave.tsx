@@ -4,6 +4,7 @@ import { SettingsCard } from '@/components/common/SettingsCard'
 import { Button } from '@/components/ui/button'
 import { useCurrentUser } from '@/features/auth/api'
 import { useLeaveWorkspace, useMembers } from '@/features/workspaces/api'
+import { useBillingEnabled } from '@/features/workspaces/billing'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 
 /** Any member may leave a workspace; its owner must transfer ownership first (`can_remove` on the caller's own row). */
@@ -14,13 +15,19 @@ export function WorkspaceLeave() {
   const leave = useLeaveWorkspace(workspace.id)
   const navigate = useNavigate()
   const membership = members.data?.find((member) => member.id === userId)
+  // Orbit Cloud refuses ownership transfer.
+  const billing = useBillingEnabled()
 
   // The server allows everyone but the owner to leave.
   if (membership && !membership.can.remove) return (
     <SettingsCard title="Leave workspace" description="You own this workspace.">
-      <p className="text-[13px] text-muted-foreground">
-        To leave, first transfer ownership to another member in <Link to="/settings/members" className="text-foreground underline underline-offset-4">Members</Link>.
-      </p>
+      {billing ? (
+        <p className="text-[13px] text-muted-foreground">The owner cannot leave. Ownership transfer is not available on Orbit Cloud yet.</p>
+      ) : (
+        <p className="text-[13px] text-muted-foreground">
+          To leave, first transfer ownership to another member in <Link to="/settings/members" className="text-foreground underline underline-offset-4">Members</Link>.
+        </p>
+      )}
     </SettingsCard>
   )
 

@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
-import { Linking, Pressable, View } from 'react-native'
+import { View } from 'react-native'
 
 import { billingBanner, billingKey, workspaceBilling } from '../data/billing'
 import { useAuthOptions } from '../hooks/account'
@@ -10,10 +10,10 @@ import { Icon, Text } from '../ui'
 
 /**
  * The web's `ReadOnlyBanner` (Orbit Cloud): the trial's days left, or the read-only line, above the dock on every tab.
- * Plans are chosen on the web (the app has no billing page), so the action opens the web's billing settings.
+ * Information only: store rules forbid steering to purchases outside the app, so it has no link and names no plan or price.
  */
 export function BillingBanner() {
-  const { client, workspaceId, session } = useOrbit()
+  const { client, workspaceId } = useOrbit()
   const { colors } = useTheme()
   const enabled = useAuthOptions().data?.billing_enabled ?? false
   const billing = useQuery({ queryKey: billingKey(workspaceId), queryFn: () => workspaceBilling(client, workspaceId), enabled })
@@ -30,9 +30,6 @@ export function BillingBanner() {
       <Text numberOfLines={1} className={`shrink text-[12px] ${trial ? 'font-noto-medium text-destructive' : 'text-muted-foreground'}`}>
         {banner.text}
       </Text>
-      <Pressable accessibilityRole="link" hitSlop={8} onPress={() => void Linking.openURL(`${session.server}/settings/billing`).catch(() => undefined)}>
-        <Text className={`text-[12px] ${trial ? 'font-noto-semibold text-destructive underline' : 'font-noto-medium text-foreground'}`}>{banner.action}</Text>
-      </Pressable>
     </View>
   )
 }

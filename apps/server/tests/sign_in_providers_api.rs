@@ -1288,3 +1288,63 @@ async fn a_provider_confirmation_unlocks_security_changes_for_a_password_less_ac
     assert_eq!(owner.status, StatusCode::UNAUTHORIZED);
     assert_eq!(owner.code(), "password_required");
 }
+
+#[tokio::test]
+async fn after_an_orbit_email_change_providers_still_find_the_same_account() {
+    let fixture = Fixture::new().await;
+    let cookie = fixture
+        .provider_only_account("g-ada", "ada@gmail.com")
+        .await;
+    let me = fixture
+        .send("GET", "/api/v1/auth/me", Some(&cookie), false, None)
+        .await;
+    let ada_id = me.body["id"].as_str().unwrap().to_owned();
+    let now = TimestampMillis::now();
+    IdentityRepository::new((*fixture.database).clone())
+        .store_email_change_token(
+            ada_id.parse().unwrap(),
+            "ada@work.example",
+            "email-change-token",
+            TimestampMillis::from_millis(now.as_millis() + 60_000),
+            "test",
+            now,
+        )
+        .await
+        .unwrap();
+    let confirmed = fixture
+        .send(
+            "POST",
+            "/api/v1/auth/email-change/confirm",
+            Some(&cookie),
+            true,
+            Some(json!({"token": "email-change-token"})),
+        )
+        .await;
+    assert_eq!(confirmed.status, StatusCode::OK, "{}", confirmed.body);
+
+    // Google still reports the old address: the subject finds the account, and the old address registers nothing.
+    let google_again = fixture
+        .flow("google", "sign_in", google("g-ada", "ada@gmail.com"), None)
+        .await;
+    assert_eq!(google_again.status, StatusCode::OK, "{}", google_again.body);
+    assert_eq!(
+        (
+            google_again.body["user"]["id"].as_str(),
+            google_again.body["user"]["email"].as_str()
+        ),
+        (Some(ada_id.as_str()), Some("ada@work.example"))
+    );
+    // GitHub vouches for the new address: it links to the same account instead of creating one.
+    let github_link = fixture
+        .flow("github", "sign_in", github(42, "ada@work.example"), None)
+        .await;
+    assert_eq!(github_link.status, StatusCode::OK, "{}", github_link.body);
+    assert_eq!(github_link.body["user"]["id"], ada_id.as_str());
+    assert_eq!(fixture.scalar_i64("SELECT COUNT(*) FROM users").await, 2);
+    assert_eq!(
+        fixture
+            .scalar_i64("SELECT COUNT(*) FROM user_identities")
+            .await,
+        2
+    );
+}

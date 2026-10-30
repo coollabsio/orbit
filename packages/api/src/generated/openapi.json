@@ -2110,7 +2110,7 @@
         "tags": [
           "crate::workspace_routes"
         ],
-        "summary": "Removes the mail server. Registration closes with it.",
+        "summary": "Removes the mail server. Registration closes with it. Orbit Cloud refuses (409 `smtp_required`).",
         "operationId": "remove_smtp",
         "parameters": [
           {
@@ -2700,12 +2700,150 @@
         ]
       }
     },
+    "/api/v1/admin/users/{user_id}/email": {
+      "put": {
+        "tags": [
+          "crate::workspace_routes"
+        ],
+        "summary": "Changes an account's email at once, verified, with no confirmation email: for instances without a mail server.\nThe account is signed out everywhere (an admin who changes their own email keeps this session). With a mail\nserver, the old address gets a notice. Orbit Cloud needs one (409 `smtp_required`) and also tells the new address.",
+        "operationId": "change_user_email",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminEmailBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden, installation_admin_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "workspace_resource_not_found, user_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, root_account, account_deleted, email_taken",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_email, same_email",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/users/{user_id}/recovery-link": {
       "post": {
         "tags": [
           "crate::workspace_routes"
         ],
-        "summary": "A one-time password recovery link for another account. It lasts 30 minutes, the same as `orbit recovery-link`.",
+        "summary": "A one-time password recovery link for another account. It lasts 30 minutes, the same as `orbit recovery-link`.\nOn Orbit Cloud the admin never sees it: it is emailed to the account (409 `smtp_required` without a mail server).",
         "operationId": "create_recovery_link",
         "parameters": [
           {
@@ -2728,6 +2866,16 @@
         ],
         "responses": {
           "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryLink"
+                }
+              }
+            }
+          },
+          "202": {
             "description": "",
             "content": {
               "application/json": {
@@ -2957,7 +3105,7 @@
         "tags": [
           "crate::workspace_routes"
         ],
-        "summary": "Turns another account's two-factor sign-in off, for a user who lost the authenticator app and the recovery codes.",
+        "summary": "Turns another account's two-factor sign-in off, for a user who lost the authenticator app and the recovery codes.\nOrbit Cloud emails the person a notice (409 `smtp_required` without a mail server).",
         "operationId": "reset_two_factor",
         "parameters": [
           {
@@ -3518,6 +3666,123 @@
         ]
       }
     },
+    "/api/v1/auth/email-change/confirm": {
+      "post": {
+        "tags": [
+          "crate::auth_routes::account"
+        ],
+        "summary": "Opens the emailed link: the new address becomes the account's email, verified. Needs no session. Every other\nsession of the account is signed out (the request's own session stays), and the old address gets a notice.",
+        "operationId": "confirm_email_change",
+        "parameters": [
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmEmailChangeBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmailChangeConfirmed"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "tags": [
@@ -3973,6 +4238,134 @@
           }
         ]
       },
+      "delete": {
+        "tags": [
+          "crate::auth_routes::account"
+        ],
+        "summary": "Deletes the account for good (GDPR erasure). The account is anonymized: what it authored stays and shows\n\"Deleted user\"; its email is freed, every session ends and it can never sign in again. Refused with 409\n`owns_workspaces` (the problem lists them in `workspaces`) while the account owns a workspace outside the trash,\nand with 409 `root_account` for the root user.",
+        "operationId": "delete_account",
+        "parameters": [
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteAccountBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Deleted; the session cookie is cleared."
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "confirmation_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "authentication_throttled",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      },
       "patch": {
         "tags": [
           "crate::auth_routes"
@@ -4062,6 +4455,143 @@
           },
           "422": {
             "description": "invalid_display_name, invalid_profile",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/me/email": {
+      "post": {
+        "tags": [
+          "crate::auth_routes::account"
+        ],
+        "summary": "Emails a one-use link, valid for 60 minutes, to the new address; the email changes when it is opened. Like\nregistration, the answer does not tell whether another account has the address or the address reached its email\nlimit: then no email is sent and an earlier link stays valid. Needs a mail server (409 `mail_unavailable`).",
+        "operationId": "request_email_change",
+        "parameters": [
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeEmailBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecoveryRequestResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "invalid_email or same_email",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "authentication_throttled",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -10329,7 +10859,7 @@
         "tags": [
           "crate::billing::routes"
         ],
-        "summary": "Starts a Stripe Checkout for `plan` and returns its URL. Refused while the workspace already\nhas full access (a subscription, or the exempt workspace): plan changes and cancellations go\nthrough the Billing Portal.",
+        "summary": "Starts a Stripe Checkout for `plan` and returns its URL. Refused while the workspace already\nhas full access (a subscription, or the exempt workspace), or while Stripe reports a live\nsubscription of the workspace's customer: plan changes and cancellations go through the\nBilling Portal. Open Checkout Sessions of the customer expire first.",
         "operationId": "billing_checkout",
         "parameters": [
           {
@@ -17399,6 +17929,387 @@
               "application/problem+json": {
                 "schema": {
                   "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/exports": {
+      "get": {
+        "tags": [
+          "crate::workspace_export_routes"
+        ],
+        "summary": "The workspace's exports that have not expired, newest first.",
+        "operationId": "list_workspace_exports",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceExportList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "workspace_action_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "workspace_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "crate::workspace_export_routes"
+        ],
+        "summary": "Starts an export of the whole workspace as a ZIP archive (tasks and chat as JSON, pages as\nMarkdown, and the files). It uses the caller's view: their private pages, and the private\nchannels and direct messages they are in. One export at a time per workspace (409).",
+        "operationId": "create_workspace_export",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceExport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden, workspace_action_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "workspace_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, export_in_progress",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/exports/{export_id}/download": {
+      "get": {
+        "tags": [
+          "crate::workspace_export_routes"
+        ],
+        "summary": "The ZIP archive of a ready export (the layout is in its `README.txt`).",
+        "operationId": "download_workspace_export",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "export_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceExportArchive"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "workspace_action_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "workspace_resource_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
                 }
               }
             }
@@ -32907,7 +33818,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, workspace_conflict, conflict, workspace_limit_reached",
+            "description": "contract_mismatch, workspace_conflict, conflict, workspace_limit_reached, transfer_unavailable",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -34333,6 +35244,19 @@
           }
         }
       },
+      "AdminEmailBody": {
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "The new address."
+          }
+        },
+        "additionalProperties": false
+      },
       "AdminUser": {
         "type": "object",
         "description": "One account as the root user's Admin area lists it.",
@@ -34343,6 +35267,7 @@
           "root",
           "admin",
           "suspended",
+          "deleted",
           "two_factor",
           "created_at",
           "workspace_count"
@@ -34355,6 +35280,10 @@
           "created_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "deleted": {
+            "type": "boolean",
+            "description": "The person deleted their account: it is anonymized and can never sign in or be reinstated."
           },
           "display_name": {
             "type": "string"
@@ -34743,6 +35672,16 @@
           },
           "type": {
             "type": "string"
+          },
+          "workspaces": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/OwnedWorkspace"
+            },
+            "description": "`owns_workspaces` only: the workspaces to delete first."
           }
         }
       },
@@ -35197,6 +36136,26 @@
             "format": "int64"
           }
         }
+      },
+      "ChangeEmailBody": {
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "The new address."
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Required when the account has a password (see `DeleteAccountBody.password`)."
+          }
+        },
+        "additionalProperties": false
       },
       "ChangePasswordBody": {
         "type": "object",
@@ -36590,6 +37549,18 @@
         },
         "additionalProperties": false
       },
+      "ConfirmEmailChangeBody": {
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "ConflictMetadata": {
         "type": "object",
         "required": [
@@ -37058,6 +38029,26 @@
           }
         }
       },
+      "DeleteAccountBody": {
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "The account's current email, typed again to confirm."
+          },
+          "password": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Required when the account has a password. An account without one confirms with a session that signed in\n(or confirmed with a provider) in the last 10 minutes, else 401 `reauthentication_required`."
+          }
+        },
+        "additionalProperties": false
+      },
       "DeliveryBody": {
         "type": "string",
         "enum": [
@@ -37162,6 +38153,18 @@
           }
         },
         "additionalProperties": false
+      },
+      "EmailChangeConfirmed": {
+        "type": "object",
+        "required": [
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "The account's email now."
+          }
+        }
       },
       "EnableTotpBody": {
         "type": "object",
@@ -39100,6 +40103,22 @@
           "desc"
         ]
       },
+      "OwnedWorkspace": {
+        "type": "object",
+        "description": "A workspace outside the trash that the account owns, which blocks deleting the account.",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
       "Page": {
         "type": "object",
         "description": "A page with its content.",
@@ -39926,6 +40945,7 @@
                 "root",
                 "admin",
                 "suspended",
+                "deleted",
                 "two_factor",
                 "created_at",
                 "workspace_count"
@@ -39938,6 +40958,10 @@
                 "created_at": {
                   "type": "string",
                   "format": "date-time"
+                },
+                "deleted": {
+                  "type": "boolean",
+                  "description": "The person deleted their account: it is anonymized and can never sign in or be reinstated."
                 },
                 "display_name": {
                   "type": "string"
@@ -40889,7 +41913,8 @@
           "comments.moderate",
           "chat.manage",
           "billing.manage",
-          "storage.manage"
+          "storage.manage",
+          "workspace.export"
         ]
       },
       "PlanInterval": {
@@ -41416,8 +42441,8 @@
       },
       "RecoveryLink": {
         "type": "object",
+        "description": "Self-hosted returns the link (201); Orbit Cloud emails it to the account instead and returns where (202).",
         "required": [
-          "url",
           "expires_at"
         ],
         "properties": {
@@ -41425,8 +42450,17 @@
             "type": "string",
             "format": "date-time"
           },
+          "sent_to": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "url": {
-            "type": "string"
+            "type": [
+              "string",
+              "null"
+            ]
           }
         }
       },
@@ -43956,6 +44990,83 @@
           }
         }
       },
+      "WorkspaceExport": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "created_at",
+          "expires_at"
+        ],
+        "properties": {
+          "completed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The archive is deleted at this time."
+          },
+          "id": {
+            "type": "string"
+          },
+          "requested_by_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The member who started it; `null` when the account is gone."
+          },
+          "size_bytes": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Size of the ZIP archive once it is ready.",
+            "minimum": 0
+          },
+          "status": {
+            "$ref": "#/components/schemas/WorkspaceExportStatus"
+          }
+        }
+      },
+      "WorkspaceExportArchive": {
+        "type": "string",
+        "format": "binary"
+      },
+      "WorkspaceExportList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceExport"
+            },
+            "description": "The newest exports first, without expired ones."
+          }
+        }
+      },
+      "WorkspaceExportStatus": {
+        "type": "string",
+        "enum": [
+          "queued",
+          "running",
+          "ready",
+          "failed"
+        ]
+      },
       "WorkspaceProblem": {
         "type": "object",
         "required": [
@@ -44115,7 +45226,8 @@
       "views.manage_shared",
       "comments.moderate",
       "chat.manage",
-      "storage.manage"
+      "storage.manage",
+      "workspace.export"
     ],
     "member": [],
     "owner": [
@@ -44132,7 +45244,8 @@
       "comments.moderate",
       "chat.manage",
       "billing.manage",
-      "storage.manage"
+      "storage.manage",
+      "workspace.export"
     ]
   }
 }

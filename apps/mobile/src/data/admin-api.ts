@@ -4,6 +4,7 @@
  * request from other accounts.
  */
 import {
+  changeUserEmail,
   createBackup as createBackupRequest,
   createRecoveryLink,
   deleteBackup as deleteBackupRequest,
@@ -28,6 +29,7 @@ import {
 } from '@orbit/api/generated/sdk.gen'
 import type {
   AdminUser,
+  AuthOptions,
   BackupCreated,
   BackupSchedule,
   BackupSummary,
@@ -156,21 +158,38 @@ export async function clearTwoFactor(client: OrbitClient, userId: string): Promi
   await resetTwoFactor({ client, path: { user_id: userId }, throwOnError: true })
 }
 
-export type AdminAction = 'make-admin' | 'remove-admin' | 'recovery-link' | 'reset-two-factor' | 'suspend' | 'reinstate'
-
-/**
- * The web's Manage menu: nobody manages the root account or their own; only the root user manages instance admins.
- * A suspended account can only be reinstated.
- */
-export function adminActions(user: AdminUser, viewer: { id: string; root: boolean }): AdminAction[] {
-  if (user.root || user.id === viewer.id || (user.admin && !viewer.root)) return []
-  const admin: AdminAction[] = viewer.root ? (user.admin ? ['remove-admin'] : user.suspended ? [] : ['make-admin']) : []
-  if (user.suspended) return [...admin, 'reinstate']
-  return [...admin, 'recovery-link', ...(user.two_factor ? (['reset-two-factor'] as const) : []), 'suspend']
+/** Changes an account's email at once, with no confirmation email; the account is signed out everywhere. */
+export async function changeEmail(client: OrbitClient, userId: string, email: string): Promise<void> {
+  await changeUserEmail({ client, path: { user_id: userId }, body: { email: email.trim() }, throwOnError: true })
 }
 
-/** `Root`, `Admin`, `2FA`, `Suspended`: the badges beside a user's name. */
+export type AdminAction = 'change-email' | 'make-admin' | 'remove-admin' | 'recovery-link' | 'reset-two-factor' | 'suspend' | 'reinstate'
+
+/**
+ * The web's Manage menu: nobody manages the root account, their own or a deleted one, except that an admin may
+ * change their own email; only the root user manages instance admins. A suspended account can only be reinstated
+ * (or get another email).
+ */
+export function adminActions(user: AdminUser, viewer: { id: string; root: boolean }): AdminAction[] {
+  if (user.deleted) return []
+  if (user.id === viewer.id) return ['change-email']
+  if (user.root || (user.admin && !viewer.root)) return []
+  const admin: AdminAction[] = viewer.root ? (user.admin ? ['remove-admin'] : user.suspended ? [] : ['make-admin']) : []
+  if (user.suspended) return ['change-email', ...admin, 'reinstate']
+  return ['change-email', ...admin, 'recovery-link', ...(user.two_factor ? (['reset-two-factor'] as const) : []), 'suspend']
+}
+
+/** Orbit Cloud emails the person about these, so they need a mail server there. */
+const EMAILS_THE_PERSON_ON_CLOUD: ReadonlySet<AdminAction> = new Set(['change-email', 'recovery-link', 'reset-two-factor'])
+
+/** Why the Manage menu offers `action` but turns it off, or null when it can run. */
+export function adminActionBlocked(action: AdminAction, options: Pick<AuthOptions, 'billing_enabled' | 'email_enabled'> | undefined): string | null {
+  return options?.billing_enabled === true && !options.email_enabled && EMAILS_THE_PERSON_ON_CLOUD.has(action) ? 'Needs a mail server on Orbit Cloud' : null
+}
+
+/** `Root`, `Admin`, `2FA`, `Suspended`: the badges beside a user's name. A deleted account has only `Deleted`. */
 export function adminBadges(user: AdminUser): string[] {
+  if (user.deleted) return ['Deleted']
   return [user.root ? 'Root' : user.admin ? 'Admin' : null, user.two_factor ? '2FA' : null, user.suspended ? 'Suspended' : null].filter((badge): badge is string => badge !== null)
 }
 

@@ -18,6 +18,13 @@ export type AcceptanceRecord = {
     workspace_id: string;
 };
 
+export type AdminEmailBody = {
+    /**
+     * The new address.
+     */
+    email: string;
+};
+
 /**
  * One account as the root user's Admin area lists it.
  */
@@ -27,6 +34,10 @@ export type AdminUser = {
      */
     admin: boolean;
     created_at: string;
+    /**
+     * The person deleted their account: it is anonymized and can never sign in or be reinstated.
+     */
+    deleted: boolean;
     display_name: string;
     email: string;
     id: string;
@@ -159,6 +170,10 @@ export type AuthProblem = {
     status: number;
     title: string;
     type: string;
+    /**
+     * `owns_workspaces` only: the workspaces to delete first.
+     */
+    workspaces?: Array<OwnedWorkspace> | null;
 };
 
 export type AuthUserResponse = ProfileFields & {
@@ -331,6 +346,17 @@ export type CategoryRecord = {
     id: string;
     name: string;
     position: number;
+};
+
+export type ChangeEmailBody = {
+    /**
+     * The new address.
+     */
+    email: string;
+    /**
+     * Required when the account has a password (see `DeleteAccountBody.password`).
+     */
+    password?: string | null;
 };
 
 export type ChangePasswordBody = {
@@ -860,6 +886,10 @@ export type Condition = {
     value?: unknown;
 };
 
+export type ConfirmEmailChangeBody = {
+    token: string;
+};
+
 export type ConflictMetadata = {
     current_version: number;
     refresh?: string | null;
@@ -1058,6 +1088,18 @@ export type CustomStickerRecord = {
     url: string;
 };
 
+export type DeleteAccountBody = {
+    /**
+     * The account's current email, typed again to confirm.
+     */
+    email: string;
+    /**
+     * Required when the account has a password. An account without one confirms with a session that signed in
+     * (or confirmed with a provider) in the last 10 minutes, else 401 `reauthentication_required`.
+     */
+    password?: string | null;
+};
+
 export type DeliveryBody = 'manual' | 'smtp';
 
 export type DiscordEventBody = {
@@ -1092,6 +1134,13 @@ export type DuplicatePageBody = {
      * Also copy the page's live sub-pages (the whole subtree, in order). Defaults to `false`.
      */
     include_children?: boolean;
+};
+
+export type EmailChangeConfirmed = {
+    /**
+     * The account's email now.
+     */
+    email: string;
 };
 
 export type EnableTotpBody = {
@@ -1826,6 +1875,14 @@ export type OrderBy = 'manual' | 'priority' | 'created' | 'updated' | 'title' | 
 export type OrderDirection = 'asc' | 'desc';
 
 /**
+ * A workspace outside the trash that the account owns, which blocks deleting the account.
+ */
+export type OwnedWorkspace = {
+    id: string;
+    name: string;
+};
+
+/**
  * A page with its content.
  */
 export type Page = {
@@ -2164,6 +2221,10 @@ export type PageAdminUser = {
          */
         admin: boolean;
         created_at: string;
+        /**
+         * The person deleted their account: it is anonymized and can never sign in or be reinstated.
+         */
+        deleted: boolean;
         display_name: string;
         email: string;
         id: string;
@@ -2491,7 +2552,7 @@ export type PasswordConfirmationBody = {
  * A workspace capability that depends on the member's role. Actions open to
  * every member (tasks, projects, attachments, docs) are not listed here.
  */
-export type Permission = 'workspace.update' | 'workspace.delete' | 'workspace.transfer' | 'members.manage' | 'audit.view' | 'api_tokens.manage' | 'integrations.manage' | 'teamspaces.delete' | 'pages.purge' | 'views.manage_shared' | 'comments.moderate' | 'chat.manage' | 'billing.manage' | 'storage.manage';
+export type Permission = 'workspace.update' | 'workspace.delete' | 'workspace.transfer' | 'members.manage' | 'audit.view' | 'api_tokens.manage' | 'integrations.manage' | 'teamspaces.delete' | 'pages.purge' | 'views.manage_shared' | 'comments.moderate' | 'chat.manage' | 'billing.manage' | 'storage.manage' | 'workspace.export';
 
 export type PlanInterval = 'month' | 'year';
 
@@ -2710,9 +2771,13 @@ export type RecoveryCompleteBody = {
     token: string;
 };
 
+/**
+ * Self-hosted returns the link (201); Orbit Cloud emails it to the account instead and returns where (202).
+ */
 export type RecoveryLink = {
     expires_at: string;
-    url: string;
+    sent_to?: string | null;
+    url?: string | null;
 };
 
 export type RecoveryRequestBody = {
@@ -3678,6 +3743,36 @@ export type WorkspaceConflict = {
     current_version: number;
     refresh: string;
 };
+
+export type WorkspaceExport = {
+    completed_at?: string | null;
+    created_at: string;
+    /**
+     * The archive is deleted at this time.
+     */
+    expires_at: string;
+    id: string;
+    /**
+     * The member who started it; `null` when the account is gone.
+     */
+    requested_by_name?: string | null;
+    /**
+     * Size of the ZIP archive once it is ready.
+     */
+    size_bytes?: number | null;
+    status: WorkspaceExportStatus;
+};
+
+export type WorkspaceExportArchive = Blob | File;
+
+export type WorkspaceExportList = {
+    /**
+     * The newest exports first, without expired ones.
+     */
+    items: Array<WorkspaceExport>;
+};
+
+export type WorkspaceExportStatus = 'queued' | 'running' | 'ready' | 'failed';
 
 export type WorkspaceProblem = {
     code: string;
@@ -4963,6 +5058,68 @@ export type SetInstanceAdminResponses = {
 
 export type SetInstanceAdminResponse = SetInstanceAdminResponses[keyof SetInstanceAdminResponses];
 
+export type ChangeUserEmailData = {
+    body: AdminEmailBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        user_id: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/users/{user_id}/email';
+};
+
+export type ChangeUserEmailErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * workspace_resource_not_found, user_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, root_account, account_deleted, email_taken
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_email, same_email
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type ChangeUserEmailError = ChangeUserEmailErrors[keyof ChangeUserEmailErrors];
+
+export type ChangeUserEmailResponses = {
+    204: void;
+};
+
+export type ChangeUserEmailResponse = ChangeUserEmailResponses[keyof ChangeUserEmailResponses];
+
 export type CreateRecoveryLinkData = {
     body?: never;
     headers?: {
@@ -5017,6 +5174,7 @@ export type CreateRecoveryLinkError = CreateRecoveryLinkErrors[keyof CreateRecov
 
 export type CreateRecoveryLinkResponses = {
     201: RecoveryLink;
+    202: RecoveryLink;
 };
 
 export type CreateRecoveryLinkResponse = CreateRecoveryLinkResponses[keyof CreateRecoveryLinkResponses];
@@ -5351,6 +5509,58 @@ export type DisconnectConnectedAccountResponses = {
 
 export type DisconnectConnectedAccountResponse = DisconnectConnectedAccountResponses[keyof DisconnectConnectedAccountResponses];
 
+export type ConfirmEmailChangeData = {
+    body: ConfirmEmailChangeBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/email-change/confirm';
+};
+
+export type ConfirmEmailChangeErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type ConfirmEmailChangeError = ConfirmEmailChangeErrors[keyof ConfirmEmailChangeErrors];
+
+export type ConfirmEmailChangeResponses = {
+    200: EmailChangeConfirmed;
+};
+
+export type ConfirmEmailChangeResponse = ConfirmEmailChangeResponses[keyof ConfirmEmailChangeResponses];
+
 export type LoginData = {
     body: LoginBody;
     headers?: {
@@ -5519,6 +5729,69 @@ export type LogoutResponses = {
 
 export type LogoutResponse = LogoutResponses[keyof LogoutResponses];
 
+export type DeleteAccountData = {
+    body: DeleteAccountBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/me';
+};
+
+export type DeleteAccountErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * confirmation_mismatch
+     */
+    422: AuthProblem;
+    /**
+     * authentication_throttled
+     */
+    429: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type DeleteAccountError = DeleteAccountErrors[keyof DeleteAccountErrors];
+
+export type DeleteAccountResponses = {
+    /**
+     * Deleted; the session cookie is cleared.
+     */
+    204: void;
+};
+
+export type DeleteAccountResponse = DeleteAccountResponses[keyof DeleteAccountResponses];
+
 export type MeData = {
     body?: never;
     headers?: {
@@ -5622,6 +5895,66 @@ export type UpdateMeResponses = {
 };
 
 export type UpdateMeResponse = UpdateMeResponses[keyof UpdateMeResponses];
+
+export type RequestEmailChangeData = {
+    body: ChangeEmailBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/me/email';
+};
+
+export type RequestEmailChangeErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: AuthProblem;
+    /**
+     * authentication_required
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * invalid_email or same_email
+     */
+    422: AuthProblem;
+    /**
+     * authentication_throttled
+     */
+    429: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type RequestEmailChangeError = RequestEmailChangeErrors[keyof RequestEmailChangeErrors];
+
+export type RequestEmailChangeResponses = {
+    202: RecoveryRequestResponse;
+};
+
+export type RequestEmailChangeResponse = RequestEmailChangeResponses[keyof RequestEmailChangeResponses];
 
 export type AuthOptionsData = {
     body?: never;
@@ -11614,6 +11947,181 @@ export type ReadChatThreadResponses = {
 };
 
 export type ReadChatThreadResponse = ReadChatThreadResponses[keyof ReadChatThreadResponses];
+
+export type ListWorkspaceExportsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/exports';
+};
+
+export type ListWorkspaceExportsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * workspace_action_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * workspace_resource_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type ListWorkspaceExportsError = ListWorkspaceExportsErrors[keyof ListWorkspaceExportsErrors];
+
+export type ListWorkspaceExportsResponses = {
+    200: WorkspaceExportList;
+};
+
+export type ListWorkspaceExportsResponse = ListWorkspaceExportsResponses[keyof ListWorkspaceExportsResponses];
+
+export type CreateWorkspaceExportData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/exports';
+};
+
+export type CreateWorkspaceExportErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * workspace_resource_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, export_in_progress
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type CreateWorkspaceExportError = CreateWorkspaceExportErrors[keyof CreateWorkspaceExportErrors];
+
+export type CreateWorkspaceExportResponses = {
+    202: WorkspaceExport;
+};
+
+export type CreateWorkspaceExportResponse = CreateWorkspaceExportResponses[keyof CreateWorkspaceExportResponses];
+
+export type DownloadWorkspaceExportData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        export_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/exports/{export_id}/download';
+};
+
+export type DownloadWorkspaceExportErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * workspace_action_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * workspace_resource_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type DownloadWorkspaceExportError = DownloadWorkspaceExportErrors[keyof DownloadWorkspaceExportErrors];
+
+export type DownloadWorkspaceExportResponses = {
+    200: WorkspaceExportArchive;
+};
+
+export type DownloadWorkspaceExportResponse = DownloadWorkspaceExportResponses[keyof DownloadWorkspaceExportResponses];
 
 export type GithubWorkspaceSettingsData = {
     body?: never;
@@ -18269,7 +18777,7 @@ export type TransferOwnershipErrors = {
      */
     404: WorkspaceProblem;
     /**
-     * contract_mismatch, workspace_conflict, conflict, workspace_limit_reached
+     * contract_mismatch, workspace_conflict, conflict, workspace_limit_reached, transfer_unavailable
      */
     409: WorkspaceProblem;
     /**

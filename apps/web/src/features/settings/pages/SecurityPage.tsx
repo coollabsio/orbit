@@ -12,9 +12,9 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { PasswordInput } from '@/components/ui/password-input'
 import { useAuthOptions, useConnectedAccounts, useCurrentUser, useDisconnectAccount, useStartProviderSignIn } from '@/features/auth/api'
 import { ConfirmWithProvider } from '@/features/auth/components/ConfirmWithProvider'
+import { CurrentPassword } from '@/features/auth/components/CurrentPassword'
 import { defaultPasskeyName, isPasskeyCancel, passkeysSupported } from '@/features/auth/passkey'
 import { PROVIDER_NAMES } from '@/features/auth/providerSignIn'
 import {
@@ -109,26 +109,6 @@ function AuthenticatorCard() {
   )
 }
 
-/**
- * The current password, asked again before a change to how the account signs in. An account without one has no
- * field: when its sign-in is too old, the server asks for a fresh provider sign-in instead.
- */
-function CurrentPassword({ hasPassword, value, onChange, error, fallback }: { hasPassword: boolean; value: string; onChange: (value: string) => void; error: unknown; fallback: string }) {
-  const id = useId()
-  const message = error ? problemDetail(error, fallback) : null
-  if (!hasPassword) {
-    if (error instanceof ApiProblem && error.code === 'reauthentication_required') return <ConfirmWithProvider returnTo={SECURITY_PATH} />
-    return message ? <p role="alert" className="text-[13px] text-destructive">{message}</p> : null
-  }
-  return (
-    <Field data-invalid={message ? true : undefined}>
-      <FieldLabel htmlFor={id}>Current password</FieldLabel>
-      <PasswordInput id={id} required autoFocus autoComplete="current-password" aria-invalid={message ? true : undefined} value={value} onChange={(event) => onChange(event.target.value)} />
-      {message ? <FieldError>{message}</FieldError> : null}
-    </Field>
-  )
-}
-
 function SetupTotpDialog({ onClose }: { onClose: () => void }) {
   const setup = useSetupTotp()
   const enable = useEnableTotp()
@@ -174,7 +154,7 @@ function SetupTotpDialog({ onClose }: { onClose: () => void }) {
               <DialogTitle>Set up an authenticator app</DialogTitle>
               <DialogDescription>{hasPassword ? 'Confirm your password to start.' : 'Orbit makes a key for your authenticator app.'}</DialogDescription>
             </DialogHeader>
-            <CurrentPassword hasPassword={hasPassword} value={password} onChange={setPassword} error={setup.error} fallback="The setup could not start." />
+            <CurrentPassword returnTo={SECURITY_PATH} hasPassword={hasPassword} value={password} onChange={setPassword} error={setup.error} fallback="The setup could not start." />
             <DialogFooter>
               <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
               <Button type="submit" disabled={setup.isPending || (hasPassword && !password)}>{setup.isPending ? 'Please wait…' : 'Continue'}</Button>
@@ -205,7 +185,7 @@ function RegenerateCodesDialog({ onClose }: { onClose: () => void }) {
               <DialogTitle>New recovery codes</DialogTitle>
               <DialogDescription>Your current recovery codes stop working.</DialogDescription>
             </DialogHeader>
-            <CurrentPassword hasPassword={hasPassword} value={password} onChange={setPassword} error={regenerate.error} fallback="New recovery codes could not be made." />
+            <CurrentPassword returnTo={SECURITY_PATH} hasPassword={hasPassword} value={password} onChange={setPassword} error={regenerate.error} fallback="New recovery codes could not be made." />
             <DialogFooter>
               <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
               <Button type="submit" disabled={regenerate.isPending || (hasPassword && !password)}>{regenerate.isPending ? 'Please wait…' : 'Make new codes'}</Button>
@@ -237,7 +217,7 @@ function DisableTwoFactorDialog({ onClose }: { onClose: () => void }) {
             <DialogTitle>Turn off two-factor sign-in?</DialogTitle>
             <DialogDescription>Sign-in no longer asks for a code, and your recovery codes stop working.</DialogDescription>
           </DialogHeader>
-          <CurrentPassword hasPassword={hasPassword} value={password} onChange={setPassword} error={disable.error} fallback="Two-factor sign-in could not be turned off." />
+          <CurrentPassword returnTo={SECURITY_PATH} hasPassword={hasPassword} value={password} onChange={setPassword} error={disable.error} fallback="Two-factor sign-in could not be turned off." />
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
             <Button type="submit" variant="destructive" disabled={disable.isPending || (hasPassword && !password)}>{disable.isPending ? 'Turning off…' : 'Turn off'}</Button>
@@ -401,7 +381,7 @@ function AddPasskeyDialog({ add, onAdd, onClose }: { add: ReturnType<typeof useA
               <FieldDescription>So you can tell your passkeys apart, e.g. "MacBook" or "YubiKey".</FieldDescription>
             </Field>
             {/* Only the password check fails while the dialog is open. */}
-            <CurrentPassword hasPassword={hasPassword} value={password} onChange={setPassword} error={add.error} fallback="The passkey could not be added." />
+            <CurrentPassword returnTo={SECURITY_PATH} hasPassword={hasPassword} value={password} onChange={setPassword} error={add.error} fallback="The passkey could not be added." />
           </FieldGroup>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
@@ -429,7 +409,7 @@ function ConnectProviderDialog({ provider, onClose }: { provider: Provider; onCl
             <DialogTitle>Connect {name}</DialogTitle>
             <DialogDescription>Confirm your password, then sign in with {name}.</DialogDescription>
           </DialogHeader>
-          <CurrentPassword hasPassword value={password} onChange={setPassword} error={connect.error} fallback="The connection could not start." />
+          <CurrentPassword returnTo={SECURITY_PATH} hasPassword value={password} onChange={setPassword} error={connect.error} fallback="The connection could not start." />
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
             <Button type="submit" disabled={connect.isPending || connect.isSuccess || !password}>{connect.isPending ? 'Please wait…' : 'Continue'}</Button>

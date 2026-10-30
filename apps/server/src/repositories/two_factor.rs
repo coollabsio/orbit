@@ -311,13 +311,13 @@ impl IdentityRepository {
     }
 
     /// Turns another account's authenticator app off from the Admin area, for a user who lost the device and the
-    /// recovery codes. The same accounts an admin may send a recovery link to.
+    /// recovery codes. The same accounts an admin may send a recovery link to. Returns the account's email.
     pub async fn reset_two_factor_as_admin(
         &self,
         actor_id: Id,
         user_id: Id,
         request_id: &str,
-    ) -> Result<(), AdminAccountError> {
+    ) -> Result<String, AdminAccountError> {
         let now = self.database().database_now().await?;
         let mut transaction = self.database().immediate_transaction().await?;
         if !Self::is_active_admin(&mut transaction, actor_id).await? {
@@ -327,13 +327,11 @@ impl IdentityRepository {
             return Err(AdminAccountError::OwnAccount);
         }
         Self::may_manage(&mut transaction, actor_id, user_id).await?;
-        let exists = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE id = $1")
+        let email = sqlx::query_scalar::<_, String>("SELECT email FROM users WHERE id = $1")
             .bind(user_id.to_string())
-            .fetch_one(&mut *transaction)
-            .await?;
-        if exists == 0 {
-            return Err(AdminAccountError::NotFound);
-        }
+            .fetch_optional(&mut *transaction)
+            .await?
+            .ok_or(AdminAccountError::NotFound)?;
         delete_two_factor(&mut transaction, user_id).await?;
         audit::record_global(
             &mut transaction,
@@ -348,7 +346,7 @@ impl IdentityRepository {
         )
         .await?;
         transaction.commit().await?;
-        Ok(())
+        Ok(email)
     }
 
     pub async fn list_passkeys(&self, user_id: Id) -> Result<Vec<PasskeyRecord>, IdentityError> {

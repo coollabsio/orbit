@@ -4,6 +4,7 @@ import { View } from 'react-native'
 import { ConfirmDialog, type ConfirmRequest } from '../../../../components/settings/Dialog'
 import { AdminShell, FieldLabel, Note, Segmented, SettingsCard } from '../../../../components/settings/Shell'
 import { SMTP_DEFAULT_PORT, SMTP_SECURITY_OPTIONS, smtpBody, smtpDraft, type SmtpView } from '../../../../data/admin-api'
+import { useAuthOptions } from '../../../../hooks/account'
 import { useInstanceSettings, useRemoveSmtp, useSaveSmtp, useSendTestEmail } from '../../../../hooks/admin'
 import { useOrbit } from '../../../../orbit-context'
 import { errorMessage } from '../../../../session-context'
@@ -30,6 +31,8 @@ export default function AdminEmailScreen() {
 
 function EmailCard({ smtp }: { smtp: SmtpView | null }) {
   const { user } = useOrbit()
+  // Orbit Cloud always needs a mail server: it can be replaced, not removed.
+  const cloud = useAuthOptions().data?.billing_enabled ?? false
   const save = useSaveSmtp()
   const remove = useRemoveSmtp()
   const test = useSendTestEmail()
@@ -47,26 +50,28 @@ function EmailCard({ smtp }: { smtp: SmtpView | null }) {
   return (
     <SettingsCard
       title="Email"
-      description="The SMTP server Orbit sends invitations, sign-up links and password reset links through. Nothing else is sent."
+      description="The SMTP server for invitations, sign-up links, password reset links and email changes. Orbit sends no other email."
       actions={
         smtp ? (
           <>
             <Button label={test.isPending ? 'Sending…' : 'Send test email'} variant="outline" size="sm" disabled={test.isPending} onPress={() => test.mutate()} />
-            <Button
-              label="Remove"
-              variant="destructive"
-              size="sm"
-              disabled={remove.isPending}
-              onPress={() =>
-                setConfirm({
-                  title: 'Remove the mail server?',
-                  description: 'Orbit stops sending invitations and password reset links by email, and registration closes.',
-                  confirmLabel: 'Remove',
-                  danger: true,
-                  onConfirm: () => remove.mutate(undefined, stored),
-                })
-              }
-            />
+            {cloud ? null : (
+              <Button
+                label="Remove"
+                variant="destructive"
+                size="sm"
+                disabled={remove.isPending}
+                onPress={() =>
+                  setConfirm({
+                    title: 'Remove the mail server?',
+                    description: 'Orbit stops sending invitations and password reset links by email, and registration closes.',
+                    confirmLabel: 'Remove',
+                    danger: true,
+                    onConfirm: () => remove.mutate(undefined, stored),
+                  })
+                }
+              />
+            )}
           </>
         ) : undefined
       }
@@ -97,6 +102,7 @@ function EmailCard({ smtp }: { smtp: SmtpView | null }) {
         />
         <Input label="From address" required placeholder="orbit@example.com" keyboardType="email-address" autoCapitalize="none" autoCorrect={false} value={draft.from_address} onChangeText={set('from_address')} />
         <Input label="From name" placeholder="Orbit" value={draft.from_name} onChangeText={set('from_name')} />
+        {cloud && smtp ? <Note>Orbit Cloud needs a mail server. Save a different one instead.</Note> : null}
         {save.isError ? <Note error>{errorMessage(save.error)}</Note> : null}
         {remove.isError ? <Note error>{errorMessage(remove.error)}</Note> : null}
         {test.isError ? <Note error>{errorMessage(test.error)}</Note> : null}

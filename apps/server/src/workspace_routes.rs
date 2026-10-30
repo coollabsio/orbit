@@ -278,6 +278,10 @@ pub fn workspace_router(state: WorkspaceState) -> Router {
             post(reset_two_factor),
         )
         .route(
+            "/api/v1/admin/users/{user_id}/email",
+            put(change_user_email),
+        )
+        .route(
             "/api/v1/admin/users/{user_id}/admin",
             put(set_instance_admin),
         )
@@ -1474,15 +1478,52 @@ async fn set_instance_admin(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Who hears about an admin action on someone else's account.
+enum AccountNotice<'a> {
+    /// Orbit Cloud: the person is always emailed, so the action needs a mail server.
+    Cloud(&'a Mailer),
+    /// Self-hosted: the person is emailed only when a mail server is saved.
+    SelfHosted(Option<&'a Mailer>),
+}
+
+async fn account_notice<'a>(
+    state: &'a WorkspaceState,
+    actor_id: Id,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> Result<AccountNotice<'a>, ApiError> {
+    let mailer = state.enabled_mailer().await;
+    if !crate::repositories::billing::enabled(state.identity.database()) {
+        return Ok(AccountNotice::SelfHosted(mailer));
+    }
+    if let Some(mailer) = mailer {
+        return Ok(AccountNotice::Cloud(mailer));
+    }
+    require_installation_admin(state, actor_id, instance, request_id).await?;
+    Err(ApiError::new(
+        StatusCode::CONFLICT,
+        "smtp_required",
+        "Mail server required",
+        "Orbit Cloud emails the person about this change. Save a mail server in Admin → Settings first.",
+        instance,
+        request_id,
+    ))
+}
+
+/// Self-hosted returns the link (201); Orbit Cloud emails it to the account instead and returns where (202).
 #[derive(Serialize, ToSchema)]
 struct RecoveryLink {
-    url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sent_to: Option<String>,
     #[schema(value_type = String, format = DateTime)]
     expires_at: TimestampMillis,
 }
 
 /// A one-time password recovery link for another account. It lasts 30 minutes, the same as `orbit recovery-link`.
-#[utoipa::path(post, path = "/api/v1/admin/users/{user_id}/recovery-link", params(("user_id" = String, Path)), responses((status = 201, body = RecoveryLink)))]
+/// On Orbit Cloud the admin never sees it: it is emailed to the account (409 `smtp_required` without a mail server).
+#[utoipa::path(post, path = "/api/v1/admin/users/{user_id}/recovery-link", params(("user_id" = String, Path)), responses((status = 201, body = RecoveryLink), (status = 202, body = RecoveryLink), (status = 409, description = "smtp_required", body = ProblemBody, content_type = "application/problem+json")))]
 async fn create_recovery_link(
     State(state): State<WorkspaceState>,
     Path(user_id): Path<String>,
@@ -1493,10 +1534,11 @@ async fn create_recovery_link(
     let instance = format!("/api/v1/admin/users/{user_id}/recovery-link");
     let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
     let user_id = parse_id(&user_id, &instance, request_id.as_ref())?;
+    let notice = account_notice(&state, session.user.id, &instance, request_id.as_ref()).await?;
     let token = orbit_platform::generate_opaque_token();
     let expires_at =
         TimestampMillis::from_millis(TimestampMillis::now().as_millis() + LIFETIME_MILLIS);
-    state
+    let email = state
         .identity
         .issue_recovery_token_as_admin(
             session.user.id,
@@ -1507,17 +1549,33 @@ async fn create_recovery_link(
         )
         .await
         .map_err(|error| admin_account_problem(error, &instance, request_id.as_ref()))?;
-    Ok((
-        StatusCode::CREATED,
-        Json(RecoveryLink {
-            url: format!("{}/recovery?token={token}", state.public_origin),
-            expires_at,
-        }),
-    ))
+    let url = format!("{}/recovery?token={token}", state.public_origin);
+    Ok(match notice {
+        AccountNotice::Cloud(mailer) => {
+            mailer.send_later(mail::templates::admin_recovery(&email, &url));
+            (
+                StatusCode::ACCEPTED,
+                Json(RecoveryLink {
+                    url: None,
+                    sent_to: Some(email),
+                    expires_at,
+                }),
+            )
+        }
+        AccountNotice::SelfHosted(_) => (
+            StatusCode::CREATED,
+            Json(RecoveryLink {
+                url: Some(url),
+                sent_to: None,
+                expires_at,
+            }),
+        ),
+    })
 }
 
 /// Turns another account's two-factor sign-in off, for a user who lost the authenticator app and the recovery codes.
-#[utoipa::path(post, path = "/api/v1/admin/users/{user_id}/two-factor/reset", params(("user_id" = String, Path)), responses((status = 204)))]
+/// Orbit Cloud emails the person a notice (409 `smtp_required` without a mail server).
+#[utoipa::path(post, path = "/api/v1/admin/users/{user_id}/two-factor/reset", params(("user_id" = String, Path)), responses((status = 204), (status = 409, description = "smtp_required", body = ProblemBody, content_type = "application/problem+json")))]
 async fn reset_two_factor(
     State(state): State<WorkspaceState>,
     Path(user_id): Path<String>,
@@ -1527,7 +1585,8 @@ async fn reset_two_factor(
     let instance = format!("/api/v1/admin/users/{user_id}/two-factor/reset");
     let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
     let user_id = parse_id(&user_id, &instance, request_id.as_ref())?;
-    state
+    let notice = account_notice(&state, session.user.id, &instance, request_id.as_ref()).await?;
+    let email = state
         .identity
         .reset_two_factor_as_admin(
             session.user.id,
@@ -1536,6 +1595,67 @@ async fn reset_two_factor(
         )
         .await
         .map_err(|error| admin_account_problem(error, &instance, request_id.as_ref()))?;
+    if let AccountNotice::Cloud(mailer) = notice {
+        mailer.send_later(mail::templates::two_factor_reset(&email));
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct AdminEmailBody {
+    /// The new address.
+    email: String,
+}
+
+/// Changes an account's email at once, verified, with no confirmation email: for instances without a mail server.
+/// The account is signed out everywhere (an admin who changes their own email keeps this session). With a mail
+/// server, the old address gets a notice. Orbit Cloud needs one (409 `smtp_required`) and also tells the new address.
+#[utoipa::path(put, path = "/api/v1/admin/users/{user_id}/email", params(("user_id" = String, Path)), request_body = AdminEmailBody, responses((status = 204), (status = 409, description = "smtp_required", body = ProblemBody, content_type = "application/problem+json")))]
+async fn change_user_email(
+    State(state): State<WorkspaceState>,
+    Path(user_id): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<AdminEmailBody>,
+) -> Result<StatusCode, ApiError> {
+    let instance = format!("/api/v1/admin/users/{user_id}/email");
+    let rid = request_id.as_ref();
+    let session = authenticate(&state, &headers, &instance, rid).await?;
+    let user_id = parse_id(&user_id, &instance, rid)?;
+    let notice = account_notice(&state, session.user.id, &instance, rid).await?;
+    let email = body.email.trim();
+    if !mail::valid_address(email) {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_email",
+            "Invalid email",
+            "Enter a valid email address.",
+            &instance,
+            rid,
+        ));
+    }
+    let changed = state
+        .identity
+        .change_email_as_admin(
+            session.user.id,
+            user_id,
+            email,
+            (session.user.id == user_id).then_some(session.id),
+            request_id_value(rid),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|error| admin_account_problem(error, &instance, rid))?;
+    let old_address_notice = mail::templates::email_changed(&changed.old_email, &changed.new_email);
+    match notice {
+        AccountNotice::Cloud(mailer) => {
+            mailer.send_later(old_address_notice);
+            mailer.send_later(mail::templates::email_set_by_admin(&changed.new_email));
+        }
+        AccountNotice::SelfHosted(Some(mailer)) => mailer.send_later(old_address_notice),
+        AccountNotice::SelfHosted(None) => {}
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1910,7 +2030,9 @@ async fn set_registration(
             InstanceSettingsError::EmailNotConfigured => {
                 email_not_configured(instance, request_id.as_ref())
             }
-            InstanceSettingsError::Unavailable(_) => internal(instance, request_id.as_ref()),
+            InstanceSettingsError::SmtpRequired | InstanceSettingsError::Unavailable(_) => {
+                internal(instance, request_id.as_ref())
+            }
         })?;
     settings_view(&state, instance, request_id.as_ref()).await
 }
@@ -2016,8 +2138,8 @@ async fn save_smtp(
     settings_view(&state, instance, request_id.as_ref()).await
 }
 
-/// Removes the mail server. Registration closes with it.
-#[utoipa::path(delete, path = "/api/v1/admin/settings/smtp", responses((status = 200, body = InstanceSettingsView)))]
+/// Removes the mail server. Registration closes with it. Orbit Cloud refuses (409 `smtp_required`).
+#[utoipa::path(delete, path = "/api/v1/admin/settings/smtp", responses((status = 200, body = InstanceSettingsView), (status = 409, description = "smtp_required", body = ProblemBody, content_type = "application/problem+json")))]
 async fn remove_smtp(
     State(state): State<WorkspaceState>,
     headers: HeaderMap,
@@ -2032,7 +2154,19 @@ async fn remove_smtp(
             TimestampMillis::now(),
         )
         .await
-        .map_err(|_| internal(instance, request_id.as_ref()))?;
+        .map_err(|error| match error {
+            InstanceSettingsError::SmtpRequired => ApiError::new(
+                StatusCode::CONFLICT,
+                "smtp_required",
+                "Mail server required",
+                "Orbit Cloud needs a mail server. Save a different one instead.",
+                instance,
+                request_id.as_ref(),
+            ),
+            InstanceSettingsError::EmailNotConfigured | InstanceSettingsError::Unavailable(_) => {
+                internal(instance, request_id.as_ref())
+            }
+        })?;
     settings_view(&state, instance, request_id.as_ref()).await
 }
 
@@ -3435,6 +3569,14 @@ fn workspace_problem(
             instance,
             request_id,
         ),
+        WorkspaceError::TransferUnavailable => ApiError::new(
+            StatusCode::CONFLICT,
+            "transfer_unavailable",
+            "Transfer unavailable",
+            "Ownership transfer is not available on Orbit Cloud yet.",
+            instance,
+            request_id,
+        ),
         WorkspaceError::InvalidInvitation => ApiError::new(
             StatusCode::NOT_FOUND,
             "invitation_not_found",
@@ -3626,6 +3768,30 @@ fn admin_account_problem(
             "account_suspended",
             "Account suspended",
             "Reinstate the account before you create a recovery link.",
+            instance,
+            request_id,
+        ),
+        AdminAccountError::Deleted => ApiError::new(
+            StatusCode::CONFLICT,
+            "account_deleted",
+            "Account deleted",
+            "The person deleted this account. It cannot be changed or reinstated.",
+            instance,
+            request_id,
+        ),
+        AdminAccountError::SameEmail => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "same_email",
+            "Same email",
+            "This is already the account's email.",
+            instance,
+            request_id,
+        ),
+        AdminAccountError::EmailTaken => ApiError::new(
+            StatusCode::CONFLICT,
+            "email_taken",
+            "Email taken",
+            "Another account has this email.",
             instance,
             request_id,
         ),

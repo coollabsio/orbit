@@ -32,6 +32,7 @@ use crate::repositories::identity::{
 use crate::repositories::instance_settings::InstanceSettingsRepository;
 use crate::socket_ticket::SocketTickets;
 
+pub(crate) mod account;
 pub(crate) mod passkeys;
 pub(crate) mod providers;
 pub(crate) mod push;
@@ -381,7 +382,15 @@ pub fn auth_router(state: AuthState) -> Router {
         )
         .route("/api/v1/auth/logout", post(logout))
         .route("/api/v1/auth/socket-ticket", post(socket_ticket))
-        .route("/api/v1/auth/me", get(me).patch(update_me))
+        .route(
+            "/api/v1/auth/me",
+            get(me).patch(update_me).delete(account::delete_account),
+        )
+        .route("/api/v1/auth/me/email", post(account::request_email_change))
+        .route(
+            "/api/v1/auth/email-change/confirm",
+            post(account::confirm_email_change),
+        )
         .route("/api/v1/auth/status", put(put_status))
         .route("/api/v1/push/key", get(push::get_push_key))
         .route(
@@ -2062,6 +2071,9 @@ struct ProblemBody {
     detail: &'static str,
     instance: String,
     request_id: String,
+    /// `owns_workspaces` only: the workspaces to delete first.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    workspaces: Option<Vec<crate::repositories::account::OwnedWorkspace>>,
 }
 
 struct ApiError {
@@ -2091,6 +2103,7 @@ impl ApiError {
                 request_id: request_id
                     .map(|Extension(value)| value.as_str().to_owned())
                     .unwrap_or_else(|| "unknown".to_owned()),
+                workspaces: None,
             }),
             retry_after: None,
         }

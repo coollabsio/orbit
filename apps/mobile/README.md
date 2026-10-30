@@ -112,6 +112,25 @@ To add an icon, add its reicon name to `ICONS` in `scripts/generate-icons.ts` an
 
 `just check` at the repo root also runs the mobile typecheck.
 
+## Store builds
+
+The sign-in screen fills in Orbit Cloud (`https://app.orbit.so`) unless `EXPO_PUBLIC_ORBIT_SERVER` is set, so a cloud user only types an email and a password. A self-hosted user replaces the server.
+
+What is configured:
+
+- `app.json`: the iOS bundle identifier and the Android package are `io.coollabs.orbit`. `ios.privacyManifests` declares no tracking, the data the app collects (email, name, photos or videos, and other user content, linked to the user, for app functionality only), and the required-reason APIs that React Native and the Expo modules use (UserDefaults, file timestamps, system boot time, disk space). The reasons are copied from each package's `PrivacyInfo.xcprivacy`. After you add a native module, check its manifest and add its reasons.
+- `eas.json`: the build version numbers live on EAS (`appVersionSource: remote`). The `development` profile makes an internal development build, `preview` an internal build, and `production` a store build that increments the build number.
+- The billing banner only shows the trial's days left or that the workspace is read-only. It has no link to billing. App Store guideline 3.1.1 and the Google Play payments policy forbid pointing to purchases outside the app.
+
+What you still have to do:
+
+1. Create the project on EAS: `bunx eas-cli init` in `apps/mobile`. It adds `extra.eas.projectId` to `app.json`.
+2. Before you build the `development` profile, install the dev client: `bunx expo install expo-dev-client`.
+3. Create the apps in App Store Connect and in the Google Play Console with the identifier `io.coollabs.orbit`.
+4. Fill in `submit.production` in `eas.json`. iOS takes `appleId` (or `EXPO_APPLE_ID`), `ascAppId` (the App Store Connect app ID) and `appleTeamId`. Android takes `serviceAccountKeyPath` (a Google service account JSON key with access to the Play Console; keep it out of git, or upload it to EAS instead) and `track` (`internal` for the first upload). Google Play requires the first upload of an app to be done by hand in the Play Console.
+5. Build and submit: `bunx eas-cli build --platform all --profile production`, then `bunx eas-cli submit --platform ios --profile production` (and `android`).
+6. Fill in the App Store privacy labels and the Play data safety form so that they match `ios.privacyManifests`.
+
 ## Next steps
 
 - Move to a development build (`bunx expo run:ios|android`, or EAS) when the app needs native modules that Expo Go does not include, for example APNs/FCM push.

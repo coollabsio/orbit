@@ -201,8 +201,9 @@ pub(crate) async fn get_billing(
 }
 
 /// Starts a Stripe Checkout for `plan` and returns its URL. Refused while the workspace already
-/// has full access (a subscription, or the exempt workspace): plan changes and cancellations go
-/// through the Billing Portal.
+/// has full access (a subscription, or the exempt workspace), or while Stripe reports a live
+/// subscription of the workspace's customer: plan changes and cancellations go through the
+/// Billing Portal. Open Checkout Sessions of the customer expire first.
 #[utoipa::path(
     post,
     path = "/api/v1/workspaces/{workspace_id}/billing/checkout",
@@ -237,17 +238,13 @@ pub(crate) async fn billing_checkout(
     if subscription.access(TimestampMillis::now(), &state.billing.config().trial)
         == WorkspaceAccess::Full
     {
-        return Err(ApiError::new(
-            StatusCode::CONFLICT,
-            "subscription_active",
-            "Subscription active",
-            "The workspace already has a subscription. Change it in the billing portal.",
-            instance,
-            id,
-        ));
+        return Err(subscription_active(&instance, id));
     }
     let customer_id = match subscription.stripe_customer_id {
-        Some(customer_id) => customer_id,
+        Some(customer_id) => {
+            refuse_duplicate_checkout(&state, workspace_id, &customer_id, &instance, id).await?;
+            customer_id
+        }
         None => {
             let name: String = sqlx::query_scalar("SELECT name FROM workspaces WHERE id = $1")
                 .bind(workspace_id.to_string())
@@ -279,6 +276,49 @@ pub(crate) async fn billing_checkout(
         .await
         .map_err(|error| stripe_failed(&error, &instance, id))?;
     Ok(Json(BillingRedirect { url }))
+}
+
+/// Asks Stripe, not the stored state, so a subscription whose webhook has not arrived yet also
+/// counts: a live one refuses the checkout (and queues the sync Orbit missed), and open Checkout
+/// Sessions expire, so a second tab cannot subscribe the workspace twice.
+async fn refuse_duplicate_checkout(
+    state: &BillingState,
+    workspace_id: Id,
+    customer_id: &str,
+    instance: &str,
+    id: Option<&Extension<RequestId>>,
+) -> Result<(), ApiError> {
+    let stripe = state.billing.stripe();
+    let subscriptions = stripe
+        .customer_subscriptions(customer_id)
+        .await
+        .map_err(|error| stripe_failed(&error, instance, id))?;
+    if let Some(live) = subscriptions
+        .iter()
+        .find(|subscription| super::grants_access(SubscriptionStatus::parse(&subscription.status)))
+    {
+        if let Err(error) =
+            sync::enqueue(state.billing.database(), &live.id, Some(workspace_id)).await
+        {
+            tracing::warn!(%error, "queueing the Stripe sync failed");
+        }
+        return Err(subscription_active(instance, id));
+    }
+    stripe
+        .expire_open_checkout_sessions(customer_id)
+        .await
+        .map_err(|error| stripe_failed(&error, instance, id))
+}
+
+fn subscription_active(instance: &str, id: Option<&Extension<RequestId>>) -> ApiError {
+    ApiError::new(
+        StatusCode::CONFLICT,
+        "subscription_active",
+        "Subscription active",
+        "The workspace already has a subscription. Change it in the billing portal.",
+        instance,
+        id,
+    )
 }
 
 /// Opens the Stripe Billing Portal (payment method, invoices, plan changes, cancellation).

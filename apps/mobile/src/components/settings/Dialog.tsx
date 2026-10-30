@@ -10,6 +10,8 @@ export interface SheetAction {
   icon?: IconName
   destructive?: boolean
   disabled?: boolean
+  /** A second line under the label, for example why the row is disabled. */
+  detail?: string
   onPress: () => void
 }
 
@@ -40,7 +42,10 @@ export function ActionSheet({ visible, title, actions, onClose }: { visible: boo
             className={`min-h-11 flex-row items-center gap-2.5 mx-1.5 px-2 rounded-md active:bg-muted ${action.disabled ? 'opacity-50' : 'opacity-100'}`}
           >
             {action.icon ? <Icon name={action.icon} size={16} color={action.destructive ? colors.destructive : colors.mutedForeground} /> : null}
-            <Text className={`font-noto-medium text-[14px] ${action.destructive ? 'text-destructive' : 'text-foreground'}`}>{action.label}</Text>
+            <View className="py-1.5">
+              <Text className={`font-noto-medium text-[14px] ${action.destructive ? 'text-destructive' : 'text-foreground'}`}>{action.label}</Text>
+              {action.detail ? <Text className="font-noto text-[12px] text-muted-foreground">{action.detail}</Text> : null}
+            </View>
           </Pressable>
         ))}
       </View>

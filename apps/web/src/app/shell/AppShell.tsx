@@ -24,6 +24,7 @@ import { useIsInstallationAdmin } from '@/features/workspaces/permissions'
 import { WorkspaceSwitcher } from './WorkspaceSwitcher'
 import { CommandPalette } from './CommandPalette'
 import { ConnectionBanner } from './ConnectionBanner'
+import { MailServerBanner } from './MailServerBanner'
 import { ReadOnlyBanner } from './ReadOnlyBanner'
 import { SidebarNav } from './SidebarNav'
 import { Topbar } from './Topbar'
@@ -195,6 +196,7 @@ function Shell() {
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background min-[900px]:floating:overflow-hidden min-[900px]:floating:rounded-lg min-[900px]:floating:border">
         <ConnectionBanner live={live} />
+        <MailServerBanner />
         <ReadOnlyBanner />
         <Topbar onOpenDrawer={() => setDrawerOpen(true)} onOpenPalette={() => setPaletteOpen(true)} />
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">

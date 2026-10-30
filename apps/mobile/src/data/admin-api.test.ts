@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 
 import {
+  adminActionBlocked,
   adminActions,
   adminBadges,
   type AdminUser,
@@ -30,6 +31,7 @@ const user = (fields: Partial<AdminUser>): AdminUser => ({
   admin: false,
   root: false,
   suspended: false,
+  deleted: false,
   two_factor: false,
   workspace_count: 1,
   created_at: '2026-10-01T10:00:00Z',
@@ -38,17 +40,24 @@ const user = (fields: Partial<AdminUser>): AdminUser => ({
 const root = { id: 'root', root: true }
 const admin = { id: 'admin', root: false }
 
-test('nobody manages the root account, their own, or (unless root) another admin', () => {
+test('nobody manages the root account, their own (but its email), or (unless root) another admin', () => {
   expect(adminActions(user({ root: true }), root)).toEqual([])
-  expect(adminActions(user({ id: 'admin' }), admin)).toEqual([])
+  expect(adminActions(user({ id: 'admin', admin: true }), admin)).toEqual(['change-email'])
+  expect(adminActions(user({ id: 'root', root: true, admin: true }), { id: 'root', root: true })).toEqual(['change-email'])
   expect(adminActions(user({ admin: true }), admin)).toEqual([])
 })
 
+test('a deleted account has only the Deleted badge and no actions, not even reinstate', () => {
+  const deleted = user({ deleted: true, suspended: true, two_factor: true })
+  expect(adminActions(deleted, root)).toEqual([])
+  expect(adminBadges(deleted)).toEqual(['Deleted'])
+})
+
 test('the root user manages admins; a suspended account can only come back', () => {
-  expect(adminActions(user({}), root)).toEqual(['make-admin', 'recovery-link', 'suspend'])
-  expect(adminActions(user({ admin: true, two_factor: true }), root)).toEqual(['remove-admin', 'recovery-link', 'reset-two-factor', 'suspend'])
-  expect(adminActions(user({ suspended: true }), root)).toEqual(['reinstate'])
-  expect(adminActions(user({}), admin)).toEqual(['recovery-link', 'suspend'])
+  expect(adminActions(user({}), root)).toEqual(['change-email', 'make-admin', 'recovery-link', 'suspend'])
+  expect(adminActions(user({ admin: true, two_factor: true }), root)).toEqual(['change-email', 'remove-admin', 'recovery-link', 'reset-two-factor', 'suspend'])
+  expect(adminActions(user({ suspended: true }), root)).toEqual(['change-email', 'reinstate'])
+  expect(adminActions(user({}), admin)).toEqual(['change-email', 'recovery-link', 'suspend'])
 })
 
 test('badges, the audit actor and job wording', () => {
@@ -117,4 +126,19 @@ test('job limits: the form, its defaults, and what it saves', () => {
   expect(jobDraft(kinds)).toEqual({ 'notion.import': { concurrency: '2', workspace_concurrency: '' } })
   expect(jobDraft(kinds, true)).toEqual({ 'notion.import': { concurrency: '4', workspace_concurrency: '1' } })
   expect(jobLimitsBody(kinds, { 'notion.import': { concurrency: ' ', workspace_concurrency: '3' } })).toEqual({ kinds: [{ kind: 'notion.import', concurrency: null, workspace_concurrency: 3 }] })
+})
+
+test('Orbit Cloud without a mail server turns off the actions that email the person, and says why', () => {
+  const actions = adminActions(user({ two_factor: true }), root)
+  const blocked = (options: { billing_enabled: boolean; email_enabled: boolean } | undefined) => actions.map((action) => [action, adminActionBlocked(action, options)])
+  expect(blocked({ billing_enabled: true, email_enabled: false })).toEqual([
+    ['change-email', 'Needs a mail server on Orbit Cloud'],
+    ['make-admin', null],
+    ['recovery-link', 'Needs a mail server on Orbit Cloud'],
+    ['reset-two-factor', 'Needs a mail server on Orbit Cloud'],
+    ['suspend', null],
+  ])
+  expect(blocked({ billing_enabled: true, email_enabled: true }).filter(([, reason]) => reason !== null)).toEqual([])
+  expect(blocked({ billing_enabled: false, email_enabled: false }).filter(([, reason]) => reason !== null)).toEqual([])
+  expect(blocked(undefined).filter(([, reason]) => reason !== null)).toEqual([])
 })

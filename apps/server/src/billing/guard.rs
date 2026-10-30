@@ -39,8 +39,9 @@ const ALLOWED_WRITES: &[(Method, &str)] = &[
     (Method::DELETE, "invitations/*"),
     (Method::DELETE, "projects/*/github"),
     (Method::POST, "imports/notion/*/cancel"),
-    // Data portability: API tokens read everything through the API, and revoking one is a
-    // security action.
+    // Data portability: a workspace export, and API tokens that read everything through the
+    // API (revoking one is a security action).
+    (Method::POST, "exports"),
     (Method::POST, "api-tokens"),
     (Method::DELETE, "api-tokens/*"),
     // Reads sent as POST, and the reader's own read markers and list preferences.

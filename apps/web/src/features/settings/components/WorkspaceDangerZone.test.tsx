@@ -118,3 +118,16 @@ test('pending deletion blocks duplicate requests and dialog dismissal', async ()
   finish(new Response(null, { status: 204 }))
   await view.findByText('Beta', { selector: 'output' })
 })
+
+test('with billing, the dialog says that deleting cancels the subscription at once', async () => {
+  for (const [status, warned] of [['active', true], ['past_due', true], ['canceled', false], [null, false]] as const) {
+    const { view, client } = setup()
+    client.setQueryData(queryKeys.authOptions, { billing_enabled: true })
+    client.setQueryData(queryKeys.billing('alpha'), { status, access: 'full' })
+    fireEvent.click(view.getByRole('button', { name: 'Delete workspace' }))
+    const dialog = within(view.getByRole('dialog'))
+    expect(dialog.queryAllByText(/cancels the subscription at once, with no refund/).length).toBe(warned ? 1 : 0)
+    expect(dialog.queryAllByText(/stays in the trash for 30 days/).length).toBe(warned ? 1 : 0)
+    view.unmount()
+  }
+})

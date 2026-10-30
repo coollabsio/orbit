@@ -6,7 +6,7 @@ import { ConfirmDialog, type ConfirmRequest, Dialog, PromptDialog, type PromptRe
 import { ACCOUNT_NAV, Badge, Note, RowIcon, RowText, SettingsCard, SettingsRow, SettingsShell } from '../../../components/settings/Shell'
 import { accountKeys, type TotpSetup, twoFactorSummary } from '../../../data/account-api'
 import { type Provider, PROVIDER_LABEL, type ProviderOutcome, providerErrorMessage, providerRows, startProviderSignIn, withReauthentication } from '../../../data/sign-in-provider'
-import { useAuthOptions, useConnectedAccounts, useDisconnectAccount, useTwoFactor, useTwoFactorWrites } from '../../../hooks/account'
+import { useAuthOptions, useConfirmIdentity, useConnectedAccounts, useDisconnectAccount, useTwoFactor, useTwoFactorWrites } from '../../../hooks/account'
 import { useOrbit } from '../../../orbit-context'
 import { errorMessage } from '../../../session-context'
 import { providerDevice } from '../../../sign-in-provider'
@@ -36,12 +36,7 @@ export default function SecurityScreen() {
   const enabled = status.data?.totp_enabled === true
   const rows = providerRows(options.data?.providers ?? [], accounts.data ?? [])
 
-  /** A fresh sign-in with a connected provider, for an account without a password. */
-  const confirmIdentity = async () => {
-    const provider = accounts.data?.[0]?.provider
-    if (!provider) throw new Error('Sign out and sign in again to confirm this change.')
-    return (await startProviderSignIn(client, provider, 'confirm', providerDevice)).kind === 'confirmed'
-  }
+  const confirmIdentity = useConfirmIdentity()
 
   const confirmed = (title: string, description: string, confirmLabel: string, then: (password?: string) => Promise<unknown>) => {
     if (user.has_password) return setPrompt({ title, description, label: 'Current password', confirmLabel, secure: true, onSubmit: then })

@@ -80,7 +80,7 @@ export function S3BucketForm({ s3, title, description, endpointPlaceholder, savi
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
           <label className="flex items-center gap-2 text-[13px]">
             <Switch checked={draft.path_style} onCheckedChange={(checked: boolean) => setDraft((current) => ({ ...current, path_style: checked }))} />
-            Path-style URLs (MinIO and most self-hosted servers)
+            Path-style URLs (MinIO and some other S3-compatible services)
           </label>
           <div className="flex items-center gap-2">
             {onRemove ? <Button type="button" variant="ghost" className="text-destructive" disabled={removing} onClick={onRemove}>Remove</Button> : null}
