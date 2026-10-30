@@ -1,13 +1,15 @@
-import { useEffect, useMemo, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router'
 import type { WorkspaceRecord } from '@orbit/api/generated/types.gen'
 import { useWorkspaces } from './api'
+import { useWorkspaceBilling } from './billing'
 import { selectedWorkspaceId, switchWorkspaceHref } from './navigation'
 import { useIsInstallationAdmin } from './permissions'
 import { WorkspaceContext } from './workspaceContext'
 import { OrbitUnavailable } from '@/components/common/OrbitUnavailable'
 import { LoadingScreen } from '@/components/common/LoadingScreen'
 import { firstLoadFailed } from '@/lib/connection'
+import { useAuthOptions } from '@/features/auth/api'
 const preferenceKey = 'orbit:selected_workspace'
 const emptyWorkspaces: WorkspaceRecord[] = []
 /** What an operator with no workspace can open: Admin and their own account settings. */
@@ -47,5 +49,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     // Anyone else with no workspace (the last one is gone, or they left it) creates one.
     return <Navigate to="/onboarding" replace />
   }
-  return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>
+  return <WorkspaceContext.Provider value={value}><BillingReady>{children}</BillingReady></WorkspaceContext.Provider>
+}
+
+/**
+ * Orbit Cloud: the first screen waits for the billing state, so the trial or read-only line above the top bar is
+ * there from the start and does not push the page down when it arrives. A failed request does not hold the app.
+ */
+function BillingReady({ children }: { children: ReactNode }) {
+  const options = useAuthOptions()
+  const billing = useWorkspaceBilling()
+  const [ready, setReady] = useState(false)
+  if (!ready && options.isFetched && (!options.data?.billing_enabled || billing.isFetched)) setReady(true)
+  return ready ? children : <LoadingScreen />
 }

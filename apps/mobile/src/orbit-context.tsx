@@ -1,6 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { createContext, type ReactNode, use, useEffect, useState } from 'react'
 
+import { accountKeys, authOptions } from './data/account-api'
+import { billingKey, workspaceBilling } from './data/billing'
 import { keys } from './data/keys'
 import { type OrbitClient, type User, type WorkspaceRecord, workspaces as listWorkspaces } from './data/orbit'
 import { loadWorkspaceId, saveWorkspaceId, type StoredSession } from './session'
@@ -59,8 +61,22 @@ export function OrbitProvider({ children }: { children: ReactNode }) {
   }
 
   return (
-    <OrbitContext value={{ client, session, user, workspace, workspaceId: workspace.id, workspaces: live, selectWorkspace, signOut, setUser }}>{children}</OrbitContext>
+    <OrbitContext value={{ client, session, user, workspace, workspaceId: workspace.id, workspaces: live, selectWorkspace, signOut, setUser }}><BillingReady>{children}</BillingReady></OrbitContext>
   )
+}
+
+/**
+ * Orbit Cloud: the first screen waits for the billing state, so the trial or read-only line above the dock is there
+ * from the start and does not push the screen up when it arrives. A failed request does not hold the app.
+ */
+function BillingReady({ children }: { children: ReactNode }) {
+  const { client, workspaceId } = useOrbit()
+  const options = useQuery({ queryKey: accountKeys.authOptions, queryFn: () => authOptions(client), staleTime: Infinity })
+  const enabled = options.data?.billing_enabled ?? false
+  const billing = useQuery({ queryKey: billingKey(workspaceId), queryFn: () => workspaceBilling(client, workspaceId), enabled })
+  const [ready, setReady] = useState(false)
+  if (!ready && options.isFetched && (!enabled || billing.isFetched)) setReady(true)
+  return ready ? children : <LoadingView />
 }
 
 export function useOrbit(): Orbit {

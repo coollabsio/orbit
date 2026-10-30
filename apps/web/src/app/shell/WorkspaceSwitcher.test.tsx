@@ -16,6 +16,7 @@ function setup() {
   window.localStorage.clear()
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   client.setQueryData(queryKeys.currentUser, { id: 'user-1', email: 'owner@orbit.test', display_name: 'Owner', installation_admin: false, root: false })
+  client.setQueryData(queryKeys.authOptions, { billing_enabled: false })
   client.setQueryData(['workspaces'], [
     { id: 'alpha', name: 'Alpha', role: 'owner', permissions: [], version: 1 },
     { id: 'beta', name: 'Beta', role: 'member', permissions: [], version: 1 },

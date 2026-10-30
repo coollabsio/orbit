@@ -30,6 +30,7 @@ function setup(role: WorkspaceRole = 'owner', last = false) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } } })
   // Signed in: the app shell has the user before any workspace page.
   client.setQueryData(queryKeys.currentUser, { id: 'user-1', email: 'owner@orbit.test', display_name: 'Owner', installation_admin: false, root: false })
+  client.setQueryData(queryKeys.authOptions, { billing_enabled: false })
   client.setQueryData(['workspaces'], [
     testWorkspace(role, { id: 'alpha', name: 'Alpha', version: 7 }),
     ...last ? [] : [BETA],

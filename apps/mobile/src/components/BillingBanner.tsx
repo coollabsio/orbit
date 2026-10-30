@@ -20,17 +20,18 @@ export function BillingBanner() {
   const [openedAt] = useState(Date.now)
   const banner = billingBanner(billing.data, openedAt)
   if (!banner) return null
+  const trial = banner.kind === 'trial'
   return (
     <View
       accessibilityRole="summary"
-      className={`min-h-8 flex-row items-center justify-center gap-2 border-t border-border px-3 py-1 ${banner.kind === 'read_only' ? 'bg-muted' : 'bg-background'}`}
+      className={`min-h-8 flex-row items-center justify-center gap-2 border-t px-3 py-1 ${trial ? 'border-destructive/20 bg-destructive/10 dark:bg-destructive/20' : 'border-border bg-muted'}`}
     >
-      {banner.kind === 'read_only' ? <Icon name="lock" size={14} color={colors.mutedForeground} /> : null}
-      <Text numberOfLines={1} className="shrink text-[12px] text-muted-foreground">
+      {!trial ? <Icon name="lock" size={14} color={colors.mutedForeground} /> : null}
+      <Text numberOfLines={1} className={`shrink text-[12px] ${trial ? 'font-noto-medium text-destructive' : 'text-muted-foreground'}`}>
         {banner.text}
       </Text>
       <Pressable accessibilityRole="link" hitSlop={8} onPress={() => void Linking.openURL(`${session.server}/settings/billing`).catch(() => undefined)}>
-        <Text className="font-noto-medium text-[12px] text-foreground">{banner.action}</Text>
+        <Text className={`text-[12px] ${trial ? 'font-noto-semibold text-destructive underline' : 'font-noto-medium text-foreground'}`}>{banner.action}</Text>
       </Pressable>
     </View>
   )
