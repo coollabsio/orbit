@@ -22,6 +22,7 @@ use futures_util::StreamExt;
 use futures_util::future::BoxFuture;
 use orbit_platform::{Database, Id, Row, TimestampMillis};
 use p256::SecretKey;
+use p256::elliptic_curve::Generate;
 use serde::{Deserialize, Serialize};
 use tokio::sync::OnceCell;
 use tokio_util::sync::CancellationToken;
@@ -251,7 +252,7 @@ impl PushSender for WebPushSender {
             };
             let mut salt = [0_u8; 16];
             rand_core::RngCore::fill_bytes(&mut rand_core::OsRng, &mut salt);
-            let sender = SecretKey::random(&mut rand_core::OsRng);
+            let sender = SecretKey::generate();
             let body = webpush::encrypt(&ua_public, &auth, &payload, &sender, &salt)
                 .ok_or(SendError::Gone)?;
             let expires = TimestampMillis::now().as_millis() / 1000 + 12 * 60 * 60;
@@ -334,7 +335,7 @@ impl PushService {
             .inner
             .key
             .get_or_try_init(|| async {
-                let fresh = SecretKey::random(&mut rand_core::OsRng);
+                let fresh = SecretKey::generate();
                 sqlx::query(
                     "INSERT INTO push_keys (id, private_key, created_at) VALUES (1, $1, $2) \
                      ON CONFLICT DO NOTHING",

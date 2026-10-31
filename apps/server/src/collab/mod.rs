@@ -64,7 +64,7 @@ pub mod close {
 pub const PROTOCOL_VERSION: &str = "1";
 
 /// What a collaborative document belongs to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DocKind {
     Page,

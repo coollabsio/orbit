@@ -107,6 +107,7 @@ const MESSAGES: Record<string, string> = {
   provider_failed: 'The provider could not be reached. Try again.',
   provider_email_unverified: 'The provider has no verified email address for this account. Verify it there, then try again.',
   registration_closed: 'No Orbit account uses this email address, and this server does not let new people sign up.',
+  account_email_unverified: 'The Orbit account with this email has not confirmed it yet. Sign in with your password, then connect this provider in Security.',
   account_suspended: 'This account is suspended.',
   session_mismatch: 'Your session changed during the sign-in. Try again.',
   identity_mismatch: 'Confirm with the account you connected to Orbit.',

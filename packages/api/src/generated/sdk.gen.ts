@@ -788,17 +788,22 @@ export const putShortcuts = <ThrowOnError extends boolean = false>(options: Opti
 });
 
 /**
- * A ticket that opens a co-editing socket (`…/collab?ticket=…`) of this session for 60 s, for
- * sockets that cannot send the session cookie or `Authorization` header (a native app's WebView).
+ * A ticket that opens the co-editing socket (`…/collab?ticket=…`) of one page or task for this
+ * session for 60 s, for sockets that cannot send the session cookie or `Authorization` header (a
+ * native app's WebView). Access to the document is checked when the socket opens.
  */
-export const socketTicket = <ThrowOnError extends boolean = false>(options?: Options<SocketTicketData, ThrowOnError>): RequestResult<SocketTicketResponses, SocketTicketErrors, ThrowOnError> => (options?.client ?? client).post<SocketTicketResponses, SocketTicketErrors, ThrowOnError>({
+export const socketTicket = <ThrowOnError extends boolean = false>(options: Options<SocketTicketData, ThrowOnError>): RequestResult<SocketTicketResponses, SocketTicketErrors, ThrowOnError> => (options.client ?? client).post<SocketTicketResponses, SocketTicketErrors, ThrowOnError>({
     security: [{
             in: 'cookie',
             name: '__Host-orbit_session',
             type: 'apiKey'
         }],
     url: '/api/v1/auth/socket-ticket',
-    ...options
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
 });
 
 export const putStatus = <ThrowOnError extends boolean = false>(options: Options<PutStatusData, ThrowOnError>): RequestResult<PutStatusResponses, PutStatusErrors, ThrowOnError> => (options.client ?? client).put<PutStatusResponses, PutStatusErrors, ThrowOnError>({

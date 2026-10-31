@@ -507,6 +507,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "400", "provider_denied");
             add_code(&mut responses, "401", "authentication_required");
             add_code(&mut responses, "403", "registration_closed");
+            add_code(&mut responses, "403", "account_email_unverified");
             add_code(&mut responses, "403", "account_suspended");
             add_code(&mut responses, "403", "session_mismatch");
             add_code(&mut responses, "403", "identity_mismatch");
@@ -806,10 +807,15 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         id if id.contains("chat") => chat_errors(id, &mut responses),
         _ => {}
     }
-    // Orbit Cloud: the billing guard refuses these creates at the trial's limits.
+    // Orbit Cloud: these creates and restores are refused at the trial's limits.
     if matches!(
         operation_id,
-        "create_task" | "create_page" | "duplicate_page" | "create_invitation"
+        "create_task"
+            | "restore_task"
+            | "create_page"
+            | "duplicate_page"
+            | "restore_page"
+            | "create_invitation"
     ) {
         add_code(&mut responses, "402", "trial_limit_reached");
     }
@@ -1226,8 +1232,10 @@ fn page_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
     ) {
         add_code(responses, "409", "conflict");
     }
-    if operation_id == "purge_page" {
+    if matches!(operation_id, "purge_page" | "move_page") {
         add_code(responses, "403", "workspace_action_forbidden");
+    }
+    if operation_id == "purge_page" {
         add_code(responses, "409", "page_not_trashed");
     }
     if operation_id == "list_page_versions" {

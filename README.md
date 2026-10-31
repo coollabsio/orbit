@@ -2,9 +2,9 @@
 
 > PRETTY ALPHA, DO NOT USE IT IN PROD.
 
-Orbit is a self-hosted workspace for teams. It puts tasks, documents, mail, and
-team chat in one application, so your team's work stays in one place and on
-your own server. The goal is an AI assistant that has the full context of every
+Orbit is a self-hosted workspace for teams. It puts tasks, documents, and team
+chat (and soon mail) in one application, so your team's work stays in one place
+and on your own server. The goal is an AI assistant that has the full context of every
 part of the workspace. Because Orbit runs on your server, the AI reads your data
 there, not in someone else's cloud.
 
@@ -19,6 +19,19 @@ there, not in someone else's cloud.
   [MCP server](docs/mcp.md).
 - **Administration**: workspaces, members, invitations, roles, sessions, API
   tokens, audit records, and instance settings.
+
+### Web-only features
+
+The iOS and Android app (`apps/mobile`) does not have these features yet. Use
+the web app for them:
+
+- Saved views
+- Timeline
+- Tasks trash
+- GitHub integration settings
+- Workspace export
+- API tokens
+- Notion import
 
 ## License
 

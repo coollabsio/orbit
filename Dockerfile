@@ -34,12 +34,10 @@ RUN apk add --no-cache bash ca-certificates tzdata \
     && mkdir -p /var/lib/orbit /var/backups/orbit \
     && chown -R 65532:65532 /var/lib/orbit /var/backups/orbit
 COPY --from=server /orbit /orbit
-# The image trusts forwarding headers from every address: it expects to run behind a proxy that is the only
-# way in. Publish port 8080 directly, or share the network with untrusted containers, and clients can fake
-# their IP address and https. Then set ORBIT_TRUSTED_PROXIES to the proxy network.
+# No ORBIT_TRUSTED_PROXIES default: production refuses to start until it lists the reverse proxy addresses.
+# Include 127.0.0.1/32 so the HEALTHCHECK (from inside the container) counts as HTTPS.
 ENV ORBIT_ENV=production \
     ORBIT_BIND=0.0.0.0 \
-    ORBIT_TRUSTED_PROXIES=0.0.0.0/0,::/0 \
     ORBIT_DATABASE_PATH=/var/lib/orbit/orbit.sqlite \
     ORBIT_ATTACHMENTS_PATH=/var/lib/orbit/attachments \
     ORBIT_BACKUPS_PATH=/var/backups/orbit

@@ -13,6 +13,7 @@
 
 use std::collections::{BTreeSet, HashMap};
 
+use orbit_domain::Permission;
 use orbit_platform::{Database, Flag, Id, Row, TimestampMillis};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
@@ -105,6 +106,9 @@ pub enum PageCommentError {
     /// Someone else's comment (edit, delete) or thread (delete).
     #[error("comment action is not permitted")]
     Forbidden,
+    /// The thread's creator may not delete it while others have live comments in it.
+    #[error("thread has comments by other members")]
+    ThreadHasReplies,
     #[error("comment input is invalid: {field}")]
     Invalid { field: &'static str },
     #[error("stored comment data is invalid")]
@@ -499,7 +503,8 @@ impl PageCommentRepository {
         Ok(())
     }
 
-    /// Deletes a whole thread (its creator only), comments and notifications included.
+    /// Deletes a whole thread, comments and notifications included. Its creator may while nobody
+    /// else has a live comment in it; comment moderators always may.
     pub async fn delete_thread(
         &self,
         workspace_id: Id,
@@ -512,8 +517,24 @@ impl PageCommentRepository {
         let mut tx = self.database.immediate_transaction().await?;
         let page = visible_page(&mut tx, workspace_id, page_id, actor_id).await?;
         let created_by = require_thread(&mut tx, page_id, thread_id).await?;
-        if created_by != actor_id {
-            return Err(PageCommentError::Forbidden);
+        let moderator = super::membership::actor(&mut *tx, workspace_id, actor_id)
+            .await?
+            .is_some_and(|actor| actor.can(Permission::CommentsModerate));
+        if !moderator {
+            if created_by != actor_id {
+                return Err(PageCommentError::Forbidden);
+            }
+            let others: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM page_comments WHERE thread_id = $1 AND author_id <> $2 \
+                 AND deleted_at IS NULL",
+            )
+            .bind(thread_id.to_string())
+            .bind(actor_id.to_string())
+            .fetch_one(&mut *tx)
+            .await?;
+            if others > 0 {
+                return Err(PageCommentError::ThreadHasReplies);
+            }
         }
         sqlx::query("DELETE FROM page_threads WHERE id = $1")
             .bind(thread_id.to_string())

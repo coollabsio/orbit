@@ -505,7 +505,10 @@ async fn installation_admin_can_create_an_online_backup() {
     assert_eq!(download.headers()[header::CONTENT_TYPE], "application/zip");
     let bytes = download.into_body().collect().await.unwrap().to_bytes();
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
-    let names: Vec<String> = archive.file_names().map(str::to_owned).collect();
+    let names: Vec<String> = archive
+        .file_names()
+        .map(|name| name.unwrap().into_owned())
+        .collect();
     assert!(names.contains(&format!("{id}/manifest.json")));
     // A Postgres snapshot holds the `COPY` rows of every table instead of the SQLite file.
     let (database_file, header) = if orbit_platform::testing_postgres() {

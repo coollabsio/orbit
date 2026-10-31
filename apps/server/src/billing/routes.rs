@@ -220,7 +220,8 @@ pub(crate) async fn billing_checkout(
 ) -> Result<Json<BillingRedirect>, ApiError> {
     let instance = format!("/api/v1/workspaces/{workspace}/billing/checkout");
     let id = request_id.as_ref();
-    let (workspace_id, email) = manager(&state, &workspace, &headers, &instance, id).await?;
+    let (workspace_id, actor_id, email) =
+        manager(&state, &workspace, &headers, &instance, id).await?;
     let plan = state.billing.config().plan(&body.plan).ok_or_else(|| {
         ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -241,10 +242,7 @@ pub(crate) async fn billing_checkout(
         return Err(subscription_active(&instance, id));
     }
     let customer_id = match subscription.stripe_customer_id {
-        Some(customer_id) => {
-            refuse_duplicate_checkout(&state, workspace_id, &customer_id, &instance, id).await?;
-            customer_id
-        }
+        Some(customer_id) => customer_id,
         None => {
             let name: String = sqlx::query_scalar("SELECT name FROM workspaces WHERE id = $1")
                 .bind(workspace_id.to_string())
@@ -262,6 +260,9 @@ pub(crate) async fn billing_checkout(
                 .map_err(|_| internal(&instance, id))?
         }
     };
+    // Also for a customer created just now: a concurrent checkout may have saved its customer
+    // first and opened a session for it.
+    refuse_duplicate_checkout(&state, workspace_id, &customer_id, &instance, id).await?;
     let origin = state.billing.public_origin();
     let url = state
         .billing
@@ -275,7 +276,42 @@ pub(crate) async fn billing_checkout(
         })
         .await
         .map_err(|error| stripe_failed(&error, &instance, id))?;
+    audit(
+        &state,
+        workspace_id,
+        actor_id,
+        "billing.checkout_started",
+        serde_json::json!({"plan": plan.key}),
+        id,
+    )
+    .await;
     Ok(Json(BillingRedirect { url }))
+}
+
+/// Records a billing action of `actor_id` in the workspace's audit log. Stripe already acted, so
+/// a failure is logged instead of failing the request.
+async fn audit(
+    state: &BillingState,
+    workspace_id: Id,
+    actor_id: Id,
+    action: &str,
+    metadata: Value,
+    id: Option<&Extension<RequestId>>,
+) {
+    let request_id = id.map_or("unknown", |Extension(value)| value.as_str());
+    if let Err(error) = repository::record_audit(
+        state.billing.database(),
+        workspace_id,
+        actor_id,
+        action,
+        request_id,
+        metadata,
+        TimestampMillis::now(),
+    )
+    .await
+    {
+        tracing::warn!(%error, action, "billing audit event could not be recorded");
+    }
 }
 
 /// Asks Stripe, not the stored state, so a subscription whose webhook has not arrived yet also
@@ -336,7 +372,7 @@ pub(crate) async fn billing_portal(
 ) -> Result<Json<BillingRedirect>, ApiError> {
     let instance = format!("/api/v1/workspaces/{workspace}/billing/portal");
     let id = request_id.as_ref();
-    let (workspace_id, _) = manager(&state, &workspace, &headers, &instance, id).await?;
+    let (workspace_id, actor_id, _) = manager(&state, &workspace, &headers, &instance, id).await?;
     let customer_id = repository::subscription(state.billing.database(), workspace_id)
         .await
         .map_err(|_| internal(&instance, id))?
@@ -358,6 +394,15 @@ pub(crate) async fn billing_portal(
         .create_portal_session(&customer_id, &return_url)
         .await
         .map_err(|error| stripe_failed(&error, &instance, id))?;
+    audit(
+        &state,
+        workspace_id,
+        actor_id,
+        "billing.portal_opened",
+        serde_json::json!({}),
+        id,
+    )
+    .await;
     Ok(Json(BillingRedirect { url }))
 }
 
@@ -487,7 +532,7 @@ async fn manager(
     headers: &HeaderMap,
     instance: &str,
     id: Option<&Extension<RequestId>>,
-) -> Result<(Id, String), ApiError> {
+) -> Result<(Id, Id, String), ApiError> {
     let (workspace_id, actor, session) = member(state, workspace, headers, instance, id).await?;
     if !actor.can(Permission::BillingManage) {
         return Err(ApiError::new(
@@ -499,7 +544,7 @@ async fn manager(
             id,
         ));
     }
-    Ok((workspace_id, session.user.email))
+    Ok((workspace_id, actor.user_id, session.user.email))
 }
 
 fn internal(instance: &str, id: Option<&Extension<RequestId>>) -> ApiError {

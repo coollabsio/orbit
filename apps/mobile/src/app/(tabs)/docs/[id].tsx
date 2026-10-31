@@ -1,4 +1,5 @@
 import { collabStatusLabel, type CollabProblem, type CollabState } from '@orbit/editor/collab/session'
+import { isSafeLinkHref } from '@orbit/editor/links'
 import { useQuery } from '@tanstack/react-query'
 import { router, useLocalSearchParams } from 'expo-router'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
@@ -341,18 +342,21 @@ const EditorView = memo(function EditorView({ ref, pageId, epoch, generation, ed
   const me = useMemo(() => ({ name: user.display_name, color: colors.mutedForeground }), [user.display_name, colors.mutedForeground])
   const actions = useMemo(
     () => ({
-      getTicket: whileMounted(mounted, () => collabTicket(client)),
+      getTicket: whileMounted(mounted, () => collabTicket(client, pageId)),
       loadFile: whileMounted(mounted, (url: string) => fileDataUrl(session.server, session.token, url)),
       fileDeleted: whileMounted(mounted, (url: string) => fileDeleted(session.server, session.token, url)),
       openPage: whileMounted(mounted, async (target: string) => router.push(`/docs/${target}`)),
-      openUrl: whileMounted(mounted, async (url: string) => void Linking.openURL(url).catch(() => {})),
+      // the editor already filters links; the app checks again before it hands one to the OS
+      openUrl: whileMounted(mounted, async (url: string) => {
+        if (isSafeLinkHref(url)) void Linking.openURL(url).catch(() => {})
+      }),
       onStatus: whileMounted(mounted, async (state: CollabState) => latest.current.onStatus(state)),
       onProblem: whileMounted(mounted, async (problem: CollabProblem) => latest.current.onProblem(problem)),
       onProbe: whileMounted(mounted, async () => latest.current.onProbe()),
       onFormat: whileMounted(mounted, async (state: FormatState) => latest.current.onFormat(state)),
       onHeight: whileMounted(mounted, async (next: number) => setHeight(next)),
     }),
-    [client, session.server, session.token],
+    [client, pageId, session.server, session.token],
   )
   const dom = useMemo(() => ({ scrollEnabled: false, style: { height } }), [height])
 

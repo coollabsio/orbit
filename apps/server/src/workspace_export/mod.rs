@@ -1,6 +1,7 @@
 //! Full workspace export (data portability): an owner or admin starts it, a `workspace.export` job
-//! writes a ZIP of the workspace (layout in [`archive::README`]) and stores it, and the owner and
-//! admins download it until it expires.
+//! writes a ZIP of the workspace as the requester sees it (layout in [`archive::README`]) and
+//! stores it, and the requester downloads it until it expires. Leaving the workspace or deleting
+//! the account expires the member's exports ([`expire_for_user`]).
 //!
 //! State machine (`workspace_exports.status`): `queued` → `running` → `ready`, or `failed` after
 //! the job's last attempt. One export per workspace is `queued` or `running` at a time. The ZIP is
@@ -296,6 +297,8 @@ impl WorkspaceExportService {
         export_from_row(&row)
     }
 
+    /// The actor's own exports: an archive holds what its requester sees (private pages, private
+    /// channels, direct messages), so nobody else lists or downloads it.
     pub async fn list(
         &self,
         workspace_id: Id,
@@ -305,10 +308,12 @@ impl WorkspaceExportService {
         require_exporter(pool, workspace_id, actor_id).await?;
         let now = self.database().database_now().await?;
         sqlx::query(sqlx::AssertSqlSafe(format!(
-            "{SELECT_EXPORT} WHERE workspace_exports.workspace_id = $1 AND workspace_exports.expires_at > $2 \
-             ORDER BY workspace_exports.created_at DESC, workspace_exports.id DESC LIMIT $3"
+            "{SELECT_EXPORT} WHERE workspace_exports.workspace_id = $1 AND workspace_exports.requested_by = $2 \
+             AND workspace_exports.expires_at > $3 \
+             ORDER BY workspace_exports.created_at DESC, workspace_exports.id DESC LIMIT $4"
         )))
         .bind(workspace_id.to_string())
+        .bind(actor_id.to_string())
         .bind(now.as_millis())
         .bind(MAX_LISTED)
         .fetch_all(pool)
@@ -318,7 +323,8 @@ impl WorkspaceExportService {
         .collect()
     }
 
-    /// Opens a ready, unexpired export for an owner or admin and audits the download.
+    /// Opens a ready, unexpired export for the owner or admin who requested it and audits the
+    /// download.
     pub async fn download(
         &self,
         workspace_id: Id,
@@ -333,10 +339,12 @@ impl WorkspaceExportService {
             "SELECT workspace_exports.location, workspace_exports.size_bytes, workspace_exports.created_at, \
              workspaces.name FROM workspace_exports JOIN workspaces ON workspaces.id = workspace_exports.workspace_id \
              WHERE workspace_exports.id = $1 AND workspace_exports.workspace_id = $2 \
-             AND workspace_exports.status = 'ready' AND workspace_exports.expires_at > $3",
+             AND workspace_exports.requested_by = $3 \
+             AND workspace_exports.status = 'ready' AND workspace_exports.expires_at > $4",
         )
         .bind(export_id.to_string())
         .bind(workspace_id.to_string())
+        .bind(actor_id.to_string())
         .bind(now.as_millis())
         .fetch_optional(pool)
         .await?
@@ -601,6 +609,37 @@ impl WorkspaceExportService {
             None => Ok(()),
         }
     }
+}
+
+/// The member left the workspace (`Some`) or the account was deleted (`None`): their exports
+/// stop now, inside the caller's transaction. They are hidden at once, an export still running
+/// stores no archive, and retention ([`WorkspaceExportService::expire`]) deletes the rows and
+/// their archives.
+pub(crate) async fn expire_for_user(
+    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    workspace_id: Option<Id>,
+    user_id: Id,
+    now: TimestampMillis,
+) -> Result<(), sqlx::Error> {
+    let workspace = workspace_id.map(|id| id.to_string());
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "UPDATE workspace_exports SET status = 'failed' WHERE requested_by = $1 \
+         AND ($2 IS NULL OR workspace_id = $2) AND status IN {ACTIVE}"
+    )))
+    .bind(user_id.to_string())
+    .bind(workspace.clone())
+    .execute(&mut **tx)
+    .await?;
+    sqlx::query(
+        "UPDATE workspace_exports SET expires_at = $1 WHERE requested_by = $2 \
+         AND ($3 IS NULL OR workspace_id = $3) AND expires_at > $1",
+    )
+    .bind(now.as_millis())
+    .bind(user_id.to_string())
+    .bind(workspace)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
 }
 
 fn payload_export_id(payload: &Value) -> Option<Id> {

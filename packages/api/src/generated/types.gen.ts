@@ -1129,6 +1129,11 @@ export type DisplayOptions = {
     sub_issues?: SubIssuesDisplay;
 };
 
+/**
+ * What a collaborative document belongs to.
+ */
+export type DocKind = 'page' | 'task';
+
 export type DuplicatePageBody = {
     /**
      * Also copy the page's live sub-pages (the whole subtree, in order). Defaults to `false`.
@@ -3076,10 +3081,22 @@ export type SmtpView = {
     username?: string | null;
 };
 
+export type SocketTicketBody = {
+    /**
+     * The page or task id.
+     */
+    id: string;
+    /**
+     * The document the socket opens: a page or a task description.
+     */
+    kind: DocKind;
+};
+
 export type SocketTicketResponse = {
     expires_at: string;
     /**
-     * Pass as the `ticket` query parameter of a co-editing socket, without a cookie.
+     * Pass as the `ticket` query parameter of the co-editing socket of the requested document,
+     * without a cookie.
      */
     ticket: string;
 };
@@ -6409,7 +6426,7 @@ export type ExchangeProviderSignInErrors = {
      */
     401: AuthProblem;
     /**
-     * origin_forbidden, registration_closed, account_suspended, session_mismatch, identity_mismatch
+     * origin_forbidden, registration_closed, account_email_unverified, account_suspended, session_mismatch, identity_mismatch
      */
     403: AuthProblem;
     /**
@@ -6996,7 +7013,7 @@ export type PutShortcutsResponses = {
 export type PutShortcutsResponse = PutShortcutsResponses[keyof PutShortcutsResponses];
 
 export type SocketTicketData = {
-    body?: never;
+    body: SocketTicketBody;
     headers?: {
         /**
          * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
@@ -14254,7 +14271,7 @@ export type MovePageErrors = {
      */
     401: TaskProblem;
     /**
-     * origin_forbidden
+     * origin_forbidden, workspace_action_forbidden
      */
     403: TaskProblem;
     /**
@@ -14377,6 +14394,10 @@ export type RestorePageErrors = {
      * authentication_required
      */
     401: TaskProblem;
+    /**
+     * trial_limit_reached
+     */
+    402: TaskProblem;
     /**
      * origin_forbidden
      */
@@ -18403,6 +18424,10 @@ export type RestoreTaskErrors = {
      * authentication_required
      */
     401: TaskProblem;
+    /**
+     * trial_limit_reached
+     */
+    402: TaskProblem;
     /**
      * origin_forbidden
      */

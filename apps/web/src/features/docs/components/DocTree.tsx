@@ -52,7 +52,7 @@ import {
   type SpaceKey,
 } from '@/features/docs/pageTree'
 import { favoriteDropIndex, useMoveFavorite, usePageFavorites, useToggleFavorite } from '@/features/docs/api/favorites'
-import { isPageVersionConflict, useCreatePage, useMovePage } from '@/features/docs/api/pages'
+import { isPageVersionConflict, movePageErrorMessage, useCreatePage, useMovePage } from '@/features/docs/api/pages'
 import {
   teamspaceDeleteError,
   teamspaceDropIndex,
@@ -245,7 +245,7 @@ export function DocTree({
           if (from !== to) toast.success(`Moved to ${spaceLabel(to, teamspaces)}`)
         },
         onError: (error) => {
-          if (!isPageVersionConflict(error)) toast.error('Could not move the page.')
+          if (!isPageVersionConflict(error)) toast.error(movePageErrorMessage(error))
         },
       },
     )

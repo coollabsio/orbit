@@ -33,6 +33,11 @@ unicode-segmentation = "1"
 url = "2"
 uuid = { version = "1", features = ["v7"] }
 
+[features]
+# Test helpers (the in-memory S3 server) for the test crates; never in a release build.
+test-support = []
+
 [dev-dependencies]
+orbit-platform = { path = ".", features = ["test-support"] }
 futures-util = "0.3"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }

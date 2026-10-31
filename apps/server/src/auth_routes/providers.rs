@@ -451,6 +451,12 @@ fn refusal_problem(refusal: SignInRefusal, request_id: Option<&Extension<Request
             "Another account is connected",
             "The Orbit account with this email is connected to another account at this provider.",
         ),
+        SignInRefusal::AccountEmailUnverified => (
+            StatusCode::FORBIDDEN,
+            "account_email_unverified",
+            "Email not confirmed",
+            "The Orbit account with this email has not confirmed it yet. Sign in with your password, then connect this provider in Account settings → Security.",
+        ),
         SignInRefusal::Suspended => (
             StatusCode::FORBIDDEN,
             "account_suspended",
@@ -467,6 +473,7 @@ fn refusal_reason(refusal: SignInRefusal) -> &'static str {
         SignInRefusal::EmailUnverified => "email_unverified",
         SignInRefusal::RegistrationClosed => "registration_closed",
         SignInRefusal::IdentityConflict => "identity_conflict",
+        SignInRefusal::AccountEmailUnverified => "account_email_unverified",
         SignInRefusal::Suspended => "suspended",
         SignInRefusal::Stale => "stale",
     }
@@ -486,7 +493,7 @@ fn invalid_handoff(request_id: Option<&Extension<RequestId>>) -> ApiError {
 /// Where every provider flow ends, for every client and intent. `sign_in`: 200 `LoginResponse` (a cookie for
 /// browsers, `session_token` for requests without Origin) or 202 two-factor challenge, the same answers as
 /// `/api/v1/auth/login`. `connect` and `confirm`: 204.
-#[utoipa::path(post, path = "/api/v1/auth/providers/exchange", request_body = ExchangeProviderBody, responses((status = 200, body = LoginResponse), (status = 202, description = "The account has two-factor sign-in on: send a code to /api/v1/auth/login/two-factor.", body = two_factor::TwoFactorChallenge), (status = 204, description = "connect or confirm finished"), (status = 400, description = "invalid_handoff or provider_denied", body = ProblemBody, content_type = "application/problem+json"), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json"), (status = 403, description = "registration_closed, account_suspended, session_mismatch or identity_mismatch", body = ProblemBody, content_type = "application/problem+json"), (status = 409, description = "identity_in_use, identity_conflict or provider_already_connected", body = ProblemBody, content_type = "application/problem+json"), (status = 422, description = "provider_email_unverified", body = ProblemBody, content_type = "application/problem+json"), (status = 502, description = "provider_failed", body = ProblemBody, content_type = "application/problem+json"), (status = 503, description = "authentication_busy", body = ProblemBody, content_type = "application/problem+json")))]
+#[utoipa::path(post, path = "/api/v1/auth/providers/exchange", request_body = ExchangeProviderBody, responses((status = 200, body = LoginResponse), (status = 202, description = "The account has two-factor sign-in on: send a code to /api/v1/auth/login/two-factor.", body = two_factor::TwoFactorChallenge), (status = 204, description = "connect or confirm finished"), (status = 400, description = "invalid_handoff or provider_denied", body = ProblemBody, content_type = "application/problem+json"), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json"), (status = 403, description = "registration_closed, account_email_unverified, account_suspended, session_mismatch or identity_mismatch", body = ProblemBody, content_type = "application/problem+json"), (status = 409, description = "identity_in_use, identity_conflict or provider_already_connected", body = ProblemBody, content_type = "application/problem+json"), (status = 422, description = "provider_email_unverified", body = ProblemBody, content_type = "application/problem+json"), (status = 502, description = "provider_failed", body = ProblemBody, content_type = "application/problem+json"), (status = 503, description = "authentication_busy", body = ProblemBody, content_type = "application/problem+json")))]
 pub(super) async fn exchange_provider_sign_in(
     State(state): State<AuthState>,
     headers: HeaderMap,

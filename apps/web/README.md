@@ -28,7 +28,7 @@ src/
     api/ or api.ts      queries, mutations and their models
     <feature>Lib.ts     pure helpers for the feature
   lib/                  framework-agnostic helpers (format, theme, viewport, utils)
-  mock/                 in-memory backend used by the mock-backed routes
+  mock/                 in-memory backend of the unrouted Mail UI (keep it out of routed code)
   test/                 test setup
   index.css             the only stylesheet: Tailwind theme, tokens, base layer
 ```

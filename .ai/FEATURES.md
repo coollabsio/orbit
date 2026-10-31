@@ -8,7 +8,7 @@ Docs pages persist too (tree, content, trash, search; see Docs below).
 
 Chat persists too (channels, direct messages, threads, files, search; see Chat below).
 
-Home, Mail, Profile and webhooks still use isolated frontend seed data. Their routes show a `Mock data` badge in every build. SMTP sending, inbound SMTP and mailboxes are follow-up milestones.
+Mail still uses isolated frontend seed data, and `/mail` redirects to `/tasks`. SMTP sending, inbound SMTP and mailboxes are follow-up milestones.
 
 ## Global shell
 

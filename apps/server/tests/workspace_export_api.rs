@@ -340,7 +340,10 @@ impl Archive {
     }
 
     fn names(&self) -> BTreeSet<String> {
-        self.0.file_names().map(str::to_owned).collect()
+        self.0
+            .file_names()
+            .map(|name| name.unwrap().into_owned())
+            .collect()
     }
 
     fn bytes(&mut self, name: &str) -> Vec<u8> {
@@ -632,6 +635,116 @@ async fn a_read_only_workspace_still_exports_through_the_background_job() {
         .unwrap();
     assert_eq!(job, "succeeded");
     stop.await;
+}
+
+#[tokio::test]
+async fn only_the_requester_sees_an_export_and_leaving_or_deleting_the_account_ends_it() {
+    let harness = Harness::new(false).await;
+    let admin = harness
+        .add_user("ada@example.com", "Ada Admin", Some("admin"))
+        .await;
+    let other = harness
+        .add_user("otto@example.com", "Otto Admin", Some("admin"))
+        .await;
+    let pool = harness.database.pool().clone();
+    let user_id = |email: &'static str| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query_scalar::<_, String>("SELECT id FROM users WHERE email = $1")
+                .bind(email)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+    let archive = |id: &str| {
+        harness
+            .root
+            .path()
+            .join(format!("backups/exports/{}/{id}.zip", harness.workspace_id))
+    };
+    let owners = harness.start_export().await;
+    harness.run_export(&owners).await;
+
+    // The owner's archive holds the owner's private pages and chats: no other admin gets it.
+    let list = harness
+        .ok(&admin, "GET", &harness.workspace("/exports"), None)
+        .await;
+    assert_eq!(list, json!({"items": []}));
+    let (status, _, _) = harness.download(&admin, &owners).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    let (status, export) = harness
+        .call(&admin, "POST", &harness.workspace("/exports"), None)
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{export}");
+    let admins = export["id"].as_str().unwrap().to_owned();
+    harness.run_export(&admins).await;
+    let (status, _, _) = harness.download(&admin, &admins).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _, _) = harness.download(&harness.owner, &admins).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let list = harness
+        .ok(&harness.owner, "GET", &harness.workspace("/exports"), None)
+        .await;
+    assert_eq!(list["items"].as_array().unwrap().len(), 1);
+    assert_eq!(list["items"][0]["id"], owners.as_str());
+
+    let (status, export) = harness
+        .call(&other, "POST", &harness.workspace("/exports"), None)
+        .await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{export}");
+    let others = export["id"].as_str().unwrap().to_owned();
+    harness.run_export(&others).await;
+
+    // Ada leaves the workspace; Otto's account is deleted. Their exports are gone at once
+    // (rows, then archives at the next retention run); the owner's stays.
+    let ada = user_id("ada@example.com").await;
+    let membership: String =
+        sqlx::query_scalar("SELECT id FROM memberships WHERE workspace_id = $1 AND user_id = $2")
+            .bind(&harness.workspace_id)
+            .bind(&ada)
+            .fetch_one(harness.database.pool())
+            .await
+            .unwrap();
+    let (status, problem) = harness
+        .call(
+            &admin,
+            "DELETE",
+            &harness.workspace(&format!("/members/{membership}?expected_version=0")),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{problem}");
+    let otto: Id = user_id("otto@example.com").await.parse().unwrap();
+    harness
+        .identity
+        .delete_account(otto, "test", TimestampMillis::now())
+        .await
+        .unwrap();
+    let live: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM workspace_exports WHERE expires_at > $1")
+            .bind(TimestampMillis::now().as_millis())
+            .fetch_one(harness.database.pool())
+            .await
+            .unwrap();
+    assert_eq!(live, 1, "only the owner's export is still served");
+
+    harness
+        .app
+        .as_ref()
+        .unwrap()
+        .run_retention_maintenance()
+        .await
+        .unwrap();
+    assert!(!archive(&admins).exists());
+    assert!(!archive(&others).exists());
+    assert!(archive(&owners).is_file());
+    let rows: Vec<String> = sqlx::query_scalar("SELECT id FROM workspace_exports")
+        .fetch_all(harness.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(rows, vec![owners]);
 }
 
 #[tokio::test]

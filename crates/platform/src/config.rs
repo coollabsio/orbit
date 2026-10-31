@@ -662,6 +662,30 @@ impl Config {
         Ok(config)
     }
 
+    /// Settings that are valid but unsafe on most networks. `orbit serve` logs each one at startup.
+    #[must_use]
+    pub fn warnings(&self) -> Vec<String> {
+        let mut warnings = Vec::new();
+        for proxy in &self.http.trusted_proxies {
+            if proxy.prefix_len() == 0 {
+                warnings.push(format!(
+                    "{HTTP_TRUSTED_PROXIES_ENV} contains {proxy}, which trusts every address: anyone \
+                     who reaches the port directly can fake their IP address (and get around rate \
+                     limits) and HTTPS. List only the reverse proxy addresses."
+                ));
+            }
+        }
+        if let Some(address) = self.metrics.listen
+            && !address.ip().is_loopback()
+        {
+            warnings.push(format!(
+                "{METRICS_LISTEN_ENV}={address} is not a loopback address: /metrics has no \
+                 authentication, so only the monitoring network may reach it."
+            ));
+        }
+        warnings
+    }
+
     pub fn validate(&self) -> Result<(), ConfigError> {
         let valid_origin = self
             .http
@@ -719,9 +743,10 @@ impl Config {
             EnvironmentMode::Production if self.http.trusted_proxies.is_empty() => {
                 return Err(ConfigError::InvalidSetting {
                     key: HTTP_TRUSTED_PROXIES_ENV,
-                    detail:
-                        "production mode requires at least one trusted proxy for the HTTPS boundary"
-                            .to_owned(),
+                    detail: "production mode requires at least one trusted proxy for the HTTPS \
+                             boundary: set it to the reverse proxy addresses, for example \
+                             127.0.0.1/32 for a proxy on the same host"
+                        .to_owned(),
                 });
             }
             _ => {}
@@ -946,4 +971,52 @@ fn parse_app_key(value: &str) -> Result<AppKey, ConfigError> {
         key: APP_KEY_ENV,
         detail: "must be base64 of 32 bytes (`openssl rand -base64 32`)".to_owned(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn production(extra: &[(&str, &str)]) -> Config {
+        let mut env: BTreeMap<String, String> = [
+            ("ORBIT_ENV", "production"),
+            ("ORBIT_PUBLIC_ORIGIN", "https://orbit.example"),
+            (
+                "ORBIT_APP_KEY",
+                "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+            ),
+            ("ORBIT_TRUSTED_PROXIES", "172.30.0.2/32"),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+        .collect();
+        env.extend(
+            extra
+                .iter()
+                .map(|(key, value)| ((*key).to_owned(), (*value).to_owned())),
+        );
+        Config::from_environment(env).unwrap()
+    }
+
+    #[test]
+    fn a_narrow_proxy_and_loopback_metrics_give_no_warning() {
+        let config = production(&[("ORBIT_METRICS_LISTEN", "127.0.0.1:9090")]);
+        assert!(config.warnings().is_empty(), "{:?}", config.warnings());
+    }
+
+    #[test]
+    fn trusting_every_address_is_a_warning() {
+        let config = production(&[("ORBIT_TRUSTED_PROXIES", "172.30.0.2/32,::/0")]);
+        let warnings = config.warnings();
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].starts_with("ORBIT_TRUSTED_PROXIES contains ::/0"));
+    }
+
+    #[test]
+    fn public_metrics_listener_is_a_warning() {
+        let config = production(&[("ORBIT_METRICS_LISTEN", "0.0.0.0:9090")]);
+        let warnings = config.warnings();
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].starts_with("ORBIT_METRICS_LISTEN=0.0.0.0:9090"));
+    }
 }

@@ -18,6 +18,7 @@ import { Outlet, useLocation } from 'react-router'
 import { SidebarLeft as PanelLeft } from 'reicon-react'
 import { cn } from 'cn'
 import { SideSheet, SideSheetContent } from '@/components/common/SideSheet'
+import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import { Tip } from '@/components/common/Tip'
 import { useWorkspace, WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { useIsInstallationAdmin } from '@/features/workspaces/permissions'
@@ -200,7 +201,9 @@ function Shell() {
         <ReadOnlyBanner />
         <Topbar onOpenDrawer={() => setDrawerOpen(true)} onOpenPalette={() => setPaletteOpen(true)} />
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <Outlet />
+          <ErrorBoundary resetKey={pathname}>
+            <Outlet />
+          </ErrorBoundary>
         </div>
         <MobileDock chatBadge={chatBadge} chatUnread={chatUnread} />
       </div>

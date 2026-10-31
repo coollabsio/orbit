@@ -14,17 +14,30 @@ pub fn is_public_ip(ip: IpAddr) -> bool {
                 return is_public_v4(mapped);
             }
             let segments = ip.segments();
+            let embedded = |high: u16, low: u16| {
+                let [a, b] = high.to_be_bytes();
+                let [c, d] = low.to_be_bytes();
+                Ipv4Addr::new(a, b, c, d)
+            };
             // NAT64 (64:ff9b::/96) carries an IPv4 address in its last 32 bits.
             if segments[..6] == [0x64, 0xff9b, 0, 0, 0, 0] {
-                let [a, b] = segments[6].to_be_bytes();
-                let [c, d] = segments[7].to_be_bytes();
-                return is_public_v4(Ipv4Addr::new(a, b, c, d));
+                return is_public_v4(embedded(segments[6], segments[7]));
+            }
+            // IPv4-compatible (::a.b.c.d, deprecated). Also `::` and `::1`, which embed 0.0.0.x.
+            if segments[..6] == [0; 6] {
+                return is_public_v4(embedded(segments[6], segments[7]));
+            }
+            // 6to4 (2002::/16) carries an IPv4 address in bits 16..48.
+            if segments[0] == 0x2002 {
+                return is_public_v4(embedded(segments[1], segments[2]));
             }
             !(ip.is_loopback()
                 || ip.is_unspecified()
                 || ip.is_multicast()
                 || (segments[0] & 0xfe00) == 0xfc00 // unique local fc00::/7
                 || (segments[0] & 0xffc0) == 0xfe80 // link-local fe80::/10
+                || (segments[0] & 0xffc0) == 0xfec0 // site-local fec0::/10 (deprecated)
+                || (segments[0] == 0x64 && segments[1] == 0xff9b && segments[2] == 1) // local-use NAT64 64:ff9b:1::/48
                 || (segments[0] == 0x2001 && segments[1] == 0x0db8) // documentation
                 || ip == Ipv6Addr::LOCALHOST)
         }
@@ -81,10 +94,30 @@ mod tests {
             "::1",
             "fc00::2",
             "::ffff:127.0.0.1",
+            "64:ff9b::7f00:1",
+            "64:ff9b::a00:1",
+            "64:ff9b:1::1",
+            "64:ff9b:1::101:101",
+            "::127.0.0.1",
+            "::10.0.0.1",
+            "::",
+            "::0.0.0.2",
+            "2002:7f00:1::1",
+            "2002:a9fe:a9fe::1",
+            "2002:c0a8:1::",
+            "fec0::1",
+            "feff::1",
         ] {
             assert!(!is_public_ip(local.parse().unwrap()), "{local}");
         }
-        for public in ["1.1.1.1", "93.184.216.34", "2606:4700::1111"] {
+        for public in [
+            "1.1.1.1",
+            "93.184.216.34",
+            "2606:4700::1111",
+            "64:ff9b::101:101",
+            "::1.1.1.1",
+            "2002:101:101::1",
+        ] {
             assert!(is_public_ip(public.parse().unwrap()), "{public}");
         }
     }

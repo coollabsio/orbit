@@ -13,6 +13,7 @@ import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import {
   isPageNotFound,
   isPageVersionConflict,
+  movePageErrorMessage,
   useCreatePage,
   useDuplicatePage,
   useMovePage,
@@ -147,7 +148,7 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
           if (spaceKey(target) !== space) toast.success(`Moved to ${spaceLabel(space, teamspaces.data)}`)
         },
         onError: (error) => {
-          if (!isPageVersionConflict(error)) toast.error('Could not move the page.')
+          if (!isPageVersionConflict(error)) toast.error(movePageErrorMessage(error))
         },
       },
     )

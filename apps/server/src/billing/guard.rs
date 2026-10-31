@@ -2,7 +2,10 @@
 //! workspace without a subscription that grants access answers 402 `workspace_read_only`. Reads
 //! stay open, and so do the writes in [`ALLOWED_WRITES`]. Co-editing sockets open read-only
 //! instead ([`ReadOnlyWorkspace`]). During the trial, a member's create in [`LIMITED_CREATES`]
-//! answers 402 `trial_limit_reached` once the workspace holds the [`TrialLimit`]. Anyone else's
+//! answers 402 `trial_limit_reached` once the workspace holds the [`TrialLimit`]; tasks and pages
+//! are counted by the repositories instead, inside each transaction that adds some
+//! (`repositories::billing::ensure_trial_capacity`), since restores, copies, imports and
+//! integrations add them too. Anyone else's
 //! write passes to the handler, which refuses it as on any workspace, so a stranger cannot tell a
 //! read-only or trial workspace from a paid one.
 
@@ -59,12 +62,8 @@ const ALLOWED_WRITES: &[(Method, &str)] = &[
 
 /// Creates a trial workspace refuses at its limit: the method and the path after
 /// `/api/v1/workspaces/{id}`, as in [`ALLOWED_WRITES`].
-const LIMITED_CREATES: &[(Method, &str, TrialLimit)] = &[
-    (Method::POST, "tasks", TrialLimit::Tasks),
-    (Method::POST, "pages", TrialLimit::Pages),
-    (Method::POST, "pages/*/duplicate", TrialLimit::Pages),
-    (Method::POST, "invitations", TrialLimit::Members),
-];
+const LIMITED_CREATES: &[(Method, &str, TrialLimit)] =
+    &[(Method::POST, "invitations", TrialLimit::Members)];
 
 /// Set on a co-editing socket request of a read-only workspace: the socket drops content updates.
 #[derive(Clone, Copy, Debug)]
@@ -251,14 +250,14 @@ fn read_only() -> Message {
 }
 
 fn trial_limit(limit: TrialLimit, trial: &TrialConfig) -> Message {
+    let reached = repository::TrialLimitReached {
+        limit,
+        allowed: limit.limit(trial),
+    };
     Message {
         code: "trial_limit_reached",
         title: "Trial limit reached",
-        detail: format!(
-            "The trial allows {} {}. Choose a plan to add more.",
-            limit.limit(trial),
-            limit.noun()
-        ),
+        detail: reached.detail(),
     }
 }
 
@@ -328,21 +327,18 @@ mod tests {
     fn creates_of_limited_records_are_checked_against_the_trial_limits() {
         let id: Id = WORKSPACE.parse().unwrap();
         for (method, rest, expected) in [
-            (Method::POST, "/tasks", Check::Create(id, TrialLimit::Tasks)),
-            (
-                Method::POST,
-                "/tasks/",
-                Check::Create(id, TrialLimit::Tasks),
-            ),
-            (Method::POST, "/pages", Check::Create(id, TrialLimit::Pages)),
-            (
-                Method::POST,
-                "/pages/p1/duplicate",
-                Check::Create(id, TrialLimit::Pages),
-            ),
+            // Tasks and pages are counted by the repositories.
+            (Method::POST, "/tasks", Check::Write(id)),
+            (Method::POST, "/pages", Check::Write(id)),
+            (Method::POST, "/pages/p1/duplicate", Check::Write(id)),
             (
                 Method::POST,
                 "/invitations",
+                Check::Create(id, TrialLimit::Members),
+            ),
+            (
+                Method::POST,
+                "/invitations/",
                 Check::Create(id, TrialLimit::Members),
             ),
             (Method::POST, "/pages/p1/move", Check::Write(id)),

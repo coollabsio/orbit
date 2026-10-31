@@ -139,10 +139,16 @@ impl Server {
         )
     }
 
-    /// A socket ticket of the session `token` (`POST /api/v1/auth/socket-ticket`).
-    pub async fn socket_ticket(&self, token: &str) -> String {
+    /// A socket ticket of the session `token` for one document (`POST /api/v1/auth/socket-ticket`);
+    /// `kind` is "page" or "task".
+    pub async fn socket_ticket(&self, token: &str, kind: &str, id: &str) -> String {
         let (status, body) = self
-            .api(token, "POST", "/api/v1/auth/socket-ticket", None)
+            .api(
+                token,
+                "POST",
+                "/api/v1/auth/socket-ticket",
+                Some(json!({"kind": kind, "id": id})),
+            )
             .await;
         assert_eq!(status, 200, "{body}");
         body["ticket"].as_str().unwrap().to_owned()

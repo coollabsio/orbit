@@ -4,7 +4,7 @@
 //!
 //! Before the upgrade: the platform layer requires exactly one allowed `Origin` for any request
 //! with `Upgrade` (403), unless it carries a `ticket` and no cookie; then the session cookie, or
-//! the session of a valid `ticket` without any other credential (401, see
+//! the session of a valid `ticket` for this page or task without any other credential (401, see
 //! `crate::socket_ticket`), and workspace membership plus a live page
 //! the user can see, or a live task in a live project (404, the same answer as for an unknown id).
 //! After it: `v` must be `1` (4426) and `epoch` must be the document's `collab_epoch` (4409). The
@@ -84,9 +84,14 @@ pub async fn upgrade(
         None => request_session(identity, cookie_mode, headers).await,
         // A ticket stands in for the session, so it never comes with another credential.
         Some(_) if headers.contains_key(COOKIE) || bearer_token(headers).is_some() => None,
+        // A ticket opens only the document it was issued for.
         Some(ticket) => {
             let now = TimestampMillis::now();
-            match tickets.and_then(|tickets| tickets.verify(ticket, now)) {
+            let document = id.parse::<Id>().ok().map(|id| DocKey { kind, id });
+            match tickets
+                .zip(document)
+                .and_then(|(tickets, document)| tickets.verify(ticket, document, now))
+            {
                 Some(session_id) => identity.authenticate_session_id(session_id, now).await.ok(),
                 None => None,
             }

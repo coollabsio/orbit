@@ -35,6 +35,11 @@ export function isPageVersionConflict(error: unknown): error is ApiProblem {
   return isTaskVersionConflict(error)
 }
 
+/** The toast for a failed move: the server's reason when it forbids the move, else a generic one. */
+export function movePageErrorMessage(error: unknown): string {
+  return error instanceof ApiProblem && error.status === 403 ? error.detail : 'Could not move the page.'
+}
+
 export function isPageNotFound(error: unknown): boolean {
   return error instanceof ApiProblem && error.status === 404
 }

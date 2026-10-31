@@ -992,21 +992,34 @@ async fn me(
     Ok(response)
 }
 
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct SocketTicketBody {
+    /// The document the socket opens: a page or a task description.
+    kind: crate::collab::DocKind,
+    /// The page or task id.
+    #[schema(value_type = String)]
+    id: Id,
+}
+
 #[derive(Serialize, ToSchema)]
 struct SocketTicketResponse {
-    /// Pass as the `ticket` query parameter of a co-editing socket, without a cookie.
+    /// Pass as the `ticket` query parameter of the co-editing socket of the requested document,
+    /// without a cookie.
     ticket: String,
     #[schema(value_type = String, format = DateTime)]
     expires_at: TimestampMillis,
 }
 
-/// A ticket that opens a co-editing socket (`…/collab?ticket=…`) of this session for 60 s, for
-/// sockets that cannot send the session cookie or `Authorization` header (a native app's WebView).
-#[utoipa::path(post, path = "/api/v1/auth/socket-ticket", responses((status = 200, body = SocketTicketResponse), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json")))]
+/// A ticket that opens the co-editing socket (`…/collab?ticket=…`) of one page or task for this
+/// session for 60 s, for sockets that cannot send the session cookie or `Authorization` header (a
+/// native app's WebView). Access to the document is checked when the socket opens.
+#[utoipa::path(post, path = "/api/v1/auth/socket-ticket", request_body = SocketTicketBody, responses((status = 200, body = SocketTicketResponse), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json")))]
 async fn socket_ticket(
     State(state): State<AuthState>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<SocketTicketBody>,
 ) -> Result<Json<SocketTicketResponse>, ApiError> {
     const INSTANCE: &str = "/api/v1/auth/socket-ticket";
     let session = authenticate(&state, &headers, INSTANCE, request_id.as_ref()).await?;
@@ -1016,8 +1029,12 @@ async fn socket_ticket(
     let expires_at = TimestampMillis::from_millis(
         TimestampMillis::now().as_millis() + crate::socket_ticket::TICKET_LIFETIME_MS,
     );
+    let document = crate::collab::DocKey {
+        kind: body.kind,
+        id: body.id,
+    };
     Ok(Json(SocketTicketResponse {
-        ticket: SocketTickets::new(&app_key).issue(session.id, expires_at),
+        ticket: SocketTickets::new(&app_key).issue(session.id, document, expires_at),
         expires_at,
     }))
 }
@@ -1475,13 +1492,36 @@ async fn change_password(
         .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
         .ok_or_else(|| ApiError::internal(instance, request_id.as_ref()))?;
     let valid = match identity.password_hash {
+        // Throttled like sign-in, so a stolen session cannot guess the password here.
         Some(password_hash) => {
-            state
+            let ip = client_ip
+                .map(|Extension(client_ip)| client_ip.0)
+                .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+            let reservation = state
+                .throttler
+                .reserve(&session.user.email, ip, TimestampMillis::now())
+                .await
+                .map_err(|decision| match decision {
+                    ThrottleDecision::RetryAfter(delay) => {
+                        ApiError::throttled(delay, instance, request_id.as_ref())
+                    }
+                    ThrottleDecision::Allowed => ApiError::internal(instance, request_id.as_ref()),
+                })?;
+            let valid = state
                 .passwords
                 .verify(body.current_password.unwrap_or_default(), password_hash)
                 .await
                 .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
-                .valid
+                .valid;
+            if valid {
+                state.throttler.finish_success(reservation).await;
+            } else {
+                state
+                    .throttler
+                    .finish_failure(reservation, TimestampMillis::now())
+                    .await;
+            }
+            valid
         }
         None => {
             two_factor::confirm_identity(
@@ -1561,40 +1601,44 @@ async fn recovery_request(
     let Some(mailer) = state.mailer().await else {
         return Ok(accepted(GENERIC_RECOVERY_DETAIL));
     };
-    // The answer is the same whether or not the account exists or reached its email limit, and the
-    // email goes out in the background.
+    // The answer is the same whether or not the account exists or reached its email limit. The
+    // account's work (email limit, link, email) runs in the background, so an existing account does
+    // not answer later than an unknown address.
     let account = state
         .repository
         .find_by_email(body.email.trim())
         .await
         .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
         .filter(|account| !account.suspended);
-    let account = match account {
-        Some(account) => state
-            .account_email_allowed(&account.email)
-            .await
-            .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
-            .then_some(account),
-        None => None,
-    };
     if let Some(account) = account {
-        let token = orbit_platform::generate_opaque_token();
-        let expires_at =
-            TimestampMillis::from_millis(TimestampMillis::now().as_millis() + LIFETIME_MILLIS);
-        state
-            .repository
-            .store_recovery_token_audited(
-                account.id,
-                &token,
-                expires_at,
-                request_id_value(request_id.as_ref()),
-            )
-            .await
-            .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
-        mailer.send_later(mail::templates::recovery(
-            &account.email,
-            &mailer.link(&format!("/recovery?token={token}")),
-        ));
+        let state = state.clone();
+        let mailer = mailer.clone();
+        let request_id = request_id_value(request_id.as_ref()).to_owned();
+        tokio::spawn(async move {
+            match state.account_email_allowed(&account.email).await {
+                Ok(true) => {}
+                Ok(false) => return,
+                Err(error) => {
+                    tracing::warn!(%error, "password reset link not issued");
+                    return;
+                }
+            }
+            let token = orbit_platform::generate_opaque_token();
+            let expires_at =
+                TimestampMillis::from_millis(TimestampMillis::now().as_millis() + LIFETIME_MILLIS);
+            if let Err(error) = state
+                .repository
+                .store_recovery_token_audited(account.id, &token, expires_at, &request_id)
+                .await
+            {
+                tracing::warn!(%error, "password reset link not issued");
+                return;
+            }
+            mailer.send_later(mail::templates::recovery(
+                &account.email,
+                &mailer.link(&format!("/recovery?token={token}")),
+            ));
+        });
     }
     Ok(accepted(EMAILED_RECOVERY_DETAIL))
 }
@@ -3300,13 +3344,27 @@ mod tests {
             "https://orbit.test",
         )));
         let tickets = crate::socket_ticket::SocketTickets::new(&[7; 32]);
+        let page = crate::collab::DocKey::page(orbit_platform::Id::new_v7());
+        let ticket_body = json!({"kind": "page", "id": page.id.to_string()});
+        let with_body = |mut request: Request<Body>| {
+            request.headers_mut().insert(
+                header::CONTENT_TYPE,
+                axum::http::HeaderValue::from_static("application/json"),
+            );
+            *request.body_mut() = Body::from(ticket_body.to_string());
+            request
+        };
         let issued = |response: Value| {
             assert_eq!(response.as_object().unwrap().len(), 2, "{response}");
             let expires_at: TimestampMillis =
                 serde_json::from_value(response["expires_at"].clone()).unwrap();
             let lifetime = expires_at.as_millis() - TimestampMillis::now().as_millis();
             assert!((55_000..=60_000).contains(&lifetime), "{lifetime}");
-            tickets.verify(response["ticket"].as_str().unwrap(), TimestampMillis::now())
+            let ticket = response["ticket"].as_str().unwrap();
+            // The ticket opens only the page it was asked for.
+            let other = crate::collab::DocKey::task(page.id);
+            assert_eq!(tickets.verify(ticket, other, TimestampMillis::now()), None);
+            tickets.verify(ticket, page, TimestampMillis::now())
         };
 
         let login = app.clone().oneshot(native_login_request()).await.unwrap();
@@ -3319,7 +3377,11 @@ mod tests {
             .id;
         let response = app
             .clone()
-            .oneshot(bearer_request("POST", "/api/v1/auth/socket-ticket", token))
+            .oneshot(with_body(bearer_request(
+                "POST",
+                "/api/v1/auth/socket-ticket",
+                token,
+            )))
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
@@ -3334,11 +3396,11 @@ mod tests {
             .id;
         let response = app
             .clone()
-            .oneshot(cookie_request(
+            .oneshot(with_body(cookie_request(
                 "POST",
                 "/api/v1/auth/socket-ticket",
                 &cookie,
-            ))
+            )))
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
@@ -3346,18 +3408,17 @@ mod tests {
         assert_eq!(issued(response), Some(cookie_session));
         assert_ne!(cookie_session, bearer_session);
 
-        let anonymous = Request::builder()
-            .method("POST")
-            .uri("/api/v1/auth/socket-ticket")
-            .header(header::ORIGIN, "https://orbit.test")
-            .body(Body::empty())
-            .unwrap();
+        let anonymous = json_request("/api/v1/auth/socket-ticket", ticket_body.clone());
         assert_eq!(
             app.clone().oneshot(anonymous).await.unwrap().status(),
             StatusCode::UNAUTHORIZED
         );
         // A cookie keeps the browser's Origin rule.
-        let mut foreign = cookie_request("POST", "/api/v1/auth/socket-ticket", &cookie);
+        let mut foreign = with_body(cookie_request(
+            "POST",
+            "/api/v1/auth/socket-ticket",
+            &cookie,
+        ));
         foreign
             .headers_mut()
             .insert(header::ORIGIN, "https://evil.example".parse().unwrap());

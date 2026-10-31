@@ -5617,7 +5617,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, registration_closed, account_suspended, session_mismatch, identity_mismatch",
+            "description": "origin_forbidden, registration_closed, account_email_unverified, account_suspended, session_mismatch, identity_mismatch",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6862,7 +6862,7 @@
         "tags": [
           "crate::auth_routes"
         ],
-        "summary": "A ticket that opens a co-editing socket (`…/collab?ticket=…`) of this session for 60 s, for\nsockets that cannot send the session cookie or `Authorization` header (a native app's WebView).",
+        "summary": "A ticket that opens the co-editing socket (`…/collab?ticket=…`) of one page or task for this\nsession for 60 s, for sockets that cannot send the session cookie or `Authorization` header (a\nnative app's WebView). Access to the document is checked when the socket opens.",
         "operationId": "socket_ticket",
         "parameters": [
           {
@@ -6875,6 +6875,16 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SocketTicketBody"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "",
@@ -23180,7 +23190,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden",
+            "description": "origin_forbidden, workspace_action_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -23459,6 +23469,16 @@
           },
           "401": {
             "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "trial_limit_reached",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -32967,6 +32987,16 @@
               }
             }
           },
+          "402": {
+            "description": "trial_limit_reached",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
           "403": {
             "description": "origin_forbidden",
             "content": {
@@ -38144,6 +38174,14 @@
         },
         "additionalProperties": false
       },
+      "DocKind": {
+        "type": "string",
+        "description": "What a collaborative document belongs to.",
+        "enum": [
+          "page",
+          "task"
+        ]
+      },
       "DuplicatePageBody": {
         "type": "object",
         "properties": {
@@ -43237,6 +43275,24 @@
           }
         }
       },
+      "SocketTicketBody": {
+        "type": "object",
+        "required": [
+          "kind",
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The page or task id."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/DocKind",
+            "description": "The document the socket opens: a page or a task description."
+          }
+        },
+        "additionalProperties": false
+      },
       "SocketTicketResponse": {
         "type": "object",
         "required": [
@@ -43250,7 +43306,7 @@
           },
           "ticket": {
             "type": "string",
-            "description": "Pass as the `ticket` query parameter of a co-editing socket, without a cookie."
+            "description": "Pass as the `ticket` query parameter of the co-editing socket of the requested document,\nwithout a cookie."
           }
         }
       },

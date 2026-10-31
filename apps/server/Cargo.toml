@@ -38,14 +38,17 @@ tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt-multi
 tokio-util = { version = "0.7", features = ["io", "rt"] }
 tokio-stream = "0.1"
 tower = { version = "0.5", features = ["util"] }
+# Serves HTTP with a header read timeout (axum::serve has none).
+hyper = { version = "1", features = ["http1", "http2", "server"] }
+hyper-util = { version = "0.1", features = ["server-auto", "server-graceful", "service", "tokio"] }
 tracing = "0.1"
 utoipa = { version = "5", features = ["axum_extras"] }
 # Passkeys. 0.6 is pure Rust; 0.5 needs OpenSSL, which the static musl image does not have.
 webauthn-rs = { version = "=0.6.1-dev", features = ["danger-allow-state-serialisation", "conditional-ui"] }
 yrs = { version = "=0.28.0", features = ["sync"] }
-zip = { version = "8.6", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+zip = { version = "9.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 pulldown-cmark = { version = "0.13", default-features = false }
-p256 = { version = "0.13", features = ["ecdh", "ecdsa"] }
+p256 = { version = "0.14", features = ["ecdh", "ecdsa", "getrandom"] }
 hkdf = "0.12"
 aes-gcm = "0.10"
 rand_core = { version = "0.6", features = ["getrandom"] }
@@ -53,6 +56,7 @@ webp = { version = "0.3.1", default-features = false }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 
 [dev-dependencies]
+orbit-platform = { path = "../../crates/platform", features = ["test-support"] }
 sqlx = { version = "0.9", default-features = false, features = ["postgres"] }
 tempfile = "3"
 tokio-tungstenite = "0.29"

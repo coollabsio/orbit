@@ -392,6 +392,14 @@ fn problem(
             instance,
             request_id,
         ),
+        PageCommentError::ThreadHasReplies => ApiError::new(
+            StatusCode::CONFLICT,
+            "page_thread_has_replies",
+            "Thread has replies",
+            "Others have replied in this thread. Delete your own comments instead, or ask an admin to delete the thread.",
+            instance,
+            request_id,
+        ),
         PageCommentError::Invalid { field } => validation(field, instance, request_id),
         PageCommentError::Corrupt | PageCommentError::Unavailable(_) => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,

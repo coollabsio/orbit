@@ -1845,6 +1845,79 @@ async fn moving_a_root_between_spaces_takes_its_whole_subtree() {
 }
 
 #[tokio::test]
+async fn only_creators_and_admins_move_teamspace_pages_into_a_private_space() {
+    let fixture = Fixture::new().await;
+    let general = fixture.teamspace_ids().await.remove(0);
+    let (_, member_cookie) =
+        add_member(&fixture, &fixture.workspace_id, "member@example.com").await;
+    let to_private = |page: &Value| {
+        (
+            format!("{}/move", fixture.page_uri(id_of(page))),
+            json!({"expected_version": page["version"], "parent_id": null, "position": 0, "private": true}),
+        )
+    };
+    let shared = fixture.create(json!({"title": "Team doc"})).await;
+    let (uri, body) = to_private(&shared);
+    let (status, problem) =
+        call_as(&fixture, &member_cookie, "POST", &uri, Some(body.clone())).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{problem}");
+    assert_eq!(problem["code"], "workspace_action_forbidden");
+
+    // The member's own page, with a sub-page someone else created, moves only as a whole that
+    // the member created.
+    let (status, own) = call_as(
+        &fixture,
+        &member_cookie,
+        "POST",
+        &fixture.pages_uri(),
+        Some(json!({"title": "Mine"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{own}");
+    let foreign_child = fixture
+        .create(json!({"parent_id": id_of(&own), "title": "Owner's child"}))
+        .await;
+    let (uri, body) = to_private(&own);
+    let (status, problem) =
+        call_as(&fixture, &member_cookie, "POST", &uri, Some(body.clone())).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{problem}");
+    let (status, out) = fixture.move_to(&foreign_child, None, 0).await;
+    assert_eq!(status, StatusCode::OK, "{out}");
+    let (status, moved) = call_as(&fixture, &member_cookie, "POST", &uri, Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{moved}");
+    assert_eq!(moved["private"], true);
+
+    // Owners and admins may move anyone's teamspace page.
+    let (status, theirs) = call_as(
+        &fixture,
+        &member_cookie,
+        "POST",
+        &fixture.pages_uri(),
+        Some(json!({"title": "Member's"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{theirs}");
+    let (uri, body) = to_private(&theirs);
+    let (status, moved) = fixture.call("POST", &uri, Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{moved}");
+
+    let audits: Vec<(String, String)> = sqlx::query_as(
+        "SELECT resource_id, metadata_json FROM audit_events WHERE action = 'page.moved_to_private' ORDER BY occurred_at, id",
+    )
+    .fetch_all(fixture.database.pool())
+    .await
+    .unwrap();
+    let from = format!(r#"{{"from_teamspace_id":"{general}"}}"#);
+    assert_eq!(
+        audits,
+        [
+            (id_of(&own).to_owned(), from.clone()),
+            (id_of(&theirs).to_owned(), from),
+        ]
+    );
+}
+
+#[tokio::test]
 async fn restore_goes_to_the_root_of_the_page_own_space() {
     let fixture = Fixture::new().await;
     fixture.create(json!({"title": "Team root"})).await;

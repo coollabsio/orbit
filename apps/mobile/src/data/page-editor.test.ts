@@ -21,22 +21,24 @@ const problem = (status: number, code: string) =>
   new Response(JSON.stringify({ type: 'about:blank', title: code, status, code, detail: code }), { status, headers: { 'content-type': 'application/problem+json' } })
 
 describe('collabTicket', () => {
-  test('asks for a ticket with the bearer token', async () => {
+  test('asks for a ticket of the page with the bearer token', async () => {
     const { instance, seen } = client(() => Response.json({ ticket: 't-1', expires_at: '2026-10-24T10:01:00Z' }))
-    expect(await collabTicket(instance)).toEqual({ ok: true, ticket: 't-1' })
+    expect(await collabTicket(instance, 'page-1')).toEqual({ ok: true, ticket: 't-1' })
     expect(seen.map((request) => [request.method, request.url, request.headers.get('authorization')])).toEqual([
       ['POST', 'https://orbit.test/api/v1/auth/socket-ticket', 'Bearer secret'],
     ])
+    expect(await seen[0].json()).toEqual({ kind: 'page', id: 'page-1' })
   })
 
   test('an ended session and a failed request report their status; no response is status 0', async () => {
-    expect(await collabTicket(client(() => problem(401, 'authentication_required')).instance)).toEqual({ ok: false, status: 401 })
-    expect(await collabTicket(client(() => problem(503, 'unavailable')).instance)).toEqual({ ok: false, status: 503 })
+    expect(await collabTicket(client(() => problem(401, 'authentication_required')).instance, 'page-1')).toEqual({ ok: false, status: 401 })
+    expect(await collabTicket(client(() => problem(503, 'unavailable')).instance, 'page-1')).toEqual({ ok: false, status: 503 })
     expect(
       await collabTicket(
         client(() => {
           throw new TypeError('Network request failed')
         }).instance,
+        'page-1',
       ),
     ).toEqual({ ok: false, status: 0 })
   })

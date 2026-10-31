@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { PAYMENT_REQUIRED_EVENT, UNAUTHORIZED_EVENT } from '@/api/client'
 import { ThemeProvider } from '@/lib/theme'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import { clearExpiredSession } from './authSession'
 
 function UnauthorizedSessionHandler() {
@@ -55,14 +56,16 @@ export function Providers({ children }: { children: ReactNode }) {
   )
 
   return (
-    <ThemeProvider>
-      <QueryClientProvider client={queryClient}>
-        <BrowserRouter>
-          <UnauthorizedSessionHandler />
-          <PaymentRequiredHandler />
-          <TooltipProvider>{children}</TooltipProvider>
-        </BrowserRouter>
-      </QueryClientProvider>
-    </ThemeProvider>
+    <ErrorBoundary>
+      <ThemeProvider>
+        <QueryClientProvider client={queryClient}>
+          <BrowserRouter>
+            <UnauthorizedSessionHandler />
+            <PaymentRequiredHandler />
+            <TooltipProvider>{children}</TooltipProvider>
+          </BrowserRouter>
+        </QueryClientProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   )
 }

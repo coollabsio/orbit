@@ -528,14 +528,15 @@ impl WorkspaceRepository {
         if !workspace.permissions.contains(&Permission::WorkspaceUpdate) {
             return Err(WorkspaceError::Forbidden);
         }
-        let deleted = uploads
-            .delete_blob(workspace_id, file_id)
-            .await
-            .map_err(|error| match error {
-                UploadError::Database(error) => WorkspaceError::Unavailable(error),
-                UploadError::BlobStore(error) => WorkspaceError::Storage(error),
-                _ => WorkspaceError::Conflict,
-            })?;
+        let deleted =
+            uploads
+                .delete_blob(workspace_id, file_id)
+                .await
+                .map_err(|error| match error {
+                    UploadError::Database(error) => WorkspaceError::Unavailable(error),
+                    UploadError::BlobStore(error) => WorkspaceError::Storage(error),
+                    _ => WorkspaceError::Conflict,
+                })?;
         if !deleted {
             return Err(WorkspaceError::NotFound);
         }
@@ -1521,6 +1522,13 @@ impl WorkspaceRepository {
             .bind(expected_version as i64)
             .execute(&mut *transaction)
             .await?;
+        crate::workspace_export::expire_for_user(
+            &mut transaction,
+            Some(workspace_id),
+            target.user_id,
+            now,
+        )
+        .await?;
         audit::record(
             &mut transaction,
             workspace_id,

@@ -23,6 +23,9 @@ pub enum SignInRefusal {
     RegistrationClosed,
     /// The account with this email is already connected to another account at this provider.
     IdentityConflict,
+    /// The account with this email never confirmed it (e.g. it accepted an invitation link): linking it would let
+    /// whoever controls the address at the provider take it over.
+    AccountEmailUnverified,
     Suspended,
     /// The identity or account changed between the first step and the code.
     Stale,
@@ -58,6 +61,8 @@ pub(crate) struct EmailAccount {
     pub user_id: Id,
     /// It already has an identity at this provider (another subject).
     pub has_provider: bool,
+    /// The account confirmed its email (`email_verified_at`).
+    pub verified: bool,
 }
 
 /// The sign-in rules: the identity wins; otherwise only a provider-verified email links or signs up.
@@ -75,6 +80,7 @@ pub(crate) fn sign_in_route(
     }
     match email_account {
         Some(account) if account.has_provider => Err(SignInRefusal::IdentityConflict),
+        Some(account) if !account.verified => Err(SignInRefusal::AccountEmailUnverified),
         Some(account) => Ok(SignInRoute::Link(account.user_id)),
         None if registration_open => Ok(SignInRoute::Register),
         None => Err(SignInRefusal::RegistrationClosed),
@@ -234,21 +240,25 @@ impl IdentityRepository {
         let owner = identity_owner(&mut transaction, profile.provider, &profile.subject).await?;
         let email_account = match (&owner, &profile.verified_email) {
             (None, Some(email)) => {
-                let user_id = sqlx::query_scalar::<_, String>(
-                    "SELECT id FROM users WHERE normalized_email = $1",
+                let account = sqlx::query(
+                    "SELECT id, email_verified_at FROM users WHERE normalized_email = $1",
                 )
                 .bind(email)
                 .fetch_optional(&mut *transaction)
-                .await?
-                .map(|id| id.parse::<Id>())
-                .transpose()
-                .map_err(|error| sqlx::Error::Decode(Box::new(error)))?;
-                match user_id {
-                    Some(user_id) => Some(EmailAccount {
-                        user_id,
-                        has_provider: has_provider(&mut transaction, user_id, profile.provider)
-                            .await?,
-                    }),
+                .await?;
+                match account {
+                    Some(account) => {
+                        let user_id = account
+                            .get::<String, _>("id")
+                            .parse::<Id>()
+                            .map_err(|error| sqlx::Error::Decode(Box::new(error)))?;
+                        Some(EmailAccount {
+                            user_id,
+                            has_provider: has_provider(&mut transaction, user_id, profile.provider)
+                                .await?,
+                            verified: account.get::<Option<i64>, _>("email_verified_at").is_some(),
+                        })
+                    }
                     None => None,
                 }
             }
@@ -685,6 +695,7 @@ mod tests {
         EmailAccount {
             user_id,
             has_provider,
+            verified: true,
         }
     }
 
@@ -715,6 +726,18 @@ mod tests {
         assert_eq!(
             sign_in_route(None, true, Some(account(user_id, true)), true),
             Err(SignInRefusal::IdentityConflict)
+        );
+        assert_eq!(
+            sign_in_route(
+                None,
+                true,
+                Some(EmailAccount {
+                    verified: false,
+                    ..account(user_id, false)
+                }),
+                true
+            ),
+            Err(SignInRefusal::AccountEmailUnverified)
         );
         assert_eq!(
             sign_in_route(None, true, None, true),

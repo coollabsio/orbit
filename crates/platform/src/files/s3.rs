@@ -20,6 +20,16 @@ use super::BlobReader;
 /// Payload hash for requests whose body is not hashed (allowed by S3 over HTTPS and by S3-compatible servers).
 const UNSIGNED_PAYLOAD: &str = "UNSIGNED-PAYLOAD";
 const PAGE_SIZE: &str = "1000";
+/// The most of an error, probe or copy response that is read.
+const SMALL_BODY_BYTES: usize = 64 * 1024;
+/// The most of an object read with [`S3Bucket::get_bytes`] (backup manifests).
+const OBJECT_BODY_BYTES: usize = 16 * 1024 * 1024;
+/// The most of one list page (1000 keys of up to 1 KiB each, with their XML).
+const LIST_BODY_BYTES: usize = 8 * 1024 * 1024;
+/// The whole of a request without a file body, also when the server sends slowly.
+const SMALL_REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+/// Reading an error body of a file transfer.
+const ERROR_BODY_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// A bucket and the key prefix under which Orbit stores its objects.
 #[derive(Clone, Eq, PartialEq)]
@@ -70,6 +80,37 @@ pub enum S3Error {
     },
     #[error("object storage returned an invalid response: {0}")]
     Response(String),
+}
+
+impl S3Error {
+    /// A short cause for an API response: no endpoint or server text beyond the S3 error code.
+    /// Log the full error.
+    #[must_use]
+    pub fn summary(&self) -> String {
+        match self {
+            Self::Config(detail) => detail.clone(),
+            Self::Request(error) if error.is_timeout() => {
+                "the storage endpoint did not answer in time".to_owned()
+            }
+            Self::Request(error) if error.is_connect() => {
+                "the connection to the storage endpoint failed".to_owned()
+            }
+            Self::Request(_) => "the request to the storage endpoint failed".to_owned(),
+            Self::Status { status, code, .. } => {
+                let code = Some(code.as_str())
+                    .filter(|code| {
+                        !code.is_empty()
+                            && code.len() <= 64
+                            && code.chars().all(|c| c.is_ascii_alphanumeric())
+                    })
+                    .map(|code| format!(" {code}"))
+                    .unwrap_or_default();
+                format!("the S3 request was refused ({status}{code})")
+            }
+            Self::Io { .. } => "a local file could not be read or written".to_owned(),
+            Self::Response(_) => "object storage returned an invalid response".to_owned(),
+        }
+    }
 }
 
 /// An object found by [`S3Bucket::list`]. `key` is relative to the configured prefix.
@@ -156,7 +197,10 @@ impl S3Bucket {
             .read_timeout(Duration::from_secs(120))
             .redirect(reqwest::redirect::Policy::none());
         if public_only {
-            client = client.dns_resolver(std::sync::Arc::new(crate::PublicResolver));
+            // A proxy from the environment would resolve the host itself, past the public-address filter.
+            client = client
+                .dns_resolver(std::sync::Arc::new(crate::PublicResolver))
+                .no_proxy();
         }
         let client = client.build()?;
         Ok(Self {
@@ -177,7 +221,7 @@ impl S3Bucket {
         let key = format!(".orbit-probe/{}", Uuid::now_v7());
         let body = b"orbit storage check".to_vec();
         self.put_bytes(&key, body.clone()).await?;
-        let read = self.get_bytes(&key).await?;
+        let read = self.get_capped(&key, SMALL_BODY_BYTES).await?;
         self.delete(&key).await?;
         if read.as_deref() != Some(body.as_slice()) {
             return Err(S3Error::Response(
@@ -193,6 +237,7 @@ impl S3Bucket {
             .request(Method::PUT, key, &[], &[])
             .header(CONTENT_LENGTH, length)
             .header(CONTENT_TYPE, "application/octet-stream")
+            .timeout(SMALL_REQUEST_TIMEOUT)
             .body(body)
             .send()
             .await?;
@@ -232,14 +277,24 @@ impl S3Bucket {
         ))
     }
 
+    /// A small object (at most 16 MiB) read into memory, or `None` when it does not exist.
     pub async fn get_bytes(&self, key: &str) -> Result<Option<Vec<u8>>, S3Error> {
-        let response = self.request(Method::GET, key, &[], &[]).send().await?;
+        self.get_capped(key, OBJECT_BODY_BYTES).await
+    }
+
+    async fn get_capped(&self, key: &str, limit: usize) -> Result<Option<Vec<u8>>, S3Error> {
+        let response = self
+            .request(Method::GET, key, &[], &[])
+            .timeout(SMALL_REQUEST_TIMEOUT)
+            .send()
+            .await?;
         if response.status() == StatusCode::NOT_FOUND {
             return Ok(None);
         }
-        Ok(Some(
-            expect_success(response).await?.bytes().await?.to_vec(),
-        ))
+        let response = expect_success(response).await?;
+        Ok(Some(read_capped(response, limit).await?.ok_or_else(
+            || S3Error::Response(format!("object {key} is larger than {limit} bytes")),
+        )?))
     }
 
     /// Downloads the object into `path` (created or truncated). Returns `false` when the object does not exist.
@@ -263,7 +318,11 @@ impl S3Bucket {
 
     /// The object's last-modified time in Unix milliseconds, or `None` when it does not exist.
     pub async fn last_modified(&self, key: &str) -> Result<Option<i64>, S3Error> {
-        let response = self.request(Method::HEAD, key, &[], &[]).send().await?;
+        let response = self
+            .request(Method::HEAD, key, &[], &[])
+            .timeout(SMALL_REQUEST_TIMEOUT)
+            .send()
+            .await?;
         if response.status() == StatusCode::NOT_FOUND {
             return Ok(None);
         }
@@ -298,12 +357,13 @@ impl S3Bucket {
             )
             .header(CONTENT_TYPE, "application/octet-stream")
             .header(CONTENT_LENGTH, 0)
+            .timeout(SMALL_REQUEST_TIMEOUT)
             .send()
             .await?;
         if response.status() == StatusCode::NOT_FOUND {
             return Ok(false);
         }
-        let body = expect_success(response).await?.text().await?;
+        let body = read_text(expect_success(response).await?, SMALL_BODY_BYTES).await?;
         // S3 can report a failed copy with 200 and an <Error> body.
         if body.contains("<Error>") {
             return match xml_value(&body, "Code").as_deref() {
@@ -320,7 +380,11 @@ impl S3Bucket {
 
     /// Deletes the object. A missing object is not an error.
     pub async fn delete(&self, key: &str) -> Result<(), S3Error> {
-        let response = self.request(Method::DELETE, key, &[], &[]).send().await?;
+        let response = self
+            .request(Method::DELETE, key, &[], &[])
+            .timeout(SMALL_REQUEST_TIMEOUT)
+            .send()
+            .await?;
         if response.status() == StatusCode::NOT_FOUND {
             return Ok(());
         }
@@ -351,8 +415,12 @@ impl S3Bucket {
             if let Some(token) = &token {
                 query.push(("continuation-token", token.clone()));
             }
-            let response = self.request(Method::GET, "", &query, &[]).send().await?;
-            let body = expect_success(response).await?.text().await?;
+            let response = self
+                .request(Method::GET, "", &query, &[])
+                .timeout(SMALL_REQUEST_TIMEOUT)
+                .send()
+                .await?;
+            let body = read_text(expect_success(response).await?, LIST_BODY_BYTES).await?;
             for contents in xml_elements(&body, "Contents") {
                 let key = xml_value(contents, "Key")
                     .ok_or_else(|| S3Error::Response("listed object without a key".to_owned()))?;
@@ -476,12 +544,48 @@ async fn expect_success(response: reqwest::Response) -> Result<reqwest::Response
         return Ok(response);
     }
     let status = response.status().as_u16();
-    let body = response.text().await.unwrap_or_default();
+    // The start of the body is enough for its code and message; a file transfer has no request
+    // timeout, so the read has its own.
+    let body = tokio::time::timeout(ERROR_BODY_TIMEOUT, read_capped(response, SMALL_BODY_BYTES))
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .flatten()
+        .map(|body| String::from_utf8_lossy(&body).into_owned())
+        .unwrap_or_default();
     Err(S3Error::Status {
         status,
         code: xml_value(&body, "Code").unwrap_or_default(),
         message: xml_value(&body, "Message").unwrap_or_default(),
     })
+}
+
+/// The body, or `None` when it is longer than `limit` (the rest is not read).
+async fn read_capped(
+    mut response: reqwest::Response,
+    limit: usize,
+) -> Result<Option<Vec<u8>>, S3Error> {
+    if response
+        .content_length()
+        .is_some_and(|length| length > limit as u64)
+    {
+        return Ok(None);
+    }
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await? {
+        if body.len() + chunk.len() > limit {
+            return Ok(None);
+        }
+        body.extend_from_slice(&chunk);
+    }
+    Ok(Some(body))
+}
+
+async fn read_text(response: reqwest::Response, limit: usize) -> Result<String, S3Error> {
+    let body = read_capped(response, limit)
+        .await?
+        .ok_or_else(|| S3Error::Response(format!("response is larger than {limit} bytes")))?;
+    String::from_utf8(body).map_err(|_| S3Error::Response("response is not UTF-8".to_owned()))
 }
 
 struct SigningKey<'a> {
@@ -627,6 +731,47 @@ mod tests {
              SignedHeaders=host;range;x-amz-content-sha256;x-amz-date, \
              Signature=f0e8bdb87c964420e857bd35b5d6ed310bd44f0170aba48dd91039c6036bdb41"
         );
+    }
+
+    #[tokio::test]
+    async fn small_reads_stop_at_their_byte_cap() {
+        let bucket = S3Bucket::new(crate::start_fake_s3().await).unwrap();
+        bucket.probe().await.unwrap();
+        bucket
+            .put_bytes("large", vec![7; SMALL_BODY_BYTES + 1])
+            .await
+            .unwrap();
+        assert!(matches!(
+            bucket.get_capped("large", SMALL_BODY_BYTES).await,
+            Err(S3Error::Response(_))
+        ));
+        assert_eq!(
+            bucket
+                .get_bytes("large")
+                .await
+                .unwrap()
+                .map(|body| body.len()),
+            Some(SMALL_BODY_BYTES + 1)
+        );
+    }
+
+    #[test]
+    fn summaries_keep_only_the_status_and_a_plain_code() {
+        let refused = S3Error::Status {
+            status: 403,
+            code: "AccessDenied".to_owned(),
+            message: "secret detail from the server".to_owned(),
+        };
+        assert_eq!(
+            refused.summary(),
+            "the S3 request was refused (403 AccessDenied)"
+        );
+        let odd = S3Error::Status {
+            status: 500,
+            code: "<script>".to_owned(),
+            message: String::new(),
+        };
+        assert_eq!(odd.summary(), "the S3 request was refused (500)");
     }
 
     #[test]

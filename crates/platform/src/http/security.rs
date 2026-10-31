@@ -3,6 +3,7 @@ use std::net::{IpAddr, Ipv4Addr};
 
 use axum::http::header::{
     CONTENT_SECURITY_POLICY, HeaderName, HeaderValue, REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS,
+    X_FRAME_OPTIONS,
 };
 use axum::http::{HeaderMap, Method, Uri};
 use ipnet::IpNet;
@@ -283,6 +284,13 @@ pub(crate) fn add_security_headers(
         HeaderValue::from_str(&policy).expect("validated CSP values form a valid header"),
     );
     headers.insert(X_CONTENT_TYPE_OPTIONS, HeaderValue::from_static("nosniff"));
+    // For browsers without CSP `frame-ancestors`. Provider sign-in is a full-page redirect, not a
+    // popup, so `same-origin` breaks no opener.
+    headers.insert(X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    headers.insert(
+        HeaderName::from_static("cross-origin-opener-policy"),
+        HeaderValue::from_static("same-origin"),
+    );
     headers.insert(
         REFERRER_POLICY,
         HeaderValue::from_static("strict-origin-when-cross-origin"),
@@ -323,7 +331,15 @@ mod tests {
     use axum::http::header::{AUTHORIZATION, COOKIE, ORIGIN, UPGRADE};
     use axum::http::{HeaderMap, Method, Uri};
 
-    use super::{OriginPolicy, bearer_token};
+    use super::{OriginPolicy, add_security_headers, bearer_token};
+
+    #[test]
+    fn responses_refuse_framing_and_isolate_the_opener() {
+        let mut headers = HeaderMap::new();
+        add_security_headers(&mut headers, true, None);
+        assert_eq!(headers["x-frame-options"], "DENY");
+        assert_eq!(headers["cross-origin-opener-policy"], "same-origin");
+    }
 
     fn permits(method: Method, path: &str, headers: &[(axum::http::HeaderName, &str)]) -> bool {
         let mut map = HeaderMap::new();

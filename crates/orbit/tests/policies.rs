@@ -206,3 +206,36 @@ fn members_leave_but_do_not_remove_or_invite_others() {
         Ok(())
     );
 }
+
+#[test]
+fn only_the_owner_changes_or_removes_an_admin() {
+    let owner = actor(WorkspaceRole::Owner);
+    let admin = actor(WorkspaceRole::Admin);
+    let other_admin = Id::new_v7();
+
+    assert_eq!(
+        admin.change_member_role(WorkspaceRole::Admin, WorkspaceRole::Member),
+        Err(MembershipDenied::RoleForbidden)
+    );
+    assert_eq!(
+        admin.remove_member(other_admin, WorkspaceRole::Admin),
+        Err(MembershipDenied::RoleForbidden)
+    );
+    assert_eq!(
+        owner.change_member_role(WorkspaceRole::Admin, WorkspaceRole::Member),
+        Ok(())
+    );
+    assert_eq!(
+        owner.remove_member(other_admin, WorkspaceRole::Admin),
+        Ok(())
+    );
+    // Admins still manage members, and leave on their own.
+    assert_eq!(
+        admin.remove_member(Id::new_v7(), WorkspaceRole::Member),
+        Ok(())
+    );
+    assert_eq!(
+        admin.remove_member(admin.user_id, WorkspaceRole::Admin),
+        Ok(())
+    );
+}

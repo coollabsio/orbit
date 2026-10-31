@@ -1519,6 +1519,172 @@ async fn discord_events_select_one_project_allowed_by_a_multi_project_token() {
     );
 }
 
+/// The GitHub App router of `fixture` with app 77 (secret `hook-secret`) installed as 1234 and
+/// connected to `acme/repo` with the label `Orbit`.
+async fn github_app(fixture: &Fixture) -> axum::Router {
+    let key = [7u8; 32];
+    let state = IntegrationState::new(
+        Arc::new(fixture.tokens.clone()),
+        Arc::new(TaskRepository::new((*fixture.database).clone())),
+    )
+    .with_github_settings(
+        Arc::new(IdentityRepository::new((*fixture.database).clone())),
+        CookieMode::secure(),
+        "https://orbit.test".to_owned(),
+        false,
+        Some(key),
+    );
+    let workspace = fixture.workspace_id.to_string();
+    let pool = fixture.database.pool();
+    sqlx::query("INSERT INTO github_apps (workspace_id, app_id, slug, private_key_encrypted, webhook_secret_encrypted, created_at) VALUES ($1, 77, 'orbit-test', $2, $3, 0)")
+        .bind(&workspace)
+        .bind(encrypt_for_test(&key, "private-key"))
+        .bind(encrypt_for_test(&key, "hook-secret"))
+        .execute(pool).await.unwrap();
+    sqlx::query("INSERT INTO github_installations (installation_id, workspace_id, account_login) VALUES (1234, $1, 'acme')")
+        .bind(&workspace).execute(pool).await.unwrap();
+    sqlx::query("INSERT INTO github_project_connections (project_id, workspace_id, installation_id, repository, label) VALUES ($1, $2, 1234, 'acme/repo', 'Orbit')")
+        .bind(fixture.project_id.to_string()).bind(&workspace).execute(pool).await.unwrap();
+    integration_router(state).layer(HttpPlatformLayer::new(OriginPolicy::new(
+        "https://orbit.test",
+    )))
+}
+
+fn github_issue(number: i64) -> Value {
+    json!({"action":"opened","installation":{"id":1234,"app_id":77},"repository":{"full_name":"acme/repo"},
+        "issue":{"number":number,"title":"GitHub task","body":"","state":"open","labels":[{"name":"Orbit"}]}})
+}
+
+async fn live_tasks(fixture: &Fixture) -> i64 {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT CAST(COUNT(*) AS BIGINT) FROM tasks WHERE workspace_id = $1 AND deleted_at IS NULL",
+    )
+    .bind(fixture.workspace_id.to_string())
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn integrations_stop_at_the_trial_task_limit_without_failing() {
+    let fixture = fixture().await;
+    let app = github_app(&fixture).await;
+    let discord = fixture
+        .tokens
+        .create(
+            fixture.workspace_id,
+            fixture.user_id,
+            "Discord".to_owned(),
+            vec![fixture.project_id],
+            true,
+            true,
+            true,
+            None,
+            "create-token",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    // A trial workspace (not the exempt root one) that holds as many tasks as its trial allows.
+    sqlx::query("UPDATE workspaces SET billing_exempt = 0 WHERE id = $1")
+        .bind(fixture.workspace_id.to_string())
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let before = live_tasks(&fixture).await;
+    let _billing = orbit_server::billing::Billing::new(
+        orbit_platform::BillingConfig {
+            trial: orbit_platform::TrialConfig {
+                tasks: before,
+                ..orbit_platform::TrialConfig::default()
+            },
+            ..orbit_platform::BillingConfig::new(
+                orbit_platform::Secret::new("sk_test_unused"),
+                orbit_platform::Secret::new("whsec_unused"),
+                vec![],
+            )
+        },
+        (*fixture.database).clone(),
+        "https://orbit.test",
+    );
+
+    let dropped = app
+        .clone()
+        .oneshot(github_request("issues", github_issue(1), true))
+        .await
+        .unwrap();
+    assert_eq!(
+        dropped.status(),
+        StatusCode::ACCEPTED,
+        "GitHub gets a 2xx, so it keeps the hook"
+    );
+    let refused = app
+        .clone()
+        .oneshot(request(Some(&discord.token), valid_body("over-limit")))
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), StatusCode::PAYMENT_REQUIRED);
+    assert_eq!(
+        response_json(refused).await["detail"],
+        format!("The trial allows {before} tasks. Choose a plan to add more.")
+    );
+    assert_eq!(live_tasks(&fixture).await, before, "nothing was written");
+}
+
+#[tokio::test]
+async fn github_webhooks_skip_secrets_that_cannot_be_decrypted() {
+    let fixture = fixture().await;
+    let other = orbit_server::repositories::workspaces::WorkspaceRepository::new(
+        (*fixture.database).clone(),
+    )
+    .create(
+        fixture.user_id,
+        "Other".to_owned(),
+        "github-test",
+        TimestampMillis::now(),
+    )
+    .await
+    .unwrap();
+    // Stored first, so it is tried first without the App header.
+    sqlx::query("INSERT INTO github_apps (workspace_id, app_id, slug, private_key_encrypted, webhook_secret_encrypted, created_at) VALUES ($1, 78, 'other', $2, $2, 0)")
+        .bind(other.id.to_string())
+        .bind(b"not encrypted with the app key".to_vec())
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let app = github_app(&fixture).await;
+    let before = live_tasks(&fixture).await;
+
+    let synced = app
+        .clone()
+        .oneshot(github_request("issues", github_issue(1), true))
+        .await
+        .unwrap();
+    assert_eq!(synced.status(), StatusCode::OK);
+    let mut for_app = github_request("issues", github_issue(2), true);
+    for (name, value) in [
+        ("x-github-hook-installation-target-type", "integration"),
+        ("x-github-hook-installation-target-id", "77"),
+    ] {
+        for_app.headers_mut().insert(name, value.parse().unwrap());
+    }
+    let synced = app.clone().oneshot(for_app).await.unwrap();
+    assert_eq!(synced.status(), StatusCode::OK);
+    assert_eq!(live_tasks(&fixture).await, before + 2);
+
+    // A delivery for the App whose secret is unreadable can be redelivered later.
+    let mut for_other = github_request("issues", github_issue(3), true);
+    for (name, value) in [
+        ("x-github-hook-installation-target-type", "integration"),
+        ("x-github-hook-installation-target-id", "78"),
+    ] {
+        for_other.headers_mut().insert(name, value.parse().unwrap());
+    }
+    let refused = app.clone().oneshot(for_other).await.unwrap();
+    assert_eq!(refused.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(response_json(refused).await["code"], "app_key_invalid");
+}
+
 struct Fixture {
     app: axum::Router,
     database: TestDatabase,

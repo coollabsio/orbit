@@ -4,17 +4,18 @@ import { NotoSans_500Medium } from '@expo-google-fonts/noto-sans/500Medium'
 import { NotoSans_600SemiBold } from '@expo-google-fonts/noto-sans/600SemiBold'
 import { NotoSans_700Bold } from '@expo-google-fonts/noto-sans/700Bold'
 import { focusManager, QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { DarkTheme, DefaultTheme, SplashScreen, Stack, ThemeProvider } from 'expo-router'
+import { DarkTheme, DefaultTheme, type ErrorBoundaryProps, SplashScreen, Stack, ThemeProvider } from 'expo-router'
 import { StatusBar } from 'expo-status-bar'
 import * as SystemUI from 'expo-system-ui'
 import { useFonts } from 'expo-font'
 import { useEffect, useState } from 'react'
-import { AppState } from 'react-native'
+import { AppState, View } from 'react-native'
 
 import { OrbitProvider } from '../orbit-context'
 import { SessionProvider, useSession } from '../session-context'
 import { fonts, loadAppearance, palettes, type Theme, useTheme } from '../theme'
 import { AppColorScope, useAppPalette } from '../theme/ColorScope'
+import { Button, EmptyState } from '../ui'
 
 void SplashScreen.preventAutoHideAsync()
 
@@ -39,6 +40,24 @@ function navigationTheme({ scheme, colors }: Theme) {
       heavy: { fontFamily: fonts.bold, fontWeight: 'normal' as const },
     },
   }
+}
+
+/** A render error anywhere in the app: expo-router shows this in place of the root layout, and Try again renders it again. */
+export function ErrorBoundary({ retry }: ErrorBoundaryProps) {
+  // the providers are gone with the layout, so the splash screen may still be up
+  useEffect(() => {
+    SplashScreen.hide()
+  }, [])
+  return (
+    <View className="flex-1 bg-background">
+      <EmptyState
+        icon="danger"
+        title="Something went wrong"
+        description="This part of Orbit stopped working. Try again, or restart the app."
+        action={<Button label="Try again" onPress={() => void retry()} />}
+      />
+    </View>
+  )
 }
 
 export default function RootLayout() {
@@ -111,8 +130,32 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
     <AppColorScope>
       <ThemeProvider value={navigationTheme(theme)}>
         <StatusBar style={theme.scheme === 'dark' ? 'light' : 'dark'} />
-        {signedIn ? <OrbitProvider>{stack}</OrbitProvider> : stack}
+        {state.status === 'offline' ? <SessionOffline server={state.session.server} /> : signedIn ? <OrbitProvider>{stack}</OrbitProvider> : stack}
       </ThemeProvider>
     </AppColorScope>
+  )
+}
+
+/** The saved session could not be checked at launch (offline, a server error): the user stays signed in. */
+function SessionOffline({ server }: { server: string }) {
+  const { retry, signOut } = useSession()
+  const [retrying, setRetrying] = useState(false)
+  return (
+    <View className="flex-1 bg-background">
+      <EmptyState
+        icon="danger"
+        title="Orbit is unavailable"
+        description={`${server.replace(/^https?:\/\//, '')} could not verify this session. Check your connection and retry.`}
+        action={
+          <View className="items-center gap-2">
+            <Button label="Retry" loading={retrying} onPress={() => {
+              setRetrying(true)
+              void retry().finally(() => setRetrying(false))
+            }} />
+            <Button label="Sign out" variant="ghost" muted onPress={() => void signOut()} />
+          </View>
+        }
+      />
+    </View>
   )
 }

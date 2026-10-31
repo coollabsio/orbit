@@ -9,10 +9,12 @@
       "distribution": "internal"
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "env": { "EXPO_PUBLIC_ORBIT_SERVER": "https://app.orbit.so" }
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": { "EXPO_PUBLIC_ORBIT_SERVER": "https://app.orbit.so" }
     }
   },
   "submit": {

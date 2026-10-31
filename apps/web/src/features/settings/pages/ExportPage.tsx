@@ -24,7 +24,7 @@ export function ExportPage() {
   return (
     <SettingsCard
       title={TITLE}
-      description="Download everything in this workspace as one ZIP file: tasks with comments, pages as Markdown, chat and all attached files. It includes your private pages and the private channels and direct messages you are in. Each download is kept for 7 days."
+      description="Download everything in this workspace as one ZIP file: tasks with comments, pages as Markdown, chat and all attached files. It includes your private pages and the private channels and direct messages you are in, so only you see and download your exports. Each download is kept for 7 days."
       actions={
         <Button
           disabled={active || start.isPending || !exports.isSuccess}
@@ -55,7 +55,6 @@ function ExportRow({ workspaceId, item }: { workspaceId: string; item: Workspace
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="font-medium text-foreground">
           <time dateTime={item.created_at}>{created}</time>
-          {item.requested_by_name ? <span className="font-normal text-muted-foreground"> · {item.requested_by_name}</span> : null}
         </span>
         {item.status === 'ready' ? (
           <span className="text-xs text-muted-foreground/70">{formatSize(item.size_bytes ?? 0)} · Deleted on {expires}</span>

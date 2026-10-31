@@ -171,6 +171,7 @@ impl IdentityRepository {
         .bind(&id)
         .execute(&mut *transaction)
         .await?;
+        crate::workspace_export::expire_for_user(&mut transaction, None, user_id, now).await?;
         audit::record_global(
             &mut transaction,
             Some(user_id),

@@ -8,7 +8,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use axum::Router;
-use axum::serve::ListenerExt;
+use axum::extract::ConnectInfo;
+use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
+use hyper_util::server::conn::auto::Builder as ConnectionBuilder;
+use hyper_util::service::TowerToHyperService;
 use orbit_platform::{
     BackupService, BlobStoreError, Config, Database, DatabaseConfig, HealthCheck, HealthRegistry,
     HttpLimits, IntegrityService, JobError, JobKind, JobStore, LocalBlobStore, MigrationError,
@@ -19,6 +22,7 @@ use serde_json::json;
 use thiserror::Error;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
+use tower::ServiceExt;
 
 use crate::attachment_routes::AttachmentState;
 use crate::auth_routes::{CookieMode, initialize_auth};
@@ -47,6 +51,10 @@ use crate::workspace_export_routes::WorkspaceExportState;
 use crate::workspace_routes::WorkspaceState;
 
 const BACKGROUND_DRAIN: Duration = Duration::from_secs(30);
+/// How long a client may take to send a request's line and headers, so slow clients cannot hold
+/// connections open (slowloris).
+const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// How often a server checks that it still holds the database ownership lock.
 const OWNERSHIP_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 /// Hourly: deletes tokens of Notion scans not started within 24 hours.
@@ -132,6 +140,9 @@ impl App {
         config
             .validate()
             .map_err(|error| AppError::Config(error.to_string()))?;
+        for warning in config.warnings() {
+            tracing::warn!("{warning}");
+        }
         let cookie_mode = cookie_mode(&config)?;
         ensure_writable_directory(&config.data.attachments)?;
         ensure_writable_directory(&config.data.backups)?;
@@ -492,8 +503,7 @@ impl App {
             let router = self.metrics.router();
             let token = service_shutdown.clone();
             services.spawn(async move {
-                axum::serve(listener, router)
-                    .with_graceful_shutdown(token.cancelled_owned())
+                serve_http(listener, router, HEADER_READ_TIMEOUT, token)
                     .await
                     .map_err(|error| error.to_string())
             });
@@ -545,17 +555,12 @@ impl App {
                 .map_err(|error| error.to_string())
         });
         let http_shutdown = CancellationToken::new();
-        // Small y-sync frames otherwise wait for Nagle + delayed ACK (~40 ms stalls).
-        let listener = listener.tap_io(|stream| {
-            let _ = stream.set_nodelay(true);
-        });
-        let server = axum::serve(
+        let server = serve_http(
             listener,
-            self.router
-                .into_make_service_with_connect_info::<SocketAddr>(),
-        )
-        .with_graceful_shutdown(http_shutdown.clone().cancelled_owned())
-        .into_future();
+            self.router.clone(),
+            HEADER_READ_TIMEOUT,
+            http_shutdown.clone(),
+        );
         tokio::pin!(server);
 
         let mut background_error = None;
@@ -623,6 +628,62 @@ impl App {
             None => Ok(()),
         }
     }
+}
+
+/// Serves `router` until `shutdown`, then waits for the requests in flight (like `axum::serve` with
+/// graceful shutdown). Unlike `axum::serve`, a client must send its headers within
+/// `header_timeout`: hyper only enforces that with a timer.
+async fn serve_http(
+    listener: tokio::net::TcpListener,
+    router: Router,
+    header_timeout: Duration,
+    shutdown: CancellationToken,
+) -> std::io::Result<()> {
+    let mut builder = ConnectionBuilder::new(TokioExecutor::new());
+    builder
+        .http1()
+        .timer(TokioTimer::new())
+        .header_read_timeout(header_timeout);
+    // CONNECT for WebSockets over HTTP/2.
+    builder
+        .http2()
+        .timer(TokioTimer::new())
+        .enable_connect_protocol();
+    let builder = Arc::new(builder);
+    let graceful = hyper_util::server::graceful::GracefulShutdown::new();
+    loop {
+        let (stream, remote) = tokio::select! {
+            accepted = listener.accept() => match accepted {
+                Ok(accepted) => accepted,
+                Err(error) => {
+                    // Like axum::serve: out of file descriptors and the like pass, so wait and retry.
+                    tracing::warn!(%error, "accepting a connection failed");
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    continue;
+                }
+            },
+            () = shutdown.cancelled() => break,
+        };
+        // Small y-sync frames otherwise wait for Nagle + delayed ACK (~40 ms stalls).
+        let _ = stream.set_nodelay(true);
+        let service = TowerToHyperService::new(router.clone().map_request(
+            move |mut request: axum::http::Request<hyper::body::Incoming>| {
+                request.extensions_mut().insert(ConnectInfo(remote));
+                request
+            },
+        ));
+        let builder = Arc::clone(&builder);
+        let watcher = graceful.watcher();
+        tokio::spawn(async move {
+            let connection = builder.serve_connection_with_upgrades(TokioIo::new(stream), service);
+            if let Err(error) = watcher.watch(connection).await {
+                tracing::trace!(%error, "connection ended with an error");
+            }
+        });
+    }
+    drop(listener);
+    graceful.shutdown().await;
+    Ok(())
 }
 
 fn cookie_mode(config: &Config) -> Result<CookieMode, AppError> {
@@ -1013,6 +1074,56 @@ mod tests {
     use orbit_platform::{EnvironmentMode, Id};
     use tempfile::TempDir;
     use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn a_client_that_does_not_finish_its_headers_is_disconnected() {
+        use tokio::io::AsyncReadExt;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let router = Router::new().route(
+            "/peer",
+            axum::routing::get(|ConnectInfo(peer): ConnectInfo<SocketAddr>| async move {
+                peer.ip().to_string()
+            }),
+        );
+        let shutdown = CancellationToken::new();
+        let server = tokio::spawn(serve_http(
+            listener,
+            router,
+            Duration::from_millis(200),
+            shutdown.clone(),
+        ));
+
+        // A complete request is served, with the peer address.
+        let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
+        client
+            .write_all(b"GET /peer HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+            .await
+            .unwrap();
+        let mut response = String::new();
+        client.read_to_string(&mut response).await.unwrap();
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        assert!(response.ends_with("127.0.0.1"), "{response}");
+
+        // One that stops in the middle of its headers is closed after the timeout.
+        let mut slow = tokio::net::TcpStream::connect(address).await.unwrap();
+        slow.write_all(b"GET /peer HTTP/1.1\r\nHost: x\r\n")
+            .await
+            .unwrap();
+        let mut rest = Vec::new();
+        tokio::time::timeout(Duration::from_secs(5), slow.read_to_end(&mut rest))
+            .await
+            .expect("the server closes a connection whose headers never end")
+            .ok();
+
+        shutdown.cancel();
+        tokio::time::timeout(Duration::from_secs(5), server)
+            .await
+            .expect("the server stops after shutdown")
+            .unwrap()
+            .unwrap();
+    }
 
     fn test_config(root: &TempDir) -> Config {
         let mut config = Config {

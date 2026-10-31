@@ -552,6 +552,73 @@ async fn user_suspension_invalidates_both_access_and_refresh() {
     );
 }
 
+#[tokio::test]
+async fn a_new_password_ends_the_oauth_grants() {
+    let f = Fixture::new().await;
+    let identity = IdentityRepository::new((*f.db).clone());
+    let hash = PasswordService::default()
+        .hash("a brand new password")
+        .unwrap();
+    let client = f.register().await;
+    let active_grants = || async {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM oauth_grants WHERE revoked_at IS NULL AND user_id = $1",
+        )
+        .bind(f.user.to_string())
+        .fetch_one(f.db.pool())
+        .await
+        .unwrap()
+    };
+
+    // Changing the password (the current session stays).
+    let code = f.code(&client).await;
+    let tokens = f.issue(&client, &code).await;
+    let access = tokens["access_token"].as_str().unwrap();
+    assert_eq!(f.access(access).await.0, StatusCode::OK);
+    let token = f.cookie.split_once('=').unwrap().1;
+    let session = identity
+        .authenticate_session(token, TimestampMillis::now())
+        .await
+        .unwrap();
+    identity
+        .change_password_keeping_session(f.user, session.id, &hash, "test", TimestampMillis::now())
+        .await
+        .unwrap();
+    assert_eq!(f.access(access).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        f.exchange(&[
+            ("grant_type", "refresh_token"),
+            ("client_id", &client),
+            ("refresh_token", tokens["refresh_token"].as_str().unwrap())
+        ])
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(active_grants().await, 0);
+
+    // Completing a password recovery.
+    let code = f.code(&client).await;
+    let tokens = f.issue(&client, &code).await;
+    let access = tokens["access_token"].as_str().unwrap();
+    assert_eq!(f.access(access).await.0, StatusCode::OK);
+    assert_eq!(active_grants().await, 1);
+    identity
+        .store_recovery_token(
+            &f.user.to_string(),
+            "reset-token",
+            TimestampMillis::from_millis(TimestampMillis::now().as_millis() + 60_000),
+        )
+        .await
+        .unwrap();
+    identity
+        .complete_recovery_audited("reset-token", &hash, "test", TimestampMillis::now())
+        .await
+        .unwrap();
+    assert_eq!(f.access(access).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(active_grants().await, 0);
+}
+
 async fn register_from(f: &Fixture, ip: &str) -> (StatusCode, Value) {
     let mut request = Request::post("/oauth/register")
         .header(header::CONTENT_TYPE, "application/json")

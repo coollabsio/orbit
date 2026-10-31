@@ -8,12 +8,14 @@ use sqlx::{Any, Transaction};
 use thiserror::Error;
 use utoipa::ToSchema;
 
+use super::billing::{TrialCapacityError, TrialLimitReached, ensure_trial_capacity};
 use super::membership;
 use super::page_mentions::mentioned_users;
 use super::sub_issues::{self, AutoClosed};
 use super::task_filter::{self, FilterError, FilterGroup, ShowCompleted, SubIssuesDisplay};
 use super::task_relations::{self, RelationActor};
 use crate::audit::{self, AuditOutcome};
+use crate::billing::TrialLimit;
 use crate::collab::kind_task::members;
 use crate::collab::markdown_import::markdown_to_blocks;
 use crate::collab::sanitize::sanitize_blocks_for;
@@ -400,6 +402,18 @@ pub enum TaskError {
     /// Co-editing is at its memory budget, or another server reset the document: try again.
     #[error("the task's co-editing document is busy")]
     Busy,
+    /// Orbit Cloud: the trial workspace holds as many tasks as the trial allows.
+    #[error("trial limit reached")]
+    TrialLimit(TrialLimitReached),
+}
+
+impl From<TrialCapacityError> for TaskError {
+    fn from(error: TrialCapacityError) -> Self {
+        match error {
+            TrialCapacityError::Reached(reached) => Self::TrialLimit(reached),
+            TrialCapacityError::Database(error) => Self::Unavailable(error),
+        }
+    }
 }
 
 impl From<CollabError> for TaskError {
@@ -1459,6 +1473,7 @@ impl TaskRepository {
         }
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
+        ensure_trial_capacity(&self.database, &mut tx, workspace_id, TrialLimit::Tasks, 1).await?;
         validate_project_status(&mut tx, workspace_id, input.project_id, input.status_id).await?;
         if task_relations::status_category_in_tx(&mut tx, workspace_id, input.status_id).await?
             == task_relations::DUPLICATE
@@ -1629,6 +1644,10 @@ impl TaskRepository {
         if let Some(row) = &existing {
             let was_deleted = row.get::<Option<i64>, _>("deleted_at").is_some();
             let task_id = parse_id(row.get("task_id"))?;
+            if was_deleted {
+                ensure_trial_capacity(&self.database, &mut tx, workspace_id, TrialLimit::Tasks, 1)
+                    .await?;
+            }
             if parse_id(row.get("project_id"))? != issue.project_id
                 || row.get::<String, _>("kind") != issue.kind
             {
@@ -1797,6 +1816,7 @@ impl TaskRepository {
             }
             return Ok(task_id);
         }
+        ensure_trial_capacity(&self.database, &mut tx, workspace_id, TrialLimit::Tasks, 1).await?;
         let status_id: String = sqlx::query_scalar(
             "SELECT id FROM task_statuses WHERE workspace_id = $1 AND project_id = $2 AND category <> 'duplicate' ORDER BY CASE WHEN category = $3 THEN 0 WHEN category = 'unstarted' THEN 1 ELSE 2 END, position, id LIMIT 1",
         ).bind(workspace_id.to_string()).bind(issue.project_id.to_string())
@@ -1903,6 +1923,7 @@ impl TaskRepository {
         }
 
         project_in_tx(&mut tx, workspace_id, input.project_id, false).await?;
+        ensure_trial_capacity(&self.database, &mut tx, workspace_id, TrialLimit::Tasks, 1).await?;
         let status_id =
             task_relations::default_status_id_in_tx(&mut tx, workspace_id, input.project_id)
                 .await?
@@ -2262,6 +2283,17 @@ impl TaskRepository {
             .map(TimestampMillis::as_millis)
             .ok_or(TaskError::NotFound)?;
         let descendants = sub_issues::trashed_with(&mut *tx, task_id, deleted_at).await?;
+        let restored = i64::try_from(descendants.len())
+            .unwrap_or(i64::MAX)
+            .saturating_add(1);
+        ensure_trial_capacity(
+            &self.database,
+            &mut tx,
+            workspace_id,
+            TrialLimit::Tasks,
+            restored,
+        )
+        .await?;
         // A task restored while its parent is still in the trash comes back top-level.
         let parent_task_id = match current.parent_task_id {
             Some(parent_id) => sub_issues::task_is_live_in_tx(&mut tx, parent_id)

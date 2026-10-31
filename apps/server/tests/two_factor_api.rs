@@ -304,6 +304,27 @@ async fn a_lockout_holds_on_every_server() {
 }
 
 #[tokio::test]
+async fn changing_the_password_shares_the_sign_in_lockout() {
+    let fixture = Fixture::new().await;
+    let change = |current: &str| {
+        fixture.post(
+            "/api/v1/auth/password",
+            Some(&fixture.cookie),
+            json!({"current_password": current, "new_password": "a brand new password"}),
+        )
+    };
+    for _ in 0..5 {
+        let (status, body) = change("wrong password value").await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+        assert_eq!(body["code"], "invalid_credentials");
+    }
+    // A stolen session cannot keep guessing: the right password is refused too, and so is sign-in.
+    let (status, body) = change(PASSWORD).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{body}");
+    assert_eq!(fixture.login().await.0, StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
 async fn a_recovery_code_signs_in_once() {
     let fixture = Fixture::new().await;
     let (_, codes) = fixture.enable_totp().await;

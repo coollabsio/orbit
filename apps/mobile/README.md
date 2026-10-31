@@ -67,16 +67,16 @@ Requirements: Bun, the Orbit dev server (`just dev` at the repo root), and a pho
 5. Open the app in Expo Go. The phone must be on the tailnet. Use one of these:
 
    - Tap the server under **Development servers** on the Expo Go Home tab (shows when both sides use the same Expo account).
-   - iOS: type `exp://devserver.tail661ee3.ts.net:8082` in the Safari address bar and open it in Expo Go.
+   - iOS: type `exp://devbox.example.ts.net:8082` in the Safari address bar and open it in Expo Go.
    - Android: tap **Enter URL manually** in Expo Go and enter the same URL.
    - Scan the QR code that Metro prints.
 
    `just mobile` sets `REACT_NATIVE_PACKAGER_HOSTNAME` from `ORBIT_MOBILE_HOST`, so Metro tells the phone to load the app from that host.
 
-6. Optional: to test Google or GitHub sign-in in Expo Go, allow the app's Expo Go redirect on the server. A development or store build sends `orbit://auth/callback`, which every server accepts. Expo Go sends its own URL instead, for example `exp://devserver.tail661ee3.ts.net:8082/--/auth/callback` (the Metro host and port, then `/--/auth/callback`). Add that exact value to the server's environment and restart it:
+6. Optional: to test Google or GitHub sign-in in Expo Go, allow the app's Expo Go redirect on the server. A development or store build sends `orbit://auth/callback`, which every server accepts. Expo Go sends its own URL instead, for example `exp://devbox.example.ts.net:8082/--/auth/callback` (the Metro host and port, then `/--/auth/callback`). Add that exact value to the server's environment and restart it:
 
    ```bash
-   ORBIT_DEV_NATIVE_REDIRECTS=exp://devserver.tail661ee3.ts.net:8082/--/auth/callback
+   ORBIT_DEV_NATIVE_REDIRECTS=exp://devbox.example.ts.net:8082/--/auth/callback
    ```
 
    The variable takes a comma-separated list, and production configurations ignore it. Without it, the start request fails with `invalid_redirect`.
@@ -114,7 +114,7 @@ To add an icon, add its reicon name to `ICONS` in `scripts/generate-icons.ts` an
 
 ## Store builds
 
-The sign-in screen fills in Orbit Cloud (`https://app.orbit.so`) unless `EXPO_PUBLIC_ORBIT_SERVER` is set, so a cloud user only types an email and a password. A self-hosted user replaces the server.
+The sign-in screen fills in Orbit Cloud (`https://app.orbit.so`) unless `EXPO_PUBLIC_ORBIT_SERVER` is set, so a cloud user only types an email and a password. A self-hosted user replaces the server. The `preview` and `production` profiles in `eas.json` set it to Orbit Cloud, so a release build never fills in a dev server from `.env.local`.
 
 What is configured:
 

@@ -623,6 +623,38 @@ async fn an_unverified_email_is_never_linked() {
 }
 
 #[tokio::test]
+async fn an_account_that_never_confirmed_its_email_is_never_linked() {
+    let fixture = Fixture::new().await;
+    // As the setup owner or an account that accepted an invitation link without an email.
+    fixture
+        .database
+        .execute("UPDATE users SET email_verified_at = NULL WHERE email = 'owner@example.com'")
+        .await
+        .unwrap();
+    for (provider, user) in [
+        ("google", google("g-owner", "owner@example.com")),
+        ("github", github(42, "owner@example.com")),
+    ] {
+        let reply = fixture.flow(provider, "sign_in", user, None).await;
+        assert_eq!(reply.status, StatusCode::FORBIDDEN, "{}", reply.body);
+        assert_eq!(reply.code(), "account_email_unverified");
+        assert!(reply.body["detail"].as_str().unwrap().contains("Security"));
+    }
+    assert_eq!(
+        fixture
+            .scalar_i64("SELECT COUNT(*) FROM user_identities")
+            .await,
+        0
+    );
+    assert_eq!(
+        fixture
+            .scalar_i64("SELECT COUNT(*) FROM users WHERE email_verified_at IS NULL")
+            .await,
+        1
+    );
+}
+
+#[tokio::test]
 async fn a_new_account_needs_open_registration_and_has_no_password() {
     let fixture = Fixture::new().await;
     let closed = fixture

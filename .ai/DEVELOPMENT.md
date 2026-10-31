@@ -86,18 +86,18 @@ docker run --rm orbit:milestone-1 --help
 docker run --name orbit --restart unless-stopped \
   -p 127.0.0.1:8080:8080 \
   -e ORBIT_PUBLIC_ORIGIN=https://orbit.example.com \
-  -e ORBIT_TRUSTED_PROXIES=172.17.0.1/32 \
+  -e ORBIT_TRUSTED_PROXIES=127.0.0.1/32,172.17.0.1/32 \
   -e ORBIT_APP_KEY=<base64 key, see docs/operations.md> \
   -v orbit-data:/var/lib/orbit \
   -v "$PWD/backups:/var/backups/orbit" \
   orbit:milestone-1
 ```
 
-The final Alpine image runs as numeric user and group 65532. It contains the static Orbit binary, Bash for operator diagnostics, CA certificates, timezone data, and empty mount points. The image sets `ORBIT_ENV=production`, `ORBIT_TRUSTED_PROXIES=0.0.0.0/0,::/0`, binds to `0.0.0.0`, and keeps data in `/var/lib/orbit` and backups in `/var/backups/orbit`. Port 2525 is reserved for the deferred inbound SMTP milestone; this release does not listen on it.
+The final Alpine image runs as numeric user and group 65532. It contains the static Orbit binary, Bash for operator diagnostics, CA certificates, timezone data, and empty mount points. The image sets `ORBIT_ENV=production`, binds to `0.0.0.0`, and keeps data in `/var/lib/orbit` and backups in `/var/backups/orbit`. Port 2525 is reserved for the deferred inbound SMTP milestone; this release does not listen on it. The image has no `ORBIT_TRUSTED_PROXIES` default: production does not start until it is set. List the reverse proxy addresses plus `127.0.0.1/32`, because the container healthcheck connects from loopback.
 
 ## Reverse proxy and Tailscale
 
-Set `ORBIT_PUBLIC_ORIGIN` to the exact external HTTPS origin. Bind to `0.0.0.0` for a container or Tailscale-reachable interface, then restrict access with the host firewall. Add only the actual proxy network to `ORBIT_TRUSTED_PROXIES`.
+Set `ORBIT_PUBLIC_ORIGIN` to the exact external HTTPS origin. Bind to `0.0.0.0` for a container or Tailscale-reachable interface, then restrict access with the host firewall. Add only the actual proxy network to `ORBIT_TRUSTED_PROXIES` (and `127.0.0.1/32` in the image, for its healthcheck). Never `0.0.0.0/0` or `::/0`: then anyone who reaches the port can fake their IP address and HTTPS, and Orbit logs a warning at startup and in `orbit config check`.
 
 Prometheus metrics are disabled by default. To expose them on a private interface only, set `ORBIT_METRICS_LISTEN`, for example `127.0.0.1:9090`, and scrape `http://127.0.0.1:9090/metrics`. Never proxy this listener through the public site.
 

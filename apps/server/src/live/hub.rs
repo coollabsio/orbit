@@ -21,7 +21,7 @@ use orbit_platform::{Database, Id, TimestampMillis};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::AnyPool;
-use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, mpsc};
+use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, broadcast, mpsc};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::{TaskTracker, task_tracker::TaskTrackerToken};
 
@@ -42,6 +42,8 @@ pub(super) const HEARTBEAT: Duration = Duration::from_secs(25);
 const HEARD_WINDOW: Duration = Duration::from_secs(35);
 /// How long a server that stops waits for its connections to send their close frames.
 const CLOSE_WAIT: Duration = Duration::from_secs(5);
+/// Access checks that may wait for the sockets; one that falls behind checks at once.
+const QUEUED_REVALIDATIONS: usize = 64;
 
 /// Who an event is for.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -139,6 +141,9 @@ struct Inner {
     stopping: CancellationToken,
     /// The connections that are served, so a server that stops can wait for their close frames.
     serving: TaskTracker,
+    /// Access changed in a workspace (`None`: in every workspace): the sockets of this server
+    /// (`/live` and `/events`) check theirs again now.
+    revalidate: broadcast::Sender<Option<Id>>,
 }
 
 /// Async locks by id that leave no entry behind once nobody holds or waits for them.
@@ -348,6 +353,7 @@ impl Inner {
             heard_window,
             stopping: CancellationToken::new(),
             serving: TaskTracker::new(),
+            revalidate: broadcast::channel(QUEUED_REVALIDATIONS).0,
         }
     }
 
@@ -645,6 +651,19 @@ impl LiveHub {
     /// Cancelled when the server stops; the connection then closes with 1012.
     pub(super) fn stopping(&self) -> CancellationToken {
         self.inner.stopping.clone()
+    }
+
+    /// Tells this server's `/live` and `/events` sockets of the workspace (all workspaces with
+    /// `None`) to check their access now. [`crate::collab::CollabHub::revalidate_database`] calls
+    /// it, and the cluster does on the other servers.
+    pub(crate) fn revalidate_here(&self, workspace_id: Option<Id>) {
+        let _ = self.inner.revalidate.send(workspace_id);
+    }
+
+    /// Access checks for the sockets: each received workspace (or `None`, or a lag) means
+    /// "check now" when it is the socket's workspace.
+    pub(crate) fn revalidations(&self) -> broadcast::Receiver<Option<Id>> {
+        self.inner.revalidate.subscribe()
     }
 
     /// Held while a connection is served, until its close frame is sent.

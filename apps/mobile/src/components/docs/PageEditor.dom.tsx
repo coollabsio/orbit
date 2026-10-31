@@ -13,6 +13,7 @@ import { CollabSession, type CollabProblem, type CollabState } from '@orbit/edit
 import { collabSocket, COLLAB_FRAGMENT } from '@orbit/editor/collab/target'
 import { ticketWebSocket, type TicketResult } from '@orbit/editor/collab/ticketSocket'
 import { watchDeletedFiles } from '@orbit/editor/deletedFiles'
+import { isSafeLinkHref } from '@orbit/editor/links'
 import { CALLOUT_DEFAULT_EMOJI, createEditorSchemas, type PageEditorInstance } from '@orbit/editor/schema'
 import { type DOMImperativeFactory, useDOMImperativeHandle } from 'expo/dom'
 import { createContext, type CSSProperties, type Ref, use, useEffect, useRef, useState } from 'react'
@@ -272,13 +273,15 @@ function Editor({ connection, editable, theme, server, actions, editorRef }: Edi
         user: actions.current.user,
         showCursorLabels: 'activity',
       },
+      // the web's link policy: http(s), mailto and in-app page links; any other href is neither created nor opened
       links: {
+        isValidLink: isSafeLinkHref,
         onClick: (event: MouseEvent) => {
           const href = event.target instanceof Element ? event.target.closest('a')?.getAttribute('href') : null
           if (!href) return true
           const pageId = docsLinkPageId(href, server)
           if (pageId) void actions.current.openPage(pageId)
-          else void actions.current.openUrl(new URL(href, server).toString())
+          else if (isSafeLinkHref(href)) void actions.current.openUrl(href)
           return true
         },
       },

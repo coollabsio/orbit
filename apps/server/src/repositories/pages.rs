@@ -13,6 +13,7 @@ use sqlx::{Any, Transaction};
 use thiserror::Error;
 use utoipa::ToSchema;
 
+use super::billing::{TrialCapacityError, TrialLimitReached, ensure_trial_capacity};
 use super::page_files::{page_file_url, page_has_file, parse_page_file_url};
 use super::page_mentions::notify_new_mentions;
 use super::page_versions::{
@@ -22,6 +23,7 @@ use super::tasks::{TaskError, record_mutation, require_access, require_access_tx
 use super::teamspaces::{default_teamspace, teamspace_exists};
 use super::workspaces::WorkspaceError;
 use crate::audit::{self, AuditOutcome};
+use crate::billing::TrialLimit;
 use crate::collab::{CollabError, CollabHub, CollabLock, DocKey};
 
 const TRASH_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
@@ -347,6 +349,10 @@ pub enum PageError {
     /// Deleting teamspace pages forever needs a workspace owner or admin.
     #[error("page action is not permitted")]
     Forbidden,
+    /// Moving teamspace pages created by others into a private space needs a workspace owner
+    /// or admin.
+    #[error("page action is not permitted")]
+    MoveToPrivateForbidden,
     /// Only pages in the trash (trashed directly) can be deleted forever.
     #[error("page is not in the trash")]
     NotTrashed,
@@ -355,6 +361,9 @@ pub enum PageError {
     Locked,
     #[error("stored page data is invalid")]
     Corrupt,
+    /// Orbit Cloud: the trial workspace holds as many pages as the trial allows.
+    #[error("trial limit reached")]
+    TrialLimit(TrialLimitReached),
     #[error("page repository is unavailable")]
     Unavailable(#[from] sqlx::Error),
     /// Co-editing is at its memory budget, or another server reset the document: try again.
@@ -380,6 +389,15 @@ impl From<WorkspaceError> for PageError {
             WorkspaceError::Unavailable(error) => Self::Unavailable(error),
             WorkspaceError::NotFound => Self::NotFound,
             _ => Self::Corrupt,
+        }
+    }
+}
+
+impl From<TrialCapacityError> for PageError {
+    fn from(error: TrialCapacityError) -> Self {
+        match error {
+            TrialCapacityError::Reached(reached) => Self::TrialLimit(reached),
+            TrialCapacityError::Database(error) => Self::Unavailable(error),
         }
     }
 }
@@ -477,6 +495,7 @@ impl PageRepository {
     ) -> Result<PageRecord, PageError> {
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
+        ensure_trial_capacity(&self.database, &mut tx, workspace_id, TrialLimit::Pages, 1).await?;
         let space = resolve_space(
             &mut tx,
             workspace_id,
@@ -797,7 +816,7 @@ impl PageRepository {
         now: TimestampMillis,
     ) -> Result<PageRecord, PageError> {
         let mut tx = self.database.immediate_transaction().await?;
-        require_access_tx(&mut tx, workspace_id, actor_id).await?;
+        let actor = require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let current = page_in_tx(&mut tx, workspace_id, page_id, actor_id, false).await?;
         check_version(expected_version, current.version, &current)?;
         if parent_id == Some(page_id) {
@@ -813,6 +832,16 @@ impl PageRepository {
             Some(current_space),
         )
         .await?;
+        let to_private = matches!(
+            (current_space, space),
+            (PageSpace::Teamspace(_), PageSpace::Private(_))
+        );
+        if to_private
+            && !actor
+                .can_move_pages_to_private(created_whole_subtree(&mut tx, page_id, actor_id).await?)
+        {
+            return Err(PageError::MoveToPrivateForbidden);
+        }
         if let Some(parent_id) = parent_id
             && is_ancestor(&mut tx, page_id, parent_id).await?
         {
@@ -861,6 +890,21 @@ impl PageRepository {
             now,
         )
         .await?;
+        if let (true, Some(teamspace_id)) = (to_private, current.teamspace_id) {
+            audit::record(
+                &mut tx,
+                workspace_id,
+                Some(actor_id),
+                "page.moved_to_private",
+                AuditOutcome::Success,
+                "page",
+                Some(page_id),
+                request_id,
+                json!({"from_teamspace_id": teamspace_id.to_string()}),
+                now,
+            )
+            .await?;
+        }
         let updated_by_user = user_in_tx(&mut tx, actor_id).await?;
         tx.commit().await?;
         // A page (and its subtree) moved into someone's private space closes other editors.
@@ -1028,6 +1072,29 @@ impl PageRepository {
                 .bind(page_id.to_string())
                 .fetch_one(&mut *tx)
                 .await?;
+        let restored: i64 = sqlx::query_scalar(
+            "WITH RECURSIVE subtree(id) AS ( \
+                 SELECT $1 \
+                 UNION ALL \
+                 SELECT pages.id FROM pages JOIN subtree ON pages.parent_id = subtree.id \
+                 WHERE pages.deleted_at IS NOT NULL AND pages.trashed_with = $2 \
+             ) \
+             SELECT CAST(COUNT(*) AS BIGINT) FROM pages \
+             WHERE workspace_id = $3 AND deleted_at IS NOT NULL AND id IN (SELECT id FROM subtree)",
+        )
+        .bind(page_id.to_string())
+        .bind(&batch)
+        .bind(workspace_id.to_string())
+        .fetch_one(&mut *tx)
+        .await?;
+        ensure_trial_capacity(
+            &self.database,
+            &mut tx,
+            workspace_id,
+            TrialLimit::Pages,
+            restored,
+        )
+        .await?;
         let space = current.space(actor_id);
         let parent_id = match current.parent_id {
             Some(parent_id)
@@ -1275,6 +1342,15 @@ impl PageRepository {
                 originals.push(page_from_row(row)?);
             }
         }
+        let copies = i64::try_from(originals.len()).unwrap_or(i64::MAX);
+        ensure_trial_capacity(
+            &self.database,
+            &mut tx,
+            workspace_id,
+            TrialLimit::Pages,
+            copies,
+        )
+        .await?;
         let pages: HashMap<Id, Id> = originals
             .iter()
             .map(|page| (page.id, Id::new_v7()))
@@ -2292,6 +2368,28 @@ async fn resolve_space(
         .await?
         .map(PageSpace::Teamspace)
         .ok_or(PageError::TeamspaceNotFound)
+}
+
+/// Whether `actor_id` created the page and every descendant, trashed ones too (they move along).
+async fn created_whole_subtree(
+    tx: &mut Transaction<'_, Any>,
+    page_id: Id,
+    actor_id: Id,
+) -> Result<bool, PageError> {
+    let others: i64 = sqlx::query_scalar(
+        "WITH RECURSIVE subtree(id) AS ( \
+             SELECT $1 \
+             UNION ALL \
+             SELECT pages.id FROM pages JOIN subtree ON pages.parent_id = subtree.id \
+         ) \
+         SELECT CAST(COUNT(*) AS BIGINT) FROM pages \
+         WHERE id IN (SELECT id FROM subtree) AND creator_id != $2",
+    )
+    .bind(page_id.to_string())
+    .bind(actor_id.to_string())
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(others == 0)
 }
 
 /// Moves every descendant (trashed ones too, so a later restore stays consistent) into `space`,

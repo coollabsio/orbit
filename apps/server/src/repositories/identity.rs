@@ -564,16 +564,17 @@ impl IdentityRepository {
         let session_id = Id::new_v7();
         let session_token = generate_opaque_token();
         let timestamp = now.as_millis();
+        // The owner typed this email while holding the setup token, so it counts as confirmed.
         sqlx::query(
             "INSERT INTO users (id, email, normalized_email, display_name, password_hash, \
-             installation_admin, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, 1, $6, $7)",
+             installation_admin, email_verified_at, created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, $5, 1, $6, $6, $6)",
         )
         .bind(user_id.to_string())
         .bind(email)
         .bind(normalized_email)
         .bind(request.display_name)
         .bind(request.password_hash)
-        .bind(timestamp)
         .bind(timestamp)
         .execute(&mut *transaction)
         .await
@@ -1455,6 +1456,7 @@ impl IdentityRepository {
         .bind(keep_session_id.to_string())
         .execute(&mut *transaction)
         .await?;
+        revoke_oauth_grants(&mut transaction, user_id, now).await?;
         audit::record_global(
             &mut transaction,
             Some(user_id),
@@ -1468,6 +1470,8 @@ impl IdentityRepository {
         )
         .await?;
         transaction.commit().await?;
+        // Open sockets of the revoked sessions close now.
+        crate::collab::CollabHub::revalidate_database(&self.database, None);
         Ok(())
     }
 
@@ -1575,11 +1579,14 @@ impl IdentityRepository {
         .bind(user_id.to_string())
         .execute(&mut *transaction)
         .await?;
+        revoke_oauth_grants(&mut transaction, user_id, now).await?;
         sqlx::query("DELETE FROM recovery_tokens WHERE token_hash = $1")
             .bind(stored)
             .execute(&mut *transaction)
             .await?;
         transaction.commit().await?;
+        // Open sockets of the revoked sessions close now.
+        crate::collab::CollabHub::revalidate_database(&self.database, None);
         Ok(user_id)
     }
 
@@ -1638,6 +1645,7 @@ impl IdentityRepository {
         .bind(user_id.to_string())
         .execute(&mut *transaction)
         .await?;
+        revoke_oauth_grants(&mut transaction, user_id, now).await?;
         sqlx::query("DELETE FROM recovery_tokens WHERE token_hash = $1")
             .bind(stored)
             .execute(&mut *transaction)
@@ -1655,6 +1663,8 @@ impl IdentityRepository {
         )
         .await?;
         transaction.commit().await?;
+        // Open sockets of the revoked sessions close now.
+        crate::collab::CollabHub::revalidate_database(&self.database, None);
         Ok(user_id)
     }
 
@@ -2148,6 +2158,23 @@ fn constant_time_eq(stored: &[u8], supplied: &[u8; 32]) -> bool {
         difference |= left ^ right;
     }
     difference == 0
+}
+
+/// Ends the user's MCP OAuth grants (and so their tokens), as a new password ends the sessions. Passkeys and
+/// provider identities stay: the person manages those in Security.
+async fn revoke_oauth_grants(
+    transaction: &mut Transaction<'_, Any>,
+    user_id: Id,
+    now: TimestampMillis,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE oauth_grants SET revoked_at = $1 WHERE user_id = $2 AND revoked_at IS NULL",
+    )
+    .bind(now.as_millis())
+    .bind(user_id.to_string())
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
 }
 
 /// Audits a profile change globally and in each of the user's workspaces. The workspace

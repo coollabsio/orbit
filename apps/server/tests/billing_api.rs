@@ -1220,6 +1220,120 @@ async fn the_trial_length_and_limits_come_from_the_config() {
 }
 
 #[tokio::test]
+async fn restores_and_copies_count_against_the_trial_limits() {
+    let stripe = FakeStripe::default();
+    let trial = TrialConfig {
+        tasks: 2,
+        pages: 2,
+        ..TrialConfig::default()
+    };
+    let server = Server::start_with_trial(Some(&stripe.start().await), trial).await;
+    sqlx::query("UPDATE tasks SET deleted_at = $1 WHERE workspace_id = $2")
+        .bind(TimestampMillis::now().as_millis())
+        .bind(&server.workspace_id)
+        .execute(server.database.pool())
+        .await
+        .unwrap();
+    let code = |answer: &(u16, Value)| (answer.0, answer.1["code"].clone());
+    let limit = (402, json!("trial_limit_reached"));
+
+    // A trashed task comes back only while the trial has room for it.
+    let (_, first) = server.create_task("One").await;
+    assert_eq!(server.create_task("Two").await.0, 201);
+    let deleted = server
+        .call(
+            "DELETE",
+            &server.workspace(&format!(
+                "/tasks/{}?expected_version={}",
+                first["id"].as_str().unwrap(),
+                first["version"]
+            )),
+            None,
+        )
+        .await;
+    assert_eq!(deleted.0, 204, "{}", deleted.1);
+    assert_eq!(server.create_task("Three").await.0, 201);
+    let restore = server.workspace(&format!("/tasks/{}/restore", first["id"].as_str().unwrap()));
+    let restored = server
+        .call(
+            "POST",
+            &restore,
+            Some(json!({"expected_version": first["version"].as_u64().unwrap() + 1})),
+        )
+        .await;
+    assert_eq!(code(&restored), limit, "{}", restored.1);
+    assert_eq!(
+        restored.1["detail"],
+        "The trial allows 2 tasks. Choose a plan to add more."
+    );
+
+    // A copy counts every page it copies; a restore every page of its batch.
+    let (status, parent) = server
+        .call(
+            "POST",
+            &server.workspace("/pages"),
+            Some(json!({"title": "Parent"})),
+        )
+        .await;
+    assert_eq!(status, 201, "{parent}");
+    let parent_id = parent["id"].as_str().unwrap();
+    let (status, child) = server
+        .call(
+            "POST",
+            &server.workspace("/pages"),
+            Some(json!({"title": "Child", "parent_id": parent_id})),
+        )
+        .await;
+    assert_eq!(status, 201, "{child}");
+    let duplicate = server.workspace(&format!("/pages/{parent_id}/duplicate"));
+    let copied = server
+        .call("POST", &duplicate, Some(json!({"include_children": true})))
+        .await;
+    assert_eq!(code(&copied), limit, "{}", copied.1);
+    let child_id = child["id"].as_str().unwrap();
+    let trashed = server
+        .call(
+            "DELETE",
+            &server.workspace(&format!("/pages/{child_id}?expected_version=0")),
+            None,
+        )
+        .await;
+    assert_eq!(trashed.0, 204, "{}", trashed.1);
+    let copied = server
+        .call("POST", &duplicate, Some(json!({"include_children": true})))
+        .await;
+    assert_eq!(copied.0, 201, "{}", copied.1);
+    let restored = server
+        .call(
+            "POST",
+            &server.workspace(&format!("/pages/{child_id}/restore")),
+            Some(json!({"expected_version": 1})),
+        )
+        .await;
+    assert_eq!(code(&restored), limit, "{}", restored.1);
+    let live: i64 = sqlx::query_scalar(
+        "SELECT CAST(COUNT(*) AS BIGINT) FROM pages WHERE workspace_id = $1 AND deleted_at IS NULL",
+    )
+    .bind(&server.workspace_id)
+    .fetch_one(server.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(live, 2);
+
+    // Once subscribed, nothing is counted.
+    server.set_status("active").await;
+    let restored = server
+        .call(
+            "POST",
+            &restore,
+            Some(json!({"expected_version": first["version"].as_u64().unwrap() + 1})),
+        )
+        .await;
+    assert_eq!(restored.0, 200, "{}", restored.1);
+    server.stop().await;
+}
+
+#[tokio::test]
 async fn billing_describes_each_plan_as_stripe_prices_it_and_asks_stripe_once() {
     let stripe = FakeStripe::default();
     stripe.set_price("price_team", ("prod_team", "Team"), 1000, "month");
@@ -1592,8 +1706,12 @@ async fn checkout_is_refused_while_stripe_has_a_live_subscription_orbit_has_not_
     );
     assert_eq!(stripe.requests("/v1/checkout/sessions").len(), 1);
     let listed = stripe.requests("GET /v1/subscriptions");
-    assert_eq!(listed.len(), 1);
-    assert_eq!(listed[0].form["customer"], "cus_test");
+    assert_eq!(
+        listed.len(),
+        2,
+        "every checkout asks Stripe, the first one too"
+    );
+    assert_eq!(listed[1].form["customer"], "cus_test");
     // The refusal queued the sync Orbit missed.
     assert_eq!(server.sync_jobs().await, 1);
     let billing = server.settled_billing().await;
@@ -1628,9 +1746,85 @@ async fn a_new_checkout_expires_the_open_sessions_of_the_customer() {
         ]
     );
     let listed = stripe.requests("GET /v1/checkout/sessions");
-    assert_eq!(listed.len(), 2);
+    assert_eq!(listed.len(), 3);
     assert_eq!(listed[0].form["status"], "open");
     assert_eq!(listed[0].form["customer"], "cus_test");
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn the_first_checkout_is_refused_when_a_concurrent_one_already_subscribed() {
+    let stripe = FakeStripe::default();
+    let server = Server::start(Some(&stripe.start().await)).await;
+    // A concurrent checkout saved its customer (the one Stripe hands out) and subscribed it,
+    // while this request still saw a workspace without a customer.
+    stripe.set_subscription(
+        "sub_other_tab",
+        &server.workspace_id,
+        "active",
+        "price_team",
+    );
+    let (status, problem) = server
+        .call(
+            "POST",
+            &server.workspace("/billing/checkout"),
+            Some(json!({"plan": "team"})),
+        )
+        .await;
+    assert_eq!(
+        (status, &problem["code"]),
+        (409, &json!("subscription_active"))
+    );
+    assert_eq!(stripe.requests("/v1/checkout/sessions").len(), 0);
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn checkouts_and_portal_sessions_are_audited() {
+    let stripe = FakeStripe::default();
+    let server = Server::start(Some(&stripe.start().await)).await;
+    let (status, redirect) = server
+        .call(
+            "POST",
+            &server.workspace("/billing/checkout"),
+            Some(json!({"plan": "business"})),
+        )
+        .await;
+    assert_eq!(status, 200, "{redirect}");
+    let (status, redirect) = server
+        .call("POST", &server.workspace("/billing/portal"), None)
+        .await;
+    assert_eq!(status, 200, "{redirect}");
+    let owner: String =
+        sqlx::query_scalar("SELECT id FROM users WHERE email = 'owner@example.com'")
+            .fetch_one(server.database.pool())
+            .await
+            .unwrap();
+    let events: Vec<(String, Option<String>, String, String)> = sqlx::query_as(
+        "SELECT action, actor_id, resource_id, metadata_json FROM audit_events \
+         WHERE workspace_id = $1 AND action LIKE 'billing.%' ORDER BY occurred_at, id",
+    )
+    .bind(&server.workspace_id)
+    .fetch_all(server.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        events,
+        [
+            (
+                "billing.checkout_started".to_owned(),
+                Some(owner.clone()),
+                server.workspace_id.clone(),
+                r#"{"plan":"business"}"#.to_owned()
+            ),
+            (
+                "billing.portal_opened".to_owned(),
+                Some(owner),
+                server.workspace_id.clone(),
+                "{}".to_owned()
+            ),
+        ]
+    );
     server.stop().await;
 }
 

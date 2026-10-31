@@ -68,7 +68,7 @@ The public origin must match the HTTPS address used by the MCP client. For this
 repository's development server, configure Jean's Run command as follows:
 
 ```bash
-ORBIT_PUBLIC_ORIGIN=https://devserver.tail661ee3.ts.net:18888 \
+ORBIT_PUBLIC_ORIGIN=https://devbox.example.ts.net:18888 \
 ORBIT_DEV_API_PORT=18080 ORBIT_DEV_WEB_PORT=18888 just dev
 ```
 
@@ -80,12 +80,12 @@ not enable HTTPS. Use the HTTPS address for Orbit sign-in too.
 Add the HTTPS endpoint to your selected backend:
 
 ```bash
-claude mcp add --scope user --transport http orbit https://devserver.tail661ee3.ts.net:18888/mcp
+claude mcp add --scope user --transport http orbit https://devbox.example.ts.net:18888/mcp
 
-codex mcp add orbit --url https://devserver.tail661ee3.ts.net:18888/mcp
+codex mcp add orbit --url https://devbox.example.ts.net:18888/mcp
 codex mcp login orbit
 
-grok mcp add --scope user --transport http orbit https://devserver.tail661ee3.ts.net:18888/mcp
+grok mcp add --scope user --transport http orbit https://devbox.example.ts.net:18888/mcp
 grok mcp doctor orbit
 ```
 
@@ -231,7 +231,7 @@ Use the public origin from your configuration. The URL below is an example,
 not a running development environment.
 
 ```bash
-export ORBIT_URL='https://orbit.example.com'
+export ORBIT_URL='https://devbox.example.ts.net:18888'
 read -rs -p 'Orbit read token: ' ORBIT_MCP_TOKEN; echo
 export ORBIT_MCP_TOKEN
 

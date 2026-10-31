@@ -11,7 +11,7 @@
 - All SQL goes through sqlx `Any`: write `$1, $2, …` (SQLite binds them by number too), import `orbit_platform::Row` (not `sqlx::Row`) so 0/1 flags decode as `bool`, decode boolean scalars as `Flag`, bind `i64` (never `bool`/`u32`), and build dynamic SQL with `SqlBuilder`. SQLite silently ignores extra bound values, so clashing `$N` numbers in `format!`-glued fragments only fail on Postgres.
 - A new SQLite migration also needs its change in the Postgres schema (`apps/server/migrations/postgres/`) and that file's entry in `runner.postgres` in `crates/platform/src/db/migrate.rs`.
 - Run the whole suite on Postgres with `ORBIT_TEST_POSTGRES_URL=postgres://orbit:orbit@127.0.0.1:15432/orbit`; each test database maps from its SQLite path.
-- No Postgres listens on 15432 after a reboot unless the persistent dev one runs: `orbit-dev-pg` (volume `orbit-dev-pg-data`, `--restart unless-stopped`, databases `orbit` for tests and `orbit_dev` for `just dev`). A `--rm` container loses all data on reboot (the dev data was lost this way on 2026-10-24). For the full test suite use `-c max_connections=300` and at least 1 GB, or connections drop mid-suite.
+- No Postgres listens on 15432 after a reboot unless the persistent dev one runs: `orbit-dev-pg` (volume `orbit-dev-pg-data`, `--restart unless-stopped`, databases `orbit` for tests and `orbit_dev` for `just dev`). A `--rm` container loses all data on reboot (the dev data was lost this way on 2026-10-24). For the full test suite use `-c max_connections=300`, at least 1 GB of memory and `--shm-size=1g` (the 64 MB default `/dev/shm` gives error 53100 in `collab_api`), or tests fail mid-suite.
 
 ## Several servers on one Postgres database
 - Any process-local state (maps, locks, counters, caches, "running" flags, background loops) is per server. If it must hold for every server, keep it in the database (a serialized `immediate_transaction`, `Database::try_singleton`) or send it through `crate::cluster`. Test such changes with two `App`s on one database (`apps/server/tests/shared_postgres`), and prove the test fails without the fix.
@@ -26,6 +26,9 @@
   (Python's SQLite 3.46.1 also says ok). It made the weekly integrity job (which runs at App start in tests) stop the
   server once `page_search` rows were updated. `IntegrityService::full` now confirms such findings with FTS5's own check
   (2026-09-25). Check new virtual tables against `integrity_check` with the bundled SQLite, not the system one.
+
+## Untrusted nested input
+- Any recursive walk over user content (markdown, Yjs XML/updates, JSON) needs a depth cap or an explicit stack: a stack overflow aborts the whole server process, not one request. yrs itself recurses on decode and delete, so `blocknote::update_too_deep` checks each update before yrs reads it (2026-10-31).
 
 ## API retry load
 - A failed `invalidateQueries` call can refetch many active queries. Do not retry it on a short fixed UI timer; use bounded backoff so an API error cannot exhaust the shared rate limit.
