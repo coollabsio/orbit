@@ -20,11 +20,11 @@ export default function AgenticScreen() {
 
   return (
     <SettingsShell title="Account settings" nav={ACCOUNT_NAV} refreshing={connections.isRefetching} onRefresh={() => void connections.refetch()}>
-      <SettingsCard title="MCP server" description="AI clients such as Claude, Codex and Grok can read your tasks through this address. The client signs in with your Orbit account, and you select the workspace and the projects it can read.">
+      <SettingsCard title="MCP server" description="AI clients such as Claude, Codex and Grok can use tasks and read docs and chat through this address. Sign in with your Orbit account and select the workspace, projects and permissions.">
         <Code text={url} />
       </SettingsCard>
 
-      <SettingsCard title="Connect a client" description="Run the command for your client in a terminal. Then sign in to Orbit in the browser, select the projects and click Allow read access.">
+      <SettingsCard title="Connect a client" description="Run the command for your client in a terminal. Then sign in to Orbit in the browser, select the projects and permissions, then allow access.">
         <View className="gap-4">
           {mcpClientCommands(url).map((entry) => (
             <View key={entry.client} className="gap-1.5">
@@ -33,18 +33,18 @@ export default function AgenticScreen() {
               <Text className="text-xs text-muted-foreground">{entry.signIn}</Text>
             </View>
           ))}
-          <Text className="text-xs text-muted-foreground">A client that cannot sign in with OAuth can send a read-only API token instead. A workspace admin creates it in the web app, in Settings → API tokens.</Text>
+          <Text className="text-xs text-muted-foreground">A client that cannot sign in with OAuth can send an API token with selected permissions instead. A workspace admin creates it in the web app, in Settings → API tokens.</Text>
         </View>
       </SettingsCard>
 
-      <SettingsCard title="Connected apps" description="MCP clients with approved read-only task access. Disconnecting an app stops its access and refresh tokens." flush>
+      <SettingsCard title="Connected apps" description="MCP clients with approved Orbit access. Disconnecting an app stops its access and refresh tokens." flush>
         {connections.isPending ? <View className="p-4"><Note>Loading connections…</Note></View> : null}
         {connections.isError ? <View className="p-4"><Note error>Connections could not be loaded.</Note></View> : null}
         {connections.data && list.length === 0 ? <View className="p-4"><Note>No connected apps.</Note></View> : null}
         {list.map((connection, index) => (
           <SettingsRow key={connection.id} first={index === 0}>
             <RowIcon icon="robot" />
-            <RowText title={connection.client_name} subtitle={`${connection.workspace_name} · Read tasks · ${connection.project_names.join(', ')}`} />
+            <RowText title={connection.client_name} subtitle={`${connection.workspace_name} · ${connection.scope} · ${connection.project_names.join(', ')}`} />
             <Button label="Disconnect" variant="ghost" size="sm" disabled={disconnect.isPending} onPress={() => disconnect.mutate(connection.id)} />
           </SettingsRow>
         ))}

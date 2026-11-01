@@ -1,4 +1,4 @@
-/** The read-only task MCP endpoint of the Orbit server at `origin` (docs/mcp.md). */
+/** The scoped MCP endpoint of the Orbit server at `origin` (docs/mcp.md). */
 export function mcpUrl(origin: string): string {
   return `${origin.replace(/\/+$/, '')}/mcp`
 }

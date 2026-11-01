@@ -1,4 +1,4 @@
-//! OAuth authorization code flow for Orbit's read-only MCP resource.
+//! OAuth authorization code flow for Orbit's MCP resource.
 //! The application owns consent and persistence; oxide-auth validates S256 PKCE.
 use std::borrow::Cow;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -29,6 +29,13 @@ use crate::repositories::identity::IdentityRepository;
 use crate::task_routes::authenticate_session;
 
 const SCOPE: &str = "tasks:read";
+const SCOPES: [&str; 4] = ["tasks:read", "tasks:write", "docs:read", "chat:read"];
+fn valid_scopes(scope: &str) -> bool {
+    !scope.is_empty() && scope.len() < 128 && scope.split_whitespace().all(|s| SCOPES.contains(&s))
+}
+fn granted_scopes(extra: &str) -> String {
+    format!("{SCOPE} {extra}").trim().to_owned()
+}
 const ACCESS_SECONDS: i64 = 15 * 60;
 const REFRESH_MILLIS: i64 = 30 * 24 * 60 * 60 * 1000;
 const REQUEST_MILLIS: i64 = 10 * 60 * 1000;
@@ -71,7 +78,7 @@ impl OAuthState {
     /// Opaque tokens are audience-bound in SQLite, not taken from an external issuer.
     pub async fn authenticate(&self, token: &str) -> Result<Option<ApiTokenPrincipal>, OAuthError> {
         let now = TimestampMillis::now().as_millis();
-        let row = sqlx::query("SELECT g.id, g.user_id, g.workspace_id, g.project_ids FROM oauth_tokens t JOIN oauth_grants g ON g.id = t.grant_id JOIN users u ON u.id = g.user_id JOIN memberships m ON m.user_id = g.user_id AND m.workspace_id = g.workspace_id JOIN workspaces w ON w.id = g.workspace_id WHERE t.access_hash = $1 AND t.access_expires_at > $2 AND g.revoked_at IS NULL AND g.resource = $3 AND g.scope = 'tasks:read' AND u.suspended_at IS NULL AND w.deleted_at IS NULL")
+        let row = sqlx::query("SELECT g.id, g.user_id, g.workspace_id, g.project_ids, g.mcp_scopes FROM oauth_tokens t JOIN oauth_grants g ON g.id = t.grant_id JOIN users u ON u.id = g.user_id JOIN memberships m ON m.user_id = g.user_id AND m.workspace_id = g.workspace_id JOIN workspaces w ON w.id = g.workspace_id WHERE t.access_hash = $1 AND t.access_expires_at > $2 AND g.revoked_at IS NULL AND g.resource = $3 AND g.scope = 'tasks:read' AND u.suspended_at IS NULL AND w.deleted_at IS NULL")
             .bind(hash(token)).bind(now).bind(&self.resource).fetch_optional(self.database.pool()).await?;
         let Some(row) = row else {
             return Ok(None);
@@ -104,7 +111,20 @@ impl OAuthState {
                 .parse()
                 .map_err(|_| OAuthError::server())?,
             service_account_id: None,
-            scopes: vec![ApiTokenScope::Read],
+            scopes: {
+                let extra: String = row.get("mcp_scopes");
+                let mut scopes = vec![ApiTokenScope::Read];
+                for (name, scope) in [
+                    ("tasks:write", ApiTokenScope::Write),
+                    ("docs:read", ApiTokenScope::DocsRead),
+                    ("chat:read", ApiTokenScope::ChatRead),
+                ] {
+                    if extra.split_whitespace().any(|s| s == name) {
+                        scopes.push(scope);
+                    }
+                }
+                scopes
+            },
         }))
     }
 }
@@ -222,7 +242,7 @@ async fn server_metadata(State(state): State<OAuthState>) -> Json<Value> {
     Json(
         json!({ "issuer": state.origin, "authorization_endpoint": format!("{}/oauth/authorize", state.origin),
         "token_endpoint": format!("{}/oauth/token", state.origin), "registration_endpoint": format!("{}/oauth/register", state.origin),
-        "revocation_endpoint": format!("{}/oauth/revoke", state.origin), "scopes_supported": [SCOPE],
+        "revocation_endpoint": format!("{}/oauth/revoke", state.origin), "scopes_supported": SCOPES,
         "response_types_supported": ["code"], "grant_types_supported": ["authorization_code", "refresh_token"],
         "token_endpoint_auth_methods_supported": ["none"], "code_challenge_methods_supported": ["S256"],
         "authorization_response_iss_parameter_supported": true }),
@@ -231,7 +251,7 @@ async fn server_metadata(State(state): State<OAuthState>) -> Json<Value> {
 async fn resource_metadata(State(state): State<OAuthState>) -> Json<Value> {
     Json(
         json!({"resource": state.resource, "authorization_servers": [state.origin],
-        "scopes_supported": [SCOPE], "bearer_methods_supported": ["header"], "resource_name": "Orbit read-only tasks"}),
+        "scopes_supported": SCOPES, "bearer_methods_supported": ["header"], "resource_name": "Orbit tasks, docs and chat"}),
     )
 }
 
@@ -408,7 +428,11 @@ async fn authorize(
     {
         return Err(OAuthError::invalid("invalid_request"));
     }
-    if input.scope.as_deref().is_some_and(|scope| scope != SCOPE) {
+    if input
+        .scope
+        .as_deref()
+        .is_some_and(|scope| !valid_scopes(scope))
+    {
         return Err(OAuthError::invalid("invalid_scope"));
     }
     if input
@@ -444,9 +468,9 @@ async fn authorize(
         .bind(now)
         .execute(&mut *tx)
         .await?;
-    sqlx::query("INSERT INTO oauth_requests (id, client_id, redirect_uri, state, pkce, resource, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7)")
+    sqlx::query("INSERT INTO oauth_requests (id, client_id, redirect_uri, state, pkce, resource, expires_at, mcp_scopes) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)")
         .bind(&id).bind(&input.client_id).bind(&input.redirect_uri).bind(&input.state).bind(pkce)
-        .bind(&state.resource).bind(now + REQUEST_MILLIS).execute(&mut *tx).await?;
+        .bind(&state.resource).bind(now + REQUEST_MILLIS).bind(input.scope.as_deref().unwrap_or(SCOPE)).execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(Redirect::to(&format!(
         "{}/oauth/consent?request={id}",
@@ -501,8 +525,13 @@ async fn consent(
             workspace_name: row.get("workspace_name"),
         })
         .collect();
+    let requested: String =
+        sqlx::query_scalar("SELECT mcp_scopes FROM oauth_requests WHERE id = $1")
+            .bind(&id)
+            .fetch_one(&mut *tx)
+            .await?;
     tx.commit().await?;
-    Ok(([(header::CACHE_CONTROL, "no-store")], Json(json!({"client_name": client, "scope": SCOPE, "csrf_token": nonce, "projects": projects}))).into_response())
+    Ok(([(header::CACHE_CONTROL, "no-store")], Json(json!({"client_name": client, "scope": requested, "csrf_token": nonce, "projects": projects}))).into_response())
 }
 
 #[derive(Deserialize)]
@@ -513,6 +542,8 @@ struct Approval {
     workspace_id: Option<Id>,
     #[serde(default)]
     project_ids: Vec<Id>,
+    #[serde(default)]
+    scopes: Vec<String>,
 }
 async fn approve(
     State(state): State<OAuthState>,
@@ -523,7 +554,7 @@ async fn approve(
     let user = user(&state, &headers).await?;
     let now = TimestampMillis::now().as_millis();
     let mut tx = state.database.immediate_transaction().await?;
-    let row = sqlx::query("SELECT client_id, redirect_uri, state, resource FROM oauth_requests WHERE id = $1 AND user_id = $2 AND csrf_hash = $3 AND expires_at > $4 AND code_hash IS NULL")
+    let row = sqlx::query("SELECT client_id, redirect_uri, state, resource, mcp_scopes FROM oauth_requests WHERE id = $1 AND user_id = $2 AND csrf_hash = $3 AND expires_at > $4 AND code_hash IS NULL")
         .bind(&id).bind(user.to_string()).bind(hash(&input.csrf_token)).bind(now).fetch_optional(&mut *tx).await?
         .ok_or_else(|| OAuthError::invalid("invalid_request"))?;
     let mut callback = Url::parse(row.get("redirect_uri")).map_err(|_| OAuthError::server())?;
@@ -541,11 +572,21 @@ async fn approve(
                 return Err(OAuthError::invalid("invalid_request"));
             }
         }
+        if input.scopes.iter().any(|s| !SCOPES.contains(&s.as_str())) {
+            return Err(OAuthError::invalid("invalid_scope"));
+        }
+        let extra = input
+            .scopes
+            .iter()
+            .filter(|s| s.as_str() != SCOPE)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(" ");
         let grant = Id::new_v7();
         let code = generate_opaque_token();
-        sqlx::query("INSERT INTO oauth_grants (id, client_id, user_id, workspace_id, project_ids, resource, scope, created_at) VALUES ($1, $2, $3, $4, $5, $6, 'tasks:read', $7)")
+        sqlx::query("INSERT INTO oauth_grants (id, client_id, user_id, workspace_id, project_ids, resource, scope, created_at, mcp_scopes) VALUES ($1, $2, $3, $4, $5, $6, 'tasks:read', $7, $8)")
             .bind(grant.to_string()).bind(row.get::<String, _>("client_id")).bind(user.to_string()).bind(workspace.to_string())
-            .bind(json!(input.project_ids).to_string()).bind(row.get::<String, _>("resource")).bind(now).execute(&mut *tx).await?;
+            .bind(json!(input.project_ids).to_string()).bind(row.get::<String, _>("resource")).bind(now).bind(&extra).execute(&mut *tx).await?;
         sqlx::query("UPDATE oauth_requests SET code_hash = $1, grant_id = $2, csrf_hash = NULL, expires_at = $3 WHERE id = $4")
             .bind(hash(&code)).bind(grant.to_string()).bind(now + 60_000).bind(&id).execute(&mut *tx).await?;
         audit::record(
@@ -557,7 +598,7 @@ async fn approve(
             "oauth_grant",
             Some(grant),
             "oauth-consent",
-            json!({"scope": SCOPE}),
+            json!({"scope": granted_scopes(&extra)}),
             TimestampMillis::from_millis(now),
         )
         .await?;
@@ -603,7 +644,11 @@ async fn token(
     {
         return Err(OAuthError::invalid("invalid_target"));
     }
-    if input.scope.as_deref().is_some_and(|scope| scope != SCOPE) {
+    if input
+        .scope
+        .as_deref()
+        .is_some_and(|scope| !valid_scopes(scope))
+    {
         return Err(OAuthError::invalid("invalid_scope"));
     }
     let now = TimestampMillis::now().as_millis();
@@ -682,6 +727,18 @@ async fn token(
     if !valid {
         return Err(OAuthError::invalid("invalid_grant"));
     }
+    let extra: String = sqlx::query_scalar("SELECT mcp_scopes FROM oauth_grants WHERE id = $1")
+        .bind(&grant)
+        .fetch_one(&mut *tx)
+        .await?;
+    let scope = granted_scopes(&extra);
+    if input.scope.as_ref().is_some_and(|requested| {
+        requested
+            .split_whitespace()
+            .any(|s| !scope.split_whitespace().any(|g| g == s))
+    }) {
+        return Err(OAuthError::invalid("invalid_scope"));
+    }
     let access = format!("orbit-mcp-a-{}", generate_opaque_token());
     let refresh = format!("orbit-mcp-r-{}", generate_opaque_token());
     sqlx::query("DELETE FROM oauth_tokens WHERE refresh_expires_at <= $1")
@@ -692,7 +749,7 @@ async fn token(
         .bind(hash(&access)).bind(hash(&refresh)).bind(&grant).bind(now + ACCESS_SECONDS * 1000).bind(now + REFRESH_MILLIS).execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(Json(
-        json!({"access_token": access, "token_type": "Bearer", "expires_in": ACCESS_SECONDS, "refresh_token": refresh, "scope": SCOPE}),
+        json!({"access_token": access, "token_type": "Bearer", "expires_in": ACCESS_SECONDS, "refresh_token": refresh, "scope": scope}),
     ))
 }
 
@@ -730,17 +787,17 @@ async fn grants(
     let user = user(&state, &headers).await?;
     let query = match state.database.backend() {
         Backend::Sqlite => {
-            "SELECT g.id, c.name AS client_name, w.name AS workspace_name, g.created_at, (SELECT json_group_array(p.name) FROM projects p JOIN json_each(g.project_ids) j ON j.value = p.id WHERE p.workspace_id = g.workspace_id AND p.deleted_at IS NULL) AS project_names FROM oauth_grants g JOIN oauth_clients c ON c.id = g.client_id JOIN workspaces w ON w.id = g.workspace_id JOIN memberships m ON m.workspace_id = w.id AND m.user_id = g.user_id WHERE g.user_id = $1 AND g.revoked_at IS NULL AND w.deleted_at IS NULL ORDER BY g.created_at DESC"
+            "SELECT g.id, g.mcp_scopes, c.name AS client_name, w.name AS workspace_name, g.created_at, (SELECT json_group_array(p.name) FROM projects p JOIN json_each(g.project_ids) j ON j.value = p.id WHERE p.workspace_id = g.workspace_id AND p.deleted_at IS NULL) AS project_names FROM oauth_grants g JOIN oauth_clients c ON c.id = g.client_id JOIN workspaces w ON w.id = g.workspace_id JOIN memberships m ON m.workspace_id = w.id AND m.user_id = g.user_id WHERE g.user_id = $1 AND g.revoked_at IS NULL AND w.deleted_at IS NULL ORDER BY g.created_at DESC"
         }
         Backend::Postgres => {
-            "SELECT g.id, c.name AS client_name, w.name AS workspace_name, g.created_at, (SELECT COALESCE(json_agg(p.name)::text, '[]') FROM projects p JOIN jsonb_array_elements_text(g.project_ids::jsonb) AS j(value) ON j.value = p.id WHERE p.workspace_id = g.workspace_id AND p.deleted_at IS NULL) AS project_names FROM oauth_grants g JOIN oauth_clients c ON c.id = g.client_id JOIN workspaces w ON w.id = g.workspace_id JOIN memberships m ON m.workspace_id = w.id AND m.user_id = g.user_id WHERE g.user_id = $1 AND g.revoked_at IS NULL AND w.deleted_at IS NULL ORDER BY g.created_at DESC"
+            "SELECT g.id, g.mcp_scopes, c.name AS client_name, w.name AS workspace_name, g.created_at, (SELECT COALESCE(json_agg(p.name)::text, '[]') FROM projects p JOIN jsonb_array_elements_text(g.project_ids::jsonb) AS j(value) ON j.value = p.id WHERE p.workspace_id = g.workspace_id AND p.deleted_at IS NULL) AS project_names FROM oauth_grants g JOIN oauth_clients c ON c.id = g.client_id JOIN workspaces w ON w.id = g.workspace_id JOIN memberships m ON m.workspace_id = w.id AND m.user_id = g.user_id WHERE g.user_id = $1 AND g.revoked_at IS NULL AND w.deleted_at IS NULL ORDER BY g.created_at DESC"
         }
     };
     let rows = sqlx::query(query)
         .bind(user.to_string())
         .fetch_all(state.database.pool())
         .await?;
-    let items: Vec<_> = rows.into_iter().map(|row| json!({"id": row.get::<String, _>("id"), "client_name": row.get::<String, _>("client_name"), "workspace_name": row.get::<String, _>("workspace_name"), "scope": SCOPE, "project_names": serde_json::from_str::<Value>(row.get("project_names")).unwrap_or_else(|_| json!([])), "created_at": row.get::<i64, _>("created_at")})).collect();
+    let items: Vec<_> = rows.into_iter().map(|row| json!({"id": row.get::<String, _>("id"), "client_name": row.get::<String, _>("client_name"), "workspace_name": row.get::<String, _>("workspace_name"), "scope": granted_scopes(row.get("mcp_scopes")), "project_names": serde_json::from_str::<Value>(row.get("project_names")).unwrap_or_else(|_| json!([])), "created_at": row.get::<i64, _>("created_at")})).collect();
     Ok(Json(json!({"items": items})))
 }
 

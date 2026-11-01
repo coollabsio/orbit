@@ -324,6 +324,15 @@ impl App {
                         Arc::new(ApiTokenRepository::new(database.clone())),
                         Arc::new(TaskRepository::new(database.clone())),
                     )
+                    .with_content(
+                        Arc::new(crate::repositories::pages::PageRepository::new(
+                            database.clone(),
+                        )),
+                        Arc::new(crate::repositories::chat::ChatRepository::new(
+                            database.clone(),
+                            attachment_state.uploads.clone(),
+                        )),
+                    )
                     .with_oauth(oauth.clone()),
                     &config.http.public_origin,
                 ),

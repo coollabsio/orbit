@@ -445,9 +445,36 @@ impl From<FilterError> for TaskError {
 #[derive(Clone)]
 pub struct TaskRepository {
     database: Database,
+    project_grant: Option<Vec<Id>>,
 }
 
 impl TaskRepository {
+    pub fn with_project_grant(&self, projects: Vec<Id>) -> Self {
+        Self {
+            database: self.database.clone(),
+            project_grant: Some(projects),
+        }
+    }
+    async fn check_project_grant(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+        workspace: Id,
+        task: Id,
+    ) -> Result<(), TaskError> {
+        let Some(grant) = &self.project_grant else {
+            return Ok(());
+        };
+        let projects: Vec<String> = sqlx::query_scalar("WITH RECURSIVE edges(a, b) AS (SELECT id, parent_task_id FROM tasks WHERE workspace_id = $2 AND parent_task_id IS NOT NULL UNION SELECT parent_task_id, id FROM tasks WHERE workspace_id = $2 AND parent_task_id IS NOT NULL), related(id) AS (SELECT id FROM tasks WHERE id = $1 AND workspace_id = $2 UNION SELECT e.b FROM edges e JOIN related r ON e.a = r.id) SELECT DISTINCT project_id FROM tasks WHERE id IN (SELECT id FROM related)").bind(task.to_string()).bind(workspace.to_string()).fetch_all(&mut **tx).await?;
+        if projects.is_empty()
+            || projects
+                .iter()
+                .any(|p| !grant.iter().any(|id| id.to_string() == *p))
+        {
+            return Err(TaskError::NotFound);
+        }
+        Ok(())
+    }
+
     pub async fn reconcile_github_attribution(
         &self,
         now: TimestampMillis,
@@ -518,7 +545,10 @@ impl TaskRepository {
 
     #[must_use]
     pub fn new(database: Database) -> Self {
-        Self { database }
+        Self {
+            database,
+            project_grant: None,
+        }
     }
 
     #[must_use]
@@ -1473,6 +1503,13 @@ impl TaskRepository {
         }
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
+        if self
+            .project_grant
+            .as_ref()
+            .is_some_and(|g| !g.contains(&input.project_id) || input.parent_task_id.is_some())
+        {
+            return Err(TaskError::NotFound);
+        }
         ensure_trial_capacity(&self.database, &mut tx, workspace_id, TrialLimit::Tasks, 1).await?;
         validate_project_status(&mut tx, workspace_id, input.project_id, input.status_id).await?;
         if task_relations::status_category_in_tx(&mut tx, workspace_id, input.status_id).await?
@@ -2013,6 +2050,8 @@ impl TaskRepository {
         };
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
+        self.check_project_grant(&mut tx, workspace_id, update.id)
+            .await?;
         let before = sub_issues::snapshot_in_tx(&mut tx, update.id).await?;
         let task_before = task_in_tx(&mut tx, workspace_id, update.id, false).await?;
         let blocks =
@@ -2212,6 +2251,8 @@ impl TaskRepository {
     ) -> Result<(), TaskError> {
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
+        self.check_project_grant(&mut tx, workspace_id, task_id)
+            .await?;
         let current = task_in_tx(&mut tx, workspace_id, task_id, false).await?;
         check_version(expected_version, current.version, &current)?;
         let descendants = sub_issues::live_descendants(&mut *tx, task_id).await?;

@@ -763,3 +763,75 @@ async fn a_full_registry_prunes_unused_clients_before_it_refuses() {
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert_eq!(body["error"], "temporarily_unavailable");
 }
+
+#[tokio::test]
+async fn optional_scopes_need_consent_and_survive_refresh() {
+    use orbit_server::repositories::api_tokens::ApiTokenScope;
+    let f = Fixture::new().await;
+    let client = f.register().await;
+    let id = f.pending(&client).await;
+    let (_, consent) = f
+        .send(
+            "GET",
+            &format!("/api/v1/oauth/consent/{id}"),
+            json!({}),
+            true,
+        )
+        .await;
+    let (status, approval) = f.send("POST", &format!("/api/v1/oauth/consent/{id}"), json!({"approved": true, "csrf_token": consent["csrf_token"], "workspace_id": f.workspace, "project_ids": [f.project], "scopes": ["tasks:write", "docs:read", "chat:read"]}), true).await;
+    assert_eq!(status, StatusCode::OK, "{approval}");
+    let callback = url::Url::parse(approval["redirect_uri"].as_str().unwrap()).unwrap();
+    let code = callback
+        .query_pairs()
+        .find(|(k, _)| k == "code")
+        .unwrap()
+        .1
+        .to_string();
+    let token = f.issue(&client, &code).await;
+    for scope in ["tasks:write", "docs:read", "chat:read"] {
+        assert!(token["scope"].as_str().unwrap().contains(scope));
+    }
+    let principal = f
+        .oauth
+        .authenticate(token["access_token"].as_str().unwrap())
+        .await
+        .ok()
+        .flatten()
+        .unwrap();
+    for scope in [
+        ApiTokenScope::Read,
+        ApiTokenScope::Write,
+        ApiTokenScope::DocsRead,
+        ApiTokenScope::ChatRead,
+    ] {
+        assert!(principal.scopes.contains(&scope));
+    }
+    let (status, refreshed) = f
+        .exchange(&[
+            ("grant_type", "refresh_token"),
+            ("client_id", &client),
+            ("refresh_token", token["refresh_token"].as_str().unwrap()),
+        ])
+        .await;
+    assert_eq!(status, StatusCode::OK, "{refreshed}");
+    assert_eq!(refreshed["scope"], token["scope"]);
+    let readonly_code = f.code(&client).await;
+    let readonly = f.issue(&client, &readonly_code).await;
+    let principal = f
+        .oauth
+        .authenticate(readonly["access_token"].as_str().unwrap())
+        .await
+        .ok()
+        .flatten()
+        .unwrap();
+    assert_eq!(principal.scopes, vec![ApiTokenScope::Read]);
+    let (status, _) = f
+        .exchange(&[
+            ("grant_type", "refresh_token"),
+            ("client_id", &client),
+            ("refresh_token", readonly["refresh_token"].as_str().unwrap()),
+            ("scope", "tasks:write"),
+        ])
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}

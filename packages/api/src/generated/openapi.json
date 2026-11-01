@@ -35422,7 +35422,9 @@
         "type": "string",
         "enum": [
           "read",
-          "write"
+          "write",
+          "docs:read",
+          "chat:read"
         ]
       },
       "AttachmentComment": {

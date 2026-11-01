@@ -637,6 +637,10 @@ async fn put_member_note(
 enum ApiTokenScope {
     Read,
     Write,
+    #[serde(rename = "docs:read")]
+    DocsRead,
+    #[serde(rename = "chat:read")]
+    ChatRead,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -697,6 +701,11 @@ async fn create_api_token(
         || name.chars().count() > 100
         || project_ids.is_empty()
         || body.scopes.is_empty()
+        || (body.service_account
+            && body
+                .scopes
+                .iter()
+                .any(|s| matches!(s, ApiTokenScope::DocsRead | ApiTokenScope::ChatRead)))
     {
         return Err(ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -715,6 +724,16 @@ async fn create_api_token(
         .scopes
         .iter()
         .any(|scope| matches!(scope, ApiTokenScope::Write));
+    let mcp_scopes = body
+        .scopes
+        .iter()
+        .filter_map(|s| match s {
+            ApiTokenScope::DocsRead => Some("docs:read"),
+            ApiTokenScope::ChatRead => Some("chat:read"),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
     let now = TimestampMillis::now();
     let expires_at = match body.expires_in_days {
         None => None,
@@ -734,7 +753,7 @@ async fn create_api_token(
     };
     let issued = state
         .api_tokens
-        .create(
+        .create_scoped(
             workspace_id,
             session.user.id,
             name.to_owned(),
@@ -745,6 +764,7 @@ async fn create_api_token(
             expires_at,
             request_id_value(request_id.as_ref()),
             now,
+            &mcp_scopes,
         )
         .await
         .map_err(|error| api_token_problem(error, &instance, request_id.as_ref()))?;

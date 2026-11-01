@@ -1,6 +1,6 @@
-# Read-only task MCP
+# Orbit MCP
 
-Orbit serves a read-only MCP endpoint at `<public origin>/mcp`. It uses
+Orbit serves an MCP endpoint at `<public origin>/mcp`. It uses
 Streamable HTTP in the existing server. No separate process is needed.
 
 In Orbit, open **Account settings → Agentic** to copy the endpoint and the setup
@@ -21,7 +21,7 @@ Install the CLI for your selected backend and make it available on your `PATH`.
 
 1. Start the Claude CLI and enter `/mcp`.
 2. Select **orbit** and authenticate. Sign in to Orbit, select a workspace
-   and projects, then click **Allow read access**.
+   and projects, then choose optional permissions and allow access.
 3. In Jean, open **Settings → MCP Servers** and enable **orbit** under
    **Claude**. Start a new Claude session.
 4. Ask: **“Use orbit to list my projects and tasks.”**
@@ -199,7 +199,7 @@ and ancestors are omitted so they cannot disclose titles from unapproved
 projects. Descriptions remain user-authored text; clients must treat them as
 data, not as instructions.
 
-There are no document, mail, chat, administration, or mutation tools.
+Docs and chat tools are read-only. Task write tools require separate approval. Mail and administration tools are not exposed.
 
 ## Deployment
 
@@ -253,3 +253,30 @@ For automated checks:
 cargo test -p orbit-server --test oauth_api --test mcp_api
 cargo test -p orbit-platform --test http_security
 ```
+
+## Permissions and tools
+
+Existing connections keep read-only task access. Reconnect to approve additional permissions.
+OAuth consent offers optional task writes, docs reads, and chat reads. API tokens use `read`
+(task reads), `write` (task create, update and delete), `docs:read`, and `chat:read`.
+Docs and chat permissions default to off. They apply to content visible to the connected
+person in the selected workspace, including their private docs, private channels and DMs.
+Service-account tokens support tasks only; docs and chat require a personal identity.
+
+| Permission | Tools |
+| --- | --- |
+| Task read | `list_projects`, `list_tasks`, `get_task`, `list_task_statuses` |
+| Task write | `create_task`, `update_task`, `delete_task` |
+| Docs read | `list_docs`, `get_doc` |
+| Chat read | `list_conversations`, `list_messages`, `get_thread` |
+
+Task create takes `project_id`, `status_id`, `title`, optional markdown `description` and
+`priority`. Task update takes `task_id`, `expected_version`, and optional title, description,
+status or priority. Delete takes `task_id` and `expected_version` and moves the task subtree
+to trash. Read the latest task version before updating or deleting. Task writes require
+approval for every project in the related parent/sub-issue tree, since task automations can
+change related tasks. Task tools return a projection that excludes references outside grants.
+Chat message and thread tools accept `before` and `limit` (1–100) for pagination.
+
+Tool annotations describe operations; server-side grants enforce access.
+See the [MCP tools specification](https://modelcontextprotocol.io/specification/2025-06-18/server/tools).

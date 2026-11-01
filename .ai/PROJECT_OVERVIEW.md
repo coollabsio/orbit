@@ -18,7 +18,7 @@ These routes use the production API and the database:
 
 Mail has no backend yet. Its UI in `features/mail` uses mock data, and `/mail` redirects to `/tasks`. `mail.rs` on the server sends only account email (invitations, registration, recovery).
 
-AI: there is no built-in assistant yet. AI clients read projects and tasks through the read-only MCP endpoint (`/mcp`, see `docs/mcp.md`).
+AI: there is no built-in assistant yet. AI clients use tasks and read docs and chat through the scoped MCP endpoint (`/mcp`, see `docs/mcp.md`).
 
 ## Runtime shape
 

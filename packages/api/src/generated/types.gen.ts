@@ -74,7 +74,7 @@ export type ApiTokenRecord = {
     token_prefix: string;
 };
 
-export type ApiTokenScope = 'read' | 'write';
+export type ApiTokenScope = 'read' | 'write' | 'docs:read' | 'chat:read';
 
 export type AttachmentComment = {
     attachments: Array<AttachmentRecord>;
