@@ -911,3 +911,65 @@ async fn docs_and_chat_require_explicit_scopes_and_never_expose_write_tools() {
     let denied = f.tool("get_doc", json!({"page_id": Id::new_v7()})).await;
     assert_eq!(denied["result"]["isError"], true, "{denied}");
 }
+
+#[tokio::test]
+async fn task_writes_are_refused_in_a_read_only_cloud_workspace() {
+    let f = Fixture::new().await;
+    sqlx::query("UPDATE api_tokens SET can_write = 1 WHERE id = $1")
+        .bind(f.token_id.to_string())
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    // Not the exempt root workspace and past its trial, so without a subscription it is read-only.
+    sqlx::query("UPDATE workspaces SET created_at = 0, billing_exempt = 0 WHERE id = $1")
+        .bind(f.workspace.to_string())
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    let _billing = orbit_server::billing::Billing::new(
+        orbit_platform::BillingConfig::new(
+            orbit_platform::Secret::new("sk_test_unused"),
+            orbit_platform::Secret::new("whsec_unused"),
+            vec![],
+        ),
+        (*f.database).clone(),
+        "https://orbit.test",
+    );
+    let current = f.tasks.get_task(f.workspace, f.task, f.user).await.unwrap();
+    let calls = [
+        (
+            "create_task",
+            json!({"project_id": f.project, "status_id": current.status_id, "title": "Created"}),
+        ),
+        (
+            "update_task",
+            json!({"task_id": f.task, "expected_version": current.version, "title": "Changed"}),
+        ),
+        (
+            "delete_task",
+            json!({"task_id": f.task, "expected_version": current.version}),
+        ),
+    ];
+    for (name, arguments) in calls {
+        let refused = f.tool(name, arguments).await;
+        assert_eq!(refused["result"]["isError"], true, "{name}: {refused}");
+        assert!(
+            refused.to_string().contains("read-only"),
+            "{name}: {refused}"
+        );
+    }
+    let after = f.tasks.get_task(f.workspace, f.task, f.user).await.unwrap();
+    assert_eq!(after.version, current.version);
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM tasks WHERE workspace_id = $1")
+        .bind(f.workspace.to_string())
+        .fetch_one(f.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(count, 2);
+    // Reads stay open.
+    let read = f.tool("get_task", json!({"task_id": f.task})).await;
+    assert_eq!(
+        read["result"]["structuredContent"]["title"],
+        "Approved task"
+    );
+}

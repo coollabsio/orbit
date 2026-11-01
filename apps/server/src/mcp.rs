@@ -21,9 +21,12 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+use crate::billing::WorkspaceAccess;
+use crate::billing::guard::READ_ONLY_DETAIL;
 use crate::repositories::api_tokens::{
     ApiTokenError, ApiTokenPrincipal, ApiTokenRepository, ApiTokenScope,
 };
+use crate::repositories::billing::write_access;
 use crate::repositories::task_filter::{
     Condition, FilterField, FilterGroup, FilterNode, FilterOperator, GroupOp, ShowCompleted,
     SubIssuesDisplay,
@@ -460,6 +463,17 @@ impl TaskTools {
                 "Connection lacks the required permission",
                 None,
             ));
+        }
+        if required_scope(&request.name) == ApiTokenScope::Write {
+            match write_access(self.tasks.database(), principal.workspace_id).await {
+                Ok(WorkspaceAccess::ReadOnly) => {
+                    return Ok(CallToolResult::error(vec![ContentBlock::text(
+                        READ_ONLY_DETAIL,
+                    )]));
+                }
+                Ok(_) => {}
+                Err(_) => return Err(ErrorData::internal_error("Billing is unavailable", None)),
+            }
         }
         let unavailable =
             || CallToolResult::error(vec![ContentBlock::text("Resource is not available")]);
