@@ -21,6 +21,7 @@ export function AgenticPage() {
               <p className="text-xs text-muted-foreground">{entry.signIn}</p>
             </div>
           ))}
+          <p className="text-xs text-muted-foreground">For a remote server, run claude mcp login orbit --no-browser or codex mcp login orbit --no-browser. Open the printed link in your browser, select “Client runs on a remote server”, then copy the callback URL into your terminal.</p>
           <p className="text-xs text-muted-foreground">
             A client that cannot sign in with OAuth can send an API token with selected permissions instead. A workspace admin creates it in{' '}
             <Link to="/settings/api-tokens" className="text-foreground underline underline-offset-2">Settings → API tokens</Link>.

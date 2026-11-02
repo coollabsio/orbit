@@ -33,6 +33,7 @@ export default function AgenticScreen() {
               <Text className="text-xs text-muted-foreground">{entry.signIn}</Text>
             </View>
           ))}
+          <Text className="text-xs text-muted-foreground">For a remote server, run claude mcp login orbit --no-browser or codex mcp login orbit --no-browser. Open the printed link in your browser, select “Client runs on a remote server”, then copy the callback URL into your terminal.</Text>
           <Text className="text-xs text-muted-foreground">A client that cannot sign in with OAuth can send an API token with selected permissions instead. A workspace admin creates it in the web app, in Settings → API tokens.</Text>
         </View>
       </SettingsCard>

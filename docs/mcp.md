@@ -91,11 +91,24 @@ grok mcp doctor orbit
 
 No fixed callback port is required. Let the client choose its callback port.
 If the CLI runs on a remote server and your browser runs on your computer,
-the browser must still reach the CLI's loopback callback. Forward the port
-shown in the callback URL through SSH, or use an existing remote callback
-forwarding method. Tailscale access to Orbit alone does not forward this
-callback. If remote OAuth cannot be completed, use the read-only API-token
-alternative.
+start sign-in with manual callback entry:
+
+```bash
+claude mcp login orbit --no-browser
+# or
+codex mcp login orbit --no-browser
+```
+
+Open the printed authorization link in your browser. On Orbit's consent page,
+select **Client runs on a remote server**, choose access, and approve.
+Click **Copy callback URL** and paste the full URL into the waiting terminal.
+The code expires after one minute; restart sign-in if it expires. If clipboard
+access fails, select the URL field and copy it manually. Denying access also
+shows a callback URL so the terminal can finish with the denial.
+
+Clients without manual callback entry still need SSH forwarding of their
+loopback callback port, or the API-token alternative. Tailscale access to Orbit
+alone does not forward a client's loopback callback.
 
 ### Disconnect and troubleshooting
 
