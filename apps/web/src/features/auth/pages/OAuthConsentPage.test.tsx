@@ -50,12 +50,12 @@ for (const approved of [true, false]) {
       await userEvent.click(await view.findByRole('option', { name: 'Workspace One' }))
       await userEvent.click(view.getByRole('checkbox', { name: 'Project One' }))
     }
-    fireEvent.click(view.getByRole('button', { name: approved ? 'Allow read access' : 'Deny', exact: true }))
+    fireEvent.click(view.getByRole('button', { name: approved ? 'Allow read access' : 'Deny' }))
     const field = await view.findByRole('textbox', { name: 'Callback URL' }) as HTMLTextAreaElement
     expect(field.value).toBe(callback)
     expect(window.location.pathname).toBe('/oauth/consent')
     expect(body).toEqual({ csrf_token: 'nonce', approved, workspace_id: approved ? 'workspace-1' : null, project_ids: approved ? ['project-1'] : [], scopes: [] })
-    expect(view.queryAllByRole('button', { name: 'Allow read access', exact: true }).length).toBe(0)
+    expect(view.queryAllByRole('button', { name: 'Allow read access' }).length).toBe(0)
     const clipboard = navigator.clipboard
     const originalWrite = clipboard.writeText
     try {
