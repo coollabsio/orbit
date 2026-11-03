@@ -1,31 +1,45 @@
+import { useState } from 'react'
 import { toast } from 'sonner'
-import type { WorkspaceBucketView } from '@orbit/api/generated/types.gen'
+import { cn } from 'cn'
+import type { StorageFile, WorkspaceBucketView } from '@orbit/api/generated/types.gen'
+import { canDeleteStorageFile, storageFileLabel, storageFilesPage } from '@orbit/api/storage'
 import { ApiProblem } from '@orbit/api/problem'
 import { confirmAction } from '@/components/common/confirmAction'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { Button } from '@/components/ui/button'
+import { Progress, ProgressLabel } from '@/components/ui/progress'
 import { Spinner } from '@/components/ui/spinner'
 import { S3BucketForm } from '@/features/settings/components/S3BucketForm'
-import { useRemoveWorkspaceBucket, useSaveWorkspaceBucket, useWorkspaceBucket } from '@/features/workspaces/api'
+import { useDeleteStorageFile, useRemoveWorkspaceBucket, useSaveWorkspaceBucket, useWorkspaceBucket, useWorkspaceStorage } from '@/features/workspaces/api'
 import { useCan } from '@/features/workspaces/permissions'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { formatBytes } from '@/lib/formatBytes'
 
-const TITLE = 'File storage'
+const TITLE = 'Own bucket'
 
 function problemText(error: unknown, fallback: string) {
   return error instanceof ApiProblem ? error.detail : fallback
 }
 
-/** The workspace's own S3 bucket for its files, instead of the installation's storage. */
+/** The workspace's storage use, which every member sees, and its own S3 bucket, which only admins manage. */
 export function FileStoragePage() {
   const { workspace } = useWorkspace()
   const canManage = useCan('storage.manage')
-  const bucket = useWorkspaceBucket(workspace.id, canManage)
-  if (!canManage) return <SettingsCard title={TITLE}><p className="m-0 text-muted-foreground">Only workspace owners and administrators can manage file storage.</p></SettingsCard>
+  return (
+    <>
+      <StorageCard workspaceId={workspace.id} />
+      {canManage ? <BucketSettings workspaceId={workspace.id} /> : null}
+    </>
+  )
+}
+
+/** The workspace's own S3 bucket for its files, instead of the installation's storage. */
+function BucketSettings({ workspaceId }: { workspaceId: string }) {
+  const bucket = useWorkspaceBucket(workspaceId, true)
   if (bucket.isPending) return <SettingsCard title={TITLE}><p role="status">Loading settings…</p></SettingsCard>
   if (bucket.isError) return <SettingsCard title={TITLE}><p role="alert">Settings could not be loaded. <Button variant="ghost" onClick={() => void bucket.refetch()}>Retry</Button></p></SettingsCard>
   // Remount on save so the form shows what the server stored.
-  return <BucketForm key={JSON.stringify(bucket.data.s3)} workspaceId={workspace.id} bucket={bucket.data} />
+  return <BucketForm key={JSON.stringify(bucket.data.s3)} workspaceId={workspaceId} bucket={bucket.data} />
 }
 
 function BucketForm({ workspaceId, bucket }: { workspaceId: string; bucket: WorkspaceBucketView }) {
@@ -78,5 +92,76 @@ function BucketForm({ workspaceId, bucket }: { workspaceId: string; bucket: Work
         {bucket.move_error ? <span role="alert" className="text-destructive">Moving files stopped: {bucket.move_error} Orbit tries again every ten minutes.</span> : null}
       </div>
     </S3BucketForm>
+  )
+}
+
+/** How much of its storage quota the workspace uses. Every member sees it; admins also see (and can delete) the
+    largest files. */
+function StorageCard({ workspaceId }: { workspaceId: string }) {
+  const [offset, setOffset] = useState(0)
+  const storage = useWorkspaceStorage(workspaceId, offset)
+  const files = storage.data?.largest_files ?? []
+  const page = storageFilesPage(offset, files.length, storage.data?.file_count ?? 0)
+  // a delete emptied the last page: go back one
+  if (storage.data && !storage.isPlaceholderData && files.length === 0 && page.previous !== null) setOffset(page.previous)
+  const deleteFile = useDeleteStorageFile(workspaceId)
+  const used = storage.data?.used_bytes ?? 0
+  const quota = storage.data?.quota_bytes ?? null
+  const percent = quota ? Math.min(100, (used / quota) * 100) : 0
+
+  async function remove(file: StorageFile) {
+    const { name } = storageFileLabel(file)
+    if (!await confirmAction({ title: `Delete ${name}?`, description: 'It frees its storage at once. Tasks, pages and messages that use it show “Deleted file” instead. You cannot undo this.', confirmLabel: 'Delete', danger: true })) return
+    deleteFile.mutate(file.id, { onError: () => toast.error('The file could not be deleted.') })
+  }
+
+  return (
+    <SettingsCard
+      title="Usage"
+      description="Files, emoji and stickers of this workspace. A file attached more than once counts once; a deleted file stops counting about a day after the trash is emptied."
+    >
+      {storage.isPending ? <p role="status" className="text-[13px] text-muted-foreground">Loading storage…</p> : null}
+      {storage.isError ? <p role="alert" className="text-[13px] text-destructive">Storage use could not be loaded.</p> : null}
+      {storage.data ? (
+        <Progress
+          value={quota ? percent : null}
+          className={cn('gap-2', !quota && '[&_[data-slot=progress-track]]:hidden', percent >= 90 && '[&_[data-slot=progress-indicator]]:bg-destructive')}
+        >
+          <ProgressLabel className="text-[13px] text-foreground">Used</ProgressLabel>
+          <span className="ml-auto text-[13px] text-muted-foreground tabular-nums">
+            {quota ? `${formatBytes(used)} of ${formatBytes(quota)}` : `${formatBytes(used)} · no limit`}
+          </span>
+        </Progress>
+      ) : null}
+      {storage.data?.largest_files.length ? (
+        <div className="mt-5 flex flex-col gap-2">
+          <h3 className="text-[13px] font-medium text-foreground">Largest files</h3>
+          <ul className="flex flex-col divide-y rounded-lg border">
+            {storage.data.largest_files.map((file) => {
+              const { name, where } = storageFileLabel(file)
+              return (
+                <li key={file.id} className="flex items-center gap-3 px-3 py-2">
+                  <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="truncate text-[13px] text-foreground">{name}</span>
+                    <span className="truncate text-xs text-muted-foreground">{where}</span>
+                  </div>
+                  <span className="shrink-0 text-[13px] text-muted-foreground tabular-nums">{formatBytes(file.byte_size)}</span>
+                  {canDeleteStorageFile(file) ? (
+                    <Button variant="ghost" size="sm" aria-label={`Delete ${name}`} disabled={deleteFile.isPending} onClick={() => void remove(file)}>Delete</Button>
+                  ) : null}
+                </li>
+              )
+            })}
+          </ul>
+          {page.previous !== null || page.next !== null ? (
+            <div className="flex items-center gap-2">
+              <span className="mr-auto text-xs text-muted-foreground tabular-nums">{page.label}</span>
+              <Button variant="outline" size="sm" disabled={page.previous === null || storage.isFetching} onClick={() => page.previous !== null && setOffset(page.previous)}>Previous</Button>
+              <Button variant="outline" size="sm" disabled={page.next === null || storage.isFetching} onClick={() => page.next !== null && setOffset(page.next)}>Next</Button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </SettingsCard>
   )
 }
