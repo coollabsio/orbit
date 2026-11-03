@@ -9,7 +9,6 @@ import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { Tip } from '@/components/common/Tip'
-import { RobotIcon } from '@/components/common/icons/RobotIcon'
 import { ColorDot } from '@/components/common/ColorDot'
 import { useQuery } from '@tanstack/react-query'
 import { useProjects } from '@/features/tasks/api/projects'
@@ -498,13 +497,15 @@ export function SidebarNav({
                   ) : (
                     <SidebarNavComingSoon key={link.to} icon={link.icon} label={link.label} />
                   ))}
-                  <SidebarSection label="Personal" collapsed={collapsed} />
-                  {/* connect AI clients (MCP); kept here so people find it without opening their account settings */}
-                  <SidebarNavItem to="/profile/agentic" icon={RobotIcon} label="Agentic" onClick={onNavigate} />
                   {/* the new UI keeps these in the Tasks area */}
-                  {contextual ? null : TASK_PRESETS.map((preset) => (
-                    <SidebarNavItem key={preset.view} to={taskViewPath(preset.view)} active={taskViewActive(preset.view)} icon={preset.icon} label={preset.label} onClick={onNavigate} />
-                  ))}
+                  {contextual ? null : (
+                    <>
+                      <SidebarSection label="Personal" collapsed={collapsed} />
+                      {TASK_PRESETS.map((preset) => (
+                        <SidebarNavItem key={preset.view} to={taskViewPath(preset.view)} active={taskViewActive(preset.view)} icon={preset.icon} label={preset.label} onClick={onNavigate} />
+                      ))}
+                    </>
+                  )}
                   <SidebarSection label="Manage" collapsed={collapsed} />
                   <SidebarNavItem to="/settings" icon={Settings} label="Settings" onClick={onNavigate} />
                   {isRoot ? (

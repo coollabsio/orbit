@@ -225,18 +225,14 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
   const onTasks = pathname === '/tasks' || pathname.startsWith('/tasks/')
   const onSettings = pathname === '/settings' || pathname.startsWith('/settings/')
   const onAdmin = pathname.startsWith('/settings/admin')
-  const onAgentic = pathname === '/settings/agentic'
   const onActivity = pathname === '/activity'
   const taskView = (name: string) => pathname === '/tasks' && view === name
   const workspaceLinks: NavLink[] = [
     { label: 'Home', icon: 'home', href: '/', active: pathname === '/' },
     { label: 'Tasks', icon: 'tasks', href: tasksHref({ project }, {}), active: onTasks && !view },
   ]
-  const personal: NavLink[] = [
-    { label: 'Agentic', icon: 'robot', href: '/settings/agentic', active: onAgentic },
-    // the new UI keeps the task presets in the Tasks area
-    ...(newUi ? [] : TASK_PRESETS.map((preset) => ({ label: preset.label, icon: preset.icon, href: tasksHref({ project }, { view: preset.view }), active: taskView(preset.view) }))),
-  ]
+  // the new UI keeps the task presets in the Tasks area
+  const personal: NavLink[] = newUi ? [] : TASK_PRESETS.map((preset) => ({ label: preset.label, icon: preset.icon, href: tasksHref({ project }, { view: preset.view }), active: taskView(preset.view) }))
   const dark = scheme === 'dark'
 
   return (
@@ -305,12 +301,12 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
               <NavRow link={{ label: 'Docs', icon: 'docs', href: '/docs', active: pathname.startsWith('/docs') }} onPress={() => go('/docs')} />
               <NavRow link={{ label: 'Chat', icon: 'chat', href: '/chat', active: pathname.startsWith('/chat'), badge: chatBadge.count, dot: chatBadge.unread }} onPress={() => go('/chat')} />
               <NavRow link={{ label: 'Mail', icon: 'mail', href: '/', active: false }} comingSoon />
-              <Section label="Personal" />
+              {personal.length > 0 ? <Section label="Personal" /> : null}
               {personal.map((link) => (
                 <NavRow key={link.label} link={link} onPress={() => go(link.href)} />
               ))}
               <Section label="Manage" />
-              <NavRow link={{ label: 'Settings', icon: 'settings', href: '/settings', active: onSettings && !onAdmin && !onAgentic }} onPress={() => go('/settings')} />
+              <NavRow link={{ label: 'Settings', icon: 'settings', href: '/settings', active: onSettings && !onAdmin }} onPress={() => go('/settings')} />
               {user.installation_admin ? (
                 <>
                   {/* the installation, not the workspace: it sits apart at the bottom */}

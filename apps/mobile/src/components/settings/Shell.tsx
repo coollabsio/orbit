@@ -23,6 +23,7 @@ export interface SettingsNavItem {
 export const WORKSPACE_NAV: readonly SettingsNavItem[] = [
   { href: '/settings', label: 'General', icon: 'settings' },
   { href: '/settings/file-storage', label: 'File storage', icon: 'cloudConnection', permission: 'storage.manage' },
+  { href: '/settings/workspace-agentic', label: 'Agentic', icon: 'robot' },
   { href: '/settings/members', label: 'Members', icon: 'people' },
 ]
 

@@ -148,6 +148,7 @@ export default function App() {
                 <Route path="emoji" element={<EmojiPage />} />
                 <Route path="stickers" element={<StickersPage />} />
                 <Route path="github" element={<GithubPage />} />
+                <Route path="agentic" element={<AgenticPage />} />
                 <Route path="billing" element={<BillingPage />} />
                 <Route path="export" element={<ExportPage />} />
                 <Route path="danger-zone" element={<DangerZonePage />} />
