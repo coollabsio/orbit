@@ -140,7 +140,7 @@ orbit backup verify <backup-id>
 Restore procedure:
 
 1. Stop Orbit. Restore refuses a database owned by a running process.
-2. Copy the current data directory somewhere safe.
+2. Restore first backs up the current data and prints that backup's ID: restore it to undo the restore. If the database is too damaged to back up, restore stops; copy the data directory by hand and add `--no-safety-backup`.
 3. Run `orbit backup verify <backup-id>`.
 4. Run `orbit backup restore <backup-id>`. A snapshot restores only into the same kind of database (SQLite or Postgres) it came from.
 5. Run `orbit migrate status`.

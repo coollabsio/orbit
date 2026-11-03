@@ -123,6 +123,19 @@ pub fn apply(
     Ok(())
 }
 
+/// A new storage with the bucket saved in Admin → Storage, for a command that runs without the server.
+pub async fn saved_storage(
+    database: &Database,
+    app_key: Option<&[u8; 32]>,
+) -> Result<ObjectStorage, String> {
+    let saved = load_saved(database)
+        .await
+        .map_err(|error| error.to_string())?;
+    let storage = ObjectStorage::default();
+    apply(&storage, &saved, app_key)?;
+    Ok(storage)
+}
+
 /// The storage the server uses and the settings it applied, so the server can apply what another server saved
 /// ([`reload_saved`]).
 struct Applied {

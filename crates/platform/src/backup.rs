@@ -204,8 +204,28 @@ impl BackupService {
         database: &Database,
         cancellation: CancellationToken,
     ) -> Result<BackupSnapshot, BackupError> {
+        let snapshot = self.create_stored(database, cancellation.clone()).await?;
+        self.apply_retention(cancellation).await?;
+        Ok(snapshot)
+    }
+
+    /// A snapshot of the data that a restore is about to replace. Retention does not run, so it cannot remove
+    /// the snapshot that is restored next.
+    pub async fn create_before_restore(
+        &self,
+        database: &Database,
+    ) -> Result<BackupSnapshot, BackupError> {
+        self.create_stored(database, CancellationToken::new()).await
+    }
+
+    /// A snapshot, moved to S3 when backups go there.
+    async fn create_stored(
+        &self,
+        database: &Database,
+        cancellation: CancellationToken,
+    ) -> Result<BackupSnapshot, BackupError> {
         let mut snapshot = self
-            .create_kind(database, BackupKind::Snapshot, cancellation.clone())
+            .create_kind(database, BackupKind::Snapshot, cancellation)
             .await?;
         if let Some(bucket) = self.storage.backup_bucket() {
             // On failure the local snapshot stays, so the backup is not lost.
@@ -213,7 +233,6 @@ impl BackupService {
             remove_dir_all(&snapshot.path)?;
             snapshot.in_object_storage = true;
         }
-        self.apply_retention(cancellation).await?;
         Ok(snapshot)
     }
 

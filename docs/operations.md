@@ -66,6 +66,8 @@ Retention, reconciliation, scheduler, or integrity supervision failure cancels n
 
 ## Restore rollback or ownership error
 
+Before it replaces anything, `orbit backup restore <id>` backs up the current data (in S3 when backups go there) and prints the ID of that backup: restore that ID to undo the restore. If the current database cannot be backed up, nothing is restored; copy the data by hand, then add `--no-safety-backup`.
+
 Restore refuses an active database ownership lock (the `<database>.lock` file next to the database; do not delete it while Orbit runs). Stop every Orbit process that uses that file. If restore reports rollback failure, do not start Orbit. Preserve the target and rollback paths named by the error and recover from a separate verified snapshot.
 
 On Postgres (`ORBIT_DATABASE_URL`), the ownership lock is a Postgres advisory lock. Each server holds it shared; `backup restore`, `migrate run --reset` and `db-reset` need it exclusive, so stop every Orbit server that uses the database first. A server whose lock connection drops (network, Postgres failover) stops with `lost the database ownership lock`; start it again. A Postgres snapshot holds one `COPY` file per table (`database/<table>.copy`) instead of `database.sqlite`. Restore replaces every table in one transaction: if it fails, the database is unchanged. A snapshot restores only into the same kind of database it came from.
@@ -282,7 +284,14 @@ The root user saves an S3-compatible bucket (AWS S3, Cloudflare R2, MinIO, …) 
 
 With attachments in S3, a backup holds the database (and the files still on this server), not the bucket's files. So Orbit does not delete an unused file from the bucket at once: it keeps it 40 days, longer than any kept backup, so a restored older database still finds its files.
 
-When the server is lost, restore on a new server from the bucket. The command line reads the bucket from environment variables, not from the (lost) database:
+The `orbit backup` commands use the bucket saved in Admin → Storage and decrypt its secret with `ORBIT_APP_KEY`. With Postgres, or with SQLite on a server that still has its database, stop the servers and restore:
+
+```sh
+orbit backup list            # the last column says local or s3
+orbit backup restore <id>
+```
+
+When the database is lost too (an SQLite server is gone), restore on a new server and give the bucket in environment variables. They come before the saved bucket:
 
 ```sh
 export ORBIT_BACKUP_S3_ENDPOINT=https://s3.eu-central-1.amazonaws.com ORBIT_BACKUP_S3_BUCKET=orbit-files \
