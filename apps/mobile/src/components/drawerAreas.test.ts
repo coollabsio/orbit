@@ -49,6 +49,10 @@ describe('drawerSections', () => {
       { label: 'Data', items: [{ href: '/settings/admin/storage' }] },
       { label: 'Monitoring', items: [{ href: '/settings/admin/audit' }] },
     ])
+    expect(drawerSections('account', areas.account)).toEqual([
+      { label: 'Account', items: [{ href: '/settings/profile' }] },
+      { label: 'Preferences', items: [{ href: '/settings/appearance' }, { href: '/settings/notifications' }] },
+    ])
   })
 })
 
