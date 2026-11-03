@@ -19,11 +19,29 @@ import { ACCOUNT_NAV, ADMIN_NAV, allowedNav, WORKSPACE_NAV } from './settings/Sh
 
 const DrawerContext = createContext<(() => void) | null>(null)
 
-/** The ☰ button of every tab header: opens the sidebar drawer, like the web's mobile topbar. */
+/** The ☰ button of every tab header, and the Activity bell beside it: like the web's phone top bar. */
 export function MenuButton() {
   const { colors } = useTheme()
   const open = use(DrawerContext)
-  return <IconButton icon="menu" label="Menu" iconSize={18} color={alpha(colors.mutedForeground, 0.7)} onPress={open ?? undefined} />
+  const pathname = usePathname()
+  const unread = (useUnreadNotifications().data?.length ?? 0) > 0
+  const onActivity = pathname === '/activity'
+  return (
+    <>
+      <IconButton icon="menu" label="Menu" iconSize={18} color={alpha(colors.mutedForeground, 0.7)} onPress={open ?? undefined} />
+      <Pressable
+        accessibilityRole="link"
+        accessibilityLabel={unread ? 'Activity, unread' : 'Activity'}
+        accessibilityState={{ selected: onActivity }}
+        onPress={() => router.navigate('/activity')}
+        hitSlop={6}
+        className={`size-7 items-center justify-center rounded-md active:bg-muted ${onActivity ? 'bg-muted' : ''}`}
+      >
+        <Icon name="bell" size={17} color={onActivity ? colors.foreground : alpha(colors.mutedForeground, 0.7)} />
+        {unread ? <View className="absolute top-0.5 right-0.5 size-2 rounded-full bg-primary" /> : null}
+      </Pressable>
+    </>
+  )
 }
 
 /** The tab roots: on a pushed screen the same edge swipe is iOS's back gesture. */
