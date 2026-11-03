@@ -21,14 +21,14 @@ function problemText(error: unknown, fallback: string) {
   return error instanceof ApiProblem ? error.detail : fallback
 }
 
-/** The workspace's storage use, which every member sees, and its own S3 bucket, which only admins manage. */
+/** The workspace's own S3 bucket, which only admins manage, and its storage use, which every member sees. */
 export function FileStoragePage() {
   const { workspace } = useWorkspace()
   const canManage = useCan('storage.manage')
   return (
     <>
-      <StorageCard workspaceId={workspace.id} />
       {canManage ? <BucketSettings workspaceId={workspace.id} /> : null}
+      <StorageCard workspaceId={workspace.id} />
     </>
   )
 }

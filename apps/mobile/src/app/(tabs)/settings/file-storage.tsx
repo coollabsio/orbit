@@ -34,15 +34,6 @@ export default function FileStorageScreen() {
       refreshing={storage.isRefetching || bucket.isRefetching}
       onRefresh={() => { void storage.refetch(); if (allowed) void bucket.refetch() }}
     >
-      <SettingsCard
-        title="Usage"
-        description="Files, emoji and stickers of this workspace. A file attached more than once counts once; a deleted file stops counting about a day after the trash is emptied."
-      >
-        {storage.data ? <StorageBar {...storageUse(storage.data)} /> : <Note error={storage.isError}>{storage.isError ? 'Storage use could not be loaded.' : 'Loading storage…'}</Note>}
-        {files.length ? (
-          <LargestFiles files={files} page={page} loading={storage.isFetching} onPage={setOffset} />
-        ) : null}
-      </SettingsCard>
       {!allowed ? null : bucket.data ? (
         <BucketCard key={workspace.id} view={bucket.data} />
       ) : (
@@ -57,6 +48,15 @@ export default function FileStorageScreen() {
           )}
         </SettingsCard>
       )}
+      <SettingsCard
+        title="Usage"
+        description="Files, emoji and stickers of this workspace. A file attached more than once counts once; a deleted file stops counting about a day after the trash is emptied."
+      >
+        {storage.data ? <StorageBar {...storageUse(storage.data)} /> : <Note error={storage.isError}>{storage.isError ? 'Storage use could not be loaded.' : 'Loading storage…'}</Note>}
+        {files.length ? (
+          <LargestFiles files={files} page={page} loading={storage.isFetching} onPage={setOffset} />
+        ) : null}
+      </SettingsCard>
     </SettingsShell>
   )
 }
