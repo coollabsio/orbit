@@ -195,7 +195,7 @@ function Shell() {
         </MenuSurfaceContext>
       </aside>
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background min-[900px]:floating:overflow-hidden min-[900px]:floating:rounded-lg min-[900px]:floating:border">
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-background min-[900px]:floating:overflow-hidden min-[900px]:floating:rounded-lg min-[900px]:floating:border">
         <ConnectionBanner live={live} />
         <MailServerBanner />
         <ReadOnlyBanner />
