@@ -1,7 +1,7 @@
 import { apiClient } from '@/api/client'
 import { uploadTaskAttachments } from '@orbit/api/generated/sdk.gen'
 import { taskAttachmentUrl } from '@/features/docs/editor/content'
-import { shrinkImage } from '@/lib/shrinkImage'
+import { shrinkUpload } from '@/lib/shrinkUpload'
 
 /**
  * Uploads a file placed in a task's description or a comment (paste, drop, slash menu, paperclip) as an inline
@@ -12,7 +12,7 @@ export async function uploadInlineFile(workspaceId: string, taskId: string, file
     client: apiClient,
     path: { workspace_id: workspaceId, task_id: taskId },
     query: { inline: '1' },
-    body: { file: await shrinkImage(file) },
+    body: { file: await shrinkUpload(file) },
     throwOnError: true,
   })
   return taskAttachmentUrl(workspaceId, taskId, data.id)
