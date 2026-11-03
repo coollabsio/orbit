@@ -13,6 +13,7 @@ test('Tasks opens the mobile sidebar with workspace selection without an extra h
     if (/\/views\/[^/]+\/favorite$|\/view-favorites\/order$/.test(path)) { await route.fulfill({ status: 204 }); return }
     let body: unknown = { items: [], next_cursor: null }
     if (path.endsWith('/views')) body = []
+    if (path.endsWith('/storage')) body = { file_count: 0, largest_files: [], used_bytes: 0, quota_bytes: null }
     if (path === '/api/v1/setup/status') body = { complete: true }
     if (path === '/api/v1/auth/me') body = { id: 'user-1', display_name: 'Test User', email: 'test@example.com' }
     if (path === '/api/v1/workspaces') body = workspaces
@@ -53,7 +54,7 @@ test('Tasks opens the mobile sidebar with workspace selection without an extra h
   await expect(page.getByRole('button', { name: 'Save Changes' })).toHaveCount(0)
   await page.getByLabel('Name', { exact: true }).fill('Draft name')
   await expect(page.getByRole('button', { name: 'Save Changes' })).toBeVisible()
-  const popup = page.locator('.unsaved-bar')
+  const popup = page.getByRole('status').filter({ hasText: 'You have unsaved changes.' })
   await expect.poll(async () => Math.round((await popup.boundingBox())?.y ?? -1)).toBe(12)
   await page.evaluate(() => {
     Object.defineProperty(window.visualViewport, 'height', { configurable: true, value: 440 })
@@ -62,7 +63,7 @@ test('Tasks opens the mobile sidebar with workspace selection without an extra h
     Object.defineProperty(window.visualViewport, 'width', { configurable: true, value: 350 })
     window.visualViewport!.dispatchEvent(new Event('resize'))
   })
-  await page.locator('.settings-scroll').evaluate((element) => { element.scrollTop = 240 })
+  await page.locator('.overflow-y-auto').filter({ has: page.getByLabel('Name', { exact: true }) }).last().evaluate((element) => { element.scrollTop = 240 })
   await expect.poll(async () => Math.round((await popup.boundingBox())?.y ?? -1)).toBe(192)
   await expect.poll(async () => Math.round((await popup.boundingBox())?.x ?? -1)).toBe(32)
   await expect.poll(async () => Math.round((await popup.boundingBox())?.width ?? -1)).toBe(326)
@@ -93,5 +94,5 @@ test('Tasks opens the mobile sidebar with workspace selection without an extra h
   await expect(page.getByRole('button', { name: 'Save Changes' })).toHaveCount(0)
   await expect(page.getByLabel('Name', { exact: true })).toHaveValue('Gamma renamed')
   await page.setViewportSize({ width: 1280, height: 844 })
-  await expect(page.locator('.app-sidebar').getByRole('button', { name: 'Workspace: Gamma renamed' })).toBeVisible()
+  await expect(page.locator('aside').first().getByRole('button', { name: 'Workspace: Gamma renamed' })).toBeVisible()
 })
