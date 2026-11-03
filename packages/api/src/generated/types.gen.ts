@@ -235,6 +235,45 @@ export type BackupCreated = {
     id: string;
 };
 
+/**
+ * A page or task in a backup snapshot.
+ */
+export type BackupItem = {
+    /**
+     * Pages: the sub-pages that `include_children` copies (one level). Always 0 for tasks.
+     */
+    child_count: number;
+    /**
+     * The item was in the trash when the backup was made.
+     */
+    deleted: boolean;
+    id: string;
+    kind: BackupItemKind;
+    /**
+     * Tasks: the number in the project.
+     */
+    number: number | null;
+    /**
+     * Pages: the parent page's title. `null` at the top level and for tasks.
+     */
+    parent_title: string | null;
+    /**
+     * Tasks: the project's name.
+     */
+    project_name: string | null;
+    title: string;
+    /**
+     * Unix milliseconds.
+     */
+    updated_at: number;
+};
+
+export type BackupItemKind = 'page' | 'task';
+
+export type BackupItemList = {
+    items: Array<BackupItem>;
+};
+
 export type BackupList = {
     items: Array<BackupSummary>;
 };
@@ -261,6 +300,22 @@ export type BackupSummary = {
 };
 
 export type BackupSummaryKind = 'snapshot' | 'pre_migration';
+
+/**
+ * A workspace in a backup snapshot.
+ */
+export type BackupWorkspace = {
+    id: string;
+    /**
+     * The workspace still exists and is not in the trash: only such a workspace can receive a restore.
+     */
+    live: boolean;
+    name: string;
+};
+
+export type BackupWorkspaceList = {
+    items: Array<BackupWorkspace>;
+};
 
 export type BillingCheckoutBody = {
     /**
@@ -2869,8 +2924,40 @@ export type ReplyToRecord = {
     sticker: boolean;
 };
 
+export type RestoreBackupItem = {
+    /**
+     * The item's id in the snapshot.
+     */
+    id: string;
+    /**
+     * Pages: also copy the sub-pages. Ignored for tasks.
+     */
+    include_children?: boolean;
+    kind: BackupItemKind;
+};
+
 export type RestoreBody = {
     expected_version: number;
+};
+
+/**
+ * The copy a restore made.
+ */
+export type RestoredItem = {
+    /**
+     * The id of the new page or task.
+     */
+    id: string;
+    kind: BackupItemKind;
+    /**
+     * Files of the item whose bytes were neither in the live workspace, the snapshot nor the blob store.
+     */
+    missing_files: number;
+    /**
+     * The web route of the new item (`/docs/<id>`, `/tasks/<KEY-12>`).
+     */
+    path: string;
+    title: string;
 };
 
 export type RoleBody = 'owner' | 'admin' | 'member';
@@ -4225,6 +4312,216 @@ export type DownloadBackupResponses = {
 };
 
 export type DownloadBackupResponse = DownloadBackupResponses[keyof DownloadBackupResponses];
+
+export type ListBackupWorkspacesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        backup_id: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/backups/{backup_id}/workspaces';
+};
+
+export type ListBackupWorkspacesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * backup_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * backup_unreadable
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * backup_unavailable
+     */
+    503: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type ListBackupWorkspacesError = ListBackupWorkspacesErrors[keyof ListBackupWorkspacesErrors];
+
+export type ListBackupWorkspacesResponses = {
+    200: BackupWorkspaceList;
+};
+
+export type ListBackupWorkspacesResponse = ListBackupWorkspacesResponses[keyof ListBackupWorkspacesResponses];
+
+export type ListBackupItemsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        backup_id: string;
+        workspace_id: string;
+    };
+    query: {
+        kind: BackupItemKind;
+        /**
+         * Only items whose title contains this text (any case).
+         */
+        q?: string;
+    };
+    url: '/api/v1/admin/backups/{backup_id}/workspaces/{workspace_id}/items';
+};
+
+export type ListBackupItemsErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * backup_not_found, workspace_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * backup_unreadable
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * backup_unavailable
+     */
+    503: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type ListBackupItemsError = ListBackupItemsErrors[keyof ListBackupItemsErrors];
+
+export type ListBackupItemsResponses = {
+    200: BackupItemList;
+};
+
+export type ListBackupItemsResponse = ListBackupItemsResponses[keyof ListBackupItemsResponses];
+
+export type RestoreBackupItemData = {
+    body: RestoreBackupItem;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        backup_id: string;
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/admin/backups/{backup_id}/workspaces/{workspace_id}/restore';
+};
+
+export type RestoreBackupItemErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * trial_limit_reached
+     */
+    402: WorkspaceProblem;
+    /**
+     * origin_forbidden, installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * backup_not_found, workspace_not_found, item_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch, project_missing, teamspace_missing
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large, storage_quota_exceeded
+     */
+    413: WorkspaceProblem;
+    /**
+     * backup_unreadable
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * backup_unavailable
+     */
+    503: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type RestoreBackupItemError = RestoreBackupItemErrors[keyof RestoreBackupItemErrors];
+
+export type RestoreBackupItemResponses = {
+    201: RestoredItem;
+};
+
+export type RestoreBackupItemResponse = RestoreBackupItemResponses[keyof RestoreBackupItemResponses];
 
 export type GetJobLimitsData = {
     body?: never;

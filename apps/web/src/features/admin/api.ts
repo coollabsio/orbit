@@ -1,8 +1,8 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
-import { changeUserEmail, createBackup, createRecoveryLink, deleteBackup, getInstanceSettings, getJobLimits, saveJobLimits, listAdminUsers, listBackups, listGlobalAudit, removeS3, removeSignInProvider, removeSmtp, resetTwoFactor, saveLimits, saveS3, saveSignInProvider, saveStorageOptions, setInstanceAdmin, startImageCompression, saveSmtp, sendTestEmail, setAccountSuspension, setRegistration } from '@orbit/api/generated/sdk.gen'
-import type { InstanceSettingsView, JobLimitsBody, LimitsView, Provider, S3Body, SignInProviderBody, SmtpBody, StorageOptionsBody } from '@orbit/api/generated/types.gen'
+import { changeUserEmail, createBackup, createRecoveryLink, deleteBackup, getInstanceSettings, getJobLimits, saveJobLimits, listAdminUsers, listBackupItems, listBackups, listBackupWorkspaces, restoreBackupItem, listGlobalAudit, removeS3, removeSignInProvider, removeSmtp, resetTwoFactor, saveLimits, saveS3, saveSignInProvider, saveStorageOptions, setInstanceAdmin, startImageCompression, saveSmtp, sendTestEmail, setAccountSuspension, setRegistration } from '@orbit/api/generated/sdk.gen'
+import type { BackupItemKind, InstanceSettingsView, JobLimitsBody, LimitsView, Provider, S3Body, SignInProviderBody, SmtpBody, StorageOptionsBody } from '@orbit/api/generated/types.gen'
 
 /** Accounts on this instance in cursor pages; `search` matches part of the name or email. Admins only. */
 export function useAdminUsers(search: string) {
@@ -129,6 +129,43 @@ export function useDeleteBackup() {
       await deleteBackup({ client: apiClient, throwOnError: true, path: { backup_id: backupId } })
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.backups }),
+  })
+}
+
+/** Workspaces in a backup. The first request for a backup in S3 waits while the server downloads and checks it. */
+export function useBackupWorkspaces(backupId: string) {
+  return useQuery({
+    queryKey: [...queryKeys.backups, backupId, 'workspaces'],
+    queryFn: async () => {
+      const { data } = await listBackupWorkspaces({ client: apiClient, throwOnError: true, path: { backup_id: backupId } })
+      return data.items
+    },
+    // A backup never changes.
+    staleTime: Infinity,
+  })
+}
+
+/** Pages or tasks of one workspace in a backup, newest first; `search` matches part of the title. */
+export function useBackupItems(backupId: string, workspaceId: string | null, kind: BackupItemKind, search: string) {
+  return useQuery({
+    queryKey: [...queryKeys.backups, backupId, 'workspaces', workspaceId, kind, search],
+    queryFn: async () => {
+      const { data } = await listBackupItems({ client: apiClient, throwOnError: true, path: { backup_id: backupId, workspace_id: workspaceId! }, query: { kind, q: search || undefined } })
+      return data.items
+    },
+    enabled: workspaceId !== null,
+    staleTime: Infinity,
+    placeholderData: keepPreviousData,
+  })
+}
+
+/** Copies a page (and, if asked, its sub-pages) or a task from a backup into the live workspace. */
+export function useRestoreBackupItem(backupId: string, workspaceId: string) {
+  return useMutation({
+    mutationFn: async (body: { kind: BackupItemKind; id: string; include_children: boolean }) => {
+      const { data } = await restoreBackupItem({ client: apiClient, throwOnError: true, path: { backup_id: backupId, workspace_id: workspaceId }, body })
+      return data
+    },
   })
 }
 

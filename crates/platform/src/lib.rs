@@ -24,7 +24,7 @@ pub use auth::{
 };
 pub use backup::{
     AttachmentMutationCoordinator, AttachmentMutationGuard, BackupError, BackupFile, BackupKind,
-    BackupManifest, BackupService, BackupSnapshot,
+    BackupManifest, BackupService, BackupSnapshot, SnapshotReader, SnapshotRow,
 };
 pub use config::{
     AppKey, BillingConfig, Config, ConfigError, DataConfig, EnvironmentMode, HttpConfig,

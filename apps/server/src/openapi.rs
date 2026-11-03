@@ -123,6 +123,9 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::workspace_routes::list_backups,
         crate::workspace_routes::download_backup,
         crate::workspace_routes::delete_backup,
+        crate::backup_item_routes::list_backup_workspaces,
+        crate::backup_item_routes::list_backup_items,
+        crate::backup_item_routes::restore_backup_item,
         crate::integration_routes::create_discord_event,
         crate::integration_routes::github_webhook,
         crate::integration_routes::github_manifest_callback,
@@ -758,6 +761,22 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "403", "installation_admin_required");
             add_code(&mut responses, "404", "backup_not_found");
         }
+        "list_backup_workspaces" | "list_backup_items" | "restore_backup_item" => {
+            add_code(&mut responses, "403", "installation_admin_required");
+            add_code(&mut responses, "404", "backup_not_found");
+            add_code(&mut responses, "422", "backup_unreadable");
+            add_code(&mut responses, "503", "backup_unavailable");
+            if operation_id != "list_backup_workspaces" {
+                add_code(&mut responses, "404", "workspace_not_found");
+            }
+            if operation_id == "restore_backup_item" {
+                add_code(&mut responses, "402", "trial_limit_reached");
+                add_code(&mut responses, "404", "item_not_found");
+                add_code(&mut responses, "409", "project_missing");
+                add_code(&mut responses, "409", "teamspace_missing");
+                add_code(&mut responses, "413", "storage_quota_exceeded");
+            }
+        }
         id if attachment_list_operation(id) => {
             add_code(&mut responses, "400", "invalid_cursor");
             add_code(&mut responses, "404", "attachment_not_found");
@@ -874,6 +893,8 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "save_storage_options"
             | "save_limits"
             | "save_job_limits"
+            | "list_backup_items"
+            | "restore_backup_item"
             | "create_workspace"
             | "rename_workspace"
             | "list_members"

@@ -3679,7 +3679,7 @@ fn description_markdown(blocks: &[Value]) -> String {
 }
 
 /// Blocks sent for a description: sanitized, with their markdown copy.
-fn description_from_blocks(
+pub(super) fn description_from_blocks(
     workspace_id: Id,
     task_id: Id,
     blocks: &[Value],

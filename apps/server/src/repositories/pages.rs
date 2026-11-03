@@ -73,14 +73,14 @@ pub enum PageSpace {
 }
 
 impl PageSpace {
-    fn teamspace_column(self) -> Option<String> {
+    pub(super) fn teamspace_column(self) -> Option<String> {
         match self {
             Self::Teamspace(id) => Some(id.to_string()),
             Self::Private(_) => None,
         }
     }
 
-    fn owner_column(self) -> Option<String> {
+    pub(super) fn owner_column(self) -> Option<String> {
         match self {
             Self::Teamspace(_) => None,
             Self::Private(owner) => Some(owner.to_string()),
@@ -2145,18 +2145,18 @@ fn copy_title(title: &str) -> String {
 }
 
 /// Rewrites references into a duplicated set of pages to their copies.
-struct Remap<'a> {
-    workspace_id: Id,
+pub(super) struct Remap<'a> {
+    pub(super) workspace_id: Id,
     /// Original page id → copy id.
-    pages: &'a HashMap<Id, Id>,
+    pub(super) pages: &'a HashMap<Id, Id>,
     /// (original page id, original file id) → (copy page id, copy file id).
-    files: &'a HashMap<(Id, Id), (Id, Id)>,
+    pub(super) files: &'a HashMap<(Id, Id), (Id, Id)>,
 }
 
 impl Remap<'_> {
     /// Walks block JSON: `pageId` props of `page` blocks, page-file URLs (image/file `url`
     /// props and anything else holding one) and `/docs/<id>` link targets. Text is left alone.
-    fn value(&self, value: &mut Value, key: Option<&str>) {
+    pub(super) fn value(&self, value: &mut Value, key: Option<&str>) {
         match value {
             Value::Array(items) => {
                 for item in items {
@@ -2186,7 +2186,7 @@ impl Remap<'_> {
     }
 
     /// The copy's URL for a file of a copied page or a `/docs/<id>` link to a copied page.
-    fn url(&self, url: &str) -> Option<String> {
+    pub(super) fn url(&self, url: &str) -> Option<String> {
         if let Some((workspace, page, file)) = parse_page_file_url(url) {
             if workspace != self.workspace_id {
                 return None;
@@ -2228,7 +2228,7 @@ fn insert_index(position: Option<i64>, len: usize) -> usize {
 
 /// Live siblings in `space` under `parent_id` (the space's root when `None`), excluding
 /// `exclude`, in order.
-async fn sibling_ids(
+pub(super) async fn sibling_ids(
     tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     space: PageSpace,
@@ -2251,7 +2251,7 @@ async fn sibling_ids(
     .collect()
 }
 
-async fn renumber(tx: &mut Transaction<'_, Any>, ids: &[Id]) -> Result<(), PageError> {
+pub(super) async fn renumber(tx: &mut Transaction<'_, Any>, ids: &[Id]) -> Result<(), PageError> {
     for (position, id) in ids.iter().enumerate() {
         let position = position as i64;
         sqlx::query("UPDATE pages SET position = $1 WHERE id = $2 AND position <> $3")

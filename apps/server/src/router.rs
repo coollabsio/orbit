@@ -11,6 +11,7 @@ use orbit_platform::{
 
 use crate::attachment_routes::{AttachmentState, attachment_router};
 use crate::auth_routes::{AuthState, auth_router};
+use crate::backup_item_routes::{BackupItemState, backup_item_router};
 use crate::chat_routes::{ChatState, chat_router};
 use crate::export_routes::{ExportState, export_router};
 use crate::import_routes::{ImportState, import_router};
@@ -32,6 +33,7 @@ pub struct ApiRoutes {
     pub oauth: Router,
     pub auth: AuthState,
     pub workspaces: WorkspaceState,
+    pub backup_items: BackupItemState,
     pub tasks: TaskState,
     pub pages: PageState,
     pub page_files: PageFileState,
@@ -66,6 +68,7 @@ pub fn production_router(
         .merge(api.oauth)
         .merge(realtime)
         .merge(workspace_router(api.workspaces))
+        .merge(backup_item_router(api.backup_items))
         .merge(task_router(api.tasks))
         .merge(views)
         .merge(page_router(api.pages))

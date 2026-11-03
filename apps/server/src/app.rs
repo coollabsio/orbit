@@ -366,6 +366,12 @@ impl App {
                         attachment_state.uploads.clone(),
                     ),
                 ),
+                backup_items: crate::backup_item_routes::BackupItemState::new(
+                    Arc::clone(&identity),
+                    Some(backups.clone()),
+                    attachment_state.uploads.clone(),
+                    cookie_mode,
+                ),
                 tasks: TaskState::new(Arc::clone(&identity), cookie_mode)
                     .with_socket_tickets(app_key.as_ref().map(SocketTickets::new)),
                 pages: PageState::new(Arc::clone(&identity), cookie_mode)

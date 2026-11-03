@@ -140,8 +140,12 @@ const RELATION_FALLBACK: Record<string, string> = {
   'task.relation_removed': 'removed relation',
 }
 
+const ACTIVITY_TEXT: Record<string, string> = {
+  'backup.item_restored': 'restored from a backup',
+}
+
 function genericActivityText(action: string): string {
-  return action.split('.').reverse().join(' ')
+  return ACTIVITY_TEXT[action] ?? action.split('.').reverse().join(' ')
 }
 
 /**

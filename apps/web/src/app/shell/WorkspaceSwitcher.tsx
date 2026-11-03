@@ -13,7 +13,7 @@ import { useWorkspace } from '@/features/workspaces/workspaceContext'
 
 /** The panel is a Popover rather than a DropdownMenu: picking a workspace swaps the
     panel for a "create workspace" form, and a menu's typeahead would swallow typing. */
-export function WorkspaceSwitcher({ collapsed = false, topbar = false, onSelect }: { collapsed?: boolean; /** The phone top bar's look: initial badge, name and an up/down chevron. */ topbar?: boolean; onSelect?: () => void }) {
+export function WorkspaceSwitcher({ collapsed = false, topbar = false }: { collapsed?: boolean; /** The phone top bar's look: initial badge, name and an up/down chevron. */ topbar?: boolean }) {
   const { workspace } = useWorkspace()
   const createWorkspace = useCreateWorkspace()
   const [open, setOpen] = useState(false)
@@ -42,7 +42,7 @@ export function WorkspaceSwitcher({ collapsed = false, topbar = false, onSelect 
       )}
       {/* Base UI unmounts the panel after its exit, so the create form resets each time it closes. */}
       <PopoverContent align="start" className="max-h-(--available-height) w-auto min-w-[13rem] gap-0 overflow-y-auto overscroll-contain p-1">
-        <WorkspaceMenu createWorkspace={createWorkspace} onSelect={() => { setOpen(false); onSelect?.() }} />
+        <WorkspaceMenu createWorkspace={createWorkspace} onSelect={() => setOpen(false)} />
       </PopoverContent>
     </Popover>
   )

@@ -70,7 +70,7 @@ Before it replaces anything, `orbit backup restore <id>` backs up the current da
 
 Restore refuses an active database ownership lock (the `<database>.lock` file next to the database; do not delete it while Orbit runs). Stop every Orbit process that uses that file. If restore reports rollback failure, do not start Orbit. Preserve the target and rollback paths named by the error and recover from a separate verified snapshot.
 
-On Postgres (`ORBIT_DATABASE_URL`), the ownership lock is a Postgres advisory lock. Each server holds it shared; `backup restore`, `migrate run --reset` and `db-reset` need it exclusive, so stop every Orbit server that uses the database first. A server whose lock connection drops (network, Postgres failover) stops with `lost the database ownership lock`; start it again. A Postgres snapshot holds one `COPY` file per table (`database/<table>.copy`) instead of `database.sqlite`. Restore replaces every table in one transaction: if it fails, the database is unchanged. A snapshot restores only into the same kind of database it came from.
+On Postgres (`ORBIT_DATABASE_URL`), the ownership lock is a Postgres advisory lock. Each server holds it shared; `backup restore`, `migrate run --reset` and `db-reset` need it exclusive, so stop every Orbit server that uses the database first. A server whose lock connection drops (network, Postgres failover) stops with `lost the database ownership lock`; start it again. A Postgres snapshot holds one zstd-compressed `COPY` file per table (`database/<table>.copy.zst`) instead of `database.sqlite`; restore also reads the plain `<table>.copy` files of older snapshots. Restore replaces every table in one transaction: if it fails, the database is unchanged. A snapshot restores only into the same kind of database it came from.
 
 ## Lost or expired setup token
 
@@ -301,6 +301,19 @@ orbit backup restore <id>
 ```
 
 Set the same `ORBIT_APP_KEY` on the new server before you start Orbit: without it, Orbit cannot read the saved S3 secret and does not start while a bucket is saved. Data written after the last backup is lost, so choose the schedule by how much data you can lose.
+
+### Restore one page or one task
+
+To get back one page or one task, you do not need to stop the server or restore the whole database. An instance admin opens a backup, picks a workspace and an item, and Orbit copies the item into the live workspace as a new item. Nothing else in the live database changes. The API is `GET /api/v1/admin/backups/{id}/workspaces`, `GET …/workspaces/{workspace_id}/items?kind=page|task&q=` and `POST …/workspaces/{workspace_id}/restore`.
+
+- Orbit verifies the backup's checksums first. It checks each backup at most once in 10 minutes per server. A backup in S3 is fetched into `<backups>/downloads/` as for a download.
+- Orbit reads the snapshot and never writes to it: the SQLite file opens read-only, and Postgres `COPY` files (`.copy.zst`, or `.copy` in older backups) are parsed.
+- The workspace must still exist and must not be in the trash.
+- A page gets the title "<title> (restored)". With sub-pages, the copy keeps their structure and titles. It goes under its old parent when that page is live in the same space, else to the top level of its teamspace. If the teamspace is gone, the restore fails (`teamspace_missing`). A private page goes back only to its owner's private space, and only while the owner is a member.
+- A task gets the title "<title> (restored)" and a new number in its old project. If the project is gone or in the trash, the restore fails (`project_missing`). The status and labels are matched by name in the live project; without a match the task gets the first status and no label. Assignees who left the workspace are dropped.
+- Files are shared with the live workspace when it still has the same bytes. Otherwise Orbit uploads them again from the backup's `attachments/` folder, or from the blob store (S3 keeps unused files for 40 days). The response counts the files it could not find in `missing_files`. Restored files count toward the storage quota.
+- Not restored: comments, page versions, favorites, visits, task relations, sub-tasks and activity.
+- Each restore writes the audit event `backup.item_restored` with the backup id, the kind, the old id and the new id.
 
 ### A workspace's own bucket
 

@@ -1,6 +1,7 @@
 pub mod account;
 pub mod api_tokens;
 pub mod attachments;
+pub mod backup_items;
 pub mod billing;
 pub mod chat;
 pub mod identity;

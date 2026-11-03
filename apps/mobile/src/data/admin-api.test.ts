@@ -6,6 +6,8 @@ import {
   adminBadges,
   type AdminUser,
   auditActor,
+  type BackupItem,
+  backupItemSubtitle,
   compressionText,
   jobDraft,
   jobLabel,
@@ -15,6 +17,9 @@ import {
   limitText,
   movingText,
   parseLimit,
+  restoredRoute,
+  restoredText,
+  restoreItemBody,
   s3Body,
   s3Draft,
   settingsPollInterval,
@@ -141,4 +146,35 @@ test('Orbit Cloud without a mail server turns off the actions that email the per
   expect(blocked({ billing_enabled: true, email_enabled: true }).filter(([, reason]) => reason !== null)).toEqual([])
   expect(blocked({ billing_enabled: false, email_enabled: false }).filter(([, reason]) => reason !== null)).toEqual([])
   expect(blocked(undefined).filter(([, reason]) => reason !== null)).toEqual([])
+})
+
+const backupItem = (fields: Partial<BackupItem>): BackupItem => ({
+  id: 'p1', kind: 'page', title: 'Roadmap', parent_title: null, project_name: null, number: null, deleted: false, updated_at: 0, child_count: 0, ...fields,
+})
+
+test('restoreItemBody takes sub-pages along only for a page that has them', () => {
+  expect(restoreItemBody(backupItem({ child_count: 2 }), true)).toEqual({ kind: 'page', id: 'p1', include_children: true })
+  expect(restoreItemBody(backupItem({ child_count: 2 }), false)).toEqual({ kind: 'page', id: 'p1', include_children: false })
+  expect(restoreItemBody(backupItem({ child_count: 0 }), true)).toEqual({ kind: 'page', id: 'p1', include_children: false })
+  expect(restoreItemBody(backupItem({ id: 't1', kind: 'task' }), true)).toEqual({ kind: 'task', id: 't1', include_children: false })
+})
+
+test('backupItemSubtitle names the parent and sub-pages of a page, the project and number of a task', () => {
+  expect(backupItemSubtitle(backupItem({ parent_title: 'Docs', child_count: 1 }))).toBe('In Docs · 1 sub-page')
+  expect(backupItemSubtitle(backupItem({ child_count: 3 }))).toBe('3 sub-pages')
+  expect(backupItemSubtitle(backupItem({}))).toBeUndefined()
+  expect(backupItemSubtitle(backupItem({ kind: 'task', project_name: 'Web', number: 12 }))).toBe('Web · #12')
+})
+
+test('restoredText adds the files the backup did not have', () => {
+  expect(restoredText({ title: 'Roadmap', missing_files: 0 })).toBe('Restored as Roadmap.')
+  expect(restoredText({ title: 'Roadmap', missing_files: 1 })).toBe('Restored as Roadmap. 1 file was not in the backup.')
+  expect(restoredText({ title: '', missing_files: 3 })).toBe('Restored as Untitled. 3 files were not in the backup.')
+})
+
+test('restoredRoute opens the copy by id, only in a workspace the viewer belongs to', () => {
+  const memberOf = [{ id: 'w1' }]
+  expect(restoredRoute({ kind: 'page', id: 'p9' }, 'w1', memberOf)).toBe('/docs/p9')
+  expect(restoredRoute({ kind: 'task', id: 't9' }, 'w1', memberOf)).toBe('/tasks/t9')
+  expect(restoredRoute({ kind: 'page', id: 'p9' }, 'w2', memberOf)).toBeNull()
 })

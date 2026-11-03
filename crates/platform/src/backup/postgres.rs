@@ -1,22 +1,24 @@
 //! Postgres snapshots: the rows of every table, written with `COPY` inside one `REPEATABLE READ`
 //! transaction (so all tables show the same moment), and restored into a schema rebuilt from the
-//! migrations of the snapshot's version. Postgres runs DDL in transactions, so a restore either
+//! migrations of the snapshot's version. Each table file is zstd-compressed; snapshots written
+//! before that hold plain `<table>.copy` files, which restore still reads. Postgres runs DDL in transactions, so a restore either
 //! replaces the whole database or changes nothing.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use async_compression::tokio::{bufread::ZstdDecoder, write::ZstdEncoder};
 use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::{PgPool, Postgres};
 use sqlx::{Row, Transaction};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncRead, AsyncWriteExt, BufReader};
 use tokio_util::sync::CancellationToken;
 
 use super::{BackupError, check_cancelled, io_error};
 use crate::{Backend, Migration, db::metadata_table_sql};
 
-/// The snapshot directory with one `<table>.copy` file per table and [`TABLES_FILE`].
+/// The snapshot directory with one `<table>.copy.zst` file per table and [`TABLES_FILE`].
 pub(super) const DATABASE_DIRECTORY: &str = "database";
 const TABLES_FILE: &str = "tables.json";
 
@@ -40,10 +42,11 @@ pub(super) async fn dump(
     let tables = tables(&mut transaction).await?;
     for table in &tables {
         check_cancelled(cancellation)?;
-        let path = directory.join(format!("{}.copy", table.table));
-        let mut file = tokio::fs::File::create(&path)
+        let path = directory.join(format!("{}.copy.zst", table.table));
+        let file = tokio::fs::File::create(&path)
             .await
             .map_err(|source| io_error(&path, source))?;
+        let mut file = ZstdEncoder::new(file);
         let mut rows = transaction
             .copy_out_raw(&format!(
                 "COPY {} ({}) TO STDOUT",
@@ -58,7 +61,11 @@ pub(super) async fn dump(
                 .map_err(|source| io_error(&path, source))?;
         }
         drop(rows);
-        file.sync_all()
+        file.shutdown()
+            .await
+            .map_err(|source| io_error(&path, source))?;
+        file.into_inner()
+            .sync_all()
             .await
             .map_err(|source| io_error(&path, source))?;
     }
@@ -145,10 +152,7 @@ pub(super) async fn restore(
     let order = load_order(&mut transaction, &copies).await?;
     set_user_triggers(&mut transaction, &order, "DISABLE").await?;
     for copy in &order {
-        let path = directory.join(format!("{}.copy", copy.table));
-        let file = tokio::fs::File::open(&path)
-            .await
-            .map_err(|source| io_error(&path, source))?;
+        let file = open_table(directory, &copy.table).await?;
         let mut sink = transaction
             .copy_in_raw(&format!(
                 "COPY {} ({}) FROM STDIN",
@@ -306,6 +310,29 @@ async fn set_user_triggers(
         .map_err(BackupError::Postgres)?;
     }
     Ok(())
+}
+
+/// The rows of `table`, decompressed: `<table>.copy.zst`, or `<table>.copy` in older snapshots.
+pub(super) async fn open_table(
+    directory: &Path,
+    table: &str,
+) -> Result<Box<dyn AsyncRead + Unpin + Send>, BackupError> {
+    let open = |path: PathBuf| async move {
+        tokio::fs::File::open(&path)
+            .await
+            .map_err(|source| io_error(&path, source))
+    };
+    let compressed = directory.join(format!("{table}.copy.zst"));
+    if tokio::fs::try_exists(&compressed)
+        .await
+        .map_err(|source| io_error(&compressed, source))?
+    {
+        let file = open(compressed).await?;
+        return Ok(Box::new(ZstdDecoder::new(BufReader::new(file))));
+    }
+    Ok(Box::new(
+        open(directory.join(format!("{table}.copy"))).await?,
+    ))
 }
 
 fn quote(identifier: &str) -> String {

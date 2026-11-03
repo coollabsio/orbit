@@ -75,7 +75,7 @@ async fn postgres_restore_replaces_the_database_and_attachments() {
             .manifest
             .files
             .iter()
-            .any(|file| file.path == "database/users.copy")
+            .any(|file| file.path == "database/users.copy.zst")
     );
 
     fixture
@@ -145,6 +145,55 @@ async fn postgres_restore_replaces_the_database_and_attachments() {
         .await
         .unwrap();
     assert_ne!(new_epoch, epoch);
+}
+
+#[tokio::test]
+async fn postgres_restore_reads_uncompressed_table_files_of_older_snapshots() {
+    if !orbit_platform::testing_postgres() {
+        return;
+    }
+    let fixture = Fixture::new().await;
+    fixture
+        .database
+        .execute(
+            "INSERT INTO users (id, email, normalized_email, display_name, password_hash, \
+             created_at, updated_at) VALUES ('kept', 'k@example.com', 'k@example.com', 'Kept', 'x', 1, 1)",
+        )
+        .await
+        .unwrap();
+    let snapshot = fixture.service.create(&fixture.database).await.unwrap();
+    let mut manifest = snapshot.manifest;
+    for file in &mut manifest.files {
+        let Some(plain) = file.path.strip_suffix(".zst") else {
+            continue;
+        };
+        let compressed = snapshot.path.join(&file.path);
+        let contents = zstd::decode_all(fs::File::open(&compressed).unwrap()).unwrap();
+        fs::remove_file(&compressed).unwrap();
+        fs::write(snapshot.path.join(plain), &contents).unwrap();
+        file.path = plain.to_owned();
+        file.sha256 = checksum(&contents);
+        file.byte_size = contents.len() as u64;
+    }
+    fs::write(
+        snapshot.path.join("manifest.json"),
+        serde_json::to_vec(&manifest).unwrap(),
+    )
+    .unwrap();
+    fixture.database.execute("DELETE FROM users").await.unwrap();
+
+    fixture
+        .service
+        .restore_postgres(&snapshot.id, &fixture.database)
+        .await
+        .unwrap();
+
+    let users: String = fixture
+        .database
+        .scalar("SELECT string_agg(id, ',' ORDER BY id) FROM users")
+        .await
+        .unwrap();
+    assert_eq!(users, "kept");
 }
 
 #[tokio::test]

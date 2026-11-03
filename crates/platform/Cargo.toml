@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 argon2 = "0.5"
+async-compression = { version = "0.4", features = ["tokio", "zstd"] }
 axum = "0.8"
 base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
@@ -40,4 +41,5 @@ test-support = []
 [dev-dependencies]
 orbit-platform = { path = ".", features = ["test-support"] }
 futures-util = "0.3"
+zstd = "0.14"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }

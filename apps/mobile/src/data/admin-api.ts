@@ -11,11 +11,14 @@ import {
   getInstanceSettings,
   getJobLimits,
   listAdminUsers,
+  listBackupItems,
   listBackups,
+  listBackupWorkspaces,
   listGlobalAudit,
   removeS3 as removeS3Request,
   removeSmtp as removeSmtpRequest,
   resetTwoFactor,
+  restoreBackupItem as restoreBackupItemRequest,
   saveJobLimits as saveJobLimitsRequest,
   saveLimits as saveLimitsRequest,
   saveS3 as saveS3Request,
@@ -31,6 +34,9 @@ import type {
   AdminUser,
   AuthOptions,
   BackupCreated,
+  BackupItem,
+  BackupItemKind,
+  BackupWorkspace,
   BackupSchedule,
   BackupSummary,
   CompressionStatus,
@@ -40,6 +46,8 @@ import type {
   LimitsView,
   PageAuditEvent,
   RecoveryLink,
+  RestoreBackupItem,
+  RestoredItem,
   S3Body,
   S3View,
   SmtpBody,
@@ -52,7 +60,7 @@ import type {
 import { formatBytes } from './account-api'
 import type { OrbitClient } from './orbit'
 
-export type { AdminUser, BackupSchedule, BackupSummary, CompressionStatus, InstanceSettingsView, JobLimitView, LimitsView, RecoveryLink, S3View, SmtpSecurity, SmtpView, StorageView }
+export type { AdminUser, BackupItem, BackupItemKind, BackupSchedule, BackupSummary, BackupWorkspace, CompressionStatus, InstanceSettingsView, JobLimitView, LimitsView, RecoveryLink, RestoredItem, S3View, SmtpSecurity, SmtpView, StorageView }
 export type AuditEvent = PageAuditEvent['items'][number]
 
 export interface Page<T> {
@@ -64,6 +72,8 @@ export const adminKeys = {
   users: (search: string) => ['admin', 'users', search] as const,
   audit: ['admin', 'audit'] as const,
   backups: ['admin', 'backups'] as const,
+  backupWorkspaces: (backupId: string) => ['admin', 'backups', backupId, 'workspaces'] as const,
+  backupItems: (backupId: string, workspaceId: string, kind: BackupItemKind, search: string) => ['admin', 'backups', backupId, 'items', workspaceId, kind, search] as const,
   jobs: ['admin', 'jobs'] as const,
   settings: ['admin', 'settings'] as const,
 }
@@ -83,6 +93,51 @@ export async function auditEvents(client: OrbitClient, cursor?: string): Promise
 
 export async function backups(client: OrbitClient): Promise<BackupSummary[]> {
   return (await listBackups({ client, throwOnError: true })).data.items
+}
+
+/** The workspaces in a backup. The first open of a backup in S3 downloads it, which can take a while. */
+export async function backupWorkspaces(client: OrbitClient, backupId: string): Promise<BackupWorkspace[]> {
+  return (await listBackupWorkspaces({ client, path: { backup_id: backupId }, throwOnError: true })).data.items
+}
+
+/** A backup workspace's pages or tasks whose title contains `search`, newest first (at most 200). */
+export async function backupItems(client: OrbitClient, backupId: string, workspaceId: string, kind: BackupItemKind, search: string): Promise<BackupItem[]> {
+  const { data } = await listBackupItems({ client, path: { backup_id: backupId, workspace_id: workspaceId }, query: { kind, q: search || undefined }, throwOnError: true })
+  return data.items
+}
+
+/** Copies one page or task from a backup into the live workspace. */
+export async function restoreBackupItem(client: OrbitClient, backupId: string, workspaceId: string, body: RestoreBackupItem): Promise<RestoredItem> {
+  return (await restoreBackupItemRequest({ client, path: { backup_id: backupId, workspace_id: workspaceId }, body, throwOnError: true })).data
+}
+
+/** What `Restore copy` sends: only a page with sub-pages can take them along. */
+export function restoreItemBody(item: Pick<BackupItem, 'id' | 'kind' | 'child_count'>, includeChildren: boolean): RestoreBackupItem {
+  return { kind: item.kind, id: item.id, include_children: item.kind === 'page' && item.child_count > 0 && includeChildren }
+}
+
+/** A backup row's second line: the parent page and sub-pages of a page, the project and number of a task. */
+export function backupItemSubtitle(item: BackupItem): string | undefined {
+  const parts = item.kind === 'page'
+    ? [item.parent_title ? `In ${item.parent_title}` : null, item.child_count > 0 ? `${item.child_count} ${item.child_count === 1 ? 'sub-page' : 'sub-pages'}` : null]
+    : [item.project_name, item.number != null ? `#${item.number}` : null]
+  const text = parts.filter((part): part is string => !!part).join(' · ')
+  return text || undefined
+}
+
+/** `Restored as …`, with the files the backup did not have. */
+export function restoredText(item: Pick<RestoredItem, 'title' | 'missing_files'>): string {
+  const missing = item.missing_files > 0 ? ` ${item.missing_files} ${item.missing_files === 1 ? 'file was' : 'files were'} not in the backup.` : ''
+  return `Restored as ${item.title || 'Untitled'}.${missing}`
+}
+
+/**
+ * The app's screen for a restored copy (the server's `path` is a web route), or null when the app cannot open it: the
+ * app shows one workspace of the viewer's at a time, and an admin need not be a member of the one restored into.
+ */
+export function restoredRoute(item: Pick<RestoredItem, 'kind' | 'id'>, workspaceId: string, memberOf: readonly { id: string }[]): `/docs/${string}` | `/tasks/${string}` | null {
+  if (!memberOf.some((workspace) => workspace.id === workspaceId)) return null
+  return item.kind === 'page' ? `/docs/${item.id}` : `/tasks/${item.id}`
 }
 
 export async function jobLimits(client: OrbitClient): Promise<JobLimitView[]> {

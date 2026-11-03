@@ -2,6 +2,7 @@ pub mod app;
 pub mod attachment_routes;
 pub mod audit;
 pub mod auth_routes;
+pub mod backup_item_routes;
 pub mod billing;
 pub mod chat_routes;
 pub mod cluster;

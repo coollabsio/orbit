@@ -1,9 +1,10 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
+use std::time::Instant;
 
 use chrono::{Datelike, TimeZone, Utc};
 use fs2::FileExt;
@@ -21,12 +22,17 @@ use crate::{
 use crate::files::TEMPORARY_DIRECTORY;
 
 mod postgres;
+mod reader;
+
+pub use reader::{SnapshotReader, SnapshotRow};
 
 const DATABASE_FILE: &str = "database.sqlite";
 const MANIFEST_FILE: &str = "manifest.json";
 /// Snapshots fetched from S3 for verify, download or restore.
 const DOWNLOADS: &str = "downloads";
 const DOWNLOAD_CACHE_MILLIS: u128 = 60 * 60 * 1000;
+/// [`BackupService::verified_snapshot`] checks a snapshot's hashes again after this long.
+const VERIFIED_FOR: std::time::Duration = std::time::Duration::from_secs(10 * 60);
 const SUPPORTED_SCHEMA_VERSION: i64 = 65;
 /// Retention keeps up to this many snapshots from the last day, so a manual or hourly backup does not replace an
 /// earlier one from the same day.
@@ -95,6 +101,9 @@ pub struct BackupService {
     attachment_root: PathBuf,
     attachment_mutations: AttachmentMutationCoordinator,
     storage: ObjectStorage,
+    /// Snapshots [`Self::verified_snapshot`] checked, by id, with the time of the check. Per process: it only saves
+    /// work.
+    verified: Arc<std::sync::Mutex<HashMap<String, (Instant, BackupSnapshot)>>>,
 }
 
 #[derive(Debug, Error)]
@@ -161,6 +170,8 @@ pub enum BackupError {
     Postgres(#[source] sqlx::Error),
     #[error("backup snapshot is invalid: {0}")]
     InvalidSnapshot(String),
+    #[error("backup snapshot could not be read: {0}")]
+    SnapshotRead(#[source] sqlx::Error),
     #[error(
         "backup {id} is a {snapshot:?} snapshot and cannot be restored into a {database:?} database"
     )]
@@ -179,6 +190,7 @@ impl BackupService {
             attachment_root: attachment_root.into(),
             attachment_mutations: AttachmentMutationCoordinator::default(),
             storage: ObjectStorage::default(),
+            verified: Arc::default(),
         }
     }
 
@@ -304,6 +316,45 @@ impl BackupService {
     pub async fn verify(&self, id: &str) -> Result<BackupSnapshot, BackupError> {
         let snapshot = self.find(id).await?;
         verify_snapshot(&snapshot)?;
+        Ok(snapshot)
+    }
+
+    /// [`Self::verify`] for reading many times: a snapshot verified in the last [`VERIFIED_FOR`] by this process
+    /// is not checked again while its files are still there (a snapshot fetched from S3 is removed from
+    /// `downloads/` an hour after the fetch). A snapshot from S3 counts as fetched again when it is verified, so
+    /// it stays for an hour after that.
+    pub async fn verified_snapshot(&self, id: &str) -> Result<BackupSnapshot, BackupError> {
+        let cached = self
+            .verified
+            .lock()
+            .expect("verified snapshot cache is not poisoned")
+            .get(id)
+            .filter(|(at, snapshot)| {
+                at.elapsed() < VERIFIED_FOR && snapshot.path.join(MANIFEST_FILE).is_file()
+            })
+            .map(|(_, snapshot)| snapshot.clone());
+        if let Some(snapshot) = cached {
+            return Ok(snapshot);
+        }
+        let snapshot = self.find(id).await?;
+        let checked = snapshot.clone();
+        tokio::task::spawn_blocking(move || {
+            verify_snapshot(&checked)?;
+            if checked.in_object_storage {
+                // Best effort: `remove_stale_downloads` goes by the directory's modification time.
+                let _ = File::open(&checked.path)
+                    .and_then(|directory| directory.set_modified(std::time::SystemTime::now()));
+            }
+            Ok::<_, BackupError>(())
+        })
+        .await
+        .map_err(|error| BackupError::BlockingTask(error.to_string()))??;
+        let mut verified = self
+            .verified
+            .lock()
+            .expect("verified snapshot cache is not poisoned");
+        verified.retain(|_, (at, _)| at.elapsed() < VERIFIED_FOR);
+        verified.insert(id.to_owned(), (Instant::now(), snapshot.clone()));
         Ok(snapshot)
     }
 
