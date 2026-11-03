@@ -15,17 +15,27 @@ WORKDIR /src/apps/web
 ARG ORBIT_BUILD_REVISION
 RUN ORBIT_BUILD_REVISION=${ORBIT_BUILD_REVISION} bun run build
 
-FROM rust:1.97.1-alpine AS server
+# cargo-chef builds the Rust dependencies in their own layer. That layer changes only when
+# Cargo.toml or Cargo.lock change, so the GitHub Actions layer cache keeps it between builds.
+FROM lukemathwalker/cargo-chef:0.1.78-rust-1.97.1-alpine3.23 AS chef
 RUN apk add --no-cache musl-dev
 WORKDIR /src
+
+FROM chef AS planner
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY crates/ crates/
+COPY apps/server/ apps/server/
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS server
+COPY --from=planner /src/recipe.json recipe.json
+RUN cargo chef cook --locked --release -p orbit-server --recipe-path recipe.json
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY crates/ crates/
 COPY apps/server/ apps/server/
 COPY --from=web /src/apps/web/dist/ apps/web/dist/
 ARG ORBIT_BUILD_REVISION
-RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,target=/src/target,sharing=locked \
-    ORBIT_BUILD_REVISION=${ORBIT_BUILD_REVISION} \
+RUN ORBIT_BUILD_REVISION=${ORBIT_BUILD_REVISION} \
     cargo build --locked --release -p orbit-server \
     && cp target/release/orbit /orbit
 
