@@ -9,7 +9,11 @@ use axum::extract::{Extension, Path, Query, State};
 use axum::http::header::{CACHE_CONTROL, LOCATION, REFERRER_POLICY};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use orbit_platform::{ClientIp, Id, RequestId, TimestampMillis};
+use std::net::{IpAddr, Ipv4Addr};
+
+use orbit_platform::{
+    AuthenticatedUser, ClientIp, Id, RequestId, ThrottleDecision, TimestampMillis,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use utoipa::{IntoParams, ToSchema};
@@ -36,6 +40,7 @@ const AUTHORIZATION_LIFETIME_MILLIS: i64 = 10 * 60 * 1_000;
 const WEB_RETURN_PATH: &str = "/login/callback";
 const START: &str = "/api/v1/auth/providers/{provider}/start";
 const EXCHANGE: &str = "/api/v1/auth/providers/exchange";
+const LINK: &str = "/api/v1/auth/providers/link";
 
 /// What the person asked for, fixed at start. The session ids make a connect or confirm land only on the session
 /// that asked for it.
@@ -493,7 +498,7 @@ fn invalid_handoff(request_id: Option<&Extension<RequestId>>) -> ApiError {
 /// Where every provider flow ends, for every client and intent. `sign_in`: 200 `LoginResponse` (a cookie for
 /// browsers, `session_token` for requests without Origin) or 202 two-factor challenge, the same answers as
 /// `/api/v1/auth/login`. `connect` and `confirm`: 204.
-#[utoipa::path(post, path = "/api/v1/auth/providers/exchange", request_body = ExchangeProviderBody, responses((status = 200, body = LoginResponse), (status = 202, description = "The account has two-factor sign-in on: send a code to /api/v1/auth/login/two-factor.", body = two_factor::TwoFactorChallenge), (status = 204, description = "connect or confirm finished"), (status = 400, description = "invalid_handoff or provider_denied", body = ProblemBody, content_type = "application/problem+json"), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json"), (status = 403, description = "registration_closed, account_email_unverified, account_suspended, session_mismatch or identity_mismatch", body = ProblemBody, content_type = "application/problem+json"), (status = 409, description = "identity_in_use, identity_conflict or provider_already_connected", body = ProblemBody, content_type = "application/problem+json"), (status = 422, description = "provider_email_unverified", body = ProblemBody, content_type = "application/problem+json"), (status = 502, description = "provider_failed", body = ProblemBody, content_type = "application/problem+json"), (status = 503, description = "authentication_busy", body = ProblemBody, content_type = "application/problem+json")))]
+#[utoipa::path(post, path = "/api/v1/auth/providers/exchange", request_body = ExchangeProviderBody, responses((status = 200, body = LoginResponse), (status = 202, description = "`two_factor_token`: the account has two-factor sign-in on, send a code to /api/v1/auth/login/two-factor. `password_token`: the provider account connects to an existing account, send its password to /api/v1/auth/providers/link.", body = ExchangeChallenge), (status = 204, description = "connect or confirm finished"), (status = 400, description = "invalid_handoff or provider_denied", body = ProblemBody, content_type = "application/problem+json"), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json"), (status = 403, description = "registration_closed, account_email_unverified, link_needs_sign_in, account_suspended, session_mismatch or identity_mismatch", body = ProblemBody, content_type = "application/problem+json"), (status = 409, description = "identity_in_use, identity_conflict or provider_already_connected", body = ProblemBody, content_type = "application/problem+json"), (status = 422, description = "provider_email_unverified", body = ProblemBody, content_type = "application/problem+json"), (status = 502, description = "provider_failed", body = ProblemBody, content_type = "application/problem+json"), (status = 503, description = "authentication_busy", body = ProblemBody, content_type = "application/problem+json")))]
 pub(super) async fn exchange_provider_sign_in(
     State(state): State<AuthState>,
     headers: HeaderMap,
@@ -601,21 +606,34 @@ async fn sign_in(
         Err(ProviderSignInError::Refused(refusal)) => return Err(refused(refusal, None).await),
         Err(ProviderSignInError::Database(_)) => return Err(ApiError::internal(EXCHANGE, rid)),
     };
+    if account.link {
+        return password_challenge(state, account.user, profile, rid).await;
+    }
+    finish_sign_in(state, headers, account.user, profile, false, EXCHANGE, rid).await
+}
+
+/// The second factor when the account has one, else the session. `link` writes the new identity with the session.
+async fn finish_sign_in(
+    state: &AuthState,
+    headers: &HeaderMap,
+    user: AuthenticatedUser,
+    profile: ProviderProfile,
+    link: bool,
+    instance: &'static str,
+    rid: Option<&Extension<RequestId>>,
+) -> Result<Response, ApiError> {
     let totp_enabled = state
         .repository
-        .two_factor_status(account.user.id)
+        .two_factor_status(user.id)
         .await
-        .map_err(|_| ApiError::internal(EXCHANGE, rid))?
+        .map_err(|_| ApiError::internal(instance, rid))?
         .totp_enabled;
     if totp_enabled {
         return two_factor::challenge(
             state,
-            account.user,
-            FirstFactor::Provider {
-                profile,
-                link: account.link,
-            },
-            EXCHANGE,
+            user,
+            FirstFactor::Provider { profile, link },
+            instance,
             rid,
         )
         .await;
@@ -623,9 +641,9 @@ async fn sign_in(
     let session = match state
         .repository
         .create_provider_session_audited(
-            &account.user,
+            &user,
             &profile,
-            account.link,
+            link,
             request_id_value(rid),
             TimestampMillis::now(),
         )
@@ -633,17 +651,215 @@ async fn sign_in(
     {
         Ok(session) => session,
         Err(ProviderSignInError::Refused(refusal)) => {
-            return Err(refused(refusal, Some(account.user.id)).await);
+            record_failure(
+                state,
+                Some(user.id),
+                profile.provider,
+                refusal_reason(refusal),
+                rid,
+            )
+            .await;
+            return Err(refusal_problem(refusal, rid));
         }
-        Err(ProviderSignInError::Database(_)) => return Err(ApiError::internal(EXCHANGE, rid)),
+        Err(ProviderSignInError::Database(_)) => return Err(ApiError::internal(instance, rid)),
     };
-    Ok(signed_in_response(
-        state,
-        account.user,
-        &session,
-        SessionDelivery::for_request(headers),
+    Ok(signed_in_response(state, user, &session, SessionDelivery::for_request(headers)).await)
+}
+
+/// The answer to a provider sign-in that found an existing account by its email.
+#[derive(Serialize, ToSchema)]
+pub(super) struct PasswordChallenge {
+    /// Send it with the account password to `/api/v1/auth/providers/link` within five minutes.
+    password_token: String,
+    provider: Provider,
+    /// The Orbit account the provider account connects to.
+    email: String,
+}
+
+/// The 202 answers of the exchange: a second factor, or the password before a first link.
+#[derive(Serialize, ToSchema)]
+#[serde(untagged)]
+pub(super) enum ExchangeChallenge {
+    #[expect(
+        dead_code,
+        reason = "two_factor::challenge writes this answer; the enum documents both"
+    )]
+    TwoFactor(two_factor::TwoFactorChallenge),
+    Password(PasswordChallenge),
+}
+
+/// A provider account must not connect to an existing account by email alone: whoever controls the address at the
+/// provider would get in. The account password confirms the first link. An account without a password signs in
+/// another way and connects the provider from Security.
+async fn password_challenge(
+    state: &AuthState,
+    user: AuthenticatedUser,
+    profile: ProviderProfile,
+    rid: Option<&Extension<RequestId>>,
+) -> Result<Response, ApiError> {
+    let has_password = state
+        .repository
+        .find_by_email(&user.email)
+        .await
+        .map_err(|_| ApiError::internal(EXCHANGE, rid))?
+        .is_some_and(|identity| identity.password_hash.is_some());
+    if !has_password {
+        record_failure(
+            state,
+            Some(user.id),
+            profile.provider,
+            "link_needs_sign_in",
+            rid,
+        )
+        .await;
+        return Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "link_needs_sign_in",
+            "Account already exists",
+            "An Orbit account with this email already exists. Sign in to it another way, then connect this provider in Account settings → Security.",
+            EXCHANGE,
+            rid,
+        ));
+    }
+    let provider = profile.provider;
+    let email = user.email.clone();
+    let token = state
+        .pending
+        .insert(Pending::ProviderLink {
+            user,
+            profile,
+            attempts: 0,
+        })
+        .await
+        .map_err(|_| ApiError::internal(EXCHANGE, rid))?
+        .ok_or_else(|| busy(EXCHANGE, rid))?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(ExchangeChallenge::Password(PasswordChallenge {
+            password_token: token,
+            provider,
+            email,
+        })),
     )
-    .await)
+        .into_response())
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct LinkProviderBody {
+    password_token: String,
+    password: String,
+}
+
+/// The password step of a first link: the account password connects the provider account and signs in (or asks
+/// for the second factor). Wrong passwords count toward the sign-in throttle of the account; five end the step.
+#[utoipa::path(post, path = "/api/v1/auth/providers/link", request_body = LinkProviderBody, responses((status = 200, body = LoginResponse), (status = 202, description = "The account has two-factor sign-in on: send a code to /api/v1/auth/login/two-factor.", body = two_factor::TwoFactorChallenge), (status = 400, description = "invalid_password_token", body = ProblemBody, content_type = "application/problem+json"), (status = 401, description = "invalid_credentials", body = ProblemBody, content_type = "application/problem+json"), (status = 403, description = "account_suspended", body = ProblemBody, content_type = "application/problem+json"), (status = 409, description = "identity_conflict", body = ProblemBody, content_type = "application/problem+json"), (status = 429, description = "authentication_throttled", body = ProblemBody, content_type = "application/problem+json"), (status = 503, description = "authentication_busy", body = ProblemBody, content_type = "application/problem+json")))]
+pub(super) async fn link_provider_sign_in(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+    client_ip: Option<Extension<ClientIp>>,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<LinkProviderBody>,
+) -> Result<Response, ApiError> {
+    let rid = request_id.as_ref();
+    let expired = || {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_password_token",
+            "Sign-in expired",
+            "This sign-in has expired. Start again.",
+            LINK,
+            rid,
+        )
+    };
+    let Some((
+        expires_at,
+        Pending::ProviderLink {
+            user,
+            profile,
+            attempts,
+        },
+    )) = state
+        .pending
+        .take(&body.password_token)
+        .await
+        .map_err(|_| ApiError::internal(LINK, rid))?
+    else {
+        return Err(expired());
+    };
+    let restore = |attempts| Pending::ProviderLink {
+        user: user.clone(),
+        profile: profile.clone(),
+        attempts,
+    };
+    let ip = client_ip
+        .map(|Extension(client_ip)| client_ip.0)
+        .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+    let reservation = match state
+        .throttler
+        .reserve(&user.email, ip, TimestampMillis::now())
+        .await
+    {
+        Ok(reservation) => reservation,
+        Err(ThrottleDecision::RetryAfter(delay)) => {
+            state
+                .pending
+                .restore(&body.password_token, expires_at, restore(attempts))
+                .await
+                .map_err(|_| ApiError::internal(LINK, rid))?;
+            return Err(ApiError::throttled(delay, LINK, rid));
+        }
+        Err(ThrottleDecision::Allowed) => unreachable!("allowed admission returns a reservation"),
+    };
+    let password_hash = state
+        .repository
+        .find_by_email(&user.email)
+        .await
+        .map_err(|_| ApiError::internal(LINK, rid))?
+        .filter(|identity| identity.id == user.id)
+        .and_then(|identity| identity.password_hash);
+    let Some(password_hash) = password_hash else {
+        // The password was removed or the email changed after the exchange.
+        state.throttler.finish_success(reservation).await;
+        return Err(expired());
+    };
+    let valid = state
+        .passwords
+        .verify(body.password, password_hash)
+        .await
+        .map_err(|_| ApiError::internal(LINK, rid))?
+        .valid;
+    if !valid {
+        state
+            .throttler
+            .finish_failure(reservation, TimestampMillis::now())
+            .await;
+        record_failure(
+            &state,
+            Some(user.id),
+            profile.provider,
+            "invalid_password",
+            rid,
+        )
+        .await;
+        if attempts + 1 < two_factor::MAX_CODE_ATTEMPTS {
+            state
+                .pending
+                .restore(&body.password_token, expires_at, restore(attempts + 1))
+                .await
+                .map_err(|_| ApiError::internal(LINK, rid))?;
+        }
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "invalid_credentials",
+            "Authentication failed",
+            "The password is incorrect.",
+            LINK,
+            rid,
+        ));
+    }
+    state.throttler.finish_success(reservation).await;
+    finish_sign_in(&state, &headers, user, profile, true, LINK, rid).await
 }
 
 /// A connect or confirm result applies only to the session that started it.

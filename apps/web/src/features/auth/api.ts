@@ -14,6 +14,7 @@ import {
   disconnectConnectedAccount,
   exchangeProviderSignIn,
   finishPasskeyLogin,
+  linkProviderSignIn,
   listConnectedAccounts,
   login,
   loginSecondFactor,
@@ -34,6 +35,8 @@ import {
   uploadAvatar,
 } from '@orbit/api/generated/sdk.gen'
 import type {
+  LinkProviderBody,
+  PasswordChallenge,
   ChangeEmailBody,
   ChangePasswordBody,
   DeleteAccountBody,
@@ -175,8 +178,15 @@ export function useStartProviderSignIn() {
   })
 }
 
-/** How a provider flow ended: signed in, a code is needed next, or a `connect` / `confirm` is done. */
-export type ProviderExchange = { kind: 'signed_in' } | { kind: 'two_factor'; token: string } | { kind: 'done' }
+/**
+ * How a provider flow ended: signed in, a code is needed next, the account password must confirm a first link, or a
+ * `connect` / `confirm` is done.
+ */
+export type ProviderExchange =
+  | { kind: 'signed_in' }
+  | { kind: 'two_factor'; token: string }
+  | { kind: 'password'; token: string; provider: Provider; email: string }
+  | { kind: 'done' }
 
 // The callback page shows a sign-in that needs a session as its own error, not as the global login redirect.
 const providerExchangeClient = createApiClient()
@@ -192,10 +202,25 @@ export function useProviderExchange() {
         return { kind: 'done' }
       }
       // Only 204 has no body.
-      const result = required(data as LoginResponse | TwoFactorChallenge | undefined, 'Sign-in response was empty.')
+      const result = required(data as LoginResponse | TwoFactorChallenge | PasswordChallenge | undefined, 'Sign-in response was empty.')
+      if ('password_token' in result) return { kind: 'password', token: result.password_token, provider: result.provider, email: result.email }
       if (isTwoFactorChallenge(result)) return { kind: 'two_factor', token: result.two_factor_token }
       signedIn(result)
       return { kind: 'signed_in' }
+    },
+  })
+}
+
+/** The password that confirms a first link of a provider account to an existing account. Answers like `useLogin`. */
+export function useLinkProviderSignIn() {
+  const signedIn = useSignedIn()
+  return useMutation({
+    mutationFn: async (body: LinkProviderBody) => {
+      const { data } = await linkProviderSignIn({ client: providerExchangeClient, body, throwOnError: true })
+      return required<LoginResponse | TwoFactorChallenge>(data, 'Sign-in response was empty.')
+    },
+    onSuccess: (response) => {
+      if (!isTwoFactorChallenge(response)) signedIn(response)
     },
   })
 }

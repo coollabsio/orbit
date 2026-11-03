@@ -1,4 +1,5 @@
 import { useMutation } from '@tanstack/react-query'
+import { router } from 'expo-router'
 import { useState } from 'react'
 import { View } from 'react-native'
 
@@ -8,8 +9,8 @@ import { ACCOUNT_NAV, Note, SettingsCard, SettingsShell } from '../../../compone
 import { confirmsEmail, deleteAccount, ownedWorkspaces, passwordProblem, requestEmailChange } from '../../../data/account-api'
 import * as api from '../../../data/orbit'
 import { phoneValid, profileChanges, profileFormOf, type ProfileForm } from '../../../data/profile'
-import { withReauthentication } from '../../../data/sign-in-provider'
-import { pickImage, useAuthOptions, useChangePassword, useConfirmIdentity, useSetProfilePicture } from '../../../hooks/account'
+import { signInMethods, withReauthentication } from '../../../data/sign-in-provider'
+import { pickImage, useAuthOptions, useChangePassword, useConnectedAccounts, useConfirmIdentity, useSetProfilePicture } from '../../../hooks/account'
 import { useOrbit } from '../../../orbit-context'
 import { errorMessage } from '../../../session-context'
 import { Button, Input, Text } from '../../../ui'
@@ -157,8 +158,22 @@ function EmailField() {
         description={options.data && !emailEnabled ? 'This Orbit cannot send email, so the email cannot be changed. Ask an administrator.' : undefined}
       />
       {emailEnabled ? <View className="items-start"><Button label="Change" variant="outline" onPress={() => setChanging(true)} /></View> : null}
+      <SignInMethods />
       {changing ? <EmailChangeDialog onClose={() => setChanging(false)} /> : null}
     </View>
+  )
+}
+
+/** How the account signs in; opens Security, where the methods change. */
+function SignInMethods() {
+  const { user } = useOrbit()
+  const connected = useConnectedAccounts()
+  const methods = signInMethods(user.has_password, connected.data ?? [])
+  if (methods.length === 0) return null
+  return (
+    <Text accessibilityRole="link" onPress={() => router.push('/settings/security')} className="text-[13px] leading-[19.5px] text-muted-foreground">
+      {`Sign-in methods: ${methods.join(' · ')}`}
+    </Text>
   )
 }
 

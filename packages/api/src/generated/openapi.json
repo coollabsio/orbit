@@ -6072,11 +6072,11 @@
             }
           },
           "202": {
-            "description": "The account has two-factor sign-in on: send a code to /api/v1/auth/login/two-factor.",
+            "description": "`two_factor_token`: the account has two-factor sign-in on, send a code to /api/v1/auth/login/two-factor. `password_token`: the provider account connects to an existing account, send its password to /api/v1/auth/providers/link.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TwoFactorChallenge"
+                  "$ref": "#/components/schemas/ExchangeChallenge"
                 }
               }
             }
@@ -6105,7 +6105,7 @@
             }
           },
           "403": {
-            "description": "origin_forbidden, registration_closed, account_email_unverified, account_suspended, session_mismatch, identity_mismatch",
+            "description": "origin_forbidden, registration_closed, account_email_unverified, link_needs_sign_in, account_suspended, session_mismatch, identity_mismatch",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -6190,6 +6190,151 @@
           {
             "cookieAuth": []
           }
+        ]
+      }
+    },
+    "/api/v1/auth/providers/link": {
+      "post": {
+        "tags": [
+          "crate::auth_routes::providers"
+        ],
+        "summary": "The password step of a first link: the account password connects the provider account and signs in (or asks\nfor the second factor). Wrong passwords count toward the sign-in throttle of the account; five end the step.",
+        "operationId": "link_provider_sign_in",
+        "parameters": [
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkProviderBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "The account has two-factor sign-in on: send a code to /api/v1/auth/login/two-factor.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TwoFactorChallenge"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request, invalid_password_token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "invalid_credentials",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden, account_suspended",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, identity_conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "authentication_throttled",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "authentication_busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
         ]
       }
     },
@@ -38825,6 +38970,17 @@
         },
         "additionalProperties": false
       },
+      "ExchangeChallenge": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/TwoFactorChallenge"
+          },
+          {
+            "$ref": "#/components/schemas/PasswordChallenge"
+          }
+        ],
+        "description": "The 202 answers of the exchange: a second factor, or the password before a first link."
+      },
       "ExchangeProviderBody": {
         "type": "object",
         "required": [
@@ -39699,6 +39855,22 @@
           "youtube",
           "image"
         ]
+      },
+      "LinkProviderBody": {
+        "type": "object",
+        "required": [
+          "password_token",
+          "password"
+        ],
+        "properties": {
+          "password": {
+            "type": "string"
+          },
+          "password_token": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "LoginBody": {
         "type": "object",
@@ -42526,6 +42698,28 @@
           },
           "name": {
             "type": "string"
+          }
+        }
+      },
+      "PasswordChallenge": {
+        "type": "object",
+        "description": "The answer to a provider sign-in that found an existing account by its email.",
+        "required": [
+          "password_token",
+          "provider",
+          "email"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "description": "The Orbit account the provider account connects to."
+          },
+          "password_token": {
+            "type": "string",
+            "description": "Send it with the account password to `/api/v1/auth/providers/link` within five minutes."
+          },
+          "provider": {
+            "$ref": "#/components/schemas/Provider"
           }
         }
       },

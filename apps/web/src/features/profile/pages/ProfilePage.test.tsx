@@ -38,6 +38,7 @@ function setup(handler?: Handler, { me = user, options = OPTIONS }: { me?: Recor
     const handled = await handler?.(request, body)
     if (handled) return handled
     if (path === '/api/v1/auth/options') return Response.json(options)
+    if (path === '/api/v1/auth/connected-accounts') return Response.json([])
     if (path === '/api/v1/auth/me' && request.method === 'PATCH') {
       return Response.json({ ...user, display_name: (body as { display_name: string }).display_name })
     }

@@ -5,6 +5,7 @@ import { ApiProblem } from '@orbit/api/problem'
 import { useProviderExchange } from '@/features/auth/api'
 import { AuthCard } from '@/features/auth/components/AuthForm'
 import { AuthMessage } from '@/features/auth/components/AuthMessage'
+import { LinkPasswordStep } from '@/features/auth/components/LinkPasswordStep'
 import { TwoFactorStep } from '@/features/auth/components/TwoFactorStep'
 import { oauthLoginDestination } from '@/features/auth/oauth'
 import { clearProviderFlow, parseProviderCallback, PROVIDER_NAMES, storedProviderFlow } from '@/features/auth/providerSignIn'
@@ -24,6 +25,8 @@ export function ProviderCallbackPage() {
   const exchange = useProviderExchange()
   const [callback] = useState(() => ({ ...parseProviderCallback(location.hash), flow: storedProviderFlow() }))
   const [codeStepError, setCodeStepError] = useState<Error | null>(null)
+  // The password step of a first link can lead to a code step of its own.
+  const [linkTwoFactorToken, setLinkTwoFactorToken] = useState<string | null>(null)
   const started = useRef(false)
   const { handoff, returnTo, flow } = callback
 
@@ -61,11 +64,15 @@ export function ProviderCallbackPage() {
       </AuthCard>
     )
   }
-  if (exchange.data?.kind === 'two_factor') {
-    return <TwoFactorStep token={exchange.data.token} onSignedIn={() => void navigate(oauthLoginDestination(returnTo), { replace: true })} onBack={(reason) => {
-      if (reason) setCodeStepError(reason)
-      else void navigate('/login', { replace: true })
-    }} />
+  const signedIn = () => void navigate(oauthLoginDestination(returnTo), { replace: true })
+  const back = (reason: Error | null) => {
+    if (reason) setCodeStepError(reason)
+    else void navigate('/login', { replace: true })
+  }
+  const twoFactorToken = exchange.data?.kind === 'two_factor' ? exchange.data.token : linkTwoFactorToken
+  if (twoFactorToken) return <TwoFactorStep token={twoFactorToken} onSignedIn={signedIn} onBack={back} />
+  if (exchange.data?.kind === 'password') {
+    return <LinkPasswordStep token={exchange.data.token} provider={exchange.data.provider} email={exchange.data.email} onSignedIn={signedIn} onTwoFactor={setLinkTwoFactorToken} onBack={back} />
   }
   return <AuthMessage title={signingIn ? 'Signing you in' : 'Confirming your account'} detail="One moment." />
 }

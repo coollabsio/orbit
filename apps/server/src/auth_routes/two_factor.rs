@@ -35,7 +35,7 @@ const PENDING_LIFETIME_MILLIS: i64 = 5 * 60 * 1_000;
 /// Pending entries kept at most. Passkey sign-in starts without an account, so this bounds the rows it can add.
 const MAX_PENDING: usize = 10_000;
 /// Wrong codes one sign-in may try before the password is needed again.
-const MAX_CODE_ATTEMPTS: u8 = 5;
+pub(super) const MAX_CODE_ATTEMPTS: u8 = 5;
 /// How long after a sign-in (or a provider confirmation) an account without a password may change how it signs in.
 pub(super) const FRESH_SIGN_IN_MILLIS: i64 = 10 * 60 * 1_000;
 
@@ -67,6 +67,12 @@ pub(super) enum Pending {
     ProviderHandoff {
         flow: ProviderFlow,
         outcome: Result<ProviderProfile, ProviderFailure>,
+    },
+    /// A provider sign-in found an account by its email: the account password must confirm the first link.
+    ProviderLink {
+        user: AuthenticatedUser,
+        profile: ProviderProfile,
+        attempts: u8,
     },
 }
 
@@ -168,7 +174,7 @@ impl PendingStore {
     }
 
     /// Puts an entry back under its token with its first expiry, for another try.
-    async fn restore(
+    pub(super) async fn restore(
         &self,
         token: &str,
         expires_at: TimestampMillis,
