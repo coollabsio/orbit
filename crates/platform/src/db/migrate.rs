@@ -450,6 +450,13 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0064_mcp_permissions.sql"),
                     false,
                 ),
+                Migration::new(
+                    65,
+                    include_str!(
+                        "../../../../apps/server/migrations/0065_confirm_setup_owner_email.sql"
+                    ),
+                    false,
+                ),
             ],
         );
         runner.postgres = vec![
@@ -557,6 +564,13 @@ impl MigrationRunner {
                 64,
                 include_str!(
                     "../../../../apps/server/migrations/postgres/0064_mcp_permissions.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                65,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0065_confirm_setup_owner_email.sql"
                 ),
                 false,
             ),
