@@ -2,7 +2,7 @@
 
 ## Product and milestone status
 
-Orbit is a self-hosted workspace application with a Rust server and a React web client. Milestone one persists identity, sessions, workspaces, memberships, invitations, projects, workflow statuses, labels, tasks, comments, attachments, trash, and audit records in SQLite (default) or Postgres.
+Orbit is a self-hosted workspace application with a Rust server and a React web client. It keeps tasks, docs, and chat for a team in one place, in SQLite (default) or Postgres. The product goal is an AI assistant with the full context of the workspace. Because Orbit is self-hosted, that context stays on the team's own server.
 
 The production binary embeds the matching Vite build. It serves the SPA and `/api/v1` from one HTTP listener. Operators terminate HTTPS at a reverse proxy.
 
@@ -10,21 +10,15 @@ The production binary embeds the matching Vite build. It serves the SPA and `/ap
 
 These routes use the production API and the database:
 
-- `/setup`, `/login`, `/recovery`, and `/accept-invitation`
-- `/tasks`, `/tasks/:taskId`, task trash, and project workflow settings
-- `/settings`, `/settings/members`, and `/settings/sessions`
+- `/setup`, `/login`, `/register`, `/recovery`, `/onboarding`, and `/accept-invitation`
+- `/` (home summaries), `/tasks`, `/views`, task trash, and project settings
+- `/docs` (collaborative pages, trash, Notion import)
+- `/chat` (channels, DMs, threads); `/dm/*` redirects to `/chat`
+- `/activity` (`/inbox` redirects to it), `/profile`, `/settings`, and `/admin`
 
-These routes still use frontend mock data and show a `Mock data` badge:
+Mail has no backend yet. Its UI in `features/mail` uses mock data, and `/mail` redirects to `/tasks`. `mail.rs` on the server sends only account email (invitations, registration, recovery).
 
-- `/`
-- `/docs` and `/docs/:docId`
-- `/mail` and `/mail/:threadId`
-- `/chat`, channel, thread, and chat settings routes
-- `/dm` and `/dm/:dmId`
-- `/inbox`
-- `/profile`
-
-Mock records never flow into production APIs. Refreshing a mock-backed route recreates its seed data.
+AI: there is no built-in assistant yet. AI clients use tasks and read docs and chat through the scoped MCP endpoint (`/mcp`, see `docs/mcp.md`).
 
 ## Runtime shape
 

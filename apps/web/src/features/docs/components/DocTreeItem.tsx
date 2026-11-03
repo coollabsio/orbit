@@ -1,5 +1,5 @@
 import { ChevronRight, Copy, MoreH as Ellipsis, DocumentText as FileText, Add as Plus, Star, Trash as Trash2 } from 'reicon-react'
-import type { PageSummary } from '@/api/generated/types.gen'
+import type { PageSummary } from '@orbit/api/generated/types.gen'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Emoji } from '@/components/common/Emoji'
@@ -144,9 +144,6 @@ export function DocTreeItem({
         </span>
         <span className="min-w-0 flex-1 truncate">{pageTitle(page)}</span>
         <TreeRowActions>
-          <TreeIconButton tip="Add child page" aria-label="Add child page" onClick={() => onCreateChild(page.id)}>
-            <Plus className="size-[13px]" />
-          </TreeIconButton>
           <DropdownMenu>
             <DropdownMenuTrigger render={<TreeIconButton tip="Page options" aria-label="Page options" />}>
               <Ellipsis className="size-[13px]" />
@@ -177,6 +174,9 @@ export function DocTreeItem({
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          <TreeIconButton tip="Add child page" aria-label="Add child page" onClick={() => onCreateChild(page.id)}>
+            <Plus className="size-[13px]" />
+          </TreeIconButton>
         </TreeRowActions>
       </div>
       {expanded

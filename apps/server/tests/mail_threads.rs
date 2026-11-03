@@ -10,7 +10,7 @@ use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use orbit_mail::{AuthOutcome, DmarcPolicy, DmarcVerdict, Verdict};
 use orbit_platform::{
-    AttachmentMutationCoordinator, AuthenticatedUser, Id, JobStore, LocalBlobStore, MailMode,
+    AttachmentMutationCoordinator, AuthenticatedUser, Id, LocalBlobStore, MailMode,
     PasswordService, TestDatabase, TimestampMillis, UploadLimits, UploadService,
 };
 use orbit_server::auth_routes::CookieMode;
@@ -104,11 +104,7 @@ impl Fixture {
             UploadLimits::default(),
         );
         let mail = Arc::new(MailRepository::new((*database).clone(), uploads, APP_KEY));
-        let intake = MailIntake::new(
-            Arc::clone(&mail),
-            JobStore::new((*database).clone()),
-            52_428_800,
-        );
+        let intake = MailIntake::new(Arc::clone(&mail), 52_428_800);
         let app = mail_router(MailState::new(
             Arc::clone(&identity),
             Arc::clone(&mail),

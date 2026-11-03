@@ -94,7 +94,7 @@ export function TimelineBar({ task, span, range, pxPerDay, color, status, assign
         <div
           {...common}
           className={cn(
-            'group/bar absolute top-1 flex h-6 cursor-grab items-center text-xs whitespace-nowrap text-foreground outline-none select-none focus-visible:[&>[data-diamond]]:ring-2 focus-visible:[&>[data-diamond]]:ring-primary data-dragging:cursor-grabbing',
+            'group/bar absolute top-1 flex h-6 cursor-grab items-center text-xs whitespace-nowrap text-foreground outline-none select-none focus-visible:[&>[data-diamond]]:ring-1 focus-visible:[&>[data-diamond]]:ring-primary/70 data-dragging:cursor-grabbing',
             // day-snapped moves glide instead of jumping while the pointer drags
             'data-dragging:transition-[left,width] data-dragging:duration-100 data-dragging:ease-out',
             closed && 'opacity-50',
@@ -129,7 +129,7 @@ export function TimelineBar({ task, span, range, pxPerDay, color, status, assign
         {...common}
         data-started={status?.category === 'started' || undefined}
         className={cn(
-          'group/bar absolute top-1 flex h-6 cursor-grab items-center gap-1.5 rounded-md border border-[color-mix(in_oklab,var(--bar)_38%,transparent)] bg-[color-mix(in_oklab,var(--bar)_12%,var(--background))] px-2 text-xs font-medium text-foreground outline-none select-none hover:border-[color-mix(in_oklab,var(--bar)_65%,transparent)] focus-visible:ring-2 focus-visible:ring-primary/60 data-dragging:cursor-grabbing data-dragging:shadow-lg data-started:bg-[color-mix(in_oklab,var(--bar)_22%,var(--background))]',
+          'group/bar absolute top-1 flex h-6 cursor-grab items-center gap-1.5 rounded-md border border-[color-mix(in_oklab,var(--bar)_38%,transparent)] bg-[color-mix(in_oklab,var(--bar)_12%,var(--background))] px-2 text-xs font-medium text-foreground outline-none select-none hover:border-[color-mix(in_oklab,var(--bar)_65%,transparent)] focus-visible:ring-1 focus-visible:ring-primary/70 data-dragging:cursor-grabbing data-dragging:shadow-lg data-started:bg-[color-mix(in_oklab,var(--bar)_22%,var(--background))]',
           // day-snapped moves glide instead of jumping while the pointer drags
           'data-dragging:transition-[left,width] data-dragging:duration-100 data-dragging:ease-out',
           closed && 'opacity-50',

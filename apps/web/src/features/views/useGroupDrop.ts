@@ -1,6 +1,6 @@
 import { useState, type DragEvent } from 'react'
 import { toast } from 'sonner'
-import type { TaskRecord } from '@/api/generated/types.gen'
+import type { TaskRecord } from '@orbit/api/generated/types.gen'
 import type { Task } from '@/features/tasks/api/models'
 import { useBulkTasks, useUpdateTask } from '@/features/tasks/api/tasks'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'

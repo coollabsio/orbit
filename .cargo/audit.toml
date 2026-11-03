@@ -1,0 +1,15 @@
+# cargo audit configuration. Every ignored advisory must say why it is ignored.
+[advisories]
+ignore = [
+    # rsa 0.9 Marvin attack: no fixed rsa release exists. rsa comes only through
+    # webauthn-rs -> crypto-glue 0.1, which uses it to verify passkey attestation
+    # signatures with public keys. Orbit never decrypts or signs with an RSA private
+    # key, so the timing side channel has no secret to leak (not reachable).
+    "RUSTSEC-2023-0071",
+    # crypto-bigint 0.5 timing variability: the fix is crypto-bigint 0.7, but
+    # webauthn-rs 0.6.1-dev (latest) pins crypto-glue 0.1 -> elliptic-curve 0.13 ->
+    # crypto-bigint 0.5 (no fix upstream). That path only verifies public-key
+    # signatures. Orbit's own secret-key ECDSA/ECDH (web push) uses p256 0.14, which
+    # is on the fixed crypto-bigint 0.7 (not reachable with secrets).
+    "RUSTSEC-2026-0387",
+]

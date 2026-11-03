@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 import { testWorkspace } from '../src/test/workspace'
 
 for (const mode of ['desktop', 'collapsed', 'mobile']) {
-  test(`${mode} sidebar shows the signed-in profile and supports logout retry`, async ({ page }) => {
+  test(`${mode} shell shows the signed-in profile and supports logout retry`, async ({ page }) => {
     await page.setViewportSize({ width: mode === 'mobile' ? 390 : 1280, height: 844 })
     let signedIn = true
     let attempts = 0
@@ -35,35 +35,31 @@ for (const mode of ['desktop', 'collapsed', 'mobile']) {
       await route.fulfill({ json: body })
     })
     await page.goto('/tasks?workspace=alpha')
-    if (mode === 'mobile') await page.getByRole('button', { name: 'Menu', exact: true }).click()
     if (mode === 'collapsed') await page.getByRole('button', { name: 'Collapse sidebar' }).click()
-    const sidebar = page.locator(mode === 'mobile' ? '.mobile-drawer' : '.app-sidebar')
-    const trigger = sidebar.getByRole('button', { name: 'Account menu for Test User' })
+    const shell = mode === 'mobile' ? page.locator('header').filter({ has: page.getByRole('button', { name: 'Open sidebar', exact: true }) }) : page.locator('aside').first()
+    const trigger = shell.getByRole('button', { name: 'Account menu for Test User' })
     await expect(trigger).toBeVisible()
-    if (mode !== 'collapsed') await expect(trigger).toContainText('test@example.com')
-    const box = await trigger.boundingBox()
-    expect(box!.y).toBeGreaterThan(700)
-    if (mode === 'mobile') {
-      const drawerBox = await sidebar.boundingBox()
-      expect(drawerBox!.y + drawerBox!.height - box!.y - box!.height).toBeGreaterThanOrEqual(12)
-    }
+    if (mode === 'desktop') await expect(trigger).toContainText('Test User')
+    if (mode !== 'mobile') expect((await trigger.boundingBox())!.y).toBeGreaterThan(700)
     await trigger.click()
+    await expect(page.getByRole('menu')).toBeVisible()
     await page.keyboard.press('Escape')
     await expect(trigger).toHaveAttribute('aria-expanded', 'false')
     await trigger.click()
-    const logout = page.getByRole('button', { name: 'Log out', exact: true })
+    const logout = page.getByRole('menuitem', { name: 'Log out', exact: true })
     await expect(logout).toBeVisible()
-    const popup = page.locator('.user-menu .popover')
+    const popup = page.getByRole('menu')
+    await expect(popup).toContainText('test@example.com')
     expect((await popup.boundingBox())!.width).toBeLessThan(250)
     await logout.click()
     await expect(page.getByRole('alert')).toContainText('Could not log out')
     await expect(page).toHaveURL(/tasks/)
     await logout.click()
-    await expect(page.getByRole('button', { name: 'Logging out…' })).toBeDisabled()
+    await expect(page.getByRole('menuitem', { name: 'Logging out…' })).toHaveAttribute('aria-disabled', 'true')
     await expect.poll(() => attempts).toBe(2)
     finishLogout()
     await expect(page).toHaveURL(/\/login$/)
-    await expect(page.getByRole('heading', { name: 'Sign in to Orbit' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Orbit', exact: true })).toBeVisible()
     expect(attempts).toBe(2)
     await page.goto('/tasks?workspace=alpha')
     await expect(page).toHaveURL(/\/login$/)

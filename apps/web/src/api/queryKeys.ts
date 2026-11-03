@@ -9,6 +9,7 @@ export const queryKeys = {
   /** Whether the authenticator app is on and how many recovery codes are left. */
   twoFactor: ['two-factor'] as const,
   passkeys: ['passkeys'] as const,
+  connectedAccounts: ['connected-accounts'] as const,
   shortcuts: ['shortcuts'] as const,
   /** The browsers the user gets notifications on. */
   pushDevices: ['push-devices'] as const,
@@ -33,8 +34,14 @@ export const queryKeys = {
   memberProfile: (workspaceId: string, userId: string) => [...workspace(workspaceId), 'profiles', userId] as const,
   invitations: (workspaceId: string) => [...workspace(workspaceId), 'invitations'] as const,
   apiTokens: (workspaceId: string) => [...workspace(workspaceId), 'api-tokens'] as const,
+  /** Full workspace exports (ZIP archives) that have not expired. */
+  workspaceExports: (workspaceId: string) => [...workspace(workspaceId), 'exports'] as const,
+  /** Orbit Cloud: the workspace's subscription and access. */
+  billing: (workspaceId: string) => [...workspace(workspaceId), 'billing'] as const,
   /** Bytes of files the workspace stores, and its quota. */
   workspaceStorage: (workspaceId: string) => [...workspace(workspaceId), 'storage'] as const,
+  /** The workspace's own S3 bucket for its files. */
+  workspaceBucket: (workspaceId: string) => [...workspace(workspaceId), 'storage', 'bucket'] as const,
   projects: (workspaceId: string) => [...workspace(workspaceId), 'projects'] as const,
   statuses: (workspaceId: string, projectId: string) =>
     [...workspace(workspaceId), 'projects', projectId, 'statuses'] as const,

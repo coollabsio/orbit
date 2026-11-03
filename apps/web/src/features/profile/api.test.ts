@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { QueryClient } from '@tanstack/react-query'
-import type { MemberProfile } from '@/api/generated/types.gen'
+import type { MemberProfile } from '@orbit/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 import { saveMemberNote } from './api'
 

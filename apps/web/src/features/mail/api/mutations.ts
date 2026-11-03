@@ -31,7 +31,7 @@ import {
   updateMailLabel,
   updateMailThread,
   updateMailThreads,
-} from '@/api/generated/sdk.gen'
+} from '@orbit/api/generated/sdk.gen'
 import type {
   CreateMailboxBody,
   CreateMailLabelBody,
@@ -44,7 +44,7 @@ import type {
   SetMailAdminBody,
   UpdateMailLabelBody,
   UpdateMailProviderBody,
-} from '@/api/generated/types.gen'
+} from '@orbit/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 import { useContext } from 'react'
 import { useWorkspace, WorkspaceContext } from '@/features/workspaces/workspaceContext'

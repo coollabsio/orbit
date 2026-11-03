@@ -1,5 +1,5 @@
 import { useId, useState, type FormEvent } from 'react'
-import type { MailProviderKind, MailProviderSecretsBody, MailProviderSettings, MailProviderView } from '@/api/generated/types.gen'
+import type { MailProviderKind, MailProviderSecretsBody, MailProviderSettings, MailProviderView } from '@orbit/api/generated/types.gen'
 import { Modal } from '@/components/common/Modal'
 import { Button } from '@/components/ui/button'
 import { DialogClose, DialogFooter } from '@/components/ui/dialog'

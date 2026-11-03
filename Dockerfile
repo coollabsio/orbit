@@ -1,24 +1,41 @@
 # syntax=docker/dockerfile:1.7
 ARG ORBIT_BUILD_REVISION=container
-FROM oven/bun:1.3.14-alpine AS web
+FROM oven/bun:1.4.4-alpine AS web
+WORKDIR /src
+COPY package.json bun.lock bunfig.toml ./
+COPY apps/web/package.json apps/web/
+COPY apps/mobile/package.json apps/mobile/
+COPY packages/api/package.json packages/api/
+COPY packages/editor/package.json packages/editor/
+RUN bun install --frozen-lockfile --filter web
+COPY packages/api/ packages/api/
+COPY packages/editor/ packages/editor/
+COPY apps/web/ apps/web/
 WORKDIR /src/apps/web
-COPY apps/web/package.json apps/web/bun.lock ./
-RUN bun install --frozen-lockfile
-COPY apps/web/ ./
 ARG ORBIT_BUILD_REVISION
 RUN ORBIT_BUILD_REVISION=${ORBIT_BUILD_REVISION} bun run build
 
-FROM rust:1.97.1-alpine AS server
+# cargo-chef builds the Rust dependencies in their own layer. That layer changes only when
+# Cargo.toml or Cargo.lock change, so the GitHub Actions layer cache keeps it between builds.
+FROM lukemathwalker/cargo-chef:0.1.78-rust-1.97.1-alpine3.23 AS chef
 RUN apk add --no-cache musl-dev
 WORKDIR /src
+
+FROM chef AS planner
+COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY crates/ crates/
+COPY apps/server/ apps/server/
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS server
+COPY --from=planner /src/recipe.json recipe.json
+RUN cargo chef cook --locked --release -p orbit-server --recipe-path recipe.json
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY crates/ crates/
 COPY apps/server/ apps/server/
 COPY --from=web /src/apps/web/dist/ apps/web/dist/
 ARG ORBIT_BUILD_REVISION
-RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
-    --mount=type=cache,target=/src/target,sharing=locked \
-    ORBIT_BUILD_REVISION=${ORBIT_BUILD_REVISION} \
+RUN ORBIT_BUILD_REVISION=${ORBIT_BUILD_REVISION} \
     cargo build --locked --release -p orbit-server \
     && cp target/release/orbit /orbit
 
@@ -27,12 +44,10 @@ RUN apk add --no-cache bash ca-certificates tzdata \
     && mkdir -p /var/lib/orbit /var/backups/orbit \
     && chown -R 65532:65532 /var/lib/orbit /var/backups/orbit
 COPY --from=server /orbit /orbit
-# The image trusts forwarding headers from every address: it expects to run behind a proxy that is the only
-# way in. Publish port 8080 directly, or share the network with untrusted containers, and clients can fake
-# their IP address and https. Then set ORBIT_TRUSTED_PROXIES to the proxy network.
+# No ORBIT_TRUSTED_PROXIES default: production refuses to start until it lists the reverse proxy addresses.
+# Include 127.0.0.1/32 so the HEALTHCHECK (from inside the container) counts as HTTPS.
 ENV ORBIT_ENV=production \
     ORBIT_BIND=0.0.0.0 \
-    ORBIT_TRUSTED_PROXIES=0.0.0.0/0,::/0 \
     ORBIT_DATABASE_PATH=/var/lib/orbit/orbit.sqlite \
     ORBIT_ATTACHMENTS_PATH=/var/lib/orbit/attachments \
     ORBIT_BACKUPS_PATH=/var/backups/orbit

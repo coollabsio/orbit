@@ -3,7 +3,7 @@
 import { SuggestionMenuController } from '@blocknote/react'
 import { insertPageMention, mentionTriggerAllowed, pageMentionItems } from './mentionItems'
 import type { PageMentionOptions } from './pageMentions'
-import type { PageEditorInstance } from './schema'
+import type { PageEditorInstance } from '@orbit/editor/schema'
 
 export function PageMentionMenu({ editor, options }: { editor: PageEditorInstance; options: () => PageMentionOptions | undefined }) {
   return (

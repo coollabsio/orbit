@@ -55,7 +55,7 @@ test('a GitHub issue title is read-only, but links remain usable', () => {
 
 test('new untitled task opens with an empty focused title field', () => {
   const view = render(<TaskTextFields task={task(1, 'Untitled', '')} onUpdate={() => {}} />)
-  const title = view.getByLabelText('Task title') as HTMLInputElement
+  const title = view.getByLabelText('Task title') as HTMLTextAreaElement
 
   expect(title.value).toBe('')
   expect(title.placeholder).toBe('Task title')

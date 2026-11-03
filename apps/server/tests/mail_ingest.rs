@@ -12,8 +12,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use orbit_mail::{AuthOutcome, DmarcPolicy, DmarcVerdict, Verdict};
 use orbit_platform::{
     AttachmentMutationCoordinator, BlobFuture, BlobObject, BlobReader, BlobStore, BlobStoreError,
-    Id, IntegrityService, JobError, JobStore, LocalBlobStore, Row, StagedUpload, StoredObject,
-    TestDatabase, TimestampMillis, UploadLimits, UploadService, testing_postgres,
+    Id, IntegrityService, JobError, LocalBlobStore, Row, StagedUpload, StoredObject, TestDatabase,
+    TimestampMillis, UploadLimits, UploadService, testing_postgres,
 };
 use orbit_server::mail_intake::{InboundMessage, MailIntake, Recipient, Source};
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
@@ -79,7 +79,6 @@ struct Fixture {
     database: TestDatabase,
     mail: Arc<MailRepository>,
     intake: MailIntake,
-    jobs: JobStore,
     fail_open: Arc<AtomicBool>,
     workspace: Id,
     owner: Id,
@@ -130,14 +129,12 @@ impl Fixture {
             UploadLimits::default(),
         );
         let mail = Arc::new(MailRepository::new((*database).clone(), uploads, APP_KEY));
-        let jobs = JobStore::new((*database).clone());
-        let intake = MailIntake::new(Arc::clone(&mail), jobs.clone(), 52_428_800);
+        let intake = MailIntake::new(Arc::clone(&mail), 52_428_800);
         let mut fixture = Self {
             _root: root,
             database,
             mail,
             intake,
-            jobs,
             fail_open,
             workspace: setup.workspace_id,
             owner: setup.user_id,
@@ -831,7 +828,7 @@ async fn exhausted_retries_fail_the_receipt_and_retry_ingests_it() {
     let (member, _) = fixture.member("Member").await;
     let refused = fixture
         .mail
-        .retry_receipt(fixture.workspace, member, receipt, &fixture.jobs)
+        .retry_receipt(fixture.workspace, member, receipt)
         .await
         .unwrap_err();
     assert!(matches!(refused, MailError::Forbidden(_)), "{refused:?}");
@@ -844,7 +841,7 @@ async fn exhausted_retries_fail_the_receipt_and_retry_ingests_it() {
         .await;
     fixture
         .mail
-        .retry_receipt(fixture.workspace, fixture.owner, receipt, &fixture.jobs)
+        .retry_receipt(fixture.workspace, fixture.owner, receipt)
         .await
         .unwrap();
     let (status, _, message) = fixture.receipt_status(receipt).await;
@@ -865,7 +862,7 @@ async fn exhausted_retries_fail_the_receipt_and_retry_ingests_it() {
     assert_eq!(fixture.threads().await.len(), 1);
     let again = fixture
         .mail
-        .retry_receipt(fixture.workspace, fixture.owner, receipt, &fixture.jobs)
+        .retry_receipt(fixture.workspace, fixture.owner, receipt)
         .await
         .unwrap_err();
     assert!(matches!(again, MailError::Conflict(_)), "{again:?}");

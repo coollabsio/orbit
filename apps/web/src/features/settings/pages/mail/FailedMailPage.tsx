@@ -1,6 +1,6 @@
 import { toast } from 'sonner'
 import { SmsTracking } from 'reicon-react'
-import type { MailFailedReceipt, MailRejectedDelivery, MailRejectReason } from '@/api/generated/types.gen'
+import type { MailFailedReceipt, MailRejectedDelivery, MailRejectReason } from '@orbit/api/generated/types.gen'
 import { EmptyState } from '@/components/common/EmptyState'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { Badge } from '@/components/ui/badge'

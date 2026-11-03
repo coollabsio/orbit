@@ -1,9 +1,9 @@
 import { filterSuggestionItems, insertOrUpdateBlockForSlashMenu } from '@blocknote/core/extensions'
 import { getDefaultReactSlashMenuItems, type DefaultReactSuggestionItem } from '@blocknote/react'
 import { DocumentText, Hierarchy, LampOn, Link2 } from 'reicon-react'
-import { MERMAID_LANGUAGE } from '@/lib/codeLanguages'
-import { CALLOUT_DEFAULT_BACKGROUND } from './CalloutBlock'
-import type { PageEditorInstance } from './schema'
+import { MERMAID_LANGUAGE } from '@orbit/editor/codeLanguages'
+import { CALLOUT_DEFAULT_BACKGROUND } from '@orbit/editor/schema'
+import type { PageEditorInstance } from '@orbit/editor/schema'
 
 /** Group the custom page items join (the reference editor's default "Basic blocks" group). */
 export const PAGE_ITEMS_GROUP = 'Basic blocks'

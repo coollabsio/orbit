@@ -48,7 +48,7 @@ function dropUnder(drag: SidebarDrag, clientX: number, clientY: number): Sidebar
 
 /**
  * The copy of the dragged row that follows the pointer, as in Discord: a little transparent, with a shadow. It goes
- * into the sidebar, so it has the colours of the chat theme, and it takes no pointer events, so the row under it is
+ * into the sidebar, so it has the colours of the custom theme, and it takes no pointer events, so the row under it is
  * still found.
  */
 function makeGhost(source: HTMLElement): { element: HTMLElement; rect: DOMRect } {

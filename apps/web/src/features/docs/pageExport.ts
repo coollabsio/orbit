@@ -1,7 +1,7 @@
 import { toast } from 'sonner'
 import { apiClient, type createApiClient } from '@/api/client'
-import { exportPage } from '@/api/generated/sdk.gen'
-import { ApiProblem } from '@/api/problem'
+import { exportPage } from '@orbit/api/generated/sdk.gen'
+import { ApiProblem } from '@orbit/api/problem'
 
 type ApiClient = ReturnType<typeof createApiClient>
 

@@ -1,12 +1,8 @@
+import { CALLOUT_DEFAULT_EMOJI } from '@orbit/editor/schema'
 import { useState } from 'react'
 import { Emoji } from '@/components/common/Emoji'
 import { EmojiPicker } from '@/components/common/EmojiPicker'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-
-/** Emoji of a new callout (and of imported Notion callouts whose icon is not an emoji). */
-export const CALLOUT_DEFAULT_EMOJI = '💡'
-/** Background of a new callout; any BlockNote color name, `default` = no fill, just a border. */
-export const CALLOUT_DEFAULT_BACKGROUND = 'gray'
 
 interface CalloutEditor {
   readonly isEditable: boolean

@@ -1,9 +1,9 @@
 import { useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient, type createApiClient } from '@/api/client'
-import { listRecentPages, recordPageVisit, setPageLock } from '@/api/generated/sdk.gen'
-import type { Page, RecentPage } from '@/api/generated/types.gen'
-import { ApiProblem } from '@/api/problem'
+import { listRecentPages, recordPageVisit, setPageLock } from '@orbit/api/generated/sdk.gen'
+import type { Page, RecentPage } from '@orbit/api/generated/types.gen'
+import { ApiProblem } from '@orbit/api/problem'
 import { queryKeys } from '@/api/queryKeys'
 import { reconcilePage } from './pages'
 

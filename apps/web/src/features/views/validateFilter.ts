@@ -1,7 +1,7 @@
 import { apiClient } from '@/api/client'
-import { queryTasks } from '@/api/generated/sdk.gen'
-import type { TaskQueryBody } from '@/api/generated/types.gen'
-import { ApiProblem } from '@/api/problem'
+import { queryTasks } from '@orbit/api/generated/sdk.gen'
+import type { TaskQueryBody } from '@orbit/api/generated/types.gen'
+import { ApiProblem } from '@orbit/api/problem'
 import type { FilterIssue } from './filterTree'
 import type { FilterGroup } from './viewState'
 

@@ -1140,7 +1140,9 @@ async fn enqueue_in_commits_with_the_callers_transaction() {
     let (database, store) = store().await;
     let queued = job("in_transaction", JobPriority::Normal, 1_000);
     let mut transaction = database.immediate_transaction().await.unwrap();
-    store.enqueue_in(&mut transaction, &queued).await.unwrap();
+    JobStore::enqueue_in(&mut transaction, &queued)
+        .await
+        .unwrap();
     transaction.commit().await.unwrap();
 
     let claim = store
@@ -1156,7 +1158,9 @@ async fn enqueue_in_rolls_back_with_the_callers_transaction() {
     let (database, store) = store().await;
     let queued = job("rolled_back", JobPriority::Normal, 1_000);
     let mut transaction = database.immediate_transaction().await.unwrap();
-    store.enqueue_in(&mut transaction, &queued).await.unwrap();
+    JobStore::enqueue_in(&mut transaction, &queued)
+        .await
+        .unwrap();
     drop(transaction);
 
     assert!(store.get(queued.id).await.unwrap().is_none());

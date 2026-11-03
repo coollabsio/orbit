@@ -4,7 +4,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { toast } from 'sonner'
 import { queryKeys } from '@/api/queryKeys'
-import type { PageTaskRecord, TaskRecord, TaskRelationRecord } from '@/api/generated/types.gen'
+import type { PageTaskRecord, TaskRecord, TaskRelationRecord } from '@orbit/api/generated/types.gen'
 import { useAddTaskRelation, useBulkTasks, useCreateTaskComment, useRemoveTaskRelation, useTaskRelations, useTasks, useUpdateTask } from './tasks'
 import { keepIdentifiersTogether } from '@/lib/toast'
 

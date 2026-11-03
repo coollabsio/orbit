@@ -2263,6 +2263,106 @@ async fn admin_user_list_pages_and_searches_by_name_or_email() {
     assert!(wildcard["items"].as_array().unwrap().is_empty());
 }
 
+#[tokio::test]
+async fn only_the_owner_changes_or_removes_an_admin_and_admins_still_leave() {
+    let database = TestDatabase::new().await.unwrap();
+    let identity = Arc::new(IdentityRepository::new((*database).clone()));
+    let setup = setup_owner(&identity).await;
+    let owner_cookie = format!("__Host-orbit_session={}", setup.1);
+    let first = create_user(&database, &identity, "first@example.com", "First").await;
+    let second = create_user(&database, &identity, "second@example.com", "Second").await;
+    let app = workspace_router(WorkspaceState::new(
+        Arc::clone(&identity),
+        "https://orbit.test".to_owned(),
+        CookieMode::secure(),
+    ))
+    .layer(HttpPlatformLayer::new(OriginPolicy::new(
+        "https://orbit.test",
+    )));
+    for (email, user) in [
+        ("first@example.com", &first),
+        ("second@example.com", &second),
+    ] {
+        invite_and_accept(&app, &setup.0, &owner_cookie, email, "admin", &user.1).await;
+    }
+    let members = response_json(
+        app.clone()
+            .oneshot(cookie_request(
+                "GET",
+                &format!("/api/v1/workspaces/{}/members?limit=100", setup.0),
+                &first.1,
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let row = |user_id: Id| {
+        members["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["user_id"] == user_id.to_string())
+            .unwrap()
+            .clone()
+    };
+    let (first_row, second_row) = (row(first.0), row(second.0));
+    // The UI hides the actions an admin may not take on another admin.
+    assert_eq!(second_row["can_change_role"], false);
+    assert_eq!(second_row["can_remove"], false);
+    assert_eq!(first_row["can_remove"], true, "an admin may leave");
+    let second_membership = second_row["id"].as_str().unwrap();
+
+    let demote = app
+        .clone()
+        .oneshot(json_request(
+            "PATCH",
+            &format!("/api/v1/workspaces/{}/members/{second_membership}", setup.0),
+            &first.1,
+            json!({"role": "member", "expected_version": 0}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(demote.status(), StatusCode::FORBIDDEN);
+    let remove = app
+        .clone()
+        .oneshot(cookie_request(
+            "DELETE",
+            &format!(
+                "/api/v1/workspaces/{}/members/{second_membership}?expected_version=0",
+                setup.0
+            ),
+            &first.1,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(remove.status(), StatusCode::FORBIDDEN);
+
+    let owner_demotes = app
+        .clone()
+        .oneshot(json_request(
+            "PATCH",
+            &format!("/api/v1/workspaces/{}/members/{second_membership}", setup.0),
+            &owner_cookie,
+            json!({"role": "member", "expected_version": 0}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(owner_demotes.status(), StatusCode::NO_CONTENT);
+    let leave = app
+        .oneshot(cookie_request(
+            "DELETE",
+            &format!(
+                "/api/v1/workspaces/{}/members/{}?expected_version=0",
+                setup.0,
+                first_row["id"].as_str().unwrap()
+            ),
+            &first.1,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(leave.status(), StatusCode::NO_CONTENT);
+}
+
 async fn setup_owner(repository: &IdentityRepository) -> (String, String) {
     let now = TimestampMillis::now();
     repository

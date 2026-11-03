@@ -419,6 +419,70 @@ async fn threads_support_replies_edits_resolve_and_author_only_changes() {
 }
 
 #[tokio::test]
+async fn a_thread_creator_cannot_delete_the_replies_of_others() {
+    let fixture = Fixture::new().await;
+    let owner = fixture.owner.clone();
+    let creator = fixture
+        .add_member(&fixture.workspace_id, "creator@example.com", "Creator")
+        .await;
+    let replier = fixture
+        .add_member(&fixture.workspace_id, "replier@example.com", "Replier")
+        .await;
+    let page = fixture.create_page(&owner, json!({"title": "Plan"})).await;
+    let (_, thread) = fixture
+        .start_thread(&creator.cookie, &page, text("Question"))
+        .await;
+    let thread_uri = format!("{}/{}", fixture.threads_uri(&page), id(&thread));
+    let (_, reply) = fixture
+        .call(
+            &replier.cookie,
+            "POST",
+            &format!("{thread_uri}/comments"),
+            Some(json!({ "body": text("Answer") })),
+        )
+        .await;
+
+    let (status, problem) = fixture
+        .call(&creator.cookie, "DELETE", &thread_uri, None)
+        .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(problem["code"], "page_thread_has_replies");
+    assert_eq!(fixture.count("SELECT COUNT(*) FROM page_threads").await, 1);
+
+    // Once the reply is gone, the creator may delete the thread.
+    let (status, _) = fixture
+        .call(
+            &replier.cookie,
+            "DELETE",
+            &format!("{thread_uri}/comments/{}", id(&reply)),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (status, _) = fixture
+        .call(&creator.cookie, "DELETE", &thread_uri, None)
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+
+    // A comment moderator (owner, admin) deletes a thread with replies.
+    let (_, thread) = fixture
+        .start_thread(&creator.cookie, &page, text("Again"))
+        .await;
+    let thread_uri = format!("{}/{}", fixture.threads_uri(&page), id(&thread));
+    fixture
+        .call(
+            &replier.cookie,
+            "POST",
+            &format!("{thread_uri}/comments"),
+            Some(json!({ "body": text("Answer") })),
+        )
+        .await;
+    let (status, _) = fixture.call(&owner, "DELETE", &thread_uri, None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(fixture.count("SELECT COUNT(*) FROM page_threads").await, 0);
+}
+
+#[tokio::test]
 async fn invalid_bodies_are_rejected() {
     let fixture = Fixture::new().await;
     let page = fixture

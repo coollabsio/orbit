@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use orbit_mail::inbound::resend::ResendEvent;
 use orbit_mail::inbound::{Delivery, InboundError, SpfHeaderOwned, SpfSource, ses};
 use orbit_mail::{Authenticator, authentication_results, provider_spf, strip_auth_results};
-use orbit_platform::{JobStore, S3Bucket, S3Config, TimestampMillis};
+use orbit_platform::{S3Bucket, S3Config, TimestampMillis};
 use serde::Deserialize;
 
 use crate::mail_image_proxy::{FetchError, SafeFetch};
@@ -83,7 +83,6 @@ impl ProviderIntake {
     #[must_use]
     pub fn new(
         mail: Arc<MailRepository>,
-        jobs: JobStore,
         max_message_bytes: u64,
         auth: Arc<Authenticator>,
         hostname: String,
@@ -92,7 +91,6 @@ impl ProviderIntake {
             // the limit is for the provider's message; Orbit's trace headers come on top
             intake: MailIntake::new(
                 Arc::clone(&mail),
-                jobs,
                 max_message_bytes + crate::mail_listener::TRACE_HEADROOM,
             ),
             mail,

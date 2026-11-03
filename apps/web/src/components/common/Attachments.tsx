@@ -47,8 +47,8 @@ export function Attachments({
   const [viewerPdf, setViewerPdf] = useState<Attachment | null>(null)
   if (attachments.length === 0) return null
 
-  const images = attachments.filter(isImage)
-  const otherFiles = attachments.filter((att) => !isImage(att))
+  const images = attachments.filter((att) => isImage(att) && !att.deleted)
+  const otherFiles = attachments.filter((att) => !isImage(att) || att.deleted)
   const single = images.length === 1
 
   return (
@@ -101,7 +101,15 @@ export function Attachments({
         <div className="flex max-w-md flex-col gap-2">
           {otherFiles.map((att) => (
             <span key={att.id} className="group relative block">
-              {isPdf(att) ? (
+              {att.deleted ? (
+                <span data-slot="attachment-deleted" className="flex items-center gap-3 rounded-lg border border-dashed border-border p-3 text-muted-foreground">
+                  <Paperclip className="size-10 shrink-0 opacity-50" />
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="text-sm font-medium">Deleted file</span>
+                    <span className="truncate text-xs">{att.fileName} · an admin deleted it</span>
+                  </span>
+                </span>
+              ) : isPdf(att) ? (
                 <button
                   type="button"
                   aria-label={`Open ${att.fileName}`}

@@ -1,6 +1,6 @@
 import { toast } from 'sonner'
-import type { BulkItem } from '@/api/generated/types.gen'
-import { ApiProblem } from '@/api/problem'
+import type { BulkItem } from '@orbit/api/generated/types.gen'
+import { ApiProblem } from '@orbit/api/problem'
 import { isTaskVersionConflict } from '@/features/tasks/api/conflicts'
 import { taskIdentifier, type Project, type Task } from '@/features/tasks/api/models'
 import { useBulkTasks } from '@/features/tasks/api/tasks'

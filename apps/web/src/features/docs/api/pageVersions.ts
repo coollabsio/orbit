@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient, type createApiClient } from '@/api/client'
-import { getPageVersion, listPageVersions, restorePageVersion } from '@/api/generated/sdk.gen'
-import type { Page, PageVersion, PageVersionList } from '@/api/generated/types.gen'
+import { getPageVersion, listPageVersions, restorePageVersion } from '@orbit/api/generated/sdk.gen'
+import type { Page, PageVersion, PageVersionList } from '@orbit/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 import { reconcilePage } from './pages'
 

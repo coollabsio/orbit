@@ -3,7 +3,7 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "cn"
 
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-[color,background-color,border-color,box-shadow,opacity,translate] duration-120 ease-[cubic-bezier(0.23,1,0.32,1)] outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/button inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-[color,background-color,border-color,box-shadow,opacity,translate,scale] duration-120 ease-[cubic-bezier(0.23,1,0.32,1)] outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
@@ -36,9 +36,10 @@ const buttonVariants = cva(
     compoundVariants: [
       {
         // Coolify's physical edge: hover lifts the face 1px, press sinks it and drops the edge.
+        // The Flat style hides the edge (transparent depth) and presses with a small scale instead.
         variant: ["default", "outline", "secondary", "destructive"],
         class:
-          "bg-clip-border shadow-[0_2px_0_var(--button-depth)] hover:-translate-y-px hover:shadow-[0_3px_0_var(--button-depth)] active:not-aria-[haspopup]:translate-y-0.5 active:not-aria-[haspopup]:shadow-none disabled:shadow-none",
+          "bg-clip-border shadow-[0_2px_0_var(--button-depth)] hover:-translate-y-px hover:shadow-[0_3px_0_var(--button-depth)] active:not-aria-[haspopup]:translate-y-0.5 active:not-aria-[haspopup]:shadow-none disabled:shadow-none flat:[--button-depth:transparent]! flat:hover:translate-y-0 flat:active:not-aria-[haspopup]:translate-y-0 flat:active:not-aria-[haspopup]:scale-[0.97]",
       },
     ],
     defaultVariants: {

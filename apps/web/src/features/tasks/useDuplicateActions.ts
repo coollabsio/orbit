@@ -1,7 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { apiClient } from '@/api/client'
-import type { TaskRecord } from '@/api/generated/types.gen'
+import type { TaskRecord } from '@orbit/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 import { announceAutoClosed } from '@/features/tasks/api/autoClosed'
 import { reconcileWorkspaceTask } from '@/features/tasks/api/optimistic'

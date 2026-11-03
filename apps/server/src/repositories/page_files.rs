@@ -277,8 +277,8 @@ async fn authorized_file(
     actor_id: Id,
 ) -> Result<AuthorizedAttachment, PageFileError> {
     let row = sqlx::query(sqlx::AssertSqlSafe(format!(
-        "SELECT attachment_blobs.storage_key AS storage_key, page_files.mime_type AS mime_type, \
-         page_files.file_name AS file_name FROM page_files \
+        "SELECT attachment_blobs.storage_key AS storage_key, attachment_blobs.deleted_at AS deleted_at, \
+         page_files.mime_type AS mime_type, page_files.file_name AS file_name FROM page_files \
          JOIN attachment_blobs ON attachment_blobs.id = page_files.blob_id \
          AND attachment_blobs.workspace_id = page_files.workspace_id \
          JOIN pages ON pages.id = page_files.page_id AND pages.workspace_id = page_files.workspace_id \
@@ -300,6 +300,7 @@ async fn authorized_file(
         storage_key: row.try_get("storage_key")?,
         media_type: row.try_get("mime_type")?,
         display_name: row.try_get("file_name")?,
+        deleted: row.try_get::<Option<i64>, _>("deleted_at")?.is_some(),
     })
 }
 

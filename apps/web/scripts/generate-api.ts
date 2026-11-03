@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-const [input = 'src/api/generated/openapi.json', output = 'src/api/generated'] = Bun.argv.slice(2)
+const [input = '../../packages/api/src/generated/openapi.json', output = '../../packages/api/src/generated'] = Bun.argv.slice(2)
 const source = await Bun.file(input).text()
 const document = JSON.parse(source)
 const contractId = document?.info?.version

@@ -11,6 +11,7 @@ use orbit_platform::{
 
 use crate::attachment_routes::{AttachmentState, attachment_router};
 use crate::auth_routes::{AuthState, auth_router};
+use crate::backup_item_routes::{BackupItemState, backup_item_router};
 use crate::chat_routes::{ChatState, chat_router};
 use crate::export_routes::{ExportState, export_router};
 use crate::import_routes::{ImportState, import_router};
@@ -23,18 +24,23 @@ use crate::static_assets::StaticAssets;
 use crate::task_routes::{TaskState, task_router};
 use crate::teamspace_routes::{TeamspaceState, teamspace_router};
 use crate::view_routes::view_router;
+use crate::workspace_export_routes::{WorkspaceExportState, workspace_export_router};
 use crate::workspace_routes::{WorkspaceState, workspace_router};
 
 pub struct ApiRoutes {
+    /// Orbit Cloud billing: its routes and the read-only guard. `None` on a self-hosted server.
+    pub billing: Option<crate::billing::Billing>,
     pub mcp: Router,
     pub oauth: Router,
     pub auth: AuthState,
     pub workspaces: WorkspaceState,
+    pub backup_items: BackupItemState,
     pub tasks: TaskState,
     pub pages: PageState,
     pub page_files: PageFileState,
     pub page_comments: PageCommentState,
     pub exports: ExportState,
+    pub workspace_exports: WorkspaceExportState,
     pub teamspaces: TeamspaceState,
     pub attachments: AttachmentState,
     pub integrations: IntegrationState,
@@ -57,17 +63,21 @@ pub fn production_router(
     let database = api.auth.database().clone();
     let realtime = crate::realtime::router(api.tasks.clone());
     let views = view_router(api.tasks.clone());
-    auth_router(api.auth)
+    let identity = std::sync::Arc::clone(&api.tasks.identity);
+    let cookie_mode = api.tasks.cookie_mode;
+    let router = auth_router(api.auth)
         .merge(api.mcp)
         .merge(api.oauth)
         .merge(realtime)
         .merge(workspace_router(api.workspaces))
+        .merge(backup_item_router(api.backup_items))
         .merge(task_router(api.tasks))
         .merge(views)
         .merge(page_router(api.pages))
         .merge(page_file_router(api.page_files))
         .merge(page_comment_router(api.page_comments))
         .merge(export_router(api.exports))
+        .merge(workspace_export_router(api.workspace_exports))
         .merge(teamspace_router(api.teamspaces))
         .merge(attachment_router(api.attachments))
         .merge(integration_router(api.integrations))
@@ -82,21 +92,34 @@ pub fn production_router(
                 .with_state(health),
         )
         .merge(assets.router())
-        .method_not_allowed_fallback(method_not_allowed)
-        .layer({
-            let layer = HttpPlatformLayer::new(origin_policy)
-                .with_contract_id(crate::openapi::CONTRACT_ID)
-                .with_limits(limits)
-                .with_rate_limits(rate_limits)
-                .with_session_cookie(session_cookie)
-                .with_shared_rate_limits(database)
-                .with_csp_script_hash(csp_script_hash);
-            if require_secure_transport {
-                layer.require_secure_transport()
-            } else {
-                layer
-            }
-        })
+        .method_not_allowed_fallback(method_not_allowed);
+    let router = match api.billing {
+        Some(billing) => crate::billing::guard::layer(
+            router.merge(crate::billing::router(
+                billing.clone(),
+                std::sync::Arc::clone(&identity),
+                cookie_mode,
+            )),
+            billing,
+            identity,
+            cookie_mode,
+        ),
+        None => router,
+    };
+    router.layer({
+        let layer = HttpPlatformLayer::new(origin_policy)
+            .with_contract_id(crate::openapi::CONTRACT_ID)
+            .with_limits(limits)
+            .with_rate_limits(rate_limits)
+            .with_session_cookie(session_cookie)
+            .with_shared_rate_limits(database)
+            .with_csp_script_hash(csp_script_hash);
+        if require_secure_transport {
+            layer.require_secure_transport()
+        } else {
+            layer
+        }
+    })
 }
 
 async fn method_not_allowed(request: Request) -> Response<Body> {

@@ -1,4 +1,4 @@
-import { type QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { keepPreviousData, type QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient, type createApiClient } from '@/api/client'
 import { fetchAllPages } from '@/api/pagination'
 import { queryKeys } from '@/api/queryKeys'
@@ -9,8 +9,12 @@ import {
   changeMemberRole,
   createInvitation,
   createWorkspace,
+  deleteStorageFile,
   deleteWorkspace,
+  getWorkspaceBucket,
   getWorkspaceStorage,
+  removeWorkspaceBucket,
+  saveWorkspaceBucket,
   listInvitations,
   listMembers,
   listWorkspaces,
@@ -18,8 +22,9 @@ import {
   renameWorkspace,
   revokeInvitation,
   transferOwnership,
-} from '@/api/generated/sdk.gen'
-import type { AcceptBody, InvitationBody, MemberRecord, RoleBody, WorkspaceRecord } from '@/api/generated/types.gen'
+} from '@orbit/api/generated/sdk.gen'
+import { STORAGE_FILES_PAGE } from '@orbit/api/storage'
+import type { AcceptBody, InvitationBody, MemberRecord, RoleBody, S3Body, WorkspaceBucketView, WorkspaceRecord } from '@orbit/api/generated/types.gen'
 import type { User } from './models'
 
 type ApiClient = ReturnType<typeof createApiClient>
@@ -107,15 +112,63 @@ export function useInvitations(workspaceId: string | null) {
   })
 }
 
-/** Bytes of files the workspace stores, and its quota (`null` is unlimited). */
-export function useWorkspaceStorage(workspaceId: string) {
+/** Bytes of files the workspace stores, and its quota (`null` is unlimited); admins also get a page of the largest
+    files, from `offset`. */
+export function useWorkspaceStorage(workspaceId: string, offset = 0) {
   return useQuery({
-    queryKey: queryKeys.workspaceStorage(workspaceId),
+    queryKey: [...queryKeys.workspaceStorage(workspaceId), offset],
+    // the page stays while the next one loads
+    placeholderData: keepPreviousData,
     queryFn: async () => {
-      const { data } = await getWorkspaceStorage({ client: apiClient, path: { workspace_id: workspaceId }, throwOnError: true })
+      const { data } = await getWorkspaceStorage({ client: apiClient, path: { workspace_id: workspaceId }, query: { files: STORAGE_FILES_PAGE, offset }, throwOnError: true })
       return required(data, 'Workspace storage response was empty.')
     },
   })
+}
+
+/** Deletes a stored file for an admin; where it was used, it then shows as a deleted file. */
+export function useDeleteStorageFile(workspaceId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (fileId: string) => {
+      await deleteStorageFile({ client: apiClient, path: { workspace_id: workspaceId, file_id: fileId }, throwOnError: true })
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.workspaceStorage(workspaceId) }),
+  })
+}
+
+/** The workspace's own S3 bucket. Polls while files move into it or back out of it. */
+export function useWorkspaceBucket(workspaceId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.workspaceBucket(workspaceId),
+    queryFn: async () => {
+      const { data } = await getWorkspaceBucket({ client: apiClient, path: { workspace_id: workspaceId }, throwOnError: true })
+      return required(data, 'Workspace bucket response was empty.')
+    },
+    enabled,
+    refetchInterval: (query) => {
+      const bucket = query.state.data
+      return bucket && (bucket.checking || bucket.files_to_move > 0 || bucket.removing) ? 5000 : false
+    },
+  })
+}
+
+function useWorkspaceBucketWrite<T>(workspaceId: string, write: (body: T) => Promise<WorkspaceBucketView | undefined>) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (body: T) => required(await write(body), 'Workspace bucket response was empty.'),
+    onSuccess: (bucket) => queryClient.setQueryData(queryKeys.workspaceBucket(workspaceId), bucket),
+  })
+}
+
+export function useSaveWorkspaceBucket(workspaceId: string) {
+  return useWorkspaceBucketWrite(workspaceId, async (body: S3Body) =>
+    (await saveWorkspaceBucket({ client: apiClient, path: { workspace_id: workspaceId }, body, throwOnError: true })).data)
+}
+
+export function useRemoveWorkspaceBucket(workspaceId: string) {
+  return useWorkspaceBucketWrite(workspaceId, async (_: void) =>
+    (await removeWorkspaceBucket({ client: apiClient, path: { workspace_id: workspaceId }, throwOnError: true })).data)
 }
 
 export function useCreateWorkspace() {

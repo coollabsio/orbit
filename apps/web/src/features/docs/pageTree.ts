@@ -1,5 +1,5 @@
 // Pure helpers over the flat page tree (`GET /pages` → PageSummary[]). No React or API imports.
-import type { PageSummary, Teamspace } from '@/api/generated/types.gen'
+import type { PageSummary, Teamspace } from '@orbit/api/generated/types.gen'
 
 export type DropZone = 'before' | 'after' | 'inside'
 

@@ -1,18 +1,15 @@
-import { useState } from 'react'
 import { toast } from 'sonner'
-import type { BackupSchedule, CompressionStatus, S3View, StorageView } from '@/api/generated/types.gen'
-import { ApiProblem } from '@/api/problem'
+import type { BackupSchedule, CompressionStatus, S3View, StorageView } from '@orbit/api/generated/types.gen'
+import { ApiProblem } from '@orbit/api/problem'
 import { confirmAction } from '@/components/common/confirmAction'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { Button } from '@/components/ui/button'
-import { Field, FieldLabel } from '@/components/ui/field'
-import { Input } from '@/components/ui/input'
-import { PasswordInput } from '@/components/ui/password-input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Spinner } from '@/components/ui/spinner'
 import { Switch } from '@/components/ui/switch'
 import { useInstanceSettings, useRemoveS3, useSaveS3, useSaveStorageOptions, useStartImageCompression } from '@/features/admin/api'
-import { FieldGrid, RequiredMark, SettingsRow } from '@/features/settings/components/SettingsParts'
+import { S3BucketForm } from '@/features/settings/components/S3BucketForm'
+import { SettingsRow } from '@/features/settings/components/SettingsParts'
 import { formatSize } from '@/lib/attachmentLib'
 
 // `items` lets Select.Value render the option label instead of the raw value.
@@ -45,33 +42,6 @@ export function AdminStoragePage() {
 function BucketCard({ s3 }: { s3: S3View | null }) {
   const save = useSaveS3()
   const remove = useRemoveS3()
-  const [draft, setDraft] = useState({
-    endpoint: s3?.endpoint ?? '',
-    region: s3?.region ?? '',
-    bucket: s3?.bucket ?? '',
-    prefix: s3?.prefix ?? '',
-    access_key_id: s3?.access_key_id ?? '',
-    secret_access_key: '',
-    path_style: s3?.path_style ?? false,
-  })
-  const set = (field: keyof typeof draft) => (event: React.ChangeEvent<HTMLInputElement>) => setDraft((current) => ({ ...current, [field]: event.target.value }))
-
-  function submit(event: React.FormEvent) {
-    event.preventDefault()
-    save.mutate({
-      endpoint: draft.endpoint.trim(),
-      region: draft.region.trim() || null,
-      bucket: draft.bucket.trim(),
-      prefix: draft.prefix.trim() || null,
-      access_key_id: draft.access_key_id.trim(),
-      // An empty field keeps the saved secret key.
-      secret_access_key: draft.secret_access_key || undefined,
-      path_style: draft.path_style,
-    }, {
-      onSuccess: () => toast('Bucket saved'),
-      onError: (error) => toast.error(problemText(error, 'The bucket could not be saved.')),
-    })
-  }
 
   async function removeBucket() {
     const confirmed = await confirmAction({
@@ -88,49 +58,19 @@ function BucketCard({ s3 }: { s3: S3View | null }) {
   }
 
   return (
-    <form onSubmit={submit}>
-      <SettingsCard
-        title="S3 bucket"
-        description="An S3-compatible bucket (AWS S3, Cloudflare R2, MinIO, …) for attachments and backups. Orbit writes, reads and deletes a test file before it saves."
-      >
-        <FieldGrid>
-          <Field>
-            <FieldLabel htmlFor="s3-endpoint">Endpoint <RequiredMark /></FieldLabel>
-            <Input id="s3-endpoint" required type="url" placeholder="https://s3.eu-central-1.amazonaws.com" value={draft.endpoint} onChange={set('endpoint')} />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="s3-region">Region</FieldLabel>
-            <Input id="s3-region" placeholder="us-east-1" value={draft.region} onChange={set('region')} />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="s3-bucket">Bucket <RequiredMark /></FieldLabel>
-            <Input id="s3-bucket" required placeholder="orbit-files" value={draft.bucket} onChange={set('bucket')} />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="s3-prefix">Prefix</FieldLabel>
-            <Input id="s3-prefix" placeholder="orbit" value={draft.prefix} onChange={set('prefix')} />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="s3-access-key">Access key ID <RequiredMark /></FieldLabel>
-            <Input id="s3-access-key" required autoComplete="off" value={draft.access_key_id} onChange={set('access_key_id')} />
-          </Field>
-          <Field>
-            <FieldLabel htmlFor="s3-secret-key">Secret access key {s3 ? null : <RequiredMark />}</FieldLabel>
-            <PasswordInput id="s3-secret-key" autoComplete="new-password" required={!s3} placeholder={s3 ? 'Saved. Leave empty to keep it.' : ''} value={draft.secret_access_key} onChange={set('secret_access_key')} />
-          </Field>
-        </FieldGrid>
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-          <label className="flex items-center gap-2 text-[13px]">
-            <Switch checked={draft.path_style} onCheckedChange={(checked: boolean) => setDraft((current) => ({ ...current, path_style: checked }))} />
-            Path-style URLs (MinIO and most self-hosted servers)
-          </label>
-          <div className="flex items-center gap-2">
-            {s3 ? <Button type="button" variant="ghost" className="text-destructive" disabled={remove.isPending} onClick={() => void removeBucket()}>Remove</Button> : null}
-            <Button type="submit" disabled={save.isPending}>{save.isPending ? 'Testing bucket…' : 'Save bucket'}</Button>
-          </div>
-        </div>
-      </SettingsCard>
-    </form>
+    <S3BucketForm
+      s3={s3}
+      title="S3 bucket"
+      description="An S3-compatible bucket (AWS S3, Cloudflare R2, MinIO, …) for attachments and backups. Orbit writes, reads and deletes a test file before it saves."
+      endpointPlaceholder="https://s3.eu-central-1.amazonaws.com"
+      saving={save.isPending}
+      removing={remove.isPending}
+      onSave={(body) => save.mutate(body, {
+        onSuccess: () => toast('Bucket saved'),
+        onError: (error) => toast.error(problemText(error, 'The bucket could not be saved.')),
+      })}
+      onRemove={s3 ? () => void removeBucket() : undefined}
+    />
   )
 }
 

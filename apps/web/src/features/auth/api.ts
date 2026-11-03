@@ -1,6 +1,6 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { apiClient, type createApiClient } from '@/api/client'
+import { apiClient, createApiClient } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
 import { disablePushForSignOut } from '@/features/realtime/push'
 import { clearViewSessionEdits } from '@/features/views/useViewState'
@@ -9,7 +9,12 @@ import { connectionRetryDelay, retryConnectionFailure } from '@/lib/connection'
 import {
   authOptions,
   changePassword,
+  confirmEmailChange,
+  deleteAccount,
+  disconnectConnectedAccount,
+  exchangeProviderSignIn,
   finishPasskeyLogin,
+  listConnectedAccounts,
   login,
   loginSecondFactor,
   logout,
@@ -20,14 +25,21 @@ import {
   registrationComplete,
   registrationRequest,
   removeAvatar,
+  requestEmailChange,
   setupComplete,
   setupStatus,
   startPasskeyLogin,
+  startProviderSignIn,
   updateMe,
   uploadAvatar,
-} from '@/api/generated/sdk.gen'
+} from '@orbit/api/generated/sdk.gen'
 import type {
+  ChangeEmailBody,
   ChangePasswordBody,
+  DeleteAccountBody,
+  ExchangeProviderBody,
+  Provider,
+  SignInIntent,
   LoginBody,
   LoginResponse,
   SecondFactorBody,
@@ -40,9 +52,10 @@ import type {
   AuthUserResponse,
   UpdateMeBody,
   UserStatus,
-} from '@/api/generated/types.gen'
-import { ApiProblem } from '@/api/problem'
+} from '@orbit/api/generated/types.gen'
+import { ApiProblem } from '@orbit/api/problem'
 import { getPasskey } from '@/features/auth/passkey'
+import { codeChallenge, createCodeVerifier, saveProviderFlow } from '@/features/auth/providerSignIn'
 
 type ApiClient = ReturnType<typeof createApiClient>
 
@@ -141,6 +154,52 @@ export function usePasskeyLogin() {
   })
 }
 
+/**
+ * Leaves for the provider's sign-in page. `connect` and `confirm` apply to the signed-in account; `return_to` is an
+ * Orbit path that comes back with the handoff.
+ */
+export function useStartProviderSignIn() {
+  return useMutation({
+    /** `password` goes with `connect` from an account that has one. */
+    mutationFn: async ({ provider, intent, returnTo = null, password = null }: { provider: Provider; intent: SignInIntent; returnTo?: string | null; password?: string | null }) => {
+      const verifier = createCodeVerifier()
+      const { data } = await startProviderSignIn({
+        client: apiClient,
+        path: { provider },
+        body: { intent, code_challenge: await codeChallenge(verifier), redirect: 'web', return_to: returnTo, password },
+        throwOnError: true,
+      })
+      saveProviderFlow({ provider, intent, verifier })
+      window.location.assign(required(data, 'Provider sign-in response was empty.').authorize_url)
+    },
+  })
+}
+
+/** How a provider flow ended: signed in, a code is needed next, or a `connect` / `confirm` is done. */
+export type ProviderExchange = { kind: 'signed_in' } | { kind: 'two_factor'; token: string } | { kind: 'done' }
+
+// The callback page shows a sign-in that needs a session as its own error, not as the global login redirect.
+const providerExchangeClient = createApiClient()
+
+export function useProviderExchange() {
+  const queryClient = useQueryClient()
+  const signedIn = useSignedIn()
+  return useMutation({
+    mutationFn: async (body: ExchangeProviderBody): Promise<ProviderExchange> => {
+      const { data, response } = await exchangeProviderSignIn({ client: providerExchangeClient, body, throwOnError: true })
+      if (response.status === 204) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.connectedAccounts })
+        return { kind: 'done' }
+      }
+      // Only 204 has no body.
+      const result = required(data as LoginResponse | TwoFactorChallenge | undefined, 'Sign-in response was empty.')
+      if (isTwoFactorChallenge(result)) return { kind: 'two_factor', token: result.two_factor_token }
+      signedIn(result)
+      return { kind: 'signed_in' }
+    },
+  })
+}
+
 export function useLogout() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -149,12 +208,55 @@ export function useLogout() {
       await disablePushForSignOut()
       await logout({ client: apiClient, throwOnError: true })
     },
-    onSuccess: async () => {
-      queryClient.clear()
-      clearViewSessionEdits()
-      // What this user's chat left on the device does not stay for the next person.
-      await withinTime(clearLocalCache())
+    onSuccess: () => forgetSignedOutUser(queryClient),
+  })
+}
+
+/** The session ended: nothing of this user stays in memory or on the device for the next person. */
+async function forgetSignedOutUser(queryClient: QueryClient) {
+  queryClient.clear()
+  clearViewSessionEdits()
+  // What this user's chat left on the device does not stay for the next person.
+  await withinTime(clearLocalCache())
+}
+
+/**
+ * Deletes the signed-in account for good. Refused with 409 `owns_workspaces` (the problem lists them) or
+ * `root_account`; an account without a password may need a fresh provider sign-in (`reauthentication_required`).
+ */
+export function useDeleteAccount() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (body: DeleteAccountBody) => {
+      await deleteAccount({ client: apiClient, body, throwOnError: true })
     },
+    onSuccess: async () => {
+      // The server has ended every session; this browser only stops listening for push messages.
+      await disablePushForSignOut()
+      await forgetSignedOutUser(queryClient)
+    },
+  })
+}
+
+/** Emails a link to the new address; the email changes when it is opened. */
+export function useRequestEmailChange() {
+  return useMutation({
+    mutationFn: async (body: ChangeEmailBody) => {
+      const { data } = await requestEmailChange({ client: apiClient, body, throwOnError: true })
+      return required(data, 'Email change response was empty.')
+    },
+  })
+}
+
+/** Opens the emailed link; needs no session. Answers with the account's new email. */
+export function useConfirmEmailChange() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (token: string) => {
+      const { data } = await confirmEmailChange({ client: apiClient, body: { token }, throwOnError: true })
+      return required(data, 'Email change response was empty.').email
+    },
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.currentUser }),
   })
 }
 
@@ -299,6 +401,30 @@ export function useChangePassword() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
+      // An account without a password has one now.
+      void queryClient.invalidateQueries({ queryKey: queryKeys.currentUser })
     },
+  })
+}
+
+/** The Google and GitHub accounts that sign in to this account. */
+export function useConnectedAccounts() {
+  return useQuery({
+    queryKey: queryKeys.connectedAccounts,
+    queryFn: async () => {
+      const { data } = await listConnectedAccounts({ client: apiClient, throwOnError: true })
+      return required(data, 'Connected accounts response was empty.')
+    },
+  })
+}
+
+/** Refused with 409 `last_sign_in_method` when the account has no other way to sign in. */
+export function useDisconnectAccount() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (provider: Provider) => {
+      await disconnectConnectedAccount({ client: apiClient, path: { provider }, throwOnError: true })
+    },
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.connectedAccounts }),
   })
 }

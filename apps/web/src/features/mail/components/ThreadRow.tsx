@@ -1,6 +1,6 @@
 import { Paperclip2 as Paperclip, Star } from 'reicon-react'
 import { cn } from 'cn'
-import type { MailLabel, MailThreadSummary } from '@/api/generated/types.gen'
+import type { MailLabel, MailThreadSummary } from '@orbit/api/generated/types.gen'
 import { ColorDot } from '@/components/common/ColorDot'
 import { Tip } from '@/components/common/Tip'
 import { UserAvatar } from '@/components/common/UserAvatar'

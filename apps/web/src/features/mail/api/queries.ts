@@ -18,8 +18,8 @@ import {
   listMailThreads,
   previewPersonalMailboxes,
   searchMail,
-} from '@/api/generated/sdk.gen'
-import type { MailDomain, MailNamePattern, MailThreadPage } from '@/api/generated/types.gen'
+} from '@orbit/api/generated/sdk.gen'
+import type { MailDomain, MailNamePattern, MailThreadPage } from '@orbit/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 import { useContext } from 'react'
 import { useWorkspace, WorkspaceContext } from '@/features/workspaces/workspaceContext'

@@ -44,11 +44,11 @@ export function visibleTaskIds(pointer: TaskPointer): string[] {
 /** The task row that holds the keyboard focus. */
 export const focusedTaskId = () => rowOf(document.activeElement)
 
-/** Gives a task row the keyboard focus and brings it into view. */
+/** Gives a task row the keyboard focus (with its ring, also after a click) and brings it into view. */
 export function focusTaskRow(id: string, pointer: TaskPointer) {
   pointer.list?.mount(id)
   const row = document.querySelector<HTMLElement>(`[data-task-id="${CSS.escape(id)}"]`)
-  row?.focus({ preventScroll: true })
+  row?.focus({ preventScroll: true, focusVisible: true })
   // keyboard movement never animates: the row is in view at once
   row?.scrollIntoView?.({ block: 'nearest' })
 }
@@ -89,7 +89,7 @@ export function useVirtualTaskRows(ids: string[]) {
 /** Marks an element as a task row: the keyboard can focus it and the pointer can target it. */
 export const taskRowTarget = (id: string) => ({ 'data-task-id': id })
 
-/** Follows the pointer for a tasks page: the row under it is the target of task commands. */
+/** Follows the pointer for a tasks page: the row under it is the target of task commands while no row has the focus. */
 export function trackPointer(pointer: TaskPointer) {
   const onPointerMove = (event: globalThis.PointerEvent) => {
     // a scroll moves rows under a still pointer; only a real movement changes the target
@@ -97,12 +97,9 @@ export function trackPointer(pointer: TaskPointer) {
     Object.assign(pointer, { x: event.clientX, y: event.clientY })
     const target = event.target instanceof Element ? event.target : null
     const id = rowOf(target)
-    if (id) {
-      pointer.hoveredId = id
-      // the pointer takes over from the keyboard
-      const focused = document.activeElement
-      if (focused instanceof HTMLElement && rowOf(focused) !== null && rowOf(focused) !== id) focused.blur()
-    } else if (!inOverlay(target)) {
+    // the keyboard focus stays where it is: the pointer only names the target when no row has the focus
+    if (id) pointer.hoveredId = id
+    else if (!inOverlay(target)) {
       // over a dialog or a menu the row stays the target: the command menu acts on the task it was opened over
       pointer.hoveredId = null
     }

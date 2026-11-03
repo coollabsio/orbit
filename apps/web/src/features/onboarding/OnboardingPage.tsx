@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, Navigate, useNavigate } from 'react-router'
 import { Check } from 'reicon-react'
-import { ApiProblem } from '@/api/problem'
+import { ApiProblem } from '@orbit/api/problem'
 import { ColorSwatch } from '@/components/common/ColorSwatch'
 import { cn } from 'cn'
 import { Button, buttonVariants } from '@/components/ui/button'

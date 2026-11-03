@@ -1,5 +1,5 @@
-import { ROLE_PERMISSIONS } from '@/api/generated/rolePermissions'
-import type { WorkspaceRecord, WorkspaceRole } from '@/api/generated/types.gen'
+import { ROLE_PERMISSIONS } from '@orbit/api/generated/rolePermissions'
+import type { WorkspaceRecord, WorkspaceRole } from '@orbit/api/generated/types.gen'
 
 /** A workspace record as the server sends it to a caller with `role`. */
 export function testWorkspace(role: WorkspaceRole = 'owner', overrides: Partial<WorkspaceRecord> = {}): WorkspaceRecord {

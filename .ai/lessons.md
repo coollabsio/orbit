@@ -11,7 +11,7 @@
 - All SQL goes through sqlx `Any`: write `$1, $2, …` (SQLite binds them by number too), import `orbit_platform::Row` (not `sqlx::Row`) so 0/1 flags decode as `bool`, decode boolean scalars as `Flag`, bind `i64` (never `bool`/`u32`), and build dynamic SQL with `SqlBuilder`. SQLite silently ignores extra bound values, so clashing `$N` numbers in `format!`-glued fragments only fail on Postgres.
 - A new SQLite migration also needs its change in the Postgres schema (`apps/server/migrations/postgres/`) and that file's entry in `runner.postgres` in `crates/platform/src/db/migrate.rs`.
 - Run the whole suite on Postgres with `ORBIT_TEST_POSTGRES_URL=postgres://orbit:orbit@127.0.0.1:15432/orbit`; each test database maps from its SQLite path.
-- No Postgres listens on 15432 by default. Start a throwaway one: `docker run -d --rm --name orbit-test-pg -p 127.0.0.1:15432:5432 -e POSTGRES_USER=orbit -e POSTGRES_PASSWORD=orbit -e POSTGRES_DB=orbit -e POSTGRES_INITDB_ARGS="--locale-provider=builtin --builtin-locale=C.UTF-8 --locale=C.UTF-8" --memory=1g postgres:17-alpine -c max_connections=300` (512 MB or the default 100 connections drop connections mid-suite), and stop it afterwards.
+- No Postgres listens on 15432 after a reboot unless the persistent dev one runs: `orbit-dev-pg` (volume `orbit-dev-pg-data`, `--restart unless-stopped`, databases `orbit` for tests and `orbit_dev` for `just dev`). A `--rm` container loses all data on reboot (the dev data was lost this way on 2026-10-24). For the full test suite use `-c max_connections=300`, at least 1 GB of memory and `--shm-size=1g` (the 64 MB default `/dev/shm` gives error 53100 in `collab_api`), or tests fail mid-suite.
 
 ## Several servers on one Postgres database
 - Any process-local state (maps, locks, counters, caches, "running" flags, background loops) is per server. If it must hold for every server, keep it in the database (a serialized `immediate_transaction`, `Database::try_singleton`) or send it through `crate::cluster`. Test such changes with two `App`s on one database (`apps/server/tests/shared_postgres`), and prove the test fails without the fix.
@@ -29,6 +29,9 @@
 - A contentless FTS5 table (`content = ''`) refuses `DELETE` unless it is created with `contentless_delete = 1`
   (SQLite 3.43+); then `DELETE … WHERE rowid = …` works and reads the same as on the Postgres twin table
   (`mail_search`, 2026-10-23).
+
+## Untrusted nested input
+- Any recursive walk over user content (markdown, Yjs XML/updates, JSON) needs a depth cap or an explicit stack: a stack overflow aborts the whole server process, not one request. yrs itself recurses on decode and delete, so `blocknote::update_too_deep` checks each update before yrs reads it (2026-10-31).
 
 ## API retry load
 - A failed `invalidateQueries` call can refetch many active queries. Do not retry it on a short fixed UI timer; use bounded backoff so an API error cannot exhaust the shared rate limit.
@@ -65,6 +68,7 @@
 - Browser-default `text-align: center` on `<button>` inherits into child spans — the base reset must set `text-align: left` on buttons.
 - The production CSP is `style-src 'self'`: a library that adds a `<style>` at runtime (Sonner, Mermaid) works on the Vite dev server and loses its styles in production. Put the rules in `index.css` or a constructed style sheet (`document.adoptedStyleSheets`), and test a production build served with the server's CSP header.
 - Typecheck the web app with `bunx tsc -b` (what `build` runs). `tsc --noEmit -p .` checks nothing: the root `tsconfig.json` only has references, so it passes on broken code.
+- In `apps/web`, run `bun test src` (the `test` script), not bare `bun test`: bare `bun test` also loads the Playwright e2e files and reports false failures.
 - `cargo test --workspace` stops at the first failing test binary; use `--no-fail-fast` to see the whole suite.
 - Playwright rewrites the tracked `apps/web/test-results/.last-run.json` on every run — restore it with `git checkout --` and never commit it.
 - If the Agent Browser fails with a `SingletonLock: File exists` profile error, another session holds the profile. Do not delete the lock; drive the dev server with `playwright-core` from `apps/web/node_modules` instead (script in `/tmp`).
@@ -162,5 +166,15 @@
 ## Permissions
 - Every authorization rule lives in `crates/orbit/src/policy.rs`: `Policy::can(role, Permission)` for role rules, methods on `Actor` for rules that depend on a record (author, owner, target member). Repositories get the `Actor` from `repositories/membership.rs` inside their own transaction; they never compare role names or write their own role SQL.
 - The web app holds no rules. Workspace abilities come from `workspace.permissions` (`useCan`), installation admin from `useIsInstallationAdmin`, and per-record abilities from `can_*` flags on the record (`can_edit`, `can_delete`, `can_purge`, ...). A new gated action is a new `Permission` or `Actor` method, a flag on the record if the UI needs it, then `just api`.
-- Build workspace fixtures in web tests and e2e mocks with `testWorkspace(role)` (`src/test/workspace.ts`); its role table is generated from the server (`api/generated/rolePermissions.ts`). Hand-written literals passed to `setQueryData` or `Response.json` are untyped, so a new required field breaks them only at run time.
-- Cookie sessions are read only through `auth_routes::request_session`.
+- Build workspace fixtures in web tests and e2e mocks with `testWorkspace(role)` (`src/test/workspace.ts`); its role table is generated from the server (`packages/api/src/generated/rolePermissions.ts`). Hand-written literals passed to `setQueryData` or `Response.json` are untyped, so a new required field breaks them only at run time.
+- Sessions (cookie or `Authorization: Bearer`) are read only through `auth_routes::request_session`.
+
+## One editor schema for every client of a Y.Doc
+- A page's Y.Doc is shared by the web, the mobile editor and the server's converter. An editor with any other schema
+  (a missing block, a different prop default, no comment mark) silently drops or rewrites nodes for everyone. Build
+  every editor from `createEditorSchemas` in `packages/editor` and pass only views; `packages/editor/src/schema.test.ts`
+  checks the result against `apps/server/src/collab/blocknote-schema.json`. Never PATCH `content` of a page from a client
+  that is not the collaborative editor: it replaces the live document (the old mobile "Add text" did, 2026-10-24).
+- Expo DOM components render in a web view whose `#root` is a flex row: give the component's root `flex: 1`, or it is
+  only as wide as its content. The Expo web target renders the component inline, so the preview does not show this;
+  check the exported bundle (`expo export --platform ios`, `www.bundle/*.html`) with a fake `window.ReactNativeWebView`.

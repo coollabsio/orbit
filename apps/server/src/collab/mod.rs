@@ -34,6 +34,9 @@ pub mod close {
     pub const BAD_MESSAGE: u16 = 4400;
     /// The session ended (logout, revocation, expiry, suspension): sign in again.
     pub const SESSION: u16 = 4401;
+    /// The workspace became read-only (Orbit Cloud, no subscription): fetch the billing state
+    /// and reconnect; the new connection is read-only.
+    pub const READ_ONLY: u16 = 4402;
     /// No access any more (moved into someone's private space, removed from the workspace).
     pub const FORBIDDEN: u16 = 4403;
     /// The page was trashed or deleted.
@@ -61,7 +64,7 @@ pub mod close {
 pub const PROTOCOL_VERSION: &str = "1";
 
 /// What a collaborative document belongs to.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum DocKind {
     Page,

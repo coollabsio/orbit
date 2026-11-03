@@ -2,9 +2,9 @@ import { afterEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import type { NotionImport } from '@/api/generated/types.gen'
+import type { NotionImport } from '@orbit/api/generated/types.gen'
 import { createApiClient } from '@/api/client'
-import { ApiProblem } from '@/api/problem'
+import { ApiProblem } from '@orbit/api/problem'
 import { queryKeys } from '@/api/queryKeys'
 import {
   createNotionImportRequest,
@@ -64,7 +64,7 @@ test('status helpers: active imports poll, final ones never change', () => {
 test('problems map to friendly messages', () => {
   expect(notionImportErrorMessage(problem(422, 'notion_token_invalid'))).toContain('Notion rejected this token')
   expect(notionImportErrorMessage(problem(409, 'app_key_missing'))).toBe(
-    'The server administrator must set an app key before anyone can import from Notion.',
+    'Orbit is not ready to import from Notion yet. Ask the Orbit administrator to set the app key.',
   )
   expect(notionImportErrorMessage(problem(409, 'import_in_progress'))).toContain('already have an import running')
   expect(notionImportErrorMessage(problem(502, 'notion_unavailable'))).toContain('could not be reached')

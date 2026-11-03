@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import type { Page, PageSummary, PageVersionSummary } from '@/api/generated/types.gen'
+import type { Page, PageSummary, PageVersionSummary } from '@orbit/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 import { usePageVersion, usePageVersions, useRestorePageVersion, VERSION_PAGE_SIZE } from './pageVersions'
 

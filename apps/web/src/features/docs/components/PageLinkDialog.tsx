@@ -3,7 +3,7 @@
 // Filtering stays ours (`shouldFilter={false}`) so the substring match is unchanged.
 import { useMemo, useState } from 'react'
 import { DocumentText as FileText } from 'reicon-react'
-import type { PageSummary } from '@/api/generated/types.gen'
+import type { PageSummary } from '@orbit/api/generated/types.gen'
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { Emoji } from '@/components/common/Emoji'
 import { Modal } from '@/components/common/Modal'

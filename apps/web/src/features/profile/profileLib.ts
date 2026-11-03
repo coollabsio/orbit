@@ -1,4 +1,4 @@
-import type { AuthUserResponse, UpdateMeBody } from '@/api/generated/types.gen'
+import type { AuthUserResponse, UpdateMeBody } from '@orbit/api/generated/types.gen'
 
 export const PROFILE_LIMITS = { title: 80, pronouns: 40, phone: 32, bio: 500, note: 1000 } as const
 

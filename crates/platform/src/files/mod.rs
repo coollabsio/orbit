@@ -1,3 +1,4 @@
+#[cfg(any(test, feature = "test-support"))]
 mod fake_s3;
 mod local;
 mod s3;
@@ -11,11 +12,14 @@ use std::pin::Pin;
 use thiserror::Error;
 use tokio::io::AsyncRead;
 
+#[cfg(any(test, feature = "test-support"))]
 pub use fake_s3::start_fake_s3;
 pub use local::LocalBlobStore;
+pub(crate) use local::TEMPORARY_DIRECTORY;
 pub use s3::{S3Bucket, S3Config, S3Error, S3Object};
 pub use tiered::{
     BlobMoveStatus, ObjectStorage, ObjectStorageState, S3_DELETE_DELAY_MILLIS, TieredBlobStore,
+    WorkspaceBucket,
 };
 pub use upload::{
     AuthorizedAttachment, BLOB_REFERENCE_COUNT, BlobDownload, ContentDisposition, DownloadMetadata,

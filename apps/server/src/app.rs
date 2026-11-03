@@ -8,7 +8,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use axum::Router;
-use axum::serve::ListenerExt;
+use axum::extract::ConnectInfo;
+use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
+use hyper_util::server::conn::auto::Builder as ConnectionBuilder;
+use hyper_util::service::TowerToHyperService;
 use orbit_platform::{
     BackupService, BlobStoreError, Config, Database, DatabaseConfig, HealthCheck, HealthRegistry,
     HttpLimits, IntegrityService, JobError, JobKind, JobStore, LocalBlobStore, MigrationError,
@@ -19,6 +22,7 @@ use serde_json::json;
 use thiserror::Error;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
+use tower::ServiceExt;
 
 use crate::attachment_routes::AttachmentState;
 use crate::auth_routes::{CookieMode, initialize_auth};
@@ -39,7 +43,6 @@ use crate::page_file_routes::PageFileState;
 use crate::page_routes::PageState;
 use crate::repositories::api_tokens::ApiTokenRepository;
 use crate::repositories::identity::IdentityRepository;
-use crate::repositories::instance_settings::InstanceSettingsRepository;
 use crate::repositories::mail::{
     DNS_CHECK_JOB, MailRepository, PENDING_CHECK_MS, PURGE_JOB, dns_check_kind, mail_ingest_kind,
     mail_purge_kind, run_ingest_job,
@@ -48,12 +51,19 @@ use crate::repositories::page_files::PageFileRepository;
 use crate::repositories::tasks::TaskRepository;
 use crate::repositories::workspaces::WorkspaceRepository;
 use crate::router::{ApiRoutes, production_router};
+use crate::socket_ticket::SocketTickets;
 use crate::static_assets::{FRONTEND_REVISION, StaticAssetError, StaticAssets};
 use crate::task_routes::TaskState;
 use crate::teamspace_routes::TeamspaceState;
+use crate::workspace_export::WorkspaceExportService;
+use crate::workspace_export_routes::WorkspaceExportState;
 use crate::workspace_routes::WorkspaceState;
 
 const BACKGROUND_DRAIN: Duration = Duration::from_secs(30);
+/// How long a client may take to send a request's line and headers, so slow clients cannot hold
+/// connections open (slowloris).
+const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// How often a server checks that it still holds the database ownership lock.
 const OWNERSHIP_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 /// Hourly: deletes tokens of Notion scans not started within 24 hours.
@@ -72,6 +82,7 @@ pub struct App {
     workspaces: Arc<WorkspaceRepository>,
     object_storage: ObjectStorage,
     blob_store: TieredBlobStore,
+    workspace_exports: WorkspaceExportService,
     production_services: Option<ProductionServices>,
     /// Set when the server stops: readiness fails, so a load balancer takes it out.
     draining: Arc<AtomicBool>,
@@ -141,6 +152,9 @@ impl App {
         config
             .validate()
             .map_err(|error| AppError::Config(error.to_string()))?;
+        for warning in config.warnings() {
+            tracing::warn!("{warning}");
+        }
         let cookie_mode = cookie_mode(&config)?;
         ensure_writable_directory(&config.data.attachments)?;
         ensure_writable_directory(&config.data.backups)?;
@@ -198,8 +212,7 @@ impl App {
                 .map_err(AppError::Config)?;
         }
         let object_storage = ObjectStorage::default();
-        let storage_settings = InstanceSettingsRepository::new(database.clone())
-            .storage()
+        let storage_settings = crate::object_storage::load_saved(&database)
             .await
             .map_err(|error| AppError::Database(error.to_string()))?;
         crate::object_storage::apply_and_keep(
@@ -218,6 +231,13 @@ impl App {
             backups.attachment_mutations(),
         );
         let store: Arc<dyn orbit_platform::BlobStore> = Arc::new(blob_store.clone());
+        let workspace_exports = WorkspaceExportService::new(
+            database.clone(),
+            Arc::clone(&store),
+            object_storage.clone(),
+            &config.data.backups,
+            config.http.public_origin.clone(),
+        );
         let workspaces = Arc::new(WorkspaceRepository::with_blob_store_and_mutations(
             database.clone(),
             Arc::clone(&store),
@@ -271,7 +291,6 @@ impl App {
         let mail_listener = if config.mail.enabled {
             let intake = MailIntake::new(
                 Arc::clone(&mail),
-                JobStore::new(database.clone()),
                 config.mail.max_message_bytes + TRACE_HEADROOM,
             );
             Some(
@@ -304,7 +323,6 @@ impl App {
             });
             Arc::new(ProviderIntake::new(
                 Arc::clone(&mail),
-                JobStore::new(database.clone()),
                 config.mail.max_message_bytes,
                 Arc::new(auth),
                 hostname,
@@ -319,6 +337,23 @@ impl App {
             config.mail.mode,
         );
 
+        let billing = config.billing.clone().map(|billing| {
+            crate::billing::Billing::new(billing, database.clone(), &config.http.public_origin)
+        });
+        if billing.is_some()
+            && crate::repositories::instance_settings::InstanceSettingsRepository::new(
+                database.clone(),
+            )
+            .get()
+            .await
+            .map_err(|error| AppError::Database(error.to_string()))?
+            .smtp
+            .is_none()
+        {
+            tracing::warn!(
+                "Orbit Cloud has no mail server: email change, invitations by email, password reset and sign-up do not work until one is saved in Admin → Email"
+            );
+        }
         let production_services = initialize_production_services(
             &database,
             backups.clone(),
@@ -327,6 +362,8 @@ impl App {
             notion_imports.clone(),
             dns_checker,
             Arc::clone(&mail),
+            workspace_exports.clone(),
+            billing.clone(),
             config.jobs.concurrency,
         )
         .await?;
@@ -353,10 +390,20 @@ impl App {
         );
         let router = metrics.instrument(production_router(
             ApiRoutes {
+                billing: billing.clone(),
                 mcp: crate::mcp::router(
                     crate::mcp::McpState::new(
                         Arc::new(ApiTokenRepository::new(database.clone())),
                         Arc::new(TaskRepository::new(database.clone())),
+                    )
+                    .with_content(
+                        Arc::new(crate::repositories::pages::PageRepository::new(
+                            database.clone(),
+                        )),
+                        Arc::new(crate::repositories::chat::ChatRepository::new(
+                            database.clone(),
+                            attachment_state.uploads.clone(),
+                        )),
                     )
                     .with_oauth(oauth.clone()),
                     &config.http.public_origin,
@@ -366,7 +413,9 @@ impl App {
                     let auth = auth
                         .with_mailer(mailer.clone())
                         .with_rate_limits(config.rate_limits)
-                        .with_uploads(attachment_state.uploads.clone());
+                        .with_uploads(attachment_state.uploads.clone())
+                        .with_billing_enabled(billing.is_some())
+                        .with_native_redirects(&config.http.dev_native_redirects);
                     match app_key {
                         Some(app_key) => auth.with_app_key(app_key),
                         None => auth,
@@ -382,14 +431,23 @@ impl App {
                 .with_mailer(mailer)
                 .with_rate_limits(config.rate_limits)
                 .with_object_storage(object_storage.clone(), blob_store.clone())
+                .with_uploads(attachment_state.uploads.clone())
                 .with_image_compressor(
                     crate::image_compression::ImageCompressor::new(
                         database.clone(),
                         attachment_state.uploads.clone(),
                     ),
                 ),
-                tasks: TaskState::new(Arc::clone(&identity), cookie_mode),
-                pages: PageState::new(Arc::clone(&identity), cookie_mode),
+                backup_items: crate::backup_item_routes::BackupItemState::new(
+                    Arc::clone(&identity),
+                    Some(backups.clone()),
+                    attachment_state.uploads.clone(),
+                    cookie_mode,
+                ),
+                tasks: TaskState::new(Arc::clone(&identity), cookie_mode)
+                    .with_socket_tickets(app_key.as_ref().map(SocketTickets::new)),
+                pages: PageState::new(Arc::clone(&identity), cookie_mode)
+                    .with_socket_tickets(app_key.as_ref().map(SocketTickets::new)),
                 page_comments: PageCommentState::new(Arc::clone(&identity), cookie_mode),
                 page_files: PageFileState::new(
                     Arc::clone(&identity),
@@ -401,6 +459,11 @@ impl App {
                     attachment_state.uploads.clone(),
                     cookie_mode,
                     config.http.public_origin.clone(),
+                ),
+                workspace_exports: WorkspaceExportState::new(
+                    Arc::clone(&identity),
+                    workspace_exports.clone(),
+                    cookie_mode,
                 ),
                 teamspaces: TeamspaceState::new(Arc::clone(&identity), cookie_mode),
                 attachments: attachment_state.clone(),
@@ -461,6 +524,7 @@ impl App {
             workspaces,
             object_storage,
             blob_store,
+            workspace_exports,
             production_services: Some(production_services),
             draining,
             mail_listener,
@@ -520,7 +584,17 @@ impl App {
             .map_err(|error| AppError::Background(error.to_string()))
     }
 
+    /// Full workspace exports (start, run a job, expire), for tests and tools.
+    #[must_use]
+    pub fn workspace_exports(&self) -> &WorkspaceExportService {
+        &self.workspace_exports
+    }
+
     pub async fn run_retention_maintenance(&self) -> Result<(), AppError> {
+        self.workspace_exports
+            .expire(orbit_platform::TimestampMillis::now())
+            .await
+            .map_err(|error| AppError::Background(error.to_string()))?;
         self.workspaces
             .run_retention_maintenance()
             .await
@@ -550,8 +624,7 @@ impl App {
             let router = self.metrics.router();
             let token = service_shutdown.clone();
             services.spawn(async move {
-                axum::serve(listener, router)
-                    .with_graceful_shutdown(token.cancelled_owned())
+                serve_http(listener, router, HEADER_READ_TIMEOUT, token)
                     .await
                     .map_err(|error| error.to_string())
             });
@@ -611,17 +684,12 @@ impl App {
             services.spawn(async move { mail.run(listener, token, BACKGROUND_DRAIN).await });
         }
         let http_shutdown = CancellationToken::new();
-        // Small y-sync frames otherwise wait for Nagle + delayed ACK (~40 ms stalls).
-        let listener = listener.tap_io(|stream| {
-            let _ = stream.set_nodelay(true);
-        });
-        let server = axum::serve(
+        let server = serve_http(
             listener,
-            self.router
-                .into_make_service_with_connect_info::<SocketAddr>(),
-        )
-        .with_graceful_shutdown(http_shutdown.clone().cancelled_owned())
-        .into_future();
+            self.router.clone(),
+            HEADER_READ_TIMEOUT,
+            http_shutdown.clone(),
+        );
         tokio::pin!(server);
 
         let mut background_error = None;
@@ -689,6 +757,62 @@ impl App {
             None => Ok(()),
         }
     }
+}
+
+/// Serves `router` until `shutdown`, then waits for the requests in flight (like `axum::serve` with
+/// graceful shutdown). Unlike `axum::serve`, a client must send its headers within
+/// `header_timeout`: hyper only enforces that with a timer.
+async fn serve_http(
+    listener: tokio::net::TcpListener,
+    router: Router,
+    header_timeout: Duration,
+    shutdown: CancellationToken,
+) -> std::io::Result<()> {
+    let mut builder = ConnectionBuilder::new(TokioExecutor::new());
+    builder
+        .http1()
+        .timer(TokioTimer::new())
+        .header_read_timeout(header_timeout);
+    // CONNECT for WebSockets over HTTP/2.
+    builder
+        .http2()
+        .timer(TokioTimer::new())
+        .enable_connect_protocol();
+    let builder = Arc::new(builder);
+    let graceful = hyper_util::server::graceful::GracefulShutdown::new();
+    loop {
+        let (stream, remote) = tokio::select! {
+            accepted = listener.accept() => match accepted {
+                Ok(accepted) => accepted,
+                Err(error) => {
+                    // Like axum::serve: out of file descriptors and the like pass, so wait and retry.
+                    tracing::warn!(%error, "accepting a connection failed");
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    continue;
+                }
+            },
+            () = shutdown.cancelled() => break,
+        };
+        // Small y-sync frames otherwise wait for Nagle + delayed ACK (~40 ms stalls).
+        let _ = stream.set_nodelay(true);
+        let service = TowerToHyperService::new(router.clone().map_request(
+            move |mut request: axum::http::Request<hyper::body::Incoming>| {
+                request.extensions_mut().insert(ConnectInfo(remote));
+                request
+            },
+        ));
+        let builder = Arc::clone(&builder);
+        let watcher = graceful.watcher();
+        tokio::spawn(async move {
+            let connection = builder.serve_connection_with_upgrades(TokioIo::new(stream), service);
+            if let Err(error) = watcher.watch(connection).await {
+                tracing::trace!(%error, "connection ended with an error");
+            }
+        });
+    }
+    drop(listener);
+    graceful.shutdown().await;
+    Ok(())
 }
 
 fn cookie_mode(config: &Config) -> Result<CookieMode, AppError> {
@@ -849,6 +973,8 @@ async fn initialize_production_services(
     notion_imports: NotionImportService,
     dns_checker: DnsChecker,
     mail: Arc<MailRepository>,
+    workspace_exports: WorkspaceExportService,
+    billing: Option<crate::billing::Billing>,
     concurrency: usize,
 ) -> Result<ProductionServices, AppError> {
     let store = JobStore::new(database.clone());
@@ -856,6 +982,7 @@ async fn initialize_production_services(
     let failure = CancellationToken::new();
     let retention_repository = Arc::clone(&workspaces);
     let retention_database = database.clone();
+    let retention_exports = workspace_exports.clone();
     let integrity_service = integrity;
     let integrity_failure = failure.clone();
     let worker_config = WorkerConfig::new(concurrency)
@@ -864,7 +991,11 @@ async fn initialize_production_services(
         .with_handler(maintenance_kind("workspace.retention"), move |_| {
             let repository = Arc::clone(&retention_repository);
             let database = retention_database.clone();
+            let exports = retention_exports.clone();
             async move {
+                exports.expire(TimestampMillis::now()).await.map_err(|_| {
+                    JobError::Retryable("workspace export cleanup failed".to_owned())
+                })?;
                 repository
                     .run_retention_maintenance()
                     .await
@@ -949,6 +1080,11 @@ async fn initialize_production_services(
                         .map_err(|error| JobError::Retryable(error.to_string()))
                 }
             })
+        })
+        .and_then(|worker| crate::workspace_export::register_job(worker, workspace_exports))
+        .and_then(|worker| match billing {
+            Some(billing) => crate::billing::register_jobs(worker, billing),
+            None => Ok(worker),
         })
         .map_err(|error| AppError::ProductionServices(error.to_string()))?;
 
@@ -1121,6 +1257,56 @@ mod tests {
     use orbit_platform::{EnvironmentMode, Id};
     use tempfile::TempDir;
     use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn a_client_that_does_not_finish_its_headers_is_disconnected() {
+        use tokio::io::AsyncReadExt;
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let router = Router::new().route(
+            "/peer",
+            axum::routing::get(|ConnectInfo(peer): ConnectInfo<SocketAddr>| async move {
+                peer.ip().to_string()
+            }),
+        );
+        let shutdown = CancellationToken::new();
+        let server = tokio::spawn(serve_http(
+            listener,
+            router,
+            Duration::from_millis(200),
+            shutdown.clone(),
+        ));
+
+        // A complete request is served, with the peer address.
+        let mut client = tokio::net::TcpStream::connect(address).await.unwrap();
+        client
+            .write_all(b"GET /peer HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+            .await
+            .unwrap();
+        let mut response = String::new();
+        client.read_to_string(&mut response).await.unwrap();
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        assert!(response.ends_with("127.0.0.1"), "{response}");
+
+        // One that stops in the middle of its headers is closed after the timeout.
+        let mut slow = tokio::net::TcpStream::connect(address).await.unwrap();
+        slow.write_all(b"GET /peer HTTP/1.1\r\nHost: x\r\n")
+            .await
+            .unwrap();
+        let mut rest = Vec::new();
+        tokio::time::timeout(Duration::from_secs(5), slow.read_to_end(&mut rest))
+            .await
+            .expect("the server closes a connection whose headers never end")
+            .ok();
+
+        shutdown.cancel();
+        tokio::time::timeout(Duration::from_secs(5), server)
+            .await
+            .expect("the server stops after shutdown")
+            .unwrap()
+            .unwrap();
+    }
 
     fn test_config(root: &TempDir) -> Config {
         let mut config = Config {

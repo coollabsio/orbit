@@ -1,6 +1,6 @@
 import { useId, useState, type FormEvent } from 'react'
 import { toast } from 'sonner'
-import type { MailDomain, MailMailbox } from '@/api/generated/types.gen'
+import type { MailDomain, MailMailbox } from '@orbit/api/generated/types.gen'
 import { confirmAction } from '@/components/common/confirmAction'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

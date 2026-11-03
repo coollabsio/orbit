@@ -1,4 +1,4 @@
-import type { CreateTaskBody, LabelRecord, ProjectRecord, TaskUpdateBody } from '@/api/generated/types.gen'
+import type { CreateTaskBody, LabelRecord, ProjectRecord, TaskUpdateBody } from '@orbit/api/generated/types.gen'
 import type { Task, TaskPriority, TaskStatusDef } from '@/features/tasks/api/models'
 import { labelKeyOf, labelRepresentatives, PRIORITY_LABEL, PRIORITY_ORDER, projectLabels, statusKeyOf } from '@/features/tasks/taskMeta'
 import { statusGroups } from '@/features/tasks/tasksLib'

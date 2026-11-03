@@ -9,8 +9,8 @@ import {
   reopenPageThread,
   resolvePageThread,
   updatePageComment,
-} from '@/api/generated/sdk.gen'
-import type { PageComment, PageThread } from '@/api/generated/types.gen'
+} from '@orbit/api/generated/sdk.gen'
+import type { PageComment, PageThread } from '@orbit/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 
 type ApiClient = ReturnType<typeof createApiClient>

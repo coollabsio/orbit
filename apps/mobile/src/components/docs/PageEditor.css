@@ -1,0 +1,215 @@
+/* The page editor in its web view. Colors come from the app theme (`--orbit-*`, set by PageEditor.dom.tsx); the
+   block styles follow the web page editor (apps/web/src/features/docs/editor/PageEditor.tsx). */
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  -webkit-text-size-adjust: 100%;
+}
+
+.orbit-page-editor {
+  /* the web view's #root is a flex row: take its whole width */
+  flex: 1;
+  min-width: 0;
+  color: var(--orbit-foreground);
+  font-family: 'Noto Sans', -apple-system, system-ui, sans-serif;
+  /* 16px text: iOS zooms into smaller text when it gets focus */
+  font-size: 16px;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.orbit-page-editor .bn-container {
+  --bn-font-family: inherit;
+  --bn-border-radius: 6px;
+  --bn-colors-editor-background: transparent;
+  --bn-colors-editor-text: var(--orbit-foreground);
+  --bn-colors-border: var(--orbit-border);
+  --bn-colors-side-menu: var(--orbit-muted-foreground);
+}
+
+/* No side menu on phones: blocks use the full width. */
+.orbit-page-editor .bn-editor {
+  padding-inline: 12px;
+  padding-bottom: 24px;
+}
+
+.orbit-page-editor .bn-editor :is(h1, h2, h3, h4, h5, h6) {
+  line-height: 1.3;
+}
+
+.orbit-page-editor .bn-editor a[data-inline-content-type='link'] {
+  color: var(--orbit-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Placeholders: only in the focused empty block. */
+.orbit-page-editor .bn-editor[contenteditable='true'] .bn-block-content[data-is-empty-and-focused]:has(.ProseMirror-trailingBreak:only-child)::after {
+  content: 'Write something';
+  color: var(--orbit-muted-foreground);
+  font-style: normal;
+}
+.orbit-page-editor .bn-editor[contenteditable='true'] .bn-block-content[data-content-type='heading']:has(.ProseMirror-trailingBreak:only-child)::after {
+  content: 'Heading';
+}
+.orbit-page-editor .bn-editor[contenteditable='true'] .bn-block-content:is([data-content-type='bulletListItem'], [data-content-type='numberedListItem'], [data-content-type='checkListItem']):has(.ProseMirror-trailingBreak:only-child)::after {
+  content: 'List';
+}
+
+/* Callouts (Notion-style): the whole block, so nested blocks sit inside the box. */
+.orbit-page-editor .bn-block:has(> [data-content-type='callout'], > * > [data-content-type='callout']) {
+  --callout-tint: var(--bn-colors-highlights-gray-background);
+  --callout-strength: 100%;
+  margin: 4px 0;
+  padding: 12px 14px 12px 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--callout-tint) var(--callout-strength), transparent);
+}
+.orbit-page-editor[data-theme='dark'] .bn-block:has(> [data-content-type='callout'], > * > [data-content-type='callout']) {
+  --callout-strength: 24%;
+}
+.orbit-page-editor .bn-block:has(> [data-content-type='callout'][data-background-color='default'], > * > [data-content-type='callout'][data-background-color='default']) {
+  border-color: var(--orbit-border);
+  background: transparent;
+}
+.orbit-page-editor .bn-block:has(> [data-content-type='callout'][data-background-color='brown'], > * > [data-content-type='callout'][data-background-color='brown']) { --callout-tint: var(--bn-colors-highlights-brown-background); }
+.orbit-page-editor .bn-block:has(> [data-content-type='callout'][data-background-color='red'], > * > [data-content-type='callout'][data-background-color='red']) { --callout-tint: var(--bn-colors-highlights-red-background); }
+.orbit-page-editor .bn-block:has(> [data-content-type='callout'][data-background-color='orange'], > * > [data-content-type='callout'][data-background-color='orange']) { --callout-tint: var(--bn-colors-highlights-orange-background); }
+.orbit-page-editor .bn-block:has(> [data-content-type='callout'][data-background-color='yellow'], > * > [data-content-type='callout'][data-background-color='yellow']) { --callout-tint: var(--bn-colors-highlights-yellow-background); }
+.orbit-page-editor .bn-block:has(> [data-content-type='callout'][data-background-color='green'], > * > [data-content-type='callout'][data-background-color='green']) { --callout-tint: var(--bn-colors-highlights-green-background); }
+.orbit-page-editor .bn-block:has(> [data-content-type='callout'][data-background-color='blue'], > * > [data-content-type='callout'][data-background-color='blue']) { --callout-tint: var(--bn-colors-highlights-blue-background); }
+.orbit-page-editor .bn-block:has(> [data-content-type='callout'][data-background-color='purple'], > * > [data-content-type='callout'][data-background-color='purple']) { --callout-tint: var(--bn-colors-highlights-purple-background); }
+.orbit-page-editor .bn-block:has(> [data-content-type='callout'][data-background-color='pink'], > * > [data-content-type='callout'][data-background-color='pink']) { --callout-tint: var(--bn-colors-highlights-pink-background); }
+.orbit-page-editor .bn-block-content[data-content-type='callout'] {
+  position: relative;
+  padding: 0 !important;
+  background: transparent !important;
+}
+.orbit-page-editor .bn-block:has(> [data-content-type='callout'], > * > [data-content-type='callout']) > .bn-block-group {
+  margin-left: 32px !important;
+}
+.orbit-callout {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 8px;
+}
+.orbit-callout-emoji {
+  display: flex;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  line-height: 1;
+  user-select: none;
+}
+.orbit-callout-text {
+  min-width: 0;
+  flex: 1;
+  padding: 1px 0;
+}
+
+/* Page cards: a link to another page. */
+.orbit-page-card {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--orbit-foreground);
+  font: inherit;
+  font-weight: 500;
+  text-align: left;
+  user-select: none;
+}
+.orbit-page-card:active {
+  background: var(--orbit-muted);
+}
+.orbit-page-card-icon {
+  display: flex;
+  width: 18px;
+  flex-shrink: 0;
+  justify-content: center;
+}
+.orbit-page-card-title {
+  overflow: hidden;
+  text-decoration: underline;
+  text-decoration-color: var(--orbit-border);
+  text-overflow: ellipsis;
+  text-underline-offset: 3px;
+  white-space: nowrap;
+}
+.orbit-page-card[data-state='trashed'],
+.orbit-page-card[data-state='missing'] {
+  color: var(--orbit-muted-foreground);
+}
+.orbit-page-card[data-state='trashed'] .orbit-page-card-title {
+  text-decoration-line: line-through;
+}
+.orbit-page-card[data-state='missing'] .orbit-page-card-title {
+  text-decoration: none;
+}
+.orbit-page-card-note {
+  flex-shrink: 0;
+  color: var(--orbit-muted-foreground);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.orbit-mention {
+  padding: 0 2px;
+  border-radius: 4px;
+  background: color-mix(in oklab, var(--orbit-primary) 10%, transparent);
+  color: var(--orbit-primary);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+/* Comment anchors (threads are on the Comments sheet). */
+.orbit-page-editor .bn-thread-mark:not([data-orphan='true']) {
+  border-bottom: 2px solid rgb(245 158 11 / 0.55);
+  background: rgb(251 191 36 / 0.2);
+}
+.orbit-page-editor[data-theme='dark'] .bn-thread-mark:not([data-orphan='true']) {
+  border-bottom-color: rgb(251 191 36 / 0.5);
+  background: rgb(251 191 36 / 0.13);
+}
+
+/* Code: the code surface is dark in both themes, so tokens use GitHub's dark palette. */
+.orbit-page-editor .bn-block-content[data-content-type='codeBlock'] {
+  border-radius: 8px;
+}
+.orbit-token-keyword { color: #ff7b72; }
+.orbit-token-string { color: #a5d6ff; }
+.orbit-token-comment { color: #8b949e; }
+.orbit-token-class { color: #ffa657; }
+.orbit-token-property { color: #79c0ff; }
+.orbit-token-entity { color: #d2a8ff; }
+.orbit-token-jsxliterals { color: #7ee787; }
+
+.orbit-page-editor-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px 12px;
+}
+.orbit-page-editor-loading span {
+  height: 14px;
+  border-radius: 4px;
+  background: var(--orbit-muted);
+}
+.orbit-page-editor-loading span:nth-child(2) {
+  width: 80%;
+}
+.orbit-page-editor-loading span:nth-child(3) {
+  width: 60%;
+}

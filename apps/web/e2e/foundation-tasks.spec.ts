@@ -1,5 +1,5 @@
 import { expect, test, type Browser, type Page } from '@playwright/test'
-import { CONTRACT_ID } from '../src/api/generated/contract'
+import { CONTRACT_ID } from '@orbit/api/generated/contract'
 
 async function api<T>(page: Page, path: string, method = 'GET', body?: unknown): Promise<T> {
   return page.evaluate(async ({ path, method, body, contract }) => {

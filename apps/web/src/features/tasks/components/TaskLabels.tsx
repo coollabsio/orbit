@@ -1,7 +1,7 @@
 import { useRef, useState, type CSSProperties, type ReactElement } from 'react'
 import { useNavigate } from 'react-router'
 import { Add as Plus, Setting2 as Settings } from 'reicon-react'
-import type { LabelRecord } from '@/api/generated/types.gen'
+import type { LabelRecord } from '@orbit/api/generated/types.gen'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Command, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'

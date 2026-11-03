@@ -139,6 +139,21 @@ impl Server {
         )
     }
 
+    /// A socket ticket of the session `token` for one document (`POST /api/v1/auth/socket-ticket`);
+    /// `kind` is "page" or "task".
+    pub async fn socket_ticket(&self, token: &str, kind: &str, id: &str) -> String {
+        let (status, body) = self
+            .api(
+                token,
+                "POST",
+                "/api/v1/auth/socket-ticket",
+                Some(json!({"kind": kind, "id": id})),
+            )
+            .await;
+        assert_eq!(status, 200, "{body}");
+        body["ticket"].as_str().unwrap().to_owned()
+    }
+
     pub fn ws_url(&self, workspace: &str, page: &str, query: &str) -> String {
         self.doc_ws_url(workspace, "pages", page, query)
     }
@@ -388,6 +403,11 @@ impl Client {
             .socket(&url, Some(token), Some(&server.base))
             .await
             .expect("handshake");
+        Self::sync(socket).await
+    }
+
+    /// Syncs over an opened socket; `Err(close code)` when the server closes first.
+    pub async fn sync(socket: Socket) -> Result<Self, u16> {
         let mut client = Self {
             doc: new_doc(None),
             socket,

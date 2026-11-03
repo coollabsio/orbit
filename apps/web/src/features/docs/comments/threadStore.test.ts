@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'bun:test'
 import { QueryClient } from '@tanstack/react-query'
-import type { PageComment, PageThread } from '@/api/generated/types.gen'
+import type { PageComment, PageThread } from '@orbit/api/generated/types.gen'
 import type { CommentsApi } from './api'
 import { threadCounts } from './api'
 import { OrbitThreadStore, OrbitThreadStoreAuth, toThreadData } from './threadStore'
@@ -181,7 +181,10 @@ describe('OrbitThreadStoreAuth', () => {
     expect(auth.canDeleteComment(data.comments[0])).toBe(true)
     expect(auth.canUpdateComment(data.comments[1])).toBe(false)
     expect(auth.canDeleteComment(data.comments[1])).toBe(false)
-    expect(auth.canDeleteThread(data)).toBe(true)
+    // Bob replied, so Ann may no longer delete the whole thread; she may once his reply is gone.
+    expect(auth.canDeleteThread(data)).toBe(false)
+    expect(auth.canDeleteThread(toThreadData(thread({ comments: [comment()] })))).toBe(true)
+    expect(auth.canDeleteThread(toThreadData(thread({ comments: [comment(), comment({ id: 'c2', author_id: 'bob', deleted_at: '2026-01-01T00:00:00Z' })] })))).toBe(true)
     const bob = new OrbitThreadStoreAuth(() => 'bob')
     expect(bob.canDeleteThread(data)).toBe(false)
     expect(bob.canAddComment()).toBe(true)

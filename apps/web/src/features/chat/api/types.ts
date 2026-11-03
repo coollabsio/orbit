@@ -43,6 +43,8 @@ export interface Attachment {
   /** Known for images, so the list can reserve the space before they load. */
   width?: number
   height?: number
+  /** An admin deleted the stored file. */
+  deleted?: boolean
 }
 
 /** What an external URL shows as a card. Image URLs are always `https`. */

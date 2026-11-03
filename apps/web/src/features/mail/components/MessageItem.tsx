@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { Code, DocumentDownload, Gallery, More, Printer, ShieldTick } from 'reicon-react'
-import type { MailMessageView, MailPerson } from '@/api/generated/types.gen'
+import type { MailMessageView, MailPerson } from '@orbit/api/generated/types.gen'
 import { Attachments } from '@/components/common/Attachments'
 import { Modal } from '@/components/common/Modal'
 import { Tip } from '@/components/common/Tip'

@@ -1,5 +1,5 @@
 import { toast } from 'sonner'
-import type { MailDomain, MailProviderView } from '@/api/generated/types.gen'
+import type { MailDomain, MailProviderView } from '@orbit/api/generated/types.gen'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useSetDomainRoute } from '@/features/mail/api/mutations'
 import { SettingsRow } from '@/features/settings/components/SettingsParts'

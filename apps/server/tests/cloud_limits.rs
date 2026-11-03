@@ -176,6 +176,8 @@ async fn email_caps_hold_across_servers() {
     let path = "/api/v1/auth/recovery/request";
     assert_eq!(one.call("POST", path, None, reset.clone()).await.0, 202);
     assert_eq!(two.call("POST", path, None, reset).await.0, 202);
+    // The links are issued in the background, after the answer.
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     let links: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM recovery_tokens")
         .fetch_one(one.database.pool())
         .await

@@ -10,7 +10,7 @@ import {
   useId,
 } from 'react'
 import { At, Paperclip2, Send2, SmileCircle, Sticker, Xmark } from 'reicon-react'
-import type { CustomStickerRecord } from '@/api/generated/types.gen'
+import type { CustomStickerRecord } from '@orbit/api/generated/types.gen'
 import { confirmAction } from '@/components/common/confirmAction'
 import { EmojiPicker } from '@/components/common/EmojiPicker'
 import { MentionPopover } from '@/components/common/MentionPopover'

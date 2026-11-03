@@ -1,7 +1,7 @@
 import type { IconComponent } from 'reicon-react'
 import { Archive, DirectInbox, ShieldCross, Trash } from 'reicon-react'
-import type { MailAttachmentView, MailFolder, MailPerson, MailThreadSummary } from '@/api/generated/types.gen'
-import { ApiProblem } from '@/api/problem'
+import type { MailAttachmentView, MailFolder, MailPerson, MailThreadSummary } from '@orbit/api/generated/types.gen'
+import { ApiProblem } from '@orbit/api/problem'
 import type { Attachment } from '@/lib/attachmentLib'
 import type { ThreadFilter } from './api/keys'
 

@@ -8,11 +8,11 @@
 //! directly.
 
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use reqwest::dns::{Addrs, Name, Resolve, Resolving};
+use orbit_platform::{PublicResolver, is_public_ip};
 use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Semaphore;
@@ -326,84 +326,9 @@ fn allowed_target(url: &Url, allow_local: bool) -> bool {
     }
     match url.host() {
         Some(Host::Domain(_)) => true,
-        Some(Host::Ipv4(ip)) => is_public(IpAddr::V4(ip)),
-        Some(Host::Ipv6(ip)) => is_public(IpAddr::V6(ip)),
+        Some(Host::Ipv4(ip)) => is_public_ip(IpAddr::V4(ip)),
+        Some(Host::Ipv6(ip)) => is_public_ip(IpAddr::V6(ip)),
         None => false,
-    }
-}
-
-/// An address on the public internet: not loopback, private, link-local, shared, reserved,
-/// multicast or documentation space. An IPv6 address that carries an IPv4 one (mapped,
-/// compatible, NAT64, 6to4) is judged by that address. Also the mail image proxy's rule.
-pub(crate) fn is_public(ip: IpAddr) -> bool {
-    match ip {
-        IpAddr::V4(ip) => is_public_v4(ip),
-        IpAddr::V6(ip) => {
-            if let Some(mapped) = ip.to_ipv4_mapped() {
-                return is_public_v4(mapped);
-            }
-            let segments = ip.segments();
-            // NAT64 (64:ff9b::/96) carries an IPv4 address in its last 32 bits.
-            if segments[..6] == [0x64, 0xff9b, 0, 0, 0, 0] {
-                let [a, b] = segments[6].to_be_bytes();
-                let [c, d] = segments[7].to_be_bytes();
-                return is_public_v4(Ipv4Addr::new(a, b, c, d));
-            }
-            // 6to4 (2002::/16) carries an IPv4 address in bits 16–47.
-            if segments[0] == 0x2002 {
-                let [a, b] = segments[1].to_be_bytes();
-                let [c, d] = segments[2].to_be_bytes();
-                return is_public_v4(Ipv4Addr::new(a, b, c, d));
-            }
-            !(ip.is_loopback()
-                || ip.is_unspecified()
-                || ip.is_multicast()
-                || segments[..6] == [0, 0, 0, 0, 0, 0] // IPv4-compatible ::/96 (also :: and ::1)
-                || segments[..4] == [0x100, 0, 0, 0] // discard 100::/64
-                || (segments[0] == 0x2001 && segments[1] == 0) // Teredo 2001::/32
-                || (segments[0] & 0xfe00) == 0xfc00 // unique local fc00::/7
-                || (segments[0] & 0xffc0) == 0xfe80 // link-local fe80::/10
-                || (segments[0] & 0xffc0) == 0xfec0 // site-local fec0::/10
-                || (segments[0] == 0x2001 && segments[1] == 0x0db8) // documentation
-                || (segments[0] == 0x3fff && segments[1] < 0x1000) // documentation 3fff::/20
-                || ip == Ipv6Addr::LOCALHOST)
-        }
-    }
-}
-
-fn is_public_v4(ip: Ipv4Addr) -> bool {
-    let [a, b, c, _] = ip.octets();
-    !(ip.is_private()
-        || ip.is_loopback()
-        || ip.is_link_local()
-        || ip.is_broadcast()
-        || ip.is_unspecified()
-        || ip.is_multicast()
-        || ip.is_documentation()
-        || a == 0
-        || (a == 100 && (b & 0xc0) == 64) // shared address space 100.64.0.0/10
-        || (a == 192 && b == 0 && c == 0) // protocol assignments 192.0.0.0/24
-        || (a == 192 && b == 88 && c == 99) // 6to4 relay anycast 192.88.99.0/24
-        || (a == 198 && (b & 0xfe) == 18) // benchmarks 198.18.0.0/15
-        || a >= 240)
-}
-
-/// Resolves a host name to its public addresses only. The connection uses what this returns, so
-/// a name that resolves to a local address (also after a redirect) cannot be reached.
-struct PublicResolver;
-
-impl Resolve for PublicResolver {
-    fn resolve(&self, name: Name) -> Resolving {
-        Box::pin(async move {
-            let addresses: Vec<SocketAddr> = tokio::net::lookup_host((name.as_str(), 0))
-                .await?
-                .filter(|address| is_public(address.ip()))
-                .collect();
-            if addresses.is_empty() {
-                return Err("the host has no public address".into());
-            }
-            Ok(Box::new(addresses.into_iter()) as Addrs)
-        })
     }
 }
 
@@ -858,37 +783,6 @@ mod tests {
                 .as_str(),
             "https://example.com/a"
         );
-    }
-
-    #[test]
-    fn a_host_name_resolves_to_public_addresses_only() {
-        for local in [
-            "127.0.0.1",
-            "10.1.2.3",
-            "192.168.0.10",
-            "169.254.1.1",
-            "::1",
-            "fc00::2",
-            "::ffff:10.0.0.1",
-            "64:ff9b::a9fe:a9fe",
-            "2002:7f00:1::",
-            "::7f00:1",
-            "fec0::1",
-            "2001::1",
-            "fd00:ec2::254",
-            "192.88.99.1",
-            "100.64.0.1",
-        ] {
-            assert!(!is_public(local.parse().unwrap()), "{local}");
-        }
-        for public in [
-            "1.1.1.1",
-            "93.184.216.34",
-            "2606:4700::1111",
-            "2002:0101:0101::",
-        ] {
-            assert!(is_public(public.parse().unwrap()), "{public}");
-        }
     }
 
     #[test]

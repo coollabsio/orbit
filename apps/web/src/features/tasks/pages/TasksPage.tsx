@@ -1,6 +1,6 @@
 import { useShortcutTitle } from '@/shortcuts/shortcutText'
 import { TaskCommands } from '@/features/tasks/TaskCommands'
-import { useListNavigation, useTaskTarget, visibleTaskIds } from '@/shortcuts/taskTarget'
+import { focusTaskRow, useListNavigation, useTaskTarget, visibleTaskIds } from '@/shortcuts/taskTarget'
 import { TaskTargetProvider } from '@/shortcuts/TaskTargetProvider'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router'
@@ -8,9 +8,10 @@ import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { UNDO_TOAST_DURATION } from '@/lib/toast'
 import { loadFailed } from '@/lib/connection'
-import { Bookmark, ChevronDown, Menu, Add as Plus, Setting2 as Settings, TaskSquare as SquareCheck } from 'reicon-react'
+import { useScrollMemory } from '@/lib/useScrollMemory'
+import { Bookmark, ChevronDown, Add as Plus, Setting2 as Settings, TaskSquare as SquareCheck } from 'reicon-react'
 import { cn } from 'cn'
-import { ApiProblem } from '@/api/problem'
+import { ApiProblem } from '@orbit/api/problem'
 import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
 import {
@@ -78,6 +79,8 @@ import { countConditions, DEFAULT_DISPLAY, emptyFilter, isTaskPreset, normalizeV
 const EMPTY_PROJECTS: NonNullable<ReturnType<typeof useProjects>['data']> = []
 const EMPTY_LABELS: NonNullable<ReturnType<typeof useLabels>['data']> = []
 const OPEN_WAIT_MS = 300
+/** The last task open from each list page (its path and query): back on the list, that row has the keyboard focus. */
+const lastOpenTask = new Map<string, string>()
 
 /** History state of a task URL: the project page it was opened from, where closing returns, and whether the
  * previous history entry is another task (closing then returns to it). */
@@ -298,6 +301,26 @@ function WorkspaceTasksPage() {
   }
   useCommand('detail.next', taskId ? () => stepTask(1) : null)
   useCommand('detail.prev', taskId ? () => stepTask(-1) : null)
+
+  // `viewState.isLoading` too: after a page or view switch the disabled task query still shows the previous
+  // page's tasks as placeholder data, which must not render under the new page's title and placeholder display.
+  const pending = viewState.isLoading || projectsQuery.isPending || statusesQuery.isPending || membersQuery.isPending || labelsQuery.isPending
+  const tasksShown = !detailOpen && !pending && !tasksQuery.isLoading && !tasksQuery.error
+  // closing a task returns to the list as it was: same scroll position, and the task's row has the focus
+  const listKey = `${basePath}${closeSearchSuffix}`
+  useEffect(() => {
+    if (taskId) lastOpenTask.set(listKey, taskId)
+  }, [listKey, taskId])
+  useEffect(() => {
+    const id = tasksShown ? lastOpenTask.get(listKey) : undefined
+    if (!id || !visibleTaskIds(pointer).includes(id)) return
+    // next frame: a virtual list puts its rows in the DOM only after it has measured its scroller
+    const frame = requestAnimationFrame(() => focusTaskRow(id, pointer))
+    return () => cancelAnimationFrame(frame)
+  }, [listKey, pointer, tasksShown])
+  // the board scrolls in the page; the list and the timeline remember their own scrollers
+  const boardScroller = useRef<HTMLDivElement>(null)
+  useScrollMemory(boardScroller, 'task-board', tasksShown && layout === 'board')
   // list keys work in every layout; rows can be selected in the list only (it has the bulk toolbar)
   useListNavigation(detailOpen ? null : openTask, { selectable: layout === 'list' })
 
@@ -342,10 +365,7 @@ function WorkspaceTasksPage() {
   if (loadFailed(preference)) {
     return <TaskBoundary title="Tasks unavailable" description="The server could not load the settings for this page." />
   }
-  // `viewState.isLoading` too: after a page or view switch the disabled task query still shows the previous
-  // page's tasks as placeholder data, which must not render under the new page's title and placeholder display.
   // On a list, the task query loads and fails inside the list area, so the filter stays reachable to fix it.
-  const pending = viewState.isLoading || projectsQuery.isPending || statusesQuery.isPending || membersQuery.isPending || labelsQuery.isPending
   if (taskRoute.error) {
     return <TaskBoundary title="Task unavailable" description={taskUnavailableDescription(taskRoute.error)} />
   }
@@ -373,9 +393,6 @@ function WorkspaceTasksPage() {
       ) : (
         <Pane className="relative">
           <PaneHeader className="bg-background text-foreground max-[899px]:min-h-11 max-[899px]:flex-wrap max-[899px]:px-2 max-[899px]:py-1.5">
-            <Button type="button" variant="ghost" size="icon-sm" className="hidden shrink-0 text-muted-foreground/70 max-[899px]:inline-flex" aria-label="Menu" onClick={() => window.dispatchEvent(new CustomEvent('open-sidebar'))}>
-              <Menu className="size-[18px]" />
-            </Button>
             {source.kind === 'view' ? (
               <ViewHeader
                 workspaceId={workspace.id}
@@ -475,7 +492,7 @@ function WorkspaceTasksPage() {
             }}
           />
           {showNewProject ? <NewProjectModal onClose={() => setShowNewProject(false)} onCreated={(project) => { setProjectFilter(project.id); setShowNewProject(false) }} /> : null}
-          <div className={cn('min-h-0 flex-1', layout === 'timeline' ? 'overflow-hidden' : 'overflow-y-auto')}>
+          <div ref={boardScroller} className={cn('min-h-0 flex-1', layout === 'timeline' ? 'overflow-hidden' : 'overflow-y-auto')}>
             {tasksQuery.error || tasksQuery.isLoading ? (
               <div className="flex h-full flex-col p-2 *:flex-1">
                 {tasksQuery.error

@@ -3,20 +3,24 @@
 //! page or a task description (what y-websocket 3 speaks).
 //!
 //! Before the upgrade: the platform layer requires exactly one allowed `Origin` for any request
-//! with `Upgrade` (403); then the session cookie (401), and workspace membership plus a live page
+//! with `Upgrade` (403), unless it carries a `ticket` and no cookie; then the session cookie, or
+//! the session of a valid `ticket` for this page or task without any other credential (401, see
+//! `crate::socket_ticket`), and workspace membership plus a live page
 //! the user can see, or a live task in a live project (404, the same answer as for an unknown id).
 //! After it: `v` must be `1` (4426) and `epoch` must be the document's `collab_epoch` (4409). The
-//! connection is re-checked every 15 s and whenever pages or tasks move, get trashed or members
-//! leave.
+//! connection is re-checked every 15 s and whenever pages or tasks move, get trashed, members
+//! leave or the workspace's subscription changes (an editing socket of a workspace that became
+//! read-only closes with 4402).
 
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
 use axum::body::Bytes;
 use axum::extract::ws::{CloseFrame, Message as WsMessage, WebSocket, WebSocketUpgrade};
+use axum::http::header::COOKIE;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use orbit_platform::{Database, Id, Row, TimestampMillis};
+use orbit_platform::{Database, Id, Row, TimestampMillis, bearer_token};
 use serde::Deserialize;
 use sqlx::AnyPool;
 use tokio::sync::broadcast;
@@ -24,15 +28,21 @@ use tokio::sync::broadcast;
 use super::hub::{CollabHub, MessageKind, Outbound, Peer};
 use super::{DocKey, DocKind, close};
 use crate::auth_routes::{CookieMode, request_session};
+use crate::billing::WorkspaceAccess;
+use crate::repositories::billing;
 use crate::repositories::identity::IdentityRepository;
+use crate::socket_ticket::SocketTickets;
 
 /// Query parameters y-websocket appends (`params`).
-#[derive(Debug, Default, Deserialize)]
+#[derive(Default, Deserialize)]
 pub struct CollabQuery {
     /// Protocol version; must be `1`.
     pub v: Option<String>,
     /// The page's `collab_epoch` the client's document belongs to.
     pub epoch: Option<String>,
+    /// A socket ticket (`POST /api/v1/auth/socket-ticket`), for clients that cannot send the
+    /// session cookie.
+    pub ticket: Option<String>,
 }
 
 /// Why a connection may not (or no longer) edit the page.
@@ -54,10 +64,13 @@ impl Denied {
 }
 
 /// Upgrades an authorized request to the collaboration socket of a page or task (`kind`).
+/// With `read_only` (an Orbit Cloud workspace without a subscription) the socket syncs the
+/// document to the client but drops its content updates.
 #[allow(clippy::too_many_arguments)]
 pub async fn upgrade(
     identity: &IdentityRepository,
     cookie_mode: CookieMode,
+    tickets: Option<&SocketTickets>,
     database: &Database,
     workspace: &str,
     kind: DocKind,
@@ -65,8 +78,26 @@ pub async fn upgrade(
     query: CollabQuery,
     headers: &HeaderMap,
     upgrade: WebSocketUpgrade,
+    read_only: bool,
 ) -> Response {
-    let Some(session) = request_session(identity, cookie_mode, headers).await else {
+    let session = match query.ticket.as_deref() {
+        None => request_session(identity, cookie_mode, headers).await,
+        // A ticket stands in for the session, so it never comes with another credential.
+        Some(_) if headers.contains_key(COOKIE) || bearer_token(headers).is_some() => None,
+        // A ticket opens only the document it was issued for.
+        Some(ticket) => {
+            let now = TimestampMillis::now();
+            let document = id.parse::<Id>().ok().map(|id| DocKey { kind, id });
+            match tickets
+                .zip(document)
+                .and_then(|(tickets, document)| tickets.verify(ticket, document, now))
+            {
+                Some(session_id) => identity.authenticate_session_id(session_id, now).await.ok(),
+                None => None,
+            }
+        }
+    };
+    let Some(session) = session else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
     let (Ok(workspace_id), Ok(id)) = (workspace.parse::<Id>(), id.parse::<Id>()) else {
@@ -90,6 +121,7 @@ pub async fn upgrade(
     let limit = hub.config().max_frame_bytes;
     let connection = Connection {
         hub,
+        database: database.clone(),
         pool,
         workspace_id,
         key,
@@ -97,6 +129,7 @@ pub async fn upgrade(
         peer: Peer {
             user_id: session.user.id,
             name: session.user.display_name,
+            read_only,
         },
         query,
     };
@@ -111,6 +144,7 @@ pub async fn upgrade(
 
 struct Connection {
     hub: CollabHub,
+    database: Database,
     pool: AnyPool,
     workspace_id: Id,
     key: DocKey,
@@ -234,8 +268,8 @@ impl Connection {
                     }
                     Ok(Outbound::Close { code, reason }) => return (code, reason),
                     Ok(Outbound::Revalidate) => {
-                        if let Some(denied) = self.denied().await {
-                            return denied.close();
+                        if let Some(close) = self.denied().await {
+                            return close;
                         }
                     }
                     // Too slow to keep up: the client resyncs on reconnect.
@@ -251,17 +285,18 @@ impl Connection {
                     }
                 }
                 _ = recheck.tick() => {
-                    if let Some(denied) = self.denied().await {
-                        return denied.close();
+                    if let Some(close) = self.denied().await {
+                        return close;
                     }
                 }
             }
         }
     }
 
-    async fn denied(&self) -> Option<Denied> {
+    /// How to close a connection that may no longer stay open as it is.
+    async fn denied(&self) -> Option<(u16, &'static str)> {
         // A database hiccup is not a reason to drop an editor; the next check decides.
-        check_access(
+        let denied = check_access(
             &self.pool,
             self.workspace_id,
             self.key,
@@ -269,7 +304,15 @@ impl Connection {
             self.peer.user_id,
         )
         .await
-        .unwrap_or_default()
+        .unwrap_or_default();
+        if let Some(denied) = denied {
+            return Some(denied.close());
+        }
+        // An editing socket of a workspace that became read-only: the client reconnects, and the
+        // read-only guard opens the new socket read-only.
+        let access = billing::write_access(&self.database, self.workspace_id).await;
+        (!self.peer.read_only && access.ok() == Some(WorkspaceAccess::ReadOnly))
+            .then_some((close::READ_ONLY, "workspace is read-only"))
     }
 }
 

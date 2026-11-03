@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import type { Page } from '@/api/generated/types.gen'
+import type { Page } from '@orbit/api/generated/types.gen'
 import { PageAutosaver, type AutosaveTimers, type PagePatch, type SaveStatus } from './autosave'
 
 /** Manual clock: timers only fire on `advance`. */

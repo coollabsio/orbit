@@ -1,16 +1,19 @@
 import { useRef, useState } from 'react'
-import { ApiProblem } from '@/api/problem'
+import { ApiProblem } from '@orbit/api/problem'
 import { UnsavedBar } from '@/components/common/UnsavedBar'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { PasswordInput } from '@/components/ui/password-input'
 import { Button } from '@/components/ui/button'
-import { useChangePassword, useCurrentUser, useSetAvatar, useUpdateProfile } from '@/features/auth/api'
+import { useAuthOptions, useChangePassword, useCurrentUser, useSetAvatar, useUpdateProfile } from '@/features/auth/api'
+import { ConfirmWithProvider } from '@/features/auth/components/ConfirmWithProvider'
 import { userColor } from '@/features/workspaces/api'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { avatarImage } from '@/features/profile/avatarImage'
 import { TimeZonePicker } from '@/features/profile/components/TimeZonePicker'
+import { DeleteAccountCard } from '@/features/profile/components/DeleteAccountCard'
+import { EmailChangeDialog } from '@/features/profile/components/EmailChangeDialog'
 import { PROFILE_LIMITS, phoneValid, profileChanges, profileDirty, profileFormOf, type ProfileForm } from '@/features/profile/profileLib'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { FieldGrid, RequiredMark } from '@/features/settings/components/SettingsParts'
@@ -106,12 +109,14 @@ function AvatarField() {
 /** The bio counter shows from this many characters before the limit. */
 const BIO_COUNTER_FROM = 100
 
-/** Account settings: the profile other members see, and authenticated password change. */
+/** Account settings: the profile other members see, the email, the password, and deleting the account. */
 export function ProfilePage() {
   const user = useCurrentUser()
   const me = user.data
   const updateProfile = useUpdateProfile()
   const changePasswordMutation = useChangePassword()
+  // Accounts created with Google or GitHub set their first password without a current one.
+  const hasPassword = me?.has_password !== false
 
   const formRef = useRef<HTMLFormElement>(null)
   const saved = profileFormOf(me)
@@ -128,6 +133,10 @@ export function ProfilePage() {
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [passwordError, setPasswordError] = useState<string | null>(null)
+  const options = useAuthOptions()
+  // The new address confirms the change with an emailed link.
+  const emailEnabled = options.data?.email_enabled === true
+  const [changingEmail, setChangingEmail] = useState(false)
 
   const dirty = profileDirty(me, form)
   const bioLeft = PROFILE_LIMITS.bio - form.bio.length
@@ -148,7 +157,7 @@ export function ProfilePage() {
     }
     setPasswordError(null)
     changePasswordMutation.mutate(
-      { current_password: currentPassword, new_password: newPassword },
+      { current_password: hasPassword ? currentPassword : null, new_password: newPassword },
       {
         onSuccess: () => {
           setCurrentPassword('')
@@ -163,6 +172,7 @@ export function ProfilePage() {
     ?? (changePasswordMutation.isError
       ? errorDetail(changePasswordMutation.error, 'Password could not be changed.')
       : null)
+  const reauthenticate = changePasswordMutation.error instanceof ApiProblem && changePasswordMutation.error.code === 'reauthentication_required'
 
   // Shown in `AccountLayout`, which has the pane, the header and the scrolling column.
   return (
@@ -189,7 +199,11 @@ export function ProfilePage() {
                     <FieldLabel htmlFor="profile-email">
                       Email
                     </FieldLabel>
-                    <Input id="profile-email" value={me?.email ?? ''} readOnly />
+                    <div className="flex gap-2">
+                      <Input id="profile-email" value={me?.email ?? ''} readOnly />
+                      {emailEnabled ? <Button type="button" variant="outline" onClick={() => setChangingEmail(true)}>Change</Button> : null}
+                    </div>
+                    {options.data && !emailEnabled ? <FieldDescription>This Orbit cannot send email, so the email cannot be changed. Ask an administrator.</FieldDescription> : null}
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="profile-title">Title</FieldLabel>
@@ -239,24 +253,26 @@ export function ProfilePage() {
 
             <form onSubmit={submitPassword}>
               <SettingsCard
-                title="Password"
-                description="Other devices will be signed out."
+                title={hasPassword ? 'Password' : 'Set a password'}
+                description={hasPassword ? 'Other devices will be signed out.' : 'Sign in with your email and a password as well as your connected account.'}
                 actions={
                   <Button type="submit" variant="outline" disabled={changePasswordMutation.isPending}>
-                    {changePasswordMutation.isPending ? 'Changing…' : 'Change password'}
+                    {changePasswordMutation.isPending ? 'Saving…' : hasPassword ? 'Change password' : 'Set password'}
                   </Button>
                 }
               >
                 <FieldGrid>
-                  <div className="min-[900px]:col-span-2">
-                    <PasswordField
-                      id="current-password"
-                      label="Current password"
-                      autoComplete="current-password"
-                      value={currentPassword}
-                      onChange={setCurrentPassword}
-                    />
-                  </div>
+                  {hasPassword ? (
+                    <div className="min-[900px]:col-span-2">
+                      <PasswordField
+                        id="current-password"
+                        label="Current password"
+                        autoComplete="current-password"
+                        value={currentPassword}
+                        onChange={setCurrentPassword}
+                      />
+                    </div>
+                  ) : null}
                   <PasswordField
                     id="new-password"
                     label="New password"
@@ -271,7 +287,9 @@ export function ProfilePage() {
                     value={confirmPassword}
                     onChange={setConfirmPassword}
                   />
-                  {passwordAlert ? (
+                  {reauthenticate ? (
+                    <div className="min-[900px]:col-span-2"><ConfirmWithProvider returnTo="/profile" /></div>
+                  ) : passwordAlert ? (
                     <p className="text-xs text-destructive min-[900px]:col-span-2" role="alert">
                       {passwordAlert}
                     </p>
@@ -279,6 +297,8 @@ export function ProfilePage() {
                 </FieldGrid>
               </SettingsCard>
             </form>
+            <DeleteAccountCard />
+            {changingEmail && me ? <EmailChangeDialog currentEmail={me.email} hasPassword={hasPassword} onClose={() => setChangingEmail(false)} /> : null}
         {dirty ? (
           <UnsavedBar
             onReset={() => {

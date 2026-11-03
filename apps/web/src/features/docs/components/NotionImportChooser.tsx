@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
-import { ChevronRight, Database, DocumentText as FileText, Search, Warning } from 'reicon-react'
-import type { NotionImport, NotionImportDestinationBody, NotionImportTree, PageSummary, Teamspace } from '@/api/generated/types.gen'
+import { ChevronRight, Database, DocumentText as FileText, Search4 as Search, Warning } from 'reicon-react'
+import type { NotionImport, NotionImportDestinationBody, NotionImportTree, PageSummary, Teamspace } from '@orbit/api/generated/types.gen'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'

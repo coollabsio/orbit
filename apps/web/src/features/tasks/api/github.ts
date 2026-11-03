@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
-import { deleteGithubProjectConnection, githubProjectSettings, githubWorkspaceSettings, saveGithubProjectConnection, startGithubManifest } from '@/api/generated/sdk.gen'
-import type { GithubProjectConnectionBody } from '@/api/generated/types.gen'
+import { deleteGithubProjectConnection, githubProjectSettings, githubWorkspaceSettings, saveGithubProjectConnection, startGithubManifest } from '@orbit/api/generated/sdk.gen'
+import type { GithubProjectConnectionBody } from '@orbit/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 
 const key = (workspaceId: string, projectId: string) => [...queryKeys.workspace(workspaceId), 'github-project', projectId] as const

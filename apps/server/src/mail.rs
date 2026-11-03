@@ -238,6 +238,70 @@ pub mod templates {
         }
     }
 
+    /// A recovery link an Orbit Cloud administrator sent from Admin → Users.
+    #[must_use]
+    pub fn admin_recovery(to: &str, url: &str) -> OutgoingEmail {
+        OutgoingEmail {
+            to: to.to_owned(),
+            subject: "Reset your Orbit password".to_owned(),
+            body: format!(
+                "An Orbit administrator started a password reset for your account. Open this link to set a new \
+                 password:\n{url}\n\n\
+                 The link works once and expires in 30 minutes. If you did not ask for this, contact support; \
+                 your password stays the same until the link is used.\n"
+            ),
+        }
+    }
+
+    /// Sent to the new address when an Orbit Cloud administrator changes an account's email.
+    #[must_use]
+    pub fn email_set_by_admin(to: &str) -> OutgoingEmail {
+        OutgoingEmail {
+            to: to.to_owned(),
+            subject: "Your Orbit email was changed".to_owned(),
+            body: "An Orbit administrator set this address as the email of your account.\n\n\
+                   If you did not ask for this, contact support.\n"
+                .to_owned(),
+        }
+    }
+
+    /// Sent when an Orbit Cloud administrator turns off an account's two-step sign-in.
+    #[must_use]
+    pub fn two_factor_reset(to: &str) -> OutgoingEmail {
+        OutgoingEmail {
+            to: to.to_owned(),
+            subject: "Two-step sign-in was turned off".to_owned(),
+            body: "An Orbit administrator turned off two-step sign-in for your account. If you did not ask for \
+                   this, contact support.\n"
+                .to_owned(),
+        }
+    }
+
+    /// Sent to the new address of an email change.
+    #[must_use]
+    pub fn email_change(to: &str, url: &str) -> OutgoingEmail {
+        OutgoingEmail {
+            to: to.to_owned(),
+            subject: "Confirm your new Orbit email".to_owned(),
+            body: format!(
+                "Open this link to make this address the email of your Orbit account:\n{url}\n\n\
+                 The link works once and expires in 60 minutes. If you did not ask for this, ignore this email.\n"
+            ),
+        }
+    }
+
+    /// Sent to the old address once an email change is confirmed.
+    #[must_use]
+    pub fn email_changed(to: &str, new_email: &str) -> OutgoingEmail {
+        OutgoingEmail {
+            to: to.to_owned(),
+            subject: "Your Orbit email was changed".to_owned(),
+            body: format!(
+                "The email of your Orbit account was changed to {new_email}.\n\nIf this was not you, contact support right away.\n"
+            ),
+        }
+    }
+
     #[must_use]
     pub fn test(to: &str) -> OutgoingEmail {
         OutgoingEmail {

@@ -6,7 +6,7 @@ import type {
   MailThreadPage,
   MailThreadSummary,
   UpdateMailThreadBody,
-} from '@/api/generated/types.gen'
+} from '@orbit/api/generated/types.gen'
 import { mailKeys, type ThreadFilter } from './keys'
 
 /** One change for one or many threads, as `PATCH threads/{id}` and `POST threads/bulk` take it. */

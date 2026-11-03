@@ -1,4 +1,4 @@
-import type { LabelRecord } from '@/api/generated/types.gen'
+import type { LabelRecord } from '@orbit/api/generated/types.gen'
 import type { StatusCategory, TaskPriority, TaskStatusDef } from '@/features/tasks/api/models'
 
 /** Status categories (workflow stages). Every status belongs to one; the glyph shape comes from it. */

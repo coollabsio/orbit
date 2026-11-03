@@ -41,8 +41,16 @@ test('the nav badge is the sum of the count badges plus unread followed threads'
     root: testMessage({ id }), conversationId: 'c1', lastReply: null,
     state: { rootId: id, conversationId: 'c1', following: true, lastReadReplyId: null, unreadReplies, mentionCount: 0 },
   })
-  expect(chatBadges(conversations, states, [thread('m1', 4), thread('m2', 0), thread('m3', 1)])).toEqual({ unreads: 6, threads: 2, total: 8 })
+  expect(chatBadges(conversations, states, [thread('m1', 4), thread('m2', 0), thread('m3', 1)])).toEqual({ unreads: 6, threads: 2, total: 8, unread: true })
   expect(unreadConversations(conversations, states).map((item) => item.conversation.id).sort()).toEqual(['c1', 'd1'])
+})
+
+test('the nav item is unread without a count when a channel only has messages without mentions', () => {
+  const conversations = [conversation('c1'), conversation('c2')]
+  const unread = [state('c1', { unreadCount: 5 }), state('c2', { notify: 'muted', unreadCount: 9 })]
+  expect(chatBadges(conversations, unread, [])).toEqual({ unreads: 0, threads: 0, total: 0, unread: true })
+  // A muted conversation alone does not count as unread.
+  expect(chatBadges(conversations, [state('c2', { notify: 'muted', unreadCount: 9 })], []).unread).toBe(false)
 })
 
 test('sidebar sections: favorites, categories by position, Channels, then DMs by last activity', () => {

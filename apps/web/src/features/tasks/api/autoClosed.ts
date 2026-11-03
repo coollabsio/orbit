@@ -1,6 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import type { ProjectRecord, TaskRecord } from '@/api/generated/types.gen'
+import type { ProjectRecord, TaskRecord } from '@orbit/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 import { refIdentifier, taskIdentifier } from './models'
 import { findCachedTask } from './optimistic'

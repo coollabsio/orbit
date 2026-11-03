@@ -377,6 +377,253 @@ fn postgres_database_url_comes_from_environment_and_is_redacted() {
     assert!(load([("ORBIT_DATABASE_URL", "mysql://x")]).is_err());
 }
 
+const STRIPE: [(&str, &str); 3] = [
+    ("ORBIT_STRIPE_SECRET_KEY", "sk_test_123"),
+    ("ORBIT_STRIPE_WEBHOOK_SECRET", "whsec_123"),
+    (
+        "ORBIT_STRIPE_PRICES",
+        "team:price_team, business-2:price_business",
+    ),
+];
+
+#[test]
+fn billing_is_off_by_default() {
+    assert_eq!(load([]).unwrap().billing, None);
+    assert_eq!(load([("ORBIT_CLOUD", "false")]).unwrap().billing, None);
+}
+
+#[test]
+fn cloud_mode_reads_stripe_settings_in_order() {
+    let [secret, webhook, prices] = STRIPE;
+    let cfg = load([("ORBIT_CLOUD", "true"), secret, webhook, prices]).unwrap();
+
+    let billing = cfg.billing.unwrap();
+    assert_eq!(billing.secret_key.expose(), "sk_test_123");
+    assert_eq!(billing.webhook_secret.expose(), "whsec_123");
+    assert_eq!(
+        billing.plans,
+        [
+            orbit_platform::Plan {
+                key: "team".to_owned(),
+                price_id: "price_team".to_owned()
+            },
+            orbit_platform::Plan {
+                key: "business-2".to_owned(),
+                price_id: "price_business".to_owned()
+            },
+        ]
+    );
+    assert_eq!(billing.api_base.as_str(), "https://api.stripe.com/");
+    assert!(!format!("{billing:?}").contains("sk_test_123"));
+    assert!(!format!("{billing:?}").contains("whsec_123"));
+}
+
+#[test]
+fn stripe_secrets_can_come_from_files() {
+    let secret_path = fixture_path("stripe-secret");
+    let webhook_path = fixture_path("stripe-webhook");
+    fs::write(&secret_path, "sk_test_file\n").unwrap();
+    fs::write(&webhook_path, "whsec_file\n").unwrap();
+    let secret = secret_path.to_string_lossy().into_owned();
+    let webhook = webhook_path.to_string_lossy().into_owned();
+    let result = load([
+        ("ORBIT_CLOUD", "true"),
+        ("ORBIT_STRIPE_SECRET_KEY_FILE", secret.as_str()),
+        ("ORBIT_STRIPE_WEBHOOK_SECRET_FILE", webhook.as_str()),
+        STRIPE[2],
+    ]);
+    let both = load([
+        ("ORBIT_CLOUD", "true"),
+        ("ORBIT_STRIPE_SECRET_KEY_FILE", secret.as_str()),
+        STRIPE[0],
+        STRIPE[1],
+        STRIPE[2],
+    ]);
+    let _ = fs::remove_file(secret_path);
+    let _ = fs::remove_file(webhook_path);
+
+    let billing = result.unwrap().billing.unwrap();
+    assert_eq!(billing.secret_key.expose(), "sk_test_file");
+    assert_eq!(billing.webhook_secret.expose(), "whsec_file");
+    assert!(matches!(
+        both.unwrap_err(),
+        orbit_platform::ConfigError::AmbiguousSecret { ref key } if key == "ORBIT_STRIPE_SECRET_KEY"
+    ));
+}
+
+#[test]
+fn cloud_mode_requires_every_stripe_setting() {
+    let [secret, webhook, prices] = STRIPE;
+    for (missing, env) in [
+        ("ORBIT_STRIPE_SECRET_KEY", [webhook, prices]),
+        ("ORBIT_STRIPE_WEBHOOK_SECRET", [secret, prices]),
+        ("ORBIT_STRIPE_PRICES", [secret, webhook]),
+    ] {
+        let error = load([("ORBIT_CLOUD", "true"), env[0], env[1]])
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(missing), "{error}");
+    }
+}
+
+#[test]
+fn stripe_settings_without_cloud_mode_are_rejected() {
+    for setting in STRIPE {
+        let error = load([setting]).unwrap_err().to_string();
+        assert!(
+            error.contains(setting.0) && error.contains("ORBIT_CLOUD"),
+            "{error}"
+        );
+    }
+    let error = load([("ORBIT_CLOUD", "yes")]).unwrap_err().to_string();
+    assert!(error.contains("ORBIT_CLOUD"), "{error}");
+}
+
+#[test]
+fn stripe_prices_must_be_unique_lowercase_plan_keys() {
+    let [secret, webhook, _] = STRIPE;
+    for prices in [
+        "",
+        "team",
+        "Team:price_1",
+        "team:price_1,team:price_2",
+        "team:price_1,business:price_1",
+        "te am:price_1",
+        "team:",
+    ] {
+        let error = load([
+            ("ORBIT_CLOUD", "true"),
+            secret,
+            webhook,
+            ("ORBIT_STRIPE_PRICES", prices),
+        ])
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("ORBIT_STRIPE_PRICES"), "{prices:?}: {error}");
+    }
+}
+
+#[test]
+fn trial_has_defaults_and_can_be_changed_in_cloud_mode() {
+    let [secret, webhook, prices] = STRIPE;
+    let cloud = ("ORBIT_CLOUD", "true");
+    let defaults = load([cloud, secret, webhook, prices]).unwrap();
+    assert_eq!(
+        defaults.billing.unwrap().trial,
+        orbit_platform::TrialConfig {
+            days: 7,
+            tasks: 50,
+            pages: 20,
+            members: 3
+        }
+    );
+
+    let custom = load([
+        cloud,
+        secret,
+        webhook,
+        prices,
+        ("ORBIT_TRIAL_DAYS", "0"),
+        ("ORBIT_TRIAL_TASKS", "0"),
+        ("ORBIT_TRIAL_PAGES", "100"),
+        ("ORBIT_TRIAL_MEMBERS", "1"),
+    ])
+    .unwrap();
+    assert_eq!(
+        custom.billing.unwrap().trial,
+        orbit_platform::TrialConfig {
+            days: 0,
+            tasks: 0,
+            pages: 100,
+            members: 1
+        }
+    );
+}
+
+#[test]
+fn trial_settings_reject_values_out_of_range_and_non_numbers() {
+    let [secret, webhook, prices] = STRIPE;
+    for (key, value, detail) in [
+        ("ORBIT_TRIAL_DAYS", "366", "must be 0 to 365 days"),
+        ("ORBIT_TRIAL_DAYS", "-1", "\"-1\" must be a whole number"),
+        (
+            "ORBIT_TRIAL_DAYS",
+            "seven",
+            "\"seven\" must be a whole number",
+        ),
+        ("ORBIT_TRIAL_TASKS", "2.5", "\"2.5\" must be a whole number"),
+        ("ORBIT_TRIAL_TASKS", "-1", "must be 0 or more"),
+        ("ORBIT_TRIAL_PAGES", "-5", "must be 0 or more"),
+        (
+            "ORBIT_TRIAL_MEMBERS",
+            "0",
+            "must be 1 or more (the owner counts)",
+        ),
+        ("ORBIT_TRIAL_MEMBERS", "", "\"\" must be a whole number"),
+    ] {
+        let error = load([
+            ("ORBIT_CLOUD", "true"),
+            secret,
+            webhook,
+            prices,
+            (key, value),
+        ])
+        .unwrap_err()
+        .to_string();
+        assert_eq!(
+            error,
+            format!("invalid configuration setting {key}: {detail}")
+        );
+    }
+}
+
+#[test]
+fn trial_settings_without_cloud_mode_are_rejected() {
+    for key in [
+        "ORBIT_TRIAL_DAYS",
+        "ORBIT_TRIAL_TASKS",
+        "ORBIT_TRIAL_PAGES",
+        "ORBIT_TRIAL_MEMBERS",
+    ] {
+        let error = load([(key, "1")]).unwrap_err().to_string();
+        assert_eq!(
+            error,
+            format!("invalid configuration setting {key}: is only used with ORBIT_CLOUD=true")
+        );
+    }
+}
+
+#[test]
+fn dev_native_redirects_are_parsed_and_refused_in_production() {
+    let development = load([(
+        "ORBIT_DEV_NATIVE_REDIRECTS",
+        " exp://100.64.0.5:8082/--/auth/callback ,,exp://127.0.0.1:8081/--/auth/callback",
+    )])
+    .unwrap();
+    assert_eq!(
+        development.http.dev_native_redirects,
+        vec![
+            "exp://100.64.0.5:8082/--/auth/callback".to_owned(),
+            "exp://127.0.0.1:8081/--/auth/callback".to_owned(),
+        ]
+    );
+
+    let production = load([
+        ("ORBIT_ENV", "production"),
+        ("ORBIT_PUBLIC_ORIGIN", "https://orbit.example"),
+        ("ORBIT_TRUSTED_PROXIES", "10.0.0.0/8"),
+        (
+            "ORBIT_DEV_NATIVE_REDIRECTS",
+            "exp://100.64.0.5:8082/--/auth/callback",
+        ),
+    ])
+    .unwrap_err();
+    assert_eq!(
+        production.to_string(),
+        "invalid configuration setting ORBIT_DEV_NATIVE_REDIRECTS: is for development only and cannot be set in production mode"
+    );
+}
+
 fn invalid_key(error: orbit_platform::ConfigError) -> &'static str {
     match error {
         orbit_platform::ConfigError::InvalidSetting { key, .. } => key,

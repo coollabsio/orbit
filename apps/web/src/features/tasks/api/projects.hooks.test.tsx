@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { queryKeys } from '@/api/queryKeys'
-import type { ProjectRecord } from '@/api/generated/types.gen'
+import type { ProjectRecord } from '@orbit/api/generated/types.gen'
 import { useUpdateProject } from './projects'
 
 const originalFetch = globalThis.fetch

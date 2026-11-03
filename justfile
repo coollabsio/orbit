@@ -8,7 +8,7 @@ setup:
     cargo --version
     bun --version
     just --version
-    cd apps/web && bun install --frozen-lockfile
+    bun install --frozen-lockfile
     cd apps/web && bun run build
 
 dev:
@@ -39,10 +39,24 @@ dev:
     web_pid=$!
     wait -n "$server_pid" "$web_pid"
 
+# Metro for the Expo app (apps/mobile). The phone loads it from ORBIT_MOBILE_HOST (for example a Tailscale name).
+mobile:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd apps/mobile
+    if [ -f .env.local ]; then
+        set -a
+        source .env.local
+        set +a
+    fi
+    REACT_NATIVE_PACKAGER_HOSTNAME="${ORBIT_MOBILE_HOST:-${REACT_NATIVE_PACKAGER_HOSTNAME:-}}" bunx expo start --port "${ORBIT_MOBILE_PORT:-8082}"
+
 test:
     just version-check
     cargo test --workspace
     cd apps/web && bun run test
+    cd packages/api && bun run test
+    cd packages/editor && bun run test && bun run typecheck
 
 version-check:
     #!/usr/bin/env bash
@@ -63,11 +77,14 @@ check:
     cargo test --workspace
     cd apps/web && bun run lint
     cd apps/web && bun run test
+    cd packages/api && bun run test
+    cd packages/editor && bun run test && bun run typecheck
+    cd apps/mobile && bunx tsc --noEmit
     just api-check
     cargo build --release --workspace
 
 api:
-    cargo run -p orbit-server -- openapi --output apps/web/src/api/generated/openapi.json
+    cargo run -p orbit-server -- openapi --output packages/api/src/generated/openapi.json
     cd apps/web && bun run api:generate
 
 api-check:
@@ -84,7 +101,7 @@ api-check:
     generate "$first"
     generate "$second"
     diff -ru "$first" "$second"
-    diff -ru apps/web/src/api/generated "$first"
+    diff -ru packages/api/src/generated "$first"
 
 db-reset:
     ORBIT_ENV=development cargo run -p orbit-server -- db-reset --yes

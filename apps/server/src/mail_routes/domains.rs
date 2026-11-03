@@ -349,7 +349,7 @@ pub(crate) async fn check_mail_domain(
     let domain_id = call.id(&domain)?;
     state
         .mail
-        .request_dns_check(call.workspace_id, call.actor_id, domain_id, &state.jobs)
+        .request_dns_check(call.workspace_id, call.actor_id, domain_id)
         .await
         .map_err(|error| call.problem(error))?;
     Ok(StatusCode::ACCEPTED)

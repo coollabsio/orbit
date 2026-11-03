@@ -25,7 +25,7 @@ import {
   restoreTask,
   updateComment,
   updateTask,
-} from '@/api/generated/sdk.gen'
+} from '@orbit/api/generated/sdk.gen'
 import type {
   BulkItem,
   CreateTaskBody,
@@ -38,7 +38,7 @@ import type {
   TaskRelationRecord,
   TaskUpdateBody,
   CommentRecord,
-} from '@/api/generated/types.gen'
+} from '@orbit/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 import { announceAutoClosed } from './autoClosed'
 import { isTaskVersionConflict } from './conflicts'

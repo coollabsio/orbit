@@ -14,6 +14,7 @@
 ## Sidebars
 
 - First sidebar groups Workspace, Personal, Manage.
+- Content-aware (Coolify), only in the new UI (Account settings → Appearance → Layout; check `useNewUi()` or the `new-ui:` variant, and keep the classic layout as it was): in Tasks (`/tasks`, `/views`: All tasks, Views, My work, Projects, Favorite views), Settings, Account settings and Admin the first sidebar shows Back plus that area's links (`features/settings/settingsNav.ts`). On desktop with the sidebar open, Docs and Chat render their own list into it through `InAppSidebar`; collapsed or on phones the list stays beside the content. A change of area slides in (forward from the right, back from the left); the first load and moves inside an area do not animate. Do not add a second navigation column next to the first sidebar.
 - Collapse control is at the bottom beside the user menu.
 - Collapsed state is a 56px icon rail with section separators.
 - Feature sidebars may be resizable from 220–420px; persist widths in local storage and hide resizers on mobile.

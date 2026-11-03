@@ -3,7 +3,7 @@
 ## Requirements
 
 - Rust 1.97.1 from `rust-toolchain.toml`
-- Bun 1.3.14 or later
+- Bun 1.4.4 or later
 - Just
 - Docker only for OCI builds
 
@@ -86,18 +86,18 @@ docker run --rm orbit:milestone-1 --help
 docker run --name orbit --restart unless-stopped \
   -p 127.0.0.1:8080:8080 \
   -e ORBIT_PUBLIC_ORIGIN=https://orbit.example.com \
-  -e ORBIT_TRUSTED_PROXIES=172.17.0.1/32 \
+  -e ORBIT_TRUSTED_PROXIES=127.0.0.1/32,172.17.0.1/32 \
   -e ORBIT_APP_KEY=<base64 key, see docs/operations.md> \
   -v orbit-data:/var/lib/orbit \
   -v "$PWD/backups:/var/backups/orbit" \
   orbit:milestone-1
 ```
 
-The final Alpine image runs as numeric user and group 65532. It contains the static Orbit binary, Bash for operator diagnostics, CA certificates, timezone data, and empty mount points. The image sets `ORBIT_ENV=production`, `ORBIT_TRUSTED_PROXIES=0.0.0.0/0,::/0`, binds to `0.0.0.0`, and keeps data in `/var/lib/orbit` and backups in `/var/backups/orbit`. The image also exposes port 2525, the inbound SMTP listener; it listens only with `ORBIT_MAIL_ENABLED=true` (see [Mail](../docs/operations.md#mail)). Do not use port 2525 for anything else.
+The final Alpine image runs as numeric user and group 65532. It contains the static Orbit binary, Bash for operator diagnostics, CA certificates, timezone data, and empty mount points. The image sets `ORBIT_ENV=production`, binds to `0.0.0.0`, and keeps data in `/var/lib/orbit` and backups in `/var/backups/orbit`. Port 2525 is the inbound SMTP listener; it listens only with `ORBIT_MAIL_ENABLED=true` (see [Mail](../docs/operations.md#mail)). Do not use port 2525 for anything else. The image has no `ORBIT_TRUSTED_PROXIES` default: production does not start until it is set. List the reverse proxy addresses plus `127.0.0.1/32`, because the container healthcheck connects from loopback.
 
 ## Reverse proxy and Tailscale
 
-Set `ORBIT_PUBLIC_ORIGIN` to the exact external HTTPS origin. Bind to `0.0.0.0` for a container or Tailscale-reachable interface, then restrict access with the host firewall. Add only the actual proxy network to `ORBIT_TRUSTED_PROXIES`.
+Set `ORBIT_PUBLIC_ORIGIN` to the exact external HTTPS origin. Bind to `0.0.0.0` for a container or Tailscale-reachable interface, then restrict access with the host firewall. Add only the actual proxy network to `ORBIT_TRUSTED_PROXIES` (and `127.0.0.1/32` in the image, for its healthcheck). Never `0.0.0.0/0` or `::/0`: then anyone who reaches the port can fake their IP address and HTTPS, and Orbit logs a warning at startup and in `orbit config check`.
 
 Prometheus metrics are disabled by default. To expose them on a private interface only, set `ORBIT_METRICS_LISTEN`, for example `127.0.0.1:9090`, and scrape `http://127.0.0.1:9090/metrics`. Never proxy this listener through the public site.
 
@@ -140,7 +140,7 @@ orbit backup verify <backup-id>
 Restore procedure:
 
 1. Stop Orbit. Restore refuses a database owned by a running process.
-2. Copy the current data directory somewhere safe.
+2. Restore first backs up the current data and prints that backup's ID: restore it to undo the restore. If the database is too damaged to back up, restore stops; copy the data directory by hand and add `--no-safety-backup`.
 3. Run `orbit backup verify <backup-id>`.
 4. Run `orbit backup restore <backup-id>`. A snapshot restores only into the same kind of database (SQLite or Postgres) it came from.
 5. Run `orbit migrate status`.

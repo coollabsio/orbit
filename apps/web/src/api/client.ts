@@ -1,34 +1,22 @@
-export { CONTRACT_ID } from '@/api/generated/contract'
-import { CONTRACT_ID } from '@/api/generated/contract'
-import { createClient } from '@/api/generated/client/index'
-import { parseProblem } from './problem'
+import { createOrbitClient, type OrbitClientOptions } from '@orbit/api/client'
 
-interface ApiClientOptions {
-  fetch?: (request: Request) => Promise<Response>
-  onUnauthorized?: () => void
-}
+export { CONTRACT_ID } from '@orbit/api/generated/contract'
+
+type ApiClientOptions = Pick<OrbitClientOptions, 'fetch' | 'onUnauthorized' | 'onPaymentRequired'>
 
 export const UNAUTHORIZED_EVENT = 'orbit:unauthorized'
+/** Orbit Cloud refused a write: the workspace is read-only or at a trial limit; `detail` is the server's message. */
+export const PAYMENT_REQUIRED_EVENT = 'orbit:payment-required'
 
 export function createApiClient(options: ApiClientOptions = {}) {
-  const client = createClient({
+  return createOrbitClient({
+    ...options,
     baseUrl: globalThis.location?.origin ?? 'http://localhost',
     credentials: 'include',
-    fetch: options.fetch as typeof globalThis.fetch,
-    headers: { 'X-Orbit-Contract': CONTRACT_ID },
   })
-
-  client.interceptors.response.use(async (response) => {
-    if (response.ok) return response
-    const problem = await parseProblem(response)
-    if (problem.status === 401 && problem.code === 'authentication_required') {
-      options.onUnauthorized?.()
-    }
-    throw problem
-  })
-  return client
 }
 
 export const apiClient = createApiClient({
   onUnauthorized: () => window.dispatchEvent(new Event(UNAUTHORIZED_EVENT)),
+  onPaymentRequired: (detail) => window.dispatchEvent(new CustomEvent(PAYMENT_REQUIRED_EVENT, { detail })),
 })

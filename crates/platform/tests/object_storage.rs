@@ -8,7 +8,8 @@ use chrono::Utc;
 use orbit_platform::{
     AttachmentMutationCoordinator, BackupService, BlobStore, Database, DatabaseConfig, Id,
     LocalBlobStore, MigrationRunner, NewAttachmentReference, ObjectStorage, ObjectStorageState,
-    S3Bucket, S3Config, TestDatabase, TieredBlobStore, UploadLimits, UploadService, start_fake_s3,
+    S3Bucket, S3Config, TestDatabase, TieredBlobStore, UploadLimits, UploadService,
+    WorkspaceBucket, start_fake_s3,
 };
 use tokio::io::AsyncReadExt;
 
@@ -56,6 +57,7 @@ impl Fixture {
             bucket: Some(bucket.clone()),
             attachments: attachments_in_s3,
             backups: false,
+            ..Default::default()
         });
         let mutations = AttachmentMutationCoordinator::default();
         let store = TieredBlobStore::new(local.clone(), storage.clone(), mutations.clone());
@@ -77,9 +79,13 @@ impl Fixture {
     }
 
     async fn upload(&self, contents: &'static [u8]) -> String {
+        self.upload_to(Id::new_v7(), contents).await
+    }
+
+    async fn upload_to(&self, workspace_id: Id, contents: &'static [u8]) -> String {
         let staged = self
             .service
-            .stage(Id::new_v7(), Id::new_v7(), "file.txt", contents)
+            .stage(workspace_id, Id::new_v7(), "file.txt", contents)
             .await
             .unwrap();
         self.service
@@ -163,6 +169,7 @@ async fn the_mover_moves_blobs_to_s3_and_back_while_reads_keep_working() {
         bucket: Some(fixture.bucket.clone()),
         attachments: true,
         backups: false,
+        ..Default::default()
     });
     assert_eq!(fixture.read(&key).await, b"first on disk");
     assert_eq!(fixture.store.move_blobs().await.unwrap(), 1);
@@ -175,12 +182,238 @@ async fn the_mover_moves_blobs_to_s3_and_back_while_reads_keep_working() {
         bucket: Some(fixture.bucket.clone()),
         attachments: false,
         backups: false,
+        ..Default::default()
     });
     assert_eq!(fixture.store.move_blobs().await.unwrap(), 1);
     assert!(!fixture.in_bucket(&key).await);
     assert_eq!(fixture.local.blobs().await.unwrap().len(), 1);
     assert_eq!(fixture.read(&key).await, b"first on disk");
     assert!(!fixture.bucket.any("blobs/").await.unwrap());
+}
+
+fn with_workspace_bucket(
+    fixture: &Fixture,
+    workspace_id: Id,
+    bucket: &S3Bucket,
+    active: bool,
+) -> ObjectStorageState {
+    ObjectStorageState {
+        bucket: Some(fixture.bucket.clone()),
+        attachments: true,
+        backups: false,
+        workspace_buckets: [(
+            workspace_id.to_string(),
+            WorkspaceBucket {
+                bucket: bucket.clone(),
+                active,
+            },
+        )]
+        .into(),
+    }
+}
+
+async fn holds(bucket: &S3Bucket, storage_key: &str) -> bool {
+    bucket.last_modified(storage_key).await.unwrap().is_some()
+}
+
+#[tokio::test]
+async fn a_workspace_bucket_takes_the_workspace_files_and_gives_them_back_when_removed() {
+    let fixture = Fixture::new(true).await;
+    let workspace = Id::new_v7();
+    let other = fixture.upload(b"another workspace").await;
+    let before = fixture.upload_to(workspace, b"before the bucket").await;
+    let own = bucket().await;
+
+    fixture
+        .storage
+        .configure(with_workspace_bucket(&fixture, workspace, &own, true));
+    let after = fixture.upload_to(workspace, b"after the bucket").await;
+    assert!(holds(&own, &after).await);
+    assert!(!fixture.in_bucket(&after).await);
+    assert_eq!(fixture.read(&before).await, b"before the bucket");
+
+    assert_eq!(fixture.store.move_blobs().await.unwrap(), 1);
+    assert!(holds(&own, &before).await);
+    assert!(!fixture.in_bucket(&before).await);
+    assert!(fixture.in_bucket(&other).await, "other workspaces stay");
+    assert!(!holds(&own, &other).await);
+    assert_eq!(
+        fixture
+            .store
+            .workspace_status(&workspace.to_string())
+            .unwrap()
+            .remaining,
+        0
+    );
+    assert_eq!(fixture.read(&before).await, b"before the bucket");
+    assert_eq!(fixture.read(&other).await, b"another workspace");
+
+    fixture
+        .storage
+        .configure(with_workspace_bucket(&fixture, workspace, &own, false));
+    assert_eq!(fixture.read(&after).await, b"after the bucket");
+    let removed = fixture.upload_to(workspace, b"after removal").await;
+    assert!(fixture.in_bucket(&removed).await);
+    assert!(!holds(&own, &removed).await);
+
+    fixture.store.move_blobs().await.unwrap();
+    assert!(!own.any("blobs/").await.unwrap());
+    assert!(fixture.in_bucket(&before).await);
+    assert!(fixture.in_bucket(&after).await);
+    assert!(fixture.local.blobs().await.unwrap().is_empty());
+    assert_eq!(fixture.read(&after).await, b"after the bucket");
+}
+
+#[tokio::test]
+async fn existing_files_on_this_server_move_to_a_workspace_bucket_and_back() {
+    let fixture = Fixture::new(false).await;
+    let workspace = Id::new_v7();
+    let id = workspace.to_string();
+    let first = fixture.upload_to(workspace, b"first").await;
+    let second = fixture.upload_to(workspace, b"second").await;
+    let other = fixture.upload(b"another workspace").await;
+    let own = bucket().await;
+    let state = |active| ObjectStorageState {
+        workspace_buckets: [(
+            id.clone(),
+            WorkspaceBucket {
+                bucket: own.clone(),
+                active,
+            },
+        )]
+        .into(),
+        ..Default::default()
+    };
+
+    fixture.storage.configure(state(true));
+    assert_eq!(fixture.store.workspace_status(&id), None, "not counted yet");
+    assert_eq!(fixture.store.move_blobs().await.unwrap(), 2);
+    assert_eq!(fixture.store.workspace_status(&id).unwrap().remaining, 0);
+    let local: Vec<_> = fixture
+        .local
+        .blobs()
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|object| object.storage_key)
+        .collect();
+    assert_eq!(local, std::slice::from_ref(&other));
+    assert!(holds(&own, &first).await && holds(&own, &second).await);
+    assert_eq!(fixture.read(&second).await, b"second");
+
+    fixture.storage.configure(state(false));
+    assert_eq!(
+        fixture.store.workspace_status(&id),
+        None,
+        "not counted since the removal"
+    );
+    assert_eq!(fixture.store.move_blobs().await.unwrap(), 2);
+    assert_eq!(fixture.store.workspace_status(&id).unwrap().remaining, 0);
+    assert!(!own.any("blobs/").await.unwrap());
+    assert_eq!(fixture.local.blobs().await.unwrap().len(), 3);
+    assert_eq!(fixture.read(&first).await, b"first");
+}
+
+#[tokio::test]
+async fn a_workspace_bucket_that_fails_does_not_stop_the_cleanup() {
+    let fixture = Fixture::new(false).await;
+    let workspace = Id::new_v7();
+    let unreachable = S3Bucket::new(S3Config {
+        endpoint: "http://127.0.0.1:9".to_owned(),
+        ..fixture.bucket.config().clone()
+    })
+    .unwrap();
+    let key = fixture.upload(b"unused").await;
+    fixture.storage.configure(ObjectStorageState {
+        bucket: Some(fixture.bucket.clone()),
+        workspace_buckets: [(
+            workspace.to_string(),
+            WorkspaceBucket {
+                bucket: unreachable,
+                active: true,
+            },
+        )]
+        .into(),
+        ..Default::default()
+    });
+    fixture
+        .database
+        .execute("DELETE FROM attachment_references")
+        .await
+        .unwrap();
+
+    let result = fixture
+        .service
+        .reconcile(Utc::now().timestamp_millis() + 2 * DAY_MILLIS)
+        .await
+        .unwrap();
+    assert_eq!(result.deleted_blobs, 1);
+    assert!(
+        fixture
+            .local
+            .blobs()
+            .await
+            .unwrap()
+            .iter()
+            .all(|object| object.storage_key != key)
+    );
+
+    fixture.storage.configure(ObjectStorageState {
+        bucket: Some(fixture.bucket.clone()),
+        ..Default::default()
+    });
+    let waiting = fixture.upload_to(workspace, b"waits for the bucket").await;
+    fixture.storage.configure(ObjectStorageState {
+        bucket: Some(fixture.bucket.clone()),
+        workspace_buckets: [(
+            workspace.to_string(),
+            WorkspaceBucket {
+                bucket: S3Bucket::new(S3Config {
+                    endpoint: "http://127.0.0.1:9".to_owned(),
+                    ..fixture.bucket.config().clone()
+                })
+                .unwrap(),
+                active: true,
+            },
+        )]
+        .into(),
+        ..Default::default()
+    });
+    fixture.store.move_blobs().await.unwrap();
+    let status = fixture
+        .store
+        .workspace_status(&workspace.to_string())
+        .unwrap();
+    assert!(status.error.is_some());
+    assert_eq!(status.remaining, 1);
+    assert_eq!(fixture.read(&waiting).await, b"waits for the bucket");
+}
+
+#[test]
+fn a_workspace_bucket_must_be_public_https() {
+    let config = |endpoint: &str| S3Config {
+        endpoint: endpoint.to_owned(),
+        region: String::new(),
+        bucket: "files".to_owned(),
+        prefix: String::new(),
+        access_key_id: "key".to_owned(),
+        secret_access_key: "secret".to_owned(),
+        path_style: true,
+    };
+    for endpoint in [
+        "http://s3.example.com",
+        "https://127.0.0.1",
+        "https://10.0.0.2:9000",
+        "https://169.254.169.254",
+        "https://[::1]",
+    ] {
+        assert!(
+            S3Bucket::new_public(config(endpoint)).is_err(),
+            "{endpoint}"
+        );
+    }
+    assert!(S3Bucket::new_public(config("https://s3.example.com")).is_ok());
+    assert!(S3Bucket::new(config("http://127.0.0.1:9000")).is_ok());
 }
 
 #[tokio::test]
@@ -230,6 +463,7 @@ async fn backups_go_to_s3_and_restore_from_it() {
         bucket: Some(bucket().await),
         attachments: false,
         backups: true,
+        ..Default::default()
     });
     let backups_root = root.path().join("backups");
     let service = BackupService::new(&backups_root, &attachments)

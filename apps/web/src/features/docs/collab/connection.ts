@@ -1,21 +1,6 @@
 import { createContext } from 'react'
-import type { CollabConnection } from './session'
-
-/** The Y.Doc fragment BlockNote binds to; the server's converter reads and writes the same name. */
-export const COLLAB_FRAGMENT = 'prosemirror'
-/** `?v=` of the collab socket (`PROTOCOL_VERSION` in `apps/server/src/collab/mod.rs`). */
-export const COLLAB_PROTOCOL_VERSION = '1'
-
-/** The REST collection of a collaborative document: a docs page or a task (its description). */
-export type CollabKind = 'pages' | 'tasks'
-
-export interface CollabTarget {
-  workspaceId: string
-  kind: CollabKind
-  id: string
-  /** `Page.collab_epoch` / `Task.collab_epoch`; a stale one is closed with 4409. */
-  epoch: string
-}
+import type { CollabConnection } from '@orbit/editor/collab/session'
+import { collabSocket, COLLAB_FRAGMENT, type CollabTarget } from '@orbit/editor/collab/target'
 
 /** Opens a collaborative document (the socket starts connecting right away). */
 export type CollabConnect = (target: CollabTarget) => Promise<CollabConnection>
@@ -24,12 +9,12 @@ export type CollabConnect = (target: CollabTarget) => Promise<CollabConnection>
  * The real connection: `WebsocketProvider` on `/api/v1/workspaces/{ws}/{pages|tasks}/{id}/collab?v=1&epoch=…` (same
  * origin, so the session cookie rides along). yjs + y-websocket load on demand, next to the lazy editor chunk.
  */
-export const connectDoc: CollabConnect = async ({ workspaceId, kind, id, epoch }) => {
+export const connectDoc: CollabConnect = async (target) => {
   const [Y, { WebsocketProvider }] = await Promise.all([import('yjs'), import('y-websocket')])
   const doc = new Y.Doc()
-  const origin = window.location.origin.replace(/^http/, 'ws')
-  const provider = new WebsocketProvider(`${origin}/api/v1/workspaces/${workspaceId}/${kind}/${id}`, 'collab', doc, {
-    params: { v: COLLAB_PROTOCOL_VERSION, epoch },
+  const { serverUrl, room, params } = collabSocket(window.location.origin, target)
+  const provider = new WebsocketProvider(serverUrl, room, doc, {
+    params,
     // Tabs of the same browser sync through the server like everyone else (and each shows up in presence once).
     disableBc: true,
     maxBackoffTime: 5000,

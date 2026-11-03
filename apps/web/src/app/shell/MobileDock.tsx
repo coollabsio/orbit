@@ -16,10 +16,11 @@ const DOCK_LINKS = [
 ].filter((link) => !(docsHidden && link.to === '/docs'))
 
 /** A dock entry: a link for the sections that exist, a disabled button for the upcoming ones. */
-function MobileDockItem({ to, label, icon: Icon, enabled, badge = 0 }: { to: string; label: string; icon: ComponentType<{ className?: string }>; enabled: boolean; badge?: number }) {
+function MobileDockItem({ to, label, icon: Icon, enabled, badge = 0, unread = false }: { to: string; label: string; icon: ComponentType<{ className?: string }>; enabled: boolean; badge?: number; /** A dot when there is no count. */ unread?: boolean }) {
   const count = enabled ? badge : 0
+  const dot = enabled && count === 0 && unread
   return useRender({
-    render: enabled ? <NavLink to={to} end={to === '/'} aria-label={count > 0 ? `${label}, ${count} unread` : undefined} /> : <Button variant="ghost" disabled aria-label={label} />,
+    render: enabled ? <NavLink to={to} end={to === '/'} aria-label={count > 0 ? `${label}, ${count} unread` : dot ? `${label}, unread` : undefined} /> : <Button variant="ghost" disabled aria-label={label} />,
     props: {
       'data-slot': 'mobile-dock-item',
       className: cn(
@@ -40,6 +41,8 @@ function MobileDockItem({ to, label, icon: Icon, enabled, badge = 0 }: { to: str
               >
                 {count > 99 ? '99+' : count}
               </span>
+            ) : dot ? (
+              <span data-slot="mobile-dock-dot" aria-hidden="true" className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-primary" />
             ) : null}
           </span>
           {label}
@@ -53,7 +56,7 @@ function MobileDockItem({ to, label, icon: Icon, enabled, badge = 0 }: { to: str
  * The phone's bottom navigation. A chat conversation is a full screen, so the dock is not shown there.
  * It also hides while the keyboard is open, so the field being typed in keeps the space.
  */
-export function MobileDock({ chatEnabled: chat = chatEnabled, chatBadge = 0, mailBadge = 0 }: { chatEnabled?: boolean; /** Unread count on the Chat item. */ chatBadge?: number; /** Unread Inbox threads on the Mail item. */ mailBadge?: number }) {
+export function MobileDock({ chatEnabled: chat = chatEnabled, chatBadge = 0, chatUnread = false, mailBadge = 0 }: { chatEnabled?: boolean; /** Unread count on the Chat item. */ chatBadge?: number; /** Chat has an unread message, with or without a count. */ chatUnread?: boolean; /** Unread Inbox threads on the Mail item. */ mailBadge?: number }) {
   const { pathname } = useLocation()
   if (isChatConversationPath(pathname)) return null
   const paths = mobileDockPathsFor(chat)
@@ -63,7 +66,7 @@ export function MobileDock({ chatEnabled: chat = chatEnabled, chatBadge = 0, mai
       aria-label="Mobile navigation"
     >
       {DOCK_LINKS.map((link) => (
-        <MobileDockItem key={link.to} {...link} enabled={paths.includes(link.to)} badge={link.to === '/chat' ? chatBadge : link.to === '/mail' ? mailBadge : 0} />
+        <MobileDockItem key={link.to} {...link} enabled={paths.includes(link.to)} badge={link.to === '/chat' ? chatBadge : link.to === '/mail' ? mailBadge : 0} unread={link.to === '/chat' && chatUnread} />
       ))}
     </nav>
   )

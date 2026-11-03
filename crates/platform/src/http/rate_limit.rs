@@ -241,16 +241,19 @@ impl RateLimiter {
         let mut entries = self.local.lock().unwrap_or_else(PoisonError::into_inner);
         if !entries.contains_key(&key) && entries.len() >= MAX_LOCAL_ENTRIES {
             entries.retain(|_, (window, _)| *window == minute);
-            // Still full: forget the quietest subject. A flood of new subjects then replaces
-            // itself, while the subjects near their limit stay counted. A new subject is never
-            // refused because the table is full.
-            if entries.len() >= MAX_LOCAL_ENTRIES
-                && let Some(quietest) = entries
+            // Still at least half full: forget the quieter half at once, so the next new subjects
+            // need no scan. A flood of new subjects then replaces itself, while the subjects near
+            // their limit stay counted. A new subject is never refused because the table is full.
+            if entries.len() >= MAX_LOCAL_ENTRIES / 2 {
+                let mut quiet: Vec<(u32, Key)> = entries
                     .iter()
-                    .min_by_key(|(_, (_, hits))| *hits)
-                    .map(|(key, _)| *key)
-            {
-                entries.remove(&quietest);
+                    .map(|(key, (_, hits))| (*hits, *key))
+                    .collect();
+                let half = quiet.len() / 2;
+                quiet.select_nth_unstable_by_key(half, |(hits, _)| *hits);
+                for (_, key) in &quiet[..half] {
+                    entries.remove(key);
+                }
             }
         }
         let entry = entries.entry(key).or_insert((minute, 0));
@@ -303,6 +306,10 @@ pub(super) fn endpoint_class(method: &Method, path: &str) -> Option<EndpointClas
     if path != "/api" && !path.starts_with("/api/") {
         return None;
     }
+    // The provider callback is a GET that calls out to Google or GitHub; the generic rules below miss it.
+    if path.starts_with("/api/v1/auth/providers/") {
+        return Some(EndpointClass::Authentication);
+    }
     // Both send email to an address anyone can type, so they share the strict recovery limit.
     if path.contains("/recovery") || path.contains("/auth/register") {
         Some(EndpointClass::Recovery)
@@ -313,7 +320,13 @@ pub(super) fn endpoint_class(method: &Method, path: &str) -> Option<EndpointClas
     } else if method == Method::POST && path.ends_with("/chat/files") {
         // A chat file upload. The downloads (`GET .../chat/files/{id}`) are chat requests.
         Some(EndpointClass::Upload)
-    } else if path.ends_with("/login") || path.contains("/session") || path.contains("/setup") {
+    } else if path.ends_with("/login")
+        || path.starts_with("/api/v1/auth/login/")
+        || path.starts_with("/api/v1/auth/passkey/login/")
+        || path == "/api/v1/auth/password"
+        || path.contains("/session")
+        || path.contains("/setup")
+    {
         Some(EndpointClass::Authentication)
     } else if path.contains("/chat/") {
         Some(EndpointClass::Chat)
@@ -377,6 +390,45 @@ mod tests {
             assert!(limiter.count_local(key(host), 2, MINUTE));
         }
         assert!(!limiter.count_local(exhausted, 2, MINUTE));
+    }
+
+    #[test]
+    fn a_full_table_forgets_its_quieter_half_at_once() {
+        const MINUTE: i64 = 1;
+        let limiter = general(10);
+        let key = |host: u32| (Subject::Ip(IpAddr::V4(host.into())), EndpointClass::General);
+        for host in 0..MAX_LOCAL_ENTRIES as u32 {
+            assert!(limiter.count_local(key(host), 10, MINUTE));
+            // Every other subject is busier.
+            if host % 2 == 0 {
+                assert!(limiter.count_local(key(host), 10, MINUTE));
+            }
+        }
+        assert!(limiter.count_local(key(u32::MAX), 10, MINUTE));
+        let entries = limiter.local.lock().unwrap();
+        assert_eq!(entries.len(), MAX_LOCAL_ENTRIES / 2 + 1);
+        assert!(
+            (0..MAX_LOCAL_ENTRIES as u32)
+                .step_by(2)
+                .all(|host| entries.contains_key(&key(host)))
+        );
+    }
+
+    #[test]
+    fn password_and_second_factor_sign_in_are_authentication_requests() {
+        for path in [
+            "/api/v1/auth/login",
+            "/api/v1/auth/login/two-factor",
+            "/api/v1/auth/passkey/login/start",
+            "/api/v1/auth/passkey/login/finish",
+            "/api/v1/auth/password",
+        ] {
+            assert_eq!(
+                endpoint_class(&Method::POST, path),
+                Some(EndpointClass::Authentication),
+                "{path}"
+            );
+        }
     }
 
     #[tokio::test]
@@ -496,6 +548,21 @@ mod tests {
         assert!(!permits(&limiter, client, &Method::GET, chat).await);
         // Exhausted chat leaves the other apps alone.
         assert!(permits(&limiter, client, &Method::GET, "/api/v1/workspaces/w/tasks").await);
+    }
+
+    #[test]
+    fn provider_sign_in_routes_are_authentication_requests() {
+        for (method, path) in [
+            (Method::POST, "/api/v1/auth/providers/google/start"),
+            (Method::GET, "/api/v1/auth/providers/github/callback"),
+            (Method::POST, "/api/v1/auth/providers/exchange"),
+        ] {
+            assert_eq!(
+                endpoint_class(&method, path),
+                Some(EndpointClass::Authentication),
+                "{path}"
+            );
+        }
     }
 
     #[tokio::test]

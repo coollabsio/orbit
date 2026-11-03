@@ -99,7 +99,7 @@ pub async fn compress_images(
     progress: impl Fn(&CompressSummary),
 ) -> Result<CompressSummary, UploadError> {
     let blobs = sqlx::query(
-        "SELECT id, storage_key FROM attachment_blobs WHERE byte_size >= $1 ORDER BY created_at, id",
+        "SELECT id, storage_key FROM attachment_blobs WHERE byte_size >= $1 AND deleted_at IS NULL ORDER BY created_at, id",
     )
     .bind(SHRINK_MIN_BYTES)
     .fetch_all(database.pool())

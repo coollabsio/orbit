@@ -192,7 +192,7 @@ async fn only_the_root_user_saves_mail_settings_and_the_password_is_encrypted() 
     assert_eq!(body["code"], "email_not_configured");
     assert_eq!(
         call(app, "GET", "/api/v1/auth/options", None, None).await.1,
-        json!({"registration_open": false, "email_enabled": false, "passkeys_enabled": false})
+        json!({"registration_open": false, "email_enabled": false, "passkeys_enabled": false, "billing_enabled": false, "providers": [], "provider_registration_open": false})
     );
 
     let (status, body) = call(
@@ -241,7 +241,7 @@ async fn only_the_root_user_saves_mail_settings_and_the_password_is_encrypted() 
     assert_eq!(body["registration_open"], true);
     assert_eq!(
         call(app, "GET", "/api/v1/auth/options", None, None).await.1,
-        json!({"registration_open": true, "email_enabled": true, "passkeys_enabled": false})
+        json!({"registration_open": true, "email_enabled": true, "passkeys_enabled": false, "billing_enabled": false, "providers": [], "provider_registration_open": false})
     );
 
     // Removing the mail server closes registration.
@@ -391,6 +391,38 @@ async fn password_reset_is_emailed_only_with_a_mail_server_and_never_reveals_acc
 }
 
 #[tokio::test]
+async fn a_password_reset_answers_before_the_account_work_so_timing_reveals_no_account() {
+    let fixture = fixture().await;
+    let (mailer, outbox) = Mailer::recording(fixture.identity.database().clone(), ORIGIN);
+    let app = router(&fixture.identity, Some(mailer));
+    // Another writer holds the database: the link cannot be stored yet, but the answer comes anyway.
+    let writer = fixture
+        .identity
+        .database()
+        .immediate_transaction()
+        .await
+        .unwrap();
+    let answer = tokio::time::timeout(
+        Duration::from_secs(5),
+        call(
+            &app,
+            "POST",
+            "/api/v1/auth/recovery/request",
+            None,
+            Some(json!({"email": "root@example.com"})),
+        ),
+    )
+    .await
+    .expect("the answer does not wait for the reset link");
+    assert_eq!(answer.0, StatusCode::ACCEPTED);
+    assert!(outbox.lock().unwrap().is_empty());
+    writer.rollback().await.unwrap();
+    let emails = sent(&outbox, 1).await;
+    assert_eq!(emails.len(), 1);
+    assert_eq!(emails[0].to, "root@example.com");
+}
+
+#[tokio::test]
 async fn emailed_invitations_need_a_mail_server_and_send_the_link_instead_of_returning_it() {
     let fixture = fixture().await;
     let uri = format!("/api/v1/workspaces/{}/invitations", fixture.workspace_id);
@@ -474,15 +506,17 @@ async fn account_emails_to_one_address_have_a_cooldown_and_a_daily_cap() {
     assert_eq!(register("new@example.com").await.0, StatusCode::ACCEPTED);
     let emails = sent(&outbox, 2).await;
     tokio::time::sleep(Duration::from_millis(50)).await;
-    let recipients: Vec<_> = outbox
+    // The reset email is sent after the response, so the two emails can arrive in any order.
+    let mut recipients: Vec<_> = outbox
         .lock()
         .unwrap()
         .iter()
         .map(|email| email.to.clone())
         .collect();
+    recipients.sort();
     assert_eq!(
         recipients,
-        ["root@example.com", "new@example.com"],
+        ["new@example.com", "root@example.com"],
         "{emails:?}"
     );
 
@@ -583,4 +617,124 @@ async fn invitation_emails_have_daily_caps_per_workspace_and_per_inviter() {
     assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(body["code"], "invitation_email_limit");
     assert_eq!(sent(&outbox, 3).await.len(), 3);
+}
+
+/// Saves a Google sign-in provider straight in the database, so registration has a way besides email.
+async fn add_provider(fixture: &Fixture) {
+    sqlx::query("INSERT INTO sign_in_providers (provider, client_id, client_secret, created_at, updated_at) VALUES ('google', 'client', $1, 0, 0)")
+        .bind(vec![1_u8, 2, 3])
+        .execute(fixture.identity.database().pool())
+        .await
+        .unwrap();
+}
+
+/// Turns Orbit Cloud billing on for the fixture's database.
+fn enable_cloud(fixture: &Fixture) -> orbit_server::billing::Billing {
+    orbit_server::billing::Billing::new(
+        orbit_platform::BillingConfig::new(
+            orbit_platform::Secret::new("sk_test_unused"),
+            orbit_platform::Secret::new("whsec_unused"),
+            vec![],
+        ),
+        fixture.identity.database().clone(),
+        ORIGIN,
+    )
+}
+
+#[tokio::test]
+async fn orbit_cloud_keeps_its_mail_server_and_needs_it_for_registration() {
+    let fixture = fixture().await;
+    let _billing = enable_cloud(&fixture);
+    add_provider(&fixture).await;
+    let app = &router(
+        &fixture.identity,
+        Some(Mailer::new(
+            fixture.identity.database().clone(),
+            Some([9; 32]),
+            ORIGIN,
+        )),
+    );
+    let root = Some(fixture.root_cookie.as_str());
+
+    let (status, body) = call(
+        app,
+        "PUT",
+        "/api/v1/admin/settings/registration",
+        root,
+        Some(json!({"open": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["code"], "email_not_configured");
+
+    let (status, _) = call(
+        app,
+        "PUT",
+        "/api/v1/admin/settings/smtp",
+        root,
+        Some(smtp_body()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = call(app, "DELETE", "/api/v1/admin/settings/smtp", root, None).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["code"], "smtp_required");
+    assert_eq!(
+        body["detail"],
+        "Orbit Cloud needs a mail server. Save a different one instead."
+    );
+    let (_, settings) = call(app, "GET", "/api/v1/admin/settings", root, None).await;
+    assert_eq!(settings["smtp"]["host"], "smtp.example.com");
+
+    let mut replacement = smtp_body();
+    replacement["host"] = json!("mail.example.net");
+    let (status, body) = call(
+        app,
+        "PUT",
+        "/api/v1/admin/settings/smtp",
+        root,
+        Some(replacement),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["smtp"]["host"], "mail.example.net");
+}
+
+#[tokio::test]
+async fn self_hosted_opens_registration_with_only_a_provider_and_removes_the_mail_server() {
+    let fixture = fixture().await;
+    add_provider(&fixture).await;
+    let app = &router(
+        &fixture.identity,
+        Some(Mailer::new(
+            fixture.identity.database().clone(),
+            Some([9; 32]),
+            ORIGIN,
+        )),
+    );
+    let root = Some(fixture.root_cookie.as_str());
+
+    let (status, body) = call(
+        app,
+        "PUT",
+        "/api/v1/admin/settings/registration",
+        root,
+        Some(json!({"open": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["registration_open"], true);
+
+    let (status, _) = call(
+        app,
+        "PUT",
+        "/api/v1/admin/settings/smtp",
+        root,
+        Some(smtp_body()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, body) = call(app, "DELETE", "/api/v1/admin/settings/smtp", root, None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body["smtp"].is_null());
 }

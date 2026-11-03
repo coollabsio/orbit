@@ -38,8 +38,8 @@ import {
   sendChatMessage,
   updateChatChannel,
   updateChatState,
-} from '@/api/generated/sdk.gen'
-import type { ChatEvent as WireEvent, ChatFileRecord } from '@/api/generated/types.gen'
+} from '@orbit/api/generated/sdk.gen'
+import type { ChatEvent as WireEvent, ChatFileRecord } from '@orbit/api/generated/types.gen'
 import type { Notice } from '@/features/realtime/notify'
 import type { PresenceEntry, PresenceMap } from '@/features/realtime/presence'
 import { shrinkImage } from '@/lib/shrinkImage'

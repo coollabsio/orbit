@@ -109,11 +109,22 @@ test('after the focused row leaves the list, J starts at the first row', async (
   expect(focused()).toBe('a')
 })
 
-test('moving the pointer onto a row makes it the target and ends the keyboard focus', async () => {
+test('moving the pointer onto a row keeps the keyboard focus and its target', async () => {
   const view = mount()
   await userEvent.keyboard('j')
   fireEvent.pointerMove(view.getByText('c'), { clientX: 10, clientY: 10 })
-  expect(focused()).toBeNull()
+  expect(focused()).toBe('a')
+  const probe = view.getByRole('button', { name: 'target' })
+  fireEvent.click(probe)
+  expect(probe.textContent).toBe('a')
+  // J goes on from the focused row, not from the hovered one
+  await userEvent.keyboard('j')
+  expect(focused()).toBe('b')
+})
+
+test('without a focused row, the row under the pointer is the target', () => {
+  const view = mount()
+  fireEvent.pointerMove(view.getByText('c'), { clientX: 10, clientY: 10 })
   const probe = view.getByRole('button', { name: 'target' })
   fireEvent.click(probe)
   expect(probe.textContent).toBe('c')

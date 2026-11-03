@@ -1,5 +1,5 @@
-import type { CreateTaskBody } from '@/api/generated/types.gen'
-import { ApiProblem } from '@/api/problem'
+import type { CreateTaskBody } from '@orbit/api/generated/types.gen'
+import { ApiProblem } from '@orbit/api/problem'
 import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
 import { BulkTaskLimitError, MAX_BULK_TASK_UPDATES } from '@/features/tasks/api/tasks'
 import { defaultStatusOf } from '@/features/tasks/taskMeta'

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient, type createApiClient } from '@/api/client'
-import { addPageFavorite, listPageFavorites, movePageFavorite, removePageFavorite } from '@/api/generated/sdk.gen'
+import { addPageFavorite, listPageFavorites, movePageFavorite, removePageFavorite } from '@orbit/api/generated/sdk.gen'
 import { queryKeys } from '@/api/queryKeys'
 
 type ApiClient = ReturnType<typeof createApiClient>

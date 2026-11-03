@@ -1,4 +1,4 @@
-import type { AuthUserResponse } from '@/api/generated/types.gen'
+import type { AuthUserResponse } from '@orbit/api/generated/types.gen'
 
 interface AuthGateInput {
   /** `undefined` until the setup status has loaded once. */

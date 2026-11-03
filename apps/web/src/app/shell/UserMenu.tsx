@@ -1,18 +1,15 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
-import { ChevronDown, Logout as LogOut, Setting2 as Settings, User } from 'reicon-react'
+import { Brush, ChevronDown, Logout as LogOut, User } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { useTheme, type Theme } from '@/lib/themeContext'
 import { useCurrentUser, useLogout } from '@/features/auth/api'
 import { userColor } from '@/features/workspaces/api'
 import { UserAvatar } from '@/components/common/UserAvatar'
@@ -22,19 +19,12 @@ import { CustomStatusText } from '@/features/realtime/components/CustomStatusTex
 import { StatusMenuItems } from '@/features/realtime/components/StatusMenuItems'
 import { useOwnStatus } from '@/features/realtime/useOwnStatus'
 
-const THEMES: { value: Theme; label: string }[] = [
-  { value: 'light', label: 'Light' },
-  { value: 'dark', label: 'Dark' },
-]
-
 /** Signed-in profile and account actions shared by both sidebars. */
-export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
+export function UserMenu({ collapsed = false, topbar = false }: { collapsed?: boolean; /** The phone top bar's look: avatar and chevron, the menu opens below. */ topbar?: boolean }) {
   const user = useCurrentUser()
   const logout = useLogout()
   const navigate = useNavigate()
-  const { theme, setTheme } = useTheme()
   const me = user.data
-  const [appearanceOpen, setAppearanceOpen] = useState(false)
   // the user's own status is what they chose, not what the others see
   const status = useOwnStatus()
   const hasCustomStatus = status.emoji !== null || status.text !== null
@@ -44,13 +34,13 @@ export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
 
   return (
     <>
-      <DropdownMenu onOpenChange={(open) => { if (!open) setAppearanceOpen(false) }}>
+      <DropdownMenu>
         <Tip label={collapsed ? userName : undefined} side="right">
           <DropdownMenuTrigger
             render={
               <Button
                 variant="outline"
-                className={cn('h-auto min-h-[34px] w-full min-w-0 flex-1 justify-start gap-1.5 p-1.5 font-normal', collapsed && 'w-8 px-[5px]')}
+                className={cn('h-8 w-full min-w-0 flex-1 justify-start gap-2 rounded-lg px-2 aria-expanded:border-primary aria-expanded:bg-primary/5 dark:border-sidebar-tint/24 dark:bg-primary/14 dark:text-[oklch(0.95_0.02_359)] dark:[--button-depth:color-mix(in_oklab,var(--primary)_35%,transparent)] dark:hover:border-sidebar-tint/34 dark:hover:bg-primary/18 dark:aria-expanded:border-primary dark:aria-expanded:bg-primary/18 dark:[&_svg]:text-sidebar-tint', collapsed && 'w-8 flex-none justify-center px-0', topbar && 'h-9 w-auto flex-none gap-1.5')}
                 aria-label={`Account menu for ${userName}`}
               />
             }
@@ -58,11 +48,11 @@ export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
             <UserAvatar
               user={me ? { name: me.display_name || me.email, color: userColor(me.id), avatarUrl: me.avatar_url } : null}
               name={userName}
-              size={20}
+              size={topbar ? 24 : 20}
               status={me ? status.presence : undefined}
               className="shrink-0"
             />
-            {!collapsed ? (
+            {!collapsed && !topbar ? (
               <span className="flex min-w-0 flex-1 text-left">
                 <span className="min-w-0 truncate text-xs font-medium text-foreground">{userName}</span>
               </span>
@@ -70,7 +60,8 @@ export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
             {!collapsed ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground/70 transition-transform group-aria-expanded/button:rotate-180" /> : null}
           </DropdownMenuTrigger>
         </Tip>
-        <DropdownMenuContent side="top" align="start" className="w-[220px] max-w-[calc(100vw-32px)]">
+        {/* the pink tint of the sidebar it opens from */}
+        <DropdownMenuContent side={topbar ? 'bottom' : 'top'} align={topbar ? 'end' : 'start'} sideOffset={4} className="w-52 max-w-[calc(100vw-32px)] rounded-[10px] dark:bg-sidebar-popover dark:ring-sidebar-tint/22 dark:**:data-[slot$=-item]:focus:bg-sidebar-tint/10 dark:**:data-[slot$=-item]:data-highlighted:bg-sidebar-tint/10">
           <div className="min-w-0 px-2 py-1.5">
             <div className="truncate text-[13px] font-semibold text-foreground">{userName}</div>
             {hasCustomStatus ? (
@@ -92,20 +83,10 @@ export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
             <User />
             Account settings
           </DropdownMenuItem>
-          <DropdownMenuItem closeOnClick={false} aria-expanded={appearanceOpen} onClick={() => setAppearanceOpen((o) => !o)}>
-            <Settings />
+          <DropdownMenuItem onClick={() => navigate('/profile/appearance')}>
+            <Brush />
             Appearance
-            <ChevronDown className={cn('ml-auto size-3.5 text-muted-foreground transition-transform', appearanceOpen && 'rotate-180')} />
           </DropdownMenuItem>
-          {appearanceOpen ? (
-            <DropdownMenuRadioGroup className="pl-6" value={theme} onValueChange={(value) => setTheme(value as Theme)}>
-              {THEMES.map((option) => (
-                <DropdownMenuRadioItem key={option.value} value={option.value} closeOnClick>
-                  {option.label}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          ) : null}
           <DropdownMenuSeparator />
           {/* data-danger, not variant="destructive": the preset menu popup forces destructive items to the accent color */}
           <DropdownMenuItem

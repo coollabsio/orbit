@@ -14,7 +14,7 @@ import {
   restoreProject,
   updateProject,
   updateStatus,
-} from '@/api/generated/sdk.gen'
+} from '@orbit/api/generated/sdk.gen'
 import type {
   ProjectBody,
   ProjectRecord,
@@ -23,7 +23,7 @@ import type {
   StatusBody,
   StatusRecord,
   StatusUpdateBody,
-} from '@/api/generated/types.gen'
+} from '@orbit/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 import type { StatusCategory, TaskStatusDef } from './models'
 import { isTaskVersionConflict } from './conflicts'

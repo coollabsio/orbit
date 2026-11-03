@@ -1,4 +1,4 @@
-import type { TextRange } from '@/api/generated/types.gen'
+import type { TextRange } from '@orbit/api/generated/types.gen'
 
 export interface HighlightSegment {
   text: string

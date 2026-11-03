@@ -1,12 +1,12 @@
 import { useState, type ReactNode } from 'react'
 import { cva } from 'class-variance-authority'
-import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import type { Task } from '@/features/tasks/api/models'
 import { LinkifiedText } from './LinkifiedText'
 
 /**
  * The title shares one look whether read-only, previewed or edited, so switching to the field never shifts the
- * text. `md:` repeats the sizes because Input sets its own `md:text-sm`.
+ * text. `md:` repeats the sizes because Textarea sets its own `md:text-sm`.
  */
 export const taskTextVariants = cva('w-full border-0 bg-transparent p-0 text-foreground outline-none placeholder:text-muted-foreground', {
   variants: {
@@ -17,7 +17,8 @@ export const taskTextVariants = cva('w-full border-0 bg-transparent p-0 text-for
       read: 'whitespace-pre-wrap [overflow-wrap:anywhere]',
       // the text sits flush (p-0), so the keyboard focus ring goes outside the box rather than over the glyphs
       preview: 'cursor-text rounded-sm whitespace-pre-wrap [overflow-wrap:anywhere] focus-visible:ring-2 focus-visible:ring-ring/50 data-muted:text-muted-foreground',
-      edit: 'h-auto rounded-none focus-visible:ring-0 dark:bg-transparent',
+      // a textarea that grows with the text (field-sizing), so a long title wraps the same as in the preview
+      edit: 'min-h-0 resize-none rounded-none [overflow-wrap:anywhere] focus-visible:ring-0 dark:bg-transparent',
     },
   },
 })
@@ -48,14 +49,18 @@ function TaskTitleDraft({ task, onUpdate, onTitleTab, readOnly = false }: Parame
     return <EditablePreview className={taskTextVariants({ field: 'title', mode: 'preview' })} ariaLabel="Task title" onEdit={() => setEditingTitle(true)}><LinkifiedText text={title} /></EditablePreview>
   }
   return (
-    <Input
+    <Textarea
       className={taskTextVariants({ field: 'title', mode: 'edit' })}
+      rows={1}
       data-keep-font-size=""
       value={title}
       placeholder="Task title"
       aria-label="Task title"
       autoFocus
-      onChange={(event) => setTitle(event.target.value)}
+      // the caret starts at the end, as it did in the one-line field
+      onFocus={(event) => event.currentTarget.setSelectionRange(title.length, title.length)}
+      // a title is one line: pasted line breaks become spaces
+      onChange={(event) => setTitle(event.target.value.replace(/\r?\n/g, ' '))}
       onBlur={() => {
         const value = title.trim()
         if (value && value !== task.title) onUpdate({ title: value })
@@ -63,7 +68,10 @@ function TaskTitleDraft({ task, onUpdate, onTitleTab, readOnly = false }: Parame
         setEditingTitle(false)
       }}
       onKeyDown={(event) => {
-        if (event.key === 'Enter') event.currentTarget.blur()
+        if (event.key === 'Enter') {
+          event.preventDefault()
+          event.currentTarget.blur()
+        }
         if (event.key === 'Tab' && !event.shiftKey && onTitleTab) {
           event.preventDefault()
           event.currentTarget.blur()

@@ -1,5 +1,5 @@
 import { toast } from 'sonner'
-import type { TaskUpdateBody } from '@/api/generated/types.gen'
+import type { TaskUpdateBody } from '@orbit/api/generated/types.gen'
 import { isTaskVersionConflict } from '@/features/tasks/api/conflicts'
 import { useUpdateTask } from '@/features/tasks/api/tasks'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'

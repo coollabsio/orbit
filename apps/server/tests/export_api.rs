@@ -223,7 +223,7 @@ impl Fixture {
             let mut entry = archive.by_index(index).unwrap();
             let mut content = Vec::new();
             entry.read_to_end(&mut content).unwrap();
-            files.push((entry.name().to_owned(), content));
+            files.push((entry.name().unwrap().into_owned(), content));
         }
         Export {
             disposition: headers[header::CONTENT_DISPOSITION]

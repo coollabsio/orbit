@@ -1,4 +1,4 @@
-import type { PageEditorInstance } from './schema'
+import type { PageEditorInstance } from '@orbit/editor/schema'
 
 function isEmptyInlineBlock(block: { content?: unknown }): boolean {
   return Array.isArray(block.content) && block.content.length === 0

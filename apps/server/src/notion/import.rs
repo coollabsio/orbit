@@ -43,6 +43,8 @@ use super::files::sanitize_file_name;
 use super::model::{BlockNode, NotionPage, normalize_id};
 pub use super::scan::{NotionImportNode, NotionImportNodeKind, NotionImportTree};
 use super::scan::{ScanControl, build_tree};
+use crate::billing::WorkspaceAccess;
+use crate::repositories::billing;
 use crate::repositories::membership;
 use crate::repositories::page_files::{PageFileRepository, page_file_url};
 use crate::repositories::page_versions::SaveOrigin;
@@ -1080,6 +1082,7 @@ impl NotionImportService {
         }
         let workspace_id = parse_stored_id(row.get("workspace_id"))?;
         let user_id = parse_stored_id(row.get("user_id"))?;
+        self.ensure_writable(workspace_id).await?;
         let selection: Option<StoredSelection> = row
             .get::<Option<String>, _>("selection_json")
             .and_then(|json| serde_json::from_str(&json).ok());
@@ -1144,7 +1147,7 @@ impl NotionImportService {
             if items[index].status != "pending" {
                 continue;
             }
-            if self.should_stop(import_id, run).await? {
+            if self.should_stop(import_id, workspace_id, run).await? {
                 return stopped(run);
             }
             let parent = items[index]
@@ -1212,7 +1215,7 @@ impl NotionImportService {
             if items[index].status != "created" {
                 continue;
             }
-            if self.should_stop(import_id, run).await? {
+            if self.should_stop(import_id, workspace_id, run).await? {
                 return stopped(run);
             }
             let item = items[index].clone();
@@ -1326,6 +1329,12 @@ impl NotionImportService {
             {
                 Ok(_) => {}
                 Err(PageError::Unavailable(error)) => return Err(Failure::from(error)),
+                Err(PageError::TrialLimit(reached)) => {
+                    return Err(Failure::Fatal(format!(
+                        "The import stopped at the trial's limit. {}",
+                        reached.detail()
+                    )));
+                }
                 Err(_) if is_root => {
                     return Err(Failure::Fatal(
                         "The import destination is no longer available.".to_owned(),
@@ -1560,16 +1569,35 @@ impl NotionImportService {
             .collect())
     }
 
-    async fn should_stop(&self, import_id: Id, run: &JobRun) -> Result<bool, Failure> {
+    /// Whether to stop before the next page; a workspace that became read-only fails the import.
+    async fn should_stop(
+        &self,
+        import_id: Id,
+        workspace_id: Id,
+        run: &JobRun,
+    ) -> Result<bool, Failure> {
         if run.cancel.is_cancelled() {
             return Ok(true);
         }
+        self.ensure_writable(workspace_id).await?;
         let status: Option<String> =
             sqlx::query_scalar("SELECT status FROM notion_imports WHERE id = $1")
                 .bind(import_id.to_string())
                 .fetch_optional(self.database().pool())
                 .await?;
         Ok(status.as_deref() != Some("importing"))
+    }
+
+    /// Orbit Cloud: a read-only workspace (past its trial, no subscription) takes no imported pages.
+    async fn ensure_writable(&self, workspace_id: Id) -> Result<(), Failure> {
+        match billing::write_access(self.database(), workspace_id).await? {
+            WorkspaceAccess::Full | WorkspaceAccess::Trial => Ok(()),
+            WorkspaceAccess::ReadOnly => Err(Failure::Fatal(
+                "The import stopped because the workspace is read-only: it has no active \
+                 subscription."
+                    .to_owned(),
+            )),
+        }
     }
 
     async fn fail_item(

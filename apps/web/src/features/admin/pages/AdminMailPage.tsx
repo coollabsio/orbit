@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { toast } from 'sonner'
 import { CloseCircle, InfoCircle, TickCircle, Warning } from 'reicon-react'
-import type { MailAdmin, PtrStatus } from '@/api/generated/types.gen'
+import type { MailAdmin, PtrStatus } from '@orbit/api/generated/types.gen'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

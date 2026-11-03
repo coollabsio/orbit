@@ -17,3 +17,8 @@ export function PageMentionChip({ userId, name }: { userId: string; name: string
     </span>
   )
 }
+
+/** `render` of the `mention` inline content: `name` is the member's name when they were mentioned. */
+export function PageMentionView({ inlineContent }: { inlineContent: { props: { userId: string; name: string } } }) {
+  return <PageMentionChip userId={inlineContent.props.userId} name={inlineContent.props.name} />
+}

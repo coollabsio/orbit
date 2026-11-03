@@ -74,7 +74,7 @@ async fn github_schema_is_in_one_draft_migration() {
         db.scalar::<i64>("SELECT MAX(version) FROM schema_migrations")
             .await
             .unwrap(),
-        56
+        66
     );
     assert_eq!(
         db.scalar::<i64>("SELECT COUNT(*) FROM pragma_table_info('github_issue_links') WHERE name IN ('kind', 'pull_state', 'sync_paused')")
@@ -211,7 +211,7 @@ async fn rejects_a_schema_newer_than_the_binary() {
         error,
         MigrationError::SchemaNewer {
             database_version: 999,
-            binary_version: 56
+            binary_version: 66
         }
     ));
 }
@@ -460,6 +460,63 @@ async fn exposes_pending_destructive_migrations_without_running_backups() {
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].version, 1);
     assert!(pending[0].destructive);
+}
+
+#[tokio::test]
+async fn billing_exempt_migration_marks_the_oldest_workspace_the_root_user_owns() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
+        .await
+        .unwrap();
+    MigrationRunner::embedded_through("test", 56)
+        .run(&database)
+        .await
+        .unwrap();
+    let mut transaction = database.transaction().await.unwrap();
+    sqlx::raw_sql(
+        "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at)
+         VALUES ('root', 'root@example.com', 'root@example.com', 'Root', 'x', 1, 1),
+                ('other', 'other@example.com', 'other@example.com', 'Other', 'x', 1, 1);
+         INSERT INTO installation_state (id, initialized, root_user_id) VALUES (1, 1, 'root');
+         INSERT INTO workspaces (id, name, version, owner_membership_id, deleted_at, created_at, updated_at)
+         VALUES ('w-other', 'Other first', 0, 'm-other', NULL, 1, 1),
+                ('w-b', 'Root tie, later id', 0, 'm-b', NULL, 5, 5),
+                ('w-a', 'Root tie, deleted', 0, 'm-a', 9, 5, 5),
+                ('w-late', 'Root later', 0, 'm-late', NULL, 7, 7);
+         INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at)
+         VALUES ('m-other', 'w-other', 'other', 'owner', 0, 1, 1),
+                ('m-b', 'w-b', 'root', 'owner', 0, 5, 5),
+                ('m-a', 'w-a', 'root', 'owner', 0, 5, 5),
+                ('m-late', 'w-late', 'root', 'owner', 0, 7, 7);",
+    )
+    .execute(&mut *transaction)
+    .await
+    .unwrap();
+    transaction.commit().await.unwrap();
+
+    MigrationRunner::embedded("test")
+        .run(&database)
+        .await
+        .unwrap();
+
+    let exempt: Vec<(String, i64)> =
+        sqlx::query_as("SELECT id, billing_exempt FROM workspaces ORDER BY id")
+            .fetch_all(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        exempt,
+        [
+            ("w-a".to_owned(), 1),
+            ("w-b".to_owned(), 0),
+            ("w-late".to_owned(), 0),
+            ("w-other".to_owned(), 0),
+        ]
+    );
+    let second = sqlx::query("UPDATE workspaces SET billing_exempt = 1 WHERE id = 'w-b'")
+        .execute(database.pool())
+        .await;
+    assert!(second.is_err(), "at most one workspace is exempt");
 }
 
 #[tokio::test]
@@ -2529,4 +2586,44 @@ async fn project_labels_migration_copies_labels_into_every_project() {
     .unwrap();
     assert_eq!(count("SELECT COUNT(*) FROM labels".into()).await, 3);
     assert_eq!(count("SELECT COUNT(*) FROM task_labels".into()).await, 0);
+}
+
+#[tokio::test]
+async fn setup_owner_email_migration_confirms_only_the_setup_owner() {
+    if orbit_platform::testing_postgres() {
+        return; // SQLite migration history (embedded_through)
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let db = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
+        .await
+        .unwrap();
+    MigrationRunner::embedded_through("test", 64)
+        .run(&db)
+        .await
+        .unwrap();
+    db.execute(
+        "BEGIN;
+         INSERT INTO installation_state (id, initialized, initialized_at) VALUES (1, 1, 1000)
+         ON CONFLICT (id) DO UPDATE SET initialized = 1, initialized_at = 1000;
+         INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at)
+         VALUES ('owner', 'owner@example.com', 'owner@example.com', 'Owner', 'x', 1000, 1000),
+                ('invited', 'invited@example.com', 'invited@example.com', 'Invited', 'x', 2000, 2000);
+         COMMIT;",
+    )
+    .await
+    .unwrap();
+
+    MigrationRunner::embedded("test").run(&db).await.unwrap();
+
+    let verified = |id: &str| format!("SELECT email_verified_at FROM users WHERE id = '{id}'");
+    assert_eq!(
+        db.scalar::<Option<i64>>(&verified("owner")).await.unwrap(),
+        Some(1000)
+    );
+    assert_eq!(
+        db.scalar::<Option<i64>>(&verified("invited"))
+            .await
+            .unwrap(),
+        None
+    );
 }

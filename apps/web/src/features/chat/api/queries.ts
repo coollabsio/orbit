@@ -243,11 +243,6 @@ export function useChatBadges(): ChatBadges {
   return chatBadges(conversations ?? [], states ?? [], threads ?? [])
 }
 
-/** The Chat item in the app sidebar and the mobile dock: all count badges plus unread followed threads. */
-export function useChatBadgeCount(): number {
-  return useChatBadges().total
-}
-
 /** The groups of the Unreads view: unread, not muted, newest activity first. */
 export function useUnreadConversations(): UnreadConversation[] {
   const conversations = useConversations().data

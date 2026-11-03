@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Copy } from 'reicon-react'
-import type { MailAdmin, MailAuthResult, MailTestAddress, MailTestResult } from '@/api/generated/types.gen'
+import type { MailAdmin, MailAuthResult, MailTestAddress, MailTestResult } from '@orbit/api/generated/types.gen'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { Tip } from '@/components/common/Tip'
 import { Badge } from '@/components/ui/badge'

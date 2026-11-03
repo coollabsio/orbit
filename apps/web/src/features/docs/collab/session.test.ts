@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import * as Y from 'yjs'
 import { FakeProvider } from '@/test/fakeCollab'
-import { COLLAB_FRAGMENT } from './connection'
+import { COLLAB_FRAGMENT } from '@orbit/editor/collab/target'
 import {
   collabProblemAction,
   CollabSession,
@@ -13,7 +13,7 @@ import {
   problemOfClose,
   type CollabProblem,
   type CollabTimers,
-} from './session'
+} from '@orbit/editor/collab/session'
 
 function fakeClock() {
   let now = 1_000_000
@@ -140,6 +140,7 @@ describe('CollabSession', () => {
     [4404, 'gone', 'lost', 'Access lost'],
     [4403, 'forbidden', 'lost', 'Access lost'],
     [4401, 'session', 'lost', 'Access lost'],
+    [4402, 'read-only', 'reset', 'Connecting…'],
     [4409, 'reset', 'reset', 'Connecting…'],
     [4423, 'reset', 'reset', 'Connecting…'],
     [4413, 'too-large', 'error', 'Not syncing'],
@@ -249,6 +250,7 @@ describe('collabProblemAction', () => {
     expect(collabProblemAction('forbidden')).toBe('leave')
     expect(collabProblemAction('session')).toBe('unauthorized')
     expect(collabProblemAction('reset')).toBe('reopen')
+    expect(collabProblemAction('read-only')).toBe('read-only')
     expect(collabProblemAction('rate-limited')).toBe('rate-limited')
     expect(collabProblemAction('too-large')).toBe('notice')
     expect(collabProblemAction('protocol')).toBe('notice')

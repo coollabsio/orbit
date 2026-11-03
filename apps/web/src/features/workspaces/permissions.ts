@@ -1,4 +1,4 @@
-import type { Permission } from '@/api/generated/types.gen'
+import type { Permission } from '@orbit/api/generated/types.gen'
 import { useCurrentUser } from '@/features/auth/api'
 import { useWorkspace } from './workspaceContext'
 

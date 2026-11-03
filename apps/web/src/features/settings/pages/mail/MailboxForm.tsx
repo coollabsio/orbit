@@ -1,6 +1,6 @@
 import { useId, useState, type FormEvent } from 'react'
 import { toast } from 'sonner'
-import type { MailboxKind, MailDomain } from '@/api/generated/types.gen'
+import type { MailboxKind, MailDomain } from '@orbit/api/generated/types.gen'
 import { Button } from '@/components/ui/button'
 import { DialogClose, DialogFooter } from '@/components/ui/dialog'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'

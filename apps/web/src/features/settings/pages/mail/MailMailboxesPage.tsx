@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { DirectInbox } from 'reicon-react'
-import type { MailDomain, MailMailbox } from '@/api/generated/types.gen'
+import type { MailDomain, MailMailbox } from '@orbit/api/generated/types.gen'
 import { EmptyState } from '@/components/common/EmptyState'
 import { Modal } from '@/components/common/Modal'
 import { SettingsCard } from '@/components/common/SettingsCard'

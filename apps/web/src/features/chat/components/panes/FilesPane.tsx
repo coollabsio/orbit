@@ -26,8 +26,8 @@ export function FilesPane({ conversationId }: { conversationId: string }) {
   const [viewerImage, setViewerImage] = useState<Attachment | null>(null)
 
   const shared: SharedFile[] = (files.data ?? []).flatMap((message) => message.attachments.map((attachment) => ({ attachment, message })))
-  const images = shared.filter((file) => isImage(file.attachment))
-  const others = shared.filter((file) => !isImage(file.attachment))
+  const images = shared.filter((file) => isImage(file.attachment) && !file.attachment.deleted)
+  const others = shared.filter((file) => !isImage(file.attachment) || file.attachment.deleted)
   const authorName = (message: Message) => members.find((member) => member.id === message.authorId)?.name ?? 'Unknown'
 
   return (
@@ -82,10 +82,10 @@ export function FilesPane({ conversationId }: { conversationId: string }) {
                       <DocumentText aria-hidden className="size-5 shrink-0 text-muted-foreground" />
                       <span className="flex min-w-0 flex-1 flex-col">
                         <span className="truncate text-sm font-medium" title={attachment.fileName}>
-                          {attachment.fileName}
+                          {attachment.deleted ? 'Deleted file' : attachment.fileName}
                         </span>
                         <span className="truncate text-xs text-muted-foreground">
-                          {formatSize(attachment.fileSize)} · {authorName(message)} · {relativeAgo(message.createdAt)}
+                          {attachment.deleted ? attachment.fileName : formatSize(attachment.fileSize)} · {authorName(message)} · {relativeAgo(message.createdAt)}
                         </span>
                       </span>
                       <Tip label="Go to message">
@@ -93,7 +93,7 @@ export function FilesPane({ conversationId }: { conversationId: string }) {
                           <MessageIcon />
                         </Button>
                       </Tip>
-                      <Tip label="Download">
+                      {attachment.deleted ? null : <Tip label="Download">
                         <a
                           href={attachment.url}
                           download={attachment.fileName}
@@ -102,7 +102,7 @@ export function FilesPane({ conversationId }: { conversationId: string }) {
                         >
                           <Download />
                         </a>
-                      </Tip>
+                      </Tip>}
                     </li>
                   ))}
                 </ul>

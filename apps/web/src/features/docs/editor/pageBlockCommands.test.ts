@@ -1,7 +1,8 @@
 import { afterEach, expect, test } from 'bun:test'
 import { BlockNoteEditor } from '@blocknote/core'
 import { insertPageBlock } from './pageBlockCommands'
-import { pageEditorSchema, type PageEditorInstance } from './schema'
+import type { PageEditorInstance } from '@orbit/editor/schema'
+import { pageEditorSchema } from './schema'
 
 const mounted: { editor: PageEditorInstance; element: HTMLElement }[] = []
 

@@ -1,0 +1,243 @@
+import { useSyncExternalStore, type CSSProperties } from 'react'
+import { useNewUi } from './themeContext'
+
+/**
+ * Account settings → Appearance → Custom: a personal colour theme for the whole app, in place of Light, System or
+ * Dark. Four colours, and every text colour is derived so that it stays readable. `null` is the chosen app theme.
+ */
+export interface CustomTheme {
+  /** The sidebar background. */
+  sidebar: string
+  /** The open conversation's row. */
+  selected: string
+  /** Unread markers, count badges, mentions and the send button. */
+  accent: string
+  /** The background of every page: messages, headers, panes, menus and dialogs. */
+  chat: string
+}
+
+export interface CustomThemePreset {
+  name: string
+  theme: CustomTheme
+}
+
+export const CUSTOM_THEME_PRESETS: readonly CustomThemePreset[] = [
+  { name: 'Slack', theme: { sidebar: '#3f0e40', selected: '#1164a3', accent: '#ecb22e', chat: '#ffffff' } },
+  { name: 'Slack Dark', theme: { sidebar: '#19171d', selected: '#1164a3', accent: '#ecb22e', chat: '#1a1d21' } },
+  { name: 'Discord Ash', theme: { sidebar: '#2b2d31', selected: '#404249', accent: '#5865f2', chat: '#313338' } },
+  { name: 'Discord Dark', theme: { sidebar: '#121214', selected: '#2c2c30', accent: '#5865f2', chat: '#1a1a1e' } },
+  { name: 'Discord Onyx', theme: { sidebar: '#000000', selected: '#1f1f23', accent: '#5865f2', chat: '#070709' } },
+  { name: 'Discord Light', theme: { sidebar: '#f2f3f5', selected: '#d7d9dc', accent: '#5865f2', chat: '#ffffff' } },
+  { name: 'Midnight', theme: { sidebar: '#0f172a', selected: '#2e4a7d', accent: '#f2458f', chat: '#1a2338' } },
+  { name: 'Forest', theme: { sidebar: '#12342b', selected: '#2c6e57', accent: '#f4b860', chat: '#1b2a25' } },
+  { name: 'Ember', theme: { sidebar: '#3b1410', selected: '#8f2d1f', accent: '#ffb86b', chat: '#241816' } },
+  { name: 'Slate', theme: { sidebar: '#2b3038', selected: '#4a5361', accent: '#6cc4f5', chat: '#353b45' } },
+  { name: 'Paper', theme: { sidebar: '#ebe6da', selected: '#d9d1bf', accent: '#c2410c', chat: '#f7f4ec' } },
+  { name: 'Blossom', theme: { sidebar: '#fde8f1', selected: '#f9c4dc', accent: '#d61f69', chat: '#fff7fa' } },
+]
+
+// the old name, from when the theme coloured only chat: renaming it would drop saved themes
+const STORAGE_KEY = 'orbit:chat:theme'
+const HEX = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i
+
+/** A colour as `#rrggbb` in lower case, or `null` when the text is not a hex colour. */
+export function normalizeHex(text: string): string | null {
+  const match = HEX.exec(text.trim())
+  if (!match) return null
+  const digits = match[1].toLowerCase()
+  return `#${digits.length === 3 ? [...digits].map((digit) => digit + digit).join('') : digits}`
+}
+
+/** WCAG relative luminance of a `#rrggbb` colour. */
+function luminance(hex: string): number {
+  const channel = (offset: number) => {
+    const value = Number.parseInt(hex.slice(offset, offset + 2), 16) / 255
+    return value <= 0.03928 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
+  }
+  return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5)
+}
+
+const LIGHT_TEXT = '#ffffff'
+const DARK_TEXT = '#171717'
+
+/** WCAG contrast ratio of two colours, from 1 to 21. */
+function contrast(a: string, b: string): number {
+  const [low, high] = [luminance(a), luminance(b)].sort((x, y) => x - y)
+  return (high + 0.05) / (low + 0.05)
+}
+
+/** White or near-black, whichever has more contrast on this background. */
+export function readableOn(background: string): string {
+  return contrast(LIGHT_TEXT, background) >= contrast(DARK_TEXT, background) ? LIGHT_TEXT : DARK_TEXT
+}
+
+/** `from` moved toward `to` by `amount` (0 to 1), channel by channel. */
+function mix(from: string, to: string, amount: number): string {
+  const channel = (offset: number) => {
+    const start = Number.parseInt(from.slice(offset, offset + 2), 16)
+    const end = Number.parseInt(to.slice(offset, offset + 2), 16)
+    return Math.round(start + (end - start) * amount).toString(16).padStart(2, '0')
+  }
+  return `#${channel(1)}${channel(3)}${channel(5)}`
+}
+
+/**
+ * The accent as it shows on the message surface (mention text, the "New" line). A sidebar accent can be too close to
+ * the surface (Slack's yellow on white), so it moves toward the text colour until it has a 3:1 contrast.
+ */
+export function accentOn(surface: string, accent: string): string {
+  const text = readableOn(surface)
+  let color = accent
+  for (let step = 0; step < 8 && contrast(color, surface) < 3; step += 1) color = mix(color, text, 0.15)
+  return color
+}
+
+/** The theme as a code to share: `#3f0e40,#1164a3,#ecb22e,#ffffff` (sidebar, selected, accent, messages). */
+export function serializeCustomTheme(theme: CustomTheme): string {
+  return [theme.sidebar, theme.selected, theme.accent, theme.chat].join(',')
+}
+
+/**
+ * Reads a shared code: four hex colours separated by commas or spaces. Three colours are a sidebar-only code; the
+ * message surface is then a neutral one that agrees with the sidebar. `null` when the text is not a code.
+ */
+export function parseCustomTheme(code: string): CustomTheme | null {
+  const colors = code.split(/[\s,]+/).filter(Boolean).map(normalizeHex)
+  const [sidebar, selected, accent, chat] = colors
+  if (colors.length < 3 || colors.length > 4 || !sidebar || !selected || !accent || (colors.length === 4 && !chat)) return null
+  return { sidebar, selected, accent, chat: chat ?? (readableOn(sidebar) === LIGHT_TEXT ? '#1a1d21' : '#ffffff') }
+}
+
+/** The shadcn surface tokens for one background colour: text, quiet text, hover, borders and fields. */
+function surfaceVariables(surface: string, accent: string): Record<string, string> {
+  const text = readableOn(surface)
+  const tint = (percent: number) => `color-mix(in oklch, ${text} ${percent}%, ${surface})`
+  return {
+    '--background': surface,
+    '--foreground': text,
+    '--card': tint(4),
+    '--card-foreground': text,
+    '--muted': tint(11),
+    '--muted-foreground': tint(66),
+    '--secondary': tint(13),
+    '--secondary-foreground': text,
+    '--accent': tint(11),
+    '--accent-foreground': text,
+    '--border': `color-mix(in oklch, ${text} 14%, transparent)`,
+    '--input': `color-mix(in oklch, ${text} 20%, transparent)`,
+    '--ring': tint(50),
+    '--primary': accent,
+    '--primary-foreground': readableOn(accent),
+  }
+}
+
+
+/** `dark` or `light`: the app theme that the custom theme's message colour reads as. */
+export function customThemeScheme(theme: CustomTheme): 'dark' | 'light' {
+  return readableOn(theme.chat) === LIGHT_TEXT ? 'dark' : 'light'
+}
+
+/**
+ * The shadcn token overrides for the page surface (`bg-background`, `text-foreground`, `bg-muted`, `bg-primary`…).
+ * `ThemeProvider` puts them on the document root, so every page and portalled menu or dialog gets them.
+ */
+export function customThemeVariables(theme: CustomTheme | null): CSSProperties {
+  if (!theme) return {}
+  const text = readableOn(theme.chat)
+  return {
+    ...surfaceVariables(theme.chat, accentOn(theme.chat, theme.accent)),
+    '--popover': `color-mix(in oklch, ${text} 6%, ${theme.chat})`,
+    '--popover-foreground': text,
+  } as CSSProperties
+}
+
+/** The overrides for the sidebar inside the chat page: its own surface, and the colour of the open row. */
+export function customSidebarVariables(theme: CustomTheme | null): CSSProperties {
+  if (!theme) return {}
+  return {
+    ...surfaceVariables(theme.sidebar, theme.accent),
+    '--chat-selected': theme.selected,
+    '--chat-selected-foreground': readableOn(theme.selected),
+  } as CSSProperties
+}
+
+const listeners = new Set<() => void>()
+let cached: { raw: string | null; theme: CustomTheme | null } | null = null
+
+function read(): CustomTheme | null {
+  let raw: string | null = null
+  try {
+    raw = globalThis.localStorage?.getItem(STORAGE_KEY) ?? null
+  } catch {
+    // Unreadable storage: the default theme.
+  }
+  if (!cached || cached.raw !== raw) cached = { raw, theme: raw ? parseCustomTheme(raw) : null }
+  return cached.theme
+}
+
+/** Saves the theme in this browser (theme sync is a backend project). `null` goes back to the Orbit default. */
+export function setCustomTheme(theme: CustomTheme | null) {
+  try {
+    if (theme) globalThis.localStorage?.setItem(STORAGE_KEY, serializeCustomTheme(theme))
+    else globalThis.localStorage?.removeItem(STORAGE_KEY)
+  } catch {
+    // Storage is full or blocked: the theme does not change.
+  }
+  for (const listener of listeners) listener()
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener)
+  globalThis.addEventListener?.('storage', listener)
+  return () => {
+    listeners.delete(listener)
+    globalThis.removeEventListener?.('storage', listener)
+  }
+}
+
+export function useCustomTheme(): CustomTheme | null {
+  return useSyncExternalStore(subscribe, read, () => null)
+}
+
+/**
+ * The custom theme on the app sidebar: its surface, the nav row colours and the open chat row. `scheme` is the class
+ * for the sidebar (`dark` or `light`), so its `dark:` styles follow the theme's sidebar colour and not the app theme.
+ */
+export function appSidebarTheme(theme: CustomTheme | null): { scheme?: 'dark' | 'light'; style?: CSSProperties } {
+  if (!theme) return {}
+  const text = readableOn(theme.sidebar)
+  const tint = (percent: number) => `color-mix(in oklch, ${text} ${percent}%, ${theme.sidebar})`
+  const accent = accentOn(theme.sidebar, theme.accent)
+  return {
+    scheme: text === LIGHT_TEXT ? 'dark' : 'light',
+    style: {
+      ...customSidebarVariables(theme),
+      '--sidebar': theme.sidebar,
+      '--sidebar-wash': 'transparent',
+      '--sidebar-foreground': text,
+      // the selected rows (docs tree, chat list, project rail) use the theme's selected colour
+      '--sidebar-accent': theme.selected,
+      '--sidebar-accent-foreground': readableOn(theme.selected),
+      '--sidebar-border': `color-mix(in oklch, ${text} 14%, transparent)`,
+      '--sidebar-edge': `color-mix(in oklch, ${text} 10%, transparent)`,
+      '--sidebar-nav': tint(72),
+      '--sidebar-nav-active': text,
+      '--sidebar-nav-muted': tint(55),
+      '--sidebar-tint': accent,
+      '--sidebar-tint-foreground': `color-mix(in oklch, ${accent} 55%, ${text})`,
+      '--sidebar-primary': accent,
+      '--sidebar-primary-foreground': readableOn(accent),
+      // the menus opened from the sidebar (workspace, account): a raised surface with a hint of the accent
+      '--sidebar-popover': `color-mix(in oklch, ${accent} 8%, ${tint(8)})`,
+      '--popover': 'var(--sidebar-popover)',
+      '--popover-foreground': text,
+    } as CSSProperties,
+  }
+}
+
+/** The custom theme for the sidebar and the menus it opens (they are portalled out of it, so they need it too). */
+export function useAppSidebarTheme() {
+  const theme = useCustomTheme()
+  // the classic layout keeps the custom theme on chat only
+  return appSidebarTheme(useNewUi() ? theme : null)
+}

@@ -62,3 +62,11 @@ test('a single image with a known size holds its place before it loads, at most 
   const unknown = render(<Attachments attachments={[image]} />)
   expect(unknown.getByRole('button', { name: 'Open image diagram.png' }).querySelector('img')!.style.width).toBe('')
 })
+
+test('a deleted file says so and offers no image or download', () => {
+  const view = render(<Attachments attachments={[{ ...image, deleted: true }, { ...image, id: 'file-1', fileName: 'notes.pdf', mimeType: 'application/pdf', deleted: true }]} />)
+  expect(view.getAllByText('Deleted file')).toHaveLength(2)
+  expect(view.getByText('diagram.png · an admin deleted it')).toBeTruthy()
+  expect(view.queryAllByRole('button', { name: 'Open image diagram.png' })).toHaveLength(0)
+  expect(view.container.querySelectorAll('a')).toHaveLength(0)
+})

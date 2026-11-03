@@ -11,9 +11,9 @@ import {
   reorderViewFavorites,
   unfavoriteView,
   updateView,
-} from '@/api/generated/sdk.gen'
-import type { SavedViewRecord, ViewCreateBody, ViewUpdateBody } from '@/api/generated/types.gen'
-import { ApiProblem } from '@/api/problem'
+} from '@orbit/api/generated/sdk.gen'
+import type { SavedViewRecord, ViewCreateBody, ViewUpdateBody } from '@orbit/api/generated/types.gen'
+import { ApiProblem } from '@orbit/api/problem'
 import { queryKeys } from '@/api/queryKeys'
 import type { PageKey, ViewState } from '@/features/views/viewState'
 

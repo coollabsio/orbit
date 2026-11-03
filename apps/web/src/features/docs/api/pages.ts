@@ -14,9 +14,9 @@ import {
   searchPages,
   updatePage,
   uploadPageFile,
-} from '@/api/generated/sdk.gen'
-import type { CreatePageBody, Page, PageFile, PageSummary, PageTrashEmptied, PageUpdateBody, TrashedPage } from '@/api/generated/types.gen'
-import { ApiProblem } from '@/api/problem'
+} from '@orbit/api/generated/sdk.gen'
+import type { CreatePageBody, Page, PageFile, PageSummary, PageTrashEmptied, PageUpdateBody, TrashedPage } from '@orbit/api/generated/types.gen'
+import { ApiProblem } from '@orbit/api/problem'
 import { queryKeys } from '@/api/queryKeys'
 import { shrinkImage } from '@/lib/shrinkImage'
 import { confirmAction } from '@/components/common/confirmAction'
@@ -33,6 +33,11 @@ function required<T>(data: T | undefined, message: string): T {
 /** Same 409 shape as tasks (`conflict` with `current_version`, `current`, `refresh`). */
 export function isPageVersionConflict(error: unknown): error is ApiProblem {
   return isTaskVersionConflict(error)
+}
+
+/** The toast for a failed move: the server's reason when it forbids the move, else a generic one. */
+export function movePageErrorMessage(error: unknown): string {
+  return error instanceof ApiProblem && error.status === 403 ? error.detail : 'Could not move the page.'
 }
 
 export function isPageNotFound(error: unknown): boolean {

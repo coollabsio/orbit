@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { ApiProblem } from '@/api/problem'
+import { ApiProblem } from '@orbit/api/problem'
 import { connectionRetryDelay, createConnectionStore, firstLoadFailed, isConnectionFailure, loadFailed, queryLostConnection, retryConnectionFailure } from './connection'
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))

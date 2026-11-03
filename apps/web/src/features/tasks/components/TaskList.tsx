@@ -1,6 +1,7 @@
 import { useTaskTarget, useVirtualTaskRows } from '@/shortcuts/taskTarget'
 import { useCommand } from '@/shortcuts/useCommand'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useScrollMemory } from '@/lib/useScrollMemory'
 import { defaultRangeExtractor, useVirtualizer, type VirtualItem } from '@tanstack/react-virtual'
 import { Calendar, Copy, Danger, Flag, Hierarchy2, LinkBroken, Loader, Add as Plus, RecordCircle, TaskSquare as SquareCheck, Tag, UserAdd, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
@@ -21,7 +22,7 @@ import { PriorityIcon } from './PriorityIcon'
 import { PRIORITY_LABEL, PRIORITY_ORDER } from '@/features/tasks/taskMeta'
 import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
 import type { User } from '@/features/workspaces/models'
-import type { BulkItem, LabelRecord } from '@/api/generated/types.gen'
+import type { BulkItem, LabelRecord } from '@orbit/api/generated/types.gen'
 import { assigneeToggleUpdates, dueUpdates, everyTaskHasLabel, labelChoices, labelToggleUpdates, priorityUpdates, statusUpdates } from '@/features/tasks/bulkUpdates'
 import { BulkTaskLimitError, MAX_BULK_TASK_UPDATES, useBulkTasks } from '@/features/tasks/api/tasks'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
@@ -165,11 +166,14 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
   const scroller = useRef<HTMLDivElement>(null)
   const content = useRef<HTMLDivElement>(null)
   const { keepId, onFocus } = useVirtualTaskRows(lines.flatMap((line) => (line.kind === 'row' ? [line.row.task.id] : [])))
+  const savedTop = useScrollMemory(scroller, 'task-list')
   // rows that stay in the DOM out of view: the dragged row (see `renderRow`) and the row with the focus
   const kept = lines.flatMap((line, index) => (line.kind === 'row' && (line.row.task.id === keepId || line.row.task.id === drag?.taskId) ? [index] : []))
   const virtualizer = useVirtualizer({
     count: lines.length,
     getScrollElement: () => scroller.current,
+    // the list mounts where it was left (back from a task)
+    initialOffset: savedTop,
     getItemKey: (index) => lines[index].key,
     estimateSize: (index) => LINE_HEIGHT[lines[index].kind],
     overscan: 10,
@@ -356,7 +360,8 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
         ref={scroller}
         data-slot="task-list"
         data-virtual-scroller
-        className="h-full overflow-y-auto"
+        // a row brought into view (keyboard) stops below the sticky group and sub-group headers
+        className={cn('h-full overflow-y-auto', display.group_by !== 'none' && (display.sub_group_by !== 'none' ? 'scroll-pt-[68px]' : 'scroll-pt-9'))}
         onFocus={onFocus}
       >
         <div ref={content} className="relative" style={{ height: virtualizer.getTotalSize() }}>

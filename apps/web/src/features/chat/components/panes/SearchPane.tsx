@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Paperclip2, SearchNormal } from 'reicon-react'
+import { Paperclip2, Search4 } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Toggle } from '@/components/ui/toggle'
@@ -63,14 +63,14 @@ export function SearchPane({ conversationId, query }: { conversationId: string; 
       </div>
       <RightPaneBody>
         {!searching ? (
-          <RightPaneEmpty icon={SearchNormal} title="Search messages" description="Type in the search field of the conversation, or choose a filter." />
+          <RightPaneEmpty icon={Search4} title="Search messages" description="Type in the search field of the conversation, or choose a filter." />
         ) : search.isPending ? (
           <RightPaneLoading />
         ) : search.isError ? (
           <RightPaneError title="The search results could not be loaded." onRetry={() => void search.refetch()} />
         ) : hits.length === 0 ? (
           <RightPaneEmpty
-            icon={SearchNormal}
+            icon={Search4}
             title={text ? `No results for "${text}"` : 'No results'}
             description={thisConversation ? 'Nothing matches in this conversation.' : 'Try other words or remove a filter.'}
             action={

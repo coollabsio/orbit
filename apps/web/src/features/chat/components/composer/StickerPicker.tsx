@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { SearchNormal } from 'reicon-react'
-import type { CustomStickerRecord } from '@/api/generated/types.gen'
+import { Search4 } from 'reicon-react'
+import type { CustomStickerRecord } from '@orbit/api/generated/types.gen'
 import { Tip } from '@/components/common/Tip'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
 import { searchStickers } from '@/lib/customSticker'
@@ -17,7 +17,7 @@ export function StickerPicker({ stickers, onPick }: { stickers: readonly CustomS
       <div className="p-2">
         <InputGroup className="border-0 bg-secondary/40 dark:bg-secondary/40">
           <InputGroupAddon>
-            <SearchNormal />
+            <Search4 />
           </InputGroupAddon>
           <InputGroupInput autoFocus type="search" value={search} placeholder="Search stickers" aria-label="Search stickers" autoComplete="off" onChange={(event) => setSearch(event.target.value)} />
         </InputGroup>

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
-import type { ChatEvent as WireEvent, ConversationRecord, MessageRecord } from '@/api/generated/types.gen'
-import { ApiProblem } from '@/api/problem'
+import type { ChatEvent as WireEvent, ConversationRecord, MessageRecord } from '@orbit/api/generated/types.gen'
+import { ApiProblem } from '@orbit/api/problem'
 import { ChatError } from './types'
 import { toChatError, toEvent } from './wire'
 
@@ -21,8 +21,8 @@ const message: MessageRecord = {
   edited_at: '2026-10-02T08:01:00.000Z',
   deleted: false,
   attachments: [
-    { id: 'f1', url: '/api/v1/workspaces/w1/chat/files/f1', file_name: 'plan.png', mime_type: 'image/png', size_bytes: 68, width: 640, height: 400 },
-    { id: 'f2', url: '/api/v1/workspaces/w1/chat/files/f2', file_name: 'notes.txt', mime_type: 'text/plain', size_bytes: 12, width: null, height: null },
+    { id: 'f1', url: '/api/v1/workspaces/w1/chat/files/f1', file_name: 'plan.png', mime_type: 'image/png', size_bytes: 68, width: 640, height: 400, deleted: false },
+    { id: 'f2', url: '/api/v1/workspaces/w1/chat/files/f2', file_name: 'notes.txt', mime_type: 'text/plain', size_bytes: 12, width: null, height: null, deleted: true },
   ],
   reactions: [{ emoji: '👍', user_ids: ['u1', 'u2'] }],
   pinned: true,
@@ -70,8 +70,8 @@ test('a wire message becomes a chat message with millisecond times', () => {
       editedAt: Date.UTC(2026, 9, 2, 8, 1),
       deleted: false,
       attachments: [
-        { id: 'f1', fileName: 'plan.png', mimeType: 'image/png', fileSize: 68, url: '/api/v1/workspaces/w1/chat/files/f1', width: 640, height: 400 },
-        { id: 'f2', fileName: 'notes.txt', mimeType: 'text/plain', fileSize: 12, url: '/api/v1/workspaces/w1/chat/files/f2' },
+        { id: 'f1', fileName: 'plan.png', mimeType: 'image/png', fileSize: 68, url: '/api/v1/workspaces/w1/chat/files/f1', deleted: false, width: 640, height: 400 },
+        { id: 'f2', fileName: 'notes.txt', mimeType: 'text/plain', fileSize: 12, url: '/api/v1/workspaces/w1/chat/files/f2', deleted: true },
       ],
       reactions: [{ emoji: '👍', userIds: ['u1', 'u2'] }],
       pinned: true,

@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { History, Refresh as RotateCcw, Xmark as X } from 'reicon-react'
 import { cn } from 'cn'
-import type { PageVersionSummary } from '@/api/generated/types.gen'
+import type { PageVersionSummary } from '@orbit/api/generated/types.gen'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 import { confirmAction } from '@/components/common/confirmAction'

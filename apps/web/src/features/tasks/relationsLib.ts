@@ -1,4 +1,4 @@
-import type { TaskRelationRecord } from '@/api/generated/types.gen'
+import type { TaskRelationRecord } from '@orbit/api/generated/types.gen'
 import type { Task, TaskStatusDef } from '@/features/tasks/api/models'
 
 /** What the picker chooses a task for. `blocked_by` is stored server-side as "the other task blocks this one". */

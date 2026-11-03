@@ -25,3 +25,49 @@ test('anonymous OAuth consent keeps its return path despite the global session h
   await waitFor(() => expect(destination?.path).toBe('/login'))
   expect(new URLSearchParams(destination?.search).get('return_to')).toBe(`/oauth/consent?request=${request}`)
 })
+
+for (const approved of [true, false]) {
+  test(`remote consent ${approved ? 'approval' : 'denial'} preserves the callback`, async () => {
+    const { fireEvent } = await import('@testing-library/react')
+    const userEvent = (await import('@testing-library/user-event')).default.setup()
+    const callback = `http://localhost:9999/callback?${approved ? 'code=secret' : 'error=access_denied'}&state=original`
+    let body: unknown
+    window.history.replaceState(null, '', `/oauth/consent?request=${'r'.repeat(43)}`)
+    globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(input instanceof Request ? input.url : String(input), window.location.origin).pathname
+      if (path === '/api/v1/auth/me') return Response.json({ id: 'user-1', display_name: 'Ada' })
+      if (init?.method === 'POST') {
+        body = JSON.parse(init.body as string)
+        return Response.json({ redirect_uri: callback })
+      }
+      return Response.json({ client_name: 'Remote client', csrf_token: 'nonce', scope: 'tasks:read', projects: [{ id: 'project-1', name: 'Project One', workspace_id: 'workspace-1', workspace_name: 'Workspace One' }] })
+    }, { preconnect: originalFetch.preconnect })
+    const view = render(<Providers><OAuthConsentPage /></Providers>)
+    await view.findByText('Remote client')
+    await userEvent.click(view.getByRole('checkbox', { name: 'Client runs on a remote server' }))
+    if (approved) {
+      fireEvent.click(view.getByRole('combobox'))
+      await userEvent.click(await view.findByRole('option', { name: 'Workspace One' }))
+      await userEvent.click(view.getByRole('checkbox', { name: 'Project One' }))
+    }
+    fireEvent.click(view.getByRole('button', { name: approved ? 'Allow read access' : 'Deny' }))
+    const field = await view.findByRole('textbox', { name: 'Callback URL' }) as HTMLTextAreaElement
+    expect(field.value).toBe(callback)
+    expect(window.location.pathname).toBe('/oauth/consent')
+    expect(body).toEqual({ csrf_token: 'nonce', approved, workspace_id: approved ? 'workspace-1' : null, project_ids: approved ? ['project-1'] : [], scopes: [] })
+    expect(view.queryAllByRole('button', { name: 'Allow read access' }).length).toBe(0)
+    const clipboard = navigator.clipboard
+    const originalWrite = clipboard.writeText
+    try {
+      clipboard.writeText = async () => { throw new Error('Clipboard denied') }
+      fireEvent.click(view.getByRole('button', { name: 'Copy callback URL' }))
+      await view.findByText('Could not copy. Select the URL above and copy it manually.')
+      expect(field.value).toBe(callback)
+      let copied = ''
+      clipboard.writeText = async (text) => { copied = text }
+      fireEvent.click(view.getByRole('button', { name: 'Copy callback URL' }))
+      await view.findByText('Callback URL copied.')
+      expect(copied).toBe(callback)
+    } finally { clipboard.writeText = originalWrite }
+  })
+}

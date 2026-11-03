@@ -135,6 +135,43 @@ async fn old_markdown_task_opens_as_blocks() {
 }
 
 #[tokio::test]
+async fn a_ticket_opens_the_description_socket_without_the_cookie() {
+    let root = TempDir::new().unwrap();
+    let server = Server::start(&root, fast_config()).await;
+    let users = setup(&server).await;
+    let task = create_task(&server, &users, "Start").await;
+    let id = task["id"].as_str().unwrap();
+    let epoch = get_task(&server, &users, id).await["collab_epoch"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let ticket = server.socket_ticket(&users.member, "task", id).await;
+    let url = server.doc_ws_url(
+        &users.workspace,
+        "tasks",
+        id,
+        &format!("v=1&epoch={epoch}&ticket={ticket}"),
+    );
+
+    let socket = server
+        .socket(&url, None, Some("null"))
+        .await
+        .expect("upgraded");
+    let mut webview = Client::sync(socket).await.expect("synced");
+    let mut browser = open(&server, &users, &users.owner, id).await;
+    webview.type_text(0, "Hi ").await;
+    browser.wait_text("Hi Start").await;
+    assert_eq!(
+        server
+            .socket(&url, Some(&users.member), Some(&server.base))
+            .await
+            .err(),
+        Some(401)
+    );
+    server.stop().await;
+}
+
+#[tokio::test]
 async fn two_sockets_same_user_merge() {
     let root = TempDir::new().unwrap();
     let server = Server::start(&root, fast_config()).await;

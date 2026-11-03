@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
-import { createChatEmoji, deleteChatEmoji, listChatEmoji } from '@/api/generated/sdk.gen'
-import type { CustomEmojiRecord } from '@/api/generated/types.gen'
+import { createChatEmoji, deleteChatEmoji, listChatEmoji } from '@orbit/api/generated/sdk.gen'
+import type { CustomEmojiRecord } from '@orbit/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 
 const byName = (emoji: CustomEmojiRecord[]): ReadonlyMap<string, CustomEmojiRecord> => new Map(emoji.map((entry) => [entry.name, entry]))

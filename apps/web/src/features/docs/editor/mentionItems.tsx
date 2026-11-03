@@ -3,7 +3,7 @@ import type { Transaction } from '@tiptap/pm/state'
 import type { DefaultReactSuggestionItem } from '@blocknote/react'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { filterPageMentionCandidates, PRIVATE_PAGE_HINT, type PageMentionMember, type PageMentionOptions } from './pageMentions'
-import type { PageEditorInstance } from './schema'
+import type { PageEditorInstance } from '@orbit/editor/schema'
 
 /** Picker entries for `query`; a private page's entries sit under the "only you" hint. */
 export function pageMentionItems(

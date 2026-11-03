@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { ApiProblem } from '@/api/problem'
+import { ApiProblem } from '@orbit/api/problem'
 import type { TaskStatusDef } from '@/features/tasks/api/models'
 import { breadcrumbParts, descendantCount, parentErrorMessage, parentPickerTitle, parentToastMessage, subIssueDefaults, trashConfirmDescription, trashedSubIssuesLabel } from './subIssuesLib'
 

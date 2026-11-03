@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router'
-import type { CreateTaskBody, TaskRecord } from '@/api/generated/types.gen'
+import type { CreateTaskBody, TaskRecord } from '@orbit/api/generated/types.gen'
 import { NewTaskDialog } from '@/features/tasks/components/NewTaskDialog'
 import type { GroupValues } from '@/features/views/layoutGroups'
 import { useCommand } from '@/shortcuts/useCommand'

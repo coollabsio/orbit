@@ -1,7 +1,7 @@
 // the chat reference CodeBlock (MessageItem.tsx): fenced code with copy button and syntax colors. A `mermaid` block
 // shows its diagram; a button switches to the source.
 import { Fragment, useState } from 'react'
-import { codeLines, detectLanguage, languageId, MERMAID_LANGUAGE } from '@/lib/codeLanguages'
+import { codeLines, detectLanguage, languageId, MERMAID_LANGUAGE } from '@orbit/editor/codeLanguages'
 import { Button } from '@/components/ui/button'
 import { codeTokenVariants } from './codeToken'
 import { CopyCodeButton } from './CopyCodeButton'

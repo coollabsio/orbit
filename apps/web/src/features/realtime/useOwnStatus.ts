@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Presence, UserStatus } from '@/api/generated/types.gen'
+import type { Presence, UserStatus } from '@orbit/api/generated/types.gen'
 import { useCurrentUser } from '@/features/auth/api'
 import { customStatusOf } from './presence'
 

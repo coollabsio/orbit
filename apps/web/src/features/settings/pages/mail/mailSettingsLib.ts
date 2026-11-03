@@ -1,6 +1,6 @@
 import { toast } from 'sonner'
-import type { MailProviderKind, MailProviderView } from '@/api/generated/types.gen'
-import { ApiProblem } from '@/api/problem'
+import type { MailProviderKind, MailProviderView } from '@orbit/api/generated/types.gen'
+import { ApiProblem } from '@orbit/api/problem'
 import { fullDate, relativeTime, timeOfDay } from '@/lib/format'
 
 /** The server's words for a refused mail request (its `detail` names the reason), else `fallback`. */

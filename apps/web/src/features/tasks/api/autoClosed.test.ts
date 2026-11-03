@@ -1,7 +1,7 @@
 import { expect, spyOn, test } from 'bun:test'
 import { QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import type { TaskRecord } from '@/api/generated/types.gen'
+import type { TaskRecord } from '@orbit/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 import { announceAutoClosed, autoClosedMessage, autoClosedOf } from './autoClosed'
 import { keepIdentifiersTogether } from '@/lib/toast'

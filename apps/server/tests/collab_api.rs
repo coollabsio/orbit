@@ -9,9 +9,12 @@ use std::time::Duration;
 
 use orbit_platform::{Id, TimestampMillis};
 use orbit_server::collab::blocknote::{FRAGMENT, doc_to_blocks, new_doc};
-use orbit_server::collab::{CollabConfig, CollabHub};
+use orbit_server::collab::{CollabConfig, CollabHub, DocKey};
+use orbit_server::repositories::billing::{self as billing_repository, SubscriptionSnapshot};
+use orbit_server::repositories::identity::IdentityRepository;
 use orbit_server::repositories::page_versions::SaveOrigin;
 use orbit_server::repositories::pages::{PageChanges, PageRepository};
+use orbit_server::socket_ticket::SocketTickets;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 use yrs::sync::awareness::AwarenessUpdateEntry;
@@ -140,6 +143,150 @@ async fn handshake_checks_origin_session_membership_and_page_visibility() {
             .await
             .err(),
         Some(4409)
+    );
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn a_ticket_opens_the_socket_from_a_webview_without_the_cookie() {
+    let root = TempDir::new().unwrap();
+    let server = Server::start(&root, fast_config()).await;
+    let users = setup(&server).await;
+    let page = create_page(
+        &server,
+        &users,
+        &users.owner,
+        json!({"title": "Shared"}),
+        "hello",
+    )
+    .await;
+    let id = page["id"].as_str().unwrap();
+    let epoch = page["collab_epoch"].as_str().unwrap();
+    let url = |ticket: &str| {
+        server.ws_url(
+            &users.workspace,
+            id,
+            &format!("v=1&epoch={epoch}&ticket={ticket}"),
+        )
+    };
+
+    // A WebView sends an opaque or foreign Origin, or none, and no cookie.
+    let ticket = server.socket_ticket(&users.member, "page", id).await;
+    let socket = server
+        .socket(&url(&ticket), None, Some("null"))
+        .await
+        .expect("upgraded");
+    let mut webview = Client::sync(socket).await.expect("synced");
+    assert_eq!(webview.text(), "hello");
+    let socket = server
+        .socket(&url(&ticket), None, Some("https://webview.example"))
+        .await
+        .expect("upgraded");
+    assert_eq!(Client::sync(socket).await.expect("synced").text(), "hello");
+    let socket = server
+        .socket(&url(&ticket), None, None)
+        .await
+        .expect("upgraded");
+    assert_eq!(Client::sync(socket).await.expect("synced").text(), "hello");
+
+    // It edits like a cookie client, as the ticket's user.
+    let mut browser = Client::open(&server, &users, &users.owner, id).await;
+    webview.type_text(5, " world").await;
+    browser.wait_text("hello world").await;
+    browser.type_text(0, "Oh, ").await;
+    webview.wait_text("Oh, hello world").await;
+    webview
+        .set_awareness(1, json!({"user": {"name": "Mallory"}, "cursor": null}))
+        .await;
+    let webview_id = webview.doc.client_id().get();
+    assert!(
+        browser
+            .pump(Duration::from_secs(5), |client, _| client
+                .awareness
+                .contains_key(&webview_id))
+            .await
+    );
+    let state: Value = serde_json::from_str(&browser.awareness[&webview_id]).unwrap();
+    assert_eq!(state["user"]["id"], users.member_id.to_string());
+    assert_eq!(state["user"]["name"], "Mia Member");
+
+    // A ticket never comes with the cookie.
+    assert_eq!(
+        server
+            .socket(&url(&ticket), Some(&users.member), Some(&server.base))
+            .await
+            .err(),
+        Some(401)
+    );
+    // Altered, expired, foreign-key, or garbage tickets.
+    let mut altered = ticket.clone().into_bytes();
+    altered[10] = if altered[10] == b'A' { b'B' } else { b'A' };
+    let altered = String::from_utf8(altered).unwrap();
+    let identity = IdentityRepository::new(server.database.clone());
+    let member_session = identity
+        .authenticate_session(&users.member, TimestampMillis::now())
+        .await
+        .unwrap()
+        .id;
+    let document = DocKey::page(id.parse().unwrap());
+    let expired = SocketTickets::new(&[1; 32]).issue(
+        member_session,
+        document,
+        TimestampMillis::from_millis(TimestampMillis::now().as_millis() - 1),
+    );
+    let foreign_key = SocketTickets::new(&[2; 32]).issue(
+        member_session,
+        document,
+        TimestampMillis::from_millis(TimestampMillis::now().as_millis() + 60_000),
+    );
+    // A ticket asked for another page (that the member can open) or for a task with this id.
+    let other = create_page(&server, &users, &users.owner, json!({"title": "Other"}), "").await;
+    let other_page = server
+        .socket_ticket(&users.member, "page", other["id"].as_str().unwrap())
+        .await;
+    let as_task = server.socket_ticket(&users.member, "task", id).await;
+    for ticket in [
+        altered.as_str(),
+        &expired,
+        &foreign_key,
+        &other_page,
+        &as_task,
+        "x",
+        "",
+    ] {
+        assert_eq!(
+            server.socket(&url(ticket), None, Some("null")).await.err(),
+            Some(401),
+            "{ticket}"
+        );
+    }
+    // The ticket of a session that signed out.
+    let (_, session) = add_user(&server, Some(&users.workspace), "pat@example.com", "Pat").await;
+    let ticket = server.socket_ticket(&session, "page", id).await;
+    assert!(
+        server
+            .socket(&url(&ticket), None, Some("null"))
+            .await
+            .is_ok()
+    );
+    let (status, _) = server
+        .api(&session, "POST", "/api/v1/auth/logout", None)
+        .await;
+    assert_eq!(status, 204);
+    assert_eq!(
+        server.socket(&url(&ticket), None, Some("null")).await.err(),
+        Some(401)
+    );
+    // Outside a co-editing socket a ticket does not lift the Origin rule.
+    let ticket = server.socket_ticket(&users.member, "page", id).await;
+    let live = format!(
+        "{}/api/v1/workspaces/{}/live?ticket={ticket}",
+        server.base.replacen("http", "ws", 1),
+        users.workspace
+    );
+    assert_eq!(
+        server.socket(&live, None, Some("null")).await.err(),
+        Some(403)
     );
     server.stop().await;
 }
@@ -1366,5 +1513,472 @@ async fn a_page_write_past_the_memory_budget_is_busy() {
         .await;
     assert_eq!(status, 503, "{body}");
     assert_eq!(body["code"], "page_busy");
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn a_read_only_cloud_workspace_syncs_documents_but_drops_edits() {
+    let root = TempDir::new().unwrap();
+    let mut config = app_config(&root);
+    config.billing = Some(orbit_platform::BillingConfig::new(
+        orbit_platform::Secret::new("sk_test_unused"),
+        orbit_platform::Secret::new("whsec_unused"),
+        vec![orbit_platform::Plan {
+            key: "team".to_owned(),
+            price_id: "price_team".to_owned(),
+        }],
+    ));
+    let server = Server::start_with(config, fast_config()).await;
+    let users = setup(&server).await;
+    // Not the exempt root workspace and past its trial, so without a subscription it is read-only.
+    sqlx::query("UPDATE workspaces SET created_at = 0, billing_exempt = 0 WHERE id = $1")
+        .bind(&users.workspace)
+        .execute(server.database.pool())
+        .await
+        .unwrap();
+    let set_status = |status: &'static str| {
+        let database = server.database.clone();
+        let workspace = users.workspace.clone();
+        async move {
+            sqlx::query(
+                "INSERT INTO workspace_subscriptions (workspace_id, stripe_customer_id, status, updated_at) \
+                 VALUES ($1, 'cus_test', $2, 0) \
+                 ON CONFLICT (workspace_id) DO UPDATE SET status = excluded.status",
+            )
+            .bind(workspace)
+            .bind(status)
+            .execute(database.pool())
+            .await
+            .unwrap();
+        }
+    };
+    set_status("active").await;
+    let page = create_page(
+        &server,
+        &users,
+        &users.owner,
+        json!({"title": "Paid"}),
+        "abc",
+    )
+    .await;
+    let id = page["id"].as_str().unwrap();
+    let mut editing = Client::open(&server, &users, &users.owner, id).await;
+
+    set_status("canceled").await;
+    assert_eq!(
+        editing.wait_close().await,
+        4402,
+        "an editing socket closes once the workspace is read-only"
+    );
+    let mut a = Client::open(&server, &users, &users.owner, id).await;
+    let mut b = Client::open(&server, &users, &users.member, id).await;
+    assert_eq!(
+        b.text(),
+        "abc",
+        "a read-only workspace still syncs the document"
+    );
+    b.type_text(3, "X").await;
+    assert!(
+        !a.pump(Duration::from_millis(1200), |client, _| client.text()
+            != "abc"
+            || client.closed.is_some())
+            .await,
+        "edits from a read-only workspace are not broadcast, and read-only sockets stay open \
+         past the access recheck"
+    );
+    assert_eq!(b.closed, None);
+    let stored = get_page(&server, &users, &users.owner, id).await;
+    assert_eq!(stored["content"][0]["content"][0]["text"], "abc");
+    let c = Client::open(&server, &users, &users.owner, id).await;
+    assert_eq!(
+        c.text(),
+        "abc",
+        "edits from a read-only workspace are not applied"
+    );
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn a_lapsed_subscription_closes_editing_sockets_on_every_server() {
+    let Some(database) = shared_postgres::SharedDatabase::create().await else {
+        return; // several servers need a Postgres database
+    };
+    // No periodic recheck within the test: only the cluster message can close the socket.
+    let config = || CollabConfig {
+        recheck_interval: Duration::from_secs(600),
+        ..fast_config()
+    };
+    let billing = || {
+        Some(orbit_platform::BillingConfig::new(
+            orbit_platform::Secret::new("sk_test_unused"),
+            orbit_platform::Secret::new("whsec_unused"),
+            vec![orbit_platform::Plan {
+                key: "team".to_owned(),
+                price_id: "price_team".to_owned(),
+            }],
+        ))
+    };
+    let (root_one, root_two) = (TempDir::new().unwrap(), TempDir::new().unwrap());
+    let shared = |root: &TempDir| {
+        let mut app = app_config(root);
+        app.data.database_url = Some(database.url.clone());
+        app.app_key = Some(shared_postgres::APP_KEY.parse().unwrap());
+        app.billing = billing();
+        app
+    };
+    let one = Server::start_with(shared(&root_one), config()).await;
+    let users = setup(&one).await;
+    let two = Server::start_with(shared(&root_two), config()).await;
+    let workspace: Id = users.workspace.parse().unwrap();
+    // Not the exempt root workspace and past its trial, so without a subscription it is read-only.
+    sqlx::query("UPDATE workspaces SET created_at = 0, billing_exempt = 0 WHERE id = $1")
+        .bind(&users.workspace)
+        .execute(one.database.pool())
+        .await
+        .unwrap();
+    let subscription = |status: &str| SubscriptionSnapshot {
+        customer_id: "cus_test".to_owned(),
+        subscription_id: "sub_test".to_owned(),
+        plan: Some("team".to_owned()),
+        status: status.to_owned(),
+        cancel_at_period_end: false,
+        current_period_end: None,
+    };
+    billing_repository::apply_subscription(
+        &one.database,
+        workspace,
+        &subscription("active"),
+        TimestampMillis::now(),
+    )
+    .await
+    .unwrap();
+    let page = create_page(&one, &users, &users.owner, json!({"title": "Pad"}), "x").await;
+    let id = page["id"].as_str().unwrap();
+    let mut editing = Client::open(&two, &users, &users.member, id).await;
+
+    billing_repository::apply_subscription(
+        &one.database,
+        workspace,
+        &subscription("canceled"),
+        TimestampMillis::now(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        editing.wait_close().await,
+        4402,
+        "the other server closes its editing socket"
+    );
+    let reconnected = Client::open(&two, &users, &users.member, id).await;
+    assert_eq!(reconnected.text(), "x", "the client reconnects read-only");
+    one.stop().await;
+    two.stop().await;
+    database.drop().await;
+}
+
+#[tokio::test]
+async fn updates_waiting_for_a_missing_dependency_count_against_the_document_limit() {
+    let root = TempDir::new().unwrap();
+    let server = Server::start(
+        &root,
+        CollabConfig {
+            max_frame_bytes: 64 * 1024,
+            max_doc_bytes: 128 * 1024,
+            ..fast_config()
+        },
+    )
+    .await;
+    let users = setup(&server).await;
+    let page = create_page(&server, &users, &users.owner, json!({"title": "Gap"}), "g").await;
+    let id = page["id"].as_str().unwrap();
+    let mut client = Client::open(&server, &users, &users.member, id).await;
+
+    // A second client id whose first edit never reaches the server: every later edit of it
+    // depends on that one, so yrs keeps them pending and no delta is produced.
+    let ghost = new_doc(None);
+    let state = client
+        .doc
+        .transact()
+        .encode_state_as_update_v1(&Default::default());
+    ghost
+        .transact_mut()
+        .apply_update(Update::decode_v1(&state).unwrap())
+        .unwrap();
+    let edit = |text: &str| {
+        let before = ghost.transact().state_vector();
+        {
+            let mut txn = ghost.transact_mut();
+            paragraph_text(&ghost, &mut txn, 0).insert(&mut txn, 0, text);
+        }
+        ghost.transact().encode_state_as_update_v1(&before)
+    };
+    let _withheld = edit("a");
+    let gapped: Vec<Vec<u8>> = (0..4).map(|_| edit(&"z".repeat(40 * 1024))).collect();
+
+    // What yrs does with them: pending, not integrated, no update event.
+    let probe = new_doc(None);
+    probe
+        .transact_mut()
+        .apply_update(Update::decode_v1(&state).unwrap())
+        .unwrap();
+    let events = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counter = Arc::clone(&events);
+    probe
+        .observe_update_v1("probe", move |_, _| {
+            counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        })
+        .unwrap();
+    for update in &gapped {
+        probe
+            .transact_mut()
+            .apply_update(Update::decode_v1(update).unwrap())
+            .unwrap();
+    }
+    assert!(probe.transact().has_missing_updates());
+    assert_eq!(events.load(std::sync::atomic::Ordering::Relaxed), 0);
+
+    for update in gapped {
+        client
+            .send(Message::Sync(SyncMessage::Update(update)))
+            .await;
+    }
+    assert_eq!(client.wait_close().await, 4413);
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn too_deeply_nested_updates_are_refused_and_the_room_reloads_without_them() {
+    let root = TempDir::new().unwrap();
+    let server = Server::start(&root, fast_config()).await;
+    let users = setup(&server).await;
+    let page = create_page(&server, &users, &users.owner, json!({"title": "Deep"}), "d").await;
+    let id = page["id"].as_str().unwrap();
+    let mut owner = Client::open(&server, &users, &users.owner, id).await;
+    let mut member = Client::open(&server, &users, &users.member, id).await;
+    owner.type_text(1, "keep").await;
+    assert!(
+        member
+            .pump(Duration::from_secs(5), |client, _| client.text() == "dkeep")
+            .await
+    );
+
+    // 100 nested blocks (200 elements) each time: every update alone passes the check before
+    // applying; the second one takes the document past the 256 elements it may reach.
+    let nest = |txn: &mut TransactionMut| {
+        let fragment = txn.get_xml_fragment(FRAGMENT).unwrap();
+        let Some(XmlOut::Element(group)) = fragment.get(txn, 0) else {
+            panic!("no block group")
+        };
+        let Some(XmlOut::Element(mut container)) = group.get(txn, 0) else {
+            panic!("no block")
+        };
+        while let Some(XmlOut::Element(group)) = container.get(txn, 1) {
+            let Some(XmlOut::Element(inner)) = group.get(txn, 0) else {
+                break;
+            };
+            container = inner;
+        }
+        for _ in 0..100 {
+            let group = container.push_back(txn, yrs::XmlElementPrelim::empty("blockGroup"));
+            container = group.push_back(txn, yrs::XmlElementPrelim::empty("blockContainer"));
+            let paragraph = container.push_back(txn, yrs::XmlElementPrelim::empty("paragraph"));
+            paragraph.push_back(txn, yrs::XmlTextPrelim::new("x"));
+        }
+    };
+    let xs = |client: &Client| client.text().matches('x').count();
+    member.edit(|_, txn| nest(txn)).await;
+    assert!(
+        owner
+            .pump(Duration::from_secs(5), |client, _| xs(client) == 100)
+            .await
+    );
+    member.edit(|_, txn| nest(txn)).await;
+    assert_eq!(member.wait_close().await, 4413);
+    assert_eq!(owner.wait_close().await, 1012, "the room reloads");
+    assert_eq!(xs(&owner), 100, "nobody else received it");
+
+    let fresh = Client::open(&server, &users, &users.owner, id).await;
+    assert!(
+        fresh.text().starts_with("dkeep"),
+        "the edits before it are kept"
+    );
+    assert_eq!(xs(&fresh), 100);
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn mentions_are_repaired_live_in_any_update() {
+    let root = TempDir::new().unwrap();
+    // No projection (which repairs too) within the test.
+    let server = Server::start(
+        &root,
+        CollabConfig {
+            project_idle: Duration::from_secs(600),
+            project_max_delay: Duration::from_secs(600),
+            ..fast_config()
+        },
+    )
+    .await;
+    let users = setup(&server).await;
+    let page = create_page(&server, &users, &users.owner, json!({"title": "M"}), "m").await;
+    let id = page["id"].as_str().unwrap();
+    let mut owner = Client::open(&server, &users, &users.owner, id).await;
+    let mut member = Client::open(&server, &users, &users.member, id).await;
+    let mentions = |doc: &Doc| {
+        let mut txn = doc.transact_mut();
+        block_element(&mut txn, 0)
+            .children(&txn)
+            .filter(|child| matches!(child, XmlOut::Element(element) if element.tag().as_ref() == "mention"))
+            .count()
+    };
+    // Neither `link` nor `url` in this update.
+    member
+        .edit(|_, txn| {
+            let paragraph = block_element(txn, 0);
+            let mention = paragraph.push_back(txn, yrs::XmlElementPrelim::empty("mention"));
+            mention.insert_attribute(txn, "userId", "not-a-user");
+            mention.insert_attribute(txn, "name", "Mallory");
+        })
+        .await;
+    assert_eq!(mentions(&member.doc), 1);
+    assert!(
+        member
+            .pump(Duration::from_secs(5), |client, _| mentions(&client.doc)
+                == 0)
+            .await,
+        "the server removes the mention"
+    );
+    assert!(
+        owner
+            .pump(Duration::from_secs(2), |client, _| client.text() == "m"
+                && mentions(&client.doc) == 0)
+            .await
+    );
+    server.stop().await;
+}
+
+/// A second client id on `client`'s document, for hand-made updates the client's own document
+/// never applies (yrs would recurse over them there too).
+fn ghost_of(client: &Client) -> Doc {
+    let ghost = new_doc(None);
+    let state = client
+        .doc
+        .transact()
+        .encode_state_as_update_v1(&Default::default());
+    ghost
+        .transact_mut()
+        .apply_update(Update::decode_v1(&state).unwrap())
+        .unwrap();
+    ghost
+}
+
+/// Nests `levels` more elements in the ghost's first paragraph (inside the last one `tip`
+/// names), returning the update and the new tip.
+fn nest(
+    ghost: &Doc,
+    tip: Option<yrs::XmlElementRef>,
+    levels: usize,
+) -> (Vec<u8>, yrs::XmlElementRef) {
+    let before = ghost.transact().state_vector();
+    let tip = {
+        let mut txn = ghost.transact_mut();
+        let mut node = match tip {
+            Some(tip) => tip,
+            None => block_element(&mut txn, 0),
+        };
+        for _ in 0..levels {
+            node = node.push_back(&mut txn, yrs::XmlElementPrelim::empty("x"));
+        }
+        node
+    };
+    (ghost.transact().encode_state_as_update_v1(&before), tip)
+}
+
+/// A v1 update that only deletes `id`.
+fn delete_only(id: yrs::ID) -> Vec<u8> {
+    use yrs::updates::encoder::Encode;
+    let mut deletes = yrs::IdSet::default();
+    deletes.insert(id, 1);
+    let mut update = vec![0];
+    update.extend(deletes.encode_v1());
+    update
+}
+
+async fn assert_alive(server: &Server, users: &Users, id: &str, text: &str) {
+    let fresh = Client::open(server, users, &users.owner, id).await;
+    assert_eq!(fresh.text(), text, "the server still serves the page");
+}
+
+#[tokio::test]
+async fn updates_that_would_make_yrs_recurse_too_deep_are_refused_before_yrs_reads_them() {
+    let root = TempDir::new().unwrap();
+    let server = Server::start(&root, fast_config()).await;
+    let users = setup(&server).await;
+    let page = create_page(&server, &users, &users.owner, json!({"title": "R"}), "r").await;
+    let id = page["id"].as_str().unwrap();
+
+    // One update: a chain 20 000 elements deep and the deletion of its root (yrs deletes and
+    // collects a subtree recursively).
+    let mut client = Client::open(&server, &users, &users.member, id).await;
+    let ghost = ghost_of(&client);
+    let root_id = yrs::ID::new(
+        ghost.client_id(),
+        ghost.transact().state_vector().get(&ghost.client_id()),
+    );
+    let (chain, _) = nest(&ghost, None, 20_000);
+    let update = yrs::merge_updates_v1([chain, delete_only(root_id)]).unwrap();
+    client
+        .send(Message::Sync(SyncMessage::Update(update)))
+        .await;
+    assert_eq!(client.wait_close().await, 4413);
+    assert_alive(&server, &users, id, "r").await;
+
+    // The same chain in pieces yrs holds back (they nest inside an element it has not seen),
+    // then that element with the deletion: everything would integrate, and be deleted, at once.
+    let mut client = Client::open(&server, &users, &users.member, id).await;
+    let ghost = ghost_of(&client);
+    let (withheld, withheld_tip) = nest(&ghost, None, 1);
+    let root_id = yrs::ID::new(
+        ghost.client_id(),
+        ghost.transact().state_vector().get(&ghost.client_id()),
+    );
+    let mut tip = Some(withheld_tip);
+    let mut closed = None;
+    for _ in 0..100 {
+        let (piece, next) = nest(&ghost, tip, 200);
+        tip = Some(next);
+        client.send(Message::Sync(SyncMessage::Update(piece))).await;
+        if client
+            .pump(Duration::from_millis(20), |client, _| {
+                client.closed.is_some()
+            })
+            .await
+        {
+            closed = client.closed;
+            break;
+        }
+    }
+    if closed.is_none() {
+        let update = yrs::merge_updates_v1([withheld, delete_only(root_id)]).unwrap();
+        client
+            .send(Message::Sync(SyncMessage::Update(update)))
+            .await;
+        closed = Some(client.wait_close().await);
+    }
+    assert_eq!(closed, Some(4413));
+    assert_alive(&server, &users, id, "r").await;
+
+    // An attribute value 100 000 arrays deep (yrs decodes `Any` recursively).
+    let mut client = Client::open(&server, &users, &users.member, id).await;
+    let mut update = vec![1, 1, 7, 0, 8, 1, 1, b'x', 1];
+    for _ in 0..100_000 {
+        update.extend([117, 1]);
+    }
+    update.extend([126, 0]);
+    client
+        .send(Message::Sync(SyncMessage::Update(update)))
+        .await;
+    assert_eq!(client.wait_close().await, 4413);
+    assert_alive(&server, &users, id, "r").await;
     server.stop().await;
 }

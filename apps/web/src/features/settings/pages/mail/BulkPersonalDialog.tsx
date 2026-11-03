@@ -1,6 +1,6 @@
 import { useId, useState } from 'react'
 import { toast } from 'sonner'
-import type { MailDomain, MailNamePattern } from '@/api/generated/types.gen'
+import type { MailDomain, MailNamePattern } from '@orbit/api/generated/types.gen'
 import { Modal } from '@/components/common/Modal'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

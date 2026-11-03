@@ -1,23 +1,25 @@
 //! Postgres snapshots: the rows of every table, written with `COPY` inside one `REPEATABLE READ`
 //! transaction (so all tables show the same moment), and restored into a schema rebuilt from the
-//! migrations of the snapshot's version. Postgres runs DDL in transactions, so a restore either
+//! migrations of the snapshot's version. Each table file is zstd-compressed; snapshots written
+//! before that hold plain `<table>.copy` files, which restore still reads. Postgres runs DDL in transactions, so a restore either
 //! replaces the whole database or changes nothing.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+use async_compression::tokio::{bufread::ZstdDecoder, write::ZstdEncoder};
 use futures_util::TryStreamExt;
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::{PgPool, Postgres};
 use sqlx::{Row, Transaction};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio_util::sync::CancellationToken;
 
-use super::crypto::DataKey;
+use super::crypto::{DataKey, Opener, Sealer};
 use super::{BackupError, check_cancelled, io_error};
 use crate::{Backend, Migration, db::metadata_table_sql};
 
-/// The snapshot directory with one `<table>.copy` file per table and [`TABLES_FILE`].
+/// The snapshot directory with one `<table>.copy.zst` file per table and [`TABLES_FILE`].
 pub(super) const DATABASE_DIRECTORY: &str = "database";
 const TABLES_FILE: &str = "tables.json";
 
@@ -48,11 +50,13 @@ pub(super) async fn dump(
     let tables = tables(&mut transaction).await?;
     for table in &tables {
         check_cancelled(cancellation)?;
-        let name = format!("{}.copy", table.table);
+        let name = format!("{}.copy.zst", table.table);
         let path = directory.join(&name);
         let mut file = tokio::fs::File::create(&path)
             .await
             .map_err(|source| io_error(&path, source))?;
+        // compressed first, then encrypted: the zstd output is drained after each chunk
+        let mut encoder = ZstdEncoder::new(Vec::new());
         let mut sealer = key.map(|key| key.sealer(&snapshot_path(&name)));
         let mut sealed = Vec::new();
         let mut rows = transaction
@@ -64,19 +68,20 @@ pub(super) async fn dump(
             .await
             .map_err(BackupError::Postgres)?;
         while let Some(chunk) = rows.try_next().await.map_err(BackupError::Postgres)? {
-            let bytes = match &mut sealer {
-                Some(sealer) => {
-                    sealed.clear();
-                    sealer.update(&chunk, &mut sealed)?;
-                    &sealed[..]
-                }
-                None => &chunk[..],
-            };
-            file.write_all(bytes)
+            encoder
+                .write_all(&chunk)
                 .await
                 .map_err(|source| io_error(&path, source))?;
+            let compressed = std::mem::take(encoder.get_mut());
+            write_sealed(&mut file, &path, sealer.as_mut(), &compressed, &mut sealed).await?;
         }
         drop(rows);
+        encoder
+            .shutdown()
+            .await
+            .map_err(|source| io_error(&path, source))?;
+        let rest = std::mem::take(encoder.get_mut());
+        write_sealed(&mut file, &path, sealer.as_mut(), &rest, &mut sealed).await?;
         if let Some(sealer) = sealer {
             sealed.clear();
             sealer.finish(&mut sealed)?;
@@ -187,11 +192,7 @@ pub(super) async fn restore(
     let order = load_order(&mut transaction, &copies).await?;
     set_user_triggers(&mut transaction, &order, "DISABLE").await?;
     for copy in &order {
-        let name = format!("{}.copy", copy.table);
-        let path = directory.join(&name);
-        let mut file = tokio::fs::File::open(&path)
-            .await
-            .map_err(|source| io_error(&path, source))?;
+        let file = open_table(directory, &copy.table, key).await?;
         let mut sink = transaction
             .copy_in_raw(&format!(
                 "COPY {} ({}) FROM STDIN",
@@ -200,36 +201,7 @@ pub(super) async fn restore(
             ))
             .await
             .map_err(BackupError::Postgres)?;
-        match key {
-            None => {
-                sink.read_from(file).await.map_err(BackupError::Postgres)?;
-            }
-            // Decrypted a piece at a time: a table is never held in memory.
-            Some(key) => {
-                let mut opener = key.opener(&snapshot_path(&name));
-                let mut buffer = vec![0_u8; 256 * 1024];
-                let mut opened = Vec::new();
-                loop {
-                    let read = file
-                        .read(&mut buffer)
-                        .await
-                        .map_err(|source| io_error(&path, source))?;
-                    if read == 0 {
-                        break;
-                    }
-                    opener.update(&buffer[..read], &mut opened)?;
-                    if !opened.is_empty() {
-                        sink.send(std::mem::take(&mut opened))
-                            .await
-                            .map_err(BackupError::Postgres)?;
-                    }
-                }
-                opener.finish(&mut opened)?;
-                if !opened.is_empty() {
-                    sink.send(opened).await.map_err(BackupError::Postgres)?;
-                }
-            }
-        }
+        sink.read_from(file).await.map_err(BackupError::Postgres)?;
         sink.finish().await.map_err(BackupError::Postgres)?;
     }
     // Deferred keys (the workspace owner) are checked now: a table with pending checks cannot
@@ -378,6 +350,102 @@ async fn set_user_triggers(
         .map_err(BackupError::Postgres)?;
     }
     Ok(())
+}
+
+/// Writes `bytes` to `file`, sealed when the snapshot is encrypted.
+async fn write_sealed(
+    file: &mut tokio::fs::File,
+    path: &Path,
+    sealer: Option<&mut Sealer>,
+    bytes: &[u8],
+    sealed: &mut Vec<u8>,
+) -> Result<(), BackupError> {
+    let output = match sealer {
+        Some(sealer) => {
+            sealed.clear();
+            sealer.update(bytes, sealed)?;
+            &sealed[..]
+        }
+        None => bytes,
+    };
+    file.write_all(output)
+        .await
+        .map_err(|source| io_error(path, source))
+}
+
+/// The ciphertext of `file` decrypted as it is read, a piece at a time: a table is never held in
+/// memory.
+fn decrypting(file: tokio::fs::File, opener: Opener) -> impl AsyncRead + Unpin + Send {
+    struct Reading {
+        file: tokio::fs::File,
+        opener: Opener,
+        buffer: Vec<u8>,
+    }
+    let to_io = |error: BackupError| std::io::Error::other(error.to_string());
+    let start = Some(Reading {
+        file,
+        opener,
+        buffer: vec![0_u8; 256 * 1024],
+    });
+    let stream =
+        futures_util::stream::try_unfold(start, move |state: Option<Reading>| async move {
+            let Some(mut reading) = state else {
+                return Ok::<_, std::io::Error>(None);
+            };
+            loop {
+                let read = reading.file.read(&mut reading.buffer).await?;
+                let mut opened = Vec::new();
+                if read == 0 {
+                    reading.opener.finish(&mut opened).map_err(to_io)?;
+                    return Ok(Some((tokio_util::bytes::Bytes::from(opened), None)));
+                }
+                reading
+                    .opener
+                    .update(&reading.buffer[..read], &mut opened)
+                    .map_err(to_io)?;
+                if !opened.is_empty() {
+                    return Ok(Some((
+                        tokio_util::bytes::Bytes::from(opened),
+                        Some(reading),
+                    )));
+                }
+            }
+        });
+    tokio_util::io::StreamReader::new(Box::pin(stream))
+}
+
+/// The rows of `table`, decrypted (with `key`) and decompressed: `<table>.copy.zst`, or
+/// `<table>.copy` in older snapshots.
+pub(super) async fn open_table(
+    directory: &Path,
+    table: &str,
+    key: Option<&DataKey>,
+) -> Result<Box<dyn AsyncRead + Unpin + Send>, BackupError> {
+    let compressed = directory.join(format!("{table}.copy.zst"));
+    let (path, zstd) = if tokio::fs::try_exists(&compressed)
+        .await
+        .map_err(|source| io_error(&compressed, source))?
+    {
+        (compressed, true)
+    } else {
+        (directory.join(format!("{table}.copy")), false)
+    };
+    let file = tokio::fs::File::open(&path)
+        .await
+        .map_err(|source| io_error(&path, source))?;
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let plain: Box<dyn AsyncRead + Unpin + Send> = match key {
+        Some(key) => Box::new(decrypting(file, key.opener(&snapshot_path(&name)))),
+        None => Box::new(file),
+    };
+    Ok(if zstd {
+        Box::new(ZstdDecoder::new(BufReader::new(plain)))
+    } else {
+        plain
+    })
 }
 
 fn quote(identifier: &str) -> String {

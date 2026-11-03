@@ -1,4 +1,4 @@
-import { SearchNormal as Search } from 'reicon-react'
+import { Search4 as Search } from 'reicon-react'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
 
 /** Quick search: local to the page, never saved into a view (a saved text filter is `text contains`). */

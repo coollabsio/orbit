@@ -6,7 +6,14 @@
 /* BlockNote's shadcn menus use Tailwind classes from its compiled bundle; scan it so they get generated. */
 @source "../node_modules/@blocknote/shadcn";
 
-@custom-variant dark (&:is(.dark *));
+/* `.light` inside `.dark` (the custom theme on a light sidebar) switches the dark styles off again */
+@custom-variant dark (&:is(.dark *):not(:where(.light *)));
+
+/* Account settings → Appearance (lib/theme.tsx): Style → Flat, and Navigation style → Floating */
+@custom-variant flat (&:where([data-flat] *));
+@custom-variant floating (&:where([data-floating] *));
+/* Account settings → Appearance → Layout → New UI. `:is`, so `new-ui:dark:` beats a plain `dark:` */
+@custom-variant new-ui (&:is([data-new-ui] *));
 
 /* hover-only affordances (e.g. relation × buttons): real hover and a fine pointer; touch keeps them visible */
 @custom-variant hover-fine {
@@ -26,6 +33,14 @@
     --color-sidebar-primary: var(--sidebar-primary);
     --color-sidebar-foreground: var(--sidebar-foreground);
     --color-sidebar: var(--sidebar);
+    --color-sidebar-edge: var(--sidebar-edge);
+    --color-sidebar-wash: var(--sidebar-wash);
+    --color-sidebar-nav: var(--sidebar-nav);
+    --color-sidebar-nav-active: var(--sidebar-nav-active);
+    --color-sidebar-nav-muted: var(--sidebar-nav-muted);
+    --color-sidebar-tint: var(--sidebar-tint);
+    --color-sidebar-tint-foreground: var(--sidebar-tint-foreground);
+    --color-sidebar-popover: var(--sidebar-popover);
     --color-chart-5: var(--chart-5);
     --color-chart-4: var(--chart-4);
     --color-chart-3: var(--chart-3);
@@ -91,6 +106,15 @@
     --sidebar-accent-foreground: oklch(0.205 0 0);
     --sidebar-border: oklch(0.922 0 0);
     --sidebar-ring: oklch(0.708 0 0);
+    /* Coolify chrome: a faint neutral right edge in light mode, no brand wash */
+    --sidebar-edge: rgb(0 0 0 / 6%);
+    --sidebar-wash: transparent;
+    --sidebar-nav: oklch(0.4386 0 0);
+    --sidebar-nav-active: oklch(0.2046 0 0);
+    --sidebar-nav-muted: oklch(0.5103 0 0);
+    --sidebar-tint: var(--primary);
+    --sidebar-tint-foreground: var(--primary);
+    --sidebar-popover: var(--popover);
 }
 
 .dark {
@@ -117,7 +141,8 @@
     --chart-3: oklch(0.546 0.245 262.881);
     --chart-4: oklch(0.488 0.243 264.376);
     --chart-5: oklch(0.424 0.199 265.638);
-    --sidebar: oklch(0.205 0 0);
+    /* Coolify's dark sidebar is brand-black (#120e1a); Orbit's brand is pink, so pink-black */
+    --sidebar: oklch(0.17 0.018 359);
     --sidebar-foreground: oklch(0.985 0 0);
     --sidebar-primary: oklch(0.659 0.216 358.989);
     --sidebar-primary-foreground: oklch(1 0 0);
@@ -125,6 +150,24 @@
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
+    /* the pink counterparts of Coolify's lavender (#a391ff, #b9adff) and its tinted sidebar menus */
+    --sidebar-tint: oklch(0.74 0.15 359);
+    --sidebar-tint-foreground: oklch(0.82 0.09 359);
+    --sidebar-edge: oklch(0.74 0.15 359 / 10%);
+    --sidebar-wash: oklch(0.659 0.216 358.989 / 9%);
+    --sidebar-nav: oklch(0.8 0.02 359);
+    --sidebar-nav-active: oklch(0.9612 0 0);
+    --sidebar-nav-muted: oklch(0.58 0.04 359);
+    --sidebar-popover: color-mix(in oklab, var(--primary) 10%, oklch(0.2002 0 0));
+}
+
+/* New UI: the selected row in a side list is the sidebar colour, a bit darker (lighter in dark mode) */
+:root[data-new-ui] {
+    --sidebar-accent: color-mix(in oklch, var(--sidebar), black 6%);
+}
+
+:root.dark[data-new-ui] {
+    --sidebar-accent: color-mix(in oklch, var(--sidebar), white 9%);
 }
 
 @layer base {
@@ -561,4 +604,14 @@ img.ProseMirror-separator {
 
 .ProseMirror-focused .ProseMirror-gapcursor {
   display: block;
+}
+
+/* BlockNote pins its touch formatting toolbar (portaled to <body>) above the on-screen keyboard, which is where iOS
+   scrolls the field being typed in, so the toolbar covers it. Pin it to the top of the visual viewport instead, over
+   the page header. Same `--bn-vv-*` variables BlockNote publishes; `html` outranks its unlayered rule. */
+html .bn-mobile-formatting-toolbar {
+  transform: translate(var(--bn-vv-left, 0px), var(--bn-vv-top, 0px)) scale(calc(1 / var(--bn-vv-scale, 1)));
+  transform-origin: left top;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: 0;
 }

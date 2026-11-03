@@ -1,6 +1,5 @@
 export type ConsentProject = { id: string; name: string; workspace_id: string; workspace_name: string }
 export type OAuthConsent = { client_name: string; scope: string; csrf_token: string; projects: ConsentProject[] }
-export type OAuthConnection = { id: string; client_name: string; workspace_name: string; project_names: string[]; scope: string; created_at: number }
 
 export async function oauthRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, { credentials: 'same-origin', ...init })

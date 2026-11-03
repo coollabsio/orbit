@@ -59,7 +59,19 @@ async fn development_app_accepts_distinct_http_origins_but_still_requires_one() 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{origin}");
     }
 
-    let missing = app.router().oneshot(login_request(None)).await.unwrap();
+    // Native clients sign in without an Origin; other mutations still need one.
+    let native = app.router().oneshot(login_request(None)).await.unwrap();
+    assert_eq!(native.status(), StatusCode::UNAUTHORIZED);
+    let missing = app
+        .router()
+        .oneshot(
+            Request::post("/api/v1/auth/recovery/request")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(r#"{"email":"owner@example.com"}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     assert_eq!(missing.status(), StatusCode::FORBIDDEN);
 }
 
@@ -193,7 +205,7 @@ async fn app_build_migrates_checks_readiness_and_returns_first_run_setup_url() {
             .scalar::<i64>("SELECT MAX(version) FROM schema_migrations")
             .await
             .unwrap(),
-        56
+        66
     );
 
     let readiness = app
@@ -497,12 +509,15 @@ async fn installation_admin_can_create_an_online_backup() {
     assert_eq!(download.headers()[header::CONTENT_TYPE], "application/zip");
     let bytes = download.into_body().collect().await.unwrap().to_bytes();
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes)).unwrap();
-    let names: Vec<String> = archive.file_names().map(str::to_owned).collect();
+    let names: Vec<String> = archive
+        .file_names()
+        .map(|name| name.unwrap().into_owned())
+        .collect();
     assert!(names.contains(&format!("{id}/manifest.json")));
     // A Postgres snapshot holds the `COPY` rows of every table instead of the SQLite file. The archive keeps the
     // files encrypted, so `orbit backup restore` with the same app key restores it.
     let database_file = if orbit_platform::testing_postgres() {
-        format!("{id}/database/users.copy")
+        format!("{id}/database/users.copy.zst")
     } else {
         format!("{id}/database.sqlite")
     };

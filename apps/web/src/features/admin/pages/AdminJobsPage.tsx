@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
-import type { JobLimitView } from '@/api/generated/types.gen'
-import { ApiProblem } from '@/api/problem'
+import type { JobLimitView } from '@orbit/api/generated/types.gen'
+import { ApiProblem } from '@orbit/api/problem'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
@@ -12,6 +12,7 @@ import { SettingsRow } from '@/features/settings/components/SettingsParts'
 const KIND_LABELS: Record<string, string> = {
   'notion.scan': 'Notion scans',
   'notion.import': 'Notion imports',
+  'workspace.export': 'Workspace exports',
 }
 
 type Draft = Record<string, { concurrency: string; workspace_concurrency: string }>

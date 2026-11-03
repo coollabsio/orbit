@@ -1,6 +1,6 @@
 use orbit_domain::Actor;
 use orbit_platform::{
-    AuthorizedAttachment, Backend, BlobDownload, Database, Id, NewAttachmentReference, Row,
+    AuthorizedAttachment, Backend, BlobDownload, Database, Flag, Id, NewAttachmentReference, Row,
     StagedUpload, TimestampMillis, UploadError, UploadService,
 };
 use serde::{Deserialize, Serialize};
@@ -31,6 +31,8 @@ pub struct CreatedAttachment {
     pub media_type: String,
     pub byte_size: u64,
     pub created_at: TimestampMillis,
+    /// An admin deleted the stored file; the attachment stays to say so.
+    pub deleted: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -176,7 +178,9 @@ impl AttachmentRepository {
         let rows = if let Some((created_at, id)) = after {
             sqlx::query(
                 "SELECT id, workspace_id, task_id, comment_id, owner_id, display_name, media_type, \
-                 byte_size, created_at FROM attachment_references WHERE workspace_id = $1 AND task_id = $2 \
+                 byte_size, created_at, EXISTS (SELECT 1 FROM attachment_blobs b \
+                 WHERE b.id = attachment_references.blob_id AND b.deleted_at IS NOT NULL) AS deleted \
+                 FROM attachment_references WHERE workspace_id = $1 AND task_id = $2 \
                  AND comment_id IS NOT DISTINCT FROM $3 AND inline = 0 AND (created_at > $4 OR (created_at = $5 AND id > $6)) \
                  ORDER BY created_at, id LIMIT $7",
             )
@@ -192,7 +196,9 @@ impl AttachmentRepository {
         } else {
             sqlx::query(
                 "SELECT id, workspace_id, task_id, comment_id, owner_id, display_name, media_type, \
-                 byte_size, created_at FROM attachment_references WHERE workspace_id = $1 AND task_id = $2 \
+                 byte_size, created_at, EXISTS (SELECT 1 FROM attachment_blobs b \
+                 WHERE b.id = attachment_references.blob_id AND b.deleted_at IS NOT NULL) AS deleted \
+                 FROM attachment_references WHERE workspace_id = $1 AND task_id = $2 \
                  AND comment_id IS NOT DISTINCT FROM $3 AND inline = 0 ORDER BY created_at, id LIMIT $4",
             )
             .bind(workspace_id.to_string())
@@ -357,7 +363,7 @@ impl AttachmentRepository {
     ) -> Result<AuthorizedAttachment, AttachmentRepositoryError> {
         let now = self.database.database_now().await?;
         let row = sqlx::query(
-            "SELECT attachment_blobs.storage_key, attachment_references.media_type, \
+            "SELECT attachment_blobs.storage_key, attachment_blobs.deleted_at, attachment_references.media_type, \
              attachment_references.display_name FROM attachment_references JOIN attachment_blobs \
              ON attachment_blobs.id = attachment_references.blob_id \
              AND attachment_blobs.workspace_id = attachment_references.workspace_id \
@@ -390,6 +396,7 @@ impl AttachmentRepository {
             storage_key: row.try_get("storage_key")?,
             media_type: row.try_get("media_type")?,
             display_name: row.try_get("display_name")?,
+            deleted: row.try_get::<Option<i64>, _>("deleted_at")?.is_some(),
         })
     }
 
@@ -551,6 +558,7 @@ impl AttachmentRepository {
                 media_type: upload.detected_media_type.clone(),
                 byte_size: upload.size_bytes,
                 created_at: finalized.created_at,
+                deleted: false,
             },
             comment,
         ))
@@ -670,6 +678,7 @@ fn attachment_from_row(
         byte_size: u64::try_from(row.try_get::<i64, _>("byte_size")?)
             .map_err(|_| AttachmentRepositoryError::InvalidRecord)?,
         created_at: TimestampMillis::from_millis(row.try_get("created_at")?),
+        deleted: row.try_get::<Flag, _>("deleted")?.0,
     })
 }
 

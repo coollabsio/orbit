@@ -1,6 +1,6 @@
 import type { User } from '@/features/workspaces/models'
 import { formatTaskIdentifier } from '@/lib/taskLinks'
-import type { AttachmentRecord, AuditEvent, CommentRecord, LabelRecord, ProjectRecord, TaskRecord } from '@/api/generated/types.gen'
+import type { AttachmentRecord, AuditEvent, CommentRecord, LabelRecord, ProjectRecord, TaskRecord } from '@orbit/api/generated/types.gen'
 
 export type StatusCategory = 'unstarted' | 'started' | 'completed' | 'cancelled' | 'duplicate'
 export type TaskPriority = 'none' | 'low' | 'medium' | 'high' | 'urgent'
@@ -33,6 +33,8 @@ export interface Attachment {
   mimeType: string
   fileSize: number
   url: string
+  /** An admin deleted the stored file. */
+  deleted?: boolean
 }
 
 export interface TaskComment {
@@ -138,8 +140,12 @@ const RELATION_FALLBACK: Record<string, string> = {
   'task.relation_removed': 'removed relation',
 }
 
+const ACTIVITY_TEXT: Record<string, string> = {
+  'backup.item_restored': 'restored from a backup',
+}
+
 function genericActivityText(action: string): string {
-  return action.split('.').reverse().join(' ')
+  return ACTIVITY_TEXT[action] ?? action.split('.').reverse().join(' ')
 }
 
 /**
@@ -278,6 +284,7 @@ export function taskFromRecord(
     url: attachment.comment_id
       ? `/api/v1/workspaces/${attachment.workspace_id}/tasks/${attachment.task_id}/comments/${attachment.comment_id}/attachments/${attachment.id}/download`
       : `/api/v1/workspaces/${attachment.workspace_id}/tasks/${attachment.task_id}/attachments/${attachment.id}/download`,
+    deleted: attachment.deleted,
   })
   const priority: TaskPriority = ['none', 'low', 'medium', 'high', 'urgent'].includes(record.priority)
     ? record.priority as TaskPriority

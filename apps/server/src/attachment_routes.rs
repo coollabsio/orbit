@@ -139,6 +139,8 @@ pub struct AttachmentRecord {
     pub byte_size: u64,
     #[schema(value_type = String, format = DateTime)]
     pub created_at: TimestampMillis,
+    /// An admin deleted the stored file: show "Deleted file"; its download is a "Deleted file" image (410).
+    pub deleted: bool,
 }
 
 impl From<CreatedAttachment> for AttachmentRecord {
@@ -153,6 +155,7 @@ impl From<CreatedAttachment> for AttachmentRecord {
             media_type: value.media_type,
             byte_size: value.byte_size,
             created_at: value.created_at,
+            deleted: value.deleted,
         }
     }
 }
@@ -807,6 +810,9 @@ pub(crate) fn download_response(download: orbit_platform::BlobDownload) -> Optio
     let content_type = HeaderValue::from_str(&download.metadata.content_type).ok()?;
     let disposition = HeaderValue::from_str(&download.metadata.content_disposition).ok()?;
     let mut response = Response::new(Body::from_stream(ReaderStream::new(download.reader)));
+    if download.deleted {
+        *response.status_mut() = StatusCode::GONE;
+    }
     response.headers_mut().insert(CONTENT_TYPE, content_type);
     response
         .headers_mut()

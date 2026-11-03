@@ -9,8 +9,8 @@ import type {
   MessageRecord,
   ThreadPage as WireThreadPage,
   ThreadStateRecord,
-} from '@/api/generated/types.gen'
-import { ApiProblem } from '@/api/problem'
+} from '@orbit/api/generated/types.gen'
+import { ApiProblem } from '@orbit/api/problem'
 import {
   type Attachment,
   ChatError,
@@ -56,6 +56,7 @@ export function toAttachment(record: ChatFileRecord): Attachment {
     mimeType: record.mime_type,
     fileSize: record.size_bytes,
     url: record.url,
+    deleted: record.deleted,
     ...(record.width !== null && record.height !== null ? { width: record.width, height: record.height } : {}),
   }
 }

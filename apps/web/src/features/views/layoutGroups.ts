@@ -1,4 +1,4 @@
-import type { BulkItem, CreateTaskBody, TaskUpdateBody } from '@/api/generated/types.gen'
+import type { BulkItem, CreateTaskBody, TaskUpdateBody } from '@orbit/api/generated/types.gen'
 import type { Task } from '@/features/tasks/api/models'
 import { statusKeyOf } from '@/features/tasks/taskMeta'
 import { dropUpdate, groupTasks, taskGroupValue, type GroupContext, type TaskGroup } from './grouping'

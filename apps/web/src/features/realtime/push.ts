@@ -1,5 +1,5 @@
 import { apiClient } from '@/api/client'
-import { createPushSubscription, deletePushSubscription, getPushKey, listPushSubscriptions } from '@/api/generated/sdk.gen'
+import { createPushSubscription, deletePushSubscription, getPushKey, listPushSubscriptions } from '@orbit/api/generated/sdk.gen'
 import { appNavigate } from '@/lib/navigateBridge'
 
 /** The server's base64url key as the bytes `pushManager.subscribe` takes. */

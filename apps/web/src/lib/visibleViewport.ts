@@ -59,6 +59,33 @@ function largeViewportProbe() {
   return probe
 }
 
+/** The ancestors that scroll vertically, nearest first, up to (not including) the page. */
+function scrollingPanes(element: HTMLElement): HTMLElement[] {
+  const panes: HTMLElement[] = []
+  for (let parent = element.parentElement; parent && parent !== document.body && parent !== document.documentElement; parent = parent.parentElement) {
+    const overflow = getComputedStyle(parent).overflowY
+    if ((overflow === 'auto' || overflow === 'scroll') && parent.scrollHeight > parent.clientHeight) panes.push(parent)
+  }
+  return panes
+}
+
+/** Scrolls one pane by the least amount that brings the field into view (like `block: 'nearest'`). */
+export function scrollIntoPane(field: HTMLElement, pane: HTMLElement, margin = 0) {
+  const box = field.getBoundingClientRect()
+  const view = pane.getBoundingClientRect()
+  if (box.bottom + margin > view.bottom) pane.scrollTop += Math.min(box.bottom + margin - view.bottom, box.top - view.top)
+  else if (box.top < view.top) pane.scrollTop -= view.top - box.top
+}
+
+/**
+ * `scrollIntoView` for a field above the keyboard, without panning the page: iOS Safari would pan it too, which leaves
+ * the short shell above an empty band. Every scrolling pane around the field moves, nearest first.
+ */
+export function revealField(field: HTMLElement) {
+  for (const pane of scrollingPanes(field)) scrollIntoPane(field, pane, 12)
+  if (window.scrollY || window.visualViewport?.offsetTop) window.scrollTo(0, 0)
+}
+
 /**
  * Keep --app-height in sync when Safari shows or hides its toolbars or the keyboard.
  * `data-keyboard` on the root marks an open keyboard. When the shell gets shorter, the
@@ -82,16 +109,33 @@ export function bindVisibleViewport(
     root.toggleAttribute('data-keyboard', keyboardOpen(input))
     const field = document.activeElement
     if (height < previous && field instanceof HTMLElement && field.matches('input, textarea, [contenteditable="true"]')) {
-      field.scrollIntoView({ block: 'nearest' })
+      // after the shorter shell has laid out
+      requestAnimationFrame(() => revealField(field))
     }
     previous = height
   }
+  // A tapped field comes into view at once, before anything is typed, and again when the keyboard has finished
+  // opening (iOS reports the shorter viewport in steps, and sometimes only at the end).
+  let settle: ReturnType<typeof setTimeout> | undefined
+  const onFocus = (event: FocusEvent) => {
+    const field = event.target
+    if (!(field instanceof HTMLElement) || !field.matches('input, textarea, [contenteditable="true"]')) return
+    if (!window.matchMedia('(pointer: coarse)').matches) return
+    requestAnimationFrame(() => revealField(field))
+    clearTimeout(settle)
+    settle = setTimeout(() => {
+      if (document.activeElement === field) revealField(field)
+    }, 400)
+  }
   apply()
+  document.addEventListener('focusin', onFocus)
   viewport?.addEventListener('resize', apply)
   window.addEventListener('resize', apply)
   window.addEventListener('orientationchange', apply)
   return () => {
     probe.remove()
+    document.removeEventListener('focusin', onFocus)
+    clearTimeout(settle)
     viewport?.removeEventListener('resize', apply)
     window.removeEventListener('resize', apply)
     window.removeEventListener('orientationchange', apply)

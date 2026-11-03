@@ -44,6 +44,7 @@ import { AddRelationMenu, DuplicateBanner, TaskRelationsSection } from './TaskRe
 import { TaskBreadcrumb } from './TaskBreadcrumb'
 import { SubIssuesSection } from './TaskSubIssues'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { useWorkspaceReadOnly } from '@/features/workspaces/billing'
 import { Attachments } from '@/components/common/Attachments'
 import { ActivityFeed } from './ActivityFeed'
 import { TaskCommentComposer } from './TaskCommentComposer'
@@ -71,7 +72,10 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
   const createComment = useCreateTaskComment(workspace.id, task?.id ?? '')
   const deleteTask = useDeleteTask(workspace.id)
   const githubLinks = useTaskGithubLinks(workspace.id, task?.id)
+  const workspaceReadOnly = useWorkspaceReadOnly()
   const githubContentReadOnly = !githubLinks.isSuccess || githubLinks.data.some((link) => link.source)
+  // Orbit Cloud without a subscription: the description socket drops edits, so offer none.
+  const contentReadOnly = githubContentReadOnly || workspaceReadOnly
   const githubSyncPaused = githubLinks.data?.some((link) => link.source && link.state === 'paused')
   const githubPullRequests = githubLinks.data?.filter((link) => link.kind === 'pull_request' && !link.source) ?? []
   // the task is the GitHub issue or pull request it syncs from: the server refuses to move it to another project
@@ -190,11 +194,11 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
             ) : null}
             <TaskTextFields
               task={task}
-              readOnly={githubContentReadOnly}
+              readOnly={contentReadOnly}
               onUpdate={(body) => updateTask.mutate({ taskId: task.id, body: { expected_version: task.version, ...body } })}
               onTitleTab={() => descriptionRef.current?.focus()}
             />
-            <TaskDescriptionEditor ref={descriptionRef} workspaceId={workspace.id} task={task} readOnly={githubContentReadOnly} />
+            <TaskDescriptionEditor ref={descriptionRef} workspaceId={workspace.id} task={task} readOnly={contentReadOnly} />
             {/* files attached before rich text; new files go into the description */}
             {task.attachments.length > 0 ? (
               <div className="mt-2 max-w-[520px]">

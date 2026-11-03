@@ -708,7 +708,6 @@ impl MailRepository {
         workspace_id: Id,
         actor_id: Id,
         domain_id: Id,
-        jobs: &JobStore,
     ) -> Result<bool, MailError> {
         let now = self.database.database_now().await?;
         let mut transaction = self.database.immediate_transaction().await?;
@@ -727,7 +726,7 @@ impl MailRepository {
         if waiting > 0 {
             return Ok(false);
         }
-        jobs.enqueue_in(&mut transaction, &job)
+        JobStore::enqueue_in(&mut transaction, &job)
             .await
             .map_err(|error| match error {
                 orbit_platform::JobStoreError::Database(error) => MailError::Unavailable(error),

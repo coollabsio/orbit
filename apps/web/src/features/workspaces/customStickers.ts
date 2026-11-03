@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
-import { createChatSticker, deleteChatSticker, listChatStickers } from '@/api/generated/sdk.gen'
-import type { CustomStickerRecord } from '@/api/generated/types.gen'
+import { createChatSticker, deleteChatSticker, listChatStickers } from '@orbit/api/generated/sdk.gen'
+import type { CustomStickerRecord } from '@orbit/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 
 /**

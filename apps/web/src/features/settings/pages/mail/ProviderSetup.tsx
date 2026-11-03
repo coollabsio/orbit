@@ -1,4 +1,4 @@
-import type { MailProviderSetup } from '@/api/generated/types.gen'
+import type { MailProviderSetup } from '@orbit/api/generated/types.gen'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Danger } from 'reicon-react'
 import { CopyButton } from './MailDomainRecords'

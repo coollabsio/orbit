@@ -171,11 +171,15 @@ pub struct AuthorizedAttachment {
     pub storage_key: String,
     pub media_type: String,
     pub display_name: String,
+    /// An admin deleted the blob (`attachment_blobs.deleted_at`); there are no bytes to serve.
+    pub deleted: bool,
 }
 
 pub struct BlobDownload {
     pub reader: BlobReader,
     pub metadata: DownloadMetadata,
+    /// The blob was deleted: `reader` is a "Deleted file" image, to send with status 410.
+    pub deleted: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -349,8 +353,17 @@ impl UploadFinalization<'_> {
 }
 
 /// Bytes of files a workspace stores: each blob once, however many references it has. A blob stops counting
-/// when reconcile deletes it, a day after its last reference went (see [`QUARANTINE_MILLIS`]).
-pub const WORKSPACE_STORAGE_USED: &str = "SELECT CAST(COALESCE(SUM(byte_size), 0) AS BIGINT) FROM attachment_blobs WHERE workspace_id = $1";
+/// when reconcile deletes it, a day after its last reference went (see [`QUARANTINE_MILLIS`]), or at once when an
+/// admin deletes it ([`UploadService::delete_blob`]).
+pub const WORKSPACE_STORAGE_USED: &str = "SELECT CAST(COALESCE(SUM(byte_size), 0) AS BIGINT) FROM attachment_blobs WHERE workspace_id = $1 AND deleted_at IS NULL";
+
+/// Served (with status 410) in place of a blob an admin deleted, so an image of it, or a link to it, says so.
+const DELETED_FILE_SVG: &str = concat!(
+    r##"<svg xmlns="http://www.w3.org/2000/svg" width="320" height="80" viewBox="0 0 320 80">"##,
+    r##"<rect x="0.5" y="0.5" width="319" height="79" rx="8" fill="#8881" stroke="#8886"/>"##,
+    r##"<text x="160" y="46" text-anchor="middle" font-family="system-ui,sans-serif" font-size="15" fill="#888">"##,
+    "Deleted file</text></svg>"
+);
 
 /// Refuses a new blob that would take the workspace over `instance_settings.workspace_storage_quota_bytes` (0 is
 /// unlimited). Bytes the workspace already stores cost nothing, as blobs are deduplicated per workspace. Runs in
@@ -629,6 +642,36 @@ impl UploadService {
         Ok(())
     }
 
+    /// Deletes a blob of `workspace_id` for an admin, keeping its references: tasks, pages and chat messages that
+    /// use it then get the "Deleted file" image, and it stops counting toward the workspace's storage at once. Its
+    /// row gets a `deleted:<id>` hash and key, so the same bytes can be uploaded again as a new blob, and reconcile
+    /// removes the stored object as untracked (after the usual quarantine, which also covers a concurrent upload of
+    /// the same bytes). Returns `false` when there is no such live blob, or a profile picture, custom emoji or
+    /// sticker uses it (those are deleted where they are managed).
+    pub async fn delete_blob(&self, workspace_id: Id, blob_id: Id) -> Result<bool, UploadError> {
+        let _operation = self.operations.lock().await;
+        let _mutation = self.mutations.begin().await;
+        let now = self.database.database_now().await?;
+        let tombstone = format!("deleted:{blob_id}");
+        let mut transaction = self.database.immediate_transaction().await?;
+        let deleted = sqlx::query(
+            "UPDATE attachment_blobs SET deleted_at = $1, sha256 = $2, storage_key = $2 \
+             WHERE id = $3 AND workspace_id = $4 AND deleted_at IS NULL \
+             AND NOT EXISTS (SELECT 1 FROM user_avatars WHERE blob_id = $3) \
+             AND NOT EXISTS (SELECT 1 FROM custom_emoji WHERE blob_id = $3) \
+             AND NOT EXISTS (SELECT 1 FROM custom_stickers WHERE blob_id = $3)",
+        )
+        .bind(now.as_millis())
+        .bind(&tombstone)
+        .bind(blob_id.to_string())
+        .bind(workspace_id.to_string())
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+        transaction.commit().await?;
+        Ok(deleted == 1)
+    }
+
     /// The stored bytes of a blob, from the local disk or S3.
     pub async fn read_blob(&self, storage_key: &str) -> Result<Vec<u8>, UploadError> {
         let mut reader = self.store.open(storage_key).await?;
@@ -814,7 +857,7 @@ impl UploadService {
             .map(|object| (object.storage_key.clone(), object))
             .collect();
         let quarantined = sqlx::query(
-            "SELECT id, storage_key FROM attachment_blobs WHERE quarantine_until <= $1",
+            "SELECT id, storage_key, deleted_at FROM attachment_blobs WHERE quarantine_until <= $1",
         )
         .bind(now_millis)
         .fetch_all(self.database.pool())
@@ -822,6 +865,7 @@ impl UploadService {
         for row in quarantined {
             let id: String = row.try_get("id")?;
             let storage_key: String = row.try_get("storage_key")?;
+            let deleted = row.try_get::<Option<i64>, _>("deleted_at")?.is_some();
             blob_inventory.remove(&storage_key);
             let mut transaction = self.database.immediate_transaction().await?;
             let references: i64 = sqlx::query_scalar(BLOB_REFERENCE_COUNT)
@@ -829,7 +873,17 @@ impl UploadService {
                 .bind(&id)
                 .fetch_one(&mut *transaction)
                 .await?;
-            if references == 0 {
+            if references == 0 && deleted {
+                // Its object went when the blob was deleted (reconcile removed it as untracked).
+                result.deleted_blobs += sqlx::query(
+                    "DELETE FROM attachment_blobs WHERE id = $1 AND quarantine_until <= $2",
+                )
+                .bind(&id)
+                .bind(now_millis)
+                .execute(&mut *transaction)
+                .await?
+                .rows_affected();
+            } else if references == 0 {
                 let recently_published = self
                     .store
                     .blob_modified_at(&storage_key)
@@ -913,9 +967,25 @@ impl UploadService {
         Fut: Future<Output = Result<AuthorizedAttachment, UploadError>>,
     {
         let attachment = authorize().await?;
+        if attachment.deleted {
+            return Ok(BlobDownload {
+                reader: Box::pin(std::io::Cursor::new(DELETED_FILE_SVG.as_bytes())),
+                metadata: DownloadMetadata {
+                    content_type: "image/svg+xml".to_owned(),
+                    disposition: ContentDisposition::Inline,
+                    content_disposition: "inline; filename=\"deleted-file.svg\"".to_owned(),
+                    x_content_type_options: "nosniff",
+                },
+                deleted: true,
+            });
+        }
         let metadata = Self::download_metadata(&attachment.media_type, &attachment.display_name);
         let reader = self.store.open(&attachment.storage_key).await?;
-        Ok(BlobDownload { reader, metadata })
+        Ok(BlobDownload {
+            reader,
+            metadata,
+            deleted: false,
+        })
     }
 }
 

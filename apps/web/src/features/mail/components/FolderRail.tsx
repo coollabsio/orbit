@@ -1,7 +1,7 @@
 import type { ComponentType, ReactNode } from 'react'
 import { useNavigate } from 'react-router'
 import { DirectboxDefault, Star } from 'reicon-react'
-import type { MailCounts, MailLabel, MailMeMailbox } from '@/api/generated/types.gen'
+import type { MailCounts, MailLabel, MailMeMailbox } from '@orbit/api/generated/types.gen'
 import { ColorDot } from '@/components/common/ColorDot'
 import { PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { Badge } from '@/components/ui/badge'

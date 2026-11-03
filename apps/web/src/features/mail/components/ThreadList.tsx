@@ -1,7 +1,7 @@
 import { useEffect, useRef, type ComponentType, type ReactNode } from 'react'
 import { useNavigate } from 'react-router'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import type { MailLabel, MailThreadSummary } from '@/api/generated/types.gen'
+import type { MailLabel, MailThreadSummary } from '@orbit/api/generated/types.gen'
 import { PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'

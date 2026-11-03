@@ -107,7 +107,7 @@ export function ActivityFeed({ task, state, onOpenTask }: ActivityFeedProps) {
   }
 
   const renderThread = (thread: CommentThread) => (
-    <div key={thread.root.id} className="my-3 overflow-hidden rounded-[10px] border bg-card">
+    <div key={thread.root.id} className="my-3 overflow-hidden rounded-[10px] border bg-card/50">
       <CommentItem state={state} taskId={task.id} comment={thread.root} />
       {thread.replies.map((reply) => (
         <CommentItem key={reply.id} state={state} taskId={task.id} comment={reply} reply />

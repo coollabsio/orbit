@@ -16,6 +16,7 @@ use serde_json::Value;
 use utoipa::{IntoParams, ToSchema};
 
 use crate::auth_routes::{CookieMode, request_session};
+use crate::repositories::billing::TrialLimitReached;
 use crate::repositories::identity::{AuthenticatedSession, IdentityRepository};
 use crate::repositories::sub_issues::AutoClosed;
 use crate::repositories::task_filter::{
@@ -29,6 +30,7 @@ use crate::repositories::tasks::{
     normalize_project_key,
 };
 use crate::repositories::views::ViewRepository;
+use crate::socket_ticket::SocketTickets;
 
 #[derive(Clone)]
 pub struct TaskState {
@@ -36,6 +38,8 @@ pub struct TaskState {
     tasks: Arc<TaskRepository>,
     pub(crate) views: Arc<ViewRepository>,
     pub(crate) cookie_mode: CookieMode,
+    /// Verifies the tickets of co-editing sockets; `None` refuses every ticket.
+    socket_tickets: Option<SocketTickets>,
 }
 
 impl TaskState {
@@ -47,7 +51,14 @@ impl TaskState {
             views: Arc::new(ViewRepository::new(database)),
             identity,
             cookie_mode,
+            socket_tickets: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_socket_tickets(mut self, socket_tickets: Option<SocketTickets>) -> Self {
+        self.socket_tickets = socket_tickets;
+        self
     }
 
     #[must_use]
@@ -61,6 +72,7 @@ impl TaskState {
             identity,
             tasks,
             cookie_mode,
+            socket_tickets: None,
         }
     }
 }
@@ -1190,11 +1202,13 @@ async fn collab_socket(
     Path((workspace, task)): Path<(String, String)>,
     Query(query): Query<crate::collab::socket::CollabQuery>,
     headers: HeaderMap,
+    read_only: Option<Extension<crate::billing::guard::ReadOnlyWorkspace>>,
     upgrade: WebSocketUpgrade,
 ) -> Response {
     crate::collab::socket::upgrade(
         &state.identity,
         state.cookie_mode,
+        state.socket_tickets.as_ref(),
         state.identity.database(),
         &workspace,
         crate::collab::DocKind::Task,
@@ -1202,6 +1216,7 @@ async fn collab_socket(
         query,
         &headers,
         upgrade,
+        read_only.is_some(),
     )
     .await
 }
@@ -2392,6 +2407,7 @@ pub(crate) fn task_problem(
             instance,
             request_id,
         ),
+        TaskError::TrialLimit(reached) => ApiError::trial_limit(reached, instance, request_id),
         TaskError::Unavailable(_) => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
@@ -2427,7 +2443,7 @@ pub(crate) struct ProblemBody {
     title: &'static str,
     status: u16,
     code: &'static str,
-    detail: &'static str,
+    detail: std::borrow::Cow<'static, str>,
     instance: String,
     request_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2472,7 +2488,7 @@ impl ApiError {
                 title,
                 status: status.as_u16(),
                 code,
-                detail,
+                detail: detail.into(),
                 instance: instance.into(),
                 request_id: request_id
                     .map(|Extension(value)| value.as_str().to_owned())
@@ -2481,6 +2497,24 @@ impl ApiError {
                 path: None,
             }),
         }
+    }
+
+    /// 402 `trial_limit_reached`, as the billing guard words it.
+    pub(crate) fn trial_limit(
+        reached: TrialLimitReached,
+        instance: impl Into<String>,
+        request_id: Option<&Extension<RequestId>>,
+    ) -> Self {
+        let mut error = Self::new(
+            StatusCode::PAYMENT_REQUIRED,
+            "trial_limit_reached",
+            "Trial limit reached",
+            "",
+            instance,
+            request_id,
+        );
+        error.body.detail = reached.detail().into();
+        error
     }
 
     pub(crate) fn version_conflict(

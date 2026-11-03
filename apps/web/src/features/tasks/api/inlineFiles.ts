@@ -1,5 +1,5 @@
 import { apiClient } from '@/api/client'
-import { uploadTaskAttachments } from '@/api/generated/sdk.gen'
+import { uploadTaskAttachments } from '@orbit/api/generated/sdk.gen'
 import { taskAttachmentUrl } from '@/features/docs/editor/content'
 import { shrinkImage } from '@/lib/shrinkImage'
 

@@ -1,4 +1,4 @@
-import type { NotionImport, PageSummary, Teamspace } from '@/api/generated/types.gen'
+import type { NotionImport, PageSummary, Teamspace } from '@orbit/api/generated/types.gen'
 import { pageTitle } from '@/features/docs/pageTree'
 
 /** Where an import's pages went, for the summary ("General", "Private", or "Inside “Roadmap”"). */

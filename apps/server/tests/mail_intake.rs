@@ -9,8 +9,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use orbit_mail::{AuthOutcome, DmarcPolicy, DmarcVerdict, TlsInfo, Verdict};
 use orbit_platform::{
     AttachmentMutationCoordinator, BlobFuture, BlobObject, BlobReader, BlobStore, BlobStoreError,
-    Id, JobStore, LocalBlobStore, StagedUpload, StoredObject, TestDatabase, TimestampMillis,
-    UploadLimits, UploadService,
+    Id, LocalBlobStore, StagedUpload, StoredObject, TestDatabase, TimestampMillis, UploadLimits,
+    UploadService,
 };
 use orbit_server::mail_intake::{
     InboundMessage, IntakeError, MailIntake, Recipient, Source, mail_ingest_kind,
@@ -129,11 +129,7 @@ impl Fixture {
             UploadLimits::default(),
         );
         let mail = Arc::new(MailRepository::new((*database).clone(), uploads, APP_KEY));
-        let intake = MailIntake::new(
-            Arc::clone(&mail),
-            JobStore::new((*database).clone()),
-            max_message_bytes,
-        );
+        let intake = MailIntake::new(Arc::clone(&mail), max_message_bytes);
         Self {
             _root: root,
             database,

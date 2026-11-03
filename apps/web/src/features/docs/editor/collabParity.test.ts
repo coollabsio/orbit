@@ -16,11 +16,12 @@ import { describe, expect, test } from 'bun:test'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { BlockNoteEditor } from '@blocknote/core'
-import { CommentsExtension, DefaultThreadStoreAuth, ThreadStore } from '@blocknote/core/comments'
 import { _blocksToProsemirrorNode, blocksToYXmlFragment, yDocToBlocks } from '@blocknote/core/yjs'
 import { Transform } from '@tiptap/pm/transform'
 import { prosemirrorToYXmlFragment, yXmlFragmentToProseMirrorRootNode } from 'y-prosemirror'
 import * as Y from 'yjs'
+import { commentMarks } from '@orbit/editor/commentMarks'
+import { schemaTable } from '@orbit/editor/schemaTable'
 import { toEditorContent } from './content'
 import { EDITOR_BLOCK_TYPES, pageEditorSchema } from './schema'
 
@@ -37,57 +38,6 @@ type Json = Record<string, unknown>
 
 function editor() {
   return BlockNoteEditor.create({ schema: pageEditorSchema, _tiptapOptions: { injectCSS: false } })
-}
-
-/** Schema facts the Rust converter needs: PM attr order and defaults per block, table cell attrs, style kinds. */
-function schemaTable() {
-  const instance = editor()
-  const pm = instance.pmSchema
-  const blocks: Record<string, unknown> = {}
-  const blockSchema = instance.schema.blockSchema as Record<string, { content: string; propSchema: Json }>
-  for (const type of Object.keys(blockSchema).sort()) {
-    const spec = blockSchema[type]
-    const node = pm.nodes[type]
-    if (!node) continue
-    const created = node.create()
-    const attrs = Object.keys(node.spec.attrs ?? {})
-    blocks[type] = {
-      content: node.spec.code ? 'plain' : spec.content,
-      attrs: attrs.map((name) => ({
-        name,
-        prop: name in spec.propSchema,
-        missing: created.attrs[name] === undefined ? { undefined: true } : { value: created.attrs[name] },
-      })),
-    }
-  }
-  const cell = pm.nodes.tableCell.create()
-  const styles: Record<string, string> = {}
-  const styleSchema = instance.schema.styleSchema as Record<string, { propSchema: string }>
-  for (const name of Object.keys(styleSchema).sort()) styles[name] = styleSchema[name].propSchema
-  // Custom inline content (mentions): PM attr order and defaults; `text` and `link` are built in.
-  const inline: Record<string, unknown> = {}
-  const inlineSchema = instance.schema.inlineContentSchema as Record<string, string | { content: string; propSchema: Json }>
-  for (const type of Object.keys(inlineSchema).sort()) {
-    const spec = inlineSchema[type]
-    const node = pm.nodes[type]
-    if (typeof spec === 'string' || !node) continue
-    const created = node.create()
-    inline[type] = {
-      content: spec.content,
-      attrs: Object.keys(node.spec.attrs ?? {}).map((name) => ({
-        name,
-        prop: name in spec.propSchema,
-        missing: created.attrs[name] === undefined ? { undefined: true } : { value: created.attrs[name] },
-      })),
-    }
-  }
-  return {
-    blocks,
-    inline,
-    cell: { attrs: Object.keys(pm.nodes.tableCell.spec.attrs ?? {}), defaults: cell.attrs },
-    styles,
-    container_attrs: Object.keys(pm.nodes.blockContainer.spec.attrs ?? {}),
-  }
 }
 
 const EXERCISE_PAGE = '0199a0b0-0000-7000-8000-000000000001'
@@ -245,7 +195,7 @@ function writeJson(path: string, value: unknown) {
 
 describe('collaborative converter parity (server Rust port vs BlockNote + y-prosemirror)', () => {
   test('the schema table matches the editor schema', () => {
-    const table = schemaTable()
+    const table = schemaTable(pageEditorSchema)
     if (UPDATE) writeJson(SCHEMA_FILE, table)
     expect(JSON.parse(readFileSync(SCHEMA_FILE, 'utf8'))).toEqual(JSON.parse(JSON.stringify(table)))
   })
@@ -293,31 +243,10 @@ describe('collaborative converter parity (server Rust port vs BlockNote + y-pros
 })
 
 /** A thread store that holds nothing: the parity test only needs the comment mark in the schema. */
-class EmptyThreadStore extends ThreadStore {
-  constructor() {
-    super(new DefaultThreadStoreAuth('user', 'comment'))
-  }
-  addThreadToDocument = undefined
-  createThread = async (): Promise<never> => Promise.reject(new Error('unused'))
-  addComment = async (): Promise<never> => Promise.reject(new Error('unused'))
-  updateComment = async () => {}
-  deleteComment = async () => {}
-  deleteThread = async () => {}
-  resolveThread = async () => {}
-  unresolveThread = async () => {}
-  addReaction = async () => {}
-  deleteReaction = async () => {}
-  getThread = (): never => {
-    throw new Error('unused')
-  }
-  getThreads = () => new Map()
-  subscribe = () => () => {}
-}
-
 function commentEditor() {
   return BlockNoteEditor.create({
     schema: pageEditorSchema,
-    extensions: [CommentsExtension({ threadStore: new EmptyThreadStore(), resolveUsers: async () => [] })],
+    extensions: [commentMarks()],
     _tiptapOptions: { injectCSS: false },
   })
 }

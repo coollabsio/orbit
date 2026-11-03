@@ -8,7 +8,7 @@ import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import type { SavedView } from './api/views'
 import { member } from './testFixtures'
 import { DEFAULT_DISPLAY } from './viewState'
-import type { WorkspaceRole } from '@/api/generated/types.gen'
+import type { WorkspaceRole } from '@orbit/api/generated/types.gen'
 import { testWorkspace } from '@/test/workspace'
 
 function LocationProbe() {

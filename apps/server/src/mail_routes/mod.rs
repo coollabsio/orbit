@@ -17,7 +17,7 @@ use axum::Router;
 use axum::extract::Extension;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::routing::{delete, get, patch, post, put};
-use orbit_platform::{Id, JobStore, MailMode, RequestId};
+use orbit_platform::{Id, MailMode, RequestId};
 
 pub use content::{ViewGrant, ViewKey, ViewPurpose};
 
@@ -44,7 +44,6 @@ pub struct MailSettings {
 pub struct MailState {
     pub(crate) identity: Arc<IdentityRepository>,
     pub(crate) mail: Arc<MailRepository>,
-    pub(crate) jobs: JobStore,
     pub(crate) cookie_mode: CookieMode,
     pub(crate) settings: MailSettings,
     /// Signs the view, part and image proxy URLs of mail content.
@@ -71,7 +70,6 @@ impl MailState {
         settings: MailSettings,
     ) -> Self {
         Self {
-            jobs: JobStore::new(identity.database().clone()),
             view_key: ViewKey::new(mail.app_key()),
             identity,
             mail,

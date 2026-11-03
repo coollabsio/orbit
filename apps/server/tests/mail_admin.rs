@@ -13,9 +13,8 @@ use lettre::transport::smtp::extension::ClientId;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Tokio1Executor};
 use orbit_mail::{AuthOutcome, DmarcVerdict, TlsInfo, Verdict};
 use orbit_platform::{
-    AttachmentMutationCoordinator, AuthenticatedUser, Config, EnvironmentMode, Id, JobStore,
-    LocalBlobStore, MailMode, PasswordService, TestDatabase, TimestampMillis, UploadLimits,
-    UploadService,
+    AttachmentMutationCoordinator, AuthenticatedUser, Config, EnvironmentMode, Id, LocalBlobStore,
+    MailMode, PasswordService, TestDatabase, TimestampMillis, UploadLimits, UploadService,
 };
 use orbit_server::app::App;
 use orbit_server::auth_routes::CookieMode;
@@ -84,11 +83,7 @@ impl Fixture {
             UploadLimits::default(),
         );
         let mail = Arc::new(MailRepository::new((*database).clone(), uploads, APP_KEY));
-        let intake = MailIntake::new(
-            Arc::clone(&mail),
-            JobStore::new((*database).clone()),
-            52_428_800,
-        );
+        let intake = MailIntake::new(Arc::clone(&mail), 52_428_800);
         let dns = FakeDns::new();
         let app = mail_router(
             MailState::new(

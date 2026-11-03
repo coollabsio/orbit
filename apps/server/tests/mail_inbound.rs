@@ -11,8 +11,8 @@ use hmac::{Hmac, Mac};
 use orbit_mail::{Authenticator, StaticDns};
 use orbit_platform::{
     AttachmentMutationCoordinator, BlobFuture, BlobObject, BlobReader, BlobStore, BlobStoreError,
-    Id, JobStore, LocalBlobStore, MailMode, StagedUpload, StoredObject, TestDatabase,
-    TimestampMillis, UploadLimits, UploadService,
+    Id, LocalBlobStore, MailMode, StagedUpload, StoredObject, TestDatabase, TimestampMillis,
+    UploadLimits, UploadService,
 };
 use orbit_server::auth_routes::CookieMode;
 use orbit_server::mail_delivery::ProviderIntake;
@@ -149,7 +149,6 @@ impl Fixture {
         let mail = Arc::new(MailRepository::new((*database).clone(), uploads, APP_KEY));
         let intake = ProviderIntake::new(
             Arc::clone(&mail),
-            JobStore::new((*database).clone()),
             MAX,
             Arc::new(Authenticator::with_static_dns(StaticDns::new()).unwrap()),
             HOSTNAME.to_owned(),

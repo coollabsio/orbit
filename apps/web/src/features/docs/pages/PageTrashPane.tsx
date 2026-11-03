@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { ArrowLeft, DocumentText as FileText, Lock, Refresh as RotateCcw, Trash as Trash2 } from 'reicon-react'
-import type { TrashedPage } from '@/api/generated/types.gen'
+import type { TrashedPage } from '@orbit/api/generated/types.gen'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 import { confirmAction } from '@/components/common/confirmAction'

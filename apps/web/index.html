@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
-    <meta name="theme-color" content="#000000" />
+    <meta name="theme-color" content="#160c0f" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -13,8 +13,19 @@
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <title>Orbit</title>
     <script>
-      // Apply the stored theme before first paint (default: dark) to avoid a light flash.
-      document.documentElement.classList.toggle('dark', localStorage.getItem('theme') !== 'light')
+      // iOS zooms into any field whose text is under 16px. `maximum-scale=1` stops that zoom, and iOS still lets people
+      // pinch to zoom. Only on iOS: on Android it would block pinch zoom, and Android does not zoom into fields.
+      if (/iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) {
+        var viewportMeta = document.querySelector('meta[name="viewport"]')
+        if (viewportMeta) viewportMeta.content += ', maximum-scale=1'
+      }
+      // Apply the stored appearance before first paint (default: dark) to avoid a light flash. lib/theme.tsx owns it later.
+      var theme = localStorage.getItem('theme')
+      var root = document.documentElement
+      root.classList.toggle('dark', theme === 'system' ? matchMedia('(prefers-color-scheme: dark)').matches : theme !== 'light')
+      root.toggleAttribute('data-flat', localStorage.getItem('orbit:style') === 'flat')
+      root.toggleAttribute('data-floating', localStorage.getItem('orbit:nav-style') === 'floating')
+      root.toggleAttribute('data-new-ui', localStorage.getItem('orbit:layout') !== 'classic')
     </script>
   </head>
   <body>

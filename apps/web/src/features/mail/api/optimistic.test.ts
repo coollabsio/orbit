@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { type InfiniteData, QueryClient } from '@tanstack/react-query'
-import type { MailCounts, MailThreadDetail, MailThreadPage, MailThreadSummary } from '@/api/generated/types.gen'
+import type { MailCounts, MailThreadDetail, MailThreadPage, MailThreadSummary } from '@orbit/api/generated/types.gen'
 import { mailKeys } from './keys'
 import { applyThreadChange, restoreMailSnapshot } from './optimistic'
 

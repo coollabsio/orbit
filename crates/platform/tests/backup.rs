@@ -84,11 +84,11 @@ async fn postgres_restore_replaces_the_database_and_attachments() {
             .manifest
             .files
             .iter()
-            .any(|file| file.path == "database/users.copy")
+            .any(|file| file.path == "database/users.copy.zst")
     );
     // Every file of the snapshot is encrypted, the table list too.
     assert!(snapshot.manifest.encryption.is_some());
-    let users = fs::read(snapshot.path.join("database/users.copy")).unwrap();
+    let users = fs::read(snapshot.path.join("database/users.copy.zst")).unwrap();
     assert!(!contains(&users, b"kept@example.com"));
     let tables = fs::read(snapshot.path.join("database/tables.json")).unwrap();
     assert!(serde_json::from_slice::<serde_json::Value>(&tables).is_err());
@@ -139,7 +139,7 @@ async fn postgres_restore_replaces_the_database_and_attachments() {
     assert_eq!(initialized, 1);
     let migrations: i64 = fixture
         .database
-        .scalar("SELECT COUNT(*) FROM schema_migrations WHERE version = 56")
+        .scalar("SELECT COUNT(*) FROM schema_migrations WHERE version = 66")
         .await
         .unwrap();
     assert_eq!(migrations, 1);
@@ -161,6 +161,55 @@ async fn postgres_restore_replaces_the_database_and_attachments() {
         .await
         .unwrap();
     assert_ne!(new_epoch, epoch);
+}
+
+#[tokio::test]
+async fn postgres_restore_reads_uncompressed_table_files_of_older_snapshots() {
+    if !orbit_platform::testing_postgres() {
+        return;
+    }
+    let fixture = Fixture::new().await;
+    fixture
+        .database
+        .execute(
+            "INSERT INTO users (id, email, normalized_email, display_name, password_hash, \
+             created_at, updated_at) VALUES ('kept', 'k@example.com', 'k@example.com', 'Kept', 'x', 1, 1)",
+        )
+        .await
+        .unwrap();
+    let snapshot = fixture.service.create(&fixture.database).await.unwrap();
+    let mut manifest = snapshot.manifest;
+    for file in &mut manifest.files {
+        let Some(plain) = file.path.strip_suffix(".zst") else {
+            continue;
+        };
+        let compressed = snapshot.path.join(&file.path);
+        let contents = zstd::decode_all(fs::File::open(&compressed).unwrap()).unwrap();
+        fs::remove_file(&compressed).unwrap();
+        fs::write(snapshot.path.join(plain), &contents).unwrap();
+        file.path = plain.to_owned();
+        file.sha256 = checksum(&contents);
+        file.byte_size = contents.len() as u64;
+    }
+    fs::write(
+        snapshot.path.join("manifest.json"),
+        serde_json::to_vec(&manifest).unwrap(),
+    )
+    .unwrap();
+    fixture.database.execute("DELETE FROM users").await.unwrap();
+
+    fixture
+        .service
+        .restore_postgres(&snapshot.id, &fixture.database)
+        .await
+        .unwrap();
+
+    let users: String = fixture
+        .database
+        .scalar("SELECT string_agg(id, ',' ORDER BY id) FROM users")
+        .await
+        .unwrap();
+    assert_eq!(users, "kept");
 }
 
 #[tokio::test]
@@ -197,7 +246,7 @@ async fn snapshot_manifest_checksums_the_database_and_attachment() {
     let snapshot = fixture.service.create(&fixture.database).await.unwrap();
 
     assert_eq!(snapshot.manifest.kind, BackupKind::Snapshot);
-    assert_eq!(snapshot.manifest.schema_version, 56);
+    assert_eq!(snapshot.manifest.schema_version, 66);
     assert_eq!(
         snapshot.manifest.application_version,
         env!("CARGO_PKG_VERSION")
@@ -219,6 +268,26 @@ async fn snapshot_manifest_checksums_the_database_and_attachment() {
         .find(|file| file.path == "attachments/record.txt")
         .unwrap();
     assert_eq!(attachment.sha256, checksum(b"attachment contents"));
+}
+
+#[tokio::test]
+async fn snapshot_leaves_out_upload_staging_files() {
+    let fixture = Fixture::new().await;
+    let staging = fixture._root.path().join("attachments/temporary");
+    fs::create_dir_all(&staging).unwrap();
+    fs::write(staging.join("upload-in-progress"), b"half an upload").unwrap();
+
+    let snapshot = fixture.service.create(&fixture.database).await.unwrap();
+
+    let attachments: Vec<_> = snapshot
+        .manifest
+        .files
+        .iter()
+        .map(|file| file.path.as_str())
+        .filter(|path| path.starts_with("attachments/"))
+        .collect();
+    assert_eq!(attachments, ["attachments/record.txt"]);
+    assert!(!snapshot.path.join("attachments/temporary").exists());
 }
 
 #[tokio::test]

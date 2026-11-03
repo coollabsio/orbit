@@ -11,8 +11,8 @@ use std::sync::Arc;
 
 use orbit_platform::{
     AttachmentMutationCoordinator, BackupService, Config, DataConfig, Database, DatabaseConfig,
-    DatabaseError, EnvironmentMode, LocalBlobStore, MigrationRunner, TimestampMillis, UploadLimits,
-    UploadService, lock_database_ownership, run_guarded_migrations,
+    DatabaseError, EnvironmentMode, LocalBlobStore, MigrationRunner, ObjectStorage,
+    TimestampMillis, UploadLimits, UploadService, lock_database_ownership, run_guarded_migrations,
 };
 use orbit_server::app::App;
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
@@ -119,8 +119,13 @@ pub enum BackupCommand {
     Verify {
         id: String,
     },
+    /// Replaces the database and the attachments with a backup. It first backs up the current data, so the
+    /// restore can be undone.
     Restore {
         id: String,
+        /// Skip the backup of the current data, for a database too damaged to back up.
+        #[arg(long)]
+        no_safety_backup: bool,
     },
 }
 
@@ -233,7 +238,15 @@ fn write_openapi(output: &Path) -> Result<String, CliError> {
 
 fn config_command(config: &Config, command: &ConfigCommand) -> String {
     match command {
-        ConfigCommand::Check => "configuration is valid".to_owned(),
+        ConfigCommand::Check => std::iter::once("configuration is valid".to_owned())
+            .chain(
+                config
+                    .warnings()
+                    .into_iter()
+                    .map(|warning| format!("warning: {warning}")),
+            )
+            .collect::<Vec<_>>()
+            .join("\n"),
         ConfigCommand::Show => redacted_config(config),
     }
 }
@@ -364,18 +377,21 @@ async fn migrate(config: Config, command: &MigrateCommand) -> Result<String, Cli
 }
 
 async fn backup(config: Config, command: &BackupCommand) -> Result<String, CliError> {
-    let storage = orbit_server::object_storage::from_env().map_err(CliError::Operation)?;
     // New backups are encrypted with the app key (`effective_config` requires it); restoring one needs the same key.
-    let service = BackupService::new(&config.data.backups, &config.data.attachments)
-        .with_object_storage(storage)
-        .with_app_key(config.app_key.map(|key| *key.bytes()));
+    let service = |storage| {
+        BackupService::new(&config.data.backups, &config.data.attachments)
+            .with_object_storage(storage)
+            .with_app_key(config.app_key.map(|key| *key.bytes()))
+    };
     match command {
         BackupCommand::Create => {
             let database = open_database(&config.data).await?;
+            let service = service(backup_storage(&config, Some(&database)).await?);
             let snapshot = service.create(&database).await.map_err(operation)?;
             Ok(snapshot.id)
         }
         BackupCommand::List { pre_migration } => {
+            let service = service(saved_backup_storage(&config).await?);
             let snapshots = if *pre_migration {
                 service.list_pre_migration().await
             } else {
@@ -401,26 +417,76 @@ async fn backup(config: Config, command: &BackupCommand) -> Result<String, CliEr
                 .join("\n"))
         }
         BackupCommand::Verify { id } => {
+            let service = service(saved_backup_storage(&config).await?);
             service.verify(id).await.map_err(operation)?;
             Ok(format!("backup {id} verified"))
         }
-        BackupCommand::Restore { id } => {
-            if config.data.database_url.is_some() {
+        BackupCommand::Restore {
+            id,
+            no_safety_backup,
+        } => {
+            let safety = if config.data.database_url.is_some() {
                 // Opening takes the exclusive ownership lock, so a serving Orbit blocks the restore.
                 let database = open_database_alone(&config.data).await?;
+                let service = service(backup_storage(&config, Some(&database)).await?);
+                let safety = if *no_safety_backup {
+                    None
+                } else {
+                    Some(safety_backup(&service, Ok(&database)).await?)
+                };
                 service
                     .restore_postgres(id, &database)
                     .await
                     .map_err(operation)?;
+                safety
+            } else if *no_safety_backup || !config.data.database.exists() {
+                service(saved_backup_storage(&config).await?)
+                    .restore(id, &config.data.database)
+                    .await
+                    .map_err(operation)?;
+                None
             } else {
+                let database = open_database(&config.data).await;
+                let service = service(backup_storage(&config, database.as_ref().ok()).await?);
+                let safety = safety_backup(&service, database.as_ref()).await?;
+                if let Ok(database) = database {
+                    database.pool().close().await;
+                }
                 service
                     .restore(id, &config.data.database)
                     .await
                     .map_err(operation)?;
-            }
-            Ok(format!("backup {id} restored"))
+                Some(safety)
+            };
+            Ok(match safety {
+                Some(safety) => format!(
+                    "backup {id} restored; backup {safety} holds the data from before the restore"
+                ),
+                None => format!("backup {id} restored"),
+            })
         }
     }
+}
+
+/// Backs up the data that a restore is about to replace, and returns the backup's id.
+async fn safety_backup(
+    service: &BackupService,
+    database: Result<&Database, &CliError>,
+) -> Result<String, CliError> {
+    let created = match database {
+        Ok(database) => service
+            .create_before_restore(database)
+            .await
+            .map(|snapshot| snapshot.id)
+            .map_err(|error| error.to_string()),
+        Err(error) => Err(error.to_string()),
+    };
+    created.map_err(|error| {
+        CliError::Operation(format!(
+            "the current data cannot be backed up before the restore ({error}); nothing was restored. \
+             To restore without this backup, add --no-safety-backup"
+        ))
+    })
 }
 
 async fn attachments(config: Config, command: &AttachmentsCommand) -> Result<String, CliError> {
@@ -1003,6 +1069,50 @@ fn apply_path_overrides(cli: &Cli, config: &mut Config) {
     }
 }
 
+/// The bucket for backups: the one in `ORBIT_BACKUP_S3_*` when it is set (for a lost database), else the one saved
+/// in Admin → Storage. When the database cannot give its saved bucket, only local backups are used.
+async fn backup_storage(
+    config: &Config,
+    database: Option<&Database>,
+) -> Result<ObjectStorage, CliError> {
+    let storage = orbit_server::object_storage::from_env().map_err(CliError::Operation)?;
+    let Some(database) = database else {
+        return Ok(storage);
+    };
+    if storage.current().bucket.is_some() {
+        return Ok(storage);
+    }
+    let app_key = config.app_key.as_ref().map(|key| *key.bytes());
+    match orbit_server::object_storage::saved_storage(database, app_key.as_ref()).await {
+        Ok(saved) => Ok(saved),
+        Err(error) => {
+            eprintln!(
+                "warning: the S3 bucket saved in Admin → Storage cannot be used ({error}); \
+                 set ORBIT_BACKUP_S3_* to use the backups in S3"
+            );
+            Ok(storage)
+        }
+    }
+}
+
+/// [`backup_storage`] for commands that do not keep the database open. A missing SQLite file (a lost server) is
+/// not created.
+async fn saved_backup_storage(config: &Config) -> Result<ObjectStorage, CliError> {
+    if config.data.database_url.is_none() && !config.data.database.exists() {
+        return backup_storage(config, None).await;
+    }
+    let database = match open_database(&config.data).await {
+        Ok(database) => database,
+        Err(error) => {
+            eprintln!("warning: the saved S3 bucket cannot be read ({error})");
+            return backup_storage(config, None).await;
+        }
+    };
+    let storage = backup_storage(config, Some(&database)).await;
+    database.pool().close().await;
+    storage
+}
+
 /// Opens the database next to running servers (a Postgres database only; SQLite is always alone).
 async fn open_database(data: &DataConfig) -> Result<Database, CliError> {
     Database::open(&DatabaseConfig::for_data(data).shared())
@@ -1188,6 +1298,27 @@ pub fn redacted_config(config: &Config) -> String {
     if config.app_key.is_some() {
         lines.push("ORBIT_APP_KEY=[REDACTED]".to_owned());
     }
+    match &config.billing {
+        Some(billing) => {
+            let prices = billing
+                .plans
+                .iter()
+                .map(|plan| format!("{}:{}", plan.key, plan.price_id))
+                .collect::<Vec<_>>()
+                .join(",");
+            lines.extend([
+                "ORBIT_CLOUD=true".to_owned(),
+                "ORBIT_STRIPE_SECRET_KEY=[REDACTED]".to_owned(),
+                "ORBIT_STRIPE_WEBHOOK_SECRET=[REDACTED]".to_owned(),
+                format!("ORBIT_STRIPE_PRICES={prices}"),
+                format!("ORBIT_TRIAL_DAYS={}", billing.trial.days),
+                format!("ORBIT_TRIAL_TASKS={}", billing.trial.tasks),
+                format!("ORBIT_TRIAL_PAGES={}", billing.trial.pages),
+                format!("ORBIT_TRIAL_MEMBERS={}", billing.trial.members),
+            ]);
+        }
+        None => lines.push("ORBIT_CLOUD=false".to_owned()),
+    }
     lines.join("\n")
 }
 
@@ -1265,8 +1396,8 @@ mod tests {
 
     use super::{
         BackupCommand, Cli, Command, ConfigCommand, MigrateCommand, SetupTokenCommand,
-        failure_message, healthcheck, parent_directory, redacted_config, remove_sidecars, run,
-        validate_reset_paths,
+        config_command, failure_message, healthcheck, parent_directory, redacted_config,
+        remove_sidecars, run, validate_reset_paths,
     };
 
     fn environment(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
@@ -1289,6 +1420,25 @@ mod tests {
             ("ORBIT_PUBLIC_ORIGIN", "https://orbit.example"),
             ("ORBIT_TRUSTED_PROXIES", "127.0.0.1/32"),
         ])
+    }
+
+    #[test]
+    fn config_check_prints_warnings_after_the_valid_line() {
+        let mut config = Config::default();
+        config.http.trusted_proxies = vec!["0.0.0.0/0".parse().unwrap()];
+        let output = config_command(&config, &ConfigCommand::Check);
+        let mut lines = output.lines();
+        assert_eq!(lines.next(), Some("configuration is valid"));
+        assert!(
+            lines.next().is_some_and(
+                |line| line.starts_with("warning: ORBIT_TRUSTED_PROXIES contains 0.0.0.0/0")
+            ),
+            "{output}"
+        );
+        assert_eq!(
+            config_command(&Config::default(), &ConfigCommand::Check),
+            "configuration is valid"
+        );
     }
 
     #[test]
@@ -1660,6 +1810,36 @@ mod tests {
     }
 
     #[test]
+    fn config_output_redacts_stripe_secrets() {
+        let config = Config::from_environment(environment(&[
+            ("ORBIT_ENV", "development"),
+            ("ORBIT_APP_KEY", APP_KEY),
+            ("ORBIT_CLOUD", "true"),
+            ("ORBIT_STRIPE_SECRET_KEY", "sk_test_hidden"),
+            ("ORBIT_STRIPE_WEBHOOK_SECRET", "whsec_hidden"),
+            ("ORBIT_STRIPE_PRICES", "team:price_1,business:price_2"),
+            ("ORBIT_TRIAL_DAYS", "14"),
+            ("ORBIT_TRIAL_MEMBERS", "5"),
+        ]))
+        .unwrap();
+
+        let shown = redacted_config(&config);
+
+        assert!(
+            shown.contains(
+                "ORBIT_TRIAL_DAYS=14\nORBIT_TRIAL_TASKS=50\nORBIT_TRIAL_PAGES=20\nORBIT_TRIAL_MEMBERS=5"
+            ),
+            "{shown}"
+        );
+        assert!(shown.contains("ORBIT_CLOUD=true"), "{shown}");
+        assert!(shown.contains("ORBIT_STRIPE_SECRET_KEY=[REDACTED]"));
+        assert!(shown.contains("ORBIT_STRIPE_WEBHOOK_SECRET=[REDACTED]"));
+        assert!(shown.contains("ORBIT_STRIPE_PRICES=team:price_1,business:price_2"));
+        assert!(!shown.contains("hidden"), "{shown}");
+        assert!(!format!("{config:?}").contains("hidden"));
+    }
+
+    #[test]
     fn operational_failures_include_a_concise_recovery_message() {
         let message = failure_message("database is owned");
 
@@ -1792,11 +1972,12 @@ mod tests {
             .await
             .unwrap_err();
         assert!(error.to_string().contains("different app key"), "{error}");
-        assert_eq!(
-            run(cli(&["backup", "restore", &id]), with_key(APP_KEY))
-                .await
-                .unwrap(),
-            format!("backup {id} restored")
+        let restored = run(cli(&["backup", "restore", &id]), with_key(APP_KEY))
+            .await
+            .unwrap();
+        assert!(
+            restored.starts_with(&format!("backup {id} restored")),
+            "{restored}"
         );
     }
 
@@ -1926,7 +2107,7 @@ mod tests {
         assert_eq!(developer.display_name, "Edited Developer");
         assert!(
             orbit_platform::PasswordService::default()
-                .verify("password", &developer.password_hash)
+                .verify("password", developer.password_hash.as_deref().unwrap())
                 .unwrap()
                 .valid
         );
@@ -1938,7 +2119,7 @@ mod tests {
         assert_eq!(member.display_name, "Orbit Member");
         assert!(
             orbit_platform::PasswordService::default()
-                .verify("password", &member.password_hash)
+                .verify("password", member.password_hash.as_deref().unwrap())
                 .unwrap()
                 .valid
         );
@@ -2019,7 +2200,7 @@ mod tests {
             .unwrap();
         assert_eq!(owner.id, original.user_id);
         assert_eq!(owner.display_name, "Existing Owner");
-        assert_eq!(owner.password_hash, original_hash);
+        assert_eq!(owner.password_hash, Some(original_hash));
         assert!(
             identity
                 .find_by_email("test@example.com")
@@ -2253,28 +2434,105 @@ mod tests {
             .unwrap();
         drop(database);
 
-        let restored = run(
-            Cli::try_parse_from(["orbit", "backup", "restore", &backup.id]).unwrap(),
-            env,
-        )
-        .await;
+        let (restored, undone) = restore_and_undo(&backup.id, &env, &config).await;
 
-        let database = Database::open(&DatabaseConfig::for_data(&config.data))
-            .await
-            .unwrap();
-        let initialized: i64 = database
-            .scalar("SELECT initialized FROM installation_state WHERE id = 1")
-            .await
-            .unwrap();
-        drop(database);
         sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
             "DROP DATABASE {name} WITH (FORCE)"
         )))
         .execute(&mut admin)
         .await
         .unwrap();
-        assert_eq!(restored.unwrap(), format!("backup {} restored", backup.id));
-        assert_eq!(initialized, 1);
+        assert_eq!(restored, 1);
+        assert_eq!(undone, 0);
+    }
+
+    #[tokio::test]
+    async fn backup_restore_replaces_an_sqlite_database_and_can_be_undone() {
+        if orbit_platform::testing_postgres() {
+            return; // The SQLite restore path; the Postgres test above covers Postgres.
+        }
+        let root = tempfile::TempDir::new().unwrap();
+        let database_path = root.path().join("data/orbit.sqlite");
+        let attachments = root.path().join("attachments");
+        let backups = root.path().join("backups");
+        fs::create_dir_all(&attachments).unwrap();
+        let env = environment(&[
+            ("ORBIT_ENV", "development"),
+            ("ORBIT_DATABASE_PATH", database_path.to_str().unwrap()),
+            ("ORBIT_ATTACHMENTS_PATH", attachments.to_str().unwrap()),
+            ("ORBIT_BACKUPS_PATH", backups.to_str().unwrap()),
+            (
+                "ORBIT_APP_KEY",
+                "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+            ),
+        ]);
+        let config = Config::from_environment(env.clone()).unwrap();
+        let database = Database::open(&DatabaseConfig::for_data(&config.data))
+            .await
+            .unwrap();
+        MigrationRunner::embedded(env!("CARGO_PKG_VERSION"))
+            .run(&database)
+            .await
+            .unwrap();
+        database
+            .execute("INSERT INTO installation_state (id, initialized) VALUES (1, 1)")
+            .await
+            .unwrap();
+        let backup = BackupService::new(&config.data.backups, &config.data.attachments)
+            .create(&database)
+            .await
+            .unwrap();
+        database
+            .execute("DELETE FROM installation_state")
+            .await
+            .unwrap();
+        drop(database);
+
+        let (restored, undone) = restore_and_undo(&backup.id, &env, &config).await;
+
+        assert_eq!(restored, 1);
+        assert_eq!(undone, 0);
+    }
+
+    /// Restores `id`, then the safety backup that restore made; returns the `installation_state` rows after each.
+    async fn restore_and_undo(
+        id: &str,
+        env: &BTreeMap<String, String>,
+        config: &Config,
+    ) -> (i64, i64) {
+        let rows = || async {
+            let database = Database::open(&DatabaseConfig::for_data(&config.data))
+                .await
+                .unwrap();
+            let rows: i64 = database
+                .scalar("SELECT COUNT(*) FROM installation_state")
+                .await
+                .unwrap();
+            database.pool().close().await;
+            rows
+        };
+        let message = run(
+            Cli::try_parse_from(["orbit", "backup", "restore", id]).unwrap(),
+            env.clone(),
+        )
+        .await
+        .unwrap();
+        let safety = message
+            .strip_prefix(&format!("backup {id} restored; backup "))
+            .and_then(|rest| rest.strip_suffix(" holds the data from before the restore"))
+            .unwrap_or_else(|| panic!("unexpected output: {message}"))
+            .to_owned();
+        let restored = rows().await;
+
+        let message = run(
+            Cli::try_parse_from(["orbit", "backup", "restore", &safety, "--no-safety-backup"])
+                .unwrap(),
+            env.clone(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(message, format!("backup {safety} restored"));
+        (restored, rows().await)
     }
 
     #[tokio::test]

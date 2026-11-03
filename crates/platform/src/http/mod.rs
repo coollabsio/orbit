@@ -21,7 +21,7 @@ use rate_limit::RateLimiter;
 
 pub use limits::HttpLimits;
 pub use request_id::RequestId;
-pub use security::{ClientIp, OriginPolicy, RequestTransport};
+pub use security::{ClientIp, OriginPolicy, RequestTransport, bearer_token};
 use security::{add_security_headers, inspect_request, strip_forwarding_headers};
 
 /// Applies Orbit's request identity, proxy, origin, limit, and response policy.
@@ -314,11 +314,13 @@ where
                 ));
             }
 
+            let body_limit = limits.body_limit(&request);
+            let timeout = limits.request_timeout(&request);
             let (mut parts, body) = request.into_parts();
             let instance = parts.uri.path().to_owned();
             let method = parts.method.clone();
             // Keep the body lazy so route authentication runs before an upload is read.
-            let body = Body::new(http_body_util::Limited::new(body, limits.max_body_bytes));
+            let body = Body::new(http_body_util::Limited::new(body, body_limit));
             strip_forwarding_headers(&mut parts.headers);
             parts.extensions.insert(request_id.clone());
             parts.extensions.insert(client_ip);
@@ -329,7 +331,30 @@ where
                 %method,
                 "http request"
             );
-            let response = match inner.call(Request::from_parts(parts, body)).await {
+            let call = inner.call(Request::from_parts(parts, body));
+            let result = match timeout {
+                Some(timeout) => match tokio::time::timeout(timeout, call).await {
+                    Ok(result) => result,
+                    Err(_) => {
+                        tracing::warn!(request_id = request_id.as_str(), "request timed out");
+                        return Ok(finish_response(
+                            problem_response(
+                                StatusCode::REQUEST_TIMEOUT,
+                                "request_timeout",
+                                "Request timed out",
+                                "The request took too long. Try again.",
+                                &request_id,
+                                &instance,
+                            ),
+                            &request_id,
+                            transport.is_secure(),
+                            csp_script_hash.as_deref(),
+                        ));
+                    }
+                },
+                None => call.await,
+            };
+            let response = match result {
                 Ok(response) => response,
                 Err(_) => {
                     tracing::error!(
@@ -429,4 +454,50 @@ fn finish_response(
         .insert(HeaderName::from_static("x-request-id"), request_id);
     add_security_headers(response.headers_mut(), secure, csp_script_hash);
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use axum::Router;
+    use axum::routing::get;
+    use tower::ServiceExt;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn a_timed_out_request_gets_the_request_id_and_security_headers() {
+        let app = Router::new()
+            .route(
+                "/slow",
+                get(|| async {
+                    tokio::time::sleep(Duration::from_secs(30)).await;
+                    StatusCode::NO_CONTENT
+                }),
+            )
+            .layer(
+                HttpPlatformLayer::new(OriginPolicy::new("https://orbit.test")).with_limits(
+                    HttpLimits {
+                        request_timeout: Some(Duration::from_millis(50)),
+                        ..HttpLimits::default()
+                    },
+                ),
+            );
+        let response = app
+            .oneshot(Request::builder().uri("/slow").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::REQUEST_TIMEOUT);
+        assert_eq!(response.headers()[CONTENT_TYPE], "application/problem+json");
+        for name in [
+            "x-request-id",
+            "content-security-policy",
+            "x-content-type-options",
+            "x-frame-options",
+            "cross-origin-opener-policy",
+        ] {
+            assert!(response.headers().contains_key(name), "{name}");
+        }
+    }
 }

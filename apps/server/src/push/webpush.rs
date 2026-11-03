@@ -96,6 +96,7 @@ pub fn decode(value: &str) -> Option<Vec<u8>> {
 mod tests {
     use p256::ecdsa::VerifyingKey;
     use p256::ecdsa::signature::Verifier;
+    use p256::elliptic_curve::Generate;
 
     use super::*;
 
@@ -133,7 +134,7 @@ mod tests {
 
     #[test]
     fn the_vapid_token_is_signed_by_the_key_it_names() {
-        let key = SecretKey::random(&mut rand_core::OsRng);
+        let key = SecretKey::generate();
         let header = vapid_authorization(&key, "https://push.example", "mailto:a@b.example", 99);
         let (token, named) = header
             .strip_prefix("vapid t=")

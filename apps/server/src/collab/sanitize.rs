@@ -356,22 +356,26 @@ fn sanitize_file_block(mut block: Value, policy: Option<&LinkPolicy>) -> Value {
 /// Rewrites unsafe links and file URLs inside a live document; returns whether anything changed.
 /// The caller broadcasts the resulting update like any other edit.
 pub fn repair_document(txn: &mut TransactionMut, fragment: &yrs::XmlFragmentRef) -> bool {
-    repair_document_in(txn, fragment, None)
+    repair_document_in(txn, fragment, None, true)
 }
 
-/// [`repair_document`] under one document's policy.
+/// [`repair_document`] under one document's policy. Mentions are always repaired; links and file
+/// URLs only with `links` (a change that names `link` or `url`), as they cost a pass over every
+/// text.
 pub fn repair_document_for(
     txn: &mut TransactionMut,
     fragment: &yrs::XmlFragmentRef,
     policy: &LinkPolicy,
+    links: bool,
 ) -> bool {
-    repair_document_in(txn, fragment, Some(policy))
+    repair_document_in(txn, fragment, Some(policy), links)
 }
 
 fn repair_document_in(
     txn: &mut TransactionMut,
     fragment: &yrs::XmlFragmentRef,
     policy: Option<&LinkPolicy>,
+    links: bool,
 ) -> bool {
     let mut elements = Vec::new();
     let mut texts = Vec::new();
@@ -379,6 +383,9 @@ fn repair_document_in(
         collect(txn, child, &mut elements, &mut texts);
     }
     let mut changed = repair_mentions(txn, &elements);
+    if !links {
+        return changed;
+    }
     for element in elements {
         let tag = element.tag().to_string();
         if !FILE_BLOCKS.contains(&tag.as_str()) {
@@ -502,24 +509,22 @@ fn repair_mentions(txn: &mut TransactionMut, elements: &[XmlElementRef]) -> bool
     changed
 }
 
+/// Every element and text under `node` (an explicit stack: nesting is unbounded).
 fn collect<T: ReadTxn>(
     txn: &T,
     node: XmlOut,
     elements: &mut Vec<XmlElementRef>,
     texts: &mut Vec<yrs::XmlTextRef>,
 ) {
-    match node {
-        XmlOut::Element(element) => {
-            for child in element.children(txn) {
-                collect(txn, child, elements, texts);
+    let mut stack = vec![node];
+    while let Some(node) = stack.pop() {
+        match node {
+            XmlOut::Element(element) => {
+                stack.extend(element.children(txn));
+                elements.push(element);
             }
-            elements.push(element);
-        }
-        XmlOut::Text(text) => texts.push(text),
-        XmlOut::Fragment(fragment) => {
-            for child in fragment.children(txn) {
-                collect(txn, child, elements, texts);
-            }
+            XmlOut::Text(text) => texts.push(text),
+            XmlOut::Fragment(fragment) => stack.extend(fragment.children(txn)),
         }
     }
 }
@@ -787,7 +792,7 @@ mod tests {
         let repaired = {
             let mut txn = doc.transact_mut();
             let fragment = txn.get_or_insert_xml_fragment(FRAGMENT);
-            repair_document_for(&mut txn, &fragment, &policy)
+            repair_document_for(&mut txn, &fragment, &policy, true)
         };
         assert!(repaired);
         let blocks = doc_to_blocks(&doc);

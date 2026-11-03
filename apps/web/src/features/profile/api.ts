@@ -1,9 +1,9 @@
 import { queryOptions, type QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { apiClient } from '@/api/client'
-import { getMemberProfile, putMemberNote } from '@/api/generated/sdk.gen'
-import type { MemberProfile } from '@/api/generated/types.gen'
-import { ApiProblem } from '@/api/problem'
+import { getMemberProfile, putMemberNote } from '@orbit/api/generated/sdk.gen'
+import type { MemberProfile } from '@orbit/api/generated/types.gen'
+import { ApiProblem } from '@orbit/api/problem'
 import { queryKeys } from '@/api/queryKeys'
 import { noteToSave } from './profileLib'
 

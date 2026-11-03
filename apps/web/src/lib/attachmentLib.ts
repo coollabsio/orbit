@@ -9,6 +9,8 @@ export interface Attachment {
   url: string
   width?: number
   height?: number
+  /** An admin deleted the stored file: it shows as "Deleted file", with no image or download. */
+  deleted?: boolean
 }
 
 export function formatSize(bytes: number): string {

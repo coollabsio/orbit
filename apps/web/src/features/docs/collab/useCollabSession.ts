@@ -1,6 +1,7 @@
 import { useContext, useEffect, useRef, useState } from 'react'
-import { CollabConnectContext, type CollabTarget } from './connection'
-import { CollabSession, type CollabConnection, type CollabProblem, type CollabState } from './session'
+import { CollabSession, type CollabConnection, type CollabProblem, type CollabState } from '@orbit/editor/collab/session'
+import type { CollabTarget } from '@orbit/editor/collab/target'
+import { CollabConnectContext } from './connection'
 
 export interface CollabUser {
   /** The signed-in user (undefined while loading). */

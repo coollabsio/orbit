@@ -1,6 +1,5 @@
-import { useState } from 'react'
-import { useLocation, useNavigate } from 'react-router'
-import { Menu, Notification as Bell } from 'reicon-react'
+import { useLocation, useNavigate, useSearchParams } from 'react-router'
+import { Notification as Bell } from 'reicon-react'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -17,13 +16,21 @@ import { useSlowPending } from '@/lib/useDebouncedValue'
 import { ProfileTrigger } from '@/components/common/ProfileTrigger'
 import { loadFailed } from '@/lib/connection'
 
-type InboxTab = 'all' | 'unread' | 'mentions'
+const TABS = ['all', 'unread', 'mentions'] as const
+type InboxTab = (typeof TABS)[number]
 
 export function InboxPage() {
   const { workspace } = useWorkspace()
   const navigate = useNavigate()
   const location = useLocation()
-  const [tab, setTab] = useState<InboxTab>('all')
+  // the tab is in the URL: back from a notification's task, the same tab shows at the same scroll position
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tab = TABS.find((item) => item === searchParams.get('tab')) ?? 'all'
+  const setTab = (next: InboxTab) => setSearchParams((params) => {
+    if (next === 'all') params.delete('tab')
+    else params.set('tab', next)
+    return params
+  }, { replace: true })
   const allQuery = useNotifications(workspace.id, false)
   const unreadQuery = useNotifications(workspace.id, true)
   const members = useMembers(workspace.id)
@@ -43,16 +50,6 @@ export function InboxPage() {
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
       <Pane>
         <PaneHeader>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            className="hidden shrink-0 text-muted-foreground/70 max-[899px]:inline-flex"
-            aria-label="Menu"
-            onClick={() => window.dispatchEvent(new CustomEvent('open-sidebar'))}
-          >
-            <Menu className="size-[18px]" />
-          </Button>
           <PaneTitle>Activity</PaneTitle>
           {unreadCount > 0 ? <Badge className="h-4 min-w-4 px-1 text-[10px] tabular-nums">{unreadCount}</Badge> : null}
           <span className="flex-1" />
@@ -67,7 +64,7 @@ export function InboxPage() {
         </PaneHeader>
         <Tabs className="shrink-0 gap-0" value={tab} onValueChange={(value) => setTab(value as InboxTab)}>
           <TabsList variant="line" className="min-h-10 w-full justify-start gap-1.5 border-b px-3 group-data-horizontal/tabs:h-auto">
-            {(['all', 'unread', 'mentions'] as const).map((item) => (
+            {TABS.map((item) => (
               <TabsTrigger
                 key={item}
                 value={item}

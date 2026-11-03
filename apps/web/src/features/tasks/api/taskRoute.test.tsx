@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import type { ProjectRecord, TaskRecord } from '@/api/generated/types.gen'
+import type { ProjectRecord, TaskRecord } from '@orbit/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 import { cachedTaskSlug, useTaskRouteId } from './tasks'
 

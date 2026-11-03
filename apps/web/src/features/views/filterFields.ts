@@ -15,7 +15,7 @@ import {
   UserEdit,
   type IconComponent,
 } from 'reicon-react'
-import type { LabelRecord, ProjectRecord } from '@/api/generated/types.gen'
+import type { LabelRecord, ProjectRecord } from '@orbit/api/generated/types.gen'
 import type { TaskPriority, TaskStatusDef } from '@/features/tasks/api/models'
 import { CATEGORY_LABEL, CATEGORY_ORDER, labelKeyOf, labelRepresentatives, PRIORITY_LABEL, projectLabels, PRIORITY_ORDER, sortStatuses, statusKeyOf } from '@/features/tasks/taskMeta'
 import type { User } from '@/features/workspaces/models'

@@ -5,7 +5,7 @@
 //! conversation.
 
 use orbit_platform::Row;
-use orbit_platform::{AuthorizedAttachment, BlobDownload, Id, StagedUpload, UploadError};
+use orbit_platform::{AuthorizedAttachment, BlobDownload, Flag, Id, StagedUpload, UploadError};
 use sqlx::AnyConnection;
 use sqlx::any::AnyRow;
 
@@ -19,8 +19,9 @@ pub(super) const MAX_MESSAGE_FILES: usize = 10;
 const LIST_LIMIT: i64 = 100;
 const MAX_DIMENSION: u32 = 100_000;
 
-const FILE_COLUMNS: &str =
-    "id, workspace_id, message_id, file_name, mime_type, size_bytes, width, height";
+const FILE_COLUMNS: &str = "id, workspace_id, message_id, file_name, mime_type, size_bytes, width, height, \
+     EXISTS (SELECT 1 FROM attachment_blobs b WHERE b.id = chat_message_files.blob_id AND b.deleted_at IS NOT NULL) \
+     AS deleted";
 
 fn file_from_row(row: &AnyRow) -> Result<ChatFileRecord, ChatError> {
     let id = parse_id(row.get("id"))?;
@@ -33,6 +34,7 @@ fn file_from_row(row: &AnyRow) -> Result<ChatFileRecord, ChatError> {
         size_bytes: row.get("size_bytes"),
         width: row.get("width"),
         height: row.get("height"),
+        deleted: row.get::<Flag, _>("deleted").0,
     })
 }
 
@@ -179,6 +181,7 @@ impl ChatRepository {
             size_bytes: size,
             width: dimension(width).map(i64::from),
             height: dimension(height).map(i64::from),
+            deleted: false,
         })
     }
 
@@ -194,7 +197,7 @@ impl ChatRepository {
         self.uploads
             .download(move || async move {
                 let row = sqlx::query(
-                    "SELECT b.storage_key, f.mime_type, f.file_name FROM chat_message_files f \
+                    "SELECT b.storage_key, b.deleted_at, f.mime_type, f.file_name FROM chat_message_files f \
                      JOIN attachment_blobs b ON b.id = f.blob_id AND b.workspace_id = f.workspace_id \
                      JOIN workspaces w ON w.id = f.workspace_id AND w.deleted_at IS NULL \
                      JOIN memberships me ON me.workspace_id = f.workspace_id AND me.user_id = $1 \
@@ -215,6 +218,7 @@ impl ChatRepository {
                     storage_key: row.try_get("storage_key")?,
                     media_type: row.try_get("mime_type")?,
                     display_name: row.try_get("file_name")?,
+                    deleted: row.try_get::<Option<i64>, _>("deleted_at")?.is_some(),
                 })
             })
             .await

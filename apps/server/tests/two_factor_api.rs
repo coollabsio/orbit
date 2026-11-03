@@ -221,6 +221,19 @@ async fn sign_in_asks_for_a_code_once_the_authenticator_app_is_on() {
         .await;
     assert_eq!(status, StatusCode::OK, "{signed_in}");
     assert_eq!(signed_in["user"]["email"], "owner@example.com");
+    // Sent without an Origin, as a native app does: the token comes back in the body.
+    let session_token = signed_in["session_token"].as_str().unwrap();
+    let (status, me) = fixture
+        .send(
+            Request::builder()
+                .uri("/api/v1/auth/me")
+                .header(header::AUTHORIZATION, format!("Bearer {session_token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(me["email"], "owner@example.com");
 
     // The challenge is used up.
     let (status, problem) = fixture
@@ -288,6 +301,27 @@ async fn a_lockout_holds_on_every_server() {
     let response = other.oneshot(request).await.unwrap();
 
     assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
+async fn changing_the_password_shares_the_sign_in_lockout() {
+    let fixture = Fixture::new().await;
+    let change = |current: &str| {
+        fixture.post(
+            "/api/v1/auth/password",
+            Some(&fixture.cookie),
+            json!({"current_password": current, "new_password": "a brand new password"}),
+        )
+    };
+    for _ in 0..5 {
+        let (status, body) = change("wrong password value").await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+        assert_eq!(body["code"], "invalid_credentials");
+    }
+    // A stolen session cannot keep guessing: the right password is refused too, and so is sign-in.
+    let (status, body) = change(PASSWORD).await;
+    assert_eq!(status, StatusCode::TOO_MANY_REQUESTS, "{body}");
+    assert_eq!(fixture.login().await.0, StatusCode::TOO_MANY_REQUESTS);
 }
 
 #[tokio::test]

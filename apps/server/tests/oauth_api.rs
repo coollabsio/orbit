@@ -552,6 +552,73 @@ async fn user_suspension_invalidates_both_access_and_refresh() {
     );
 }
 
+#[tokio::test]
+async fn a_new_password_ends_the_oauth_grants() {
+    let f = Fixture::new().await;
+    let identity = IdentityRepository::new((*f.db).clone());
+    let hash = PasswordService::default()
+        .hash("a brand new password")
+        .unwrap();
+    let client = f.register().await;
+    let active_grants = || async {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM oauth_grants WHERE revoked_at IS NULL AND user_id = $1",
+        )
+        .bind(f.user.to_string())
+        .fetch_one(f.db.pool())
+        .await
+        .unwrap()
+    };
+
+    // Changing the password (the current session stays).
+    let code = f.code(&client).await;
+    let tokens = f.issue(&client, &code).await;
+    let access = tokens["access_token"].as_str().unwrap();
+    assert_eq!(f.access(access).await.0, StatusCode::OK);
+    let token = f.cookie.split_once('=').unwrap().1;
+    let session = identity
+        .authenticate_session(token, TimestampMillis::now())
+        .await
+        .unwrap();
+    identity
+        .change_password_keeping_session(f.user, session.id, &hash, "test", TimestampMillis::now())
+        .await
+        .unwrap();
+    assert_eq!(f.access(access).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        f.exchange(&[
+            ("grant_type", "refresh_token"),
+            ("client_id", &client),
+            ("refresh_token", tokens["refresh_token"].as_str().unwrap())
+        ])
+        .await
+        .0,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(active_grants().await, 0);
+
+    // Completing a password recovery.
+    let code = f.code(&client).await;
+    let tokens = f.issue(&client, &code).await;
+    let access = tokens["access_token"].as_str().unwrap();
+    assert_eq!(f.access(access).await.0, StatusCode::OK);
+    assert_eq!(active_grants().await, 1);
+    identity
+        .store_recovery_token(
+            &f.user.to_string(),
+            "reset-token",
+            TimestampMillis::from_millis(TimestampMillis::now().as_millis() + 60_000),
+        )
+        .await
+        .unwrap();
+    identity
+        .complete_recovery_audited("reset-token", &hash, "test", TimestampMillis::now())
+        .await
+        .unwrap();
+    assert_eq!(f.access(access).await.0, StatusCode::UNAUTHORIZED);
+    assert_eq!(active_grants().await, 0);
+}
+
 async fn register_from(f: &Fixture, ip: &str) -> (StatusCode, Value) {
     let mut request = Request::post("/oauth/register")
         .header(header::CONTENT_TYPE, "application/json")
@@ -695,4 +762,76 @@ async fn a_full_registry_prunes_unused_clients_before_it_refuses() {
     let (status, body) = register_from(&f, "198.51.100.3").await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
     assert_eq!(body["error"], "temporarily_unavailable");
+}
+
+#[tokio::test]
+async fn optional_scopes_need_consent_and_survive_refresh() {
+    use orbit_server::repositories::api_tokens::ApiTokenScope;
+    let f = Fixture::new().await;
+    let client = f.register().await;
+    let id = f.pending(&client).await;
+    let (_, consent) = f
+        .send(
+            "GET",
+            &format!("/api/v1/oauth/consent/{id}"),
+            json!({}),
+            true,
+        )
+        .await;
+    let (status, approval) = f.send("POST", &format!("/api/v1/oauth/consent/{id}"), json!({"approved": true, "csrf_token": consent["csrf_token"], "workspace_id": f.workspace, "project_ids": [f.project], "scopes": ["tasks:write", "docs:read", "chat:read"]}), true).await;
+    assert_eq!(status, StatusCode::OK, "{approval}");
+    let callback = url::Url::parse(approval["redirect_uri"].as_str().unwrap()).unwrap();
+    let code = callback
+        .query_pairs()
+        .find(|(k, _)| k == "code")
+        .unwrap()
+        .1
+        .to_string();
+    let token = f.issue(&client, &code).await;
+    for scope in ["tasks:write", "docs:read", "chat:read"] {
+        assert!(token["scope"].as_str().unwrap().contains(scope));
+    }
+    let principal = f
+        .oauth
+        .authenticate(token["access_token"].as_str().unwrap())
+        .await
+        .ok()
+        .flatten()
+        .unwrap();
+    for scope in [
+        ApiTokenScope::Read,
+        ApiTokenScope::Write,
+        ApiTokenScope::DocsRead,
+        ApiTokenScope::ChatRead,
+    ] {
+        assert!(principal.scopes.contains(&scope));
+    }
+    let (status, refreshed) = f
+        .exchange(&[
+            ("grant_type", "refresh_token"),
+            ("client_id", &client),
+            ("refresh_token", token["refresh_token"].as_str().unwrap()),
+        ])
+        .await;
+    assert_eq!(status, StatusCode::OK, "{refreshed}");
+    assert_eq!(refreshed["scope"], token["scope"]);
+    let readonly_code = f.code(&client).await;
+    let readonly = f.issue(&client, &readonly_code).await;
+    let principal = f
+        .oauth
+        .authenticate(readonly["access_token"].as_str().unwrap())
+        .await
+        .ok()
+        .flatten()
+        .unwrap();
+    assert_eq!(principal.scopes, vec![ApiTokenScope::Read]);
+    let (status, _) = f
+        .exchange(&[
+            ("grant_type", "refresh_token"),
+            ("client_id", &client),
+            ("refresh_token", readonly["refresh_token"].as_str().unwrap()),
+            ("scope", "tasks:write"),
+        ])
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
 }

@@ -1,6 +1,6 @@
 import { afterAll, afterEach, expect, spyOn, test } from 'bun:test'
 import { toast } from 'sonner'
-import { ApiProblem } from '@/api/problem'
+import { ApiProblem } from '@orbit/api/problem'
 import { BulkTaskLimitError } from '@/features/tasks/api/tasks'
 import { reportMoveError } from './moveErrors'
 

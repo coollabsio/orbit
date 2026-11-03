@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router'
 import { PauseCircle } from 'reicon-react'
-import type { MailMeMailbox } from '@/api/generated/types.gen'
+import type { MailMeMailbox } from '@orbit/api/generated/types.gen'
 import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 

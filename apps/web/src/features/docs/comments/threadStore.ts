@@ -5,7 +5,7 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { QueryObserver } from '@tanstack/react-query'
 import { ThreadStore, ThreadStoreAuth, type CommentData, type ThreadData } from '@blocknote/core/comments'
-import type { PageComment, PageThread } from '@/api/generated/types.gen'
+import type { PageComment, PageThread } from '@orbit/api/generated/types.gen'
 import type { CommentBlocks, CommentsApi } from './api'
 
 type Listener = (threads: Map<string, ThreadData>) => void
@@ -72,8 +72,13 @@ export class OrbitThreadStoreAuth extends ThreadStoreAuth {
   canDeleteComment(comment: CommentData) {
     return !comment.deletedAt && comment.userId === this.userId()
   }
+  /** The creator deletes the thread while nobody else has a live comment in it (the server refuses it then). */
   canDeleteThread(thread: ThreadData) {
-    return (thread.metadata as OrbitThreadMetadata | undefined)?.createdBy === this.userId()
+    const userId = this.userId()
+    return (
+      (thread.metadata as OrbitThreadMetadata | undefined)?.createdBy === userId &&
+      thread.comments.every((comment) => comment.deletedAt || comment.userId === userId)
+    )
   }
   canResolveThread() {
     return this.userId() !== null

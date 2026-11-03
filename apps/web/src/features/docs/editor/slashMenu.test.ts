@@ -1,7 +1,8 @@
 import { describe, expect, mock, test } from 'bun:test'
 import { BlockNoteEditor } from '@blocknote/core'
 import { getPageSlashMenuItems, getTaskSlashMenuItems, mergeSlashItems, PAGE_ITEMS_GROUP, preferTitleMatches } from './slashMenu'
-import { EDITOR_BLOCK_TYPES, FILE_BLOCK_TYPES, pageEditorSchema, REMOVED_BLOCK_TYPES, taskEditorSchema } from './schema'
+import { FILE_BLOCK_TYPES, REMOVED_BLOCK_TYPES } from '@orbit/editor/schema'
+import { EDITOR_BLOCK_TYPES, pageEditorSchema, taskEditorSchema } from './schema'
 
 function editor() {
   return BlockNoteEditor.create({ schema: pageEditorSchema })

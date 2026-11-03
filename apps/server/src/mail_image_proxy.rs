@@ -32,7 +32,7 @@ use thiserror::Error;
 use tokio::sync::Semaphore;
 use url::{Host, Url};
 
-use crate::link_preview::is_public;
+use orbit_platform::is_public_ip as is_public;
 
 /// Largest image the proxy passes on.
 pub const MAX_IMAGE_BYTES: usize = 5 * 1024 * 1024;

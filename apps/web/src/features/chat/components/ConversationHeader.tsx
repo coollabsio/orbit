@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { Layer, MoreH, Paperclip2, People, PinTack, SearchNormal, Xmark } from 'reicon-react'
+import { Layer, MoreH, Paperclip2, People, PinTack, Search4, Xmark } from 'reicon-react'
 import { cn } from 'cn'
 import { PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { Tip } from '@/components/common/Tip'
@@ -97,7 +97,7 @@ export function ConversationHeader({ conversation }: { conversation: Conversatio
       >
         <InputGroup className="w-56 border-0 bg-secondary/40 @max-[620px]/header:w-full dark:bg-secondary/40">
           <InputGroupAddon>
-            <SearchNormal />
+            <Search4 />
           </InputGroupAddon>
           {/* keyed by the query, so the field follows `?q=` (back, forward, a closed pane) without an effect */}
           <InputGroupInput key={query} ref={searchInput} name="q" type="search" defaultValue={query} placeholder="Search" aria-label={`Search in ${title}`} autoComplete="off" />
@@ -130,7 +130,7 @@ export function ConversationHeader({ conversation }: { conversation: Conversatio
               requestAnimationFrame(() => searchInput.current?.focus())
             }}
           >
-            <SearchNormal size={20} />
+            <Search4 size={20} />
           </Button>
         </Tip>
         <PaneToggle label="Threads" pressed={openPane === 'threads'} className="max-[899px]:hidden" onToggle={toggle('threads')}>

@@ -2,7 +2,7 @@ import { focusAdjacentColumn, taskRowTarget } from '@/shortcuts/taskTarget'
 import { useState } from 'react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
-import type { LabelRecord } from '@/api/generated/types.gen'
+import type { LabelRecord } from '@orbit/api/generated/types.gen'
 import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
 import { pickerTitle } from '@/features/tasks/relationsLib'
 import { useDuplicateActions } from '@/features/tasks/useDuplicateActions'
@@ -100,7 +100,7 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
       <article
         data-board-card
         className={cn(
-          'group/card relative flex cursor-pointer flex-col gap-[7px] rounded-md border bg-card p-2.5 transition-[translate,background-color,border-color,box-shadow,opacity] duration-150 ease-out focus-visible:ring-1 focus-visible:ring-primary focus-visible:outline-none data-active:border-primary/40 data-dragging:border-dashed data-dragging:opacity-35',
+          'group/card relative flex cursor-pointer flex-col gap-[7px] rounded-md border bg-card p-2.5 transition-[translate,background-color,border-color,box-shadow,opacity] duration-150 ease-out focus-visible:ring-1 focus-visible:ring-primary/70 focus-visible:outline-none data-active:border-primary/40 data-dragging:border-dashed data-dragging:opacity-35',
           // lift only where hover is real and motion is welcome; the hover styles skip a nest target: `hover-fine` is
           // emitted after `data-*` at equal specificity, so they must be mutually exclusive (.ai/lessons.md)
           'not-data-[nest=inside]:hover-fine:hover:border-foreground/20 not-data-[nest=inside]:hover-fine:hover:bg-accent not-data-[nest=inside]:hover-fine:hover:shadow-md motion-safe:not-data-[nest=inside]:hover-fine:hover:-translate-y-px',

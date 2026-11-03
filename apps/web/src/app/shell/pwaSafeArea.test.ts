@@ -30,12 +30,9 @@ test('mobile chrome has no outer or dock hairlines', async () => {
   // the dock carries no border in any state
   const dock = await Bun.file(new URL('./MobileDock.tsx', import.meta.url)).text()
   expect(dock).not.toMatch(/border/)
-  // the mobile top bar is borderless except for the settings sub-header
-  const topbar = await Bun.file(new URL('./Topbar.tsx', import.meta.url)).text()
-  expect(topbar).not.toMatch(/(?<!settings\]:)border-b\b/)
   // the only outer vertical hairline lives on the sidebar, which is hidden on mobile
   const shell = await Bun.file(new URL('./AppShell.tsx', import.meta.url)).text()
-  expect(shell).toMatch(/border-r border-border[^"]*max-\[899px\]:hidden/)
+  expect(shell).toMatch(/border-r border-sidebar-edge[^"]*max-\[899px\]:hidden/)
 })
 
 test('mobile drawer stays below portalled workspace and profile menus', async () => {

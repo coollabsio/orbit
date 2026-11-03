@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { toast } from 'sonner'
 import { Add, InfoCircle, Routing } from 'reicon-react'
-import type { MailProviderView } from '@/api/generated/types.gen'
+import type { MailProviderView } from '@orbit/api/generated/types.gen'
 import { confirmAction } from '@/components/common/confirmAction'
 import { EmptyState } from '@/components/common/EmptyState'
 import { Modal } from '@/components/common/Modal'

@@ -1,6 +1,6 @@
 import type { ComponentType, ReactNode } from 'react'
 import { Danger, DocumentText, Global, ProfileCircle, ShieldCross } from 'reicon-react'
-import type { MailMessageView } from '@/api/generated/types.gen'
+import type { MailMessageView } from '@orbit/api/generated/types.gen'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 
 const domainOf = (address: string | undefined) => address?.split('@').pop() ?? ''

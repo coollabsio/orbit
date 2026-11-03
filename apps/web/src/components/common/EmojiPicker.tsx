@@ -1,6 +1,6 @@
 import { EmojiPicker as Frimousse, type EmojiPickerListCategoryHeaderProps, type EmojiPickerListEmojiProps, type EmojiPickerListRowProps } from 'frimousse'
 import { useContext, useState } from 'react'
-import { SearchNormal as Search } from 'reicon-react'
+import { Search4 as Search } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
 import { Spinner } from '@/components/ui/spinner'

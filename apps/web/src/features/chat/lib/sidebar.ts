@@ -32,6 +32,8 @@ export interface ChatBadges {
   threads: number
   /** The Chat item in the app sidebar and the mobile dock. */
   total: number
+  /** Something is unread, with or without a count: the Chat item shows a dot when `total` is 0. */
+  unread: boolean
 }
 
 export function chatBadges(
@@ -40,12 +42,11 @@ export function chatBadges(
   followedThreads: readonly FollowedThread[],
 ): ChatBadges {
   const stateById = new Map(states.map((state) => [state.conversationId, state]))
-  const unreads = conversations.reduce(
-    (total, conversation) => total + conversationBadge(conversation, stateById.get(conversation.id)).count,
-    0,
-  )
+  const rows = conversations.map((conversation) => conversationBadge(conversation, stateById.get(conversation.id)))
+  const unreads = rows.reduce((total, row) => total + row.count, 0)
   const threads = followedThreads.filter((thread) => thread.state.following && thread.state.unreadReplies > 0).length
-  return { unreads, threads, total: unreads + threads }
+  const total = unreads + threads
+  return { unreads, threads, total, unread: total > 0 || rows.some((row) => row.bold) }
 }
 
 export interface UnreadConversation {

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import type { AttachmentRecord, AuditEvent, CommentRecord, ProjectRecord, TaskRecord } from '@/api/generated/types.gen'
+import type { AttachmentRecord, AuditEvent, CommentRecord, ProjectRecord, TaskRecord } from '@orbit/api/generated/types.gen'
 import { refIdentifier, taskFromRecord, taskIdentifier } from './models'
 
 const project: ProjectRecord = {
@@ -22,7 +22,7 @@ const comment: CommentRecord = {
 const attachment: AttachmentRecord = {
   id: 'attachment-1', workspace_id: 'workspace-1', task_id: record.id, owner_id: 'user-1',
   display_name: 'brief.pdf', media_type: 'application/pdf', byte_size: 42,
-  created_at: '2026-09-04T12:00:00Z',
+  created_at: '2026-09-04T12:00:00Z', deleted: false,
 }
 const activity: AuditEvent = {
   id: 'activity-1', workspace_id: 'workspace-1', actor_id: 'user-1', action: 'task.updated',

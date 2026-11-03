@@ -85,13 +85,12 @@ impl JobStore {
         Ok(job.id)
     }
 
-    /// [`Self::enqueue`] inside the caller's transaction: the job exists only if the transaction commits.
+    /// Queues `job` inside `transaction`, so it exists only if the transaction commits. The
+    /// worker that runs the job registers its kind.
     pub async fn enqueue_in(
-        &self,
         transaction: &mut Transaction<'_, Any>,
         job: &Job,
     ) -> Result<Id, JobStoreError> {
-        self.register_kind(job.kind.clone())?;
         insert_job(&mut **transaction, job).await?;
         Ok(job.id)
     }
@@ -488,10 +487,10 @@ impl JobQueue {
     }
 }
 
-pub(crate) async fn insert_job<'e, E>(executor: E, job: &Job) -> Result<u64, JobStoreError>
-where
-    E: Executor<'e, Database = Any>,
-{
+async fn insert_job<'e>(
+    executor: impl Executor<'e, Database = Any>,
+    job: &Job,
+) -> Result<u64, JobStoreError> {
     Ok(sqlx::query(
         "INSERT INTO jobs (id, workspace_id, schedule_id, scheduled_for, \
          manual_retry_of, kind, payload_json, state, priority, attempt_count, max_attempts, \

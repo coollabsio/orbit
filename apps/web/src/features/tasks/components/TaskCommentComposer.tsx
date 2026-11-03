@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
 import type { PageMentionMember } from '@/features/docs/editor/pageMentions'
 import { uploadInlineFile } from '@/features/tasks/api/inlineFiles'
-import { storageQuotaDetail } from '@/api/problem'
+import { storageQuotaDetail } from '@orbit/api/problem'
 import { fileBlock, isEmptyRichText } from '@/features/tasks/lib/richText'
 // Type-only import: erased at build time, so the BlockNote chunk stays lazy.
 import type { PageEditorHandle } from '@/features/docs/editor/PageEditor'
@@ -112,7 +112,7 @@ export function TaskCommentComposer({
 
   return (
     // one box holds the field and its actions; a reply (`compact`) sits inside its thread card
-    <div data-realtime-safe="" className={cn('relative flex flex-wrap items-end', compact ? 'gap-x-1' : 'rounded-[10px] border bg-card transition-colors focus-within:border-ring')}>
+    <div data-realtime-safe="" className={cn('relative flex flex-wrap items-end', compact ? 'gap-x-1' : 'rounded-[10px] border bg-card/50 transition-colors focus-within:border-ring/50')}>
       <div className={cn('min-w-0', compact ? 'flex-1 py-1' : 'basis-full px-3 pt-2.5')}>
         <Suspense fallback={<EditorFallback />}>
           <PageEditor
@@ -129,7 +129,7 @@ export function TaskCommentComposer({
             uploadFile={uploadFile}
             mentions={mentions}
             sideMenu={false}
-            className="text-[13px] [&_.bn-editor]:min-h-6"
+            className="[&_.bn-editor]:min-h-6 [&_.bn-editor]:text-[13px]! [&_.bn-trailing-block]:hidden!"
           />
         </Suspense>
       </div>

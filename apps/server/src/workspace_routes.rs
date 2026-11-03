@@ -15,7 +15,7 @@ use orbit_domain::WorkspaceRole;
 use orbit_platform::{
     BackupError, BackupKind, BackupService, BackupSnapshot, ClientIp, Id, JobLimits, ObjectStorage,
     PasswordError, PasswordExecutor, PasswordService, RateLimitConfig, RequestId, ThrottleDecision,
-    TieredBlobStore, TimestampMillis,
+    TieredBlobStore, TimestampMillis, UploadService,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -27,6 +27,7 @@ use crate::auth_routes::{CookieMode, issued_session_cookie, request_session};
 use crate::email_quota::{self, Quota};
 use crate::image_compression::{CompressionStatus, ImageCompressor};
 use crate::mail::{self, Mailer};
+use crate::object_storage::Owner;
 use crate::repositories::api_tokens::{
     ApiTokenError, ApiTokenRecord, ApiTokenRepository, IssuedApiToken,
 };
@@ -38,7 +39,10 @@ use crate::repositories::instance_settings::{
     PasswordChange, S3Settings, SmtpSecurity, SmtpSettings, StorageSettingsError,
     adjustable_job_kinds,
 };
+use crate::repositories::sign_in_providers::SaveSignInProviderError;
+use crate::repositories::workspace_storage::{WorkspaceStorageError, WorkspaceStorageRepository};
 use crate::repositories::workspaces::{InvitationDelivery, WorkspaceError, WorkspaceRepository};
+use crate::sign_in_providers::Provider;
 
 #[derive(Clone)]
 pub struct WorkspaceState {
@@ -58,6 +62,8 @@ pub struct WorkspaceState {
     object_storage: Option<(ObjectStorage, TieredBlobStore)>,
     /// Makes large stored images smaller (Admin → Storage).
     image_compressor: Option<ImageCompressor>,
+    /// Deletes stored files for workspace admins; `None` refuses to.
+    uploads: Option<UploadService>,
 }
 
 /// Open registration is throttled like sign-in, on every server of the database.
@@ -90,6 +96,7 @@ impl WorkspaceState {
             rate_limits: RateLimitConfig::default(),
             object_storage: None,
             image_compressor: None,
+            uploads: None,
         }
     }
 
@@ -116,6 +123,7 @@ impl WorkspaceState {
             rate_limits: RateLimitConfig::default(),
             object_storage: None,
             image_compressor: None,
+            uploads: None,
         }
     }
 
@@ -134,6 +142,12 @@ impl WorkspaceState {
     #[must_use]
     pub fn with_object_storage(mut self, storage: ObjectStorage, store: TieredBlobStore) -> Self {
         self.object_storage = Some((storage, store));
+        self
+    }
+
+    #[must_use]
+    pub fn with_uploads(mut self, uploads: UploadService) -> Self {
+        self.uploads = Some(uploads);
         self
     }
 
@@ -176,6 +190,16 @@ pub fn workspace_router(state: WorkspaceState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/storage",
             get(get_workspace_storage),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/storage/files/{file_id}",
+            delete(delete_storage_file),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/storage/bucket",
+            get(get_workspace_bucket)
+                .put(save_workspace_bucket)
+                .delete(remove_workspace_bucket),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/restore",
@@ -226,6 +250,10 @@ pub fn workspace_router(state: WorkspaceState) -> Router {
         )
         .route("/api/v1/admin/settings/smtp/test", post(send_test_email))
         .route("/api/v1/admin/settings/s3", put(save_s3).delete(remove_s3))
+        .route(
+            "/api/v1/admin/settings/sign-in-providers/{provider}",
+            put(save_sign_in_provider).delete(remove_sign_in_provider),
+        )
         .route("/api/v1/admin/settings/storage", put(save_storage_options))
         .route("/api/v1/admin/settings/limits", put(save_limits))
         .route(
@@ -248,6 +276,10 @@ pub fn workspace_router(state: WorkspaceState) -> Router {
         .route(
             "/api/v1/admin/users/{user_id}/two-factor/reset",
             post(reset_two_factor),
+        )
+        .route(
+            "/api/v1/admin/users/{user_id}/email",
+            put(change_user_email),
         )
         .route(
             "/api/v1/admin/users/{user_id}/admin",
@@ -395,11 +427,22 @@ async fn get_workspace(
         .map_err(|error| workspace_problem(error, instance, request_id.as_ref()))
 }
 
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+#[serde(deny_unknown_fields)]
+struct StorageQuery {
+    /// How many of the largest files to list for an admin: 1 to 500 (default 10).
+    files: Option<u32>,
+    /// How many of the largest files to skip first, for the next pages (default 0).
+    offset: Option<u32>,
+}
+
 /// How many bytes of files the workspace stores, and its quota. Any member may read it.
-#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/storage", params(("workspace_id" = String, Path)), responses((status = 200, body = crate::repositories::workspaces::WorkspaceStorage)))]
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/storage", params(StorageQuery, ("workspace_id" = String, Path)), responses((status = 200, body = crate::repositories::workspaces::WorkspaceStorage)))]
 async fn get_workspace_storage(
     State(state): State<WorkspaceState>,
     Path(workspace_id): Path<String>,
+    ApiQuery(query): ApiQuery<StorageQuery>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
 ) -> Result<Json<crate::repositories::workspaces::WorkspaceStorage>, ApiError> {
@@ -408,9 +451,48 @@ async fn get_workspace_storage(
     let workspace_id = parse_id(&workspace_id, &instance, request_id.as_ref())?;
     state
         .workspaces
-        .storage(workspace_id, session.user.id)
+        .storage(
+            workspace_id,
+            session.user.id,
+            query.files.unwrap_or(10).max(1),
+            query.offset.unwrap_or(0),
+        )
         .await
         .map(Json)
+        .map_err(|error| workspace_problem(error, instance, request_id.as_ref()))
+}
+
+/// Deletes a stored file (one of the storage's largest files) for an admin. Tasks, pages and chat messages keep
+/// their link to it, which then says "Deleted file".
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/storage/files/{file_id}", params(("workspace_id" = String, Path), ("file_id" = String, Path)), responses((status = 204)))]
+async fn delete_storage_file(
+    State(state): State<WorkspaceState>,
+    Path((workspace_id, file_id)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<StatusCode, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace_id}/storage/files/{file_id}");
+    let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
+    let workspace_id = parse_id(&workspace_id, &instance, request_id.as_ref())?;
+    let file_id = parse_id(&file_id, &instance, request_id.as_ref())?;
+    let Some(uploads) = &state.uploads else {
+        return Err(workspace_problem(
+            WorkspaceError::NotFound,
+            instance,
+            request_id.as_ref(),
+        ));
+    };
+    state
+        .workspaces
+        .delete_storage_file(
+            uploads,
+            workspace_id,
+            session.user.id,
+            file_id,
+            request_id_value(request_id.as_ref()),
+        )
+        .await
+        .map(|()| StatusCode::NO_CONTENT)
         .map_err(|error| workspace_problem(error, instance, request_id.as_ref()))
 }
 
@@ -555,6 +637,10 @@ async fn put_member_note(
 enum ApiTokenScope {
     Read,
     Write,
+    #[serde(rename = "docs:read")]
+    DocsRead,
+    #[serde(rename = "chat:read")]
+    ChatRead,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -615,6 +701,11 @@ async fn create_api_token(
         || name.chars().count() > 100
         || project_ids.is_empty()
         || body.scopes.is_empty()
+        || (body.service_account
+            && body
+                .scopes
+                .iter()
+                .any(|s| matches!(s, ApiTokenScope::DocsRead | ApiTokenScope::ChatRead)))
     {
         return Err(ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -633,6 +724,16 @@ async fn create_api_token(
         .scopes
         .iter()
         .any(|scope| matches!(scope, ApiTokenScope::Write));
+    let mcp_scopes = body
+        .scopes
+        .iter()
+        .filter_map(|s| match s {
+            ApiTokenScope::DocsRead => Some("docs:read"),
+            ApiTokenScope::ChatRead => Some("chat:read"),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
     let now = TimestampMillis::now();
     let expires_at = match body.expires_in_days {
         None => None,
@@ -652,7 +753,7 @@ async fn create_api_token(
     };
     let issued = state
         .api_tokens
-        .create(
+        .create_scoped(
             workspace_id,
             session.user.id,
             name.to_owned(),
@@ -663,6 +764,7 @@ async fn create_api_token(
             expires_at,
             request_id_value(request_id.as_ref()),
             now,
+            &mcp_scopes,
         )
         .await
         .map_err(|error| api_token_problem(error, &instance, request_id.as_ref()))?;
@@ -1065,7 +1167,7 @@ async fn accept_invitation(
     ApiJson(body): ApiJson<AcceptBody>,
 ) -> Result<Response, ApiError> {
     let instance = "/api/v1/workspaces/invitations/accept";
-    if state.cookie_mode.session_token(&headers).is_some() {
+    if state.cookie_mode.session_credential(&headers).is_some() {
         let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
         let accepted = state
             .workspaces
@@ -1396,15 +1498,52 @@ async fn set_instance_admin(
     Ok(StatusCode::NO_CONTENT)
 }
 
+/// Who hears about an admin action on someone else's account.
+enum AccountNotice<'a> {
+    /// Orbit Cloud: the person is always emailed, so the action needs a mail server.
+    Cloud(&'a Mailer),
+    /// Self-hosted: the person is emailed only when a mail server is saved.
+    SelfHosted(Option<&'a Mailer>),
+}
+
+async fn account_notice<'a>(
+    state: &'a WorkspaceState,
+    actor_id: Id,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> Result<AccountNotice<'a>, ApiError> {
+    let mailer = state.enabled_mailer().await;
+    if !crate::repositories::billing::enabled(state.identity.database()) {
+        return Ok(AccountNotice::SelfHosted(mailer));
+    }
+    if let Some(mailer) = mailer {
+        return Ok(AccountNotice::Cloud(mailer));
+    }
+    require_installation_admin(state, actor_id, instance, request_id).await?;
+    Err(ApiError::new(
+        StatusCode::CONFLICT,
+        "smtp_required",
+        "Mail server required",
+        "Orbit Cloud emails the person about this change. Save a mail server in Admin → Settings first.",
+        instance,
+        request_id,
+    ))
+}
+
+/// Self-hosted returns the link (201); Orbit Cloud emails it to the account instead and returns where (202).
 #[derive(Serialize, ToSchema)]
 struct RecoveryLink {
-    url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    sent_to: Option<String>,
     #[schema(value_type = String, format = DateTime)]
     expires_at: TimestampMillis,
 }
 
 /// A one-time password recovery link for another account. It lasts 30 minutes, the same as `orbit recovery-link`.
-#[utoipa::path(post, path = "/api/v1/admin/users/{user_id}/recovery-link", params(("user_id" = String, Path)), responses((status = 201, body = RecoveryLink)))]
+/// On Orbit Cloud the admin never sees it: it is emailed to the account (409 `smtp_required` without a mail server).
+#[utoipa::path(post, path = "/api/v1/admin/users/{user_id}/recovery-link", params(("user_id" = String, Path)), responses((status = 201, body = RecoveryLink), (status = 202, body = RecoveryLink), (status = 409, description = "smtp_required", body = ProblemBody, content_type = "application/problem+json")))]
 async fn create_recovery_link(
     State(state): State<WorkspaceState>,
     Path(user_id): Path<String>,
@@ -1415,10 +1554,11 @@ async fn create_recovery_link(
     let instance = format!("/api/v1/admin/users/{user_id}/recovery-link");
     let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
     let user_id = parse_id(&user_id, &instance, request_id.as_ref())?;
+    let notice = account_notice(&state, session.user.id, &instance, request_id.as_ref()).await?;
     let token = orbit_platform::generate_opaque_token();
     let expires_at =
         TimestampMillis::from_millis(TimestampMillis::now().as_millis() + LIFETIME_MILLIS);
-    state
+    let email = state
         .identity
         .issue_recovery_token_as_admin(
             session.user.id,
@@ -1429,17 +1569,33 @@ async fn create_recovery_link(
         )
         .await
         .map_err(|error| admin_account_problem(error, &instance, request_id.as_ref()))?;
-    Ok((
-        StatusCode::CREATED,
-        Json(RecoveryLink {
-            url: format!("{}/recovery?token={token}", state.public_origin),
-            expires_at,
-        }),
-    ))
+    let url = format!("{}/recovery?token={token}", state.public_origin);
+    Ok(match notice {
+        AccountNotice::Cloud(mailer) => {
+            mailer.send_later(mail::templates::admin_recovery(&email, &url));
+            (
+                StatusCode::ACCEPTED,
+                Json(RecoveryLink {
+                    url: None,
+                    sent_to: Some(email),
+                    expires_at,
+                }),
+            )
+        }
+        AccountNotice::SelfHosted(_) => (
+            StatusCode::CREATED,
+            Json(RecoveryLink {
+                url: Some(url),
+                sent_to: None,
+                expires_at,
+            }),
+        ),
+    })
 }
 
 /// Turns another account's two-factor sign-in off, for a user who lost the authenticator app and the recovery codes.
-#[utoipa::path(post, path = "/api/v1/admin/users/{user_id}/two-factor/reset", params(("user_id" = String, Path)), responses((status = 204)))]
+/// Orbit Cloud emails the person a notice (409 `smtp_required` without a mail server).
+#[utoipa::path(post, path = "/api/v1/admin/users/{user_id}/two-factor/reset", params(("user_id" = String, Path)), responses((status = 204), (status = 409, description = "smtp_required", body = ProblemBody, content_type = "application/problem+json")))]
 async fn reset_two_factor(
     State(state): State<WorkspaceState>,
     Path(user_id): Path<String>,
@@ -1449,7 +1605,8 @@ async fn reset_two_factor(
     let instance = format!("/api/v1/admin/users/{user_id}/two-factor/reset");
     let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
     let user_id = parse_id(&user_id, &instance, request_id.as_ref())?;
-    state
+    let notice = account_notice(&state, session.user.id, &instance, request_id.as_ref()).await?;
+    let email = state
         .identity
         .reset_two_factor_as_admin(
             session.user.id,
@@ -1458,6 +1615,67 @@ async fn reset_two_factor(
         )
         .await
         .map_err(|error| admin_account_problem(error, &instance, request_id.as_ref()))?;
+    if let AccountNotice::Cloud(mailer) = notice {
+        mailer.send_later(mail::templates::two_factor_reset(&email));
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct AdminEmailBody {
+    /// The new address.
+    email: String,
+}
+
+/// Changes an account's email at once, verified, with no confirmation email: for instances without a mail server.
+/// The account is signed out everywhere (an admin who changes their own email keeps this session). With a mail
+/// server, the old address gets a notice. Orbit Cloud needs one (409 `smtp_required`) and also tells the new address.
+#[utoipa::path(put, path = "/api/v1/admin/users/{user_id}/email", params(("user_id" = String, Path)), request_body = AdminEmailBody, responses((status = 204), (status = 409, description = "smtp_required", body = ProblemBody, content_type = "application/problem+json")))]
+async fn change_user_email(
+    State(state): State<WorkspaceState>,
+    Path(user_id): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<AdminEmailBody>,
+) -> Result<StatusCode, ApiError> {
+    let instance = format!("/api/v1/admin/users/{user_id}/email");
+    let rid = request_id.as_ref();
+    let session = authenticate(&state, &headers, &instance, rid).await?;
+    let user_id = parse_id(&user_id, &instance, rid)?;
+    let notice = account_notice(&state, session.user.id, &instance, rid).await?;
+    let email = body.email.trim();
+    if !mail::valid_address(email) {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_email",
+            "Invalid email",
+            "Enter a valid email address.",
+            &instance,
+            rid,
+        ));
+    }
+    let changed = state
+        .identity
+        .change_email_as_admin(
+            session.user.id,
+            user_id,
+            email,
+            (session.user.id == user_id).then_some(session.id),
+            request_id_value(rid),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|error| admin_account_problem(error, &instance, rid))?;
+    let old_address_notice = mail::templates::email_changed(&changed.old_email, &changed.new_email);
+    match notice {
+        AccountNotice::Cloud(mailer) => {
+            mailer.send_later(old_address_notice);
+            mailer.send_later(mail::templates::email_set_by_admin(&changed.new_email));
+        }
+        AccountNotice::SelfHosted(Some(mailer)) => mailer.send_later(old_address_notice),
+        AccountNotice::SelfHosted(None) => {}
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1477,11 +1695,18 @@ fn email_failed(
     instance: &str,
     request_id: Option<&Extension<RequestId>>,
 ) -> ApiError {
+    tracing::warn!(%error, "email could not be sent");
+    // The SMTP server's own text stays in the log.
+    let cause = match error {
+        mail::MailError::Smtp(_) => "the SMTP connection or delivery failed".to_owned(),
+        mail::MailError::Address(_) => "an email address is invalid".to_owned(),
+        error => error.to_string(),
+    };
     ApiError::new(
         StatusCode::BAD_GATEWAY,
         "email_failed",
         "Email failed",
-        format!("The email could not be sent: {error}"),
+        format!("The email could not be sent: {cause}"),
         instance,
         request_id,
     )
@@ -1547,6 +1772,8 @@ struct InstanceSettingsView {
     storage: StorageView,
     limits: LimitsView,
     mail: InstanceMailView,
+    /// The Google and GitHub OAuth clients that are saved. A provider that is not listed is off.
+    sign_in_providers: Vec<SignInProviderView>,
 }
 
 /// Mail on this installation; the health card is `GET /api/v1/admin/mail`.
@@ -1554,6 +1781,16 @@ struct InstanceSettingsView {
 struct InstanceMailView {
     /// Workspaces may add mail domains (`PUT /api/v1/admin/mail`).
     domains_enabled: bool,
+}
+
+#[derive(Serialize, ToSchema)]
+struct SignInProviderView {
+    provider: Provider,
+    client_id: String,
+    /// A client secret is saved. The secret itself is never returned.
+    secret_set: bool,
+    /// The redirect URI to register at the provider.
+    callback_url: String,
 }
 
 /// Limits for a shared installation. `null` is unlimited.
@@ -1598,12 +1835,25 @@ async fn settings_view(
         .mail_domains_enabled()
         .await
         .map_err(|_| internal(instance, request_id))?;
+    let sign_in_providers = repository
+        .sign_in_providers()
+        .await
+        .map_err(|_| internal(instance, request_id))?
+        .into_iter()
+        .map(|saved| SignInProviderView {
+            provider: saved.provider,
+            client_id: saved.client_id,
+            secret_set: !saved.client_secret.is_empty(),
+            callback_url: saved.provider.callback_url(&state.public_origin),
+        })
+        .collect();
     let moving = state
         .object_storage
         .as_ref()
         .map(|(_, store)| store.status())
         .unwrap_or_default();
     Ok(Json(InstanceSettingsView {
+        sign_in_providers,
         storage: StorageView {
             s3: storage.s3.map(|s3| S3View {
                 endpoint: s3.endpoint,
@@ -1822,7 +2072,9 @@ async fn set_registration(
             InstanceSettingsError::EmailNotConfigured => {
                 email_not_configured(instance, request_id.as_ref())
             }
-            InstanceSettingsError::Unavailable(_) => internal(instance, request_id.as_ref()),
+            InstanceSettingsError::SmtpRequired | InstanceSettingsError::Unavailable(_) => {
+                internal(instance, request_id.as_ref())
+            }
         })?;
     settings_view(&state, instance, request_id.as_ref()).await
 }
@@ -1928,8 +2180,8 @@ async fn save_smtp(
     settings_view(&state, instance, request_id.as_ref()).await
 }
 
-/// Removes the mail server. Registration closes with it.
-#[utoipa::path(delete, path = "/api/v1/admin/settings/smtp", responses((status = 200, body = InstanceSettingsView)))]
+/// Removes the mail server. Registration closes with it. Orbit Cloud refuses (409 `smtp_required`).
+#[utoipa::path(delete, path = "/api/v1/admin/settings/smtp", responses((status = 200, body = InstanceSettingsView), (status = 409, description = "smtp_required", body = ProblemBody, content_type = "application/problem+json")))]
 async fn remove_smtp(
     State(state): State<WorkspaceState>,
     headers: HeaderMap,
@@ -1944,7 +2196,19 @@ async fn remove_smtp(
             TimestampMillis::now(),
         )
         .await
-        .map_err(|_| internal(instance, request_id.as_ref()))?;
+        .map_err(|error| match error {
+            InstanceSettingsError::SmtpRequired => ApiError::new(
+                StatusCode::CONFLICT,
+                "smtp_required",
+                "Mail server required",
+                "Orbit Cloud needs a mail server. Save a different one instead.",
+                instance,
+                request_id.as_ref(),
+            ),
+            InstanceSettingsError::EmailNotConfigured | InstanceSettingsError::Unavailable(_) => {
+                internal(instance, request_id.as_ref())
+            }
+        })?;
     settings_view(&state, instance, request_id.as_ref()).await
 }
 
@@ -1969,15 +2233,16 @@ async fn send_test_email(
 }
 
 fn storage_unreachable(
-    error: impl std::fmt::Display,
+    error: orbit_platform::S3Error,
     instance: &str,
     request_id: Option<&Extension<RequestId>>,
 ) -> ApiError {
+    tracing::warn!(%error, "bucket check failed");
     ApiError::new(
         StatusCode::BAD_GATEWAY,
         "storage_unreachable",
         "Storage unreachable",
-        format!("Orbit could not use the bucket: {error}"),
+        format!("Orbit could not use the bucket: {}", error.summary()),
         instance,
         request_id,
     )
@@ -2019,8 +2284,7 @@ async fn reload_storage(
         return Ok(());
     };
     let database = state.identity.database();
-    let settings = InstanceSettingsRepository::new(database.clone())
-        .storage()
+    let settings = crate::object_storage::load_saved(database)
         .await
         .map_err(|_| internal(instance, request_id))?;
     crate::object_storage::apply_and_keep(
@@ -2033,6 +2297,131 @@ async fn reload_storage(
     // The other servers of the database use them too.
     crate::cluster::Cluster::of(database).send(crate::cluster::Message::StorageChanged);
     Ok(())
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct SignInProviderBody {
+    /// The OAuth client ID from Google Cloud or the GitHub OAuth App.
+    client_id: String,
+    /// Absent or empty: keep the saved secret. Required the first time.
+    client_secret: Option<String>,
+}
+
+fn invalid_sign_in_provider(
+    detail: &'static str,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> ApiError {
+    ApiError::new(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "invalid_sign_in_provider",
+        "Invalid sign-in provider",
+        detail,
+        instance,
+        request_id,
+    )
+}
+
+fn sign_in_provider_not_found(
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> ApiError {
+    ApiError::new(
+        StatusCode::NOT_FOUND,
+        "provider_not_found",
+        "Unknown provider",
+        "Orbit can sign in with google or github.",
+        instance,
+        request_id,
+    )
+}
+
+/// Saves the OAuth client of a sign-in provider; the sign-in pages offer it from then on. The secret is encrypted
+/// under the app key.
+#[utoipa::path(put, path = "/api/v1/admin/settings/sign-in-providers/{provider}", params(("provider" = Provider, Path)), request_body = SignInProviderBody, responses((status = 200, body = InstanceSettingsView)))]
+async fn save_sign_in_provider(
+    State(state): State<WorkspaceState>,
+    headers: HeaderMap,
+    Path(provider): Path<String>,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<SignInProviderBody>,
+) -> Result<Json<InstanceSettingsView>, ApiError> {
+    let instance = "/api/v1/admin/settings/sign-in-providers/{provider}";
+    let rid = request_id.as_ref();
+    let session = require_root(&state, &headers, instance, rid).await?;
+    let provider =
+        Provider::parse(&provider).ok_or_else(|| sign_in_provider_not_found(instance, rid))?;
+    let client_id = body.client_id.trim();
+    if client_id.is_empty() || client_id.len() > 256 {
+        return Err(invalid_sign_in_provider(
+            "client_id: enter the client ID (at most 256 characters).",
+            instance,
+            rid,
+        ));
+    }
+    let key = state
+        .mailer
+        .as_ref()
+        .and_then(Mailer::app_key)
+        .ok_or_else(|| app_key_missing(instance, rid))?;
+    let secret = body
+        .client_secret
+        .map(|secret| secret.trim().to_owned())
+        .filter(|secret| !secret.is_empty());
+    if secret.as_ref().is_some_and(|secret| secret.len() > 512) {
+        return Err(invalid_sign_in_provider(
+            "client_secret: at most 512 characters.",
+            instance,
+            rid,
+        ));
+    }
+    let encrypted = secret
+        .map(|secret| crate::secret_box::encrypt_secret(key, &secret))
+        .transpose()
+        .map_err(|()| internal(instance, rid))?;
+    InstanceSettingsRepository::new(state.identity.database().clone())
+        .save_sign_in_provider(
+            session.user.id,
+            provider,
+            client_id,
+            encrypted,
+            request_id_value(rid),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|error| match error {
+            SaveSignInProviderError::SecretRequired => {
+                invalid_sign_in_provider("client_secret: enter the client secret.", instance, rid)
+            }
+            SaveSignInProviderError::Database(_) => internal(instance, rid),
+        })?;
+    settings_view(&state, instance, rid).await
+}
+
+/// Stops offering a sign-in provider. Accounts keep their connections, so saving it again restores them.
+#[utoipa::path(delete, path = "/api/v1/admin/settings/sign-in-providers/{provider}", params(("provider" = Provider, Path)), responses((status = 200, body = InstanceSettingsView)))]
+async fn remove_sign_in_provider(
+    State(state): State<WorkspaceState>,
+    headers: HeaderMap,
+    Path(provider): Path<String>,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<InstanceSettingsView>, ApiError> {
+    let instance = "/api/v1/admin/settings/sign-in-providers/{provider}";
+    let rid = request_id.as_ref();
+    let session = require_root(&state, &headers, instance, rid).await?;
+    let provider =
+        Provider::parse(&provider).ok_or_else(|| sign_in_provider_not_found(instance, rid))?;
+    InstanceSettingsRepository::new(state.identity.database().clone())
+        .remove_sign_in_provider(
+            session.user.id,
+            provider,
+            request_id_value(rid),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|_| internal(instance, rid))?;
+    settings_view(&state, instance, rid).await
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -2053,27 +2442,53 @@ struct S3Body {
     path_style: bool,
 }
 
-/// Saves the bucket after writing, reading and deleting a test object in it (502 `storage_unreachable` when that
-/// fails). Moving to another bucket or prefix needs the attachment files back on this server first.
-#[utoipa::path(put, path = "/api/v1/admin/settings/s3", request_body = S3Body, responses((status = 200, body = InstanceSettingsView)))]
-async fn save_s3(
-    State(state): State<WorkspaceState>,
-    headers: HeaderMap,
-    request_id: Option<Extension<RequestId>>,
-    ApiJson(body): ApiJson<S3Body>,
-) -> Result<Json<InstanceSettingsView>, ApiError> {
-    let instance = "/api/v1/admin/settings/s3";
-    let session = require_root(&state, &headers, instance, request_id.as_ref()).await?;
-    let invalid = |field: &str, detail: &str| {
-        ApiError::new(
-            StatusCode::UNPROCESSABLE_ENTITY,
-            "invalid_storage_settings",
-            "Invalid storage settings",
-            format!("{field}: {detail}"),
-            instance,
-            request_id.as_ref(),
-        )
-    };
+fn invalid_storage(
+    field: &str,
+    detail: &str,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> ApiError {
+    ApiError::new(
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "invalid_storage_settings",
+        "Invalid storage settings",
+        format!("{field}: {detail}"),
+        instance,
+        request_id,
+    )
+}
+
+/// The checked fields of an [`S3Body`], without the secret key.
+struct S3Location {
+    endpoint: String,
+    region: String,
+    bucket: String,
+    prefix: String,
+    access_key_id: String,
+    path_style: bool,
+}
+
+impl S3Location {
+    /// `secret_access_key` is encrypted under the app key.
+    fn with_secret(self, secret_access_key: Vec<u8>) -> S3Settings {
+        S3Settings {
+            endpoint: self.endpoint,
+            region: self.region,
+            bucket: self.bucket,
+            prefix: self.prefix,
+            access_key_id: self.access_key_id,
+            secret_access_key,
+            path_style: self.path_style,
+        }
+    }
+}
+
+fn validated_s3(
+    body: &S3Body,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> Result<S3Location, ApiError> {
+    let invalid = |field: &str, detail: &str| invalid_storage(field, detail, instance, request_id);
     let endpoint = body.endpoint.trim().trim_end_matches('/').to_owned();
     if !(endpoint.starts_with("https://") || endpoint.starts_with("http://"))
         || endpoint.len() > 2048
@@ -2092,6 +2507,7 @@ async fn save_s3(
     }
     let region = body
         .region
+        .as_deref()
         .map(|region| region.trim().to_owned())
         .filter(|region| !region.is_empty())
         .unwrap_or_else(|| "us-east-1".to_owned());
@@ -2100,6 +2516,7 @@ async fn save_s3(
     }
     let prefix = body
         .prefix
+        .as_deref()
         .unwrap_or_default()
         .trim()
         .trim_matches('/')
@@ -2119,6 +2536,30 @@ async fn save_s3(
     if access_key_id.is_empty() || access_key_id.len() > 256 {
         return Err(invalid("access_key_id", "enter the access key."));
     }
+    Ok(S3Location {
+        endpoint,
+        region,
+        bucket,
+        prefix,
+        access_key_id,
+        path_style: body.path_style,
+    })
+}
+
+/// Saves the bucket after writing, reading and deleting a test object in it (502 `storage_unreachable` when that
+/// fails). Moving to another bucket or prefix needs the attachment files back on this server first.
+#[utoipa::path(put, path = "/api/v1/admin/settings/s3", request_body = S3Body, responses((status = 200, body = InstanceSettingsView)))]
+async fn save_s3(
+    State(state): State<WorkspaceState>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<S3Body>,
+) -> Result<Json<InstanceSettingsView>, ApiError> {
+    let instance = "/api/v1/admin/settings/s3";
+    let session = require_root(&state, &headers, instance, request_id.as_ref()).await?;
+    let invalid =
+        |field: &str, detail: &str| invalid_storage(field, detail, instance, request_id.as_ref());
+    let location = validated_s3(&body, instance, request_id.as_ref())?;
     let key = state
         .mailer
         .as_ref()
@@ -2137,22 +2578,16 @@ async fn save_s3(
             .and_then(|s3| crate::secret_box::decrypt_secret(key, &s3.secret_access_key).ok())
             .ok_or_else(|| invalid("secret_access_key", "enter the secret key."))?,
     };
-    let s3 = S3Settings {
-        endpoint,
-        region,
-        bucket,
-        prefix,
-        access_key_id,
-        secret_access_key: crate::secret_box::encrypt_secret(key, &secret)
+    let s3 = location.with_secret(
+        crate::secret_box::encrypt_secret(key, &secret)
             .map_err(|()| internal(instance, request_id.as_ref()))?,
-        path_style: body.path_style,
-    };
+    );
     if let Some(old) = &saved.s3 {
         let moved =
             (&old.endpoint, &old.bucket, &old.prefix) != (&s3.endpoint, &s3.bucket, &s3.prefix);
         if moved {
             let in_use = saved.attachments_in_s3
-                || crate::object_storage::saved_bucket(old, Some(key))
+                || crate::object_storage::saved_bucket(old, Some(key), Owner::Installation)
                     .map_err(|_| internal(instance, request_id.as_ref()))?
                     .any("blobs/")
                     .await
@@ -2167,7 +2602,7 @@ async fn save_s3(
             }
         }
     }
-    crate::object_storage::bucket(&s3, secret)
+    crate::object_storage::bucket(&s3, secret, Owner::Installation)
         .map_err(|error| invalid("endpoint", &error))?
         .probe()
         .await
@@ -2209,7 +2644,7 @@ async fn remove_s3(
             ));
         }
         let app_key = state.mailer.as_ref().and_then(Mailer::app_key);
-        let files_left = crate::object_storage::saved_bucket(s3, app_key)
+        let files_left = crate::object_storage::saved_bucket(s3, app_key, Owner::Installation)
             .map_err(|_| internal(instance, request_id.as_ref()))?
             .any("blobs/")
             .await
@@ -2232,6 +2667,225 @@ async fn remove_s3(
         .map_err(|_| internal(instance, request_id.as_ref()))?;
     reload_storage(&state, instance, request_id.as_ref()).await?;
     settings_view(&state, instance, request_id.as_ref()).await
+}
+
+/// The S3 bucket that a workspace connected for its own files.
+#[derive(Serialize, ToSchema)]
+struct WorkspaceBucketView {
+    /// `null` while the workspace uses the installation's storage.
+    s3: Option<S3View>,
+    /// The bucket was removed: its files move back to the installation's storage, then it disappears.
+    removing: bool,
+    /// Orbit has not counted the files to move since the bucket was saved or removed yet; `files_to_move` is 0
+    /// until it has.
+    checking: bool,
+    /// The workspace's files still waiting to move into the bucket (or back out of it): existing files on this
+    /// server and in the installation's bucket move in the background.
+    files_to_move: u64,
+    /// Why moving files stopped last time. Orbit retries every ten minutes.
+    move_error: Option<String>,
+}
+
+fn workspace_storage_problem(
+    error: WorkspaceStorageError,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> ApiError {
+    match error {
+        WorkspaceStorageError::NotFound => {
+            workspace_problem(WorkspaceError::NotFound, instance, request_id)
+        }
+        WorkspaceStorageError::Forbidden => {
+            workspace_problem(WorkspaceError::Forbidden, instance, request_id)
+        }
+        WorkspaceStorageError::Database(_) => internal(instance, request_id),
+    }
+}
+
+async fn workspace_bucket_view(
+    state: &WorkspaceState,
+    workspace_id: Id,
+    user_id: Id,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> Result<Json<WorkspaceBucketView>, ApiError> {
+    let saved = WorkspaceStorageRepository::new(state.identity.database().clone())
+        .get(workspace_id, user_id)
+        .await
+        .map_err(|error| workspace_storage_problem(error, instance, request_id))?;
+    let moving = state
+        .object_storage
+        .as_ref()
+        .and_then(|(_, store)| store.workspace_status(&workspace_id.to_string()));
+    let checking = saved.is_some() && moving.is_none();
+    let moving = moving.unwrap_or_default();
+    Ok(Json(WorkspaceBucketView {
+        checking,
+        removing: saved.as_ref().is_some_and(|saved| !saved.active),
+        s3: saved.map(|saved| S3View {
+            endpoint: saved.s3.endpoint,
+            region: saved.s3.region,
+            bucket: saved.s3.bucket,
+            prefix: saved.s3.prefix,
+            access_key_id: saved.s3.access_key_id,
+            path_style: saved.s3.path_style,
+        }),
+        files_to_move: u64::try_from(moving.remaining).unwrap_or(u64::MAX),
+        move_error: moving.error,
+    }))
+}
+
+/// The workspace's own bucket. Owners and admins only.
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/storage/bucket", params(("workspace_id" = String, Path)), responses((status = 200, body = WorkspaceBucketView)))]
+async fn get_workspace_bucket(
+    State(state): State<WorkspaceState>,
+    Path(workspace_id): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<WorkspaceBucketView>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace_id}/storage/bucket");
+    let session = authenticate(&state, &headers, &instance, request_id.as_ref()).await?;
+    let workspace_id = parse_id(&workspace_id, &instance, request_id.as_ref())?;
+    workspace_bucket_view(
+        &state,
+        workspace_id,
+        session.user.id,
+        &instance,
+        request_id.as_ref(),
+    )
+    .await
+}
+
+/// Connects the workspace's own S3 bucket, after writing, reading and deleting a test object in it (502
+/// `storage_unreachable` when that fails). New files of the workspace go there and its other files move there in
+/// the background. The endpoint must be `https` on the public internet. Moving to another bucket or prefix needs
+/// the files back out of the old one first (409 `storage_in_use`).
+#[utoipa::path(put, path = "/api/v1/workspaces/{workspace_id}/storage/bucket", params(("workspace_id" = String, Path)), request_body = S3Body, responses((status = 200, body = WorkspaceBucketView)))]
+async fn save_workspace_bucket(
+    State(state): State<WorkspaceState>,
+    Path(workspace_id): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<S3Body>,
+) -> Result<Json<WorkspaceBucketView>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace_id}/storage/bucket");
+    let instance = instance.as_str();
+    let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
+    let workspace_id = parse_id(&workspace_id, instance, request_id.as_ref())?;
+    let invalid =
+        |field: &str, detail: &str| invalid_storage(field, detail, instance, request_id.as_ref());
+    let location = validated_s3(&body, instance, request_id.as_ref())?;
+    let database = state.identity.database();
+    let repository = WorkspaceStorageRepository::new(database.clone());
+    let saved = repository
+        .get(workspace_id, session.user.id)
+        .await
+        .map_err(|error| workspace_storage_problem(error, instance, request_id.as_ref()))?;
+    let key = state
+        .mailer
+        .as_ref()
+        .and_then(Mailer::app_key)
+        .ok_or_else(|| app_key_missing(instance, request_id.as_ref()))?;
+    let secret = match body.secret_access_key.filter(|secret| !secret.is_empty()) {
+        Some(secret) => secret,
+        None => saved
+            .as_ref()
+            .and_then(|saved| {
+                crate::secret_box::decrypt_secret(key, &saved.s3.secret_access_key).ok()
+            })
+            .ok_or_else(|| invalid("secret_access_key", "enter the secret key."))?,
+    };
+    let s3 = location.with_secret(
+        crate::secret_box::encrypt_secret(key, &secret)
+            .map_err(|()| internal(instance, request_id.as_ref()))?,
+    );
+    let location_of = |s3: &S3Settings| (s3.endpoint.clone(), s3.bucket.clone(), s3.prefix.clone());
+    let installation = InstanceSettingsRepository::new(database.clone())
+        .storage()
+        .await
+        .map_err(|_| internal(instance, request_id.as_ref()))?;
+    if installation
+        .s3
+        .as_ref()
+        .is_some_and(|own| location_of(own) == location_of(&s3))
+    {
+        return Err(invalid(
+            "bucket",
+            "the installation keeps its files under this bucket and prefix; use another prefix.",
+        ));
+    }
+    if let Some(old) = saved.filter(|old| location_of(&old.s3) != location_of(&s3)) {
+        let files_left = crate::object_storage::saved_bucket(&old.s3, Some(key), Owner::Workspace)
+            .map_err(|_| internal(instance, request_id.as_ref()))?
+            .any(&format!("blobs/{workspace_id}/"))
+            .await
+            .map_err(|error| storage_unreachable(error, instance, request_id.as_ref()))?;
+        if files_left {
+            return Err(storage_in_use(
+                "Files are in the saved bucket. Remove it and wait until no files are left to move before you \
+                 change the endpoint, bucket or prefix.",
+                instance,
+                request_id.as_ref(),
+            ));
+        }
+    }
+    crate::object_storage::bucket(&s3, secret, Owner::Workspace)
+        .map_err(|error| invalid("endpoint", &error))?
+        .probe()
+        .await
+        .map_err(|error| storage_unreachable(error, instance, request_id.as_ref()))?;
+    repository
+        .save(
+            workspace_id,
+            session.user.id,
+            &s3,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|error| workspace_storage_problem(error, instance, request_id.as_ref()))?;
+    reload_storage(&state, instance, request_id.as_ref()).await?;
+    workspace_bucket_view(
+        &state,
+        workspace_id,
+        session.user.id,
+        instance,
+        request_id.as_ref(),
+    )
+    .await
+}
+
+/// Stops using the workspace's own bucket: new files go to the installation's storage, and the files in the
+/// bucket move back and are deleted from it. The bucket disappears from the settings when none are left.
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/storage/bucket", params(("workspace_id" = String, Path)), responses((status = 200, body = WorkspaceBucketView)))]
+async fn remove_workspace_bucket(
+    State(state): State<WorkspaceState>,
+    Path(workspace_id): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<WorkspaceBucketView>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace_id}/storage/bucket");
+    let instance = instance.as_str();
+    let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
+    let workspace_id = parse_id(&workspace_id, instance, request_id.as_ref())?;
+    WorkspaceStorageRepository::new(state.identity.database().clone())
+        .remove(
+            workspace_id,
+            session.user.id,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(|error| workspace_storage_problem(error, instance, request_id.as_ref()))?;
+    reload_storage(&state, instance, request_id.as_ref()).await?;
+    workspace_bucket_view(
+        &state,
+        workspace_id,
+        session.user.id,
+        instance,
+        request_id.as_ref(),
+    )
+    .await
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -2459,17 +3113,19 @@ async fn create_backup(
         .await
         .map_err(|error| {
             tracing::error!(%error, "backup failed");
-            // Only installation admins reach this, so the cause is shown to them.
+            // A short cause; the full error is in the log above.
             let (code, detail) = match error {
                 orbit_platform::BackupError::ObjectStorage(error) => (
                     "backup_upload_failed",
                     format!(
-                        "The backup was saved on this server, but the upload to S3 failed: {error}"
+                        "The backup was saved on this server, but the upload to S3 failed: {}",
+                        error.summary()
                     ),
                 ),
-                error => (
+                _ => (
                     "backup_failed",
-                    format!("Orbit could not create a verified backup: {error}"),
+                    "Orbit could not create a verified backup. The server log has the cause."
+                        .to_owned(),
                 ),
             };
             ApiError::new(
@@ -2958,6 +3614,14 @@ fn workspace_problem(
             instance,
             request_id,
         ),
+        WorkspaceError::TransferUnavailable => ApiError::new(
+            StatusCode::CONFLICT,
+            "transfer_unavailable",
+            "Transfer unavailable",
+            "Ownership transfer is not available on Orbit Cloud yet.",
+            instance,
+            request_id,
+        ),
         WorkspaceError::InvalidInvitation => ApiError::new(
             StatusCode::NOT_FOUND,
             "invitation_not_found",
@@ -3149,6 +3813,30 @@ fn admin_account_problem(
             "account_suspended",
             "Account suspended",
             "Reinstate the account before you create a recovery link.",
+            instance,
+            request_id,
+        ),
+        AdminAccountError::Deleted => ApiError::new(
+            StatusCode::CONFLICT,
+            "account_deleted",
+            "Account deleted",
+            "The person deleted this account. It cannot be changed or reinstated.",
+            instance,
+            request_id,
+        ),
+        AdminAccountError::SameEmail => ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "same_email",
+            "Same email",
+            "This is already the account's email.",
+            instance,
+            request_id,
+        ),
+        AdminAccountError::EmailTaken => ApiError::new(
+            StatusCode::CONFLICT,
+            "email_taken",
+            "Email taken",
+            "Another account has this email.",
             instance,
             request_id,
         ),

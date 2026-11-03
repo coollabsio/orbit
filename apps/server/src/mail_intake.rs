@@ -124,7 +124,6 @@ impl From<serde_json::Error> for IntakeError {
 #[derive(Clone)]
 pub struct MailIntake {
     repo: Arc<MailRepository>,
-    jobs: JobStore,
     max_message_bytes: u64,
 }
 
@@ -132,10 +131,9 @@ impl MailIntake {
     /// Stores blobs through the repository's `UploadService`; `max_message_bytes` is
     /// `MailConfig::max_message_bytes`.
     #[must_use]
-    pub fn new(repo: Arc<MailRepository>, jobs: JobStore, max_message_bytes: u64) -> Self {
+    pub fn new(repo: Arc<MailRepository>, max_message_bytes: u64) -> Self {
         Self {
             repo,
-            jobs,
             max_message_bytes,
         }
     }
@@ -206,7 +204,7 @@ impl MailIntake {
                 now,
             )
             .with_workspace(workspace_id.to_string());
-            self.jobs.enqueue_in(&mut transaction, &job).await?;
+            JobStore::enqueue_in(&mut transaction, &job).await?;
             receipts.push(receipt_id);
         }
         if !tests.is_empty() {

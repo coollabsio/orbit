@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, expect, mock, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, waitFor } from '@testing-library/react'
-import type { PageVersionSummary } from '@/api/generated/types.gen'
+import type { PageVersionSummary } from '@orbit/api/generated/types.gen'
 import { registerConfirmationHandler } from '@/components/common/confirmAction'
 import { dayLabel, fullDate, timeOfDay } from '@/lib/format'
 import { PageHistoryPane } from './PageHistoryPane'

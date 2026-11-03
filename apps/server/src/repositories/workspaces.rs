@@ -6,8 +6,9 @@ use orbit_domain::{Actor, MembershipDenied, Permission, Policy, WorkspaceDefault
 use orbit_platform::{
     AttachmentMutationCoordinator, BLOB_REFERENCE_COUNT, BlobStore, BlobStoreError, Database, Id,
     IssuedSession, Job, JobError, JobKind, JobKindRegistrationError, JobStore, LocalBlobStore,
-    RecurringSchedule, Row, ScheduleError, Scheduler, TimestampMillis, WORKSPACE_STORAGE_USED,
-    Worker, WorkerConfig, WorkerError, generate_opaque_token, normalize_email,
+    RecurringSchedule, Row, ScheduleError, Scheduler, TimestampMillis, UploadError, UploadService,
+    WORKSPACE_STORAGE_USED, Worker, WorkerConfig, WorkerError, generate_opaque_token,
+    normalize_email,
 };
 use serde::Serialize;
 use serde_json::json;
@@ -164,14 +165,73 @@ pub struct MaintenanceSummary {
 }
 
 /// How many bytes of files a workspace stores, and its quota.
-#[derive(Clone, Copy, Debug, Serialize, ToSchema)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct WorkspaceStorage {
     /// Each stored file once, however often it is attached. A deleted file stops counting about a day after its
     /// last reference goes (trashed tasks, pages and messages keep their files until the trash is emptied).
     pub used_bytes: u64,
     /// `null` is unlimited.
     pub quota_bytes: Option<u64>,
+    /// One page of the files that use the most storage, largest first. Empty unless the caller may update the
+    /// workspace.
+    pub largest_files: Vec<StorageFile>,
+    /// How many files the workspace stores; `0` unless the caller may update the workspace.
+    pub file_count: u64,
 }
+
+/// One stored file (blob) of a workspace.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct StorageFile {
+    /// For `DELETE /api/v1/workspaces/{workspace_id}/storage/files/{file_id}`.
+    #[schema(value_type = String)]
+    pub id: Id,
+    pub byte_size: u64,
+    /// `null` when the file is only used in private places, or no longer used (it stops counting soon).
+    pub name: Option<String>,
+    /// Where the file is attached; empty when nothing uses it any more.
+    pub uses: Vec<StorageFileUse>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, ToSchema)]
+pub struct StorageFileUse {
+    pub kind: StorageFileUseKind,
+    /// The task title, page title or channel name; `null` for emoji, stickers and private places.
+    pub title: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum StorageFileUseKind {
+    Task,
+    Page,
+    Channel,
+    Emoji,
+    Sticker,
+    /// A personal page, a private channel, a direct message or an unsent chat upload. Its names stay hidden.
+    Private,
+}
+
+/// How many files one page of `WorkspaceStorage::largest_files` lists at most.
+pub const MAX_LARGEST_FILES: u32 = 500;
+
+/// Every use of the largest blobs of workspace `$1`, largest blob first. Names in private places are `NULL`.
+const LARGEST_FILE_USES: &str = "SELECT b.id AS blob_id, b.byte_size, u.kind, u.file_name, u.title \
+     FROM attachment_blobs b LEFT JOIN ( \
+       SELECT r.blob_id, 'task' AS kind, r.display_name AS file_name, t.title AS title \
+         FROM attachment_references r JOIN tasks t ON t.id = r.task_id WHERE r.workspace_id = $1 \
+       UNION ALL SELECT f.blob_id, CASE WHEN p.owner_id IS NULL THEN 'page' ELSE 'private' END, \
+         CASE WHEN p.owner_id IS NULL THEN f.file_name END, CASE WHEN p.owner_id IS NULL THEN p.title END \
+         FROM page_files f JOIN pages p ON p.id = f.page_id WHERE f.workspace_id = $1 \
+       UNION ALL SELECT f.blob_id, CASE WHEN c.kind = 'public' THEN 'channel' ELSE 'private' END, \
+         CASE WHEN c.kind = 'public' THEN f.file_name END, CASE WHEN c.kind = 'public' THEN c.name END \
+         FROM chat_message_files f LEFT JOIN chat_conversations c ON c.id = f.conversation_id \
+         WHERE f.workspace_id = $1 \
+       UNION ALL SELECT blob_id, 'emoji', name, NULL FROM custom_emoji WHERE workspace_id = $1 AND blob_id IS NOT NULL \
+       UNION ALL SELECT blob_id, 'sticker', name, NULL FROM custom_stickers WHERE workspace_id = $1 AND blob_id IS NOT NULL \
+     ) u ON u.blob_id = b.id \
+     WHERE b.id IN (SELECT id FROM attachment_blobs WHERE workspace_id = $1 AND deleted_at IS NULL \
+       ORDER BY byte_size DESC, id LIMIT $2 OFFSET $3) \
+     ORDER BY b.byte_size DESC, b.id, u.kind, u.title, u.file_name";
 
 #[derive(Debug, Error)]
 pub enum WorkspaceError {
@@ -181,6 +241,8 @@ pub enum WorkspaceError {
     Forbidden,
     #[error("workspace owner must transfer ownership first")]
     TransferRequired,
+    #[error("ownership transfer is not available with billing")]
+    TransferUnavailable,
     #[error("workspace invitation is invalid or expired")]
     InvalidInvitation,
     #[error("workspace invitation belongs to another email address")]
@@ -292,15 +354,19 @@ impl WorkspaceRepository {
         let id = defaults.workspace.id;
         let mut transaction = self.database.immediate_transaction().await?;
         ensure_may_own_another(&mut transaction, actor_id).await?;
+        // The root user's first workspace is exempt from billing (`crate::billing::access`).
         sqlx::query(
-            "INSERT INTO workspaces (id, name, version, owner_membership_id, created_at, updated_at) \
-             VALUES ($1, $2, 0, $3, $4, $5)",
+            "INSERT INTO workspaces (id, name, version, owner_membership_id, created_at, updated_at, \
+             billing_exempt) VALUES ($1, $2, 0, $3, $4, $5, CASE WHEN EXISTS (SELECT 1 FROM \
+             installation_state WHERE id = 1 AND root_user_id = $6) AND NOT EXISTS (SELECT 1 FROM \
+             workspaces WHERE billing_exempt = 1) THEN 1 ELSE 0 END)",
         )
         .bind(id.to_string())
         .bind(&defaults.workspace.name)
         .bind(defaults.owner.id.to_string())
         .bind(now.as_millis())
         .bind(now.as_millis())
+        .bind(actor_id.to_string())
         .execute(&mut *transaction)
         .await?;
         sqlx::query(
@@ -359,25 +425,138 @@ impl WorkspaceRepository {
         workspace_from_row(row)
     }
 
+    /// Lists `file_limit` of the largest files (at most [`MAX_LARGEST_FILES`]), after skipping `file_offset`.
     pub async fn storage(
         &self,
         workspace_id: Id,
         actor_id: Id,
+        file_limit: u32,
+        file_offset: u32,
     ) -> Result<WorkspaceStorage, WorkspaceError> {
-        self.get(workspace_id, actor_id).await?;
+        let workspace = self.get(workspace_id, actor_id).await?;
         let row = sqlx::query(sqlx::AssertSqlSafe(format!(
-            "SELECT ({WORKSPACE_STORAGE_USED}) AS used, workspace_storage_quota_bytes AS quota \
+            "SELECT ({WORKSPACE_STORAGE_USED}) AS used, workspace_storage_quota_bytes AS quota, \
+             (SELECT COUNT(*) FROM attachment_blobs WHERE workspace_id = $1 AND deleted_at IS NULL) AS files \
              FROM instance_settings WHERE id = 1"
         )))
         .bind(workspace_id.to_string())
         .fetch_one(self.database.pool())
         .await?;
+        let admin = workspace.permissions.contains(&Permission::WorkspaceUpdate);
+        let largest_files = if admin {
+            self.largest_files(workspace_id, file_limit.min(MAX_LARGEST_FILES), file_offset)
+                .await?
+        } else {
+            Vec::new()
+        };
+        let file_count = if admin {
+            u64::try_from(row.get::<i64, _>("files")).unwrap_or(0)
+        } else {
+            0
+        };
         Ok(WorkspaceStorage {
             used_bytes: u64::try_from(row.get::<i64, _>("used")).unwrap_or(0),
             quota_bytes: u64::try_from(row.get::<i64, _>("quota"))
                 .ok()
                 .filter(|quota| *quota > 0),
+            largest_files,
+            file_count,
         })
+    }
+
+    async fn largest_files(
+        &self,
+        workspace_id: Id,
+        limit: u32,
+        offset: u32,
+    ) -> Result<Vec<StorageFile>, WorkspaceError> {
+        let rows = sqlx::query(LARGEST_FILE_USES)
+            .bind(workspace_id.to_string())
+            .bind(i64::from(limit))
+            .bind(i64::from(offset))
+            .fetch_all(self.database.pool())
+            .await?;
+        let mut files: Vec<(String, StorageFile)> = Vec::new();
+        for row in rows {
+            let blob_id: String = row.get("blob_id");
+            if files.last().is_none_or(|(id, _)| *id != blob_id) {
+                let file = StorageFile {
+                    id: blob_id.parse().map_err(|_| WorkspaceError::Conflict)?,
+                    byte_size: u64::try_from(row.get::<i64, _>("byte_size")).unwrap_or(0),
+                    name: None,
+                    uses: Vec::new(),
+                };
+                files.push((blob_id, file));
+            }
+            let Some((_, file)) = files.last_mut() else {
+                continue;
+            };
+            let kind = match row.get::<Option<String>, _>("kind").as_deref() {
+                Some("task") => StorageFileUseKind::Task,
+                Some("page") => StorageFileUseKind::Page,
+                Some("channel") => StorageFileUseKind::Channel,
+                Some("emoji") => StorageFileUseKind::Emoji,
+                Some("sticker") => StorageFileUseKind::Sticker,
+                Some(_) => StorageFileUseKind::Private,
+                None => continue,
+            };
+            if file.name.is_none() {
+                file.name = row.get("file_name");
+            }
+            let used = StorageFileUse {
+                kind,
+                title: row.get("title"),
+            };
+            if !file.uses.contains(&used) {
+                file.uses.push(used);
+            }
+        }
+        Ok(files.into_iter().map(|(_, file)| file).collect())
+    }
+
+    /// Deletes a stored file of the workspace for an admin (see [`UploadService::delete_blob`]): the tasks, pages
+    /// and chat messages that use it keep their reference and show "Deleted file".
+    pub async fn delete_storage_file(
+        &self,
+        uploads: &UploadService,
+        workspace_id: Id,
+        actor_id: Id,
+        file_id: Id,
+        request_id: &str,
+    ) -> Result<(), WorkspaceError> {
+        let workspace = self.get(workspace_id, actor_id).await?;
+        if !workspace.permissions.contains(&Permission::WorkspaceUpdate) {
+            return Err(WorkspaceError::Forbidden);
+        }
+        let deleted =
+            uploads
+                .delete_blob(workspace_id, file_id)
+                .await
+                .map_err(|error| match error {
+                    UploadError::Database(error) => WorkspaceError::Unavailable(error),
+                    UploadError::BlobStore(error) => WorkspaceError::Storage(error),
+                    _ => WorkspaceError::Conflict,
+                })?;
+        if !deleted {
+            return Err(WorkspaceError::NotFound);
+        }
+        let now = self.database.database_now().await?;
+        let mut transaction = self.database.immediate_transaction().await?;
+        audit::record(
+            &mut transaction,
+            workspace_id,
+            Some(actor_id),
+            "storage_file.deleted",
+            AuditOutcome::Success,
+            "storage_file",
+            Some(file_id),
+            request_id,
+            json!({}),
+            now,
+        )
+        .await?;
+        transaction.commit().await?;
+        Ok(())
     }
 
     pub async fn rename(
@@ -478,7 +657,10 @@ impl WorkspaceRepository {
         .bind(page_size(limit).saturating_add(1) as i64)
         .fetch_all(self.database.pool())
         .await?;
-        page(rows, limit, |row| member_from_row(row, actor))
+        let transfer_available = !crate::repositories::billing::enabled(&self.database);
+        page(rows, limit, |row| {
+            member_from_row(row, actor, transfer_available)
+        })
     }
 
     /// The profile of a member of the workspace, with the caller's private note about them.
@@ -1351,6 +1533,13 @@ impl WorkspaceRepository {
             .bind(expected_version as i64)
             .execute(&mut *transaction)
             .await?;
+        crate::workspace_export::expire_for_user(
+            &mut transaction,
+            Some(workspace_id),
+            target.user_id,
+            now,
+        )
+        .await?;
         audit::record(
             &mut transaction,
             workspace_id,
@@ -1379,6 +1568,10 @@ impl WorkspaceRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<(), WorkspaceError> {
+        // Billing belongs to the owner, so Orbit Cloud cannot hand a workspace over yet.
+        if crate::repositories::billing::enabled(&self.database) {
+            return Err(WorkspaceError::TransferUnavailable);
+        }
         let mut transaction = self.database.immediate_transaction().await?;
         let actor = require_actor(&mut *transaction, workspace_id, actor_id).await?;
         if !actor.can(Permission::WorkspaceTransfer) {
@@ -1575,6 +1768,16 @@ impl WorkspaceRepository {
         };
         if changed == 0 {
             return Err(WorkspaceError::NotFound);
+        }
+        // Restoring does not resume billing: the owner subscribes again.
+        if deleted {
+            crate::repositories::billing::cancel_on_delete(
+                &self.database,
+                &mut transaction,
+                workspace_id,
+                now,
+            )
+            .await?;
         }
         audit::record(
             &mut transaction,
@@ -2174,7 +2377,11 @@ fn workspace_from_row(row: sqlx::any::AnyRow) -> Result<WorkspaceRecord, Workspa
     })
 }
 
-fn member_from_row(row: sqlx::any::AnyRow, actor: Actor) -> Result<MemberRecord, WorkspaceError> {
+fn member_from_row(
+    row: sqlx::any::AnyRow,
+    actor: Actor,
+    transfer_available: bool,
+) -> Result<MemberRecord, WorkspaceError> {
     let user_id = parse_id(row.get("user_id"))?;
     let role = parse_role(&row.get::<String, _>("role"))?;
     Ok(MemberRecord {
@@ -2188,7 +2395,7 @@ fn member_from_row(row: sqlx::any::AnyRow, actor: Actor) -> Result<MemberRecord,
             .change_member_role(role, WorkspaceRole::Member)
             .is_ok(),
         can_remove: actor.remove_member(user_id, role).is_ok(),
-        can_transfer_ownership: actor.can_transfer_ownership_to(user_id),
+        can_transfer_ownership: transfer_available && actor.can_transfer_ownership_to(user_id),
         version: u64::try_from(row.get::<i64, _>("version"))
             .map_err(|_| WorkspaceError::Conflict)?,
         created_at: TimestampMillis::from_millis(row.get("created_at")),

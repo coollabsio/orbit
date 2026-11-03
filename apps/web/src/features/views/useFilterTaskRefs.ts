@@ -1,5 +1,5 @@
 import { useQueries } from '@tanstack/react-query'
-import { ApiProblem } from '@/api/problem'
+import { ApiProblem } from '@orbit/api/problem'
 import { taskIdentifier } from '@/features/tasks/api/models'
 import { useProjects } from '@/features/tasks/api/projects'
 import { taskRecordQuery } from '@/features/tasks/api/tasks'

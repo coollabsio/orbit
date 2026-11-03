@@ -1,0 +1,36 @@
+@import 'tailwindcss';
+@import 'uniwind';
+@import './theme/theme.gen.css';
+
+/* Each Noto Sans weight is its own font family in React Native, so the family carries the weight. */
+@theme {
+  --font-noto: NotoSans_400Regular;
+  --font-noto-medium: NotoSans_500Medium;
+  --font-noto-semibold: NotoSans_600SemiBold;
+  --font-noto-bold: NotoSans_700Bold;
+  --font-mono: monospace;
+}
+
+/* `fonts.mono`: Menlo on iOS, the system monospace elsewhere. */
+@layer theme {
+  :root {
+    @variant ios {
+      --font-mono: Menlo;
+    }
+  }
+}
+
+/*
+ * Defaults of the src/ui components that call sites override (the web does it with `cn`, which needs tailwind-merge).
+ * In `components`, so a utility in a `className` wins over them, whatever the order.
+ */
+@layer components {
+  /* `Text`: the web's body text */
+  .text-body {
+    @apply font-noto text-[15px] leading-[1.45] text-foreground;
+  }
+  /* `PaneHeader`: one 44px header on every tab (the web's Tasks, Docs and Settings height; 8px sides, no bottom border) */
+  .pane-header {
+    @apply min-h-11 flex-row items-center gap-2 bg-background px-2 py-1.5;
+  }
+}

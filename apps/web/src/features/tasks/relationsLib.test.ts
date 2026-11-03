@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import type { TaskRelationRecord } from '@/api/generated/types.gen'
+import type { TaskRelationRecord } from '@orbit/api/generated/types.gen'
 import type { Task } from '@/features/tasks/api/models'
 import {
   ADD_RELATION_OPTIONS, duplicateErrorMessage, duplicateToastMessage, groupRelations, pickerCandidates, pickerTitle,

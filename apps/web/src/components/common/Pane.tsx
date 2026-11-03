@@ -10,7 +10,7 @@ function Pane({ className, ...props }: ComponentProps<'section'>) {
 
 /** The 48px header row on top of a pane; it loses its bottom border on phones. */
 function PaneHeader({ className, ...props }: ComponentProps<'div'>) {
-  return <div data-slot="pane-header" className={cn('flex min-h-12 shrink-0 items-center gap-2 border-b px-3 py-2 max-[899px]:border-b-0', className)} {...props} />
+  return <div data-slot="pane-header" className={cn('flex min-h-12 shrink-0 items-center gap-2 border-b px-3 py-1.5 max-[899px]:border-b-0', className)} {...props} />
 }
 
 /** The pane's title in its header. A `<span>` by default; `render={<h1 />}` where the title is the page heading. */

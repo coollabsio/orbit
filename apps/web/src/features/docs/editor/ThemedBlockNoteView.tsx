@@ -25,6 +25,9 @@ export function ThemedBlockNoteView<B extends BlockSchema, I extends InlineConte
         '[--bn-colors-disabled-background:var(--muted)]! [--bn-colors-disabled-text:var(--muted-foreground)]!',
         '[--bn-colors-border:var(--border)]! [--bn-colors-shadow:color-mix(in_oklab,var(--foreground)_12%,transparent)]!',
         '[--bn-colors-side-menu:var(--muted-foreground)]!',
+        // BlockNote's unlayered `.bn-shadcn svg { width: revert }` beats the shadcn `size-4` icon rule, so the side-menu
+        // icons and the menu chevrons and checkmarks fall back to their 24px size attribute.
+        "[&_.bn-side-menu_.bn-button_svg]:size-4! [&_[data-slot^=dropdown-menu-]_svg:not([class*='size-'])]:size-4!",
         className,
       )}
       {...props}

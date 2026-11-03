@@ -65,3 +65,14 @@ test('the Chat dock link shows the unread count and names it', () => {
   const none = render(<MemoryRouter initialEntries={['/tasks']}><MobileDock chatEnabled={false} chatBadge={3} /></MemoryRouter>)
   expect(none.container.querySelectorAll('[data-slot="mobile-dock-badge"]')).toHaveLength(0)
 })
+
+test('the Chat dock link shows a dot when chat is unread without a count', () => {
+  const view = render(<MemoryRouter initialEntries={['/tasks']}><MobileDock chatEnabled chatUnread /></MemoryRouter>)
+  const dock = within(view.getByRole('navigation'))
+  expect(dock.getByRole('link', { name: 'Chat, unread' })).toBeTruthy()
+  expect(view.container.querySelectorAll('[data-slot="mobile-dock-dot"]')).toHaveLength(1)
+  view.unmount()
+  // the count wins over the dot
+  const counted = render(<MemoryRouter initialEntries={['/tasks']}><MobileDock chatEnabled chatBadge={2} chatUnread /></MemoryRouter>)
+  expect(counted.container.querySelectorAll('[data-slot="mobile-dock-dot"]')).toHaveLength(0)
+})

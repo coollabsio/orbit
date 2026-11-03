@@ -498,7 +498,7 @@ pub(crate) async fn retry_mail_receipt(
     let receipt_id = call.id(&receipt)?;
     state
         .mail
-        .retry_receipt(call.workspace_id, call.actor_id, receipt_id, &state.jobs)
+        .retry_receipt(call.workspace_id, call.actor_id, receipt_id)
         .await
         .map_err(|error| call.problem(error))?;
     Ok(StatusCode::NO_CONTENT)

@@ -1,7 +1,8 @@
-import { useMemo, useState, type DragEvent, type KeyboardEvent } from 'react'
+import { useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { Filter, Layer, Lock, Menu, People, Add as Plus, Star, type IconComponent } from 'reicon-react'
+import { Filter, Layer, Lock, People, Add as Plus, Star, type IconComponent } from 'reicon-react'
 import { cn } from 'cn'
+import { useScrollMemory } from '@/lib/useScrollMemory'
 import { EmptyState } from '@/components/common/EmptyState'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { Button } from '@/components/ui/button'
@@ -32,6 +33,8 @@ export function ViewsPage() {
   const members = useMembers(workspace.id).data ?? []
   const [search, setSearch] = useState('')
   const [dialog, setDialog] = useState<RowDialog | null>(null)
+  const scroller = useRef<HTMLDivElement>(null)
+  useScrollMemory(scroller, 'views', !viewsQuery.isPending)
   const views = useMemo(() => (Array.isArray(viewsQuery.data) ? viewsQuery.data : []), [viewsQuery.data])
   const query = search.trim().toLowerCase()
   const sections = useMemo<Section[]>(() => {
@@ -56,18 +59,7 @@ export function ViewsPage() {
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
-      {/* the shell's top bar is hidden on /views, so this header carries the mobile menu button */}
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 max-[899px]:h-auto max-[899px]:min-h-11 max-[899px]:flex-wrap max-[899px]:px-2 max-[899px]:py-1.5">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className="hidden shrink-0 text-muted-foreground/70 max-[899px]:inline-flex"
-          aria-label="Menu"
-          onClick={() => window.dispatchEvent(new CustomEvent('open-sidebar'))}
-        >
-          <Menu className="size-[18px]" />
-        </Button>
         {/* views are a Tasks feature: the header says so and leads back */}
         <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 pl-1 text-[13px]">
           <Link to="/tasks" className="font-medium text-muted-foreground transition-colors hover:text-foreground">Tasks</Link>
@@ -86,7 +78,7 @@ export function ViewsPage() {
           </>
         ) : null}
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto">
         {viewsQuery.isPending ? (
           <p className="p-4 text-[13px] text-muted-foreground">Loading views…</p>
         ) : loadFailed(viewsQuery) ? (

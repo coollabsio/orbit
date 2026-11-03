@@ -1,4 +1,4 @@
-import { ApiProblem } from '@/api/problem'
+import { ApiProblem } from '@orbit/api/problem'
 
 export function taskUnavailableDescription(error: unknown): string {
   if (error instanceof ApiProblem && error.status === 404) {

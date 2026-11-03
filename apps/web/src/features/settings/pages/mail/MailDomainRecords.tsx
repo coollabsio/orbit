@@ -1,5 +1,5 @@
 import { Copy } from 'reicon-react'
-import type { MailDnsRecord, MailDnsRecordKind } from '@/api/generated/types.gen'
+import type { MailDnsRecord, MailDnsRecordKind } from '@orbit/api/generated/types.gen'
 import { Tip } from '@/components/common/Tip'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

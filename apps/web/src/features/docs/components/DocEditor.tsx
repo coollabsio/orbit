@@ -1,4 +1,5 @@
 import { useCommand } from '@/shortcuts/useCommand'
+import { isPaymentRequired } from '@orbit/api/problem'
 import { lazy, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
@@ -7,7 +8,7 @@ import { ArrowLeft, ArrowSwapHorizontal, Check, Copy, Download, MoreH as Ellipsi
 import { cn } from 'cn'
 import { apiClient, UNAUTHORIZED_EVENT } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
-import type { Page, PageSummary, PageVersionSummary, Teamspace } from '@/api/generated/types.gen'
+import type { Page, PageSummary, PageVersionSummary, Teamspace } from '@orbit/api/generated/types.gen'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -51,7 +52,7 @@ import { PageAutosaver, type AutosaveState, type PagePatch } from '@/features/do
 import { revealCollabCursor } from '@/features/docs/collab/cursor'
 import { useCollaborators } from '@/features/docs/collab/presence'
 import { PresenceAvatars } from '@/features/docs/collab/PresenceAvatars'
-import { collabProblemAction, collabStatusLabel, type CollabProblem, type CollabSession, type CollabState } from '@/features/docs/collab/session'
+import { collabProblemAction, collabStatusLabel, type CollabProblem, type CollabSession, type CollabState } from '@orbit/editor/collab/session'
 import { useCollabSession } from '@/features/docs/collab/useCollabSession'
 import { useDocPageActions } from '@/features/docs/pageActions'
 import { downloadPageMarkdown, printPage } from '@/features/docs/pageExport'
@@ -63,6 +64,7 @@ import { mentionableMembers } from '@/features/docs/comments/mentionable'
 import { pageMentionCandidates } from '@/features/docs/editor/pageMentions'
 import { useBlockDeepLink } from '@/features/docs/useBlockDeepLink'
 import { useMembers } from '@/features/workspaces/api'
+import { announceWorkspaceReadOnly, useWorkspaceReadOnly } from '@/features/workspaces/billing'
 import { Comment as CommentIcon } from 'reicon-react'
 import { loadPageEditor } from '@/features/docs/editor/loadPageEditor'
 // Type-only imports: erased at build time, so the BlockNote chunk stays lazy.
@@ -160,6 +162,9 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
   const setPageLock = useSetPageLock(workspaceId)
   /** Locked pages are read-only here (the server refuses edits too, see `POST .../lock`). */
   const locked = page.locked_at !== null
+  // Orbit Cloud without a subscription: the server drops edits, so offer none.
+  const workspaceReadOnly = useWorkspaceReadOnly()
+  const readOnly = locked || workspaceReadOnly
   usePageVisit(workspaceId, page.id)
   const restoreVersion = useRestorePageVersion(workspaceId, page.id)
   const pickResolver = useRef<((pageId: string | null) => void) | null>(null)
@@ -314,6 +319,10 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
         window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
         break
       case 'reopen':
+        void reopen()
+        break
+      case 'read-only':
+        announceWorkspaceReadOnly()
         void reopen()
         break
       case 'rate-limited':
@@ -519,7 +528,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
       const created = await createSubpage({ parent_id: pageId })
       return created.id
     } catch (error) {
-      toast.error('Could not create the sub-page. Try again.')
+      if (!isPaymentRequired(error)) toast.error('Could not create the sub-page. Try again.')
       throw error
     }
   }, [createSubpage, pageId])
@@ -837,7 +846,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
               position={cover.position}
               onChange={changeCover}
               onUpload={uploadCover}
-              readOnly={locked}
+              readOnly={readOnly}
             />
           ) : null}
           <div className={cn('mx-auto', fullWidth ? 'max-w-none px-[30px] max-[899px]:px-0' : 'max-w-[760px]')} data-full-width={fullWidth || undefined}>
@@ -861,7 +870,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
                         type="button"
                         variant="ghost"
                         className="h-auto cursor-pointer rounded-xl border-0 p-0.5 text-[60px] leading-none font-normal drop-shadow-[0_1px_2px_rgb(0_0_0/0.3)] hover:bg-foreground/[0.02] disabled:opacity-100 dark:hover:bg-foreground/[0.02]"
-                        disabled={locked}
+                        disabled={readOnly}
                         aria-label="Change icon"
                       />
                     }
@@ -883,7 +892,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
                 </Popover>
               </div>
             ) : null}
-            {!locked && (!icon || !cover.url) ? (
+            {!readOnly && (!icon || !cover.url) ? (
               <div className="flex gap-2 pt-1.5 pb-2.5" data-print-hide="">
                 {!icon ? (
                   <Popover open={addIconOpen} onOpenChange={setAddIconOpen}>
@@ -915,7 +924,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
                 ) : null}
               </div>
             ) : null}
-            {!locked && !cover.url && coverPanelOpen ? (
+            {!readOnly && !cover.url && coverPanelOpen ? (
               <div className="mb-3 max-w-[420px] rounded-lg border border-border p-3" data-print-hide="">
                 <CoverSourcePanel
                   onUpload={uploadCover}
@@ -929,7 +938,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
             <Input
               className="mb-5 h-auto w-full rounded-none border-0 bg-transparent p-0 text-[30px] leading-[1.25] font-bold text-foreground shadow-none outline-none placeholder:text-muted-foreground/70 focus:outline-none focus-visible:ring-0 md:text-[30px] max-[899px]:mb-3.5 max-[899px]:text-[22px]! dark:bg-transparent"
               value={title}
-              readOnly={locked}
+              readOnly={readOnly}
               maxLength={500}
               placeholder="Untitled"
               aria-label="Page title"
@@ -951,7 +960,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
                     ref={editorRef}
                     pageId={pageId}
                     collab={{ provider: collab.connection.provider, fragment: collab.connection.fragment, user: collabUser }}
-                    editable={!lost && syncStatus !== 'error' && !locked}
+                    editable={!lost && syncStatus !== 'error' && !readOnly}
                     resolvePage={resolvePage}
                     onOpenPage={onOpenPage}
                     onCreateSubpage={onCreateSubpage}

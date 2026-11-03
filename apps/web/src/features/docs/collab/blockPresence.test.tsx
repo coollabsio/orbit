@@ -3,7 +3,7 @@
 import { describe, expect, test } from 'bun:test'
 import { act, render, waitFor } from '@testing-library/react'
 import * as Y from 'yjs'
-import { COLLAB_FRAGMENT } from './connection'
+import { COLLAB_FRAGMENT } from '@orbit/editor/collab/target'
 import { revealCollabCursor } from './cursor'
 import { PageEditor } from '@/features/docs/editor/PageEditor'
 import { FakeProvider, writeBlocks } from '@/test/fakeCollab'

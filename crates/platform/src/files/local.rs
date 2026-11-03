@@ -14,6 +14,8 @@ use super::{
 };
 
 const SNIFF_BYTES: usize = 8 * 1024;
+/// Upload staging files under the attachment root. They are not attachments, so backups leave them out.
+pub(crate) const TEMPORARY_DIRECTORY: &str = "temporary";
 
 #[derive(Clone, Debug)]
 pub struct LocalBlobStore {
@@ -48,7 +50,7 @@ impl LocalBlobStore {
     }
 
     pub async fn temporary_files(&self) -> Result<Vec<BlobObject>, BlobStoreError> {
-        list_files(&self.root, &self.root.join("temporary")).await
+        list_files(&self.root, &self.root.join(TEMPORARY_DIRECTORY)).await
     }
 
     /// Copies the staged upload to a private file in the staging directory and checks its hash, size and media
@@ -65,7 +67,7 @@ impl LocalBlobStore {
         // The `upload-` name lets reconcile remove a copy left behind by a crash.
         let path = self
             .root
-            .join("temporary")
+            .join(TEMPORARY_DIRECTORY)
             .join(format!("upload-{}.publish", Uuid::now_v7()));
         let (publishing, mut output) = PublishingFile::create(path)?;
         copy_and_verify(upload, publishing.path(), &mut output).await?;
@@ -73,7 +75,7 @@ impl LocalBlobStore {
     }
 
     fn temporary_path_is_safe(&self, path: &Path) -> bool {
-        path.parent() == Some(self.root.join("temporary").as_path())
+        path.parent() == Some(self.root.join(TEMPORARY_DIRECTORY).as_path())
             && path
                 .file_name()
                 .is_some_and(|name| name.to_string_lossy().starts_with("upload-"))
@@ -82,7 +84,7 @@ impl LocalBlobStore {
 
 impl BlobStore for LocalBlobStore {
     fn create_temporary(&self) -> Result<PathBuf, BlobStoreError> {
-        let directory = self.root.join("temporary");
+        let directory = self.root.join(TEMPORARY_DIRECTORY);
         std::fs::create_dir_all(&directory).map_err(|source| io_error(&directory, source))?;
         let path = directory.join(format!("upload-{}", Uuid::now_v7()));
         std::fs::OpenOptions::new()

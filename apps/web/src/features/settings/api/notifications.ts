@@ -1,8 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
-import { deletePushSubscription, getNotificationPreferences, listPushSubscriptions, putNotificationPreferences, sendTestPush } from '@/api/generated/sdk.gen'
-import type { NotificationPrefs, PushSubscriptionRecord } from '@/api/generated/types.gen'
+import { deletePushSubscription, getNotificationPreferences, listPushSubscriptions, putNotificationPreferences, sendTestPush } from '@orbit/api/generated/sdk.gen'
+import type { NotificationPrefs, PushSubscriptionRecord } from '@orbit/api/generated/types.gen'
 import { currentSubscription, disablePush, enablePush } from '@/features/realtime/push'
 
 /** The browsers the user gets notifications on. */

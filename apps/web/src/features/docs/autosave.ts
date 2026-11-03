@@ -1,7 +1,7 @@
 // Page metadata autosave (title, icon, cover): debounced, single-flight, version-chained. Framework free so it can be
 // tested with fake timers. Content is not saved here: it syncs live through the page's collaborative document
 // (`features/docs/collab`), and the server projects it into `content` itself.
-import type { Page, PageUpdateBody } from '@/api/generated/types.gen'
+import type { Page, PageUpdateBody } from '@orbit/api/generated/types.gen'
 
 export type PagePatch = Omit<PageUpdateBody, 'expected_version' | 'content'>
 

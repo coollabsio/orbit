@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react'
-import type { LabelRecord } from '@/api/generated/types.gen'
+import type { LabelRecord } from '@orbit/api/generated/types.gen'
 import { confirmAction } from '@/components/common/confirmAction'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { Button } from '@/components/ui/button'

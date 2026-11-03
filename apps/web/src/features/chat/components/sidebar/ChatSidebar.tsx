@@ -3,7 +3,10 @@ import { toast } from 'sonner'
 import { Add, Brush, ChevronDown, ChevronRight, DirectInbox, Edit, Hashtag, Layer, MoreH, Trash } from 'reicon-react'
 import { confirmAction } from '@/components/common/confirmAction'
 import { PaneHeader, PaneTitle } from '@/components/common/Pane'
+import { cn } from 'cn'
 import { Tip } from '@/components/common/Tip'
+import { InAppSidebar, SidebarListHeader } from '@/app/shell/InAppSidebar'
+import { useInAppSidebar } from '@/app/shell/sidebarSlot'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { useChatContext } from '@/features/chat/api/chatContext'
@@ -16,12 +19,12 @@ import { CategoryDialog } from '@/features/chat/components/dialogs/CategoryDialo
 import { EditChannelDialog } from '@/features/chat/components/dialogs/EditChannelDialog'
 import { NewChannelDialog } from '@/features/chat/components/dialogs/NewChannelDialog'
 import { NewMessageDialog } from '@/features/chat/components/dialogs/NewMessageDialog'
-import { chatSidebarVariables, useChatTheme } from '@/features/chat/lib/chatTheme'
+import { customSidebarVariables, useCustomTheme } from '@/lib/customTheme'
 import { buildSidebarSections, conversationBadge, dropBefore, unjoinedChannelCount, type SidebarSection } from '@/features/chat/lib/sidebar'
 import { useChatLocation } from '@/features/chat/useChatNavigation'
 import { useMembers } from '@/features/workspaces/api'
 import { ChatRow, ChatRowEnd, ChatRowLink, ChatRowName, CountBadge } from './ChatRow'
-import { ChatThemeDialog } from './ChatThemeDialog'
+import { CustomThemeDialog } from '@/features/profile/components/CustomThemeDialog'
 import { ChatUserBar } from './ChatUserBar'
 import { ConversationRow } from './ConversationRow'
 import { ResizeHandle } from './ResizeHandle'
@@ -195,7 +198,8 @@ export function ChatSidebar() {
   const [width, setWidth] = useStoredWidth('orbit:chat:sidebar_width', SIDEBAR_WIDTH)
   const [collapsed, toggleCollapsed] = useCollapsedSections(workspaceId)
   const [showAllDms, setShowAllDms] = useState(false)
-  const theme = useChatTheme()
+  const theme = useCustomTheme()
+  const inAppSidebar = useInAppSidebar()
   // the last dialog stays set while it closes, so it can play its exit
   const [dialog, setDialog] = useState<SidebarDialog | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -257,41 +261,76 @@ export function ChatSidebar() {
       : built
 
   return (
+    <InAppSidebar>
+    {/* in the app sidebar it takes that sidebar's width, and its colours (the sidebar carries the custom theme): no resize there */}
     <aside
       data-slot="chat-sidebar"
       aria-label="Chat"
-      className="relative flex min-h-0 shrink-0 flex-col border-r bg-background max-[899px]:w-full! max-[899px]:border-r-0 max-[899px]:pt-[env(safe-area-inset-top,0px)] max-[899px]:group-data-[view=detail]/chat:hidden"
-      data-themed={theme ? '' : undefined}
-      style={{ width, ...chatSidebarVariables(theme) }}
+      className={cn('relative flex min-h-0 flex-col', inAppSidebar ? 'flex-1' : 'shrink-0 border-r bg-background max-[899px]:w-full! max-[899px]:border-r-0 max-[899px]:pt-[env(safe-area-inset-top,0px)] max-[899px]:group-data-[view=detail]/chat:hidden')}
+      data-themed={theme && !inAppSidebar ? '' : undefined}
+      style={inAppSidebar ? undefined : { width, ...customSidebarVariables(theme) }}
     >
-      <PaneHeader className="gap-1 pr-2">
-        <PaneTitle render={<h1 />} className="flex-1">
-          Chat
-        </PaneTitle>
-        <Tip label="Chat theme" side="bottom">
-          <Button type="button" variant="ghost" size="icon" className="text-muted-foreground" aria-label="Chat theme" onClick={() => show({ kind: 'theme' })}>
-            <Brush size={20} />
-          </Button>
-        </Tip>
-        <DropdownMenu>
-          <Tip label="New" side="bottom">
-            <DropdownMenuTrigger render={<Button type="button" variant="ghost" size="icon" className="text-muted-foreground" aria-label="New" />}>
-              <Add size={20} />
-            </DropdownMenuTrigger>
+      {inAppSidebar ? (
+        // the Back row above says "Chat"; the theme moves into ⋯ so only two small buttons remain
+        <SidebarListHeader label="Conversations">
+          <DropdownMenu>
+            <Tip label="Chat options" side="bottom">
+              <DropdownMenuTrigger render={<Button type="button" variant="ghost" size="icon-xs" aria-label="Chat options" />}>
+                <MoreH />
+              </DropdownMenuTrigger>
+            </Tip>
+            <DropdownMenuContent align="end" className="w-auto min-w-44">
+              <DropdownMenuItem onClick={() => show({ kind: 'browse' })}>Browse channels</DropdownMenuItem>
+              {admin ? <DropdownMenuItem onClick={() => show({ kind: 'category' })}>New category</DropdownMenuItem> : null}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => show({ kind: 'theme' })}>
+                <Brush />
+                Custom theme
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <DropdownMenu>
+            <Tip label="New" side="bottom">
+              <DropdownMenuTrigger render={<Button type="button" variant="ghost" size="icon-xs" aria-label="New" />}>
+                <Add />
+              </DropdownMenuTrigger>
+            </Tip>
+            <DropdownMenuContent align="end" className="w-auto min-w-44">
+              <DropdownMenuItem onClick={() => show({ kind: 'message' })}>New message</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => show({ kind: 'channel', categoryId: null })}>New channel</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </SidebarListHeader>
+      ) : (
+        <PaneHeader className="gap-1 pr-2">
+          <PaneTitle render={<h1 />} className="flex-1">
+            Chat
+          </PaneTitle>
+          <Tip label="Custom theme" side="bottom">
+            <Button type="button" variant="ghost" size="icon" className="text-muted-foreground" aria-label="Custom theme" onClick={() => show({ kind: 'theme' })}>
+              <Brush size={20} />
+            </Button>
           </Tip>
-          <DropdownMenuContent align="end" className="w-auto min-w-44">
-            <DropdownMenuItem onClick={() => show({ kind: 'message' })}>New message</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => show({ kind: 'channel', categoryId: null })}>New channel</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => show({ kind: 'browse' })}>Browse channels</DropdownMenuItem>
-            {admin ? (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => show({ kind: 'category' })}>New category</DropdownMenuItem>
-              </>
-            ) : null}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </PaneHeader>
+          <DropdownMenu>
+            <Tip label="New" side="bottom">
+              <DropdownMenuTrigger render={<Button type="button" variant="ghost" size="icon" className="text-muted-foreground" aria-label="New" />}>
+                <Add size={20} />
+              </DropdownMenuTrigger>
+            </Tip>
+            <DropdownMenuContent align="end" className="w-auto min-w-44">
+              <DropdownMenuItem onClick={() => show({ kind: 'message' })}>New message</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => show({ kind: 'channel', categoryId: null })}>New channel</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => show({ kind: 'browse' })}>Browse channels</DropdownMenuItem>
+              {admin ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => show({ kind: 'category' })}>New category</DropdownMenuItem>
+                </>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </PaneHeader>
+      )}
 
       <div className="flex shrink-0 flex-col gap-px px-2 pt-2">
         <PinnedRow to={UNREADS_PATH} icon={DirectInbox} label="Unreads" count={badges.unreads} active={location.view === 'unreads'} />
@@ -385,14 +424,18 @@ export function ChatSidebar() {
         })}
       </nav>
 
-      <ChatUserBar />
-
-      <ResizeHandle edge="right" width={width} range={SIDEBAR_WIDTH} label="Resize the chat sidebar" onResize={setWidth} />
+      {/* the app sidebar has the user menu, which sets the status too */}
+      {inAppSidebar ? null : (
+        <>
+          <ChatUserBar />
+          <ResizeHandle edge="right" width={width} range={SIDEBAR_WIDTH} label="Resize the chat sidebar" onResize={setWidth} />
+        </>
+      )}
 
       <NewMessageDialog open={isOpen('message')} onOpenChange={setDialogOpen} />
       <NewChannelDialog open={isOpen('channel')} onOpenChange={setDialogOpen} defaultCategoryId={dialog?.kind === 'channel' ? dialog.categoryId : null} />
       <BrowseChannelsDialog open={isOpen('browse')} onOpenChange={setDialogOpen} />
-      {dialog?.kind === 'theme' ? <ChatThemeDialog open={dialogOpen} onOpenChange={setDialogOpen} /> : null}
+      {dialog?.kind === 'theme' ? <CustomThemeDialog open={dialogOpen} onOpenChange={setDialogOpen} /> : null}
       {dialog?.kind === 'category' ? (
         <CategoryDialog key={dialog.category?.id ?? 'new'} open={dialogOpen} onOpenChange={setDialogOpen} category={dialog.category} />
       ) : null}
@@ -400,5 +443,6 @@ export function ChatSidebar() {
         <EditChannelDialog key={dialog.conversationId} conversationId={dialog.conversationId} open={dialogOpen} onOpenChange={setDialogOpen} />
       ) : null}
     </aside>
+    </InAppSidebar>
   )
 }

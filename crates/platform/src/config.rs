@@ -16,6 +16,7 @@ const HTTP_BIND_ENV: &str = "ORBIT_BIND";
 const HTTP_PUBLIC_ORIGIN_ENV: &str = "ORBIT_PUBLIC_ORIGIN";
 const HTTP_TRUSTED_PROXIES_ENV: &str = "ORBIT_TRUSTED_PROXIES";
 const HTTP_SHUTDOWN_DELAY_ENV: &str = "ORBIT_SHUTDOWN_DELAY_SECONDS";
+const HTTP_DEV_NATIVE_REDIRECTS_ENV: &str = "ORBIT_DEV_NATIVE_REDIRECTS";
 const ENVIRONMENT_ENV: &str = "ORBIT_ENV";
 const DATA_DATABASE_ENV: &str = "ORBIT_DATABASE_PATH";
 const DATA_DATABASE_URL_ENV: &str = "ORBIT_DATABASE_URL";
@@ -43,6 +44,17 @@ const MAIL_DNS_RESOLVER_ENV: &str = "ORBIT_MAIL_DNS_RESOLVER";
 const MAIL_CONTENT_ORIGIN_ENV: &str = "ORBIT_MAIL_CONTENT_ORIGIN";
 /// The default Docker bridge gateway: every container on the bridge seems to connect from it.
 const DOCKER_GATEWAY: IpAddr = IpAddr::V4(Ipv4Addr::new(172, 17, 0, 1));
+const CLOUD_ENV: &str = "ORBIT_CLOUD";
+const STRIPE_SECRET_KEY_ENV: &str = "ORBIT_STRIPE_SECRET_KEY";
+const STRIPE_SECRET_KEY_FILE_ENV: &str = "ORBIT_STRIPE_SECRET_KEY_FILE";
+const STRIPE_WEBHOOK_SECRET_ENV: &str = "ORBIT_STRIPE_WEBHOOK_SECRET";
+const STRIPE_WEBHOOK_SECRET_FILE_ENV: &str = "ORBIT_STRIPE_WEBHOOK_SECRET_FILE";
+const STRIPE_PRICES_ENV: &str = "ORBIT_STRIPE_PRICES";
+const TRIAL_DAYS_ENV: &str = "ORBIT_TRIAL_DAYS";
+const TRIAL_TASKS_ENV: &str = "ORBIT_TRIAL_TASKS";
+const TRIAL_PAGES_ENV: &str = "ORBIT_TRIAL_PAGES";
+const TRIAL_MEMBERS_ENV: &str = "ORBIT_TRIAL_MEMBERS";
+const STRIPE_API_BASE: &str = "https://api.stripe.com";
 /// Variables that scripts and tests use, not the server.
 const IGNORED_ENV_PREFIXES: [&str; 2] = ["ORBIT_DEV_", "ORBIT_TEST_"];
 
@@ -59,6 +71,8 @@ pub struct Config {
     /// The key for secrets saved in the database (`ORBIT_APP_KEY`). Required: [`Config::validate`]
     /// refuses a configuration without it.
     pub app_key: Option<AppKey>,
+    /// Stripe billing for Orbit Cloud (`ORBIT_CLOUD=true`); `None` on a self-hosted server.
+    pub billing: Option<BillingConfig>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -101,6 +115,9 @@ pub struct HttpConfig {
     /// How long the server still serves after a stop signal while `/health/ready` reports 503,
     /// so a load balancer takes it out first.
     pub shutdown_delay_seconds: u64,
+    /// Extra redirect URIs a native sign-in may return to, besides `orbit://auth/callback`
+    /// (`ORBIT_DEV_NATIVE_REDIRECTS`, comma-separated), for Expo Go. Refused in production.
+    pub dev_native_redirects: Vec<String>,
 }
 
 impl Default for HttpConfig {
@@ -111,6 +128,7 @@ impl Default for HttpConfig {
             public_origin: "http://127.0.0.1:8080".to_owned(),
             trusted_proxies: Vec::new(),
             shutdown_delay_seconds: 0,
+            dev_native_redirects: Vec::new(),
         }
     }
 }
@@ -490,6 +508,276 @@ impl fmt::Debug for AppKey {
     }
 }
 
+/// Orbit Cloud billing: every workspace needs a Stripe subscription to write.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BillingConfig {
+    pub secret_key: Secret,
+    pub webhook_secret: Secret,
+    /// The plans offered, in `ORBIT_STRIPE_PRICES` order. Never empty, keys are unique.
+    pub plans: Vec<Plan>,
+    /// The Stripe API. Only tests change it.
+    pub api_base: url::Url,
+    pub trial: TrialConfig,
+}
+
+/// The trial of a workspace without a subscription: its length from the workspace's creation and
+/// what it may hold (`ORBIT_TRIAL_*`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TrialConfig {
+    /// 0 to 365; 0 means no trial: a new workspace is read-only until it subscribes.
+    pub days: u32,
+    /// Tasks not in the trash.
+    pub tasks: i64,
+    /// Pages not in the trash.
+    pub pages: i64,
+    /// Members and pending invitations, the owner included, so at least 1.
+    pub members: i64,
+}
+
+impl Default for TrialConfig {
+    fn default() -> Self {
+        Self {
+            days: 7,
+            tasks: 50,
+            pages: 20,
+            members: 3,
+        }
+    }
+}
+
+impl TrialConfig {
+    /// The trial length in milliseconds.
+    #[must_use]
+    pub const fn millis(&self) -> i64 {
+        self.days as i64 * 24 * 60 * 60 * 1000
+    }
+
+    fn validate(&self) -> Result<(), ConfigError> {
+        let invalid = |key, detail: &str| {
+            Err(ConfigError::InvalidSetting {
+                key,
+                detail: detail.to_owned(),
+            })
+        };
+        if self.days > 365 {
+            return invalid(TRIAL_DAYS_ENV, "must be 0 to 365 days");
+        }
+        if self.tasks < 0 {
+            return invalid(TRIAL_TASKS_ENV, "must be 0 or more");
+        }
+        if self.pages < 0 {
+            return invalid(TRIAL_PAGES_ENV, "must be 0 or more");
+        }
+        if self.members < 1 {
+            return invalid(TRIAL_MEMBERS_ENV, "must be 1 or more (the owner counts)");
+        }
+        Ok(())
+    }
+}
+
+impl BillingConfig {
+    #[must_use]
+    pub fn new(secret_key: Secret, webhook_secret: Secret, plans: Vec<Plan>) -> Self {
+        Self {
+            secret_key,
+            webhook_secret,
+            plans,
+            api_base: url::Url::parse(STRIPE_API_BASE).expect("the Stripe API base is a URL"),
+            trial: TrialConfig::default(),
+        }
+    }
+
+    #[must_use]
+    pub fn plan(&self, key: &str) -> Option<&Plan> {
+        self.plans.iter().find(|plan| plan.key == key)
+    }
+
+    #[must_use]
+    pub fn plan_for_price(&self, price_id: &str) -> Option<&Plan> {
+        self.plans.iter().find(|plan| plan.price_id == price_id)
+    }
+
+    fn validate(&self) -> Result<(), ConfigError> {
+        let invalid = |detail: String| {
+            Err(ConfigError::InvalidSetting {
+                key: STRIPE_PRICES_ENV,
+                detail,
+            })
+        };
+        if self.plans.is_empty() {
+            return invalid("must name at least one plan".to_owned());
+        }
+        for (index, plan) in self.plans.iter().enumerate() {
+            if !valid_plan_key(&plan.key) {
+                return invalid(format!(
+                    "plan key {:?} must be 1 to 32 lowercase letters, digits or hyphens",
+                    plan.key
+                ));
+            }
+            if plan.price_id.is_empty() || plan.price_id.contains(char::is_whitespace) {
+                return invalid(format!("plan {:?} needs a Stripe price id", plan.key));
+            }
+            if self.plans[..index]
+                .iter()
+                .any(|other| other.key == plan.key)
+            {
+                return invalid(format!("plan {:?} is listed twice", plan.key));
+            }
+            if self.plans[..index]
+                .iter()
+                .any(|other| other.price_id == plan.price_id)
+            {
+                return invalid(format!("price {:?} is listed twice", plan.price_id));
+            }
+        }
+        if self.secret_key.expose().is_empty() {
+            return Err(ConfigError::InvalidSetting {
+                key: STRIPE_SECRET_KEY_ENV,
+                detail: "must not be empty".to_owned(),
+            });
+        }
+        if self.webhook_secret.expose().is_empty() {
+            return Err(ConfigError::InvalidSetting {
+                key: STRIPE_WEBHOOK_SECRET_ENV,
+                detail: "must not be empty".to_owned(),
+            });
+        }
+        self.trial.validate()
+    }
+}
+
+/// A plan a workspace can subscribe to: its key in Orbit and its Stripe price.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct Plan {
+    pub key: String,
+    pub price_id: String,
+}
+
+fn valid_plan_key(key: &str) -> bool {
+    (1..=32).contains(&key.len())
+        && key
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
+/// A secret string (an API key) that `Debug` never prints.
+#[derive(Clone, Eq, PartialEq)]
+pub struct Secret(String);
+
+impl Secret {
+    #[must_use]
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    #[must_use]
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for Secret {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("[REDACTED]")
+    }
+}
+
+/// The billing variables, collected before they are checked together.
+#[derive(Default)]
+struct BillingEnvironment {
+    cloud: bool,
+    secret_key: Option<String>,
+    webhook_secret: Option<String>,
+    prices: Option<String>,
+    trial_days: Option<String>,
+    trial_tasks: Option<String>,
+    trial_pages: Option<String>,
+    trial_members: Option<String>,
+}
+
+impl BillingEnvironment {
+    fn into_config(self) -> Result<Option<BillingConfig>, ConfigError> {
+        let missing = |key: &'static str| ConfigError::InvalidSetting {
+            key,
+            detail: "is required when ORBIT_CLOUD is true".to_owned(),
+        };
+        if !self.cloud {
+            let set = [
+                (STRIPE_SECRET_KEY_ENV, self.secret_key.is_some()),
+                (STRIPE_WEBHOOK_SECRET_ENV, self.webhook_secret.is_some()),
+                (STRIPE_PRICES_ENV, self.prices.is_some()),
+                (TRIAL_DAYS_ENV, self.trial_days.is_some()),
+                (TRIAL_TASKS_ENV, self.trial_tasks.is_some()),
+                (TRIAL_PAGES_ENV, self.trial_pages.is_some()),
+                (TRIAL_MEMBERS_ENV, self.trial_members.is_some()),
+            ];
+            return match set.into_iter().find(|(_, set)| *set) {
+                Some((key, _)) => Err(ConfigError::InvalidSetting {
+                    key,
+                    detail: "is only used with ORBIT_CLOUD=true".to_owned(),
+                }),
+                None => Ok(None),
+            };
+        }
+        let secret_key = self
+            .secret_key
+            .ok_or_else(|| missing(STRIPE_SECRET_KEY_ENV))?;
+        let webhook_secret = self
+            .webhook_secret
+            .ok_or_else(|| missing(STRIPE_WEBHOOK_SECRET_ENV))?;
+        let prices = self.prices.ok_or_else(|| missing(STRIPE_PRICES_ENV))?;
+        let plans = prices
+            .split(',')
+            .map(str::trim)
+            .filter(|entry| !entry.is_empty())
+            .map(|entry| {
+                let (key, price_id) =
+                    entry
+                        .split_once(':')
+                        .ok_or_else(|| ConfigError::InvalidSetting {
+                            key: STRIPE_PRICES_ENV,
+                            detail: format!("{entry:?} must be plan:price_id"),
+                        })?;
+                Ok(Plan {
+                    key: key.trim().to_owned(),
+                    price_id: price_id.trim().to_owned(),
+                })
+            })
+            .collect::<Result<Vec<_>, ConfigError>>()?;
+        let defaults = TrialConfig::default();
+        let trial = TrialConfig {
+            days: parse_trial(TRIAL_DAYS_ENV, self.trial_days, defaults.days)?,
+            tasks: parse_trial(TRIAL_TASKS_ENV, self.trial_tasks, defaults.tasks)?,
+            pages: parse_trial(TRIAL_PAGES_ENV, self.trial_pages, defaults.pages)?,
+            members: parse_trial(TRIAL_MEMBERS_ENV, self.trial_members, defaults.members)?,
+        };
+        Ok(Some(BillingConfig {
+            trial,
+            ..BillingConfig::new(
+                Secret::new(secret_key.trim()),
+                Secret::new(webhook_secret.trim()),
+                plans,
+            )
+        }))
+    }
+}
+
+fn parse_trial<T: std::str::FromStr>(
+    key: &'static str,
+    value: Option<String>,
+    default: T,
+) -> Result<T, ConfigError> {
+    value.map_or(Ok(default), |value| {
+        value
+            .trim()
+            .parse()
+            .map_err(|_| ConfigError::InvalidSetting {
+                key,
+                detail: format!("{value:?} must be a whole number"),
+            })
+    })
+}
+
 #[derive(Debug, Error)]
 pub enum ConfigError {
     #[error("invalid value for {key}: {value}")]
@@ -524,6 +812,30 @@ impl Config {
         }
         config.validate()?;
         Ok(config)
+    }
+
+    /// Settings that are valid but unsafe on most networks. `orbit serve` logs each one at startup.
+    #[must_use]
+    pub fn warnings(&self) -> Vec<String> {
+        let mut warnings = Vec::new();
+        for proxy in &self.http.trusted_proxies {
+            if proxy.prefix_len() == 0 {
+                warnings.push(format!(
+                    "{HTTP_TRUSTED_PROXIES_ENV} contains {proxy}, which trusts every address: anyone \
+                     who reaches the port directly can fake their IP address (and get around rate \
+                     limits) and HTTPS. List only the reverse proxy addresses."
+                ));
+            }
+        }
+        if let Some(address) = self.metrics.listen
+            && !address.ip().is_loopback()
+        {
+            warnings.push(format!(
+                "{METRICS_LISTEN_ENV}={address} is not a loopback address: /metrics has no \
+                 authentication, so only the monitoring network may reach it."
+            ));
+        }
+        warnings
     }
 
     pub fn validate(&self) -> Result<(), ConfigError> {
@@ -562,12 +874,20 @@ impl Config {
                     ),
                 });
             }
+            EnvironmentMode::Production if !self.http.dev_native_redirects.is_empty() => {
+                return Err(ConfigError::InvalidSetting {
+                    key: HTTP_DEV_NATIVE_REDIRECTS_ENV,
+                    detail: "is for development only and cannot be set in production mode"
+                        .to_owned(),
+                });
+            }
             EnvironmentMode::Production if self.http.trusted_proxies.is_empty() => {
                 return Err(ConfigError::InvalidSetting {
                     key: HTTP_TRUSTED_PROXIES_ENV,
-                    detail:
-                        "production mode requires at least one trusted proxy for the HTTPS boundary"
-                            .to_owned(),
+                    detail: "production mode requires at least one trusted proxy for the HTTPS \
+                             boundary: set it to the reverse proxy addresses, for example \
+                             127.0.0.1/32 for a proxy on the same host"
+                        .to_owned(),
                 });
             }
             _ => {}
@@ -613,7 +933,11 @@ impl Config {
             });
         }
         self.rate_limits.validate()?;
-        self.mail.validate()
+        self.mail.validate()?;
+        match &self.billing {
+            Some(billing) => billing.validate(),
+            None => Ok(()),
+        }
     }
 }
 
@@ -630,11 +954,18 @@ fn apply_environment(
     config: &mut Config,
     environment: &BTreeMap<String, String>,
 ) -> Result<(), ConfigError> {
-    if environment.contains_key(APP_KEY_ENV) && environment.contains_key(APP_KEY_FILE_ENV) {
-        return Err(ConfigError::AmbiguousSecret {
-            key: APP_KEY_ENV.to_owned(),
-        });
+    for key in [
+        APP_KEY_ENV,
+        STRIPE_SECRET_KEY_ENV,
+        STRIPE_WEBHOOK_SECRET_ENV,
+    ] {
+        if environment.contains_key(key) && environment.contains_key(&format!("{key}_FILE")) {
+            return Err(ConfigError::AmbiguousSecret {
+                key: key.to_owned(),
+            });
+        }
     }
+    let mut billing = BillingEnvironment::default();
 
     for (key, value) in environment {
         if key == ENVIRONMENT_ENV {
@@ -650,6 +981,13 @@ fn apply_environment(
             config.http.public_origin = value.clone();
         } else if key == HTTP_TRUSTED_PROXIES_ENV {
             config.http.trusted_proxies = parse_list(key, value)?;
+        } else if key == HTTP_DEV_NATIVE_REDIRECTS_ENV {
+            config.http.dev_native_redirects = value
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+                .collect();
         } else if key == HTTP_SHUTDOWN_DELAY_ENV {
             config.http.shutdown_delay_seconds = parse_environment(key, value)?;
         } else if key == DATA_DATABASE_ENV {
@@ -703,6 +1041,26 @@ fn apply_environment(
             config.app_key = Some(parse_app_key(value)?);
         } else if key == APP_KEY_FILE_ENV {
             config.app_key = Some(parse_app_key(&read_secret_file(key, Path::new(value))?)?);
+        } else if key == CLOUD_ENV {
+            billing.cloud = parse_environment(key, value)?;
+        } else if key == STRIPE_SECRET_KEY_ENV {
+            billing.secret_key = Some(value.clone());
+        } else if key == STRIPE_SECRET_KEY_FILE_ENV {
+            billing.secret_key = Some(read_secret_file(key, Path::new(value))?);
+        } else if key == STRIPE_WEBHOOK_SECRET_ENV {
+            billing.webhook_secret = Some(value.clone());
+        } else if key == STRIPE_WEBHOOK_SECRET_FILE_ENV {
+            billing.webhook_secret = Some(read_secret_file(key, Path::new(value))?);
+        } else if key == STRIPE_PRICES_ENV {
+            billing.prices = Some(value.clone());
+        } else if key == TRIAL_DAYS_ENV {
+            billing.trial_days = Some(value.clone());
+        } else if key == TRIAL_TASKS_ENV {
+            billing.trial_tasks = Some(value.clone());
+        } else if key == TRIAL_PAGES_ENV {
+            billing.trial_pages = Some(value.clone());
+        } else if key == TRIAL_MEMBERS_ENV {
+            billing.trial_members = Some(value.clone());
         } else if key.starts_with("ORBIT_")
             && !IGNORED_ENV_PREFIXES
                 .iter()
@@ -711,6 +1069,7 @@ fn apply_environment(
             return Err(ConfigError::UnknownEnvironment(key.clone()));
         }
     }
+    config.billing = billing.into_config()?;
     Ok(())
 }
 
@@ -797,4 +1156,52 @@ fn parse_app_key(value: &str) -> Result<AppKey, ConfigError> {
         key: APP_KEY_ENV,
         detail: "must be base64 of 32 bytes (`openssl rand -base64 32`)".to_owned(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn production(extra: &[(&str, &str)]) -> Config {
+        let mut env: BTreeMap<String, String> = [
+            ("ORBIT_ENV", "production"),
+            ("ORBIT_PUBLIC_ORIGIN", "https://orbit.example"),
+            (
+                "ORBIT_APP_KEY",
+                "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=",
+            ),
+            ("ORBIT_TRUSTED_PROXIES", "172.30.0.2/32"),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.to_owned(), value.to_owned()))
+        .collect();
+        env.extend(
+            extra
+                .iter()
+                .map(|(key, value)| ((*key).to_owned(), (*value).to_owned())),
+        );
+        Config::from_environment(env).unwrap()
+    }
+
+    #[test]
+    fn a_narrow_proxy_and_loopback_metrics_give_no_warning() {
+        let config = production(&[("ORBIT_METRICS_LISTEN", "127.0.0.1:9090")]);
+        assert!(config.warnings().is_empty(), "{:?}", config.warnings());
+    }
+
+    #[test]
+    fn trusting_every_address_is_a_warning() {
+        let config = production(&[("ORBIT_TRUSTED_PROXIES", "172.30.0.2/32,::/0")]);
+        let warnings = config.warnings();
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].starts_with("ORBIT_TRUSTED_PROXIES contains ::/0"));
+    }
+
+    #[test]
+    fn public_metrics_listener_is_a_warning() {
+        let config = production(&[("ORBIT_METRICS_LISTEN", "0.0.0.0:9090")]);
+        let warnings = config.warnings();
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].starts_with("ORBIT_METRICS_LISTEN=0.0.0.0:9090"));
+    }
 }

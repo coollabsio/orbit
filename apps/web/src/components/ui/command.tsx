@@ -15,7 +15,7 @@ import {
   InputGroup,
   InputGroupAddon,
 } from "./input-group"
-import { SearchNormal as SearchIcon, Check as CheckIcon } from 'reicon-react'
+import { Search4 as SearchIcon, Check as CheckIcon } from 'reicon-react'
 
 function Command({
   className,
@@ -38,12 +38,14 @@ function CommandDialog({
   description = "Search for a command to run...",
   children,
   className,
+  style,
   showCloseButton = false,
   ...props
 }: Omit<React.ComponentProps<typeof Dialog>, "children"> & {
   title?: string
   description?: string
   className?: string
+  style?: React.CSSProperties
   showCloseButton?: boolean
   children: React.ReactNode
 }) {
@@ -60,6 +62,7 @@ function CommandDialog({
           "top-1/3 flex translate-y-0 flex-col overflow-hidden rounded-xl! p-0 duration-150 data-open:zoom-in-97! data-closed:zoom-out-97!",
           className
         )}
+        style={style}
         showCloseButton={showCloseButton}
       >
         {children}

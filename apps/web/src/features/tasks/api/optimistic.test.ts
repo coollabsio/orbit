@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { QueryClient } from '@tanstack/react-query'
 import { queryKeys } from '@/api/queryKeys'
-import type { PageTaskRecord, TaskRecord } from '@/api/generated/types.gen'
+import type { PageTaskRecord, TaskRecord } from '@orbit/api/generated/types.gen'
 import { cachedDescendantIds, findCachedTask, patchWorkspaceTask, reconcileWorkspaceTask, restoreWorkspaceTasks } from './optimistic'
 
 const task = (workspaceId: string, version = 1): TaskRecord => ({

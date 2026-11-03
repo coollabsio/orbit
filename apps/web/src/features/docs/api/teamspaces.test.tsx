@@ -2,8 +2,8 @@ import { afterEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import type { Teamspace } from '@/api/generated/types.gen'
-import { ApiProblem } from '@/api/problem'
+import type { Teamspace } from '@orbit/api/generated/types.gen'
+import { ApiProblem } from '@orbit/api/problem'
 import { queryKeys } from '@/api/queryKeys'
 import {
   reorderTeamspaces,

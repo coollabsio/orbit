@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
-import type { NotionImport, NotionImportNode, PageSummary, Teamspace } from '@/api/generated/types.gen'
+import type { NotionImport, NotionImportNode, PageSummary, Teamspace } from '@orbit/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 import { ConfirmationModalHost } from '@/components/common/ConfirmationModal'
 import { WorkspaceProvider } from '@/features/workspaces/WorkspaceProvider'
@@ -142,7 +142,7 @@ test('connect: the token field is a password field and problems show friendly me
   code = 'app_key_missing'
   fireEvent.click(scan)
   await waitFor(() =>
-    expect(view.getByRole('alert').textContent).toContain('The server administrator must set an app key'),
+    expect(view.getByRole('alert').textContent).toContain('Ask the Orbit administrator to set the app key'),
   )
 })
 

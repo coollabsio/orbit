@@ -227,6 +227,9 @@ pub(crate) struct RoomState {
     last_change: Instant,
     last_editor: Option<Id>,
     state_bytes: usize,
+    /// Encoded size of the updates yrs holds back until their missing dependencies arrive: they
+    /// produce no delta, so `state_bytes` does not count them.
+    missing_bytes: usize,
     connections: usize,
     /// Awareness client id -> owning connection.
     awareness_owners: HashMap<u64, u64>,
@@ -259,6 +262,7 @@ impl RoomState {
             last_change: Instant::now(),
             last_editor: None,
             state_bytes: 0,
+            missing_bytes: 0,
             connections: 0,
             awareness_owners: HashMap::new(),
             color_holders: HashMap::new(),
@@ -281,6 +285,7 @@ impl RoomState {
     fn reset_doc(&mut self) {
         self.awareness = Awareness::new(observed_doc(&self.captured));
         self.take_captured();
+        self.missing_bytes = 0;
     }
 
     fn mark_changed(&mut self, editor: Option<Id>) {
@@ -339,6 +344,9 @@ pub(crate) struct Joined {
 pub(crate) struct Peer {
     pub(crate) user_id: Id,
     pub(crate) name: String,
+    /// The peer may read but not edit (see `crate::billing::guard`): its content updates are
+    /// dropped like those to a locked page.
+    pub(crate) read_only: bool,
 }
 
 /// What handling one inbound frame produced.
@@ -915,8 +923,10 @@ impl CollabHub {
     }
 
     fn set_bytes(&self, room: &Room, state: &RoomState) {
-        room.approx_bytes
-            .store(state.state_bytes * MEMORY_FACTOR, Ordering::Relaxed);
+        room.approx_bytes.store(
+            (state.state_bytes + state.missing_bytes) * MEMORY_FACTOR,
+            Ordering::Relaxed,
+        );
     }
 
     fn memory_in_use(&self) -> usize {
@@ -948,7 +958,7 @@ impl CollabHub {
             return Err(error);
         }
         let project = project && state.unprojected_since.is_some();
-        if project && repair(state, &room.policy()) {
+        if project && repair(state, &room.policy(), true) {
             // The repair is an ordinary update: persisted with the batch and broadcast.
             self.queue_repair(room, state);
         }
@@ -1373,28 +1383,54 @@ impl CollabHub {
                         .push(Message::Sync(SyncMessage::SyncStep2(update)).encode_v1());
                 }
                 Message::Sync(SyncMessage::SyncStep2(_) | SyncMessage::Update(_))
-                    if state.locked =>
+                    if state.locked || peer.read_only =>
                 {
                     // A locked page takes no content changes. They are dropped, not applied; the
                     // lock and the unlock both close every socket with 4423, so clients start over
                     // from the server's document and refused edits never come back.
                 }
                 Message::Sync(SyncMessage::SyncStep2(update) | SyncMessage::Update(update)) => {
-                    if state.state_bytes + update.len() > self.inner.config.max_doc_bytes {
+                    let size = state.state_bytes + state.missing_bytes + update.len();
+                    if size > self.inner.config.max_doc_bytes {
                         handled.close = Some((close::TOO_LARGE, "document too large"));
                         break;
                     }
-                    let applied = {
+                    match update_too_deep(&state, &update) {
+                        Ok(false) => {}
+                        Ok(true) => {
+                            handled.close = Some((close::TOO_LARGE, "document nested too deeply"));
+                            break;
+                        }
+                        Err(_) => {
+                            handled.close = Some((close::BAD_MESSAGE, "malformed update"));
+                            break;
+                        }
+                    }
+                    let (applied, missing) = {
                         let doc = state.awareness.doc();
                         let mut txn = doc.transact_mut();
-                        apply(&mut txn, &update)
+                        let applied = apply(&mut txn, &update);
+                        (applied, missing_bytes(&txn))
                     };
+                    if missing != state.missing_bytes {
+                        state.missing_bytes = missing;
+                        self.set_bytes(room, &state);
+                    }
                     if applied.is_err() {
                         state.take_captured();
                         handled.close = Some((close::BAD_MESSAGE, "malformed update"));
                         break;
                     }
                     let mut deltas = state.take_captured();
+                    if !deltas.is_empty() && too_deep(&state) {
+                        // Refused, but already in the room's document: write the batch before
+                        // it and reload the room without it. Nobody else has seen it.
+                        handled.close = Some((close::TOO_LARGE, "document nested too deeply"));
+                        self.persist_logged(room, &mut state, false, false).await;
+                        self.close_room(room, &mut state, close::RESTART);
+                        changed = false;
+                        break;
+                    }
                     if !deltas.is_empty() {
                         changed = true;
                         for delta in &deltas {
@@ -1408,10 +1444,13 @@ impl CollabHub {
                                 user_id: peer.user_id,
                             });
                         }
-                        // Links and file URLs can only arrive in updates that name them.
-                        if (contains(&update, b"link") || contains(&update, b"url"))
-                            && repair(&state, &room.policy())
-                        {
+                        // Links and file URLs can only arrive in changes that name them; the
+                        // deltas (not `update`) also hold what yrs integrated from earlier
+                        // updates that waited for a missing dependency.
+                        let links = deltas
+                            .iter()
+                            .any(|delta| contains(delta, b"link") || contains(delta, b"url"));
+                        if repair(&state, &room.policy(), links) {
                             for delta in state.take_captured() {
                                 broadcast_update(room, None, &delta);
                                 deltas.push(delta);
@@ -1596,10 +1635,19 @@ impl CollabHub {
         }
     }
 
-    /// [`Self::revalidate`] on the database's hub, if it has one.
+    /// [`Self::revalidate`] on the database's hub. A server that never opened a co-editing
+    /// socket has no hub, but the other servers may have sockets, so they are told anyway.
+    /// The `/live` and `/events` sockets check their access too, here and (through the same
+    /// message) on the other servers.
     pub fn revalidate_database(database: &Database, workspace_id: Option<Id>) {
-        if let Some(hub) = Self::existing(database) {
-            hub.revalidate(workspace_id);
+        if let Some(live) = crate::live::LiveHub::existing(database) {
+            live.revalidate_here(workspace_id);
+        }
+        match Self::existing(database) {
+            Some(hub) => hub.revalidate(workspace_id),
+            None => Cluster::of(database).send(ClusterMessage::Collab(CollabMessage::Revalidate {
+                workspace_id,
+            })),
         }
     }
 
@@ -1863,12 +1911,53 @@ fn write_document(state: &RoomState, blocks: &[Value], policy: &LinkPolicy) {
     blocknote::write_blocks(&mut txn, &fragment, &sanitized);
 }
 
-/// Runs the link / file URL repair on the document; the deltas land in `captured`.
-fn repair(state: &RoomState, policy: &LinkPolicy) -> bool {
+/// Runs the mention (and, with `links`, the link / file URL) repair on the document; the deltas
+/// land in `captured`.
+fn repair(state: &RoomState, policy: &LinkPolicy, links: bool) -> bool {
     let doc = state.awareness.doc();
     let mut txn = doc.transact_mut();
     let fragment = txn.get_or_insert_xml_fragment(FRAGMENT);
-    repair_document_for(&mut txn, &fragment, policy)
+    repair_document_for(&mut txn, &fragment, policy, links)
+}
+
+/// Whether the document nests deeper than [`blocknote::MAX_XML_DEPTH`].
+fn too_deep(state: &RoomState) -> bool {
+    let txn = state.awareness.doc().transact();
+    txn.get_xml_fragment(FRAGMENT)
+        .is_some_and(|fragment| blocknote::too_deep(&txn, &fragment))
+}
+
+/// Whether applying `update` could nest the document too deeply for yrs (see
+/// [`blocknote::update_too_deep`]), together with the updates yrs holds back for missing
+/// dependencies: they integrate at once when those arrive. A document that is shallow enough
+/// before plus such an update stays within twice the limit, which yrs handles; the check after
+/// applying refuses it.
+fn update_too_deep(state: &RoomState, update: &[u8]) -> Result<bool, CollabError> {
+    let corrupt = |error: yrs::encoding::read::Error| CollabError::Corrupt(error.to_string());
+    if blocknote::update_too_deep(update).map_err(corrupt)? {
+        return Ok(true);
+    }
+    let pending = state
+        .awareness
+        .doc()
+        .transact()
+        .store()
+        .pending_update()
+        .map(|pending| pending.update.encode_v1());
+    let Some(pending) = pending else {
+        return Ok(false);
+    };
+    let merged = yrs::merge_updates_v1([pending.as_slice(), update]).map_err(corrupt)?;
+    blocknote::update_too_deep(&merged).map_err(corrupt)
+}
+
+/// Encoded size of what yrs holds back for missing dependencies.
+fn missing_bytes<T: ReadTxn>(txn: &T) -> usize {
+    let store = txn.store();
+    store
+        .pending_update()
+        .map_or(0, |pending| pending.update.encode_v1().len())
+        + store.pending_ds().map_or(0, |ds| ds.encode_v1().len())
 }
 
 fn broadcast_update(room: &Room, except: Option<u64>, delta: &[u8]) {

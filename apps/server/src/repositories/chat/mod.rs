@@ -205,6 +205,8 @@ pub struct ChatFileRecord {
     pub width: Option<i64>,
     #[schema(required = true)]
     pub height: Option<i64>,
+    /// An admin deleted the stored file: show "Deleted file"; `url` serves a "Deleted file" image (410).
+    pub deleted: bool,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]

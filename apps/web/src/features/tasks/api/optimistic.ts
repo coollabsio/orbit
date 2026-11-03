@@ -1,5 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query'
-import type { PageTaskRecord, TaskRecord } from '@/api/generated/types.gen'
+import type { PageTaskRecord, TaskRecord } from '@orbit/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 
 export interface WorkspaceTaskSnapshot {

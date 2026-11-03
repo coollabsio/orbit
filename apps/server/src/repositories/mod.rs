@@ -1,5 +1,8 @@
+pub mod account;
 pub mod api_tokens;
 pub mod attachments;
+pub mod backup_items;
+pub mod billing;
 pub mod chat;
 pub mod identity;
 pub mod instance_settings;
@@ -11,6 +14,7 @@ pub mod page_files;
 pub mod page_mentions;
 pub mod page_versions;
 pub mod pages;
+pub mod sign_in_providers;
 pub mod sub_issues;
 pub mod task_filter;
 pub mod task_relations;
@@ -18,6 +22,7 @@ pub mod tasks;
 pub mod teamspaces;
 pub mod two_factor;
 pub mod views;
+pub mod workspace_storage;
 pub mod workspaces;
 
 /// Test helper: a trigger that makes `event` (e.g. `BEFORE INSERT`, `BEFORE UPDATE OF revoked_at`)

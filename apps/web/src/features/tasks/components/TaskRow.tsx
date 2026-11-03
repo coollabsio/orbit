@@ -6,7 +6,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { BlockedIndicator } from './BlockedIndicator'
 import { refIdentifier, type Project, type Task, type TaskStatusDef } from '@/features/tasks/api/models'
 import type { User } from '@/features/workspaces/models'
-import type { LabelRecord } from '@/api/generated/types.gen'
+import type { LabelRecord } from '@orbit/api/generated/types.gen'
 import type { TaskProperty } from '@/features/views/viewState'
 import { PriorityPicker } from './PriorityPicker'
 import { StatusPicker } from './StatusPicker'
@@ -64,7 +64,7 @@ export function TaskRow({ task, statuses, labels, users, assignees, project, pro
   return (
     <div
       className={cn(
-        'group/row relative flex min-h-10 w-full min-w-0 cursor-pointer items-center gap-2 border-b px-3 py-1.5 text-left transition-colors outline-none hover:bg-foreground/[0.02] focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset data-dragging:bg-muted data-dragging:opacity-50 data-selected:bg-primary/10 max-[480px]:gap-1.5',
+        'group/row relative flex min-h-10 w-full min-w-0 cursor-pointer items-center gap-2 border-b px-3 py-1.5 text-left transition-colors outline-none hover:bg-foreground/[0.02] focus-visible:ring-1 focus-visible:ring-primary/70 focus-visible:ring-inset data-dragging:bg-muted data-dragging:opacity-50 data-selected:bg-primary/10 max-[480px]:gap-1.5',
         // 2px insertion line on the row edge while a manual-order drag hovers it; absolute, so nothing shifts
         'data-drop-edge:before:pointer-events-none data-drop-edge:before:absolute data-drop-edge:before:inset-x-0 data-drop-edge:before:z-[1] data-drop-edge:before:h-0.5 data-drop-edge:before:bg-primary data-[drop-edge=top]:before:-top-px data-[drop-edge=bottom]:before:-bottom-px',
         // tint + inset ring while a drop would nest into the row (the chip names the action)

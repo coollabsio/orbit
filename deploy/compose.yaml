@@ -12,7 +12,8 @@ services:
     environment:
       ORBIT_ENV: production
       ORBIT_PUBLIC_ORIGIN: https://${ORBIT_DOMAIN:?Set ORBIT_DOMAIN in deploy/.env}
-      ORBIT_TRUSTED_PROXIES: 172.30.0.2/32
+      # Caddy, and loopback for the image healthcheck.
+      ORBIT_TRUSTED_PROXIES: 127.0.0.1/32,172.30.0.2/32
       ORBIT_APP_KEY: ${ORBIT_APP_KEY:?Set ORBIT_APP_KEY in deploy/.env}
       # Mail (see docs/operations.md#mail). Uncomment these lines, the mail port and the certificate volume.
       # ORBIT_MAIL_ENABLED: 'true'
@@ -38,6 +39,13 @@ services:
     environment:
       ORBIT_DOMAIN: ${ORBIT_DOMAIN:?Set ORBIT_DOMAIN in deploy/.env}
     ports: ['80:80', '443:443']
+    # The admin API answers on localhost:2019 once Caddy has loaded its configuration.
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:2019/config/']
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 3
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy-data:/data

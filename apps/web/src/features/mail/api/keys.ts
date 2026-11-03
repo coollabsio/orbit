@@ -1,4 +1,4 @@
-import type { MailFolder, MailNamePattern } from '@/api/generated/types.gen'
+import type { MailFolder, MailNamePattern } from '@orbit/api/generated/types.gen'
 
 /**
  * Which threads a list shows. Without `folder`: the inbox, or with `labelId` or `starred` the inbox and the archive.

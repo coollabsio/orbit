@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { ApiProblem } from '@/api/problem'
+import { ApiProblem } from '@orbit/api/problem'
 import { taskUnavailableDescription } from './taskAvailability'
 
 describe('task unavailable message', () => {

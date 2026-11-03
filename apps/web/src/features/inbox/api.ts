@@ -5,8 +5,8 @@ import {
   listNotifications,
   readAllNotifications,
   readNotification,
-} from '@/api/generated/sdk.gen'
-import type { NotificationRecord } from '@/api/generated/types.gen'
+} from '@orbit/api/generated/sdk.gen'
+import type { NotificationRecord } from '@orbit/api/generated/types.gen'
 import { fetchAllPages } from '@/api/pagination'
 import { taskPath } from '@/lib/taskLinks'
 

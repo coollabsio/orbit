@@ -10,17 +10,15 @@ Chat persists too (channels, direct messages, threads, files, search; see Chat b
 
 Mail persists too (receiving and a read-only web client: domains, mailboxes, threads, search; see Mail below). Sending mail is a follow-up milestone.
 
-Home, Profile and webhooks still use isolated frontend seed data. Their routes show a `Mock data` badge in every build.
-
 ## Global shell
 
 - First sidebar groups Workspace, Personal, and Manage navigation.
 - It collapses to a 56px icon rail; state persists in `orbit:sidebar_collapsed`.
 - Search opens the command palette. `Cmd/Ctrl+K` toggles it.
-- User menu provides Profile and theme selection.
+- User menu provides Account settings and a link to Account settings → Appearance (`/profile/appearance`).
 - Mobile uses a bottom dock and a full navigation drawer.
 - Topbar breadcrumbs are route-derived in `Topbar.tsx`.
-- Theme defaults to dark and persists under `localStorage.theme`.
+- Appearance (port of Coolify's Profile → Appearance, `lib/theme.tsx`): Layout Classic/New UI (`orbit:layout`, default classic, `[data-new-ui]` on `<html>`, `new-ui:` variant, `useNewUi()`): the new UI turns on the contextual sidebar (settings areas, the docs and chat lists in the sidebar, Back) and the whole-app custom theme on the sidebar, its menus (`MenuSurfaceContext`) and ⌘K; the classic layout keeps the custom theme on chat only. color theme Light/System/Dark (default dark, `localStorage.theme`), the custom theme (`lib/customTheme.ts`, `CustomThemeDialog`; replaces Light/System/Dark while set: `ThemeProvider` puts `customThemeVariables` on `<html>` and picks `.dark` from the message colour; picking a base theme clears it; the app sidebar uses `appSidebarTheme`, which puts `.dark` or `.light` on the sidebar so its `dark:` styles follow the sidebar colour), Navigation style Default/Floating (`orbit:nav-style`, `[data-floating]` on `<html>`, `floating:` variant, desktop only) and Style 3D/Flat (`orbit:style`, `[data-flat]`, `flat:` variant on buttons and sidebar items). `index.html` applies all of them before first paint. Coolify's Page width and Chart times are not ported.
 
 ## Home
 
@@ -177,7 +175,12 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
   (also over BlockNote's own `.dark` containers), images fitted, page breaks avoided inside images/code/tables/headings.
   Static CSS (production CSP). Smoke: `target/orbit-smoke/export.mjs`.
 - Editor: BlockNote 0.55 (rich text, markdown shortcuts, nested blocks, drag handles, undo, slash menu), lazy-loaded in its own
-  chunk. Custom `page` block links to a page; it greys out as "Missing page" when the target is trashed or gone.
+  chunk. The schema lives in `packages/editor` (`@orbit/editor`): `createEditorSchemas(views)` builds the page and task
+  schemas from fixed block configs (`page`, `callout`, `mention`, code block + `sugar-high` highlighting); a host only
+  passes how blocks render (web: `editor/schema.ts` with the shadcn views; mobile: `PageEditor.dom.tsx`). The package
+  test checks that any views give `blocknote-schema.json`, so every editor bound to a page's Y.Doc has the server's
+  schema. The package also holds `codeLanguages`, `commentMarks()` (the comment mark for editors without threads),
+  the framework-free `CollabSession` (status, close codes) and `ticketWebSocket` (a fresh socket ticket per connect). Custom `page` block links to a page; it greys out as "Missing page" when the target is trashed or gone.
   Slash items "Sub-page" (creates a child page, inserts the link, opens it) and "Link a page" (picker over the tree).
   Custom `callout` block (`editor/CalloutBlock.tsx`; slash "Callout" in Basic blocks after Quote, aliases callout/note/tip/
   warning/info): inline rich text, props `emoji` (default 💡; click it to pick another in the app's emoji picker),
@@ -217,7 +220,9 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
   changes will sync" / "Access lost" / "Not syncing". Close handling: 4404/4403 → the editor turns read-only, a toast
   ("“X” was moved to the trash." / "You no longer have access to “X”."), the page leaves the tree and the app goes to
   /docs (not for the user's own "Move to trash", which announces itself); 4409 → refetch the page (new epoch) and
-  reconnect with a fresh document; 4401 → the app-wide unauthorized flow (login); 4413 → "too large" banner + read-only
+  reconnect with a fresh document; 4402 (Orbit Cloud: the workspace lost its subscription; every server closes its
+  editing sockets of the workspace) → read-only toast, billing refetched, then the same as 4409, and the new socket is
+  read-only; 4401 → the app-wide unauthorized flow (login); 4413 → "too large" banner + read-only
   until "Reload page"; 4400/4426 → "Reload app" banner; 4429 → toast, reconnect after 5 s; 1012/1013 and drops →
   y-websocket retries. Handshakes refused before the upgrade (HTTP 401/404 arrive as 1006) trigger a throttled REST
   check of the page after 2 failures (404 → leave like a trash, 401 → login). `beforeunload` warns only while
@@ -293,7 +298,10 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
   Socket `GET /api/v1/workspaces/{ws}/pages/{id}/collab?v=1&epoch=<Page.collab_epoch>` speaks y-sync v1 (y-websocket 3:
   `new WebsocketProvider(origin + '/api/v1/workspaces/{ws}/pages/{id}', 'collab', doc, { params: { v: '1', epoch } })`,
   fragment `prosemirror`). Handshake: one allowed `Origin` (platform layer, 403), session cookie (401), then membership +
-  live page visible to the user, else 404 exactly like an unknown id. After the upgrade: `v` ≠ 1 → 4426, stale/missing
+  live page visible to the user, else 404 exactly like an unknown id. A WebView socket (mobile editor) that cannot send
+  the cookie instead appends `ticket=` from `POST /api/v1/auth/socket-ticket` (`socket_ticket.rs`: stateless, HMAC
+  under an HKDF subkey of the app key, 60 s, session re-checked); with a ticket and no Cookie any Origin passes, and a
+  ticket plus a cookie or bearer is 401. After the upgrade: `v` ≠ 1 → 4426, stale/missing
   epoch → 4409. Close codes (4400–4499 terminal for y-websocket): 4400 malformed, 4401 session ended, 4403 no access (moved
   into someone's Private, removed from the workspace), 4404 trashed/deleted, 4409 reset, 4413 frame > 1 MiB or document
   > 8 MiB (checked before applying), 4429 > 200 sync / 30 awareness msgs/s; 1012 restart, 1013 overloaded (50 sockets per
@@ -413,7 +421,7 @@ MessageItem,MailHtmlFrame,SafetyBanner,MailSearch}.tsx`), settings in `features/
 Design: `docs/superpowers/specs/2026-10-23-mail-slice-1-design.md` (local file). Operator guide:
 `docs/operations.md#mail`.
 
-Slice 1 receives and reads mail; it does not send. Server (migration 0056):
+Slice 1 receives and reads mail; it does not send. Server (migration 0066):
 
 - Provider intake (`mail_delivery.rs`, `mail_routes/{inbound,providers}.rs`, `crates/mail/src/inbound/`): Cloudflare,
   Postmark, Mailgun, Resend and SES post to `/api/v1/mail/inbound/{kind}/{id}`; instance and workspace providers
@@ -505,14 +513,65 @@ turns its routes, navigation and shortcuts off.
   with the thread; page body mentions open the page at the mentioned block).
 - Inbox and Profile remain mock-backed.
 - Profile edits the current mock user's name, email, and title.
+- Account → Profile changes the email (`POST /api/v1/auth/me/email`, password or a fresh sign-in; a one-use 60-minute
+  link to the new address, confirmed on `/confirm-email` via `POST /api/v1/auth/email-change/confirm`; other sessions
+  are signed out, the old address gets a notice, and on Orbit Cloud the owned workspaces' Stripe customers get the new
+  address through the `billing.stripe_customer_email` job). Taken addresses get the same answer and no email.
+- Admin → Users → Manage → Change email (web and mobile; `PUT /api/v1/admin/users/{user_id}/email`, admins only,
+  with or without a mail server) sets the new address at once, verified, with no confirmation email. It shares
+  `apply_email_change` (`repositories/account.rs`) with the link confirmation: pending email change and password
+  reset links are deleted, the account is signed out everywhere (an admin changing their own email keeps the current
+  session), Stripe jobs are queued, and the audit event `account.email_changed` has `changed_by: admin` (`self` for
+  the link). The old address gets the notice only when a mail server is saved. Errors: `invalid_email`, `same_email`
+  (422), `email_taken`, `account_deleted`, `root_account` (409), `user_not_found` (404). The menu shows the action on
+  the admin's own row too (only that action); never on deleted accounts.
+- Admin → Users on Orbit Cloud never acts silently (`AccountNotice` in `workspace_routes.rs`): Change email, the
+  recovery link (`POST …/recovery-link`) and Reset two-factor (`POST …/two-factor/reset`) answer 409 `smtp_required`
+  without a mail server (non-admins still get 403), and email the person after the commit (`send_later`, a failed send
+  only logs a warning): the old and the new address (`email_changed`, `email_set_by_admin`), the reset link to the
+  account (`admin_recovery`, 30 minutes; the answer is 202 `{sent_to, expires_at}` with no `url`), and a two-factor
+  notice (`two_factor_reset`). Self-hosted keeps 201 `{url, expires_at}` and its old notices. Web and mobile read
+  `billing_enabled`/`email_enabled` from `/api/v1/auth/options`: on Cloud the item is "Send password reset email" and
+  shows "Sent to …" (web toast, mobile note) instead of the link dialog, and without SMTP the three items are disabled
+  with "Needs a mail server on Orbit Cloud" (mobile `adminActionBlocked`).
+- Orbit Cloud always needs a mail server (`repositories/instance_settings.rs`): `DELETE /api/v1/admin/settings/smtp`
+  answers 409 `smtp_required` and Admin → Email hides Remove (web and mobile; saving a replacement works), and
+  opening registration needs SMTP even with a sign-in provider (409 `email_not_configured`). While Cloud has no mail
+  server (right after setup), installation admins see a red banner linking to Admin → Email (web `MailServerBanner`
+  above the top bar, mobile above the dock; computed from `billing_enabled` and `email_enabled` in `/api/v1/auth/options`),
+  and the server logs one `warn!` at startup. Self-hosted servers keep "SMTP or provider" and can remove SMTP.
+- Account → Profile → Delete account (`DELETE /api/v1/auth/me`, typed email + password or fresh sign-in) anonymizes the
+  account (`users.deleted_at`, "Deleted user", `deleted-<id>@deleted.invalid`) and removes its sign-in methods,
+  sessions, tokens, personal data and memberships; refused with `owns_workspaces` (lists them) and `root_account`.
+  Admin → Users shows it as Deleted and cannot reinstate it. Mobile has both flows in Settings → Profile.
 - Workspace Settings: General, Members, Sessions.
 - Workspace creation, members, invitations, fixed roles, ownership transfer, and sessions use persistent APIs.
 - Sessions lists the current account's active devices. It shows device/browser and last active only, with controls to revoke any non-current session.
 - Chat administration remains separate at `/chat/settings`.
+- Workspace Settings → Advanced → Export (owner/admin, `workspace.export`; also on read-only billing workspaces):
+  `POST /workspaces/{id}/exports` queues a `workspace.export` job (one queued/running export per workspace, else 409
+  `export_in_progress`; adjustable job limits); `GET …/exports` lists unexpired ones (polled while active);
+  `GET …/exports/{export_id}/download` streams the ZIP (owner/admin only, audited `workspace.export_downloaded`).
+  The job (`apps/server/src/workspace_export/`) writes `workspace.json`, `tasks/<KEY>-<n>.json` (comments,
+  attachments, activity, trash flag), `pages/<Teamspace|Private>/…md` (page-export converter) + `pages/comments.json`,
+  `chat/<channel>.json` (public channels plus private channels/DMs the requester is in), `files/<blob>/<name>` and
+  `README.txt`, streamed to a temp file, then stored at `exports/{ws}/{id}.zip` in the attachment tier (workspace
+  bucket, installation bucket, or `<backups>/exports/`). Retention deletes it 7 days after it is ready. Layout:
+  `docs/operations.md` → Workspace export. Mobile has no export screen.
 
 ## Mobile presentation
 
 - Tasks, Docs, Mail, Chat, DMs, and Inbox use their own compact headers instead of the global topbar.
 - Chat uses compact messages, avatars, attachment grids, date separators, and pinned system notices; header search is an icon that expands when used.
 - Docs drop BlockNote's side-menu gutter on phones; the page list and the page are separate screens.
+- The mobile app (`apps/mobile`) edits the page body with BlockNote in an Expo DOM component
+  (`src/components/docs/PageEditor.dom.tsx`, a web view): `@orbit/editor`'s schema bound to the page's Y.Doc over the
+  same collab socket as the web, so both co-edit one document. The socket uses `ticketWebSocket`: the native side
+  fetches `POST /auth/socket-ticket` with its bearer token before every connect and reconnect (401 → close 4401).
+  BlockNote's own menus are off (`BlockNoteViewRaw`); a native bar above the keyboard (`EditorToolbar.tsx`) sends
+  commands (styles, block types, lists, indent, image, divider, undo/redo) through the DOM ref, and the editor reports
+  its selection state, caret line and height back. The page scrolls natively (the web view is as tall as its content)
+  and the screen scrolls the caret above the bar. Close codes map to `PROBLEM_RESPONSES` (`src/data/page-editor.ts`):
+  4409/4423 reload the page and reconnect, 4402 read-only, 4403/4404/4401 stop. Orbit files load through the native
+  side as data URLs. Mobile never PATCHes page content (`savePage` takes title, icon and cover only).
 - Shared confirmation and input modals remain vertically and horizontally centered at mobile sizes.

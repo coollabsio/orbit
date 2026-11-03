@@ -64,6 +64,9 @@ function PostVideo({ preview }: { preview: LinkPreview }) {
       {playing ? (
         <iframe
           title={`Video by ${preview.authorName ?? preview.authorHandle ?? 'X'}`}
+          // Sandboxed: an opaque origin with no forms, popups or top navigation. The player runs no script (the CSP
+          // allows no inline one), but a sandbox without `allow-scripts` also blocks `autoplay`: Play would not start it.
+          sandbox="allow-scripts"
           referrerPolicy="no-referrer"
           allow="autoplay; fullscreen; picture-in-picture"
           allowFullScreen

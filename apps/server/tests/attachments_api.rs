@@ -25,6 +25,7 @@ struct Fixture {
     database: TestDatabase,
     identity: Arc<IdentityRepository>,
     store: LocalBlobStore,
+    uploads: UploadService,
     app: axum::Router,
     workspace_id: String,
     owner_cookie: String,
@@ -99,7 +100,7 @@ impl Fixture {
         );
         let attachments = attachment_router(AttachmentState::new(
             Arc::clone(&identity),
-            uploads,
+            uploads.clone(),
             CookieMode::secure(),
         ));
         Self {
@@ -107,6 +108,7 @@ impl Fixture {
             database,
             identity,
             store,
+            uploads,
             app: tasks.merge(attachments),
             workspace_id: setup.workspace_id.to_string(),
             owner_cookie,
@@ -1086,10 +1088,13 @@ async fn uploads_stay_within_the_workspace_storage_quota() {
     let workspace_id: Id = fixture.workspace_id.parse().unwrap();
     let owner_id: Id = fixture.owner_id.parse().unwrap();
     let workspaces = WorkspaceRepository::new((*fixture.database).clone());
-    let storage = workspaces.storage(workspace_id, owner_id).await.unwrap();
+    let storage = workspaces
+        .storage(workspace_id, owner_id, 10, 0)
+        .await
+        .unwrap();
     assert_eq!(
         (storage.used_bytes, storage.quota_bytes),
-        (0, Some(5_000_000_000))
+        (0, Some(1_000_000_000))
     );
     let quota = PNG.len() as i64 + 100;
     sqlx::query("UPDATE instance_settings SET workspace_storage_quota_bytes = $1 WHERE id = 1")
@@ -1134,9 +1139,14 @@ async fn uploads_stay_within_the_workspace_storage_quota() {
         .await
         .unwrap();
     assert_eq!(usage.status(), StatusCode::OK);
+    let mut usage = response_json(usage).await;
+    usage["largest_files"] = without_ids(usage["largest_files"].take());
     assert_eq!(
-        response_json(usage).await,
-        json!({"used_bytes": quota, "quota_bytes": quota})
+        usage,
+        json!({"used_bytes": quota, "quota_bytes": quota, "largest_files": [
+            {"byte_size": 100, "name": "small.bin", "uses": [{"kind": "task", "title": "Attachment task"}]},
+            {"byte_size": PNG.len(), "name": "again.png", "uses": [{"kind": "task", "title": "Attachment task"}]},
+        ], "file_count": 2})
     );
 
     // Emoji and stickers count too; a profile picture is not a workspace file.
@@ -1164,7 +1174,7 @@ async fn uploads_stay_within_the_workspace_storage_quota() {
     }
     assert_eq!(
         workspaces
-            .storage(workspace_id, owner_id)
+            .storage(workspace_id, owner_id, 10, 0)
             .await
             .unwrap()
             .used_bytes,
@@ -1211,7 +1221,7 @@ async fn uploads_stay_within_the_workspace_storage_quota() {
         .unwrap();
     assert_eq!(
         workspaces
-            .storage(workspace_id, owner_id)
+            .storage(workspace_id, owner_id, 10, 0)
             .await
             .unwrap()
             .used_bytes,
@@ -1224,7 +1234,7 @@ async fn uploads_stay_within_the_workspace_storage_quota() {
         .unwrap();
     assert_eq!(
         workspaces
-            .storage(workspace_id, owner_id)
+            .storage(workspace_id, owner_id, 10, 0)
             .await
             .unwrap()
             .quota_bytes,
@@ -1234,6 +1244,383 @@ async fn uploads_stay_within_the_workspace_storage_quota() {
         fixture.upload("big.bin", &[7_u8; 1000]).await.status(),
         StatusCode::CREATED
     );
+}
+
+#[tokio::test]
+async fn admins_see_the_largest_files_and_private_names_stay_hidden() {
+    let fixture = Fixture::new(UploadLimits::default()).await;
+    let workspace_id: Id = fixture.workspace_id.parse().unwrap();
+    let owner_id: Id = fixture.owner_id.parse().unwrap();
+    for (name, bytes) in [
+        ("first.png", PNG),
+        ("again.png", PNG),
+        ("big.bin", &[7_u8; 2000][..]),
+    ] {
+        assert_eq!(
+            fixture.upload(name, bytes).await.status(),
+            StatusCode::CREATED
+        );
+    }
+    // An unsent chat upload is private; a blob without uses waits for reconcile.
+    let now = TimestampMillis::now().as_millis();
+    let secret = Id::new_v7().to_string();
+    for (size, key) in [(10_000_i64, secret.as_str()), (5_000, "orphan")] {
+        sqlx::query(
+            "INSERT INTO attachment_blobs (id, workspace_id, sha256, byte_size, storage_key, created_at, quarantine_until) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        )
+        .bind(if key == "orphan" { Id::new_v7().to_string() } else { key.to_owned() })
+        .bind(&fixture.workspace_id)
+        .bind(key)
+        .bind(size)
+        .bind(key)
+        .bind(now)
+        .bind(now)
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    }
+    sqlx::query(
+        "INSERT INTO chat_message_files (id, workspace_id, blob_id, file_name, mime_type, size_bytes, uploaded_by, created_at) \
+         VALUES ($1, $2, $3, 'secret.bin', 'application/octet-stream', 10000, $4, $5)",
+    )
+    .bind(Id::new_v7().to_string())
+    .bind(&fixture.workspace_id)
+    .bind(&secret)
+    .bind(&fixture.owner_id)
+    .bind(now)
+    .execute(fixture.database.pool())
+    .await
+    .unwrap();
+
+    let workspaces = WorkspaceRepository::new((*fixture.database).clone());
+    let storage = workspaces
+        .storage(workspace_id, owner_id, 10, 0)
+        .await
+        .unwrap();
+    assert_eq!(
+        without_ids(serde_json::to_value(&storage.largest_files).unwrap()),
+        json!([
+            {"byte_size": 10_000, "name": null, "uses": [{"kind": "private", "title": null}]},
+            {"byte_size": 5_000, "name": null, "uses": []},
+            {"byte_size": 2000, "name": "big.bin", "uses": [{"kind": "task", "title": "Attachment task"}]},
+            {"byte_size": PNG.len(), "name": "again.png", "uses": [{"kind": "task", "title": "Attachment task"}]},
+        ])
+    );
+
+    let member_id = Id::new_v7();
+    sqlx::query(
+        "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) \
+         VALUES ($1, 'member@example.com', 'member@example.com', 'Member', 'unused', $2, $3)",
+    )
+    .bind(member_id.to_string())
+    .bind(now)
+    .bind(now)
+    .execute(fixture.database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
+         VALUES ($1, $2, $3, 'member', 0, $4, $5)",
+    )
+    .bind(Id::new_v7().to_string())
+    .bind(&fixture.workspace_id)
+    .bind(member_id.to_string())
+    .bind(now)
+    .bind(now)
+    .execute(fixture.database.pool())
+    .await
+    .unwrap();
+    let storage = workspaces
+        .storage(workspace_id, member_id, 10, 0)
+        .await
+        .unwrap();
+    assert_eq!(storage.used_bytes, 15_000 + 2000 + PNG.len() as u64);
+    assert!(storage.largest_files.is_empty());
+}
+
+#[tokio::test]
+async fn admins_delete_a_stored_file_and_its_attachments_say_so() {
+    let fixture = Fixture::new(UploadLimits::default()).await;
+    let workspace_id: Id = fixture.workspace_id.parse().unwrap();
+    let owner_id: Id = fixture.owner_id.parse().unwrap();
+    let big = [7_u8; 2000];
+    let created = fixture.upload("big.bin", &big).await;
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let attachment_id = response_json(created).await["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    assert_eq!(
+        fixture.upload("small.png", PNG).await.status(),
+        StatusCode::CREATED
+    );
+    let workspaces = WorkspaceRepository::new((*fixture.database).clone());
+    let storage = workspaces
+        .storage(workspace_id, owner_id, 10, 0)
+        .await
+        .unwrap();
+    let file_id = storage.largest_files[0].id;
+    assert_eq!(storage.largest_files[0].byte_size, 2000);
+
+    let router = workspace_router(
+        WorkspaceState::new(
+            Arc::clone(&fixture.identity),
+            "https://orbit.test".to_owned(),
+            CookieMode::secure(),
+        )
+        .with_uploads(fixture.uploads.clone()),
+    );
+    let delete_path = format!("/api/v1/workspaces/{workspace_id}/storage/files/{file_id}");
+    let deleted = router
+        .clone()
+        .oneshot(cookie_request(
+            "DELETE",
+            &delete_path,
+            &fixture.owner_cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(deleted.status(), StatusCode::NO_CONTENT);
+    let again = router
+        .oneshot(cookie_request(
+            "DELETE",
+            &delete_path,
+            &fixture.owner_cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(again.status(), StatusCode::NOT_FOUND);
+
+    // It stops counting at once and leaves the list; the attachment stays and says it was deleted.
+    let storage = workspaces
+        .storage(workspace_id, owner_id, 10, 0)
+        .await
+        .unwrap();
+    assert_eq!(storage.used_bytes, PNG.len() as u64);
+    assert_eq!(storage.largest_files.len(), 1);
+    let list = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request(
+            "GET",
+            &fixture.task_attachments(),
+            &fixture.owner_cookie,
+        ))
+        .await
+        .unwrap();
+    let list = response_json(list).await;
+    let deleted: Vec<(&str, bool)> = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| {
+            (
+                item["display_name"].as_str().unwrap(),
+                item["deleted"].as_bool().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(deleted, [("big.bin", true), ("small.png", false)]);
+    let download = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request(
+            "GET",
+            &format!("{}/{attachment_id}/download", fixture.task_attachments()),
+            &fixture.owner_cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(download.status(), StatusCode::GONE);
+    assert_eq!(download.headers()[header::CONTENT_TYPE], "image/svg+xml");
+    let body = to_bytes(download.into_body(), usize::MAX).await.unwrap();
+    assert!(String::from_utf8_lossy(&body).contains("Deleted file"));
+    // Editors ask with HEAD to mark a deleted file's link.
+    let head = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request(
+            "HEAD",
+            &format!("{}/{attachment_id}/download", fixture.task_attachments()),
+            &fixture.owner_cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(head.status(), StatusCode::GONE);
+
+    // The same bytes can be uploaded again as a new file; the old attachment stays deleted.
+    let reuploaded = fixture.upload("big-again.bin", &big).await;
+    assert_eq!(reuploaded.status(), StatusCode::CREATED);
+    let reuploaded_id = response_json(reuploaded).await["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let download = fixture
+        .app
+        .clone()
+        .oneshot(cookie_request(
+            "GET",
+            &format!("{}/{reuploaded_id}/download", fixture.task_attachments()),
+            &fixture.owner_cookie,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(download.status(), StatusCode::OK);
+    assert_eq!(
+        to_bytes(download.into_body(), usize::MAX).await.unwrap(),
+        &big[..]
+    );
+    assert_eq!(
+        workspaces
+            .storage(workspace_id, owner_id, 10, 0)
+            .await
+            .unwrap()
+            .used_bytes,
+        2000 + PNG.len() as u64
+    );
+
+    // Once nothing uses the deleted file, reconcile removes its row (it has no object to release).
+    sqlx::query("DELETE FROM attachment_references WHERE id = $1")
+        .bind(&attachment_id)
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE attachment_blobs SET quarantine_until = 0 WHERE id = $1")
+        .bind(file_id.to_string())
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    fixture
+        .uploads
+        .reconcile(TimestampMillis::now().as_millis())
+        .await
+        .unwrap();
+    let rows: i64 = fixture
+        .database
+        .scalar(&format!(
+            "SELECT COUNT(*) FROM attachment_blobs WHERE id = '{file_id}'"
+        ))
+        .await
+        .unwrap();
+    assert_eq!(rows, 0);
+}
+
+#[tokio::test]
+async fn admins_page_through_the_largest_files() {
+    let fixture = Fixture::new(UploadLimits::default()).await;
+    for size in 1..=12_usize {
+        assert_eq!(
+            fixture
+                .upload(&format!("file-{size}.bin"), &vec![7_u8; size * 100])
+                .await
+                .status(),
+            StatusCode::CREATED
+        );
+    }
+    let router = workspace_router(WorkspaceState::new(
+        Arc::clone(&fixture.identity),
+        "https://orbit.test".to_owned(),
+        CookieMode::secure(),
+    ));
+    let storage = |query: &'static str| {
+        let router = router.clone();
+        let uri = format!("/api/v1/workspaces/{}/storage{query}", fixture.workspace_id);
+        let cookie = fixture.owner_cookie.clone();
+        async move {
+            let response = router
+                .oneshot(cookie_request("GET", &uri, &cookie))
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            response_json(response).await
+        }
+    };
+    let first = storage("").await;
+    assert_eq!(first["file_count"], 12);
+    assert_eq!(first["largest_files"].as_array().unwrap().len(), 10);
+    let second = storage("?offset=10").await;
+    let second: Vec<&str> = second["largest_files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|file| file["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(second, ["file-2.bin", "file-1.bin"]);
+    let all = storage("?files=25").await;
+    let names: Vec<&str> = all["largest_files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|file| file["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names.len(), 12);
+    assert_eq!((names[0], names[11]), ("file-12.bin", "file-1.bin"));
+}
+
+#[tokio::test]
+async fn members_cannot_delete_stored_files() {
+    let fixture = Fixture::new(UploadLimits::default()).await;
+    let workspace_id: Id = fixture.workspace_id.parse().unwrap();
+    let owner_id: Id = fixture.owner_id.parse().unwrap();
+    assert_eq!(
+        fixture.upload("big.bin", &[7_u8; 2000]).await.status(),
+        StatusCode::CREATED
+    );
+    let workspaces = WorkspaceRepository::new((*fixture.database).clone());
+    let file_id = workspaces
+        .storage(workspace_id, owner_id, 10, 0)
+        .await
+        .unwrap()
+        .largest_files[0]
+        .id;
+    let member_id = Id::new_v7();
+    let now = TimestampMillis::now().as_millis();
+    sqlx::query(
+        "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) \
+         VALUES ($1, 'member@example.com', 'member@example.com', 'Member', 'unused', $2, $3)",
+    )
+    .bind(member_id.to_string())
+    .bind(now)
+    .bind(now)
+    .execute(fixture.database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
+         VALUES ($1, $2, $3, 'member', 0, $4, $5)",
+    )
+    .bind(Id::new_v7().to_string())
+    .bind(&fixture.workspace_id)
+    .bind(member_id.to_string())
+    .bind(now)
+    .bind(now)
+    .execute(fixture.database.pool())
+    .await
+    .unwrap();
+    let denied = workspaces
+        .delete_storage_file(&fixture.uploads, workspace_id, member_id, file_id, "test")
+        .await;
+    assert!(matches!(
+        denied,
+        Err(orbit_server::repositories::workspaces::WorkspaceError::Forbidden)
+    ));
+    assert_eq!(
+        workspaces
+            .storage(workspace_id, owner_id, 10, 0)
+            .await
+            .unwrap()
+            .used_bytes,
+        2000
+    );
+}
+
+/// The largest files without their (random) blob ids.
+fn without_ids(mut files: Value) -> Value {
+    for file in files.as_array_mut().unwrap() {
+        file.as_object_mut().unwrap().remove("id");
+    }
+    files
 }
 
 fn multipart_request(uri: &str, cookie: &str, files: &[(&str, &[u8])]) -> Request<Body> {

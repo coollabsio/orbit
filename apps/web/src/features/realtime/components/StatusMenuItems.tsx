@@ -1,5 +1,5 @@
 import { Edit, SmileCircle, Xmark } from 'reicon-react'
-import type { Presence } from '@/api/generated/types.gen'
+import type { Presence } from '@orbit/api/generated/types.gen'
 import { StatusMark } from '@/components/common/StatusMark'
 import { DropdownMenuItem, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator } from '@/components/ui/dropdown-menu'
 import { useSetStatus } from '@/features/auth/api'

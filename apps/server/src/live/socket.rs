@@ -25,6 +25,7 @@ use axum::routing::get;
 use orbit_platform::{Id, TimestampMillis};
 use serde::Deserialize;
 use serde_json::json;
+use tokio::sync::broadcast;
 
 use super::events;
 use super::hub::HEARTBEAT;
@@ -82,6 +83,8 @@ async fn connect(
         return refuse(upgrade, close::SESSION, "no session");
     };
     let database = state.identity.database().clone();
+    // Subscribed before the check, so access that ends after it reaches the socket.
+    let revalidations = state.hub.revalidations();
     match authorized(&database, workspace, session.id).await {
         Ok(true) => {}
         Ok(false) => return refuse(upgrade, close::FORBIDDEN, "no access"),
@@ -99,6 +102,7 @@ async fn connect(
                 session.id,
                 session.user.id,
                 resume,
+                revalidations,
             )
         })
 }
@@ -121,6 +125,7 @@ async fn serve(
     session_id: Id,
     user_id: Id,
     resume: Resume,
+    mut revalidations: broadcast::Receiver<Option<Id>>,
 ) {
     // Dropped at the end, after the close frame.
     let _serving = state.hub.serving();
@@ -153,6 +158,7 @@ async fn serve(
                 user_id,
                 &mut attached,
                 opening,
+                &mut revalidations,
             )
             .await
         }
@@ -232,6 +238,7 @@ async fn run(
     user_id: Id,
     attached: &mut super::hub::Attached,
     opening: Opening,
+    revalidations: &mut broadcast::Receiver<Option<Id>>,
 ) -> Option<(u16, &'static str)> {
     if !send_text(socket, opening.hello).await {
         return None;
@@ -285,6 +292,19 @@ async fn run(
             () = tokio::time::sleep_until(heard + SILENCE) => return None,
             _ = recheck.tick() => {
                 if !authorized(database, workspace_id, session_id).await.unwrap_or(false) {
+                    return Some((close::SESSION, "session or access ended"));
+                }
+            }
+            changed = revalidations.recv() => {
+                // A member was removed or suspended, or a session revoked: check now.
+                let ours = match changed {
+                    Ok(changed) => changed.is_none_or(|changed| changed == workspace_id),
+                    Err(broadcast::error::RecvError::Lagged(_)) => true,
+                    Err(broadcast::error::RecvError::Closed) => {
+                        return Some((close::RESTART, "server restarting"));
+                    }
+                };
+                if ours && !authorized(database, workspace_id, session_id).await.unwrap_or(false) {
                     return Some((close::SESSION, "session or access ended"));
                 }
             }

@@ -3,8 +3,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { createApiClient } from '@/api/client'
-import type { Page, PageSummary } from '@/api/generated/types.gen'
-import { ApiProblem } from '@/api/problem'
+import type { Page, PageSummary } from '@orbit/api/generated/types.gen'
+import { ApiProblem } from '@orbit/api/problem'
 import { queryKeys } from '@/api/queryKeys'
 import {
   conflictCurrentPage,

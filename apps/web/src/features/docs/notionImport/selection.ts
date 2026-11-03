@@ -4,7 +4,7 @@
 // (`selection.notion_ids`), so a checked page always means "this page and everything under it".
 // The selected set is therefore kept closed under descendants: checking a node adds its subtree,
 // unchecking a node removes its subtree and its ancestors (they no longer include everything).
-import type { NotionImportNode, NotionImportSelectionBody } from '@/api/generated/types.gen'
+import type { NotionImportNode, NotionImportSelectionBody } from '@orbit/api/generated/types.gen'
 
 export type ImportNode = Pick<NotionImportNode, 'notion_id' | 'parent_id' | 'kind' | 'title' | 'icon' | 'child_count'>
 

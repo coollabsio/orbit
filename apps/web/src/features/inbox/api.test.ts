@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import type { NotificationRecord } from '@/api/generated/types.gen'
+import type { NotificationRecord } from '@orbit/api/generated/types.gen'
 import { isMention, notificationCopy, notificationTarget } from './api'
 
 const base: NotificationRecord = {

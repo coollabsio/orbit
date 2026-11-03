@@ -58,3 +58,30 @@ test('an operator with a workspace gets the workspace app', async () => {
   const view = renderAt('/tasks', { operator: true, workspaces: [workspace] })
   await waitFor(() => expect(view.getByTestId('page').textContent).toBe(`/tasks ${workspace.name}`))
 })
+
+test('in Orbit Cloud the app waits for the billing state, so the trial line does not appear late', async () => {
+  const workspace = { id: 'alpha', name: 'Alpha', role: 'owner', permissions: [], version: 1 }
+  let sendBilling = () => {}
+  const billing = new Promise<void>((resolve) => { sendBilling = resolve })
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const path = new URL((input as Request).url).pathname
+    if (path === '/api/v1/workspaces') return Response.json([workspace])
+    if (path === '/api/v1/auth/options') return Response.json({ billing_enabled: true })
+    if (path === '/api/v1/workspaces/alpha/billing') {
+      await billing
+      return Response.json({ access: 'trial' })
+    }
+    return Response.json({ id: 'user-1', email: 'a@orbit.test', display_name: 'A', installation_admin: false, root: false })
+  }) as unknown as typeof fetch
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const view = render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={['/tasks']}><WorkspaceProvider><Page /></WorkspaceProvider></MemoryRouter>
+    </QueryClientProvider>,
+  )
+  await waitFor(() => expect(client.getQueryState(['workspaces'])?.status).toBe('success'))
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  expect(view.queryByTestId('page')).toBeNull()
+  sendBilling()
+  await waitFor(() => expect(view.getByTestId('page').textContent).toBe('/tasks Alpha'))
+})

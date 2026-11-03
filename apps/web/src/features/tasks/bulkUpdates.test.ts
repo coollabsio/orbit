@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import type { LabelRecord } from '@/api/generated/types.gen'
+import type { LabelRecord } from '@orbit/api/generated/types.gen'
 import type { Task } from '@/features/tasks/api/models'
 import { everyTaskHasLabel, labelChoices, labelToggleUpdates } from './bulkUpdates'
 import { matchingLabelIds } from './taskMeta'

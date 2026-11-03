@@ -2,10 +2,11 @@ import { defineConfig } from 'vite'
 import react, { reactCompilerPreset } from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import babel from '@rolldown/plugin-babel'
-import openapi from './src/api/generated/openapi.json' with { type: 'json' }
+import openapi from '@orbit/api/generated/openapi.json' with { type: 'json' }
 import { createHash } from 'node:crypto'
 import { cpSync, existsSync, mkdirSync, readFileSync } from 'node:fs'
-import { basename } from 'node:path'
+import { createRequire } from 'node:module'
+import { basename, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const buildRevision = process.env.ORBIT_BUILD_REVISION ?? 'development'
@@ -15,23 +16,24 @@ if (!bootstrapScript) throw new Error('theme bootstrap script is missing')
 const cspScriptHash = `sha256-${createHash('sha256').update(bootstrapScript).digest('base64')}`
 
 /**
- * Package files that Orbit serves itself (the production CSP has no CDN). Emoji: the Twemoji images at `/assets/twemoji-<version>/<code>.svg`
+ * Emoji files that Orbit serves itself (the production CSP has no CDN): the Twemoji images at `/assets/twemoji-<version>/<code>.svg`
  * and the emoji data at `/assets/emojibase-<version>/en/…`. The version in the path makes them immutable: the server
  * caches `/assets` for a year, so a browser downloads each file once. They stay in `node_modules`: the dev server
  * reads them from there and the build copies them into `dist`. The versions are those of the installed packages, as in
  * `src/lib/twemoji.ts`. The images are the `jdecked/twemoji` repository: its npm package of images stops at 15.0.0.
  */
+const packageDir = (name: string): string => dirname(createRequire(import.meta.url).resolve(`${name}/package.json`))
 const packageVersion = (name: string): string =>
-  JSON.parse(readFileSync(new URL(`./node_modules/${name}/package.json`, import.meta.url), 'utf8')).version
+  JSON.parse(readFileSync(join(packageDir(name), 'package.json'), 'utf8')).version
 const twemojiVersion = packageVersion('twemoji-assets')
 const emojibaseVersion = packageVersion('emojibase-data')
 const pdfjsVersion = packageVersion('pdfjs-dist')
-const packageAssets = [
-  { url: `/assets/twemoji-${twemojiVersion}/`, dir: fileURLToPath(new URL('./node_modules/twemoji-assets/assets/svg/', import.meta.url)), files: /^[0-9a-f-]+\.svg$/, type: 'image/svg+xml' },
-  { url: `/assets/emojibase-${emojibaseVersion}/en/shortcodes/`, dir: fileURLToPath(new URL('./node_modules/emojibase-data/en/shortcodes/', import.meta.url)), files: /^github\.json$/, type: 'application/json' },
-  { url: `/assets/emojibase-${emojibaseVersion}/en/`, dir: fileURLToPath(new URL('./node_modules/emojibase-data/en/', import.meta.url)), files: /^(data|messages)\.json$/, type: 'application/json' },
+const emojiAssets = [
+  { url: `/assets/twemoji-${twemojiVersion}/`, dir: join(packageDir('twemoji-assets'), 'assets/svg/'), files: /^[0-9a-f-]+\.svg$/, type: 'image/svg+xml' },
+  { url: `/assets/emojibase-${emojibaseVersion}/en/shortcodes/`, dir: join(packageDir('emojibase-data'), 'en/shortcodes/'), files: /^github\.json$/, type: 'application/json' },
+  { url: `/assets/emojibase-${emojibaseVersion}/en/`, dir: join(packageDir('emojibase-data'), 'en/'), files: /^(data|messages)\.json$/, type: 'application/json' },
   // pdf.js decoders for JPEG 2000 and JBIG2 images (scans): the JavaScript builds, as the CSP does not allow WebAssembly
-  { url: `/assets/pdfjs-${pdfjsVersion}/wasm/`, dir: fileURLToPath(new URL('./node_modules/pdfjs-dist/wasm/', import.meta.url)), files: /^(openjpeg|jbig2)_nowasm_fallback\.js$/, type: 'text/javascript' },
+  { url: `/assets/pdfjs-${pdfjsVersion}/wasm/`, dir: join(packageDir('pdfjs-dist'), 'wasm/'), files: /^(openjpeg|jbig2)_nowasm_fallback\.js$/, type: 'text/javascript' },
 ]
 
 // https://vite.dev/config/
@@ -49,11 +51,11 @@ export default defineConfig({
     tailwindcss(),
     babel({ presets: [reactCompilerPreset()] }),
     {
-      name: 'orbit-package-assets',
+      name: 'orbit-emoji-assets',
       configureServer(server) {
         server.middlewares.use((request, response, next) => {
           const path = (request.url ?? '').split('?')[0]
-          const asset = packageAssets.find((candidate) => path.startsWith(candidate.url))
+          const asset = emojiAssets.find((candidate) => path.startsWith(candidate.url))
           const name = asset ? basename(path) : ''
           if (!asset || !asset.files.test(name) || !existsSync(asset.dir + name)) return next()
           response.setHeader('Content-Type', asset.type)
@@ -63,11 +65,23 @@ export default defineConfig({
         })
       },
       writeBundle(options) {
-        for (const asset of packageAssets) {
+        for (const asset of emojiAssets) {
           const target = `${options.dir}${asset.url}`
           mkdirSync(target, { recursive: true })
           cpSync(asset.dir, target, { recursive: true, filter: (source) => source === asset.dir || asset.files.test(basename(source)) })
         }
+      },
+    },
+    {
+      // Sonner adds its CSS as a runtime <style> tag, which the production CSP (`style-src 'self'`) blocks and reports
+      // as a console error. `src/components/ui/sonner.tsx` bundles the same CSS from `sonner/dist/styles.css`.
+      name: 'orbit-sonner-no-runtime-css',
+      apply: 'build',
+      transform(code, id) {
+        if (!/[\\/]sonner[\\/]dist[\\/]index\.m?js$/.test(id)) return
+        const injector = 'function __insertCSS(code) {'
+        if (!code.includes(injector)) throw new Error('sonner no longer defines __insertCSS: update the orbit-sonner-no-runtime-css plugin')
+        return code.replace(injector, `${injector} return;`)
       },
     },
     {

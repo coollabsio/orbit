@@ -39,8 +39,8 @@ function useCoreQueryConnection(live: boolean) {
 }
 
 /**
- * One line above the top bar for the first minute the app cannot reach the server; the pages stay on screen below it.
- * After that `ConnectionScreen` covers the app.
+ * A small pill that floats over the top of the main pane for the first minute the app cannot reach the server. It does
+ * not take layout space, so the page does not move. After that `ConnectionScreen` covers the app.
  */
 export function ConnectionBanner({ live }: { live: boolean }) {
   useCoreQueryConnection(live)
@@ -50,10 +50,10 @@ export function ConnectionBanner({ live }: { live: boolean }) {
     <div
       data-slot="connection-banner"
       role="status"
-      className="flex min-h-8 shrink-0 items-center justify-center gap-2 border-b border-border bg-muted px-3 py-1 text-xs text-muted-foreground duration-200 animate-in fade-in"
+      className="pointer-events-none absolute top-2 left-1/2 z-30 flex max-w-[calc(100%-1rem)] -translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-popover px-2.5 py-0.5 text-[11px] text-muted-foreground shadow-sm duration-200 animate-in fade-in"
     >
-      <WifiOff className="size-3.5 shrink-0" />
-      <span className="min-w-0 truncate">Orbit lost connection, please wait</span>
+      <WifiOff className="size-3 shrink-0" />
+      <span className="min-w-0 truncate">Reconnecting…</span>
     </div>
   )
 }

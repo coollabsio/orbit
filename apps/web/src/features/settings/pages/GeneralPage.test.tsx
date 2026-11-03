@@ -9,7 +9,11 @@ import { GeneralPage } from './GeneralPage'
 import { testWorkspace } from '@/test/workspace'
 
 const originalFetch = globalThis.fetch
-beforeEach(() => { globalThis.fetch = (async () => Response.json({ items: [] })) as unknown as typeof fetch })
+beforeEach(() => {
+  globalThis.fetch = (async (input: Request) => Response.json(new URL(input.url).pathname.endsWith('/storage')
+    ? { used_bytes: 0, quota_bytes: null, largest_files: [] }
+    : { items: [] })) as unknown as typeof fetch
+})
 afterEach(() => { globalThis.fetch = originalFetch })
 
 function renderPage() {

@@ -3,15 +3,16 @@ import { useNavigate } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { apiClient, UNAUTHORIZED_EVENT } from '@/api/client'
-import { storageQuotaDetail } from '@/api/problem'
-import { getTask } from '@/api/generated/sdk.gen'
+import { announceWorkspaceReadOnly } from '@/features/workspaces/billing'
+import { storageQuotaDetail } from '@orbit/api/problem'
+import { getTask } from '@orbit/api/generated/sdk.gen'
 import { queryKeys } from '@/api/queryKeys'
 import { Button } from '@/components/ui/button'
 import { useCurrentUser } from '@/features/auth/api'
 import { revealCollabCursor } from '@/features/docs/collab/cursor'
 import { useCollaborators } from '@/features/docs/collab/presence'
 import { PresenceAvatars } from '@/features/docs/collab/PresenceAvatars'
-import { collabProblemAction, collabStatusLabel, type CollabProblem, type CollabSession } from '@/features/docs/collab/session'
+import { collabProblemAction, collabStatusLabel, type CollabProblem, type CollabSession } from '@orbit/editor/collab/session'
 import { useCollabSession } from '@/features/docs/collab/useCollabSession'
 import { pageMentionCandidates } from '@/features/docs/editor/pageMentions'
 import { useMembers } from '@/features/workspaces/api'
@@ -84,6 +85,11 @@ export function TaskDescriptionEditor({
         break
       case 'unauthorized':
         window.dispatchEvent(new Event(UNAUTHORIZED_EVENT))
+        break
+      case 'read-only':
+        announceWorkspaceReadOnly()
+        setNotice(null)
+        void refresh().then(() => setGeneration((current) => current + 1))
         break
       case 'reopen':
         setNotice(null)

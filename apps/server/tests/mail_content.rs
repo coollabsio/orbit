@@ -13,7 +13,7 @@ use axum::http::{HeaderMap, Request, StatusCode, header};
 use axum::response::IntoResponse;
 use orbit_mail::{AuthOutcome, DmarcPolicy, DmarcVerdict, Verdict};
 use orbit_platform::{
-    AttachmentMutationCoordinator, AuthenticatedUser, Id, JobStore, LocalBlobStore, MailMode,
+    AttachmentMutationCoordinator, AuthenticatedUser, Id, LocalBlobStore, MailMode,
     PasswordService, TestDatabase, TimestampMillis, UploadLimits, UploadService,
 };
 use orbit_server::auth_routes::CookieMode;
@@ -90,11 +90,7 @@ impl Fixture {
             UploadLimits::default(),
         );
         let mail = Arc::new(MailRepository::new((*database).clone(), uploads, APP_KEY));
-        let intake = MailIntake::new(
-            Arc::clone(&mail),
-            JobStore::new((*database).clone()),
-            52_428_800,
-        );
+        let intake = MailIntake::new(Arc::clone(&mail), 52_428_800);
         let owner_membership: String = sqlx::query_scalar(
             "SELECT id FROM memberships WHERE workspace_id = $1 AND user_id = $2",
         )

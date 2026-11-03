@@ -1,4 +1,4 @@
-import type { LabelRecord, ProjectRecord } from '@/api/generated/types.gen'
+import type { LabelRecord, ProjectRecord } from '@orbit/api/generated/types.gen'
 import type { TaskStatusDef } from '@/features/tasks/api/models'
 import type { User } from '@/features/workspaces/models'
 import type { FilterOptions } from './filterFields'

@@ -1,5 +1,6 @@
 import { useCommand } from '@/shortcuts/useCommand'
-import { useEffect, useRef, useState, type ComponentProps, type DragEvent, type FormEvent, type ReactNode } from 'react'
+import { isPaymentRequired } from '@orbit/api/problem'
+import { useEffect, useRef, useState, type ComponentProps, type DragEvent, type FormEvent, type ReactElement, type ReactNode } from 'react'
 import { NavLink, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import {
@@ -11,14 +12,13 @@ import {
   DocumentText as FileText,
   Lock,
   Import,
-  Menu,
   Edit as Pencil,
   Add as Plus,
   Star,
   Trash as Trash2,
   People as Users,
 } from 'reicon-react'
-import type { PageSummary, Teamspace } from '@/api/generated/types.gen'
+import type { PageSummary, Teamspace } from '@orbit/api/generated/types.gen'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -31,6 +31,8 @@ import { EmojiPicker } from '@/components/common/EmojiPicker'
 import { EmptyState } from '@/components/common/EmptyState'
 import { PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { Tip } from '@/components/common/Tip'
+import { InAppSidebar, SidebarListHeader } from '@/app/shell/InAppSidebar'
+import { useInAppSidebar } from '@/app/shell/sidebarSlot'
 import { confirmAction } from '@/components/common/confirmAction'
 import {
   PRIVATE_SPACE,
@@ -49,7 +51,7 @@ import {
   type SpaceKey,
 } from '@/features/docs/pageTree'
 import { favoriteDropIndex, useMoveFavorite, usePageFavorites, useToggleFavorite } from '@/features/docs/api/favorites'
-import { isPageVersionConflict, useCreatePage, useMovePage } from '@/features/docs/api/pages'
+import { isPageVersionConflict, movePageErrorMessage, useCreatePage, useMovePage } from '@/features/docs/api/pages'
 import {
   teamspaceDeleteError,
   teamspaceDropIndex,
@@ -104,6 +106,7 @@ export function DocTree({
   onTrash,
 }: DocTreeProps) {
   const navigate = useNavigate()
+  const inAppSidebar = useInAppSidebar()
   const teamspacesQuery = useTeamspaces(workspaceId)
   const teamspaces = teamspacesQuery.data ?? []
   const createPage = useCreatePage(workspaceId)
@@ -224,7 +227,9 @@ export function DocTree({
         setSpaceCollapsed(spaceKey(page), false)
         navigate(`/docs/${page.id}`)
       },
-      onError: () => toast.error('Could not create the page. Try again.'),
+      onError: (error) => {
+        if (!isPaymentRequired(error)) toast.error('Could not create the page. Try again.')
+      },
     })
   }
   useCommand('docs.createPage', () => handleCreate(null))
@@ -239,7 +244,7 @@ export function DocTree({
           if (from !== to) toast.success(`Moved to ${spaceLabel(to, teamspaces)}`)
         },
         onError: (error) => {
-          if (!isPageVersionConflict(error)) toast.error('Could not move the page.')
+          if (!isPageVersionConflict(error)) toast.error(movePageErrorMessage(error))
         },
       },
     )
@@ -517,36 +522,46 @@ export function DocTree({
 
   const iconPickerTeamspace = teamspaces.find((teamspace) => teamspace.id === iconPickerId) ?? null
   const failed = isError || teamspacesQuery.isError
+  const optionsMenu = (trigger: ReactElement) => (
+    <DropdownMenu>
+      <Tip label="Documents options" side="bottom">
+        <DropdownMenuTrigger render={trigger}>
+          <Ellipsis className="size-4" />
+        </DropdownMenuTrigger>
+      </Tip>
+      <DropdownMenuContent align="end" className="w-auto min-w-44">
+        <DropdownMenuItem onClick={() => navigate('/docs/import')}>
+          <Import className="size-[14px]" />
+          Import from Notion
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
 
   return (
-    <section className="flex h-full min-h-0 w-[260px] min-w-0 shrink-0 flex-col border-r border-border bg-background max-[899px]:w-full max-[899px]:border-r-0 max-[899px]:group-data-[view=doc]/docs:hidden">
-      <PaneHeader className="max-[899px]:min-h-11 max-[899px]:px-2 max-[899px]:py-1.5">
-        <Button type="button" variant="ghost" size="icon-sm" className="hidden shrink-0 text-muted-foreground/70 max-[899px]:inline-flex" aria-label="Menu" onClick={() => window.dispatchEvent(new CustomEvent('open-sidebar'))}>
-          <Menu className="size-[18px]" />
-        </Button>
-        <PaneTitle>Documents</PaneTitle>
-        <span className="flex-1" />
-        <DropdownMenu>
-          <Tip label="Documents options" side="bottom">
-            <DropdownMenuTrigger
-              render={<Button type="button" variant="ghost" size="icon-sm" aria-label="Documents options" />}
-            >
-              <Ellipsis className="size-4" />
-            </DropdownMenuTrigger>
+    <InAppSidebar>
+    <section className={cn('flex min-h-0 min-w-0 flex-col', inAppSidebar ? 'flex-1' : 'h-full w-[260px] shrink-0 border-r border-border bg-background max-[899px]:w-full max-[899px]:border-r-0 max-[899px]:group-data-[view=doc]/docs:hidden')}>
+      {inAppSidebar ? (
+        <SidebarListHeader label="Pages">
+          {optionsMenu(<Button type="button" variant="ghost" size="icon-xs" aria-label="Documents options" />)}
+          <Tip label="New page" side="bottom">
+            <Button type="button" variant="ghost" size="icon-xs" aria-label="New page" disabled={createPage.isPending} onClick={() => handleCreate(null)}>
+              <Plus />
+            </Button>
           </Tip>
-          <DropdownMenuContent align="end" className="w-auto min-w-44">
-            <DropdownMenuItem onClick={() => navigate('/docs/import')}>
-              <Import className="size-[14px]" />
-              Import from Notion
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <Tip label="New page" side="bottom">
-          <Button type="button" size="icon" aria-label="New page" disabled={createPage.isPending} onClick={() => handleCreate(null)}>
-            <Plus className="size-4" />
-          </Button>
-        </Tip>
-      </PaneHeader>
+        </SidebarListHeader>
+      ) : (
+        <PaneHeader className="max-[899px]:min-h-11 max-[899px]:px-2 max-[899px]:py-1.5">
+          <PaneTitle>Documents</PaneTitle>
+          <span className="flex-1" />
+          {optionsMenu(<Button type="button" variant="ghost" size="icon-sm" aria-label="Documents options" />)}
+          <Tip label="New page" side="bottom">
+            <Button type="button" size="icon" aria-label="New page" disabled={createPage.isPending} onClick={() => handleCreate(null)}>
+              <Plus className="size-4" />
+            </Button>
+          </Tip>
+        </PaneHeader>
+      )}
       <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         {loading ? (
           <div className="flex flex-1 items-center justify-center p-6">
@@ -751,6 +766,7 @@ export function DocTree({
         />
       ) : null}
     </section>
+    </InAppSidebar>
   )
 }
 

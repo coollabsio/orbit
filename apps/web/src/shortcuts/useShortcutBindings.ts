@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { apiClient } from '@/api/client'
-import { getShortcuts, putShortcuts } from '@/api/generated/sdk.gen'
+import { getShortcuts, putShortcuts } from '@orbit/api/generated/sdk.gen'
 import { queryKeys } from '@/api/queryKeys'
 import type { Overrides } from './bindings'
 

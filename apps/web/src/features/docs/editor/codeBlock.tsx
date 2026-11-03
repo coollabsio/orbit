@@ -1,6 +1,5 @@
-import { createExtension, defaultBlockSpecs } from '@blocknote/core'
-import { Decoration } from '@tiptap/pm/view'
-import { createHighlightPlugin } from 'prosemirror-highlight'
+import type { CodeBlockOptions } from '@orbit/editor/codeHighlight'
+import { CODE_LANGUAGES, languageId, MERMAID_LANGUAGE } from '@orbit/editor/codeLanguages'
 import { useState, useSyncExternalStore } from 'react'
 import { createRoot } from 'react-dom/client'
 import { codeTokenVariants } from '@/components/common/codeToken'
@@ -8,9 +7,6 @@ import { CopyCodeButton } from '@/components/common/CopyCodeButton'
 import { MermaidDiagram } from '@/components/common/MermaidDiagram'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { CODE_LANGUAGES, codeLines, languageId, MERMAID_LANGUAGE } from '@/lib/codeLanguages'
-
-const defaultCodeBlock = defaultBlockSpecs.codeBlock
 
 /** The part of the editor that a code block uses. */
 interface CodeBlockEditor {
@@ -21,35 +17,6 @@ interface CodeBlockEditor {
   getTextCursorPosition(): { block: { id: string } }
   updateBlock(id: string, update: { props: { language: string } }): unknown
 }
-
-/**
- * Syntax colors for the code of every code block: the same tokens and colors as a code block in a task or a chat
- * message. They are decorations, so the document holds plain text only.
- */
-const highlightExtension = createExtension({
-  key: 'codeHighlight',
-  prosemirrorPlugins: [
-    createHighlightPlugin({
-      nodeTypes: ['codeBlock'],
-      languageExtractor: (node) => node.attrs.language,
-      parser: ({ content, language, pos }) => {
-        const decorations: Decoration[] = []
-        // the text of a node starts one position after the node
-        let from = pos + 1
-        for (const line of codeLines(content, language ?? '')) {
-          for (const token of line) {
-            const className = codeTokenVariants({ type: token.type })
-            if (className) decorations.push(Decoration.inline(from, from + token.value.length, { class: className }))
-            from += token.value.length
-          }
-          // the line break
-          from += 1
-        }
-        return decorations
-      },
-    }),
-  ],
-})
 
 /**
  * The text of a code block, from the document. The DOM of the block is not a source for it: it also holds the name
@@ -162,47 +129,42 @@ function MermaidBlock({ editor, id }: { editor: CodeBlockEditor; id: string }) {
 }
 
 /**
- * BlockNote's code block with syntax colors and, in its top-right corner, a language selector and a copy button. A
- * `mermaid` block also has its diagram and the "Edit" / "View" tabs. These are a small React root outside the block's
- * content DOM, so ProseMirror must ignore its DOM changes and events.
+ * The code block of the page editor: syntax colors (the same tokens and colors as a code block in a task or a chat
+ * message) and, in its top-right corner, a language selector and a copy button. A `mermaid` block also has its diagram
+ * and the "Edit" / "View" tabs. These are a small React root outside the block's content DOM, so ProseMirror must
+ * ignore its DOM changes and events.
  */
-export const codeBlockSpec: typeof defaultCodeBlock = {
-  ...defaultCodeBlock,
-  extensions: [...(defaultCodeBlock.extensions ?? []), highlightExtension],
-  implementation: {
-    ...defaultCodeBlock.implementation,
-    render(block, editor) {
-      const view = defaultCodeBlock.implementation.render.call(this, block, editor)
-      // `dom` render (HTML export, clipboard) must stay plain code.
-      if (this.renderType !== 'nodeView' || !(view.dom instanceof HTMLElement) || !view.contentDOM) return view
+export const codeBlockOptions: CodeBlockOptions = {
+  tokenClass: (type) => codeTokenVariants({ type }) || undefined,
+  decorate(view, block, editor) {
+    if (!(view.dom instanceof HTMLElement) || !view.contentDOM) return view
 
-      const mermaid = languageId(block.props.language) === MERMAID_LANGUAGE
-      const container = document.createElement('div')
-      container.contentEditable = 'false'
-      // The block content is a flex row (BlockNote) and `position: relative`: the controls pin to its top-right corner.
-      // Only the diagram of a `mermaid` block takes a line of its own; else the container must not take width from the code.
-      if (mermaid) container.className = 'basis-full'
-      // The code surface is dark in both themes, so the token colors are the dark ones.
-      view.contentDOM.parentElement?.classList.add('dark')
-      view.dom.classList.add('group')
-      // The diagram wraps to a line of its own. In "View" the code is hidden and the block has no code surface.
-      if (mermaid) view.dom.classList.add('flex-wrap', 'has-data-[mode=view]:bg-transparent!', 'has-data-[mode=view]:p-0!', 'has-data-[mode=view]:[&>pre]:hidden!')
-      view.dom.appendChild(container)
-      const root = createRoot(container)
-      root.render(mermaid ? <MermaidBlock editor={editor} id={block.id} /> : <CodeTools editor={editor} id={block.id} language={block.props.language} />)
+    const mermaid = languageId(block.props.language) === MERMAID_LANGUAGE
+    const container = document.createElement('div')
+    container.contentEditable = 'false'
+    // The block content is a flex row (BlockNote) and `position: relative`: the controls pin to its top-right corner.
+    // Only the diagram of a `mermaid` block takes a line of its own; else the container must not take width from the code.
+    if (mermaid) container.className = 'basis-full'
+    // The code surface is dark in both themes, so the token colors are the dark ones.
+    view.contentDOM.parentElement?.classList.add('dark')
+    view.dom.classList.add('group')
+    // The diagram wraps to a line of its own. In "View" the code is hidden and the block has no code surface.
+    if (mermaid) view.dom.classList.add('flex-wrap', 'has-data-[mode=view]:bg-transparent!', 'has-data-[mode=view]:p-0!', 'has-data-[mode=view]:[&>pre]:hidden!')
+    view.dom.appendChild(container)
+    const root = createRoot(container)
+    root.render(mermaid ? <MermaidBlock editor={editor} id={block.id} /> : <CodeTools editor={editor} id={block.id} language={block.props.language} />)
 
-      const ours = (target: EventTarget | null) => target instanceof Node && container.contains(target)
-      const destroy = view.destroy
-      return {
-        ...view,
-        ignoreMutation: (mutation) => ours(mutation.target),
-        stopEvent: (event: Event) => ours(event.target),
-        destroy: () => {
-          destroy?.()
-          // Unmounting synchronously while React renders the editor logs a warning.
-          queueMicrotask(() => root.unmount())
-        },
-      }
-    },
+    const ours = (target: EventTarget | null) => target instanceof Node && container.contains(target)
+    const destroy = view.destroy
+    return {
+      ...view,
+      ignoreMutation: (mutation) => ours(mutation.target),
+      stopEvent: (event: Event) => ours(event.target),
+      destroy: () => {
+        destroy?.()
+        // Unmounting synchronously while React renders the editor logs a warning.
+        queueMicrotask(() => root.unmount())
+      },
+    }
   },
 }

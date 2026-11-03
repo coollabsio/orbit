@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render } from '@testing-library/react'
+import { MemoryRouter } from 'react-router'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { TaskTrashPage } from './TaskTrashPage'
 import { testWorkspace } from '@/test/workspace'
@@ -26,7 +27,7 @@ test('a trashed parent shows how many sub-issues went to trash with it', async (
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const view = render(
     <QueryClientProvider client={client}>
-      <WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}><TaskTrashPage /></WorkspaceContext.Provider>
+      <WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}><MemoryRouter><TaskTrashPage /></MemoryRouter></WorkspaceContext.Provider>
     </QueryClientProvider>,
   )
   expect(await view.findByText('+2 sub-issues')).toBeTruthy()
