@@ -42,8 +42,8 @@ function SettingsShell({ area }: { area: SettingsAreaName }) {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
       <Pane className="relative">
-        {/* hidden on mobile so the shell topbar takes over; same left inset as the content column, so the title lines up with the cards */}
-        <PaneHeader className="gap-[7px] bg-background pl-8 text-muted-foreground max-[899px]:hidden xl:pl-10">
+        {/* same left inset as the content column, so the title lines up with the cards */}
+        <PaneHeader className="gap-[7px] bg-background pl-5 text-muted-foreground min-[900px]:pl-8 xl:pl-10">
           <Icon className="size-[15px] shrink-0" />
           <span className="truncate text-[13px] font-semibold">{title}</span>
           {page ? (

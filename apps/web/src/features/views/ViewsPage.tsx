@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, type DragEvent, type KeyboardEvent } from 'react'
 import { Link, useNavigate } from 'react-router'
-import { Filter, Layer, Lock, Menu, People, Add as Plus, Star, type IconComponent } from 'reicon-react'
+import { Filter, Layer, Lock, People, Add as Plus, Star, type IconComponent } from 'reicon-react'
 import { cn } from 'cn'
 import { useScrollMemory } from '@/lib/useScrollMemory'
 import { EmptyState } from '@/components/common/EmptyState'
@@ -59,18 +59,7 @@ export function ViewsPage() {
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-background">
-      {/* the shell's top bar is hidden on /views, so this header carries the mobile menu button */}
       <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 max-[899px]:h-auto max-[899px]:min-h-11 max-[899px]:flex-wrap max-[899px]:px-2 max-[899px]:py-1.5">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className="hidden shrink-0 text-muted-foreground/70 max-[899px]:inline-flex"
-          aria-label="Menu"
-          onClick={() => window.dispatchEvent(new CustomEvent('open-sidebar'))}
-        >
-          <Menu className="size-[18px]" />
-        </Button>
         {/* views are a Tasks feature: the header says so and leads back */}
         <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-2 pl-1 text-[13px]">
           <Link to="/tasks" className="font-medium text-muted-foreground transition-colors hover:text-foreground">Tasks</Link>

@@ -135,13 +135,8 @@ function Shell() {
 
   useEffect(() => {
     const onOpen = () => setPaletteOpen(true)
-    const onOpenSidebar = () => setDrawerOpen(true)
     window.addEventListener('open-command-palette', onOpen)
-    window.addEventListener('open-sidebar', onOpenSidebar)
-    return () => {
-      window.removeEventListener('open-command-palette', onOpen)
-      window.removeEventListener('open-sidebar', onOpenSidebar)
-    }
+    return () => window.removeEventListener('open-command-palette', onOpen)
   }, [])
 
   useEffect(() => {
@@ -202,7 +197,7 @@ function Shell() {
         <ConnectionBanner live={live} />
         <MailServerBanner />
         <ReadOnlyBanner />
-        <Topbar onOpenDrawer={() => setDrawerOpen(true)} onOpenPalette={() => setPaletteOpen(true)} />
+        <Topbar onOpenDrawer={() => setDrawerOpen(true)} inboxUnread={inboxUnread} />
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <ErrorBoundary resetKey={pathname}>
             <Outlet />
@@ -213,9 +208,9 @@ function Shell() {
 
       <SideSheet open={drawerOpen} onOpenChange={setDrawerOpen}>
         <SideSheetContent
-          side="left"
+          side="right"
           aria-label="Navigation"
-          className={cn(sidebarTheme.scheme, 'z-[41] w-[min(280px,84vw)] overflow-hidden border-r border-sidebar-edge bg-sidebar bg-linear-to-b from-sidebar-wash to-transparent to-[520px] px-3 pt-[env(safe-area-inset-top,0px)] pb-[calc(12px+env(safe-area-inset-bottom,0px))] text-sidebar-foreground')}
+          className={cn(sidebarTheme.scheme, 'z-[41] w-[min(280px,84vw)] overflow-hidden rounded-l-2xl border-l border-sidebar-edge bg-sidebar bg-linear-to-b from-sidebar-wash to-transparent to-[520px] px-3 pt-[env(safe-area-inset-top,0px)] pb-[calc(12px+env(safe-area-inset-bottom,0px))] text-sidebar-foreground')}
           style={sidebarTheme.style}
         >
           <MenuSurfaceContext value={menuSurface}>

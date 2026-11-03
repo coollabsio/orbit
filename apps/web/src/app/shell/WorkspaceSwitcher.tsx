@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type ComponentProps } from 'react'
 import { ApiProblem } from '@orbit/api/problem'
-import { Add as Plus, ChevronDown } from 'reicon-react'
+import { Add as Plus, ChevronDown, ChevronExpandY } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -13,13 +13,22 @@ import { useWorkspace } from '@/features/workspaces/workspaceContext'
 
 /** The panel is a Popover rather than a DropdownMenu: picking a workspace swaps the
     panel for a "create workspace" form, and a menu's typeahead would swallow typing. */
-export function WorkspaceSwitcher({ collapsed = false, onSelect }: { collapsed?: boolean; onSelect?: () => void }) {
+export function WorkspaceSwitcher({ collapsed = false, topbar = false, onSelect }: { collapsed?: boolean; /** The phone top bar's look: initial badge, name and an up/down chevron. */ topbar?: boolean; onSelect?: () => void }) {
   const { workspace } = useWorkspace()
   const createWorkspace = useCreateWorkspace()
   const [open, setOpen] = useState(false)
 
   return (
     <Popover open={open} onOpenChange={setOpen} modal={false}>
+      {topbar ? (
+        <PopoverTrigger
+          render={<Button variant="ghost" className="-ml-1 h-8 min-w-0 justify-start gap-1.5 rounded-lg px-2" aria-label={`Workspace: ${workspace.name}`} />}
+        >
+          <span className="flex size-5 shrink-0 items-center justify-center rounded-md bg-muted text-[11px] font-semibold text-muted-foreground">{workspace.name.charAt(0).toUpperCase()}</span>
+          <span className="truncate text-[13px] font-semibold text-foreground">{workspace.name}</span>
+          <ChevronExpandY className="size-4 shrink-0 text-muted-foreground/70" />
+        </PopoverTrigger>
+      ) : (
       <Tip label={collapsed ? workspace.name : undefined} side="right">
         <PopoverTrigger
           render={
@@ -30,6 +39,7 @@ export function WorkspaceSwitcher({ collapsed = false, onSelect }: { collapsed?:
           {!collapsed ? <ChevronDown className="size-[13px] shrink-0 text-muted-foreground/70" /> : null}
         </PopoverTrigger>
       </Tip>
+      )}
       {/* Base UI unmounts the panel after its exit, so the create form resets each time it closes. */}
       <PopoverContent align="start" className="max-h-(--available-height) w-auto min-w-[13rem] gap-0 overflow-y-auto overscroll-contain p-1">
         <WorkspaceMenu createWorkspace={createWorkspace} onSelect={() => { setOpen(false); onSelect?.() }} />

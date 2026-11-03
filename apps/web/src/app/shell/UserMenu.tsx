@@ -20,7 +20,7 @@ import { StatusMenuItems } from '@/features/realtime/components/StatusMenuItems'
 import { useOwnStatus } from '@/features/realtime/useOwnStatus'
 
 /** Signed-in profile and account actions shared by both sidebars. */
-export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
+export function UserMenu({ collapsed = false, topbar = false }: { collapsed?: boolean; /** The phone top bar's look: avatar and chevron, the menu opens below. */ topbar?: boolean }) {
   const user = useCurrentUser()
   const logout = useLogout()
   const navigate = useNavigate()
@@ -40,7 +40,7 @@ export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
             render={
               <Button
                 variant="outline"
-                className={cn('h-8 w-full min-w-0 flex-1 justify-start gap-2 rounded-lg px-2 aria-expanded:border-primary aria-expanded:bg-primary/5 dark:border-sidebar-tint/24 dark:bg-primary/14 dark:text-[oklch(0.95_0.02_359)] dark:[--button-depth:color-mix(in_oklab,var(--primary)_35%,transparent)] dark:hover:border-sidebar-tint/34 dark:hover:bg-primary/18 dark:aria-expanded:border-primary dark:aria-expanded:bg-primary/18 dark:[&_svg]:text-sidebar-tint', collapsed && 'w-8 flex-none justify-center px-0')}
+                className={cn('h-8 w-full min-w-0 flex-1 justify-start gap-2 rounded-lg px-2 aria-expanded:border-primary aria-expanded:bg-primary/5 dark:border-sidebar-tint/24 dark:bg-primary/14 dark:text-[oklch(0.95_0.02_359)] dark:[--button-depth:color-mix(in_oklab,var(--primary)_35%,transparent)] dark:hover:border-sidebar-tint/34 dark:hover:bg-primary/18 dark:aria-expanded:border-primary dark:aria-expanded:bg-primary/18 dark:[&_svg]:text-sidebar-tint', collapsed && 'w-8 flex-none justify-center px-0', topbar && 'h-9 w-auto flex-none gap-1.5')}
                 aria-label={`Account menu for ${userName}`}
               />
             }
@@ -48,11 +48,11 @@ export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
             <UserAvatar
               user={me ? { name: me.display_name || me.email, color: userColor(me.id), avatarUrl: me.avatar_url } : null}
               name={userName}
-              size={20}
+              size={topbar ? 24 : 20}
               status={me ? status.presence : undefined}
               className="shrink-0"
             />
-            {!collapsed ? (
+            {!collapsed && !topbar ? (
               <span className="flex min-w-0 flex-1 text-left">
                 <span className="min-w-0 truncate text-xs font-medium text-foreground">{userName}</span>
               </span>
@@ -61,7 +61,7 @@ export function UserMenu({ collapsed = false }: { collapsed?: boolean }) {
           </DropdownMenuTrigger>
         </Tip>
         {/* the pink tint of the sidebar it opens from */}
-        <DropdownMenuContent side="top" align="start" sideOffset={4} className="w-52 max-w-[calc(100vw-32px)] rounded-[10px] dark:bg-sidebar-popover dark:ring-sidebar-tint/22 dark:**:data-[slot$=-item]:focus:bg-sidebar-tint/10 dark:**:data-[slot$=-item]:data-highlighted:bg-sidebar-tint/10">
+        <DropdownMenuContent side={topbar ? 'bottom' : 'top'} align={topbar ? 'end' : 'start'} sideOffset={4} className="w-52 max-w-[calc(100vw-32px)] rounded-[10px] dark:bg-sidebar-popover dark:ring-sidebar-tint/22 dark:**:data-[slot$=-item]:focus:bg-sidebar-tint/10 dark:**:data-[slot$=-item]:data-highlighted:bg-sidebar-tint/10">
           <div className="min-w-0 px-2 py-1.5">
             <div className="truncate text-[13px] font-semibold text-foreground">{userName}</div>
             {hasCustomStatus ? (

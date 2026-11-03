@@ -1,216 +1,32 @@
-import { Shortcut } from '@/shortcuts/Shortcut'
-import type { ReactNode } from 'react'
-import { useRender } from '@base-ui/react/use-render'
-import { Link, useLocation, useNavigate } from 'react-router'
-import { Lock, Add as Plus, Menu, Moon, Search4 as Search, Sun } from 'reicon-react'
-import { cn } from 'cn'
+import { Link, useLocation } from 'react-router'
+import { SidebarRight2 } from 'reicon-react'
 import { Button } from '@/components/ui/button'
-import { Tip } from '@/components/common/Tip'
-import { useTheme } from '@/lib/themeContext'
-import { useWorkspace } from '@/features/workspaces/workspaceContext'
-import { useAllStatuses, useProjects } from '@/features/tasks/api/projects'
-import { taskFromRecord, type Project, type Task, type TaskStatusDef } from '@/features/tasks/api/models'
-import { useTasks } from '@/features/tasks/api/tasks'
-import { useOpenNewTask } from '@/features/tasks/newTask'
-import { TaskStatusIcon } from '@/features/tasks/components/TaskStatusIcon'
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuShortcut, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import type { PageSummary, Teamspace } from '@orbit/api/generated/types.gen'
-import { useCreatePage, usePageTree } from '@/features/docs/api/pages'
-import { useTeamspaces } from '@/features/docs/api/teamspaces'
-import { ancestorsOf, pageTitle, spaceKey, spaceLabel } from '@/features/docs/pageTree'
-import { docsHidden } from './productNavigation'
-import { taskParamMatches } from '@/lib/taskLinks'
+import { ActivityBell } from './ActivityBell'
+import { isChatConversationPath } from './productNavigation'
+import { UserMenu } from './UserMenu'
+import { WorkspaceSwitcher } from './WorkspaceSwitcher'
 
-interface Crumb {
-  label: string
-  to?: string
-  icon?: React.ReactNode
-}
-
-type TaskNavigation = { projects: Project[]; tasks: Task[]; statuses: TaskStatusDef[] }
-
-type DocsNavigation = { pages?: PageSummary[]; teamspaces?: Teamspace[] }
-
-function crumbsFor(pathname: string, taskNavigation: TaskNavigation, docs: DocsNavigation = {}): { crumbs: Crumb[]; status?: React.ReactNode } {
-  const [, root, id, sub, subId] = pathname.split('/')
-  switch (root) {
-    case 'tasks': {
-      const crumbs: Crumb[] = [{ label: 'Tasks', to: '/tasks' }]
-      if (id === 'projects' && subId === 'settings') {
-        const project = taskNavigation.projects.find((p) => p.id === sub)
-        if (project) crumbs.push({ label: project.name, to: `/tasks?project=${project.id}` })
-        crumbs.push({ label: 'Settings' })
-        return { crumbs }
-      }
-      const task = id ? taskNavigation.tasks.find((t) => taskParamMatches(id, t)) : null
-      if (task) {
-        const status = taskNavigation.statuses.find((s) => s.id === task.statusId)
-        const project = taskNavigation.projects.find((p) => p.id === task.projectId)
-        if (project) crumbs.push({ label: project.name, to: `/tasks?project=${project.id}` })
-        crumbs.push({ label: task.identifier })
-        return {
-          crumbs,
-          status: (
-            <span className="inline-flex h-[26px] shrink-0 items-center gap-1.5 rounded-full border border-border bg-card px-2.5 text-xs font-medium text-muted-foreground max-[899px]:hidden">
-              <TaskStatusIcon status={status} size={12} />
-              {status?.name ?? 'No status'}
-            </span>
-          ),
-        }
-      }
-      return { crumbs }
-    }
-    case 'docs': {
-      const crumbs: Crumb[] = [{ label: 'Docs', to: '/docs' }]
-      if (id === 'trash') return { crumbs: [...crumbs, { label: 'Trash' }] }
-      const pages = docs.pages ?? []
-      const page = id ? pages.find((item) => item.id === id) : null
-      if (!page) return { crumbs }
-      const chain = [...ancestorsOf(pages, page.id), page].map((item) => ({ label: pageTitle(item), to: `/docs/${item.id}` }))
-      // The space is plain text: teamspaces and Private have no page of their own.
-      const space = spaceKey(page)
-      const icon = space === 'private' ? <Lock className="mr-1 inline size-3.5 align-[-2px]" aria-hidden="true" /> : undefined
-      return { crumbs: [...crumbs, { label: spaceLabel(space, docs.teamspaces), icon }, ...chain] }
-    }
-    case 'chat':
-      return { crumbs: [{ label: 'Chat', to: '/chat' }] }
-    case 'views':
-      return { crumbs: [{ label: 'Tasks', to: '/tasks' }, { label: 'Views', to: '/views' }] }
-    case 'activity':
-      return { crumbs: [{ label: 'Activity' }] }
-    case 'profile':
-      return { crumbs: [{ label: 'Profile' }] }
-    case 'admin': {
-      const crumbs: Crumb[] = [{ label: 'Admin', to: '/admin' }]
-      if (id === 'audit') crumbs.push({ label: 'Audit log' })
-      else if (id === 'backups') crumbs.push({ label: 'Backups' })
-      else if (id === 'storage') crumbs.push({ label: 'Storage' })
-      else if (id === 'users') crumbs.push({ label: 'Users' })
-      else crumbs.push({ label: 'General' })
-      return { crumbs }
-    }
-    case 'settings': {
-      const crumbs: Crumb[] = [{ label: 'Settings', to: '/settings' }]
-      if (id === 'members') crumbs.push({ label: 'Members' })
-      else if (id === 'github') crumbs.push({ label: 'GitHub' })
-      else if (id === 'sessions') crumbs.push({ label: 'Sessions' })
-      else if (id === 'danger-zone') crumbs.push({ label: 'Danger zone' })
-      return { crumbs }
-    }
-    default:
-      return { crumbs: [{ label: 'Home' }] }
-  }
-}
-
-/** One breadcrumb: a link to an ancestor, or plain text for the current page (and link-less crumbs). */
-function TopbarCrumb({ to, current, children }: { to?: string; current: boolean; children: ReactNode }) {
-  return useRender({
-    defaultTagName: 'span',
-    render: to ? <Link to={to} /> : undefined,
-    props: {
-      'data-slot': 'topbar-crumb',
-      'data-current': current,
-      className: cn(
-        'min-w-0 shrink overflow-hidden text-[13.5px] font-medium whitespace-nowrap text-ellipsis text-muted-foreground data-[current=true]:max-w-[40vw] data-[current=true]:shrink-0 data-[current=true]:text-foreground group-data-[root=home]/topbar:text-sm group-data-[root=home]/topbar:font-semibold group-data-[root=home]/topbar:text-foreground group-data-[root=settings]/topbar:text-[13px] group-data-[root=settings]/topbar:font-semibold',
-        to && 'hover:text-foreground',
-      ),
-      children,
-    },
-  })
-}
-
-export function Topbar({ onOpenDrawer, onOpenPalette }: { onOpenDrawer: () => void; onOpenPalette: () => void }) {
-  const { workspace } = useWorkspace()
-  const projects = useProjects(workspace.id)
-  const statuses = useAllStatuses(workspace.id, projects.data ?? [])
-  const tasks = useTasks(workspace.id, { limit: 100 })
-  const location = useLocation()
-  const routeRoot = location.pathname.split('/')[1] || 'home'
-  const pageTree = usePageTree(workspace.id, routeRoot === 'docs')
-  const teamspaces = useTeamspaces(workspace.id, routeRoot === 'docs')
-  const createPage = useCreatePage(workspace.id)
-  const navigate = useNavigate()
-  const { theme, toggleTheme } = useTheme()
-  const openNewTask = useOpenNewTask()
-
-  const taskNavigation = {
-    projects: projects.data ?? [],
-    statuses: statuses.data,
-    tasks: tasks.data?.pages.flatMap((page) => page.items.map((record) => taskFromRecord(record, projects.data?.find((project) => project.id === record.project_id)))) ?? [],
-  }
-  const { crumbs, status } = crumbsFor(location.pathname, taskNavigation, { pages: pageTree.data, teamspaces: teamspaces.data })
-
+/**
+ * The phone's top bar, as in Coolify: logo, workspace switcher, Activity, account menu and the button that opens the navigation
+ * drawer. Pages keep their own headers below it. A chat conversation is a full screen, so the bar is not shown there.
+ */
+export function Topbar({ onOpenDrawer, inboxUnread = false }: { onOpenDrawer: () => void; /** Activity has an unread notification. */ inboxUnread?: boolean }) {
+  const { pathname } = useLocation()
+  if (isChatConversationPath(pathname)) return null
   return (
-    <header
-      className={cn(
-        'group/topbar hidden h-12 shrink-0 items-center gap-2 bg-background px-2 max-[899px]:flex',
-        'data-[root=settings]:h-11 data-[root=settings]:min-h-11 data-[root=settings]:gap-[7px] data-[root=settings]:border-b data-[root=settings]:border-border data-[root=settings]:px-2 data-[root=settings]:py-1.5',
-        'data-[root=tasks]:hidden data-[root=views]:hidden data-[root=mail]:hidden data-[root=docs]:hidden data-[root=chat]:hidden data-[root=activity]:hidden',
-      )}
-      data-root={routeRoot}
-    >
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        className="text-muted-foreground/70"
-        onClick={onOpenDrawer}
-        aria-label="Menu"
-      >
-        <Menu className="size-[18px]" />
-      </Button>
-      <nav className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden whitespace-nowrap group-data-[root=home]/topbar:gap-0 group-data-[root=settings]/topbar:gap-[7px] group-data-[root=settings]/topbar:py-[5px]">
-        {crumbs.map((crumb, index) => {
-          const isLast = index === crumbs.length - 1
-          return (
-            <span key={index} className="contents">
-              {index > 0 ? <span className="shrink-0 text-[13px] text-muted-foreground/70 select-none">/</span> : null}
-              <TopbarCrumb to={isLast ? undefined : crumb.to} current={isLast}>
-                {crumb.icon}
-                {crumb.label}
-              </TopbarCrumb>
-            </span>
-          )
-        })}
-        {status}
-      </nav>
-      <div className="flex shrink-0 items-center gap-1.5 group-data-[root=home]/topbar:gap-0.5 group-data-[root=settings]/topbar:gap-2">
-        <Tip label="Search" side="bottom">
-          <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70 group-data-[root=home]/topbar:text-foreground" onClick={onOpenPalette} aria-label="Search">
-            <Search className={routeRoot === 'settings' ? 'size-[15px]' : 'size-4'} />
-          </Button>
-        </Tip>
-        {routeRoot !== 'home' ? (
-          <Tip label="Toggle theme" side="bottom">
-            <Button variant="ghost" size="icon-sm" className="text-muted-foreground/70" onClick={toggleTheme} aria-label="Toggle theme">
-              {theme === 'dark' ? <Sun className="size-[15px]" /> : <Moon className="size-[15px]" />}
-            </Button>
-          </Tip>
-        ) : null}
-        {routeRoot !== 'home' && routeRoot !== 'settings' && routeRoot !== 'profile' ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger render={<Button />}>
-              <Plus className="size-4" />
-              New
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-40">
-              <DropdownMenuItem onClick={() => openNewTask()}>
-                Task
-                <DropdownMenuShortcut className="tracking-normal"><Shortcut id="task.create" /></DropdownMenuShortcut>
-              </DropdownMenuItem>
-              {!docsHidden ? (
-                <DropdownMenuItem
-                 
-                  disabled={createPage.isPending}
-                  onClick={() => createPage.mutate({}, { onSuccess: (page) => navigate(`/docs/${page.id}`) })}
-                >
-                  Document
-                </DropdownMenuItem>
-              ) : null}
-              <DropdownMenuItem disabled>Email</DropdownMenuItem>
-              <DropdownMenuItem disabled>Chat message</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : null}
+    <header className="hidden shrink-0 items-center justify-between gap-4 border-b border-border bg-card px-4 py-3 max-[899px]:flex">
+      <div className="flex min-w-0 flex-1 items-center gap-2.5">
+        <Link to="/" aria-label="Home" className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted transition-opacity hover:opacity-80">
+          <img src="/logo.svg" alt="" className="size-[18px]" />
+        </Link>
+        <WorkspaceSwitcher topbar />
+      </div>
+      <div className="flex shrink-0 items-center gap-1">
+        <ActivityBell topbar unread={inboxUnread} />
+        <UserMenu topbar />
+        <Button variant="ghost" size="icon-lg" className="-mr-1 text-muted-foreground" aria-label="Open sidebar" onClick={onOpenDrawer}>
+          <SidebarRight2 className="size-5" />
+        </Button>
       </div>
     </header>
   )
