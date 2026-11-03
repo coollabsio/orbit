@@ -42,7 +42,7 @@ import {
 import type { ChatEvent as WireEvent, ChatFileRecord } from '@orbit/api/generated/types.gen'
 import type { Notice } from '@/features/realtime/notify'
 import type { PresenceEntry, PresenceMap } from '@/features/realtime/presence'
-import { shrinkImage } from '@/lib/shrinkImage'
+import { shrinkUpload } from '@/lib/shrinkUpload'
 import type { ChatClient } from './client'
 import { type LiveSocket, type LiveSocketOptions, openLiveSocket } from './liveSocket'
 import { ChatError, type ChatEvent, type ConversationState } from './types'
@@ -415,9 +415,17 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
     async uploadAttachment(original, { onProgress, signal } = {}) {
       const failed = (message: string) => new ChatError('upload_failed', message)
       if (signal?.aborted) throw failed('The upload was cancelled.')
-      const file = await shrinkImage(original)
+      // A video is compressed first, which can take a while: that fills the first half of the progress bar.
+      const video = original.type.startsWith('video/')
+      const sent = video ? (progress: number) => onProgress?.(0.5 + progress / 2) : onProgress
+      let file: File
+      try {
+        file = await shrinkUpload(original, { signal, onProgress: video ? (progress) => onProgress?.(progress / 2) : undefined })
+      } catch {
+        throw failed('The upload was cancelled.')
+      }
       const size = await imageSize(file)
-      // A cancel while the image was measured: the listener below would never fire.
+      // A cancel while the file was compressed or measured: the listener below would never fire.
       if (signal?.aborted) throw failed('The upload was cancelled.')
       return new Promise((resolve, reject) => {
         const request = new XMLHttpRequest()
@@ -427,7 +435,7 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
         request.withCredentials = true
         request.responseType = 'json'
         request.upload.onprogress = (event) => {
-          if (event.lengthComputable) onProgress?.(event.loaded / event.total)
+          if (event.lengthComputable) sent?.(event.loaded / event.total)
         }
         request.onload = () => {
           if (request.status === 201) resolve(toAttachment(request.response as ChatFileRecord))

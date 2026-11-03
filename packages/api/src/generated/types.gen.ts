@@ -1277,6 +1277,11 @@ export type EnableTotpBody = {
     code: string;
 };
 
+/**
+ * The 202 answers of the exchange: a second factor, or the password before a first link.
+ */
+export type ExchangeChallenge = TwoFactorChallenge | PasswordChallenge;
+
 export type ExchangeProviderBody = {
     /**
      * The verifier whose S256 challenge went to start.
@@ -1569,6 +1574,11 @@ export type LinkPreview = {
 };
 
 export type LinkPreviewKind = 'link' | 'x' | 'youtube' | 'image';
+
+export type LinkProviderBody = {
+    password: string;
+    password_token: string;
+};
 
 export type LoginBody = {
     email: string;
@@ -3430,6 +3440,21 @@ export type PasskeyRecord = {
      */
     last_used_at?: string | null;
     name: string;
+};
+
+/**
+ * The answer to a provider sign-in that found an existing account by its email.
+ */
+export type PasswordChallenge = {
+    /**
+     * The Orbit account the provider account connects to.
+     */
+    email: string;
+    /**
+     * Send it with the account password to `/api/v1/auth/providers/link` within five minutes.
+     */
+    password_token: string;
+    provider: Provider;
 };
 
 export type PasswordConfirmationBody = {
@@ -8169,7 +8194,7 @@ export type ExchangeProviderSignInErrors = {
      */
     401: AuthProblem;
     /**
-     * origin_forbidden, registration_closed, account_email_unverified, account_suspended, session_mismatch, identity_mismatch
+     * origin_forbidden, registration_closed, account_email_unverified, link_needs_sign_in, account_suspended, session_mismatch, identity_mismatch
      */
     403: AuthProblem;
     /**
@@ -8207,9 +8232,9 @@ export type ExchangeProviderSignInError = ExchangeProviderSignInErrors[keyof Exc
 export type ExchangeProviderSignInResponses = {
     200: LoginResponse;
     /**
-     * The account has two-factor sign-in on: send a code to /api/v1/auth/login/two-factor.
+     * `two_factor_token`: the account has two-factor sign-in on, send a code to /api/v1/auth/login/two-factor. `password_token`: the provider account connects to an existing account, send its password to /api/v1/auth/providers/link.
      */
-    202: TwoFactorChallenge;
+    202: ExchangeChallenge;
     /**
      * connect or confirm finished
      */
@@ -8217,6 +8242,70 @@ export type ExchangeProviderSignInResponses = {
 };
 
 export type ExchangeProviderSignInResponse = ExchangeProviderSignInResponses[keyof ExchangeProviderSignInResponses];
+
+export type LinkProviderSignInData = {
+    body: LinkProviderBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/auth/providers/link';
+};
+
+export type LinkProviderSignInErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request, invalid_password_token
+     */
+    400: AuthProblem;
+    /**
+     * invalid_credentials
+     */
+    401: AuthProblem;
+    /**
+     * origin_forbidden, account_suspended
+     */
+    403: AuthProblem;
+    /**
+     * contract_mismatch, identity_conflict
+     */
+    409: AuthProblem;
+    /**
+     * request_too_large
+     */
+    413: AuthProblem;
+    /**
+     * authentication_throttled
+     */
+    429: AuthProblem;
+    /**
+     * internal_error
+     */
+    500: AuthProblem;
+    /**
+     * authentication_busy
+     */
+    503: AuthProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: AuthProblem;
+};
+
+export type LinkProviderSignInError = LinkProviderSignInErrors[keyof LinkProviderSignInErrors];
+
+export type LinkProviderSignInResponses = {
+    200: LoginResponse;
+    /**
+     * The account has two-factor sign-in on: send a code to /api/v1/auth/login/two-factor.
+     */
+    202: TwoFactorChallenge;
+};
+
+export type LinkProviderSignInResponse = LinkProviderSignInResponses[keyof LinkProviderSignInResponses];
 
 export type ProviderCallbackData = {
     body?: never;

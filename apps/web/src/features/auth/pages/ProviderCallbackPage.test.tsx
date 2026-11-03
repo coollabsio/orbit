@@ -27,14 +27,18 @@ function Location() {
   return <output data-testid="location">{location.pathname + location.search}</output>
 }
 
-/** `exchange` answers the POST to /providers/exchange; with `started`, this tab began a Google sign-in. */
-function setup(exchange: () => Response, hash = '#handoff=handoff-1', started = true) {
+/**
+ * `exchange` answers the POST to /providers/exchange and `link` the one to /providers/link; with `started`, this tab
+ * began a Google sign-in.
+ */
+function setup(exchange: () => Response, hash = '#handoff=handoff-1', started = true, link: () => Response = () => Response.json({ user: USER, session_id: 'session-1' })) {
   if (started) saveProviderFlow({ provider: 'google', intent: 'sign_in', verifier: VERIFIER })
   const bodies: { path: string; body: unknown }[] = []
   globalThis.fetch = (async (request: Request) => {
     const path = new URL(request.url).pathname
     bodies.push({ path, body: await request.json() })
     if (path === '/api/v1/auth/providers/exchange') return exchange()
+    if (path === '/api/v1/auth/providers/link') return link()
     if (path === '/api/v1/auth/login/two-factor') return Response.json({ user: USER, session_id: 'session-1' })
     throw new Error('Unexpected request ' + path)
   }) as typeof fetch
@@ -81,4 +85,44 @@ test('a callback this tab did not start does not call the server', async () => {
   const { view, bodies } = setup(() => Response.json({ user: USER, session_id: 'session-1' }), '#handoff=handoff-1', false)
   expect((await view.findByRole('alert')).textContent).toBe('This sign-in has expired or was opened in another tab. Start again.')
   expect(bodies).toHaveLength(0)
+})
+
+const PASSWORD_STEP = () => Response.json({ password_token: 'link-1', provider: 'github', email: 'ada@orbit.test' }, { status: 202 })
+
+test('a first link to an existing account asks for its password, then signs in', async () => {
+  let attempts = 0
+  const { view, bodies, client } = setup(PASSWORD_STEP, '#handoff=handoff-1', true, () => {
+    attempts += 1
+    return attempts === 1
+      ? problem(401, 'invalid_credentials', 'Authentication failed', 'The password is incorrect.')
+      : Response.json({ user: USER, session_id: 'session-1' })
+  })
+  expect(await view.findByRole('heading', { name: 'Connect GitHub' })).toBeTruthy()
+  await userEvent.type(view.getByLabelText('Password'), 'wrong')
+  await userEvent.click(view.getByRole('button', { name: 'Connect and sign in' }))
+  expect((await view.findByRole('alert')).textContent).toBe('The password is incorrect.')
+  await userEvent.clear(view.getByLabelText('Password'))
+  await userEvent.type(view.getByLabelText('Password'), 'right')
+  await userEvent.click(view.getByRole('button', { name: 'Connect and sign in' }))
+  await view.findByText('/', { selector: 'output' })
+  expect(bodies.at(-1)).toEqual({ path: '/api/v1/auth/providers/link', body: { password_token: 'link-1', password: 'right' } })
+  expect(client.getQueryData<typeof USER>(queryKeys.currentUser)).toEqual(USER)
+})
+
+test('the password step continues with the code step when the account has two-factor sign-in', async () => {
+  const { view, bodies } = setup(PASSWORD_STEP, '#handoff=handoff-1', true, () => Response.json({ two_factor_token: 'challenge-1' }, { status: 202 }))
+  await userEvent.type(await view.findByLabelText('Password'), 'right')
+  await userEvent.click(view.getByRole('button', { name: 'Connect and sign in' }))
+  await userEvent.type(await view.findByLabelText('Authentication code'), '123456')
+  await userEvent.click(view.getByRole('button', { name: 'Verify' }))
+  await view.findByText('/', { selector: 'output' })
+  expect(bodies.at(-1)).toEqual({ path: '/api/v1/auth/login/two-factor', body: { two_factor_token: 'challenge-1', code: '123456' } })
+})
+
+test('an expired password step says so and links back to sign in', async () => {
+  const { view } = setup(PASSWORD_STEP, '#handoff=handoff-1', true, () => problem(400, 'invalid_password_token', 'Sign-in expired', 'This sign-in has expired. Start again.'))
+  await userEvent.type(await view.findByLabelText('Password'), 'right')
+  await userEvent.click(view.getByRole('button', { name: 'Connect and sign in' }))
+  expect(await view.findByRole('heading', { name: 'Sign-in expired' })).toBeTruthy()
+  expect(view.getByRole('link', { name: 'Back to sign in' }).getAttribute('href')).toBe('/login')
 })

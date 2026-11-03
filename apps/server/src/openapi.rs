@@ -68,6 +68,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::auth_routes::providers::start_provider_sign_in,
         crate::auth_routes::providers::provider_callback,
         crate::auth_routes::providers::exchange_provider_sign_in,
+        crate::auth_routes::providers::link_provider_sign_in,
         crate::auth_routes::providers::list_connected_accounts,
         crate::auth_routes::providers::disconnect_connected_account,
         crate::workspace_routes::create_workspace,
@@ -495,6 +496,7 @@ fn public_operation(operation_id: &str) -> bool {
             | "post_inbound"
             | "stripe_webhook"
             | "provider_callback"
+            | "link_provider_sign_in"
     )
 }
 
@@ -570,6 +572,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "401", "authentication_required");
             add_code(&mut responses, "403", "registration_closed");
             add_code(&mut responses, "403", "account_email_unverified");
+            add_code(&mut responses, "403", "link_needs_sign_in");
             add_code(&mut responses, "403", "account_suspended");
             add_code(&mut responses, "403", "session_mismatch");
             add_code(&mut responses, "403", "identity_mismatch");
@@ -578,6 +581,14 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "409", "provider_already_connected");
             add_code(&mut responses, "422", "provider_email_unverified");
             add_code(&mut responses, "502", "provider_failed");
+            add_code(&mut responses, "503", "authentication_busy");
+        }
+        "link_provider_sign_in" => {
+            add_code(&mut responses, "400", "invalid_password_token");
+            add_code(&mut responses, "401", "invalid_credentials");
+            add_code(&mut responses, "403", "account_suspended");
+            add_code(&mut responses, "409", "identity_conflict");
+            add_code(&mut responses, "429", "authentication_throttled");
             add_code(&mut responses, "503", "authentication_busy");
         }
         "disconnect_connected_account" => {
@@ -955,6 +966,7 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "save_sign_in_provider"
             | "start_provider_sign_in"
             | "exchange_provider_sign_in"
+            | "link_provider_sign_in"
             | "save_workspace_bucket"
             | "save_storage_options"
             | "save_limits"

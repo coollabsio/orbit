@@ -4,13 +4,13 @@ import { KeyboardAvoidingView, Linking, Platform, ScrollView, View } from 'react
 
 import { accountKeys, authOptions } from '../data/account-api'
 import { createClient, normalizeServer, type SignIn, signIn as signInWithPassword, signInSecondFactor } from '../data/orbit'
-import { looksLikeServer, type Provider, PROVIDER_LABEL, providerErrorMessage, startProviderSignIn } from '../data/sign-in-provider'
+import { isPasswordTokenSpent, linkProviderAccount, looksLikeServer, type PasswordStep, type Provider, PROVIDER_LABEL, providerErrorMessage, startProviderSignIn } from '../data/sign-in-provider'
 import { useSession } from '../session-context'
 import { providerDevice } from '../sign-in-provider'
 import { alpha, useTheme } from '../theme'
 import { Button, Input, Text } from '../ui'
 
-type Step = { name: 'credentials' } | { name: 'two_factor'; server: string; twoFactorToken: string }
+type Step = { name: 'credentials' } | { name: 'two_factor'; server: string; twoFactorToken: string } | { name: 'password'; server: string; challenge: PasswordStep }
 
 // Orbit Cloud, so cloud users only type their email and password; self-hosted users replace it
 const DEFAULT_SERVER = process.env.EXPO_PUBLIC_ORBIT_SERVER || 'https://app.orbit.so'
@@ -23,6 +23,7 @@ export default function SignInScreen() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [code, setCode] = useState('')
+  const [linkPassword, setLinkPassword] = useState('')
   const [busy, setBusy] = useState<'password' | Provider | null>(null)
   const [error, setError] = useState(state.status === 'signed_out' ? state.error : undefined)
   const current = looksLikeServer(server) ? normalizeServer(server) : null
@@ -65,6 +66,28 @@ export default function SignInScreen() {
       const normalized = normalizeServer(server)
       const result = await startProviderSignIn(createClient(normalized, () => null), provider, 'sign_in', providerDevice)
       if (result.kind === 'signed_in' || result.kind === 'two_factor') await finish(normalized, result)
+      else if (result.kind === 'password') {
+        setLinkPassword('')
+        setStep({ name: 'password', server: normalized, challenge: result })
+      }
+    })
+
+  const back = (message?: string) => {
+    setStep({ name: 'credentials' })
+    setCode('')
+    setLinkPassword('')
+    setError(message)
+  }
+
+  const submitLink = (current: Extract<Step, { name: 'password' }>) =>
+    run('password', async () => {
+      try {
+        await finish(current.server, await linkProviderAccount(createClient(current.server, () => null), current.challenge.token, linkPassword))
+      } catch (cause) {
+        // an expired or used token: the provider sign-in starts over
+        if (!isPasswordTokenSpent(cause)) throw cause
+        back(providerErrorMessage(cause))
+      }
     })
 
   const submitCode = (current: Extract<Step, { name: 'two_factor' }>) =>
@@ -74,6 +97,13 @@ export default function SignInScreen() {
     })
 
   const credentials = step.name === 'credentials'
+  const linking = step.name === 'password' ? PROVIDER_LABEL[step.challenge.provider] : null
+  const title = credentials ? 'Orbit' : linking ? `Connect ${linking}` : 'Two-factor code'
+  const subtitle = credentials
+    ? 'Sign in to your tasks, docs, mail and chat.'
+    : step.name === 'password'
+      ? `An Orbit account for ${step.challenge.email} already exists. Enter its password to connect your ${linking} account. You only do this once.`
+      : 'Enter the 6-digit code from your authenticator app, or a recovery code.'
 
   return (
     <KeyboardAvoidingView
@@ -86,10 +116,8 @@ export default function SignInScreen() {
         {/* the web `AuthForm`: a header, then an inset panel with the fields and actions */}
         <View className="w-full max-w-115 self-center rounded-xl border border-border bg-card shadow-lg">
           <View className="gap-1 px-6 pt-6 pb-5">
-            <Text className="font-noto-semibold text-[20px] leading-[28px]">{credentials ? 'Orbit' : 'Two-factor code'}</Text>
-            <Text className="text-[13px] leading-[19.5px] text-muted-foreground">
-              {credentials ? 'Sign in to your tasks, docs, mail and chat.' : 'Enter the 6-digit code from your authenticator app, or a recovery code.'}
-            </Text>
+            <Text className="font-noto-semibold text-[20px] leading-[28px]">{title}</Text>
+            <Text className="text-[13px] leading-[19.5px] text-muted-foreground">{subtitle}</Text>
           </View>
           <View className="-mx-px -mb-px gap-4 rounded-xl border border-border bg-background/40 p-6">
             {step.name === 'credentials' ? (
@@ -137,6 +165,26 @@ export default function SignInScreen() {
                   </>
                 ) : null}
               </>
+            ) : step.name === 'password' ? (
+              <>
+                <Input
+                  label="Password"
+                  required
+                  secureTextEntry
+                  autoComplete="current-password"
+                  textContentType="password"
+                  autoFocus
+                  value={linkPassword}
+                  onChangeText={setLinkPassword}
+                  returnKeyType="go"
+                  onSubmitEditing={() => linkPassword && submitLink(step)}
+                  error={error}
+                />
+                <View className="gap-3">
+                  <Button label="Connect and sign in" size="lg" block loading={busy !== null} disabled={!linkPassword} onPress={() => submitLink(step)} />
+                  <Button label="Back" variant="outline" size="lg" block disabled={busy !== null} onPress={() => back()} />
+                </View>
+              </>
             ) : (
               <>
                 <Input
@@ -161,11 +209,7 @@ export default function SignInScreen() {
                     size="lg"
                     block
                     disabled={busy !== null}
-                    onPress={() => {
-                      setStep({ name: 'credentials' })
-                      setCode('')
-                      setError(undefined)
-                    }}
+                    onPress={() => back()}
                   />
                 </View>
               </>

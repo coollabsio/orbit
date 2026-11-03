@@ -396,6 +396,19 @@ impl Fixture {
         .await
     }
 
+    /// The password step of a first link, after an exchange answered 202 `password_token`.
+    async fn link(&self, challenge: &Reply, password: &str, client: Client) -> Reply {
+        assert_eq!(challenge.status, StatusCode::ACCEPTED, "{}", challenge.body);
+        self.send(
+            "POST",
+            "/api/v1/auth/providers/link",
+            None,
+            client == Client::Web,
+            Some(json!({"password_token": challenge.body["password_token"], "password": password})),
+        )
+        .await
+    }
+
     /// Signs up a new account with Google (registration open) and returns its session cookie.
     async fn provider_only_account(&self, sub: &'static str, email: &'static str) -> String {
         self.database
@@ -469,7 +482,7 @@ async fn admin_saves_providers_with_an_encrypted_secret_that_an_empty_save_keeps
         stored
     );
     // The kept secret still opens: the fake provider only answers to the right one.
-    let signed_in = fixture
+    let password_step = fixture
         .flow(
             "google",
             "sign_in",
@@ -477,6 +490,7 @@ async fn admin_saves_providers_with_an_encrypted_secret_that_an_empty_save_keeps
             None,
         )
         .await;
+    let signed_in = fixture.link(&password_step, PASSWORD, Client::Web).await;
     assert_eq!(signed_in.status, StatusCode::OK, "{}", signed_in.body);
 
     let removed = fixture
@@ -520,7 +534,7 @@ async fn admin_saves_providers_with_an_encrypted_secret_that_an_empty_save_keeps
 #[tokio::test]
 async fn a_verified_email_links_once_and_the_subject_signs_in_after() {
     let fixture = Fixture::new().await;
-    let first = fixture
+    let challenge = fixture
         .flow(
             "google",
             "sign_in",
@@ -528,7 +542,27 @@ async fn a_verified_email_links_once_and_the_subject_signs_in_after() {
             None,
         )
         .await;
+    // The email alone does not connect the accounts: the account password must confirm it.
+    assert_eq!(challenge.status, StatusCode::ACCEPTED, "{}", challenge.body);
+    assert_eq!(challenge.body["provider"], "google");
+    assert_eq!(challenge.body["email"], "owner@example.com");
+    assert!(challenge.headers.get(header::SET_COOKIE).is_none());
+    let wrong = fixture
+        .link(&challenge, "not the password", Client::Web)
+        .await;
+    assert_eq!(wrong.status, StatusCode::UNAUTHORIZED);
+    assert_eq!(wrong.code(), "invalid_credentials");
+    assert_eq!(
+        fixture
+            .scalar_i64("SELECT COUNT(*) FROM user_identities")
+            .await,
+        0
+    );
+    let first = fixture.link(&challenge, PASSWORD, Client::Web).await;
     assert_eq!(first.status, StatusCode::OK, "{}", first.body);
+    let used = fixture.link(&challenge, PASSWORD, Client::Web).await;
+    assert_eq!(used.status, StatusCode::BAD_REQUEST);
+    assert_eq!(used.code(), "invalid_password_token");
     assert_eq!(first.body["user"]["email"], "owner@example.com");
     assert_eq!(first.body["user"]["has_password"], true);
     assert!(first.body.get("session_token").is_none());
@@ -770,7 +804,7 @@ async fn two_factor_runs_before_a_new_link_is_written() {
         .await;
     assert_eq!(enabled.status, StatusCode::OK, "{}", enabled.body);
 
-    let challenge = fixture
+    let password = fixture
         .flow(
             "google",
             "sign_in",
@@ -778,6 +812,7 @@ async fn two_factor_runs_before_a_new_link_is_written() {
             None,
         )
         .await;
+    let challenge = fixture.link(&password, PASSWORD, Client::Web).await;
     assert_eq!(challenge.status, StatusCode::ACCEPTED, "{}", challenge.body);
     assert_eq!(
         fixture
@@ -1172,9 +1207,10 @@ async fn native_sign_in_returns_to_an_allowlisted_app_uri_and_gets_a_token() {
         .strip_prefix("orbit://auth/callback?handoff=")
         .unwrap()
         .to_owned();
-    let reply = fixture
+    let password_step = fixture
         .exchange(&handoff, &verifier, Client::Native, None)
         .await;
+    let reply = fixture.link(&password_step, PASSWORD, Client::Native).await;
     assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
     assert!(reply.headers.get(header::SET_COOKIE).is_none());
     let token = reply.body["session_token"].as_str().unwrap();
@@ -1366,17 +1402,59 @@ async fn after_an_orbit_email_change_providers_still_find_the_same_account() {
         ),
         (Some(ada_id.as_str()), Some("ada@work.example"))
     );
-    // GitHub vouches for the new address: it links to the same account instead of creating one.
+    // GitHub vouches for the new address: it finds the same account instead of creating one, but the account has
+    // no password to confirm the link, so Ada signs in with Google and connects GitHub from Security.
     let github_link = fixture
         .flow("github", "sign_in", github(42, "ada@work.example"), None)
         .await;
-    assert_eq!(github_link.status, StatusCode::OK, "{}", github_link.body);
-    assert_eq!(github_link.body["user"]["id"], ada_id.as_str());
+    assert_eq!(
+        github_link.status,
+        StatusCode::FORBIDDEN,
+        "{}",
+        github_link.body
+    );
+    assert_eq!(github_link.code(), "link_needs_sign_in");
     assert_eq!(fixture.scalar_i64("SELECT COUNT(*) FROM users").await, 2);
     assert_eq!(
         fixture
             .scalar_i64("SELECT COUNT(*) FROM user_identities")
             .await,
-        2
+        1
+    );
+}
+
+#[tokio::test]
+async fn five_wrong_passwords_end_the_link_step() {
+    let fixture = Fixture::new().await;
+    let challenge = fixture
+        .flow("github", "sign_in", github(42, "owner@example.com"), None)
+        .await;
+    for _ in 0..5 {
+        let wrong = fixture
+            .link(&challenge, "not the password", Client::Web)
+            .await;
+        assert!(
+            matches!(
+                wrong.code(),
+                "invalid_credentials" | "authentication_throttled"
+            ),
+            "{}",
+            wrong.body
+        );
+    }
+    let right = fixture.link(&challenge, PASSWORD, Client::Web).await;
+    assert!(
+        matches!(
+            right.code(),
+            "invalid_password_token" | "authentication_throttled"
+        ),
+        "{}",
+        right.body
+    );
+    assert_eq!(
+        fixture
+            .scalar_i64("SELECT COUNT(*) FROM user_identities")
+            .await,
+        0
     );
 }

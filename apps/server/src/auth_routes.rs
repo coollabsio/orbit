@@ -440,6 +440,10 @@ pub fn auth_router(state: AuthState) -> Router {
             post(providers::exchange_provider_sign_in),
         )
         .route(
+            "/api/v1/auth/providers/link",
+            post(providers::link_provider_sign_in),
+        )
+        .route(
             "/api/v1/auth/connected-accounts",
             get(providers::list_connected_accounts),
         )

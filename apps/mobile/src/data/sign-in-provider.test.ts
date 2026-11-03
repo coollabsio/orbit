@@ -8,11 +8,14 @@ import {
   codeVerifier,
   exchangeOutcome,
   handoffFrom,
+  isPasswordTokenSpent,
+  linkProviderAccount,
   looksLikeServer,
   nativeRedirect,
   type ProviderDevice,
   providerErrorMessage,
   providerRows,
+  signInMethods,
   startProviderSignIn,
   withReauthentication,
 } from './sign-in-provider'
@@ -51,6 +54,12 @@ test('the exchange answer maps to a session, the two-factor step, or a finished 
   expect(exchangeOutcome('sign_in', 202, { two_factor_token: 'tf' })).toEqual({ kind: 'two_factor', twoFactorToken: 'tf' })
   expect(exchangeOutcome('connect', 204, undefined)).toEqual({ kind: 'connected' })
   expect(exchangeOutcome('confirm', 204, undefined)).toEqual({ kind: 'confirmed' })
+  expect(exchangeOutcome('sign_in', 202, { password_token: 'pt', provider: 'github', email: 'ada@example.com' })).toEqual({
+    kind: 'password',
+    token: 'pt',
+    provider: 'github',
+    email: 'ada@example.com',
+  })
   expect(() => exchangeOutcome('sign_in', 204, undefined)).toThrow('Update the app')
 })
 
@@ -130,6 +139,43 @@ test('closing the browser is a cancelled sign-in, with no exchange', async () =>
   expect(await startProviderSignIn(client, 'github', 'sign_in', device({ type: 'cancel' }))).toEqual({ kind: 'cancelled' })
   expect(await startProviderSignIn(server([{ status: 200, body: { authorize_url: 'u' } }]).client, 'github', 'sign_in', device({ type: 'dismiss' }))).toEqual({ kind: 'cancelled' })
   expect(sent.length).toBe(1)
+})
+
+test('a sign-in that finds an existing account asks for its password, and the link signs in or asks for the code', async () => {
+  const { client, sent } = server([
+    { status: 200, body: { authorize_url: 'https://github.com/login/oauth/authorize' } },
+    { status: 202, body: { password_token: 'pt', provider: 'github', email: 'ada@example.com' } },
+    { status: 200, body: { session_id: 's1', session_token: 'tok', user } },
+    { status: 202, body: { two_factor_token: 'tf' } },
+  ])
+  expect(await startProviderSignIn(client, 'github', 'sign_in', device({ type: 'success', url: 'orbit://auth/callback?handoff=h4' }))).toEqual({
+    kind: 'password',
+    token: 'pt',
+    provider: 'github',
+    email: 'ada@example.com',
+  })
+  expect(await linkProviderAccount(client, 'pt', 'secret')).toEqual({ kind: 'signed_in', token: 'tok', user })
+  expect(sent[2]).toEqual({ url: 'https://orbit.test/api/v1/auth/providers/link', body: { password_token: 'pt', password: 'secret' }, origin: null })
+  expect(await linkProviderAccount(client, 'pt', 'secret')).toEqual({ kind: 'two_factor', twoFactorToken: 'tf' })
+})
+
+test('a wrong link password keeps the token; a spent token starts over', async () => {
+  const reply = (status: number, code: string, detail: string) => ({
+    status,
+    body: { type: 'about:blank', title: 'Error', status, code, detail, instance: '/api/v1/auth/providers/link', request_id: 'r1' },
+  })
+  const { client } = server([reply(401, 'invalid_credentials', 'The password is incorrect.'), reply(400, 'invalid_password_token', 'Expired.')])
+  const wrong = await linkProviderAccount(client, 'pt', 'bad').catch((reason: unknown) => reason)
+  expect([providerErrorMessage(wrong), isPasswordTokenSpent(wrong)]).toEqual(['The password is incorrect.', false])
+  const spent = await linkProviderAccount(client, 'pt', 'bad').catch((reason: unknown) => reason)
+  expect([providerErrorMessage(spent), isPasswordTokenSpent(spent)]).toEqual(['The sign-in took too long or was already used. Try again.', true])
+})
+
+test('sign-in methods list the password, then the connected providers', () => {
+  const account = (provider: 'google' | 'github') => ({ provider, email: 'ada', created_at: '2026-01-01T00:00:00Z' })
+  expect(signInMethods(true, [account('github'), account('google')])).toEqual(['Password', 'Google', 'GitHub'])
+  expect(signInMethods(false, [account('github')])).toEqual(['GitHub'])
+  expect(signInMethods(undefined, [])).toEqual(['Password'])
 })
 
 test('error codes read as sentences; unknown codes keep the server detail', () => {

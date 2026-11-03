@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { Link } from 'react-router'
 import { ApiProblem } from '@orbit/api/problem'
 import { UnsavedBar } from '@/components/common/UnsavedBar'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
@@ -6,7 +7,8 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { PasswordInput } from '@/components/ui/password-input'
 import { Button } from '@/components/ui/button'
-import { useAuthOptions, useChangePassword, useCurrentUser, useSetAvatar, useUpdateProfile } from '@/features/auth/api'
+import { useAuthOptions, useChangePassword, useConnectedAccounts, useCurrentUser, useSetAvatar, useUpdateProfile } from '@/features/auth/api'
+import { PROVIDER_NAMES } from '@/features/auth/providerSignIn'
 import { ConfirmWithProvider } from '@/features/auth/components/ConfirmWithProvider'
 import { userColor } from '@/features/workspaces/api'
 import { UserAvatar } from '@/components/common/UserAvatar'
@@ -103,6 +105,18 @@ function AvatarField() {
         }}
       />
     </div>
+  )
+}
+
+/** How the account signs in, under the email; Security is where the methods change. */
+function SignInMethods({ hasPassword }: { hasPassword: boolean }) {
+  const connected = useConnectedAccounts()
+  const methods = [...(hasPassword ? ['Password'] : []), ...(connected.data ?? []).map((account) => PROVIDER_NAMES[account.provider])]
+  if (methods.length === 0) return null
+  return (
+    <FieldDescription>
+      Sign-in methods: {methods.join(' · ')}. <Link to="/profile/security" className="font-medium text-foreground underline-offset-4 hover:underline">Manage</Link>
+    </FieldDescription>
   )
 }
 
@@ -204,6 +218,7 @@ export function ProfilePage() {
                       {emailEnabled ? <Button type="button" variant="outline" onClick={() => setChangingEmail(true)}>Change</Button> : null}
                     </div>
                     {options.data && !emailEnabled ? <FieldDescription>This Orbit cannot send email, so the email cannot be changed. Ask an administrator.</FieldDescription> : null}
+                    {me ? <SignInMethods hasPassword={hasPassword} /> : null}
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="profile-title">Title</FieldLabel>

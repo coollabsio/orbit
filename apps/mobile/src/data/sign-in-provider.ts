@@ -4,8 +4,8 @@
  * so tests run the whole flow over a fake fetch and a fake browser.
  */
 import { ApiProblem } from '@orbit/api/problem'
-import { disconnectConnectedAccount, exchangeProviderSignIn, listConnectedAccounts, startProviderSignIn as startRequest } from '@orbit/api/generated/sdk.gen'
-import type { ConnectedAccount, LoginResponse, Provider, SignInIntent, TwoFactorChallenge } from '@orbit/api/generated/types.gen'
+import { disconnectConnectedAccount, exchangeProviderSignIn, linkProviderSignIn, listConnectedAccounts, startProviderSignIn as startRequest } from '@orbit/api/generated/sdk.gen'
+import type { ConnectedAccount, ExchangeChallenge, LoginResponse, Provider, SignInIntent } from '@orbit/api/generated/types.gen'
 
 import { type OrbitClient, type SignIn, signedIn } from './orbit'
 
@@ -64,17 +64,35 @@ export interface ProviderDevice {
   openAuthSession: (url: string, redirect: string) => Promise<AuthSessionResult>
 }
 
-export type ProviderOutcome = SignIn | { kind: 'connected' } | { kind: 'confirmed' } | { kind: 'cancelled' }
+/** The provider account matches an existing Orbit account by email: its password connects them, once. */
+export type PasswordStep = { kind: 'password'; token: string; provider: Provider; email: string }
 
-/** The exchange's answer: 200 a session, 202 the two-factor step, 204 a finished connect or confirm. */
-export function exchangeOutcome(intent: SignInIntent, status: number, body: LoginResponse | TwoFactorChallenge | undefined): ProviderOutcome {
+export type ProviderOutcome = SignIn | PasswordStep | { kind: 'connected' } | { kind: 'confirmed' } | { kind: 'cancelled' }
+
+/**
+ * The exchange's answer: 200 a session, 202 the two-factor step or the existing account's password, 204 a finished
+ * connect or confirm.
+ */
+export function exchangeOutcome(intent: SignInIntent, status: number, body: LoginResponse | ExchangeChallenge | undefined): ProviderOutcome {
   if (status === 204) {
     if (intent === 'connect') return { kind: 'connected' }
     if (intent === 'confirm') return { kind: 'confirmed' }
   }
   if (intent !== 'sign_in' || !body) throw new Error('The server answered the sign-in in a way this app does not know. Update the app.')
+  if ('password_token' in body) return { kind: 'password', token: body.password_token, provider: body.provider, email: body.email }
   return signedIn(body)
 }
+
+/**
+ * Connects the provider account to the existing one with its password and signs in, as the password sign-in does.
+ * A wrong password keeps the token for another try; `invalid_password_token` means starting over.
+ */
+export async function linkProviderAccount(client: OrbitClient, passwordToken: string, password: string): Promise<SignIn> {
+  const { data } = await linkProviderSignIn({ client, body: { password_token: passwordToken, password }, throwOnError: true })
+  return signedIn(data)
+}
+
+export const isPasswordTokenSpent = (error: unknown) => error instanceof ApiProblem && error.code === 'invalid_password_token'
 
 /**
  * Runs one provider flow. `client` is Origin-less: without a token for `sign_in`, with the session's for `connect` and
@@ -95,7 +113,7 @@ export async function startProviderSignIn(client: OrbitClient, provider: Provide
   const handoff = handoffFrom(session.url, redirect)
   if (!handoff) throw new Error(`${PROVIDER_LABEL[provider]} did not finish the sign-in. Try again.`)
   const exchanged = await exchangeProviderSignIn({ client, body: { handoff, code_verifier: verifier }, throwOnError: true })
-  return exchangeOutcome(intent, exchanged.response.status, exchanged.data as LoginResponse | TwoFactorChallenge | undefined)
+  return exchangeOutcome(intent, exchanged.response.status, exchanged.data as LoginResponse | ExchangeChallenge | undefined)
 }
 
 const MESSAGES: Record<string, string> = {
@@ -116,6 +134,7 @@ const MESSAGES: Record<string, string> = {
   provider_already_connected: 'This provider is already connected.',
   identity_not_found: 'This provider is not connected.',
   last_sign_in_method: 'This is your only way to sign in. Set a password or connect another account first.',
+  invalid_password_token: 'The sign-in took too long or was already used. Try again.',
 }
 
 /** A readable message for a provider flow's error; other errors keep the server's own detail. */
@@ -148,6 +167,12 @@ export async function connectedAccounts(client: OrbitClient): Promise<ConnectedA
 
 export async function disconnect(client: OrbitClient, provider: Provider): Promise<void> {
   await disconnectConnectedAccount({ client, path: { provider }, throwOnError: true })
+}
+
+/** How the account signs in, for the profile: "Password", then each connected provider. */
+export function signInMethods(hasPassword: boolean | undefined, connected: readonly ConnectedAccount[]): string[] {
+  const providers = (['google', 'github'] as const).filter((provider) => connected.some((account) => account.provider === provider))
+  return [...(hasPassword !== false ? ['Password'] : []), ...providers.map((provider) => PROVIDER_LABEL[provider])]
 }
 
 export interface ProviderRow {

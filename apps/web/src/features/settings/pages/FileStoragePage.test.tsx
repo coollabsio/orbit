@@ -9,6 +9,9 @@ import { FileStoragePage } from './FileStoragePage'
 const originalFetch = globalThis.fetch
 afterEach(() => { globalThis.fetch = originalFetch })
 
+const USAGE = { used_bytes: 2048, quota_bytes: null, file_count: 0, largest_files: [] }
+const isUsage = (input: RequestInfo | URL, init?: RequestInit) => new URL(new Request(input, init).url).pathname.endsWith('/storage')
+
 const S3 = { endpoint: 'https://s3.example.com', region: 'us-east-1', bucket: 'team-files', prefix: '', access_key_id: 'team', path_style: false }
 
 function renderPage(role: 'owner' | 'admin' | 'member') {
@@ -17,16 +20,23 @@ function renderPage(role: 'owner' | 'admin' | 'member') {
   return { workspace, view: render(<QueryClientProvider client={client}><WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}><FileStoragePage /></WorkspaceContext.Provider></QueryClientProvider>) }
 }
 
-test('members cannot manage file storage', () => {
-  globalThis.fetch = mock(() => Promise.reject(new Error('must not fetch'))) as unknown as typeof fetch
-  const { view } = renderPage('member')
-  expect(view.getByText('Only workspace owners and administrators can manage file storage.')).toBeTruthy()
-  expect(globalThis.fetch).not.toHaveBeenCalled()
+test('members see the storage use but not the bucket settings', async () => {
+  const paths: string[] = []
+  globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = new URL(new Request(input, init).url).pathname
+    paths.push(path)
+    return Response.json(USAGE)
+  }) as unknown as typeof fetch
+  const { view, workspace } = renderPage('member')
+  expect(await view.findByText('2 KB · no limit')).toBeTruthy()
+  expect(view.queryByText('Own bucket')).toBeNull()
+  expect(paths).toEqual([`/api/v1/workspaces/${workspace.id}/storage`])
 })
 
 test('an admin saves the workspace bucket and sees the files move to it', async () => {
   const requests: { method: string; path: string; body: unknown }[] = []
   globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (isUsage(input, init)) return Response.json(USAGE)
     const request = new Request(input, init)
     const body = request.method === 'PUT' ? await request.json() : null
     requests.push({ method: request.method, path: new URL(request.url).pathname, body })
@@ -53,7 +63,7 @@ test('an admin saves the workspace bucket and sees the files move to it', async 
 })
 
 test('a removed bucket shows the files moving back and offers no second removal', async () => {
-  globalThis.fetch = mock(async () => Response.json({ s3: S3, removing: true, checking: false, files_to_move: 1, move_error: 'access denied.' })) as unknown as typeof fetch
+  globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => isUsage(input, init) ? Response.json(USAGE) : Response.json({ s3: S3, removing: true, checking: false, files_to_move: 1, move_error: 'access denied.' })) as unknown as typeof fetch
   const { view } = renderPage('owner')
   await waitFor(() => expect(view.getByRole('status').textContent).toBe("1 file left to move back to Orbit's storage."))
   expect(view.getByRole('alert').textContent).toBe('Moving files stopped: access denied. Orbit tries again every ten minutes.')
@@ -62,7 +72,8 @@ test('a removed bucket shows the files moving back and offers no second removal'
 
 test('right after a save the page says it is counting the files and keeps asking', async () => {
   let calls = 0
-  globalThis.fetch = mock(async () => {
+  globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (isUsage(input, init)) return Response.json(USAGE)
     calls += 1
     return Response.json(calls === 1
       ? { s3: S3, removing: false, checking: true, files_to_move: 0, move_error: null }
