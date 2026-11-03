@@ -23,6 +23,7 @@ import { Tip } from '@/components/common/Tip'
 import { useWorkspace, WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { useIsInstallationAdmin } from '@/features/workspaces/permissions'
 import { WorkspaceSwitcher } from './WorkspaceSwitcher'
+import { ActivityBell } from './ActivityBell'
 import { CommandPalette } from './CommandPalette'
 import { ConnectionBanner } from './ConnectionBanner'
 import { MailServerBanner } from './MailServerBanner'
@@ -168,12 +169,14 @@ function Shell() {
           <div
             className={cn(
               'mb-2 flex h-12 shrink-0 items-center gap-2',
-              sidebarCollapsed ? 'justify-center px-0' : 'justify-between px-1.5',
+              // collapsed, the bell sits under the workspace letter
+              sidebarCollapsed ? 'h-auto flex-col justify-center gap-1 px-0 pt-2' : 'justify-between px-1.5',
             )}
           >
             <WorkspaceSwitcher collapsed={sidebarCollapsed} />
+            <ActivityBell unread={inboxUnread} />
           </div>
-          <SidebarNav contextual={newUi} collapsed={sidebarCollapsed} chatBadge={chatBadge} chatUnread={chatUnread} inboxUnread={inboxUnread} isRoot={isRoot} pageListRef={hostsList ? setPageListSlot : undefined} />
+          <SidebarNav contextual={newUi} collapsed={sidebarCollapsed} chatBadge={chatBadge} chatUnread={chatUnread} isRoot={isRoot} pageListRef={hostsList ? setPageListSlot : undefined} />
           <div
             className={cn(
               'flex shrink-0 items-center justify-between gap-1 py-2',
@@ -216,10 +219,11 @@ function Shell() {
           style={sidebarTheme.style}
         >
           <MenuSurfaceContext value={menuSurface}>
-            <div className="mb-2 flex h-12 shrink-0 items-center justify-start gap-2 px-1.5">
+            <div className="mb-2 flex h-12 shrink-0 items-center justify-between gap-2 px-1.5">
               <WorkspaceSwitcher onSelect={() => setDrawerOpen(false)} />
+              <ActivityBell unread={inboxUnread} />
             </div>
-            <SidebarNav contextual={newUi} backShowsMenu onNavigate={() => setDrawerOpen(false)} chatBadge={chatBadge} chatUnread={chatUnread} inboxUnread={inboxUnread} isRoot={isRoot} />
+            <SidebarNav contextual={newUi} backShowsMenu onNavigate={() => setDrawerOpen(false)} chatBadge={chatBadge} chatUnread={chatUnread} isRoot={isRoot} />
             <div className="flex shrink-0 items-center pt-2">
               <UserMenu />
             </div>

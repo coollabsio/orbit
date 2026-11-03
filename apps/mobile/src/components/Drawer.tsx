@@ -208,13 +208,13 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
   const onSettings = pathname === '/settings' || pathname.startsWith('/settings/')
   const onAdmin = pathname.startsWith('/settings/admin')
   const onAgentic = pathname === '/settings/agentic'
+  const onActivity = pathname === '/activity'
   const taskView = (name: string) => pathname === '/tasks' && view === name
   const workspaceLinks: NavLink[] = [
     { label: 'Home', icon: 'home', href: '/', active: pathname === '/' },
     { label: 'Tasks', icon: 'tasks', href: tasksHref({ project }, {}), active: onTasks && !view },
   ]
   const personal: NavLink[] = [
-    { label: 'Activity', icon: 'inbox', href: '/activity', active: pathname === '/activity', dot: inboxUnread },
     { label: 'Agentic', icon: 'robot', href: '/settings/agentic', active: onAgentic },
     // the new UI keeps the task presets in the Tasks area
     ...(newUi ? [] : TASK_PRESETS.map((preset) => ({ label: preset.label, icon: preset.icon, href: tasksHref({ project }, { view: preset.view }), active: taskView(preset.view) }))),
@@ -224,17 +224,31 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
   return (
     <View className="flex-1 border-r border-sidebar-edge bg-sidebar px-3" style={{ paddingTop: insets.top, paddingBottom: 12 + insets.bottom }}>
       <Wash color={colors.sidebarWash} width={width} />
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Workspace: ${workspace.name}`}
-        onPress={() => setSwitching(true)}
-        className="mb-2 h-12 flex-row items-center gap-[7px] px-1.5"
-      >
-        <RNText numberOfLines={1} className="shrink font-noto-bold text-[17px] tracking-[-0.34px] text-foreground">
-          {workspace.name}
-        </RNText>
-        <Icon name="chevronDown" size={13} color={alpha(colors.mutedForeground, 0.7)} />
-      </Pressable>
+      <View className="mb-2 h-12 flex-row items-center justify-between gap-2 px-1.5">
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Workspace: ${workspace.name}`}
+          onPress={() => setSwitching(true)}
+          className="shrink flex-row items-center gap-[7px]"
+        >
+          <RNText numberOfLines={1} className="shrink font-noto-bold text-[17px] tracking-[-0.34px] text-foreground">
+            {workspace.name}
+          </RNText>
+          <Icon name="chevronDown" size={13} color={alpha(colors.mutedForeground, 0.7)} />
+        </Pressable>
+        {/* the web's `ActivityBell`: Activity stays in view in every drawer area */}
+        <Pressable
+          accessibilityRole="link"
+          accessibilityLabel={inboxUnread ? 'Activity, unread' : 'Activity'}
+          accessibilityState={{ selected: onActivity }}
+          onPress={() => go('/activity')}
+          hitSlop={6}
+          className={`size-8 items-center justify-center rounded-md active:bg-neutral-100 dark:active:bg-white/6 ${onActivity ? 'bg-neutral-100 dark:bg-white/6' : ''}`}
+        >
+          <Icon name="bell" size={18} color={onActivity ? colors.sidebarNavActive : colors.sidebarNav} />
+          {inboxUnread ? <View className="absolute top-1.5 right-1.5 size-2 rounded-full bg-primary" /> : null}
+        </Pressable>
+      </View>
 
       <View className="px-1 pb-3">
         <Pressable

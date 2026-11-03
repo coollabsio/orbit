@@ -23,7 +23,7 @@ export function WorkspaceSwitcher({ collapsed = false, onSelect }: { collapsed?:
       <Tip label={collapsed ? workspace.name : undefined} side="right">
         <PopoverTrigger
           render={
-            <Button variant="ghost" className="h-auto min-w-0 items-baseline justify-start gap-[7px] rounded-none border-0 p-0 hover:bg-transparent aria-expanded:bg-transparent dark:hover:bg-transparent" aria-label={`Workspace: ${workspace.name}`} />
+            <Button variant="ghost" className="h-auto min-w-0 shrink items-baseline justify-start gap-[7px] rounded-none border-0 p-0 hover:bg-transparent aria-expanded:bg-transparent dark:hover:bg-transparent" aria-label={`Workspace: ${workspace.name}`} />
           }
         >
           <span className="truncate text-[17px] font-bold tracking-[-0.02em] text-foreground">{collapsed ? workspace.name.charAt(0) : workspace.name}</span>
