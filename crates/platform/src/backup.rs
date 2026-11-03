@@ -18,6 +18,7 @@ use crate::{
     Backend, Database, DatabaseError, MigrationRunner, ObjectStorage, S3Bucket, S3Error,
     lock_database_ownership,
 };
+use crate::files::TEMPORARY_DIRECTORY;
 
 mod postgres;
 
@@ -646,6 +647,7 @@ impl BackupService {
                     &attachment_root,
                     &temporary.join("attachments"),
                     &temporary,
+                    &attachment_root.join(TEMPORARY_DIRECTORY),
                     &mut files,
                     &cancellation,
                 )?;
@@ -917,6 +919,7 @@ fn copy_directory_cancellable(
     source: &Path,
     destination: &Path,
     backup_root: &Path,
+    skip: &Path,
     files: &mut Vec<BackupFile>,
     cancellation: &CancellationToken,
 ) -> Result<(), BackupError> {
@@ -933,6 +936,9 @@ fn copy_directory_cancellable(
     for entry in entries {
         check_cancelled(cancellation)?;
         let source_path = entry.path();
+        if source_path == skip {
+            continue;
+        }
         let destination_path = destination.join(entry.file_name());
         let file_type = entry
             .file_type()
@@ -942,6 +948,7 @@ fn copy_directory_cancellable(
                 &source_path,
                 &destination_path,
                 backup_root,
+                skip,
                 files,
                 cancellation,
             )?;

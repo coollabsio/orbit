@@ -206,6 +206,26 @@ async fn snapshot_manifest_checksums_the_database_and_attachment() {
 }
 
 #[tokio::test]
+async fn snapshot_leaves_out_upload_staging_files() {
+    let fixture = Fixture::new().await;
+    let staging = fixture._root.path().join("attachments/temporary");
+    fs::create_dir_all(&staging).unwrap();
+    fs::write(staging.join("upload-in-progress"), b"half an upload").unwrap();
+
+    let snapshot = fixture.service.create(&fixture.database).await.unwrap();
+
+    let attachments: Vec<_> = snapshot
+        .manifest
+        .files
+        .iter()
+        .map(|file| file.path.as_str())
+        .filter(|path| path.starts_with("attachments/"))
+        .collect();
+    assert_eq!(attachments, ["attachments/record.txt"]);
+    assert!(!snapshot.path.join("attachments/temporary").exists());
+}
+
+#[tokio::test]
 async fn verify_and_restore_reject_a_newer_schema_before_touching_the_target() {
     let fixture = Fixture::new().await;
     let snapshot = fixture.service.create(&fixture.database).await.unwrap();
