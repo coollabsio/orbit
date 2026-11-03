@@ -70,6 +70,18 @@ export default defineConfig({
       },
     },
     {
+      // Sonner adds its CSS as a runtime <style> tag, which the production CSP (`style-src 'self'`) blocks and reports
+      // as a console error. `src/components/ui/sonner.tsx` bundles the same CSS from `sonner/dist/styles.css`.
+      name: 'orbit-sonner-no-runtime-css',
+      apply: 'build',
+      transform(code, id) {
+        if (!/[\\/]sonner[\\/]dist[\\/]index\.m?js$/.test(id)) return
+        const injector = 'function __insertCSS(code) {'
+        if (!code.includes(injector)) throw new Error('sonner no longer defines __insertCSS: update the orbit-sonner-no-runtime-css plugin')
+        return code.replace(injector, `${injector} return;`)
+      },
+    },
+    {
       name: 'orbit-build-manifest',
       generateBundle() {
         this.emitFile({
