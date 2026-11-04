@@ -302,27 +302,6 @@ async fn read_endpoints_return_public_fields_of_approved_projects_only() {
     assert!(first.get("workspace_id").is_none(), "{first}");
     assert!(first["category"].is_string() && first["position"].is_i64());
 
-    let (status, labels) = f
-        .call(
-            Some(&token),
-            "GET",
-            &format!("/projects/{}/labels", f.project),
-            None,
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "{labels}");
-    assert_eq!(
-        labels,
-        json!({"items": [{"id": label.id, "project_id": f.project, "name": "bug", "color": "#00ff00", "version": 0}], "next_cursor": null})
-    );
-
-    let (status, members) = f.call(Some(&token), "GET", "/members", None).await;
-    assert_eq!(status, StatusCode::OK, "{members}");
-    assert_eq!(
-        members,
-        json!({"items": [{"user_id": f.user, "display_name": "Owner", "email": "owner@example.com", "role": "owner"}], "next_cursor": null})
-    );
-
     let (status, tasks) = f.call(Some(&token), "GET", "/tasks", None).await;
     assert_eq!(status, StatusCode::OK, "{tasks}");
     assert_eq!(tasks["items"].as_array().unwrap().len(), 1, "{tasks}");
@@ -402,37 +381,6 @@ async fn read_endpoints_return_public_fields_of_approved_projects_only() {
         .await;
     assert_eq!(status, StatusCode::OK, "{by_identifier}");
     assert_eq!(by_identifier, task);
-
-    f.tasks
-        .create_comment(
-            f.workspace,
-            f.task,
-            f.user,
-            None,
-            orbit_server::repositories::tasks::CommentContent::Markdown {
-                body: "First comment".into(),
-                mentioned_user_ids: vec![],
-            },
-            "test",
-            TimestampMillis::now(),
-        )
-        .await
-        .unwrap();
-    let (status, comments) = f
-        .call(
-            Some(&token),
-            "GET",
-            &format!("/tasks/{key}-{number}/comments"),
-            None,
-        )
-        .await;
-    assert_eq!(status, StatusCode::OK, "{comments}");
-    let comment = &comments["items"][0];
-    assert_eq!(comment["body"], "First comment");
-    assert_eq!(comment["task_id"], f.task.to_string());
-    assert_eq!(comment["author_id"], f.user.to_string());
-    assert_eq!(comment["parent_id"], Value::Null);
-    assert!(comment.get("body_json").is_none() && comment.get("can_edit").is_none());
 }
 
 #[tokio::test]
@@ -459,14 +407,7 @@ async fn resources_of_unapproved_projects_are_not_found() {
         ("GET", format!("/tasks/{missing}"), None),
         ("GET", format!("/tasks?project_id={other}"), None),
         ("GET", format!("/projects/{other}/statuses"), None),
-        ("GET", format!("/projects/{other}/labels"), None),
-        ("GET", "/projects/not-an-id/labels".to_owned(), None),
-        ("GET", format!("/tasks/{task}/comments"), None),
-        (
-            "POST",
-            format!("/tasks/{task}/comments"),
-            Some(json!({"body": "Leak?"})),
-        ),
+        ("GET", "/projects/not-an-id/statuses".to_owned(), None),
         (
             "PATCH",
             format!("/tasks/{task}"),
@@ -491,12 +432,6 @@ async fn resources_of_unapproved_projects_are_not_found() {
     }
     let after = f.tasks.get_task(f.workspace, task, f.user).await.unwrap();
     assert_eq!(after.version, current.version);
-    let comments: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM task_comments WHERE task_id = $1")
-        .bind(task.to_string())
-        .fetch_one(f.database.pool())
-        .await
-        .unwrap();
-    assert_eq!(comments, 0);
 }
 
 #[tokio::test]
@@ -520,11 +455,6 @@ async fn task_writes_follow_scope_version_and_workspace_rules() {
             "DELETE",
             format!("/tasks/{}?expected_version={}", f.task, current.version),
             None,
-        ),
-        (
-            "POST",
-            format!("/tasks/{}/comments", f.task),
-            Some(json!({"body": "x"})),
         ),
     ] {
         let (code, problem) = f.call(Some(&read_only), method, &path, body).await;
@@ -666,27 +596,6 @@ async fn task_writes_follow_scope_version_and_workspace_rules() {
         .await;
     assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
 
-    let (code, comment) = f
-        .call(
-            Some(&token),
-            "POST",
-            &format!("/tasks/{id}/comments"),
-            Some(json!({"body": "Done"})),
-        )
-        .await;
-    assert_eq!(code, StatusCode::CREATED, "{comment}");
-    assert_eq!(comment["body"], "Done");
-    assert_eq!(comment["task_id"], id);
-    let (code, _) = f
-        .call(
-            Some(&token),
-            "POST",
-            &format!("/tasks/{id}/comments"),
-            Some(json!({"body": "  "})),
-        )
-        .await;
-    assert_eq!(code, StatusCode::BAD_REQUEST);
-
     let (code, _) = f
         .call(
             Some(&token),
@@ -758,7 +667,7 @@ async fn a_parent_in_an_unapproved_project_does_not_leak() {
 }
 
 #[tokio::test]
-async fn docs_need_their_scope_and_a_personal_token_and_chat_is_not_served() {
+async fn docs_need_their_scope_and_a_personal_token_and_unserved_paths_are_not_found() {
     let f = Fixture::new().await;
     let page = f
         .pages
@@ -819,6 +728,9 @@ async fn docs_need_their_scope_and_a_personal_token_and_chat_is_not_served() {
     for path in [
         "/conversations".to_owned(),
         format!("/conversations/{}/messages", Id::new_v7()),
+        "/members".to_owned(),
+        format!("/projects/{}/labels", f.project),
+        format!("/tasks/{}/comments", f.task),
     ] {
         let response = f
             .app

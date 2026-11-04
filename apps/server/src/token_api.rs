@@ -20,11 +20,9 @@ use crate::repositories::task_filter::{
     SubIssuesDisplay,
 };
 use crate::repositories::tasks::{
-    CommentContent, CommentRecord, CreateTask, LabelRecord, Page, ProjectRecord, SortOrder,
-    StatusRecord, TaskChanges, TaskError, TaskFilter, TaskRecord, TaskRepository, TaskSort,
-    TaskUpdate, parse_task_identifier,
+    CreateTask, Page, ProjectRecord, SortOrder, StatusRecord, TaskChanges, TaskError, TaskFilter,
+    TaskRecord, TaskRepository, TaskSort, TaskUpdate, parse_task_identifier,
 };
-use crate::repositories::workspaces::{MemberRecord, WorkspaceRepository};
 
 const PRIORITIES: [&str; 5] = ["none", "low", "medium", "high", "urgent"];
 
@@ -318,26 +316,6 @@ impl Authorized<'_> {
         TaskView::new(task, &self.principal.project_ids)
     }
 
-    /// Resolves a task UUID or identifier (`ENG-12`) to a live task in an approved project.
-    async fn task(&self, task_ref: &str) -> Result<TaskRecord> {
-        let p = self.principal;
-        let id = self
-            .api
-            .tasks
-            .resolve_task_id(p.workspace_id, task_ref)
-            .await?;
-        let task = self
-            .api
-            .tasks
-            .get_task(p.workspace_id, id, p.creator_id)
-            .await?;
-        if self.approved(task.project_id) {
-            Ok(task)
-        } else {
-            Err(TaskError::NotFound.into())
-        }
-    }
-
     pub async fn projects(&self) -> Result<Vec<ProjectRecord>> {
         self.need(ApiTokenScope::Read)?;
         let p = self.principal;
@@ -365,54 +343,6 @@ impl Authorized<'_> {
             .granted()
             .statuses(p.workspace_id, project_id, p.creator_id, cursor, limit)
             .await?)
-    }
-
-    pub async fn labels(
-        &self,
-        project_id: Id,
-        cursor: Option<&str>,
-        limit: Option<usize>,
-    ) -> Result<Page<LabelRecord>> {
-        self.need(ApiTokenScope::Read)?;
-        let limit = page_limit(cursor, limit)?;
-        if !self.approved(project_id) {
-            return Err(TokenApiError::NotAvailable);
-        }
-        let p = self.principal;
-        Ok(self
-            .api
-            .tasks
-            .labels(
-                p.workspace_id,
-                Some(project_id),
-                p.creator_id,
-                cursor,
-                limit,
-            )
-            .await?)
-    }
-
-    pub async fn members(
-        &self,
-        cursor: Option<&str>,
-        limit: Option<usize>,
-    ) -> Result<(Vec<MemberRecord>, Option<Id>)> {
-        self.need(ApiTokenScope::Read)?;
-        let limit = page_limit(cursor, limit)?;
-        let cursor = cursor
-            .map(str::parse)
-            .transpose()
-            .map_err(|_| TokenApiError::Invalid("Invalid cursor or limit"))?;
-        let p = self.principal;
-        WorkspaceRepository::new(self.api.tasks.database().clone())
-            .members(p.workspace_id, p.creator_id, cursor, limit)
-            .await
-            .map_err(|error| match error {
-                crate::repositories::workspaces::WorkspaceError::NotFound => {
-                    TokenApiError::NotAvailable
-                }
-                _ => TokenApiError::Internal,
-            })
     }
 
     pub async fn list_tasks(&self, query: TaskQuery) -> Result<Page<TaskView>> {
@@ -652,51 +582,6 @@ impl Authorized<'_> {
             )
             .await?;
         Ok(())
-    }
-
-    pub async fn comments(
-        &self,
-        task_ref: &str,
-        cursor: Option<&str>,
-        limit: Option<usize>,
-    ) -> Result<Page<CommentRecord>> {
-        self.need(ApiTokenScope::Read)?;
-        let limit = page_limit(cursor, limit)?;
-        let task = self.task(task_ref).await?;
-        let p = self.principal;
-        Ok(self
-            .api
-            .tasks
-            .comments(p.workspace_id, task.id, p.creator_id, cursor, limit)
-            .await?)
-    }
-
-    pub async fn create_comment(&self, task_ref: &str, body: String) -> Result<CommentRecord> {
-        self.need(ApiTokenScope::Write)?;
-        if body.trim().is_empty() || body.chars().count() > 100_000 || body.len() > 100_000 {
-            return Err(TokenApiError::Invalid("Invalid comment body"));
-        }
-        let p = self.principal;
-        let id = self
-            .api
-            .tasks
-            .resolve_task_id(p.workspace_id, task_ref)
-            .await?;
-        Ok(self
-            .granted()
-            .create_comment(
-                p.workspace_id,
-                id,
-                p.creator_id,
-                None,
-                CommentContent::Markdown {
-                    body,
-                    mentioned_user_ids: Vec::new(),
-                },
-                self.request_id,
-                TimestampMillis::now(),
-            )
-            .await?)
     }
 
     /// Docs and chat act as the token's creator, so they need a personal token.

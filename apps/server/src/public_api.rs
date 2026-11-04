@@ -11,7 +11,6 @@ use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
-use orbit_domain::WorkspaceRole;
 use orbit_platform::{Id, Problem, RequestId, TimestampMillis};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -21,10 +20,7 @@ use crate::repositories::api_tokens::{
     ApiTokenError, ApiTokenPrincipal, ApiTokenRepository, ApiTokenScope,
 };
 use crate::repositories::pages::PageRepository;
-use crate::repositories::tasks::{
-    CommentRecord, LabelRecord, ProjectRecord, StatusRecord, TaskError, TaskRepository,
-};
-use crate::repositories::workspaces::MemberRecord;
+use crate::repositories::tasks::{ProjectRecord, StatusRecord, TaskError, TaskRepository};
 use crate::token_api::{NewTask, TaskPatch, TaskQuery, TokenApi, TokenApiError};
 
 pub const BASE_PATH: &str = "/api/public/v1";
@@ -56,14 +52,11 @@ pub fn router(state: PublicApiState) -> Router {
         .route("/me", get(me))
         .route("/projects", get(projects))
         .route("/projects/{project_id}/statuses", get(statuses))
-        .route("/projects/{project_id}/labels", get(labels))
-        .route("/members", get(members))
         .route("/tasks", get(list_tasks).post(create_task))
         .route(
             "/tasks/{task}",
             get(get_task).patch(update_task).delete(delete_task),
         )
-        .route("/tasks/{task}/comments", get(comments).post(create_comment))
         .route("/docs", get(docs))
         .route("/docs/{page_id}", get(doc))
         .route_layer(middleware::from_fn_with_state(state.clone(), authenticate))
@@ -401,73 +394,6 @@ impl From<StatusRecord> for StatusOut {
     }
 }
 
-#[derive(Serialize)]
-struct LabelOut {
-    id: Id,
-    project_id: Id,
-    name: String,
-    color: String,
-    version: u64,
-}
-
-impl From<LabelRecord> for LabelOut {
-    fn from(l: LabelRecord) -> Self {
-        Self {
-            id: l.id,
-            project_id: l.project_id,
-            name: l.name,
-            color: l.color,
-            version: l.version,
-        }
-    }
-}
-
-#[derive(Serialize)]
-struct MemberOut {
-    user_id: Id,
-    display_name: String,
-    email: String,
-    role: WorkspaceRole,
-}
-
-impl From<MemberRecord> for MemberOut {
-    fn from(m: MemberRecord) -> Self {
-        Self {
-            user_id: m.user_id,
-            display_name: m.display_name,
-            email: m.email,
-            role: m.role,
-        }
-    }
-}
-
-#[derive(Serialize)]
-struct CommentOut {
-    id: Id,
-    task_id: Id,
-    author_id: Id,
-    body: String,
-    parent_id: Option<Id>,
-    version: u64,
-    created_at: TimestampMillis,
-    updated_at: TimestampMillis,
-}
-
-impl From<CommentRecord> for CommentOut {
-    fn from(c: CommentRecord) -> Self {
-        Self {
-            id: c.id,
-            task_id: c.task_id,
-            author_id: c.author_id,
-            body: c.body,
-            parent_id: c.parent_id,
-            version: c.version,
-            created_at: c.created_at,
-            updated_at: c.updated_at,
-        }
-    }
-}
-
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PageQuery {
@@ -527,12 +453,6 @@ struct DeleteQuery {
     expected_version: u64,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct CommentBody {
-    body: String,
-}
-
 /// Reads a query string or JSON body, or answers 400 with the parser's reason.
 macro_rules! input {
     ($ctx:expr, $value:expr) => {
@@ -586,46 +506,6 @@ async fn statuses(
             .statuses(project, query.cursor.as_deref(), query.limit)
             .await?;
         Ok(list::<_, StatusOut>(page.items, page.next_cursor))
-    }
-    .await;
-    ctx.reply(StatusCode::OK, result)
-}
-
-async fn labels(
-    State(s): State<PublicApiState>,
-    ctx: Ctx,
-    Path(project): Path<String>,
-    query: Result<Query<PageQuery>, QueryRejection>,
-) -> Response {
-    let project = path_id!(ctx, project);
-    let query = input!(ctx, query);
-    let result = async {
-        let api = s
-            .api
-            .authorize(&ctx.principal, ApiTokenScope::Read, &ctx.request_id)
-            .await?;
-        let page = api
-            .labels(project, query.cursor.as_deref(), query.limit)
-            .await?;
-        Ok(list::<_, LabelOut>(page.items, page.next_cursor))
-    }
-    .await;
-    ctx.reply(StatusCode::OK, result)
-}
-
-async fn members(
-    State(s): State<PublicApiState>,
-    ctx: Ctx,
-    query: Result<Query<PageQuery>, QueryRejection>,
-) -> Response {
-    let query = input!(ctx, query);
-    let result = async {
-        let api = s
-            .api
-            .authorize(&ctx.principal, ApiTokenScope::Read, &ctx.request_id)
-            .await?;
-        let (items, next) = api.members(query.cursor.as_deref(), query.limit).await?;
-        Ok(list::<_, MemberOut>(items, next.map(|id| id.to_string())))
     }
     .await;
     ctx.reply(StatusCode::OK, result)
@@ -742,47 +622,6 @@ async fn delete_task(
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => ctx.error(error),
     }
-}
-
-async fn comments(
-    State(s): State<PublicApiState>,
-    ctx: Ctx,
-    Path(task): Path<String>,
-    query: Result<Query<PageQuery>, QueryRejection>,
-) -> Response {
-    let query = input!(ctx, query);
-    let result = async {
-        let api = s
-            .api
-            .authorize(&ctx.principal, ApiTokenScope::Read, &ctx.request_id)
-            .await?;
-        let page = api
-            .comments(&task, query.cursor.as_deref(), query.limit)
-            .await?;
-        Ok(list::<_, CommentOut>(page.items, page.next_cursor))
-    }
-    .await;
-    ctx.reply(StatusCode::OK, result)
-}
-
-async fn create_comment(
-    State(s): State<PublicApiState>,
-    ctx: Ctx,
-    Path(task): Path<String>,
-    body: Result<Json<CommentBody>, JsonRejection>,
-) -> Response {
-    let body = input!(ctx, body);
-    let result = async {
-        let api = s
-            .api
-            .authorize(&ctx.principal, ApiTokenScope::Write, &ctx.request_id)
-            .await?;
-        api.create_comment(&task, body.body)
-            .await
-            .map(CommentOut::from)
-    }
-    .await;
-    ctx.reply(StatusCode::CREATED, result)
 }
 
 async fn docs(State(s): State<PublicApiState>, ctx: Ctx) -> Response {

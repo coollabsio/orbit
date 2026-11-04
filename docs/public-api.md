@@ -32,7 +32,7 @@ necessary.
 
 A personal token acts as the person who created it. Orbit checks on each request
 that this person is still a member of the workspace and that their account is
-not suspended. Task writes and comments show this person as the author. A
+not suspended. Task writes show this person as the author. A
 service-account token also needs its service account to be active. It can use
 tasks only, not docs.
 
@@ -40,8 +40,8 @@ tasks only, not docs.
 
 | Scope | Name in **Settings → API tokens** | Endpoints |
 | --- | --- | --- |
-| `read` | Read | Projects, statuses, labels, members, tasks and comments (read) |
-| `write` | Write | Create, update and delete tasks, and add comments |
+| `read` | Read | Projects, statuses and tasks (read) |
+| `write` | Write | Create, update and delete tasks |
 | `docs:read` | Docs read | `GET /docs`, `GET /docs/{page_id}` |
 
 The public API does not serve chat. A token with the `chat:read` scope can read
@@ -87,7 +87,7 @@ curl -sS "$ORBIT_URL/api/public/v1/me" -H "Authorization: Bearer $ORBIT_TOKEN"
 For a service-account token, `user` is `null` and `service_account` is
 `{"id", "name"}`.
 
-### Projects, statuses, labels and members
+### Projects and statuses
 
 `GET /projects`. Scope: `read`. The approved live projects. Item:
 `{id, name, key, color, version, created_at, updated_at}`.
@@ -103,22 +103,6 @@ curl -sS "$ORBIT_URL/api/public/v1/projects" -H "Authorization: Bearer $ORBIT_TO
 ```bash
 curl -sS "$ORBIT_URL/api/public/v1/projects/$PROJECT_ID/statuses" \
   -H "Authorization: Bearer $ORBIT_TOKEN"
-```
-
-`GET /projects/{project_id}/labels?cursor&limit`. Scope: `read`. Item:
-`{id, project_id, name, color, version}`.
-
-```bash
-curl -sS "$ORBIT_URL/api/public/v1/projects/$PROJECT_ID/labels" \
-  -H "Authorization: Bearer $ORBIT_TOKEN"
-```
-
-`GET /members?cursor&limit`. Scope: `read`. The workspace members, to find
-assignee IDs. Item: `{user_id, display_name, email, role}`. `role` is `owner`,
-`admin` or `member`.
-
-```bash
-curl -sS "$ORBIT_URL/api/public/v1/members" -H "Authorization: Bearer $ORBIT_TOKEN"
 ```
 
 ### Tasks
@@ -188,26 +172,6 @@ trash for 30 days.
 ```bash
 curl -sS -X DELETE "$ORBIT_URL/api/public/v1/tasks/ENG-12?expected_version=4" \
   -H "Authorization: Bearer $ORBIT_TOKEN"
-```
-
-### Comments
-
-`GET /tasks/{task}/comments?cursor&limit`. Scope: `read`. Oldest first. Item:
-`{id, task_id, author_id, body, parent_id, version, created_at, updated_at}`.
-`body` is Markdown.
-
-```bash
-curl -sS "$ORBIT_URL/api/public/v1/tasks/ENG-12/comments" \
-  -H "Authorization: Bearer $ORBIT_TOKEN"
-```
-
-`POST /tasks/{task}/comments`. Scope: `write`. Body: `{"body": "Markdown"}`
-(1 to 100,000 characters). Response: `201` with the comment.
-
-```bash
-curl -sS "$ORBIT_URL/api/public/v1/tasks/ENG-12/comments" \
-  -H "Authorization: Bearer $ORBIT_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"body":"Deployed in build 512."}'
 ```
 
 ### Docs
