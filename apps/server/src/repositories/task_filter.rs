@@ -714,7 +714,7 @@ pub fn resolve_day(date: DateValue, now: TimestampMillis) -> i64 {
     }
 }
 
-fn parse_ymd(text: &str) -> Option<i64> {
+pub(crate) fn parse_ymd(text: &str) -> Option<i64> {
     let bytes = text.as_bytes();
     if !text.is_ascii() || bytes.len() != 10 || bytes[4] != b'-' || bytes[7] != b'-' {
         return None;

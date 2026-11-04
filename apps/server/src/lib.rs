@@ -18,6 +18,7 @@ pub mod live;
 pub mod mail;
 pub mod mcp;
 pub mod metrics;
+pub mod asana;
 pub mod notion;
 pub mod oauth;
 pub mod object_storage;
