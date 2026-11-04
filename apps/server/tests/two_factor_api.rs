@@ -273,6 +273,26 @@ async fn the_code_can_go_to_another_server_than_the_password() {
 }
 
 #[tokio::test]
+async fn a_flood_of_passkey_starts_does_not_block_a_two_factor_sign_in() {
+    let fixture = Fixture::new().await;
+    fixture.enable_totp().await;
+    // Anonymous passkey starts filled their whole budget.
+    sqlx::query(
+        "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 10000) \
+         INSERT INTO auth_pending (token_hash, expires_at, payload_json) \
+         SELECT 'flood-' || CAST(i AS TEXT), $1, '{\"kind\":\"passkey_login\",\"state\":{}}' FROM n",
+    )
+    .bind(TimestampMillis::now().as_millis() + 60_000)
+    .execute(fixture.identity.database().pool())
+    .await
+    .unwrap();
+
+    let (status, challenge) = fixture.login().await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{challenge}");
+    assert!(challenge["two_factor_token"].is_string());
+}
+
+#[tokio::test]
 async fn a_lockout_holds_on_every_server() {
     let fixture = Fixture::new().await;
     for _ in 0..5 {
