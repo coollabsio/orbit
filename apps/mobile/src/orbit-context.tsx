@@ -7,7 +7,7 @@ import { keys } from './data/keys'
 import { type OrbitClient, type User, type WorkspaceRecord, workspaces as listWorkspaces } from './data/orbit'
 import { loadWorkspaceId, saveWorkspaceId, type StoredSession } from './session'
 import { useSession } from './session-context'
-import { Button, EmptyState, ErrorView, LoadingView, Screen } from './ui'
+import { ErrorView, LoadingView } from './ui'
 
 export interface Orbit {
   client: OrbitClient
@@ -27,7 +27,7 @@ const OrbitContext = createContext<Orbit | null>(null)
  * The signed-in session and its current workspace: the one the user chose last, else the first. Renders its children
  * only once both are known, so every screen below can rely on `useOrbit()`.
  */
-export function OrbitProvider({ children }: { children: ReactNode }) {
+export function OrbitProvider({ children, noWorkspace }: { children: ReactNode; /** Shown while the user has no workspace. */ noWorkspace: ReactNode }) {
   const { state, signOut, setUser } = useSession()
   if (state.status !== 'signed_in') throw new Error('OrbitProvider needs a signed-in session')
   const { client, session, user } = state
@@ -47,13 +47,7 @@ export function OrbitProvider({ children }: { children: ReactNode }) {
 
   const live = list.data.filter((workspace) => !workspace.deleted_at)
   const workspace = live.find((item) => item.id === chosen) ?? live[0]
-  if (!workspace) {
-    return (
-      <Screen centered>
-        <EmptyState icon="home" title="No workspaces" description="Ask an admin to invite you, or create a workspace in Orbit on the web." action={<Button label="Sign out" variant="outline" onPress={() => void signOut()} />} />
-      </Screen>
-    )
-  }
+  if (!workspace) return noWorkspace
 
   const selectWorkspace = (id: string) => {
     setChosen(id)

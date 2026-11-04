@@ -96,3 +96,13 @@ export function useSession(): SessionContextValue {
   if (!value) throw new Error('useSession must be used inside <SessionProvider>')
   return value
 }
+
+/**
+ * The signed-in client, user and sign-out, also with no workspace (`useOrbit()` needs one): the account screens that
+ * work without a workspace, such as deleting the account, use this.
+ */
+export function useSignedIn() {
+  const { state, signOut } = useSession()
+  if (state.status !== 'signed_in') throw new Error('useSignedIn needs a signed-in session')
+  return { client: state.client, user: state.user, signOut }
+}

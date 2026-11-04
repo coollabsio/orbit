@@ -14,6 +14,8 @@ const preferenceKey = 'orbit:selected_workspace'
 const emptyWorkspaces: WorkspaceRecord[] = []
 /** What an operator with no workspace can open: Admin and their own account settings. */
 const operatorPages = /^\/(admin|profile)(\/|$)/
+/** Anyone else with no workspace has their profile, so they can still delete the account; its other pages lead there. */
+const profilePages = /^\/profile(\/|$)/
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const query = useWorkspaces()
@@ -44,10 +46,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   if (query.data === undefined) return <LoadingScreen />
   if (!value) {
     // Operators (the root user, instance admins) are not customers: with no workspace they land in Admin, without
-    // a workspace context (`AppShell` shows the operator frame), and may still create one there.
+    // a workspace context (`AppShell` shows the `NoWorkspaceShell` frame), and may still create one there.
     if (isOperator) return operatorPages.test(location.pathname) ? children : <Navigate to="/admin" replace />
-    // Anyone else with no workspace (the last one is gone, or they left it) creates one.
-    return <Navigate to="/onboarding" replace />
+    // Anyone else with no workspace (the last one is gone, or they left it) creates one, or opens their profile.
+    if (!profilePages.test(location.pathname)) return <Navigate to="/onboarding" replace />
+    return location.pathname.replace(/\/$/, '') === '/profile' ? children : <Navigate to="/profile" replace />
   }
   return <WorkspaceContext.Provider value={value}><BillingReady>{children}</BillingReady></WorkspaceContext.Provider>
 }

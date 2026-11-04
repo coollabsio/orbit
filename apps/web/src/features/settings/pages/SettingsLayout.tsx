@@ -38,7 +38,8 @@ function SettingsShell({ area }: { area: SettingsAreaName }) {
     .filter((item) => pathname === item.to || (!item.end && pathname.startsWith(`${item.to}/`)))
     .sort((a, b) => b.to.length - a.to.length)[0]
   // the new UI's app sidebar shows these links (`SidebarNav`); the classic one does not
-  const inAppShell = useContext(WorkspaceContext) !== null && newUi
+  // with no workspace, its sidebar and phone drawer always show them (`NoWorkspaceShell`)
+  const inAppShell = useContext(WorkspaceContext) === null || newUi
   return (
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
       <Pane className="relative">

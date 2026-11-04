@@ -16,7 +16,7 @@ just dev
 
 `just dev` starts Orbit at `http://127.0.0.1:8080` and Vite at `http://127.0.0.1:8888`. Vite proxies `/api`, `/mcp`, OAuth discovery, and OAuth protocol endpoints to the Rust server. The backend public origin follows the web port for OAuth redirects. Vite updates frontend code with hot module replacement. A lightweight watcher rebuilds and restarts the Rust server when backend source, migration, or Cargo files change. It runs pending migrations and idempotent development seeding before each backend start, so schema changes do not require a manual restart. The recipe records and stops only its own child processes.
 
-`just db-reset` is an explicit development-only destructive reset. `just seed` is idempotent and prints the local seed account credentials after creating a representative workspace, project, workflow, and task.
+`just db-reset` is an explicit development-only destructive reset. `just seed` is idempotent and prints the local seed account credentials after creating a representative workspace, project, workflow, and task. Each seed run also turns on **Open registration**, so new accounts can be tried in development; a change in **Admin → Settings** lasts only until the next backend restart. When no mail server is set, the seed sets the local Mailpit (see [`AGENTS.md`](../AGENTS.md)).
 
 The underlying commands are:
 
