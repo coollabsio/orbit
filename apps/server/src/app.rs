@@ -336,6 +336,21 @@ impl App {
                     .with_oauth(oauth.clone()),
                     &config.http.public_origin,
                 ),
+                public_api: crate::public_api::router(
+                    crate::public_api::PublicApiState::new(
+                        Arc::new(ApiTokenRepository::new(database.clone())),
+                        Arc::new(TaskRepository::new(database.clone())),
+                    )
+                    .with_content(
+                        Arc::new(crate::repositories::pages::PageRepository::new(
+                            database.clone(),
+                        )),
+                        Arc::new(crate::repositories::chat::ChatRepository::new(
+                            database.clone(),
+                            attachment_state.uploads.clone(),
+                        )),
+                    ),
+                ),
                 oauth: crate::oauth::router(oauth),
                 auth: {
                     let auth = auth

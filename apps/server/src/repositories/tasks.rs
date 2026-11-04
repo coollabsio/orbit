@@ -1506,9 +1506,14 @@ impl TaskRepository {
         if self
             .project_grant
             .as_ref()
-            .is_some_and(|g| !g.contains(&input.project_id) || input.parent_task_id.is_some())
+            .is_some_and(|g| !g.contains(&input.project_id))
         {
             return Err(TaskError::NotFound);
+        }
+        // The new sub-issue joins its parent's tree, which task automation can change.
+        if let Some(parent_id) = input.parent_task_id {
+            self.check_project_grant(&mut tx, workspace_id, parent_id)
+                .await?;
         }
         ensure_trial_capacity(&self.database, &mut tx, workspace_id, TrialLimit::Tasks, 1).await?;
         validate_project_status(&mut tx, workspace_id, input.project_id, input.status_id).await?;
@@ -2514,6 +2519,18 @@ impl TaskRepository {
         let id = Id::new_v7();
         let mut tx = self.database.immediate_transaction().await?;
         require_task_tx(&mut tx, workspace_id, task_id, actor_id).await?;
+        if let Some(grant) = &self.project_grant {
+            let project: String = sqlx::query_scalar(
+                "SELECT project_id FROM tasks WHERE id = $1 AND workspace_id = $2",
+            )
+            .bind(task_id.to_string())
+            .bind(workspace_id.to_string())
+            .fetch_one(&mut *tx)
+            .await?;
+            if !grant.iter().any(|id| id.to_string() == project) {
+                return Err(TaskError::NotFound);
+            }
+        }
         if let Some(parent_id) = parent_id {
             let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM task_comments WHERE id = $1 AND workspace_id = $2 AND task_id = $3").bind(parent_id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).fetch_one(&mut *tx).await?;
             if exists != 1 {

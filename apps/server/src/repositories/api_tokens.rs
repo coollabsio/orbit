@@ -46,6 +46,20 @@ pub enum ApiTokenScope {
     Mcp,
 }
 
+impl ApiTokenScope {
+    /// The name in token records and the public API; `Mcp` is "any scope", never stored.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Read => "read",
+            Self::Write => "write",
+            Self::DocsRead => "docs:read",
+            Self::ChatRead => "chat:read",
+            Self::Mcp => "mcp",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ApiTokenPrincipal {
     pub token_id: Id,
