@@ -783,7 +783,7 @@ impl PageRepository {
     }
 
     /// Fails with `NotFound` unless the page is live and visible to a member.
-    async fn get_visible(
+    pub(super) async fn get_visible(
         &self,
         workspace_id: Id,
         page_id: Id,

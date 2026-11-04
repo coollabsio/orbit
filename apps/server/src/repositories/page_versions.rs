@@ -234,6 +234,8 @@ impl PageRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<PageRecord, PageError> {
+        // Someone who cannot see the page must not load its document into memory.
+        self.get_visible(workspace_id, page_id, actor_id).await?;
         // The live document's latest edits are projected first, so the `restore` version holds
         // them; the room stays locked until the replacement is broadcast.
         let mut collab = CollabHub::of(&self.database)
