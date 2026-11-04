@@ -1741,28 +1741,41 @@ async fn registration_request(
         .await
         .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
         .is_some();
-    if !exists
-        && state
-            .account_email_allowed(email)
-            .await
-            .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
-    {
-        let token = orbit_platform::generate_opaque_token();
-        let now = TimestampMillis::now();
-        state
-            .repository
-            .store_registration_token(
-                email,
-                &token,
-                TimestampMillis::from_millis(now.as_millis() + LIFETIME_MILLIS),
-                now,
-            )
-            .await
-            .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
-        mailer.send_later(mail::templates::registration(
-            email,
-            &mailer.link(&format!("/register?token={token}")),
-        ));
+    // As with password reset: the email limit, link and email run in the background, so a new
+    // address does not answer later than one that already has an account.
+    if !exists {
+        let state = state.clone();
+        let mailer = mailer.clone();
+        let email = email.to_owned();
+        tokio::spawn(async move {
+            match state.account_email_allowed(&email).await {
+                Ok(true) => {}
+                Ok(false) => return,
+                Err(error) => {
+                    tracing::warn!(%error, "registration link not issued");
+                    return;
+                }
+            }
+            let token = orbit_platform::generate_opaque_token();
+            let now = TimestampMillis::now();
+            if let Err(error) = state
+                .repository
+                .store_registration_token(
+                    &email,
+                    &token,
+                    TimestampMillis::from_millis(now.as_millis() + LIFETIME_MILLIS),
+                    now,
+                )
+                .await
+            {
+                tracing::warn!(%error, "registration link not issued");
+                return;
+            }
+            mailer.send_later(mail::templates::registration(
+                &email,
+                &mailer.link(&format!("/register?token={token}")),
+            ));
+        });
     }
     Ok(accepted(
         "We sent a link to that address. Open it to finish creating your account.",

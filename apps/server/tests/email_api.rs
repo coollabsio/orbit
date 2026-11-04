@@ -423,6 +423,55 @@ async fn a_password_reset_answers_before_the_account_work_so_timing_reveals_no_a
 }
 
 #[tokio::test]
+async fn a_registration_request_answers_before_the_link_work_so_timing_reveals_no_account() {
+    let fixture = fixture().await;
+    let (mailer, outbox) = Mailer::recording(fixture.identity.database().clone(), ORIGIN);
+    let app = router(&fixture.identity, Some(mailer));
+    let root = Some(fixture.root_cookie.as_str());
+    call(
+        &app,
+        "PUT",
+        "/api/v1/admin/settings/smtp",
+        root,
+        Some(smtp_body()),
+    )
+    .await;
+    call(
+        &app,
+        "PUT",
+        "/api/v1/admin/settings/registration",
+        root,
+        Some(json!({"open": true})),
+    )
+    .await;
+    // Another writer holds the database: the link cannot be stored yet, but the answer comes anyway.
+    let writer = fixture
+        .identity
+        .database()
+        .immediate_transaction()
+        .await
+        .unwrap();
+    let answer = tokio::time::timeout(
+        Duration::from_secs(5),
+        call(
+            &app,
+            "POST",
+            "/api/v1/auth/register/request",
+            None,
+            Some(json!({"email": "fresh@example.com"})),
+        ),
+    )
+    .await
+    .expect("the answer does not wait for the registration link");
+    assert_eq!(answer.0, StatusCode::ACCEPTED);
+    assert!(outbox.lock().unwrap().is_empty());
+    writer.rollback().await.unwrap();
+    let emails = sent(&outbox, 1).await;
+    assert_eq!(emails.len(), 1);
+    assert_eq!(emails[0].to, "fresh@example.com");
+}
+
+#[tokio::test]
 async fn emailed_invitations_need_a_mail_server_and_send_the_link_instead_of_returning_it() {
     let fixture = fixture().await;
     let uri = format!("/api/v1/workspaces/{}/invitations", fixture.workspace_id);
