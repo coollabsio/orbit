@@ -2129,7 +2129,7 @@ async fn workspace_api_tokens_are_admin_only_and_revealed_once() {
         .await
         .unwrap();
     assert_eq!(principal.workspace_id.to_string(), setup.0);
-    assert_eq!(principal.service_account_id, None);
+    assert_eq!(principal.service_account, None);
     assert_eq!(
         principal
             .project_ids

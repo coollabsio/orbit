@@ -110,7 +110,7 @@ impl OAuthState {
                 .get::<String, _>("user_id")
                 .parse()
                 .map_err(|_| OAuthError::server())?,
-            service_account_id: None,
+            service_account: None,
             scopes: ApiTokenScope::parse_list(&granted_scopes(row.get("mcp_scopes"))),
         }))
     }

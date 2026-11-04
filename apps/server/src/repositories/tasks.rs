@@ -442,18 +442,87 @@ impl From<FilterError> for TaskError {
     }
 }
 
+/// The API token behind a write, for its audit rows: the token, and the service account it acts as.
+#[derive(Clone, Debug)]
+pub struct TokenActor {
+    pub token_id: Id,
+    pub service_account: Option<(Id, String)>,
+}
+
 #[derive(Clone)]
 pub struct TaskRepository {
     database: Database,
     project_grant: Option<Vec<Id>>,
+    token: Option<TokenActor>,
 }
 
 impl TaskRepository {
     pub fn with_project_grant(&self, projects: Vec<Id>) -> Self {
         Self {
-            database: self.database.clone(),
             project_grant: Some(projects),
+            ..self.clone()
         }
+    }
+
+    #[must_use]
+    pub fn with_token(self, token: TokenActor) -> Self {
+        Self {
+            token: Some(token),
+            ..self
+        }
+    }
+
+    fn service_account(&self) -> Option<(Id, &str)> {
+        self.token
+            .as_ref()
+            .and_then(|token| token.service_account.as_ref())
+            .map(|(id, name)| (*id, name.as_str()))
+    }
+
+    /// The audit actor and metadata of a write: the person, or for a service-account token none,
+    /// with the token and service account named in `metadata`.
+    fn attribution(&self, actor_id: Id, mut metadata: Value) -> (Option<Id>, Value) {
+        let Some(token) = &self.token else {
+            return (Some(actor_id), metadata);
+        };
+        metadata["api_token_id"] = json!(token.token_id);
+        match &token.service_account {
+            Some((id, name)) => {
+                metadata["actor_service_account_id"] = json!(id);
+                metadata["actor_service_account_name"] = json!(name);
+                (None, metadata)
+            }
+            None => (Some(actor_id), metadata),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn record_write(
+        &self,
+        tx: &mut Transaction<'_, Any>,
+        workspace_id: Id,
+        actor_id: Id,
+        action: &str,
+        resource_id: Id,
+        request_id: &str,
+        metadata: Value,
+        now: TimestampMillis,
+    ) -> Result<(), TaskError> {
+        let (actor, metadata) = self.attribution(actor_id, metadata);
+        audit::record(
+            tx,
+            workspace_id,
+            actor,
+            action,
+            AuditOutcome::Success,
+            "task",
+            Some(resource_id),
+            request_id,
+            metadata,
+            now,
+        )
+        .await?;
+        Ok(())
     }
     async fn check_project_grant(
         &self,
@@ -548,6 +617,7 @@ impl TaskRepository {
         Self {
             database,
             project_grant: None,
+            token: None,
         }
     }
 
@@ -1559,8 +1629,8 @@ impl TaskRepository {
             .as_ref()
             .map(|blocks| Value::Array(blocks.clone()).to_string());
         sqlx::query(
-            "INSERT INTO tasks (id, workspace_id, project_id, status_id, title, description, source_url, priority, position, creator_id, due_start_at, due_at, parent_task_id, version, created_at, updated_at, description_json) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 0, $14, $15, $16)",
+            "INSERT INTO tasks (id, workspace_id, project_id, status_id, title, description, source_url, priority, position, creator_id, due_start_at, due_at, parent_task_id, version, created_at, updated_at, description_json, creator_service_account_id) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 0, $14, $15, $16, $17)",
         )
         .bind(id.to_string())
         .bind(workspace_id.to_string())
@@ -1578,6 +1648,7 @@ impl TaskRepository {
         .bind(now.as_millis())
         .bind(now.as_millis())
         .bind(description_json)
+        .bind(self.service_account().map(|(id, _)| id.to_string()))
         .execute(&mut *tx)
         .await?;
         replace_assignees(&mut tx, id, &input.assignee_ids).await?;
@@ -1600,14 +1671,14 @@ impl TaskRepository {
             now,
         )
         .await?;
-        record_mutation(
+        self.record_write(
             &mut tx,
             workspace_id,
             actor_id,
             "task.created",
-            "task",
             id,
             request_id,
+            json!({}),
             now,
         )
         .await?;
@@ -1617,7 +1688,7 @@ impl TaskRepository {
             let actor = sub_issues::AutomationActor {
                 workspace_id,
                 actor_id,
-                service_account: None,
+                service_account: self.service_account(),
                 request_id,
                 now,
             };
@@ -2066,14 +2137,12 @@ impl TaskRepository {
         }
         let after = sub_issues::snapshot_in_tx(&mut tx, update.id).await?;
         let task_after = task_in_tx(&mut tx, workspace_id, update.id, false).await?;
-        audit::record(
+        self.record_write(
             &mut tx,
             workspace_id,
-            Some(actor_id),
+            actor_id,
             "task.updated",
-            AuditOutcome::Success,
-            "task",
-            Some(update.id),
+            update.id,
             request_id,
             json!({ "changes": updated_fields(update, &task_before, &task_after) }),
             now,
@@ -2084,7 +2153,7 @@ impl TaskRepository {
             let actor = sub_issues::AutomationActor {
                 workspace_id,
                 actor_id,
-                service_account: None,
+                service_account: self.service_account(),
                 request_id,
                 now,
             };
@@ -2272,14 +2341,14 @@ impl TaskRepository {
                 .await?;
         }
         for id in std::iter::once(task_id).chain(descendants.iter().copied()) {
-            record_mutation(
+            self.record_write(
                 &mut tx,
                 workspace_id,
                 actor_id,
                 "task.deleted",
-                "task",
                 id,
                 request_id,
+                json!({}),
                 now,
             )
             .await?;
@@ -2290,7 +2359,7 @@ impl TaskRepository {
             let actor = sub_issues::AutomationActor {
                 workspace_id,
                 actor_id,
-                service_account: None,
+                service_account: self.service_account(),
                 request_id,
                 now,
             };

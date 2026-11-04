@@ -179,7 +179,10 @@ async fn scenario(database: &Database) {
         .await
         .unwrap();
     assert_eq!(
-        bot_principal.service_account_id,
+        bot_principal
+            .service_account
+            .as_ref()
+            .map(|account| account.id),
         bot.api_token.service_account_id
     );
     let expired = TimestampMillis::from_millis(now.as_millis() + 120_000);

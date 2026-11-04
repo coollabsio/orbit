@@ -95,8 +95,15 @@ pub struct ApiTokenPrincipal {
     pub workspace_id: Id,
     pub project_ids: Vec<Id>,
     pub creator_id: Id,
-    pub service_account_id: Option<Id>,
+    pub service_account: Option<ServiceAccount>,
     pub scopes: Vec<ApiTokenScope>,
+}
+
+/// The non-login identity a token acts as; reads still use the creator's membership.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ServiceAccount {
+    pub id: Id,
+    pub name: String,
 }
 
 impl ApiTokenPrincipal {
@@ -251,7 +258,7 @@ impl ApiTokenRepository {
     ) -> Result<ApiTokenPrincipal, ApiTokenError> {
         let hash: [u8; 32] = Sha256::digest(token.as_bytes()).into();
         let row = sqlx::query(
-            "SELECT api_tokens.id, api_tokens.workspace_id, api_tokens.created_by, api_tokens.service_account_id, api_tokens.scopes \
+            "SELECT api_tokens.id, api_tokens.workspace_id, api_tokens.created_by, api_tokens.service_account_id, service_accounts.name AS service_account_name, api_tokens.scopes \
              FROM api_tokens JOIN workspaces ON workspaces.id = api_tokens.workspace_id \
              LEFT JOIN users ON users.id = api_tokens.created_by AND users.suspended_at IS NULL \
              LEFT JOIN memberships ON memberships.workspace_id = api_tokens.workspace_id AND memberships.user_id = api_tokens.created_by \
@@ -286,16 +293,25 @@ impl ApiTokenRepository {
             .get::<String, _>("created_by")
             .parse()
             .map_err(|_| ApiTokenError::InvalidIdentifier)?;
-        let service_account_id = row
+        let service_account = row
             .get::<Option<String>, _>("service_account_id")
-            .map(|value| value.parse().map_err(|_| ApiTokenError::InvalidIdentifier))
+            .map(|value| {
+                Ok::<_, ApiTokenError>(ServiceAccount {
+                    id: value
+                        .parse()
+                        .map_err(|_| ApiTokenError::InvalidIdentifier)?,
+                    name: row
+                        .get::<Option<String>, _>("service_account_name")
+                        .unwrap_or_default(),
+                })
+            })
             .transpose()?;
         let principal = ApiTokenPrincipal {
             token_id,
             workspace_id,
             project_ids,
             creator_id,
-            service_account_id,
+            service_account,
             scopes,
         };
         if required.is_some_and(|scope| !principal.allows(scope)) {

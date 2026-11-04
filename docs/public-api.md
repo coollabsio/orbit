@@ -32,9 +32,13 @@ necessary.
 
 A personal token acts as the person who created it. Orbit checks on each request
 that this person is still a member of the workspace and that their account is
-not suspended. Task writes show this person as the author. A
-service-account token also needs its service account to be active. It can use
-tasks only, not docs.
+not suspended. A service-account token also needs its service account to be
+active. It can use tasks only, not docs.
+
+The audit log records each task write with the ID of the token
+(`api_token_id`). A personal token shows its creator as the actor. A
+service-account token shows the service account as the actor and as the
+creator of the tasks that it makes.
 
 ## Scopes
 

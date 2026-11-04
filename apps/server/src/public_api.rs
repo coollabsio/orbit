@@ -453,12 +453,17 @@ struct DeleteQuery {
     expected_version: u64,
 }
 
-/// Reads a query string or JSON body, or answers 400 with the parser's reason.
+/// Reads a query string or JSON body, or answers 400.
 macro_rules! input {
     ($ctx:expr, $value:expr) => {
         match $value {
             Ok(value) => value.0,
-            Err(rejection) => return $ctx.invalid(&rejection.body_text()),
+            // The parser's text can quote the request; answer with a fixed message.
+            Err(_) => {
+                return $ctx.invalid(
+                    "The query string or JSON body is invalid. Check the field names, types and required fields.",
+                )
+            }
         }
     };
 }

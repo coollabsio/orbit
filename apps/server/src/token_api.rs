@@ -21,7 +21,7 @@ use crate::repositories::task_filter::{
 };
 use crate::repositories::tasks::{
     CreateTask, Page, ProjectRecord, SortOrder, StatusRecord, TaskChanges, TaskError, TaskFilter,
-    TaskRecord, TaskRepository, TaskSort, TaskUpdate, parse_task_identifier,
+    TaskRecord, TaskRepository, TaskSort, TaskUpdate, TokenActor, parse_task_identifier,
 };
 
 const PRIORITIES: [&str; 5] = ["none", "low", "medium", "high", "urgent"];
@@ -235,10 +235,9 @@ impl TokenApi {
     pub async fn me(&self, principal: &ApiTokenPrincipal) -> Result<Me> {
         let row = sqlx::query(
             "SELECT api_tokens.name, api_tokens.expires_at, workspaces.name AS workspace_name, \
-             users.email, users.display_name, service_accounts.name AS service_account_name \
+             users.email, users.display_name \
              FROM api_tokens JOIN workspaces ON workspaces.id = api_tokens.workspace_id \
              LEFT JOIN users ON users.id = api_tokens.created_by \
-             LEFT JOIN service_accounts ON service_accounts.id = api_tokens.service_account_id \
              WHERE api_tokens.id = $1 AND api_tokens.workspace_id = $2",
         )
         .bind(principal.token_id.to_string())
@@ -246,11 +245,9 @@ impl TokenApi {
         .fetch_optional(self.tasks.database().pool())
         .await?
         .ok_or(TokenApiError::NotAvailable)?;
-        let service_account = principal.service_account_id.map(|id| Named {
-            id,
-            name: row
-                .get::<Option<String>, _>("service_account_name")
-                .unwrap_or_default(),
+        let service_account = principal.service_account.as_ref().map(|account| Named {
+            id: account.id,
+            name: account.name.clone(),
         });
         let user = match service_account {
             Some(_) => None,
@@ -306,10 +303,19 @@ impl Authorized<'_> {
         self.principal.project_ids.contains(&project_id)
     }
 
+    /// The task repository limited to the token's projects, attributing writes to the token.
     fn granted(&self) -> TaskRepository {
         self.api
             .tasks
             .with_project_grant(self.principal.project_ids.clone())
+            .with_token(TokenActor {
+                token_id: self.principal.token_id,
+                service_account: self
+                    .principal
+                    .service_account
+                    .as_ref()
+                    .map(|account| (account.id, account.name.clone())),
+            })
     }
 
     fn view(&self, task: TaskRecord) -> TaskView {
@@ -591,7 +597,7 @@ impl Authorized<'_> {
         repository: &'r Option<Arc<T>>,
     ) -> Result<&'r Arc<T>> {
         self.need(scope)?;
-        if self.principal.service_account_id.is_some() {
+        if self.principal.service_account.is_some() {
             return Err(TokenApiError::NotAvailable);
         }
         repository.as_ref().ok_or(TokenApiError::NotAvailable)

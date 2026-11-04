@@ -489,7 +489,7 @@ async fn task_writes_follow_scope_version_and_workspace_rules() {
         )
         .await
         .unwrap();
-    let (token, _) = f
+    let (token, token_id) = f
         .token(
             &[ApiTokenScope::TasksRead, ApiTokenScope::TasksWrite],
             false,
@@ -515,14 +515,9 @@ async fn task_writes_follow_scope_version_and_workspace_rules() {
     assert_eq!(created["parent_task_id"], f.task.to_string());
     assert_eq!(created["version"], 0);
     let id = created["id"].as_str().unwrap().to_owned();
-    let actor: String = sqlx::query_scalar(
-        "SELECT actor_id FROM audit_events WHERE resource_id = $1 AND action = 'task.created'",
-    )
-    .bind(&id)
-    .fetch_one(f.database.pool())
-    .await
-    .unwrap();
-    assert_eq!(actor, f.user.to_string());
+    let (actor, metadata) = audit_of(&f, &id, "task.created").await;
+    assert_eq!(actor.as_deref(), Some(f.user.to_string().as_str()));
+    assert_eq!(metadata, json!({"api_token_id": token_id}));
 
     for body in [
         json!({"project_id": f.project, "status_id": status, "title": "x", "label_ids": [other_label.id]}),
@@ -870,4 +865,106 @@ async fn the_application_mounts_the_router_without_origin_or_contract_checks() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     assert!(response.headers().contains_key(header::WWW_AUTHENTICATE));
+}
+
+async fn audit_of(f: &Fixture, resource_id: &str, action: &str) -> (Option<String>, Value) {
+    let (actor, metadata): (Option<String>, String) = sqlx::query_as(
+        "SELECT actor_id, metadata_json FROM audit_events WHERE resource_id = $1 AND action = $2",
+    )
+    .bind(resource_id)
+    .bind(action)
+    .fetch_one(f.database.pool())
+    .await
+    .unwrap();
+    (actor, serde_json::from_str(&metadata).unwrap())
+}
+
+#[tokio::test]
+async fn service_account_writes_name_the_service_account_and_the_token() {
+    let f = Fixture::new().await;
+    let (token, token_id) = f.token(&[ApiTokenScope::TasksWrite], true).await;
+    let (_, me) = f.call(Some(&token), "GET", "/me", None).await;
+    let account = me["service_account"].clone();
+    let status = f.first_status(f.project).await;
+    let (code, created) = f
+        .call(
+            Some(&token),
+            "POST",
+            "/tasks",
+            Some(json!({"project_id": f.project, "status_id": status, "title": "From CI"})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{created}");
+    let id = created["id"].as_str().unwrap().to_owned();
+    let creator: Option<String> =
+        sqlx::query_scalar("SELECT creator_service_account_id FROM tasks WHERE id = $1")
+            .bind(&id)
+            .fetch_one(f.database.pool())
+            .await
+            .unwrap();
+    assert_eq!(creator.as_deref(), account["id"].as_str());
+    let (code, _) = f
+        .call(
+            Some(&token),
+            "PATCH",
+            &format!("/tasks/{id}"),
+            Some(json!({"expected_version": 0, "title": "Renamed"})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK);
+    let (code, _) = f
+        .call(
+            Some(&token),
+            "DELETE",
+            &format!("/tasks/{id}?expected_version=1"),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::NO_CONTENT);
+    for action in ["task.created", "task.updated", "task.deleted"] {
+        let (actor, metadata) = audit_of(&f, &id, action).await;
+        assert_eq!(actor, None, "{action}");
+        assert_eq!(metadata["api_token_id"], json!(token_id), "{action}");
+        assert_eq!(
+            metadata["actor_service_account_id"], account["id"],
+            "{action}"
+        );
+        assert_eq!(
+            metadata["actor_service_account_name"], account["name"],
+            "{action}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn invalid_input_gets_a_fixed_message() {
+    let f = Fixture::new().await;
+    let (token, _) = f.token(&[ApiTokenScope::TasksWrite], false).await;
+    let (code, problem) = f
+        .call(
+            Some(&token),
+            "POST",
+            "/tasks",
+            Some(json!({"project_id": f.project, "title": "x", "secret_field_xyz": "<script>"})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::BAD_REQUEST);
+    assert_eq!(problem["code"], "invalid_request");
+    assert_eq!(
+        problem["detail"],
+        "The query string or JSON body is invalid. Check the field names, types and required fields."
+    );
+    let (code, problem) = f
+        .call(
+            Some(&token),
+            "GET",
+            "/tasks?limit=abc&secret_param_xyz=1",
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::BAD_REQUEST);
+    assert!(
+        !problem.to_string().contains("secret_param_xyz"),
+        "{problem}"
+    );
 }
