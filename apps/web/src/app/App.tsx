@@ -23,6 +23,7 @@ import { AdminStoragePage } from '@/features/admin/pages/AdminStoragePage'
 import { AdminSettingsPage } from '@/features/admin/pages/AdminSettingsPage'
 import { AdminSignInProvidersPage } from '@/features/admin/pages/AdminSignInProvidersPage'
 import { AdminUsersPage } from '@/features/admin/pages/AdminUsersPage'
+import { AdminMailPage } from '@/features/admin/pages/AdminMailPage'
 import { GeneralPage } from '@/features/settings/pages/GeneralPage'
 import { GithubPage } from '@/features/settings/pages/GithubPage'
 import { EmojiPage } from '@/features/settings/pages/EmojiPage'
@@ -38,6 +39,12 @@ import { StickersPage } from '@/features/settings/pages/StickersPage'
 import { StoragePage } from '@/features/settings/pages/StoragePage'
 import { NotificationsPage } from '@/features/settings/pages/NotificationsPage'
 import { ApiTokensPage } from '@/features/settings/pages/ApiTokensPage'
+import { MailDomainsPage } from '@/features/settings/pages/mail/MailDomainsPage'
+import { MailProvidersPage } from '@/features/settings/pages/mail/MailProvidersPage'
+import { MailMailboxesPage } from '@/features/settings/pages/mail/MailMailboxesPage'
+import { MailLabelsPage } from '@/features/settings/pages/mail/MailLabelsPage'
+import { FailedMailPage } from '@/features/settings/pages/mail/FailedMailPage'
+import { MailPage } from '@/features/mail/pages/MailPage'
 import { FileStoragePage } from '@/features/settings/pages/FileStoragePage'
 import { ProfilePage } from '@/features/profile/pages/ProfilePage'
 import { AppearancePage } from '@/features/profile/pages/AppearancePage'
@@ -105,7 +112,7 @@ export default function App() {
               <Route path="docs/trash" element={<DocsPage view="trash" />} />
               <Route path="docs/import/:importId?" element={<DocsPage view="import" />} />
               <Route path="docs/:pageId?" element={<DocsPage />} />
-              <Route path="mail/*" element={<Navigate to="/tasks" replace />} />
+              <Route path="mail/*" element={<MailPage />} />
               {chatEnabled ? (
                 <>
                   <Route path="chat" element={<ChatPage />} />
@@ -140,6 +147,7 @@ export default function App() {
                 <Route path="storage" element={<AdminStoragePage />} />
                 <Route path="backups" element={<AdminBackupsPage />} />
                 <Route path="jobs" element={<AdminJobsPage />} />
+                <Route path="mail" element={<AdminMailPage />} />
               </Route>
               <Route path="settings" element={<SettingsLayout />}>
                 <Route index element={<GeneralPage />} />
@@ -159,6 +167,12 @@ export default function App() {
                 <Route path="shortcuts" element={<MovedTo path="/profile/shortcuts" />} />
                 <Route path="notifications" element={<MovedTo path="/profile/notifications" />} />
                 <Route path="api-tokens" element={<ApiTokensPage />} />
+                <Route path="mail" element={<Navigate to="/settings/mail/domains" replace />} />
+                <Route path="mail/domains" element={<MailDomainsPage />} />
+                <Route path="mail/providers" element={<MailProvidersPage />} />
+                <Route path="mail/mailboxes" element={<MailMailboxesPage />} />
+                <Route path="mail/labels" element={<MailLabelsPage />} />
+                <Route path="mail/failed" element={<FailedMailPage />} />
                 <Route path="file-storage" element={<FileStoragePage />} />
               </Route>
               <Route path="*" element={<Navigate to="/tasks" replace />} />

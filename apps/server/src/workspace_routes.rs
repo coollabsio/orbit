@@ -1771,8 +1771,16 @@ struct InstanceSettingsView {
     smtp: Option<SmtpView>,
     storage: StorageView,
     limits: LimitsView,
+    mail: InstanceMailView,
     /// The Google and GitHub OAuth clients that are saved. A provider that is not listed is off.
     sign_in_providers: Vec<SignInProviderView>,
+}
+
+/// Mail on this installation; the health card is `GET /api/v1/admin/mail`.
+#[derive(Serialize, ToSchema)]
+struct InstanceMailView {
+    /// Workspaces may add mail domains (`PUT /api/v1/admin/mail`).
+    domains_enabled: bool,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -1823,6 +1831,10 @@ async fn settings_view(
         .limits()
         .await
         .map_err(|_| internal(instance, request_id))?;
+    let mail_domains_enabled = repository
+        .mail_domains_enabled()
+        .await
+        .map_err(|_| internal(instance, request_id))?;
     let sign_in_providers = repository
         .sign_in_providers()
         .await
@@ -1859,6 +1871,9 @@ async fn settings_view(
             image_compression: state.image_compressor.as_ref().map(ImageCompressor::status),
         },
         limits: limits.into(),
+        mail: InstanceMailView {
+            domains_enabled: mail_domains_enabled,
+        },
         registration_open: settings.registration_open,
         smtp: settings.smtp.map(|smtp| SmtpView {
             host: smtp.host,

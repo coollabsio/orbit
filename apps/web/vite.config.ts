@@ -27,10 +27,13 @@ const packageVersion = (name: string): string =>
   JSON.parse(readFileSync(join(packageDir(name), 'package.json'), 'utf8')).version
 const twemojiVersion = packageVersion('twemoji-assets')
 const emojibaseVersion = packageVersion('emojibase-data')
+const pdfjsVersion = packageVersion('pdfjs-dist')
 const emojiAssets = [
   { url: `/assets/twemoji-${twemojiVersion}/`, dir: join(packageDir('twemoji-assets'), 'assets/svg/'), files: /^[0-9a-f-]+\.svg$/, type: 'image/svg+xml' },
   { url: `/assets/emojibase-${emojibaseVersion}/en/shortcodes/`, dir: join(packageDir('emojibase-data'), 'en/shortcodes/'), files: /^github\.json$/, type: 'application/json' },
   { url: `/assets/emojibase-${emojibaseVersion}/en/`, dir: join(packageDir('emojibase-data'), 'en/'), files: /^(data|messages)\.json$/, type: 'application/json' },
+  // pdf.js decoders for JPEG 2000 and JBIG2 images (scans): the JavaScript builds, as the CSP does not allow WebAssembly
+  { url: `/assets/pdfjs-${pdfjsVersion}/wasm/`, dir: join(packageDir('pdfjs-dist'), 'wasm/'), files: /^(openjpeg|jbig2)_nowasm_fallback\.js$/, type: 'text/javascript' },
 ]
 
 // https://vite.dev/config/

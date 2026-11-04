@@ -103,7 +103,7 @@ test('command palette never advertises disabled products or mock store titles', 
   await waitFor(() => expect(view.getByPlaceholderText('Search tasks, pages and navigation…')).toBeTruthy())
 
   const labels = view.getAllByRole('option').map((option) => option.textContent ?? '')
-  for (const forbidden of ['Go to Mail', 'Go to Direct Messages', 'Infrastructure', 'Proxy issue', '#general']) {
+  for (const forbidden of ['Go to Direct Messages', 'Infrastructure', 'Proxy issue', '#general']) {
     expect(labels.some((label) => label.includes(forbidden))).toBe(false)
   }
 })
@@ -126,6 +126,7 @@ test('empty search shows enabled navigation and Escape closes the palette', asyn
   const input = await view.findByPlaceholderText('Search tasks, pages and navigation…')
   expect(view.getByRole('option', { name: /Go to Tasks/ })).toBeTruthy()
   expect(view.getByRole('option', { name: /Go to Settings/ })).toBeTruthy()
+  expect(view.getByRole('option', { name: /Go to Mail/ })).toBeTruthy()
   fireEvent.keyDown(input, { key: 'Escape' })
   expect(closed).toBe(1)
 })

@@ -23,7 +23,10 @@ export function SequenceHint() {
   }, [pending])
 
   if (!shown || shown !== pending) return null
+  // a global command whose keys a page command shadows does not run here
+  const shadowed = new Set(active.flatMap((command) => (command.shadows ? [command.shadows] : [])))
   const next = active.flatMap((command) => {
+    if (shadowed.has(command.id)) return []
     const steps = parseKeys(bindings[command.id] ?? '')
     return steps?.length === 2 && steps[0] === shown ? [{ command, key: steps[1] }] : []
   })

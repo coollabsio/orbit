@@ -30,6 +30,11 @@ use crate::chat_routes::ChatState;
 use crate::export_routes::ExportState;
 use crate::import_routes::ImportState;
 use crate::integration_routes::IntegrationState;
+use crate::mail_delivery::ProviderIntake;
+use crate::mail_dns::{DnsChecker, DnsLookup, HickoryDns};
+use crate::mail_intake::MailIntake;
+use crate::mail_listener::{MailListener, MailListenerStatus, TRACE_HEADROOM};
+use crate::mail_routes::{MailSettings, MailState};
 use crate::metrics::Metrics;
 use crate::notion::client::NotionClientConfig;
 use crate::notion::import::{NotionImportService, NotionImportSettings};
@@ -38,6 +43,10 @@ use crate::page_file_routes::PageFileState;
 use crate::page_routes::PageState;
 use crate::repositories::api_tokens::ApiTokenRepository;
 use crate::repositories::identity::IdentityRepository;
+use crate::repositories::mail::{
+    DNS_CHECK_JOB, MailRepository, PENDING_CHECK_MS, PURGE_JOB, dns_check_kind, mail_ingest_kind,
+    mail_purge_kind, run_ingest_job,
+};
 use crate::repositories::page_files::PageFileRepository;
 use crate::repositories::tasks::TaskRepository;
 use crate::repositories::workspaces::WorkspaceRepository;
@@ -77,6 +86,9 @@ pub struct App {
     production_services: Option<ProductionServices>,
     /// Set when the server stops: readiness fails, so a load balancer takes it out.
     draining: Arc<AtomicBool>,
+    /// Built when `ORBIT_MAIL_ENABLED=true`; `serve` binds and runs it.
+    mail_listener: Option<MailListener>,
+    mail_status: Arc<MailListenerStatus>,
 }
 
 struct ProductionServices {
@@ -211,7 +223,8 @@ impl App {
         )
         .map_err(|error| AppError::Config(format!("object storage: {error}")))?;
         let backups = BackupService::new(&config.data.backups, &config.data.attachments)
-            .with_object_storage(object_storage.clone());
+            .with_object_storage(object_storage.clone())
+            .with_app_key(app_key);
         let blob_store = TieredBlobStore::new(
             LocalBlobStore::new(&config.data.attachments),
             object_storage.clone(),
@@ -267,6 +280,63 @@ impl App {
             },
         );
 
+        // `validate` requires the app key.
+        let mail_key =
+            app_key.ok_or_else(|| AppError::Config("ORBIT_APP_KEY is required".to_owned()))?;
+        let mail = Arc::new(MailRepository::new(
+            database.clone(),
+            attachment_state.uploads.clone(),
+            mail_key,
+        ));
+        let mail_listener = if config.mail.enabled {
+            let intake = MailIntake::new(
+                Arc::clone(&mail),
+                config.mail.max_message_bytes + TRACE_HEADROOM,
+            );
+            Some(
+                MailListener::new(config.mail.clone(), intake, Arc::clone(&mail))
+                    .map_err(|error| AppError::Config(format!("mail listener: {error}")))?,
+            )
+        } else {
+            None
+        };
+        let mail_status = mail_listener
+            .as_ref()
+            .map_or_else(Arc::default, MailListener::status);
+        let mail_dns: Arc<dyn DnsLookup> = Arc::new(HickoryDns::new(config.mail.dns_resolver));
+        // Mail from providers' webhooks works without the listener: no port 25 on this server.
+        let provider_intake = match config.mail.dns_resolver {
+            Some(resolver) => orbit_mail::Authenticator::with_resolver(resolver),
+            None => orbit_mail::Authenticator::system(),
+        }
+        .map(|auth| {
+            let hostname = config.mail.hostname.clone().unwrap_or_else(|| {
+                config
+                    .http
+                    .public_origin
+                    .split_once("://")
+                    .map_or("orbit", |(_, host)| host)
+                    .split([':', '/'])
+                    .next()
+                    .unwrap_or("orbit")
+                    .to_owned()
+            });
+            Arc::new(ProviderIntake::new(
+                Arc::clone(&mail),
+                config.mail.max_message_bytes,
+                Arc::new(auth),
+                hostname,
+            ))
+        })
+        .inspect_err(|error| tracing::warn!(%error, "mail from providers is off: no DNS resolver"))
+        .ok();
+        let dns_checker = DnsChecker::new(
+            Arc::clone(&mail),
+            Arc::clone(&mail_dns),
+            config.mail.hostname.clone(),
+            config.mail.mode,
+        );
+
         let billing = config.billing.clone().map(|billing| {
             crate::billing::Billing::new(billing, database.clone(), &config.http.public_origin)
         });
@@ -290,6 +360,8 @@ impl App {
             Arc::clone(&workspaces),
             integrity.clone(),
             notion_imports.clone(),
+            dns_checker,
+            Arc::clone(&mail),
             workspace_exports.clone(),
             billing.clone(),
             config.jobs.concurrency,
@@ -412,6 +484,22 @@ impl App {
                     attachment_state.uploads.clone(),
                     cookie_mode,
                 ),
+                mail: MailState::new(
+                    Arc::clone(&identity),
+                    mail,
+                    cookie_mode,
+                    MailSettings {
+                        enabled: config.mail.enabled,
+                        hostname: config.mail.hostname.clone(),
+                        mode: config.mail.mode,
+                    },
+                )
+                .with_origins(
+                    config.http.public_origin.clone(),
+                    config.mail.content_origin.clone(),
+                )
+                .with_health(Arc::clone(&mail_status), mail_dns)
+                .with_inbound_opt(provider_intake),
             },
             health,
             assets,
@@ -439,7 +527,25 @@ impl App {
             workspace_exports,
             production_services: Some(production_services),
             draining,
+            mail_listener,
+            mail_status,
         })
+    }
+
+    /// The SMTP listener's state for the health card.
+    #[must_use]
+    pub fn mail_listener_status(&self) -> Arc<MailListenerStatus> {
+        Arc::clone(&self.mail_status)
+    }
+
+    /// Replaces the SPF, DKIM and DMARC checker of the direct mode listener (tests use fixed DNS
+    /// answers).
+    #[must_use]
+    pub fn with_mail_authenticator(mut self, authenticator: orbit_mail::Authenticator) -> Self {
+        if let Some(listener) = &mut self.mail_listener {
+            listener.set_authenticator(authenticator);
+        }
+        self
     }
 
     pub fn router(&self) -> Router {
@@ -569,6 +675,14 @@ impl App {
                 .await
                 .map_err(|error| error.to_string())
         });
+        if let Some(mail) = self.mail_listener.take() {
+            let address = SocketAddr::new(self.config.mail.smtp_bind, self.config.mail.smtp_port);
+            let listener = MailListener::bind(&self.config.mail)
+                .await
+                .map_err(|source| AppError::Bind { address, source })?;
+            let token = service_shutdown.clone();
+            services.spawn(async move { mail.run(listener, token, BACKGROUND_DRAIN).await });
+        }
         let http_shutdown = CancellationToken::new();
         let server = serve_http(
             listener,
@@ -857,6 +971,8 @@ async fn initialize_production_services(
     workspaces: Arc<WorkspaceRepository>,
     integrity: IntegrityService,
     notion_imports: NotionImportService,
+    dns_checker: DnsChecker,
+    mail: Arc<MailRepository>,
     workspace_exports: WorkspaceExportService,
     billing: Option<crate::billing::Billing>,
     concurrency: usize,
@@ -928,6 +1044,43 @@ async fn initialize_production_services(
             })
         })
         .and_then(|worker| crate::notion::import::register_jobs(worker, notion_imports))
+        .and_then(|worker| {
+            worker.with_handler(dns_check_kind(), move |context| {
+                let checker = dns_checker.clone();
+                async move { checker.run(&context.job.payload).await }
+            })
+        })
+        .and_then(|worker| {
+            let mail = Arc::clone(&mail);
+            worker.with_handler(mail_ingest_kind(), move |context| {
+                let mail = Arc::clone(&mail);
+                async move {
+                    run_ingest_job(
+                        &mail,
+                        &context.job.payload,
+                        context.claim.attempt,
+                        context.job.max_attempts,
+                    )
+                    .await
+                }
+            })
+        })
+        .and_then(|worker| {
+            let mail = Arc::clone(&mail);
+            worker.with_handler(mail_purge_kind(), move |_| {
+                let mail = Arc::clone(&mail);
+                async move {
+                    let now = TimestampMillis::now();
+                    mail.purge(now)
+                        .await
+                        .map_err(|error| JobError::Retryable(error.to_string()))?;
+                    mail.purge_rejected(now)
+                        .await
+                        .map(|_| ())
+                        .map_err(|error| JobError::Retryable(error.to_string()))
+                }
+            })
+        })
         .and_then(|worker| crate::workspace_export::register_job(worker, workspace_exports))
         .and_then(|worker| match billing {
             Some(billing) => crate::billing::register_jobs(worker, billing),
@@ -972,6 +1125,21 @@ async fn initialize_production_services(
         &scheduler,
         NOTION_CLEANUP,
         Duration::from_secs(60 * 60),
+        now,
+    )
+    .await?;
+    // Pending domains every 10 minutes; the job picks the domains that are due.
+    ensure_schedule(
+        &scheduler,
+        DNS_CHECK_JOB,
+        Duration::from_millis(PENDING_CHECK_MS.unsigned_abs()),
+        now,
+    )
+    .await?;
+    ensure_schedule(
+        &scheduler,
+        PURGE_JOB,
+        Duration::from_secs(24 * 60 * 60),
         now,
     )
     .await?;

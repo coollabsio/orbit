@@ -1,8 +1,8 @@
 import { chatEnabled } from '@/lib/chatEnabled'
 
 /** Where a command can run. A page mounts the handlers of its contexts; `task-target` needs a target task. */
-export type Context = 'global' | 'task-list' | 'task-board' | 'timeline' | 'task-detail' | 'task-target' | 'new-task' | 'docs' | 'views' | 'chat'
-export type Group = 'General' | 'Navigation' | 'List' | 'Task' | 'Docs' | 'Chat'
+export type Context = 'global' | 'task-list' | 'task-board' | 'timeline' | 'task-detail' | 'task-target' | 'new-task' | 'docs' | 'views' | 'chat' | 'mail'
+export type Group = 'General' | 'Navigation' | 'List' | 'Task' | 'Docs' | 'Chat' | 'Mail'
 
 export interface Command {
   id: string
@@ -17,6 +17,8 @@ export interface Command {
   repeat?: true
   /** Runs while the focus is in a text field. Only for keys that have no meaning in text. */
   inInputs?: true
+  /** A page command that takes the keys of this global command while the page is open (mail's `/` and `G S`). */
+  shadows?: string
 }
 
 const REGISTRY = [
@@ -35,6 +37,7 @@ const REGISTRY = [
   { id: 'nav.views', title: 'Go to views', group: 'Navigation', keys: 'G V', context: 'global' },
   { id: 'nav.docs', title: 'Go to docs', group: 'Navigation', keys: 'G D', context: 'global' },
   { id: 'nav.chat', title: 'Go to chat', group: 'Navigation', keys: 'G C', context: 'global' },
+  { id: 'nav.mail', title: 'Go to mail', group: 'Navigation', keys: 'G I', context: 'global' },
   { id: 'nav.trash', title: 'Go to trash', group: 'Navigation', keys: 'G X', context: 'global' },
   { id: 'nav.settings', title: 'Go to settings', group: 'Navigation', keys: 'G S', context: 'global' },
   { id: 'nav.profile', title: 'Go to profile', group: 'Navigation', keys: 'G P', context: 'global' },
@@ -87,6 +90,23 @@ const REGISTRY = [
   { id: 'chat.nextUnread', title: 'Go to next unread conversation', group: 'Chat', keys: 'Alt+Shift+ArrowDown', context: 'chat', inInputs: true },
   { id: 'chat.unreads', title: 'Open unreads', group: 'Chat', keys: 'Mod+Shift+A', context: 'chat', inInputs: true },
   { id: 'chat.markAllRead', title: 'Mark all as read', group: 'Chat', keys: 'Shift+Escape', context: 'chat', inInputs: true },
+
+  // the thread list, the open thread, or the selection when there is one
+  { id: 'mail.down', title: 'Next conversation', group: 'Mail', keys: 'J', context: 'mail', repeat: true },
+  { id: 'mail.up', title: 'Previous conversation', group: 'Mail', keys: 'K', context: 'mail', repeat: true },
+  { id: 'mail.open', title: 'Open the conversation', group: 'Mail', keys: 'O', context: 'mail' },
+  { id: 'mail.openEnter', title: 'Open the conversation', group: 'Mail', keys: 'Enter', context: 'mail', fixed: true },
+  { id: 'mail.close', title: 'Close the conversation', group: 'Mail', keys: 'Escape', context: 'mail', fixed: true },
+  { id: 'mail.archive', title: 'Archive', group: 'Mail', keys: 'E', context: 'mail' },
+  { id: 'mail.trash', title: 'Move to trash', group: 'Mail', keys: 'Shift+3', context: 'mail' },
+  { id: 'mail.spam', title: 'Report spam', group: 'Mail', keys: 'Shift+1', context: 'mail' },
+  { id: 'mail.star', title: 'Star', group: 'Mail', keys: 'S', context: 'mail' },
+  { id: 'mail.read', title: 'Mark as read or unread', group: 'Mail', keys: 'U', context: 'mail' },
+  { id: 'mail.label', title: 'Change labels', group: 'Mail', keys: 'L', context: 'mail' },
+  { id: 'mail.select', title: 'Select the conversation', group: 'Mail', keys: 'X', context: 'mail' },
+  { id: 'mail.search', title: 'Search mail', group: 'Mail', keys: '/', context: 'mail', shadows: 'search.open' },
+  { id: 'mail.starred', title: 'Go to starred', group: 'Mail', keys: 'G S', context: 'mail', shadows: 'nav.settings' },
+  { id: 'mail.trashFolder', title: 'Go to trash', group: 'Mail', keys: 'G T', context: 'mail', shadows: 'nav.tasks' },
 ] as const satisfies readonly Command[]
 
 export type CommandId = (typeof REGISTRY)[number]['id']

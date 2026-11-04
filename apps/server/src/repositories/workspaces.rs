@@ -1516,6 +1516,17 @@ impl WorkspaceRepository {
             transaction.commit().await?;
             return Err(denied.into());
         }
+        // The member's personal mailbox stays for the admins, suspended: the delete below sets
+        // its owner to NULL and removes its only member.
+        crate::repositories::mail::suspend_owned_mailboxes(
+            &mut transaction,
+            workspace_id,
+            membership_id,
+            actor_id,
+            request_id,
+            now,
+        )
+        .await?;
         sqlx::query("DELETE FROM memberships WHERE id = $1 AND workspace_id = $2 AND version = $3")
             .bind(membership_id.to_string())
             .bind(workspace_id.to_string())
@@ -2070,9 +2081,9 @@ impl WorkspaceRepository {
                     .execute(&mut *transaction)
                     .await?
                     .rows_affected();
-            // Page files and chat files hold their blobs with ON DELETE RESTRICT, so they go
-            // before the blobs.
-            for table in ["page_files", "chat_message_files"] {
+            // Page files, chat files and mail receipts hold their blobs with ON DELETE RESTRICT,
+            // so they go before the blobs. A receipt takes its parsed messages along.
+            for table in ["page_files", "chat_message_files", "mail_receipts"] {
                 attachment_references_purged += sqlx::query(sqlx::AssertSqlSafe(format!(
                     "DELETE FROM {table} WHERE workspace_id = $1"
                 )))

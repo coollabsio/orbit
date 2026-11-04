@@ -318,7 +318,7 @@
 }
 
 /*
- * Page print / "Save as PDF" (Docs page menu → Export → PDF; `printPage` in features/docs/pageExport.ts).
+ * Page print / "Save as PDF" (Docs page menu → Export → PDF, mail message menu → Print; `printPage` in lib/print.ts).
  * While <html> has [data-print-doc] only the open page's content ([data-print-root] in DocEditor) prints: the app
  * sidebar, docs tree, page header, menus and toasts are hidden; the content is full width, light-themed whatever the
  * app theme, with images fitted to the page. A static stylesheet on purpose: the production CSP blocks injected

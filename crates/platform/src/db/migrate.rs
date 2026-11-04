@@ -124,7 +124,8 @@ async fn run_pending_migrations(
 ) -> Result<usize, GuardedMigrationError> {
     let pending = runner.pending(database).await?;
     if pending.iter().any(|migration| migration.destructive) {
-        let service = BackupService::new(&config.data.backups, &config.data.attachments);
+        let service = BackupService::new(&config.data.backups, &config.data.attachments)
+            .with_app_key(config.app_key.map(|key| *key.bytes()));
         let backup = service.create_pre_migration(database).await?;
         service.verify(&backup.id).await?;
     }
@@ -457,6 +458,11 @@ impl MigrationRunner {
                     ),
                     false,
                 ),
+                Migration::new(
+                    66,
+                    include_str!("../../../../apps/server/migrations/0066_mail.sql"),
+                    false,
+                ),
             ],
         );
         runner.postgres = vec![
@@ -572,6 +578,11 @@ impl MigrationRunner {
                 include_str!(
                     "../../../../apps/server/migrations/postgres/0065_confirm_setup_owner_email.sql"
                 ),
+                false,
+            ),
+            Migration::new(
+                66,
+                include_str!("../../../../apps/server/migrations/postgres/0066_mail.sql"),
                 false,
             ),
         ];

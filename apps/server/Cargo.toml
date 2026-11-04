@@ -11,6 +11,7 @@ path = "src/main.rs"
 [dependencies]
 axum = { version = "0.8", features = ["multipart", "ws"] }
 base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 chacha20poly1305 = "0.10"
 clap = { version = "4", features = ["derive"] }
 futures-util = "0.3"
@@ -19,10 +20,13 @@ lettre = { version = "0.11.23", default-features = false, features = ["builder",
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 http-body-util = "0.1"
 include_dir = "0.7"
+multer = "3"
 mime_guess = "2"
 oxide-auth = "=0.6.1"
 url = "2"
+unicode-normalization = "0.1"
 orbit-domain = { path = "../../crates/orbit" }
+orbit-mail = { path = "../../crates/mail" }
 orbit-platform = { path = "../../crates/platform" }
 percent-encoding = "2"
 rmcp = { version = "=3.5.0", default-features = false, features = ["server", "transport-streamable-http-server"] }
@@ -57,6 +61,8 @@ webp = { version = "0.3.1", default-features = false }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 
 [dev-dependencies]
+rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
+rustls-pki-types = "1"
 orbit-platform = { path = "../../crates/platform", features = ["test-support"] }
 sqlx = { version = "0.9", default-features = false, features = ["postgres"] }
 tempfile = "3"

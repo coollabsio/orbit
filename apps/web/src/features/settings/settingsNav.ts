@@ -1,5 +1,5 @@
 import { useContext, type ComponentType } from 'react'
-import { ArchiveBox, Brush, Card, Chart, ClipboardText, CloudConnection, Cpu, SecurityUser, Driver, Key, Keyboard, Link2, Lock, Login, Notification as Bell, Setting2 as Settings, ShieldTick as ShieldCheck, SmileCircle, Sms as Mail, Sticker, Danger as TriangleAlert, DocumentDownload, User, People as Users } from 'reicon-react'
+import { ArchiveBox, Brush, Card, Chart, ClipboardText, CloudConnection, Cpu, SecurityUser, Driver, Key, Keyboard, Link2, Lock, Login, Notification as Bell, Setting2 as Settings, ShieldTick as ShieldCheck, SmileCircle, Sms as Mail, Sticker, Danger as TriangleAlert, DocumentDownload, User, People as Users, Global, Routing, DirectInbox, Tag, SmsTracking } from 'reicon-react'
 import type { Permission } from '@orbit/api/generated/types.gen'
 import { RobotIcon } from '@/components/common/icons/RobotIcon'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
@@ -48,6 +48,16 @@ const AREAS: Record<SettingsAreaName, SettingsArea> = {
         items: [
           { to: '/settings/emoji', label: 'Emoji', icon: SmileCircle, permission: 'chat.manage' },
           { to: '/settings/stickers', label: 'Stickers', icon: Sticker, permission: 'chat.manage' },
+        ],
+      },
+      {
+        label: 'Mail',
+        items: [
+          { to: '/settings/mail/domains', label: 'Domains', icon: Global, permission: 'mail.manage' },
+          { to: '/settings/mail/providers', label: 'Providers', icon: Routing, permission: 'mail.manage' },
+          { to: '/settings/mail/mailboxes', label: 'Mailboxes', icon: DirectInbox, permission: 'mail.manage' },
+          { to: '/settings/mail/labels', label: 'Mail labels', icon: Tag, permission: 'mail.manage' },
+          { to: '/settings/mail/failed', label: 'Failed messages', icon: SmsTracking, permission: 'mail.manage' },
         ],
       },
       {
@@ -109,6 +119,7 @@ const AREAS: Record<SettingsAreaName, SettingsArea> = {
           { to: '/admin', label: 'General', icon: Settings, end: true },
           { to: '/admin/users', label: 'Users', icon: Users },
           { to: '/admin/email', label: 'Email', icon: Mail },
+          { to: '/admin/mail', label: 'Inbound mail', icon: DirectInbox },
           { to: '/admin/sign-in-providers', label: 'Sign-in providers', icon: Login },
           { to: '/admin/limits', label: 'Limits', icon: Chart },
         ],

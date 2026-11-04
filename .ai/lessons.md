@@ -4,7 +4,7 @@
 - Do not squash or edit a migration after a local database has applied it. Orbit checks both version and checksum at startup. If an uncommitted migration must be consolidated, compare the old and new schemas and back up the database before reconciling its migration records; do not reset user data to make the dev server start.
 - SQLite table rebuilds (to change a CHECK): the runner holds a transaction with `foreign_keys=ON`, so `PRAGMA foreign_keys=OFF` is a no-op and `ALTER TABLE … RENAME` fails on triggers that name the table. Copy rows aside, `DROP`, re-`CREATE` under the same name, re-insert under `PRAGMA defer_foreign_keys=ON`, then recreate the table's own indexes and triggers (see `0021`).
 - `scripts/dev-server-watch.sh` reruns `migrate run --seed` against `data/orbit.sqlite` on every source change, so a new migration is applied to the dev DB (and its checksum frozen) the moment it compiles. Get the SQL right in tests (`embedded_through`) before any `cargo build` of the server while the watcher runs (0023 was applied this way on 2026-09-25).
-- A new migration also needs: its entry in `crates/platform/src/db/migrate.rs` (else every query on the new table returns 500), `SUPPORTED_SCHEMA_VERSION` in `crates/platform/src/backup.rs` (restore refuses newer snapshots), and the version number in `crates/platform/tests/{database,backup}.rs` and `apps/server/tests/app_smoke.rs`. A new route also needs the path and operation counts in `apps/server/tests/openapi_contract.rs` and `just api`.
+- A new migration also needs: its entry in `crates/platform/src/db/migrate.rs` (else every query on the new table returns 500), `SUPPORTED_SCHEMA_VERSION` in `crates/platform/src/backup.rs` (restore refuses newer snapshots), and the version number in `crates/platform/tests/{database,backup}.rs` and `apps/server/tests/app_smoke.rs`. A new route also needs the path and operation counts in `apps/server/tests/openapi_contract.rs` and `just api`. A new recurring schedule (`ensure_schedule` in `app.rs`) also needs its kind in `app_smoke.rs` `critical_durable_schedules_exist_before_serve`.
 - A rebuilt table becomes the *newest* FK child, and SQLite runs parent-delete cascades newest-child first. A `RESTRICT` reference to the rebuilt table (e.g. `tasks.status_id`) can then block a cascade that used to work. Hard deletes must delete the restricting children explicitly first.
 
 ## Two database backends (SQLite + Postgres)
@@ -26,6 +26,9 @@
   (Python's SQLite 3.46.1 also says ok). It made the weekly integrity job (which runs at App start in tests) stop the
   server once `page_search` rows were updated. `IntegrityService::full` now confirms such findings with FTS5's own check
   (2026-09-25). Check new virtual tables against `integrity_check` with the bundled SQLite, not the system one.
+- A contentless FTS5 table (`content = ''`) refuses `DELETE` unless it is created with `contentless_delete = 1`
+  (SQLite 3.43+); then `DELETE … WHERE rowid = …` works and reads the same as on the Postgres twin table
+  (`mail_search`, 2026-10-23).
 
 ## Untrusted nested input
 - Any recursive walk over user content (markdown, Yjs XML/updates, JSON) needs a depth cap or an explicit stack: a stack overflow aborts the whole server process, not one request. yrs itself recurses on decode and delete, so `blocknote::update_too_deep` checks each update before yrs reads it (2026-10-31).
@@ -67,6 +70,7 @@
 - Typecheck the web app with `bunx tsc -b` (what `build` runs). `tsc --noEmit -p .` checks nothing: the root `tsconfig.json` only has references, so it passes on broken code.
 - In `apps/web`, run `bun test src` (the `test` script), not bare `bun test`: bare `bun test` also loads the Playwright e2e files and reports false failures.
 - `cargo test --workspace` stops at the first failing test binary; use `--no-fail-fast` to see the whole suite.
+- JavaScript packages install once at the repository root (Bun workspace, hoisted linker). An old `apps/web/node_modules` from before that layout shadows the root copies; two copies of `prosemirror-view` make the editor tests fail with `this.members[i].localsInner`. Delete it and run `bun install --frozen-lockfile` at the root.
 - Playwright rewrites the tracked `apps/web/test-results/.last-run.json` on every run — restore it with `git checkout --` and never commit it.
 - If the Agent Browser fails with a `SingletonLock: File exists` profile error, another session holds the profile. Do not delete the lock; drive the dev server with `playwright-core` from `apps/web/node_modules` instead (script in `/tmp`).
 - If Playwright's pinned headless shell is not installed, set `PLAYWRIGHT_CHROMIUM_EXECUTABLE` to an installed one under `~/.cache/ms-playwright/` (`playwright.config.ts` reads it) instead of downloading browsers.

@@ -239,3 +239,11 @@ fn only_the_owner_changes_or_removes_an_admin() {
         Ok(())
     );
 }
+
+#[test]
+fn mail_manage_is_owner_and_admin_only() {
+    assert!(Permission::ALL.contains(&Permission::MailManage));
+    assert!(Policy::can(WorkspaceRole::Owner, Permission::MailManage));
+    assert!(Policy::can(WorkspaceRole::Admin, Permission::MailManage));
+    assert!(!Policy::can(WorkspaceRole::Member, Permission::MailManage));
+}
