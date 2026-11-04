@@ -16,6 +16,9 @@ use utoipa::ToSchema;
 pub const MAX_IMAGE_EDGE: u32 = 2560;
 pub const SHRINK_MIN_BYTES: i64 = 512 * 1024;
 const QUALITY: f32 = 85.0;
+/// The most decoded pixel bytes one image may take. The header sets the size of the decode buffer, so a small
+/// file that claims a huge size would otherwise make the allocation fail and stop the whole process.
+const MAX_DECODED_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, ToSchema)]
 pub struct CompressSummary {
@@ -64,6 +67,9 @@ fn compress(bytes: &[u8]) -> Option<Vec<u8>> {
     let mut decoder = ImageReader::with_format(Cursor::new(bytes), format)
         .into_decoder()
         .ok()?;
+    if decoder.total_bytes() > MAX_DECODED_BYTES {
+        return None;
+    }
     // Browsers show a photo turned as its EXIF orientation says; the WebP has no EXIF, so turn the pixels.
     let orientation = decoder.orientation().ok()?;
     let mut image = DynamicImage::from_decoder(decoder).ok()?;
@@ -244,6 +250,21 @@ mod tests {
             .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Png)
             .unwrap();
         bytes
+    }
+
+    #[test]
+    fn compress_skips_an_image_whose_header_claims_a_huge_size() {
+        let mut bytes = Vec::new();
+        DynamicImage::ImageRgb8(ImageBuffer::new(8, 8))
+            .write_to(&mut Cursor::new(&mut bytes), ImageFormat::Jpeg)
+            .unwrap();
+        // The baseline frame header (FF C0, length, precision) is followed by the height and the width.
+        let sof = bytes
+            .windows(2)
+            .position(|pair| pair == [0xFF, 0xC0])
+            .unwrap();
+        bytes[sof + 5..sof + 9].copy_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF]);
+        assert!(compress(&bytes).is_none());
     }
 
     #[test]
