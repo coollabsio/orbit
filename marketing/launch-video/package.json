@@ -5,6 +5,7 @@
   "scripts": {
     "studio": "remotion studio",
     "render": "remotion render LaunchVideo out/orbit-launch.mp4 --codec=h264 --crf=16",
+    "render:promo": "scripts/render-promo.sh",
     "still": "remotion still LaunchVideo out/still.png",
     "capture": "cd ../../apps/web && bun ../../marketing/launch-video/scripts/capture.mjs",
     "render:music": "scripts/render-music.sh"

@@ -13,20 +13,20 @@
       },
       "firstGroupHeader": {
         "x": 224,
-        "y": 49,
+        "y": 48,
         "w": 1376,
         "h": 36
       },
       "rowWithLabels": {
         "x": 224,
-        "y": 325,
+        "y": 324,
         "w": 1376,
         "h": 40
       },
       "toolbar": {
-        "x": 1033,
+        "x": 1112,
         "y": 8,
-        "w": 555,
+        "w": 476,
         "h": 32
       }
     },
@@ -37,11 +37,11 @@
       },
       "firstRowCheckbox": {
         "x": 244,
-        "y": 105
+        "y": 104
       },
       "firstRowTitle": {
-        "x": 955,
-        "y": 105
+        "x": 878,
+        "y": 104
       },
       "displayButton": {
         "x": 1429,
@@ -67,37 +67,37 @@
       },
       "firstTwoColumns": {
         "x": 236,
-        "y": 61,
+        "y": 60,
         "w": 652,
-        "h": 939
+        "h": 940
       },
       "boardArea": {
         "x": 236,
-        "y": 61,
+        "y": 60,
         "w": 320,
-        "h": 939
+        "h": 940
       },
       "card": {
         "x": 243,
-        "y": 99,
+        "y": 98,
         "w": 306,
-        "h": 77
+        "h": 93
       },
       "toolbar": {
-        "x": 1033,
+        "x": 1112,
         "y": 8,
-        "w": 555,
+        "w": 476,
         "h": 32
       }
     },
     "targets": {
       "firstCard": {
         "x": 396,
-        "y": 138
+        "y": 145
       },
       "secondColumnFirstCard": {
         "x": 728,
-        "y": 162
+        "y": 168
       },
       "newTaskButton": {
         "x": 1535,
@@ -118,15 +118,15 @@
         "h": 1000
       },
       "zoomControls": {
-        "x": 844,
-        "y": 8,
-        "w": 167,
-        "h": 32
+        "x": 837,
+        "y": 10,
+        "w": 175,
+        "h": 28
       },
       "todayMarker": {
-        "x": 1040,
-        "y": 79,
-        "w": 25,
+        "x": 1043,
+        "y": 78,
+        "w": 18,
         "h": 20
       },
       "toolbar": {
@@ -137,24 +137,24 @@
       },
       "timelineBars": {
         "x": 646,
-        "y": 138,
-        "w": 797,
+        "y": 137,
+        "w": 862,
         "h": 856
       },
       "firstBar": {
-        "x": 758,
-        "y": 138,
-        "w": 248,
+        "x": 1204,
+        "y": 137,
+        "w": 176,
         "h": 24
       }
     },
     "targets": {
       "firstBar": {
-        "x": 882,
-        "y": 150
+        "x": 1292,
+        "y": 149
       },
       "todayButton": {
-        "x": 1050,
+        "x": 1051,
         "y": 24
       }
     }
@@ -353,7 +353,7 @@
         "x": 512,
         "y": 120,
         "w": 576,
-        "h": 414
+        "h": 448
       },
       "input": {
         "x": 541,
@@ -365,7 +365,7 @@
         "x": 518,
         "y": 160,
         "w": 564,
-        "h": 368
+        "h": 402
       }
     },
     "targets": {
@@ -681,43 +681,43 @@
     "notes": "Docs page \"Welcome to Orbit\": cover, icon, title, rich content; full doc tree (dark).",
     "regions": {
       "tree": {
-        "x": 224,
-        "y": 0,
-        "w": 260,
-        "h": 1000
+        "x": 0,
+        "y": 148,
+        "w": 259,
+        "h": 804
       },
       "favorites": {
-        "x": 232,
-        "y": 56,
+        "x": 8,
+        "y": 184,
         "w": 243,
         "h": 127
       },
       "cover": {
-        "x": 484,
+        "x": 260,
         "y": 48,
-        "w": 1116,
+        "w": 1340,
         "h": 224
       },
       "icon": {
-        "x": 662,
+        "x": 550,
         "y": 244,
         "w": 79,
-        "h": 64
+        "h": 79
       },
       "title": {
-        "x": 662,
-        "y": 308,
+        "x": 550,
+        "y": 326,
         "w": 760,
         "h": 38
       },
       "content": {
-        "x": 608,
-        "y": 366,
+        "x": 496,
+        "y": 384,
         "w": 868,
-        "h": 635
+        "h": 616
       },
       "breadcrumbs": {
-        "x": 496,
+        "x": 272,
         "y": 14,
         "w": 184,
         "h": 19
@@ -729,20 +729,20 @@
         "h": 28
       },
       "saveStatus": {
-        "x": 1453,
+        "x": 1444,
         "y": 16,
-        "w": 63,
+        "w": 34,
         "h": 16
       },
       "checklist": {
-        "x": 662,
-        "y": 708,
+        "x": 550,
+        "y": 713,
         "w": 760,
         "h": 150
       },
       "table": {
-        "x": 662,
-        "y": 927,
+        "x": 550,
+        "y": 926,
         "w": 760,
         "h": 74
       }
@@ -753,12 +753,8 @@
         "y": 24
       },
       "newPage": {
-        "x": 457,
-        "y": 24
-      },
-      "docsNav": {
-        "x": 112,
-        "y": 205
+        "x": 233,
+        "y": 162
       }
     }
   },
@@ -769,31 +765,31 @@
     "notes": "Docs page \"Architecture overview\" scrolled to the table, code block and checklist (dark).",
     "regions": {
       "tree": {
-        "x": 224,
-        "y": 0,
-        "w": 260,
-        "h": 1000
+        "x": 0,
+        "y": 148,
+        "w": 259,
+        "h": 804
       },
       "codeBlock": {
-        "x": 662,
-        "y": 740,
+        "x": 550,
+        "y": 727,
         "w": 760,
-        "h": 260
+        "h": 270
       },
       "table": {
-        "x": 662,
-        "y": 457,
+        "x": 550,
+        "y": 451,
         "w": 760,
         "h": 214
       },
       "image": {
-        "x": 662,
+        "x": 550,
         "y": 54,
         "w": 760,
         "h": 334
       },
       "content": {
-        "x": 608,
+        "x": 496,
         "y": 0,
         "w": 868,
         "h": 1000
@@ -808,56 +804,56 @@
     "notes": "Doc tree: Favorites, teamspaces (Engineering / Product / Company) with nested pages, Private.",
     "regions": {
       "tree": {
-        "x": 224,
-        "y": 0,
-        "w": 260,
-        "h": 1000
+        "x": 0,
+        "y": 148,
+        "w": 259,
+        "h": 804
       },
       "favorites": {
-        "x": 232,
-        "y": 56,
+        "x": 8,
+        "y": 184,
         "w": 243,
-        "h": 28
+        "h": 29
       },
       "engineering": {
-        "x": 232,
-        "y": 192,
+        "x": 8,
+        "y": 321,
         "w": 243,
         "h": 263
       },
       "product": {
-        "x": 232,
-        "y": 456,
+        "x": 8,
+        "y": 585,
         "w": 243,
         "h": 164
       },
       "company": {
-        "x": 232,
-        "y": 621,
+        "x": 8,
+        "y": 750,
         "w": 243,
         "h": 230
       },
       "defaultSpace": {
-        "x": 232,
-        "y": 126,
+        "x": 8,
+        "y": 255,
         "w": 243,
         "h": 65
       },
       "private": {
-        "x": 232,
-        "y": 864,
+        "x": 8,
+        "y": 993,
         "w": 243,
-        "h": 94
+        "h": 7
       },
       "rfcChildren": {
-        "x": 232,
-        "y": 357,
+        "x": 8,
+        "y": 486,
         "w": 243,
         "h": 98
       },
       "activeRow": {
-        "x": 232,
-        "y": 357,
+        "x": 8,
+        "y": 486,
         "w": 243,
         "h": 32
       }
@@ -868,12 +864,8 @@
         "y": 24
       },
       "newPage": {
-        "x": 457,
-        "y": 24
-      },
-      "docsNav": {
-        "x": 112,
-        "y": 205
+        "x": 233,
+        "y": 162
       }
     }
   },
@@ -884,38 +876,38 @@
     "notes": "Slash menu open on an empty line of \"Design principles\" (block options).",
     "regions": {
       "slashMenu": {
-        "x": 662,
-        "y": 430,
+        "x": 550,
+        "y": 448,
         "w": 351,
-        "h": 561
+        "h": 542
       },
       "caretLine": {
-        "x": 662,
-        "y": 396,
+        "x": 550,
+        "y": 414,
         "w": 760,
         "h": 30
       },
       "content": {
-        "x": 608,
-        "y": 366,
+        "x": 496,
+        "y": 384,
         "w": 868,
-        "h": 498
+        "h": 485
       },
       "tree": {
-        "x": 224,
-        "y": 0,
-        "w": 260,
-        "h": 1000
+        "x": 0,
+        "y": 148,
+        "w": 259,
+        "h": 804
       }
     },
     "targets": {
       "caret": {
-        "x": 1042,
-        "y": 411
+        "x": 930,
+        "y": 429
       },
       "slashMenu": {
-        "x": 838,
-        "y": 711
+        "x": 726,
+        "y": 719
       }
     }
   },
@@ -1279,7 +1271,7 @@
       },
       "mailNav": {
         "x": 112,
-        "y": 239
+        "y": 270
       }
     }
   },
@@ -1323,65 +1315,9 @@
     "file": "chat.png",
     "width": 3200,
     "height": 2000,
-    "notes": "Chat (upcoming, mock data): #engineering with grouped messages, a Rust code block, GitHub PR chip + GitHub bot post, reactions, @mention highlight, thread preview card, member list.",
-    "regions": {
-      "channelSidebar": {
-        "x": 224,
-        "y": 0,
-        "w": 240,
-        "h": 1000
-      },
-      "messages": {
-        "x": 464,
-        "y": 48,
-        "w": 896,
-        "h": 898
-      },
-      "composer": {
-        "x": 464,
-        "y": 946,
-        "w": 896,
-        "h": 54
-      },
-      "reactionMessage": {
-        "x": 480,
-        "y": 623,
-        "w": 864,
-        "h": 80
-      },
-      "codeBlock": {
-        "x": 538,
-        "y": 180,
-        "w": 452,
-        "h": 146
-      },
-      "githubChip": {
-        "x": 1114,
-        "y": 394,
-        "w": 145,
-        "h": 20
-      },
-      "mention": {
-        "x": 480,
-        "y": 767,
-        "w": 864,
-        "h": 48
-      }
-    },
-    "targets": {
-      "reactionMessage": {
-        "x": 912,
-        "y": 663
-      },
-      "threadPreview": {
-        "x": 693,
-        "y": 507
-      },
-      "composer": {
-        "x": 912,
-        "y": 973
-      }
-    }
+    "notes": "Chat: #engineering with reactions, a thread, a Rust code block (seed-demo-chat.ts).",
+    "regions": {},
+    "targets": {}
   },
   {
     "file": "chat-thread.png",

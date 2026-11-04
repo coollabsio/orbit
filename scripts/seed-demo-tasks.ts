@@ -163,12 +163,16 @@ for (const project of PROJECTS) {
   console.log(`+ project ${project.name}`)
 }
 
-const labels = new Map((await all<{ id: string; name: string }>(`${ws}/labels`)).map((item) => [item.name, item.id]))
-for (const label of LABELS) {
-  if (labels.has(label.name)) continue
-  const created = await api<{ id: string }>('POST', `${ws}/labels`, label)
-  labels.set(label.name, created.id)
-  console.log(`+ label ${label.name}`)
+// Labels belong to a project: create each label in every project, keyed by `projectId:name`.
+const labels = new Map<string, string>()
+for (const projectId of projects.values()) {
+  const existing = await all<{ id: string; name: string }>(`${ws}/projects/${projectId}/labels`)
+  for (const item of existing) labels.set(`${projectId}:${item.name}`, item.id)
+  for (const label of LABELS) {
+    if (labels.has(`${projectId}:${label.name}`)) continue
+    const created = await api<{ id: string }>('POST', `${ws}/projects/${projectId}/labels`, label)
+    labels.set(`${projectId}:${label.name}`, created.id)
+  }
 }
 
 const statuses = new Map<string, Map<string, string>>()
@@ -190,7 +194,7 @@ for (const task of TASKS) {
     title: task.title,
     description: task.description ?? '',
     priority: task.priority,
-    label_ids: task.labels.map((name) => labels.get(name)),
+    label_ids: task.labels.map((name) => labels.get(`${projects.get(task.project)}:${name}`)),
     assignee_ids: (task.assignees ?? []).flatMap((who) => users[who]),
     due_start_at: task.start === undefined ? null : day(task.start),
     due_at: task.due === undefined ? null : day(task.due),
