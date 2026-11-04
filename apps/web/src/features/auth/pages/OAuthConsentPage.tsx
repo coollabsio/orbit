@@ -14,6 +14,19 @@ import { oauthRequest, type OAuthConsent } from '@/features/auth/oauth'
 // Anonymous consent sessions must not trigger the app-wide /login redirect.
 const consentClient = createApiClient()
 
+const SCOPES = [
+  ['tasks:write', 'Create, change and delete tasks in selected projects'],
+  ['docs:read', 'Read workspace docs visible to you, including private docs'],
+  ['chat:read', 'Read chat visible to you, including private channels and direct messages'],
+] as const
+type Scope = (typeof SCOPES)[number][0]
+
+const PRESETS: { id: string; label: string; scopes: Scope[] }[] = [
+  { id: 'tasks-read', label: 'Read tasks only', scopes: [] },
+  { id: 'read-all', label: 'Read tasks, docs and chat', scopes: ['docs:read', 'chat:read'] },
+  { id: 'all', label: 'Full access', scopes: ['tasks:write', 'docs:read', 'chat:read'] },
+]
+
 export function OAuthConsentPage() {
   const [params] = useSearchParams()
   const request = params.get('request') ?? ''
@@ -23,7 +36,7 @@ export function OAuthConsentPage() {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [workspace, setWorkspace] = useState('')
   const [selected, setSelected] = useState<string[]>([])
-  const [scopes, setScopes] = useState<string[]>([])
+  const [scopes, setScopes] = useState<Scope[]>([])
   const consent = useQuery({
     queryKey: ['oauth-consent', request, user.data?.id],
     queryFn: () => oauthRequest<OAuthConsent>(`/api/v1/oauth/consent/${encodeURIComponent(request)}`),
@@ -62,27 +75,42 @@ export function OAuthConsentPage() {
   </div></AuthCard>
   if (user.isPending) return <LoadingScreen />
   if (user.data === null) return <Navigate to={`/login?return_to=${encodeURIComponent(`/oauth/consent?request=${request}`)}`} replace />
+  const preset = PRESETS.find((p) => p.scopes.length === scopes.length && p.scopes.every((scope) => scopes.includes(scope)))
+  const workspaceProjects = consent.data?.projects.filter((project) => project.workspace_id === workspace) ?? []
   const workspaces = [...new Map(consent.data?.projects.map((project) => [project.workspace_id, project.workspace_name])).entries()]
   return <AuthCard><div className="grid gap-5">
     <AuthBrand />
     <h1 className="text-xl font-semibold">Connect to Orbit</h1>
     {user.isError || consent.isError || !/^[A-Za-z0-9_-]{43}$/.test(request) ? <p role="alert">This request is not available. Restart the connection from your MCP client.</p> : consent.data ? <>
       <p><strong>{consent.data.client_name}</strong> wants to connect to the workspace and projects you select.</p>
-      <p className="rounded-md border border-input p-3 text-sm">If you allow access, Orbit sends the access code to <strong className="break-words">{consent.data.redirect_to}</strong>. Allow it only if you started this connection and you trust that address. The client chose its own name, and Orbit did not verify it.</p>
-      <p className="text-sm text-muted-foreground">Signed in as {user.data?.display_name}. Tasks are read-only unless you enable task writes below.</p>
+      <p className="text-sm text-muted-foreground">Signed in as {user.data?.display_name}.</p>
       <Label>Workspace<Select value={workspace} onValueChange={(value) => { setWorkspace(value ?? ''); setSelected([]) }}>
         <SelectTrigger><SelectValue placeholder="Select a workspace">{workspaces.find(([id]) => id === workspace)?.[1] ?? 'Select a workspace'}</SelectValue></SelectTrigger>
         <SelectContent>{workspaces.map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}</SelectContent>
       </Select></Label>
-      <fieldset className="grid gap-3"><legend className="mb-3 text-sm font-medium">Projects</legend>
-        {consent.data.projects.filter((project) => project.workspace_id === workspace).map((project) => <Label key={project.id} className="flex items-center gap-2">
+      <div role="group" aria-labelledby="consent-projects" className="grid gap-3">
+        <div className="flex items-center justify-between gap-3">
+          <span id="consent-projects" className="text-sm font-medium">Projects</span>
+          {workspaceProjects.length > 1 ? <Label className="flex items-center gap-2 text-sm font-normal text-muted-foreground">
+            <Checkbox checked={selected.length === workspaceProjects.length} indeterminate={selected.length > 0 && selected.length < workspaceProjects.length} onCheckedChange={(checked) => setSelected(checked ? workspaceProjects.map((project) => project.id) : [])} />
+            Select all
+          </Label> : null}
+        </div>
+        {workspaceProjects.map((project) => <Label key={project.id} className="flex items-center gap-2">
           <Checkbox checked={selected.includes(project.id)} onCheckedChange={(checked) => setSelected((ids) => checked ? [...ids, project.id] : ids.filter((id) => id !== project.id))} />
           {project.name}
         </Label>)}
         {!workspaces.length ? <p className="text-sm text-muted-foreground">No active projects are available to your account.</p> : null}
-      </fieldset>
-      <fieldset className="grid gap-3"><legend className="mb-3 text-sm font-medium">Optional permissions</legend>
-        {([['tasks:write', 'Create, change and delete tasks in selected projects'], ['docs:read', 'Read workspace docs visible to you, including private docs'], ['chat:read', 'Read chat visible to you, including private channels and direct messages']] as const).map(([scope, label]) => <Label key={scope} className="flex items-center gap-2">
+      </div>
+      <Label>Access<Select value={preset?.id ?? 'custom'} onValueChange={(value) => { const next = PRESETS.find((p) => p.id === value); if (next) setScopes(next.scopes) }}>
+        <SelectTrigger><SelectValue>{preset?.label ?? 'Custom'}</SelectValue></SelectTrigger>
+        <SelectContent>
+          {PRESETS.map((p) => <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>)}
+          {preset ? null : <SelectItem value="custom" disabled>Custom</SelectItem>}
+        </SelectContent>
+      </Select></Label>
+      <fieldset className="grid gap-3"><legend className="sr-only">Permissions</legend>
+        {SCOPES.map(([scope, label]) => <Label key={scope} className="flex items-center gap-2">
           <Checkbox checked={scopes.includes(scope)} onCheckedChange={(checked) => setScopes((current) => checked ? [...current, scope] : current.filter((s) => s !== scope))} />{label}
         </Label>)}
       </fieldset>
@@ -98,6 +126,7 @@ export function OAuthConsentPage() {
         <Button variant="outline" disabled={approve.isPending} onClick={() => approve.mutate(false)}>Deny</Button>
         <Button disabled={!workspace || !selected.length || selected.length > 100 || approve.isPending} onClick={() => approve.mutate(true)}>{scopes.length ? 'Allow selected access' : 'Allow read access'}</Button>
       </div>
+      <p className="text-xs text-muted-foreground">Allowing will redirect to <strong className="break-words font-medium text-foreground">{consent.data.redirect_to}</strong>.</p>
     </> : <p>Loading connection…</p>}
   </div></AuthCard>
 }
