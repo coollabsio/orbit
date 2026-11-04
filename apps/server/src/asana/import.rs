@@ -262,31 +262,36 @@ pub struct AsanaImportFailure {
 }
 
 /// What the import carried over besides the tasks themselves.
-#[derive(Clone, Debug, Default, Deserialize, Serialize, ToSchema)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct AsanaImportReport {
-    #[serde(default)]
     pub comments_imported: u32,
     /// Asana-hosted files downloaded and attached to the tasks.
-    #[serde(default)]
     pub files_imported: u32,
     /// Asana-hosted files that could not be downloaded (too large, gone, refused).
-    #[serde(default)]
     pub missing_files: u32,
     /// Google Drive, Dropbox and other linked attachments, added to the descriptions as links.
-    #[serde(default)]
     pub links_added: u32,
     /// "Blocked by" relations between imported tasks.
-    #[serde(default)]
     pub dependencies_linked: u32,
     /// Tasks whose Asana assignee has no Orbit member with the same email (left unassigned).
-    #[serde(default)]
     pub unmatched_assignees: u32,
     /// Subtasks deeper than five levels, not imported.
-    #[serde(default)]
     pub skipped_subtasks: u32,
     /// The first 200 failures.
-    #[serde(default, skip_deserializing)]
     pub failures: Vec<AsanaImportFailure>,
+}
+
+/// The report's counts as `asana_imports.report_json` keeps them.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(default)]
+struct StoredReport {
+    comments_imported: u32,
+    files_imported: u32,
+    missing_files: u32,
+    links_added: u32,
+    dependencies_linked: u32,
+    unmatched_assignees: u32,
+    skipped_subtasks: u32,
 }
 
 /// An Asana import. Never contains the token.
@@ -427,7 +432,7 @@ struct Run<'a> {
     client: &'a AsanaClient,
     job: &'a JobRun,
     request_id: String,
-    report: AsanaImportReport,
+    report: StoredReport,
     /// Lowercase email → member id.
     members: HashMap<String, Id>,
     /// Selected project gid → name.
@@ -655,7 +660,7 @@ impl AsanaImportService {
              WHERE id = $4 AND status = 'ready' AND token_ciphertext IS NOT NULL",
         )
         .bind(serde_json::to_string(&selection).unwrap_or_default())
-        .bind(serde_json::to_string(&AsanaImportReport::default()).unwrap_or_default())
+        .bind(serde_json::to_string(&StoredReport::default()).unwrap_or_default())
         .bind(now.as_millis())
         .bind(import_id.to_string())
         .execute(&mut *tx)
@@ -889,7 +894,7 @@ impl AsanaImportService {
         let workspace_id = parse_stored_id(row.get("workspace_id"))?;
         let user_id = parse_stored_id(row.get("user_id"))?;
         self.ensure_writable(workspace_id).await?;
-        let report: AsanaImportReport = row
+        let report: StoredReport = row
             .get::<Option<String>, _>("report_json")
             .and_then(|json| serde_json::from_str(&json).ok())
             .unwrap_or_default();
@@ -2085,11 +2090,11 @@ impl AsanaImportService {
             .transpose()
             .map_err(|_| AsanaImportError::Unavailable("invalid stored tree".to_owned()))?;
         let report = if started {
-            let mut report: AsanaImportReport = row
+            let stored: StoredReport = row
                 .get::<Option<String>, _>("report_json")
                 .and_then(|json| serde_json::from_str(&json).ok())
                 .unwrap_or_default();
-            report.failures = sqlx::query(
+            let failures = sqlx::query(
                 "SELECT asana_gid, kind, title, error FROM asana_import_items \
                  WHERE import_id = $1 AND state = 'failed' ORDER BY position LIMIT $2",
             )
@@ -2105,7 +2110,16 @@ impl AsanaImportService {
                 error: row.get::<Option<String>, _>("error").unwrap_or_default(),
             })
             .collect();
-            Some(report)
+            Some(AsanaImportReport {
+                comments_imported: stored.comments_imported,
+                files_imported: stored.files_imported,
+                missing_files: stored.missing_files,
+                links_added: stored.links_added,
+                dependencies_linked: stored.dependencies_linked,
+                unmatched_assignees: stored.unmatched_assignees,
+                skipped_subtasks: stored.skipped_subtasks,
+                failures,
+            })
         } else {
             None
         };
