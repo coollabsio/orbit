@@ -20,6 +20,7 @@ export default function GeneralScreen() {
   const { colors } = useTheme()
   const [signingOut, setSigningOut] = useState(false)
   const [signOutError, setSignOutError] = useState<string | null>(null)
+  const version = useAuthOptions().data?.version
 
   return (
     <SettingsShell title="Settings" nav={WORKSPACE_NAV}>
@@ -53,6 +54,8 @@ export default function GeneralScreen() {
       </SettingsCard>
 
       <LeaveWorkspace key={`leave-${workspace.id}`} />
+
+      {version ? <View className="items-center"><Note>Orbit v{version}</Note></View> : null}
     </SettingsShell>
   )
 }

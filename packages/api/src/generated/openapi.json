@@ -36271,7 +36271,8 @@
           "passkeys_enabled",
           "billing_enabled",
           "providers",
-          "provider_registration_open"
+          "provider_registration_open",
+          "version"
         ],
         "properties": {
           "billing_enabled": {
@@ -36300,6 +36301,10 @@
           "registration_open": {
             "type": "boolean",
             "description": "Anyone can create an account with an emailed link."
+          },
+          "version": {
+            "type": "string",
+            "description": "The Orbit release this server runs, from `[workspace.package] version` in `Cargo.toml` (for example `0.1.0`)."
           }
         }
       },

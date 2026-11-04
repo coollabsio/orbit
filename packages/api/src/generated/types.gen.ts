@@ -160,6 +160,10 @@ export type AuthOptions = {
      * Anyone can create an account with an emailed link.
      */
     registration_open: boolean;
+    /**
+     * The Orbit release this server runs, from `[workspace.package] version` in `Cargo.toml` (for example `0.1.0`).
+     */
+    version: string;
 };
 
 export type AuthProblem = {

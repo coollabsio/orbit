@@ -44,7 +44,7 @@ function renderPage(requests: string[] = [], viewer: { id: string; root: boolean
   }) as unknown as typeof fetch
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   client.setQueryData(queryKeys.currentUser, { id: viewer.id, email: 'viewer@orbit.test', display_name: 'Viewer', installation_admin: true, root: viewer.root, status: { presence: 'online' } })
-  client.setQueryData<AuthOptions>(queryKeys.authOptions, { registration_open: false, email_enabled: true, passkeys_enabled: false, billing_enabled: false, providers: [], provider_registration_open: false, ...options })
+  client.setQueryData<AuthOptions>(queryKeys.authOptions, { registration_open: false, email_enabled: true, passkeys_enabled: false, billing_enabled: false, providers: [], provider_registration_open: false, version: '0.1.0', ...options })
   return render(<QueryClientProvider client={client}><AdminUsersPage /><Toaster /></QueryClientProvider>)
 }
 

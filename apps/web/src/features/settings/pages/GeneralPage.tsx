@@ -3,6 +3,7 @@ import { UnsavedBar } from '@/components/common/UnsavedBar'
 import { Button } from '@/components/ui/button'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import { useAuthOptions } from '@/features/auth/api'
 import { useRenameWorkspace } from '@/features/workspaces/api'
 import { useCan } from '@/features/workspaces/permissions'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
@@ -16,6 +17,7 @@ export function GeneralPage() {
   const renameWorkspace = useRenameWorkspace(workspace.id)
   const renameSlow = useSlowPending(renameWorkspace.isPending)
   const canRename = useCan('workspace.update')
+  const version = useAuthOptions().data?.version
   const formRef = useRef<HTMLFormElement>(null)
   const [nameDraft, setNameDraft] = useState<{ workspaceId: string; value: string } | null>(null)
   const name = nameDraft?.workspaceId === workspace.id ? nameDraft.value : workspace.name
@@ -42,6 +44,7 @@ export function GeneralPage() {
       </SettingsCard> : null}
 
       <WorkspaceLeave key={workspace.id} />
+      {version ? <p className="text-center text-xs text-muted-foreground tabular-nums">Orbit v{version}</p> : null}
       {dirty ? (
         <UnsavedBar
           onReset={() => { if (renameWorkspace.isPending) return; setNameDraft(null); renameWorkspace.reset() }}

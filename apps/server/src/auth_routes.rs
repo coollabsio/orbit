@@ -1669,6 +1669,8 @@ struct AuthOptions {
     providers: Vec<crate::sign_in_providers::Provider>,
     /// A first sign-in with one of `providers` creates an account (registration is open; no mail server needed).
     provider_registration_open: bool,
+    /// The Orbit release this server runs, from `[workspace.package] version` in `Cargo.toml` (for example `0.1.0`).
+    version: &'static str,
 }
 
 /// What the sign-in pages offer. Public.
@@ -1692,6 +1694,7 @@ async fn auth_options(
         billing_enabled: state.billing_enabled,
         provider_registration_open: settings.registration_open && !providers.is_empty(),
         providers,
+        version: env!("CARGO_PKG_VERSION"),
     }))
 }
 
