@@ -40,10 +40,11 @@ for (const approved of [true, false]) {
         body = JSON.parse(init.body as string)
         return Response.json({ redirect_uri: callback })
       }
-      return Response.json({ client_name: 'Remote client', csrf_token: 'nonce', scope: 'tasks:read', projects: [{ id: 'project-1', name: 'Project One', workspace_id: 'workspace-1', workspace_name: 'Workspace One' }] })
+      return Response.json({ client_name: 'Remote client', redirect_to: '127.0.0.1', csrf_token: 'nonce', scope: 'tasks:read', projects: [{ id: 'project-1', name: 'Project One', workspace_id: 'workspace-1', workspace_name: 'Workspace One' }] })
     }, { preconnect: originalFetch.preconnect })
     const view = render(<Providers><OAuthConsentPage /></Providers>)
     await view.findByText('Remote client')
+    expect(view.getByText('127.0.0.1').tagName).toBe('STRONG')
     await userEvent.click(view.getByRole('checkbox', { name: 'Client runs on a remote server' }))
     if (approved) {
       fireEvent.click(view.getByRole('combobox'))

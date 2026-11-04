@@ -153,6 +153,8 @@ impl Fixture {
             )
             .await;
         assert_eq!(status, StatusCode::OK, "{consent}");
+        // The page shows where the code goes, since the client picks its own name.
+        assert_eq!(consent["redirect_to"], "127.0.0.1");
         let (status, result) = self.send("POST", &format!("/api/v1/oauth/consent/{id}"), json!({"approved":true,"csrf_token":consent["csrf_token"],"workspace_id":self.workspace,"project_ids":[self.project]}), true).await;
         assert_eq!(status, StatusCode::OK, "{result}");
         let callback = url::Url::parse(result["redirect_uri"].as_str().unwrap()).unwrap();

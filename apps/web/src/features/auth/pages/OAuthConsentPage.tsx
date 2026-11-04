@@ -68,7 +68,8 @@ export function OAuthConsentPage() {
     <h1 className="text-xl font-semibold">Connect to Orbit</h1>
     {user.isError || consent.isError || !/^[A-Za-z0-9_-]{43}$/.test(request) ? <p role="alert">This request is not available. Restart the connection from your MCP client.</p> : consent.data ? <>
       <p><strong>{consent.data.client_name}</strong> wants to connect to the workspace and projects you select.</p>
-      <p className="text-sm text-muted-foreground">Signed in as {user.data?.display_name}. Tasks are read-only unless you enable task writes below. Client names are supplied by the client, not verified by Orbit.</p>
+      <p className="rounded-md border border-input p-3 text-sm">If you allow access, Orbit sends the access code to <strong className="break-all">{consent.data.redirect_to}</strong>. Allow it only if you started this connection and you trust that address. The client chose its own name, and Orbit did not verify it.</p>
+      <p className="text-sm text-muted-foreground">Signed in as {user.data?.display_name}. Tasks are read-only unless you enable task writes below.</p>
       <Label>Workspace<Select value={workspace} onValueChange={(value) => { setWorkspace(value ?? ''); setSelected([]) }}>
         <SelectTrigger><SelectValue placeholder="Select a workspace">{workspaces.find(([id]) => id === workspace)?.[1] ?? 'Select a workspace'}</SelectValue></SelectTrigger>
         <SelectContent>{workspaces.map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}</SelectContent>

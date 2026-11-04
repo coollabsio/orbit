@@ -491,6 +491,18 @@ async fn user(state: &OAuthState, headers: &HeaderMap) -> Result<Id, OAuthError>
     .map_err(|_| OAuthError::unauthorized())
 }
 
+/// Where an approval sends the code, as the consent page shows it: the host of a web or loopback callback, or
+/// the scheme of an app's own URL. The client chooses its name, so this is what the user can trust.
+fn redirect_target(redirect_uri: &str) -> String {
+    match Url::parse(redirect_uri) {
+        Ok(url) => match url.host_str() {
+            Some(host) if !host.is_empty() => host.to_owned(),
+            _ => format!("{}:", url.scheme()),
+        },
+        Err(_) => redirect_uri.to_owned(),
+    }
+}
+
 #[derive(Serialize)]
 struct ConsentProject {
     id: String,
@@ -512,7 +524,7 @@ async fn consent(
     if updated.rows_affected() != 1 {
         return Err(OAuthError::invalid("invalid_request"));
     }
-    let client: String = sqlx::query_scalar("SELECT c.name FROM oauth_clients c JOIN oauth_requests r ON r.client_id = c.id WHERE r.id = $1")
+    let (client, redirect_uri): (String, String) = sqlx::query_as("SELECT c.name, r.redirect_uri FROM oauth_clients c JOIN oauth_requests r ON r.client_id = c.id WHERE r.id = $1")
         .bind(&id).fetch_one(&mut *tx).await?;
     let rows = sqlx::query("SELECT p.id, p.name, p.workspace_id, w.name AS workspace_name FROM projects p JOIN workspaces w ON w.id = p.workspace_id JOIN memberships m ON m.workspace_id = w.id WHERE m.user_id = $1 AND p.deleted_at IS NULL AND w.deleted_at IS NULL ORDER BY w.name, p.name, p.id")
         .bind(user.to_string()).fetch_all(&mut *tx).await?;
@@ -531,7 +543,7 @@ async fn consent(
             .fetch_one(&mut *tx)
             .await?;
     tx.commit().await?;
-    Ok(([(header::CACHE_CONTROL, "no-store")], Json(json!({"client_name": client, "scope": requested, "csrf_token": nonce, "projects": projects}))).into_response())
+    Ok(([(header::CACHE_CONTROL, "no-store")], Json(json!({"client_name": client, "redirect_to": redirect_target(&redirect_uri), "scope": requested, "csrf_token": nonce, "projects": projects}))).into_response())
 }
 
 #[derive(Deserialize)]
