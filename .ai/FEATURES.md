@@ -70,6 +70,18 @@ Core files: `TasksPage.tsx`, `components/TaskList.tsx`, `components/TaskBoard.ts
 - Writes include the observed record version. Stale writes restore the server record and expose a conflict prompt.
 - Bulk and reorder requests are one atomic request of at most 100 items. Empty unchanged choices are local no-ops.
 - Task and project trash have server-backed restore flows and 30-day retention.
+- Asana import (`pages/AsanaImportPage.tsx`, `api/asanaImports.ts`; server `asana/`, routes `/imports/asana`, migration
+  0066): "Import from Asana" under "New project" in the Tasks sidebar (and in the header project menu) opens
+  `/tasks-import`. Same states and token rules as the Notion import (scan, choose, import; token encrypted, wiped in every
+  final state; private to its creator). Choose lists projects by workspace and team (archived ones unselected). Each
+  project becomes a new Orbit project. Sections become statuses: a status with the same name is reused, otherwise
+  done-like names are `completed`, the first section `unstarted`, the rest `started`. Completed Asana tasks outside a
+  completed status go to the project's Done. Tasks keep rich-text notes, dates (dates at 12:00 UTC), priority (custom field
+  "Priority"), tags as labels, assignee matched by email (else a description line), other custom fields, linked files (as
+  links), subtasks (five levels), comments (by the importer, prefixed with the Asana author and time), Asana-hosted files
+  and dependencies (blocked by). Tasks are created with `TaskRepository::import_task`: no notifications, no sub-issue
+  auto-close, Asana's `completed_at`. A restart resumes from `asana_import_items` without duplicates. A failed or cancelled
+  import keeps what it made.
 
 ### Sub-issues
 

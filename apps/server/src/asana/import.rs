@@ -1436,47 +1436,46 @@ impl AsanaImportService {
                 .await?;
                 item.data_json = serde_json::to_string(&task).ok();
             }
-            let input = self
+            let mut input = self
                 .task_input(run, &item.project_gid, &task, parent)
                 .await?;
-            let completed_at = if task.completed {
-                task.completed_at.as_deref().and_then(parse_instant_millis)
-            } else {
-                None
-            };
-            match self
+            let completed_at = task
+                .completed_at
+                .as_deref()
+                .filter(|_| task.completed)
+                .and_then(parse_instant_millis)
+                .map(TimestampMillis::from_millis);
+            let mut created = self
                 .inner
                 .tasks
                 .import_task(
                     task_id,
                     run.workspace_id,
                     run.user_id,
-                    input,
-                    completed_at.map(TimestampMillis::from_millis),
+                    input.clone(),
+                    completed_at,
                     &run.request_id,
                     TimestampMillis::now(),
                 )
-                .await
-            {
-                Ok(_) => {}
-                // The parent was deleted meanwhile: keep the task at the top level.
-                Err(TaskError::ParentInvalid) if parent.is_some() => {
-                    let input = self.task_input(run, &item.project_gid, &task, None).await?;
-                    self.inner
-                        .tasks
-                        .import_task(
-                            task_id,
-                            run.workspace_id,
-                            run.user_id,
-                            input,
-                            completed_at.map(TimestampMillis::from_millis),
-                            &run.request_id,
-                            TimestampMillis::now(),
-                        )
-                        .await?;
-                }
-                Err(error) => return Err(Failure::from(error)),
+                .await;
+            // The parent was deleted meanwhile: keep the task at the top level.
+            if matches!(created, Err(TaskError::ParentInvalid)) && input.parent_task_id.is_some() {
+                input.parent_task_id = None;
+                created = self
+                    .inner
+                    .tasks
+                    .import_task(
+                        task_id,
+                        run.workspace_id,
+                        run.user_id,
+                        input,
+                        completed_at,
+                        &run.request_id,
+                        TimestampMillis::now(),
+                    )
+                    .await;
             }
+            created?;
         }
         sqlx::query(
             "UPDATE asana_import_items SET state = 'created' WHERE import_id = $1 AND kind = 'task' AND asana_gid = $2",
