@@ -1522,6 +1522,26 @@ impl WorkspaceRepository {
             .bind(expected_version as i64)
             .execute(&mut *transaction)
             .await?;
+        // A removed member's own credentials end here, so they do not work again if the person rejoins.
+        // Service-account tokens belong to the workspace and stay.
+        sqlx::query(
+            "UPDATE api_tokens SET revoked_at = $1 WHERE workspace_id = $2 AND created_by = $3 \
+             AND service_account_id IS NULL AND revoked_at IS NULL",
+        )
+        .bind(now.as_millis())
+        .bind(workspace_id.to_string())
+        .bind(target.user_id.to_string())
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query(
+            "UPDATE oauth_grants SET revoked_at = $1 WHERE workspace_id = $2 AND user_id = $3 \
+             AND revoked_at IS NULL",
+        )
+        .bind(now.as_millis())
+        .bind(workspace_id.to_string())
+        .bind(target.user_id.to_string())
+        .execute(&mut *transaction)
+        .await?;
         crate::workspace_export::expire_for_user(
             &mut transaction,
             Some(workspace_id),
