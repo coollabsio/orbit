@@ -5,7 +5,9 @@ use axum::http::{Request, StatusCode, header};
 use orbit_platform::{AuthenticatedUser, Id, PasswordService, TestDatabase, TimestampMillis};
 use orbit_server::auth_routes::{AuthState, CookieMode, auth_router};
 use orbit_server::repositories::identity::{AdminAccountError, IdentityRepository, SetupRequest};
+use orbit_server::repositories::two_factor::RecoveryCodeKey;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use totp_rs::{Builder, Secret};
 use tower::ServiceExt;
 
@@ -348,6 +350,14 @@ async fn changing_the_password_shares_the_sign_in_lockout() {
 async fn a_recovery_code_signs_in_once() {
     let fixture = Fixture::new().await;
     let (_, codes) = fixture.enable_totp().await;
+    // The database alone does not give the codes away: they are not stored as a plain SHA-256.
+    let plain: Vec<u8> = Sha256::digest(codes[0].replace('-', "").as_bytes()).to_vec();
+    let stored: Vec<Vec<u8>> = sqlx::query_scalar("SELECT code_hash FROM user_recovery_codes")
+        .fetch_all(fixture.identity.database().pool())
+        .await
+        .unwrap();
+    assert_eq!(stored.len(), codes.len());
+    assert!(!stored.contains(&plain));
     for expected in [StatusCode::OK, StatusCode::UNAUTHORIZED] {
         let (_, challenge) = fixture.login().await;
         let (status, _) = fixture
@@ -367,6 +377,32 @@ async fn a_recovery_code_signs_in_once() {
         .get("/api/v1/auth/two-factor", &fixture.cookie)
         .await;
     assert_eq!(status_body["recovery_codes_left"], 9);
+}
+
+#[tokio::test]
+async fn a_recovery_code_stored_before_the_hmac_still_signs_in_once() {
+    let fixture = Fixture::new().await;
+    fixture.enable_totp().await;
+    // A code from before the HMAC: stored as the plain SHA-256 of the normalized code.
+    sqlx::query(
+        "UPDATE user_recovery_codes SET code_hash = $1 WHERE code_hash = \
+         (SELECT code_hash FROM user_recovery_codes ORDER BY code_hash LIMIT 1)",
+    )
+    .bind(Sha256::digest(b"abcde12345").to_vec())
+    .execute(fixture.identity.database().pool())
+    .await
+    .unwrap();
+    for expected in [StatusCode::OK, StatusCode::UNAUTHORIZED] {
+        let (_, challenge) = fixture.login().await;
+        let (status, _) = fixture
+            .post(
+                "/api/v1/auth/login/two-factor",
+                None,
+                json!({"two_factor_token": challenge["two_factor_token"], "code": "abcde-12345"}),
+            )
+            .await;
+        assert_eq!(status, expected);
+    }
 }
 
 #[tokio::test]
@@ -460,7 +496,7 @@ async fn an_admin_resets_another_users_two_factor() {
         .unwrap();
     fixture
         .identity
-        .enable_totp(member, 1, "test", now)
+        .enable_totp(member, 1, &RecoveryCodeKey::new(&[7; 32]), "test", now)
         .await
         .unwrap()
         .unwrap();

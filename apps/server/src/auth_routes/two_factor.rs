@@ -26,7 +26,7 @@ use super::{
 use crate::audit::AuditOutcome;
 use crate::repositories::identity::{AuthenticatedSession, IdentityError};
 use crate::repositories::sign_in_providers::ProviderSignInError;
-use crate::repositories::two_factor::TwoFactorStatus;
+use crate::repositories::two_factor::{RecoveryCodeKey, TwoFactorStatus};
 use crate::secret_box::{decrypt_secret, encrypt_secret};
 use crate::sign_in_providers::{ProviderFailure, ProviderProfile};
 
@@ -441,10 +441,24 @@ async fn check_code(
         };
         return state.repository.use_totp_step(user.id, step).await;
     }
+    let Some(codes_key) = recovery_code_key(state) else {
+        return Ok(false);
+    };
     state
         .repository
-        .use_recovery_code(user.id, &code, request_id, TimestampMillis::now())
+        .use_recovery_code(
+            user.id,
+            &code,
+            &codes_key,
+            request_id,
+            TimestampMillis::now(),
+        )
         .await
+}
+
+/// Recovery codes are hashed under the app key, as the authenticator app secret is encrypted with it.
+fn recovery_code_key(state: &AuthState) -> Option<RecoveryCodeKey> {
+    state.app_key.as_ref().map(RecoveryCodeKey::new)
 }
 
 /// The time step `code` is right for, by the user's saved secret (enabled or still in setup).
@@ -634,6 +648,8 @@ pub(super) async fn enable_totp(
         .enable_totp(
             session.user.id,
             step,
+            &recovery_code_key(&state)
+                .ok_or_else(|| ApiError::internal(instance, request_id.as_ref()))?,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )
@@ -701,6 +717,8 @@ pub(super) async fn regenerate_recovery_codes(
         .repository
         .regenerate_recovery_codes(
             session.user.id,
+            &recovery_code_key(&state)
+                .ok_or_else(|| ApiError::internal(instance, request_id.as_ref()))?,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )
