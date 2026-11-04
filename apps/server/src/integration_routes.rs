@@ -32,7 +32,7 @@ use crate::secret_box::{
     decrypt_secret as decrypt_github_secret, encrypt_secret as encrypt_github_secret,
 };
 
-const INSTANCE: &str = "/api/v1/integrations/discord/events";
+const INSTANCE: &str = "/api/public/v1/integrations/discord/events";
 const MAX_EVENT_ID_CHARS: usize = 200;
 const MAX_DESCRIPTION_CHARS: usize = 100_000;
 const MAX_URL_CHARS: usize = 2_048;
@@ -1304,7 +1304,7 @@ pub struct DiscordEventResponse {
 
 #[utoipa::path(
     post,
-    path = "/api/v1/integrations/discord/events",
+    path = "/api/public/v1/integrations/discord/events",
     request_body = DiscordEventBody,
     responses(
         (status = 201, description = "Task created", body = DiscordEventResponse),

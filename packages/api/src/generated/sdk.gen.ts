@@ -18,6 +18,16 @@ export type Options<TData extends TDataShape = TDataShape, ThrowOnError extends 
     meta?: keyof ClientMeta extends never ? Record<string, unknown> : ClientMeta;
 };
 
+export const createDiscordEvent = <ThrowOnError extends boolean = false>(options: Options<CreateDiscordEventData, ThrowOnError>): RequestResult<CreateDiscordEventResponses, CreateDiscordEventErrors, ThrowOnError> => (options.client ?? client).post<CreateDiscordEventResponses, CreateDiscordEventErrors, ThrowOnError>({
+    security: [{ scheme: 'bearer', type: 'http' }],
+    url: '/api/public/v1/integrations/discord/events',
+    ...options,
+    headers: {
+        'Content-Type': 'application/json',
+        ...options.headers
+    }
+});
+
 /**
  * Starts making large stored images smaller (at most 2560 px, WebP), on this server's disk and in S3. Runs in
  * the background; the settings show its progress in `storage.image_compression`. Starting it again while it runs
@@ -962,16 +972,6 @@ export const setupTotp = <ThrowOnError extends boolean = false>(options: Options
  */
 export const stripeWebhook = <ThrowOnError extends boolean = false>(options: Options<StripeWebhookData, ThrowOnError>): RequestResult<StripeWebhookResponses, StripeWebhookErrors, ThrowOnError> => (options.client ?? client).post<StripeWebhookResponses, StripeWebhookErrors, ThrowOnError>({
     url: '/api/v1/billing/stripe/webhook',
-    ...options,
-    headers: {
-        'Content-Type': 'application/json',
-        ...options.headers
-    }
-});
-
-export const createDiscordEvent = <ThrowOnError extends boolean = false>(options: Options<CreateDiscordEventData, ThrowOnError>): RequestResult<CreateDiscordEventResponses, CreateDiscordEventErrors, ThrowOnError> => (options.client ?? client).post<CreateDiscordEventResponses, CreateDiscordEventErrors, ThrowOnError>({
-    security: [{ scheme: 'bearer', type: 'http' }],
-    url: '/api/v1/integrations/discord/events',
     ...options,
     headers: {
         'Content-Type': 'application/json',

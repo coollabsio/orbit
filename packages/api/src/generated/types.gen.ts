@@ -3956,6 +3956,69 @@ export type WorkspaceStorage = {
     used_bytes: number;
 };
 
+export type CreateDiscordEventData = {
+    body: DiscordEventBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/public/v1/integrations/discord/events';
+};
+
+export type CreateDiscordEventErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * api_token_required, invalid_api_token
+     */
+    401: TaskProblem;
+    /**
+     * api_token_scope_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * contract_mismatch, integration_event_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed, integration_project_unavailable
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateDiscordEventError = CreateDiscordEventErrors[keyof CreateDiscordEventErrors];
+
+export type CreateDiscordEventResponses = {
+    /**
+     * Existing task returned for a repeated event
+     */
+    200: DiscordEventResponse;
+    /**
+     * Task created
+     */
+    201: DiscordEventResponse;
+};
+
+export type CreateDiscordEventResponse = CreateDiscordEventResponses[keyof CreateDiscordEventResponses];
+
 export type StartImageCompressionData = {
     body?: never;
     headers?: {
@@ -7830,69 +7893,6 @@ export type StripeWebhookResponses = {
      */
     200: unknown;
 };
-
-export type CreateDiscordEventData = {
-    body: DiscordEventBody;
-    headers?: {
-        /**
-         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
-         */
-        'X-Orbit-Contract'?: string;
-    };
-    path?: never;
-    query?: never;
-    url: '/api/v1/integrations/discord/events';
-};
-
-export type CreateDiscordEventErrors = {
-    /**
-     * invalid_proxy_headers, invalid_request
-     */
-    400: TaskProblem;
-    /**
-     * api_token_required, invalid_api_token
-     */
-    401: TaskProblem;
-    /**
-     * api_token_scope_forbidden
-     */
-    403: TaskProblem;
-    /**
-     * contract_mismatch, integration_event_conflict
-     */
-    409: TaskProblem;
-    /**
-     * request_too_large
-     */
-    413: TaskProblem;
-    /**
-     * validation_failed, integration_project_unavailable
-     */
-    422: TaskProblem;
-    /**
-     * internal_error
-     */
-    500: TaskProblem;
-    /**
-     * internal_error or another documented stable code
-     */
-    default: TaskProblem;
-};
-
-export type CreateDiscordEventError = CreateDiscordEventErrors[keyof CreateDiscordEventErrors];
-
-export type CreateDiscordEventResponses = {
-    /**
-     * Existing task returned for a repeated event
-     */
-    200: DiscordEventResponse;
-    /**
-     * Task created
-     */
-    201: DiscordEventResponse;
-};
-
-export type CreateDiscordEventResponse = CreateDiscordEventResponses[keyof CreateDiscordEventResponses];
 
 export type GithubManifestCallbackData = {
     body?: never;

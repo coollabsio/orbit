@@ -247,6 +247,24 @@ curl -sS "$ORBIT_URL/api/public/v1/conversations/$CONVERSATION_ID/messages?limit
   -H "Authorization: Bearer $ORBIT_TOKEN"
 ```
 
+### Discord integration
+
+`POST /integrations/discord/events`. Scope: `write`. A Discord bot sends a
+message here to make a task from it. Body: `event_id` (required, 1 to 200
+characters, the same ID for a retry), `message` (required), `message_url`
+(required, a `https://discord.com/channels/…` link) and `project_id` (optional
+when the token has one project only). Response: `201` with
+`{"task": {...}, "duplicate": false}`, or `200` with `"duplicate": true` when
+Orbit already has a task for this `event_id`. This endpoint was at
+`/api/v1/integrations/discord/events` before. Update the bot configuration to
+the new path.
+
+```bash
+curl -sS "$ORBIT_URL/api/public/v1/integrations/discord/events" \
+  -H "Authorization: Bearer $ORBIT_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"event_id":"1234","message":"Login fails","message_url":"https://discord.com/channels/1/2/3"}'
+```
+
 ## Errors
 
 Errors are RFC 9457 problem documents (`Content-Type: application/problem+json`):

@@ -1745,7 +1745,7 @@ fn valid_body(event_id: &str) -> Value {
 fn request(token: Option<&str>, body: Value) -> Request<Body> {
     let mut builder = Request::builder()
         .method("POST")
-        .uri("/api/v1/integrations/discord/events")
+        .uri("/api/public/v1/integrations/discord/events")
         .header(header::CONTENT_TYPE, "application/json");
     if let Some(token) = token {
         builder = builder.header(header::AUTHORIZATION, format!("Bearer {token}"));

@@ -59,7 +59,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
         "/api/v1/workspaces/{workspace_id}/notifications",
         "/api/v1/workspaces/{workspace_id}/api-tokens",
         "/api/v1/workspaces/{workspace_id}/api-tokens/{token_id}",
-        "/api/v1/integrations/discord/events",
+        "/api/public/v1/integrations/discord/events",
         "/api/v1/integrations/github/manifest/callback",
         "/api/v1/workspaces/{workspace_id}/github",
         "/api/v1/workspaces/{workspace_id}/github/manifest",
@@ -95,7 +95,11 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
         "#/components/schemas/TaskProblem"
     );
 
-    let discord = operation(&document, "/api/v1/integrations/discord/events", "post");
+    let discord = operation(
+        &document,
+        "/api/public/v1/integrations/discord/events",
+        "post",
+    );
     assert_eq!(discord["security"], serde_json::json!([{"bearerAuth": []}]));
     assert!(
         discord["responses"]["401"]["description"]

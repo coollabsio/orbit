@@ -10,6 +10,142 @@
     "version": "orbit-api-v1"
   },
   "paths": {
+    "/api/public/v1/integrations/discord/events": {
+      "post": {
+        "tags": [
+          "crate::integration_routes"
+        ],
+        "operationId": "create_discord_event",
+        "parameters": [
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscordEventBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Existing task returned for a repeated event",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscordEventResponse"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Task created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DiscordEventResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "api_token_required, invalid_api_token",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "api_token_scope_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, integration_event_conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed, integration_project_unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/attachments/compress": {
       "post": {
         "tags": [
@@ -8422,142 +8558,6 @@
         },
         "security": [
           {}
-        ]
-      }
-    },
-    "/api/v1/integrations/discord/events": {
-      "post": {
-        "tags": [
-          "crate::integration_routes"
-        ],
-        "operationId": "create_discord_event",
-        "parameters": [
-          {
-            "name": "X-Orbit-Contract",
-            "in": "header",
-            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DiscordEventBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Existing task returned for a repeated event",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DiscordEventResponse"
-                }
-              }
-            }
-          },
-          "201": {
-            "description": "Task created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DiscordEventResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "invalid_proxy_headers, invalid_request",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "api_token_required, invalid_api_token",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "api_token_scope_forbidden",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "contract_mismatch, integration_event_conflict",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "413": {
-            "description": "request_too_large",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "validation_failed, integration_project_unavailable",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "internal_error",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          },
-          "default": {
-            "description": "internal_error or another documented stable code",
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TaskProblem"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearerAuth": []
-          }
         ]
       }
     },
