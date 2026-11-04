@@ -2378,3 +2378,36 @@ async fn add_member(fixture: &Fixture, workspace_id: &str, email: &str) -> (Id, 
         .unwrap();
     (id, format!("__Host-orbit_session={}", session.token))
 }
+
+#[tokio::test]
+async fn content_writes_drop_unsafe_link_and_file_urls() {
+    let fixture = Fixture::new().await;
+    let page = fixture.create(json!({"title": "Links"})).await;
+    let (status, updated) = fixture
+        .call(
+            "PATCH",
+            &fixture.page_uri(id_of(&page)),
+            Some(json!({
+                "expected_version": 0,
+                "content": [
+                    {"id": "a", "type": "paragraph", "content": [
+                        {"type": "link", "href": "javascript:alert(1)", "content": [{"type": "text", "text": "Click", "styles": {}}]}
+                    ], "children": []},
+                    {"id": "b", "type": "file", "props": {"url": "javascript:alert(2)", "name": "x"}, "children": []}
+                ]
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    let stored: String = sqlx::query_scalar("SELECT content_json FROM pages WHERE id = $1")
+        .bind(id_of(&page))
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap();
+    assert!(!stored.contains("javascript:"), "{stored}");
+    assert!(stored.contains("Click"), "{stored}");
+    assert_eq!(
+        fixture.get(id_of(&page)).await["content"],
+        updated["content"]
+    );
+}
