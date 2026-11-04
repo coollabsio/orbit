@@ -512,7 +512,10 @@ async fn installation_admin_can_create_an_online_backup() {
     assert!(names.contains(&format!("{id}/manifest.json")));
     // A Postgres snapshot holds the `COPY` rows of every table instead of the SQLite file.
     let (database_file, header) = if orbit_platform::testing_postgres() {
-        (format!("{id}/database/users.copy"), &b""[..])
+        (
+            format!("{id}/database/users.copy.zst"),
+            &[0x28, 0xB5, 0x2F, 0xFD][..],
+        )
     } else {
         (format!("{id}/database.sqlite"), &b"SQLite format 3\0"[..])
     };
