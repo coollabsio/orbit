@@ -5,12 +5,10 @@ use std::sync::Arc;
 use axum::body::{Body, to_bytes};
 use axum::http::{Request, StatusCode, header};
 use orbit_platform::{
-    AttachmentMutationCoordinator, HttpPlatformLayer, Id, LocalBlobStore, OriginPolicy,
-    PasswordService, TestDatabase, TimestampMillis, UploadLimits, UploadService,
+    HttpPlatformLayer, Id, OriginPolicy, PasswordService, TestDatabase, TimestampMillis,
 };
 use orbit_server::public_api::{PublicApiState, router};
 use orbit_server::repositories::api_tokens::ApiTokenRepository;
-use orbit_server::repositories::chat::{ChannelCreate, ChatRepository, ConversationKind};
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
 use orbit_server::repositories::pages::{CreatePage, PageRepository, SpaceRequest};
 use orbit_server::repositories::tasks::{CreateTask, TaskRepository};
@@ -23,8 +21,6 @@ struct Fixture {
     tokens: ApiTokenRepository,
     tasks: TaskRepository,
     pages: Arc<PageRepository>,
-    chat: Arc<ChatRepository>,
-    _files: tempfile::TempDir,
     user: Id,
     workspace: Id,
     project: Id,
@@ -94,19 +90,11 @@ impl Fixture {
             None,
         )
         .await;
-        let files = tempfile::tempdir().unwrap();
-        let uploads = UploadService::new(
-            (*database).clone(),
-            Arc::new(LocalBlobStore::new(files.path().join("files"))),
-            AttachmentMutationCoordinator::default(),
-            UploadLimits::default(),
-        );
         let pages = Arc::new(PageRepository::new((*database).clone()));
-        let chat = Arc::new(ChatRepository::new((*database).clone(), uploads));
         let tokens = ApiTokenRepository::new((*database).clone());
         let app = router(
             PublicApiState::new(Arc::new(tokens.clone()), Arc::new(tasks.clone()))
-                .with_content(Arc::clone(&pages), Arc::clone(&chat)),
+                .with_pages(Arc::clone(&pages)),
         )
         .layer(HttpPlatformLayer::new(OriginPolicy::new(
             "https://orbit.test",
@@ -117,8 +105,6 @@ impl Fixture {
             tokens,
             tasks,
             pages,
-            chat,
-            _files: files,
             user: setup.user_id,
             workspace: setup.workspace_id,
             project: setup.project_id,
@@ -772,7 +758,7 @@ async fn a_parent_in_an_unapproved_project_does_not_leak() {
 }
 
 #[tokio::test]
-async fn docs_and_chat_need_their_scopes_and_a_personal_token() {
+async fn docs_need_their_scope_and_a_personal_token_and_chat_is_not_served() {
     let f = Fixture::new().await;
     let page = f
         .pages
@@ -791,31 +777,8 @@ async fn docs_and_chat_need_their_scopes_and_a_personal_token() {
         )
         .await
         .unwrap();
-    let channel = f
-        .chat
-        .create_channel(
-            f.workspace,
-            f.user,
-            ChannelCreate {
-                name: "deploys".into(),
-                topic: "".into(),
-                category_id: None,
-                kind: ConversationKind::Public,
-                member_ids: vec![],
-            },
-        )
-        .await
-        .unwrap();
-    let conversation = channel.value.id;
-    let messages = format!("/conversations/{conversation}/messages");
-
     let (plain, _) = f.token(&["read"], false).await;
-    for path in [
-        "/docs".to_owned(),
-        format!("/docs/{}", page.id),
-        "/conversations".to_owned(),
-        messages.clone(),
-    ] {
+    for path in ["/docs".to_owned(), format!("/docs/{}", page.id)] {
         let (code, problem) = f.call(Some(&plain), "GET", &path, None).await;
         assert_eq!(code, StatusCode::FORBIDDEN, "{path}");
         assert_eq!(problem["code"], "insufficient_scope");
@@ -853,25 +816,24 @@ async fn docs_and_chat_need_their_scopes_and_a_personal_token() {
         )
         .await;
     assert_eq!(code, StatusCode::NOT_FOUND);
-    let (code, chats) = f.call(Some(&token), "GET", "/conversations", None).await;
-    assert_eq!(code, StatusCode::OK, "{chats}");
-    assert!(chats.to_string().contains("deploys"));
-    assert_eq!(chats["next_cursor"], Value::Null);
-    let (code, page_of_messages) = f
-        .call(Some(&token), "GET", &format!("{messages}?limit=10"), None)
-        .await;
-    assert_eq!(code, StatusCode::OK, "{page_of_messages}");
-    assert!(page_of_messages["items"].is_array());
-    assert!(
-        page_of_messages
-            .as_object()
-            .unwrap()
-            .contains_key("next_cursor")
-    );
-    let (code, _) = f
-        .call(Some(&token), "GET", &format!("{messages}?limit=101"), None)
-        .await;
-    assert_eq!(code, StatusCode::BAD_REQUEST);
+    for path in [
+        "/conversations".to_owned(),
+        format!("/conversations/{}/messages", Id::new_v7()),
+    ] {
+        let response = f
+            .app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(format!("/api/public/v1{path}"))
+                    .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+    }
 
     let (service, _) = f.token(&["read", "docs:read", "chat:read"], true).await;
     let (code, me) = f.call(Some(&service), "GET", "/me", None).await;
@@ -884,12 +846,7 @@ async fn docs_and_chat_need_their_scopes_and_a_personal_token() {
             .starts_with("cli-"),
         "{me}"
     );
-    for path in [
-        "/docs".to_owned(),
-        format!("/docs/{}", page.id),
-        "/conversations".to_owned(),
-        messages,
-    ] {
+    for path in ["/docs".to_owned(), format!("/docs/{}", page.id)] {
         let (code, body) = f.call(Some(&service), "GET", &path, None).await;
         assert_eq!(code, StatusCode::NOT_FOUND, "{path}: {body}");
     }

@@ -194,7 +194,8 @@ or a repository. A service-account token does not bypass the creator's current
 workspace membership check for repository reads.
 
 The same tokens also work with the public REST API at `/api/public/v1`, for
-scripts, CI jobs and the Orbit CLI. See [Orbit public REST API](public-api.md).
+scripts, CI jobs and the Orbit CLI. That API serves tasks and docs, not chat. See
+[Orbit public REST API](public-api.md).
 
 ## Tools
 

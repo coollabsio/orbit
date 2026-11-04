@@ -48,7 +48,7 @@ impl McpState {
         pages: Arc<crate::repositories::pages::PageRepository>,
         chat: Arc<crate::repositories::chat::ChatRepository>,
     ) -> Self {
-        self.api = self.api.with_content(pages, chat);
+        self.api = self.api.with_pages(pages).with_chat(chat);
         self
     }
     pub fn with_oauth(mut self, oauth: crate::oauth::OAuthState) -> Self {

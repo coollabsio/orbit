@@ -20,7 +20,6 @@ use crate::billing::guard::READ_ONLY_DETAIL;
 use crate::repositories::api_tokens::{
     ApiTokenError, ApiTokenPrincipal, ApiTokenRepository, ApiTokenScope,
 };
-use crate::repositories::chat::ChatRepository;
 use crate::repositories::pages::PageRepository;
 use crate::repositories::tasks::{
     CommentRecord, LabelRecord, ProjectRecord, StatusRecord, TaskError, TaskRepository,
@@ -46,8 +45,8 @@ impl PublicApiState {
     }
 
     #[must_use]
-    pub fn with_content(mut self, pages: Arc<PageRepository>, chat: Arc<ChatRepository>) -> Self {
-        self.api = self.api.with_content(pages, chat);
+    pub fn with_pages(mut self, pages: Arc<PageRepository>) -> Self {
+        self.api = self.api.with_pages(pages);
         self
     }
 }
@@ -67,8 +66,6 @@ pub fn router(state: PublicApiState) -> Router {
         .route("/tasks/{task}/comments", get(comments).post(create_comment))
         .route("/docs", get(docs))
         .route("/docs/{page_id}", get(doc))
-        .route("/conversations", get(conversations))
-        .route("/conversations/{conversation_id}/messages", get(messages))
         .route_layer(middleware::from_fn_with_state(state.clone(), authenticate))
         .with_state(state);
     Router::new().nest(BASE_PATH, routes)
@@ -536,13 +533,6 @@ struct CommentBody {
     body: String,
 }
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct MessagesQuery {
-    before: Option<Id>,
-    limit: Option<usize>,
-}
-
 /// Reads a query string or JSON body, or answers 400 with the parser's reason.
 macro_rules! input {
     ($ctx:expr, $value:expr) => {
@@ -818,46 +808,6 @@ async fn doc(State(s): State<PublicApiState>, ctx: Ctx, Path(page): Path<String>
             .authorize(&ctx.principal, ApiTokenScope::DocsRead, &ctx.request_id)
             .await?;
         api.get_doc(page).await
-    }
-    .await;
-    ctx.reply(StatusCode::OK, result)
-}
-
-async fn conversations(State(s): State<PublicApiState>, ctx: Ctx) -> Response {
-    let result = async {
-        let api = s
-            .api
-            .authorize(&ctx.principal, ApiTokenScope::ChatRead, &ctx.request_id)
-            .await?;
-        Ok(List {
-            items: api.conversations().await?,
-            next_cursor: None,
-        })
-    }
-    .await;
-    ctx.reply(StatusCode::OK, result)
-}
-
-async fn messages(
-    State(s): State<PublicApiState>,
-    ctx: Ctx,
-    Path(conversation): Path<String>,
-    query: Result<Query<MessagesQuery>, QueryRejection>,
-) -> Response {
-    let conversation = path_id!(ctx, conversation);
-    let query = input!(ctx, query);
-    let result = async {
-        let api = s
-            .api
-            .authorize(&ctx.principal, ApiTokenScope::ChatRead, &ctx.request_id)
-            .await?;
-        let page = api
-            .messages(conversation, query.before, query.limit)
-            .await?;
-        Ok(List {
-            items: page.items,
-            next_cursor: page.before.map(|id| id.to_string()),
-        })
     }
     .await;
     ctx.reply(StatusCode::OK, result)

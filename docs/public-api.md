@@ -34,7 +34,7 @@ A personal token acts as the person who created it. Orbit checks on each request
 that this person is still a member of the workspace and that their account is
 not suspended. Task writes and comments show this person as the author. A
 service-account token also needs its service account to be active. It can use
-tasks only, not docs or chat.
+tasks only, not docs.
 
 ## Scopes
 
@@ -43,9 +43,10 @@ tasks only, not docs or chat.
 | `read` | Read | Projects, statuses, labels, members, tasks and comments (read) |
 | `write` | Write | Create, update and delete tasks, and add comments |
 | `docs:read` | Docs read | `GET /docs`, `GET /docs/{page_id}` |
-| `chat:read` | Chat read | `GET /conversations`, `GET /conversations/{id}/messages` |
 
-`GET /me` works with each valid token. The `write` scope does not include `read`.
+The public API does not serve chat. A token with the `chat:read` scope can read
+chat through MCP only. `GET /me` works with each valid token. The `write` scope
+does not include `read`.
 
 ## Conventions
 
@@ -56,7 +57,7 @@ tasks only, not docs or chat.
 - A `{task}` path segment is a task UUID or a task identifier such as `ENG-12`
   (the letter case is not important).
 - Lists return `{"items": [...], "next_cursor": string | null}`. To get the next
-  page, send `next_cursor` as `cursor` (for messages, as `before`) with the same
+  page, send `next_cursor` as `cursor` with the same
   other parameters. `next_cursor` is `null` on the last page and on lists that
   have no pages.
 - `limit` is 1 to 100. The default is 50.
@@ -211,9 +212,8 @@ curl -sS "$ORBIT_URL/api/public/v1/tasks/ENG-12/comments" \
 
 ### Docs
 
-Docs and chat show only the content that the token's creator can see, including
-their private docs, private channels and direct messages. The scopes are off by
-default.
+Docs show only the documents that the token's creator can see, including their
+private docs. The `docs:read` scope is off by default.
 
 `GET /docs`. Scope: `docs:read`. Item: `{id, parent_id, teamspace_id, private,
 title, icon, position, version, updated_at}`. `next_cursor` is always `null`.
@@ -227,24 +227,6 @@ curl -sS "$ORBIT_URL/api/public/v1/docs" -H "Authorization: Bearer $ORBIT_TOKEN"
 
 ```bash
 curl -sS "$ORBIT_URL/api/public/v1/docs/$PAGE_ID" -H "Authorization: Bearer $ORBIT_TOKEN"
-```
-
-### Chat
-
-`GET /conversations`. Scope: `chat:read`. The conversations, as the MCP
-`list_conversations` tool returns them. `next_cursor` is always `null`.
-
-```bash
-curl -sS "$ORBIT_URL/api/public/v1/conversations" -H "Authorization: Bearer $ORBIT_TOKEN"
-```
-
-`GET /conversations/{conversation_id}/messages?before&limit`. Scope:
-`chat:read`. Messages in time order, oldest first. To get older messages, send
-`next_cursor` as `before`.
-
-```bash
-curl -sS "$ORBIT_URL/api/public/v1/conversations/$CONVERSATION_ID/messages?limit=20" \
-  -H "Authorization: Bearer $ORBIT_TOKEN"
 ```
 
 ### Discord integration

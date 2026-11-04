@@ -181,7 +181,8 @@ pub struct TaskPatch {
 #[derive(Clone)]
 pub struct TokenApi {
     tasks: Arc<TaskRepository>,
-    content: Option<(Arc<PageRepository>, Arc<ChatRepository>)>,
+    pages: Option<Arc<PageRepository>>,
+    chat: Option<Arc<ChatRepository>>,
 }
 
 impl TokenApi {
@@ -189,13 +190,20 @@ impl TokenApi {
     pub fn new(tasks: Arc<TaskRepository>) -> Self {
         Self {
             tasks,
-            content: None,
+            pages: None,
+            chat: None,
         }
     }
 
     #[must_use]
-    pub fn with_content(mut self, pages: Arc<PageRepository>, chat: Arc<ChatRepository>) -> Self {
-        self.content = Some((pages, chat));
+    pub fn with_pages(mut self, pages: Arc<PageRepository>) -> Self {
+        self.pages = Some(pages);
+        self
+    }
+
+    #[must_use]
+    pub fn with_chat(mut self, chat: Arc<ChatRepository>) -> Self {
+        self.chat = Some(chat);
         self
     }
 
@@ -692,16 +700,20 @@ impl Authorized<'_> {
     }
 
     /// Docs and chat act as the token's creator, so they need a personal token.
-    fn content(&self, scope: ApiTokenScope) -> Result<&(Arc<PageRepository>, Arc<ChatRepository>)> {
+    fn content<'r, T>(
+        &self,
+        scope: ApiTokenScope,
+        repository: &'r Option<Arc<T>>,
+    ) -> Result<&'r Arc<T>> {
         self.need(scope)?;
         if self.principal.service_account_id.is_some() {
             return Err(TokenApiError::NotAvailable);
         }
-        self.api.content.as_ref().ok_or(TokenApiError::NotAvailable)
+        repository.as_ref().ok_or(TokenApiError::NotAvailable)
     }
 
     pub async fn list_docs(&self) -> Result<PageList> {
-        let (pages, _) = self.content(ApiTokenScope::DocsRead)?;
+        let pages = self.content(ApiTokenScope::DocsRead, &self.api.pages)?;
         let p = self.principal;
         pages
             .pages(p.workspace_id, p.creator_id)
@@ -710,7 +722,7 @@ impl Authorized<'_> {
     }
 
     pub async fn get_doc(&self, page_id: Id) -> Result<PageRecord> {
-        let (pages, _) = self.content(ApiTokenScope::DocsRead)?;
+        let pages = self.content(ApiTokenScope::DocsRead, &self.api.pages)?;
         let p = self.principal;
         pages
             .get_page(p.workspace_id, page_id, p.creator_id)
@@ -719,7 +731,7 @@ impl Authorized<'_> {
     }
 
     pub async fn conversations(&self) -> Result<Vec<ConversationRecord>> {
-        let (_, chat) = self.content(ApiTokenScope::ChatRead)?;
+        let chat = self.content(ApiTokenScope::ChatRead, &self.api.chat)?;
         let p = self.principal;
         chat.list_conversations(p.workspace_id, p.creator_id)
             .await
@@ -732,7 +744,7 @@ impl Authorized<'_> {
         before: Option<Id>,
         limit: Option<usize>,
     ) -> Result<MessagePage> {
-        let (_, chat) = self.content(ApiTokenScope::ChatRead)?;
+        let chat = self.content(ApiTokenScope::ChatRead, &self.api.chat)?;
         let p = self.principal;
         chat.list_messages(
             p.workspace_id,
@@ -750,7 +762,7 @@ impl Authorized<'_> {
         before: Option<Id>,
         limit: Option<usize>,
     ) -> Result<ThreadPage> {
-        let (_, chat) = self.content(ApiTokenScope::ChatRead)?;
+        let chat = self.content(ApiTokenScope::ChatRead, &self.api.chat)?;
         let p = self.principal;
         chat.get_thread(
             p.workspace_id,
