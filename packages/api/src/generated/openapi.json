@@ -19243,6 +19243,696 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/imports/asana": {
+      "get": {
+        "tags": [
+          "crate::asana_import_routes"
+        ],
+        "summary": "The caller's 20 most recent Asana imports in this workspace (without trees).",
+        "operationId": "list_asana_imports",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AsanaImportList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "asana_import_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "crate::asana_import_routes"
+        ],
+        "summary": "Validates the token with Asana, stores it encrypted and starts the scan.",
+        "operationId": "create_asana_import",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAsanaImportBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AsanaImport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "asana_import_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, app_key_missing, import_in_progress",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "asana_token_invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "asana_unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/imports/asana/{import_id}": {
+      "get": {
+        "tags": [
+          "crate::asana_import_routes"
+        ],
+        "summary": "One of the caller's Asana imports: status, progress and report. The scan tree (once\nscanned) only with `?include=tree`.",
+        "operationId": "get_asana_import",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "import_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include",
+            "in": "query",
+            "description": "`tree` adds the scan tree; without it `tree` is `null`.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Optional parts of an import detail response.",
+              "enum": [
+                "tree"
+              ]
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AsanaImport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "asana_import_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/imports/asana/{import_id}/cancel": {
+      "post": {
+        "tags": [
+          "crate::asana_import_routes"
+        ],
+        "summary": "Cancels a scan or import and deletes its token; what was already imported stays.",
+        "operationId": "cancel_asana_import",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "import_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AsanaImport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "asana_import_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, asana_import_state_conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/imports/asana/{import_id}/start": {
+      "post": {
+        "tags": [
+          "crate::asana_import_routes"
+        ],
+        "summary": "Starts a scanned import with the projects to import.",
+        "operationId": "start_asana_import",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "import_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartAsanaImportBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AsanaImport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "asana_import_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, import_in_progress, asana_import_state_conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/imports/notion": {
       "get": {
         "tags": [
@@ -36060,6 +36750,312 @@
           "chat:read"
         ]
       },
+      "AsanaImport": {
+        "type": "object",
+        "description": "An Asana import. Never contains the token.",
+        "required": [
+          "id",
+          "workspace_id",
+          "status",
+          "asana_user_name",
+          "progress",
+          "error",
+          "tree",
+          "report",
+          "project_ids",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "asana_user_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The Asana user the token belongs to."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the import failed or expired."
+          },
+          "id": {
+            "type": "string"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/AsanaImportProgress"
+          },
+          "project_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The Orbit projects the import created that still exist, in selection order."
+          },
+          "report": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AsanaImportReport",
+                "description": "Set once the import was started."
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/AsanaImportStatus"
+          },
+          "tree": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AsanaImportTree",
+                "description": "The scan result, once ready. Only in `GET …/imports/asana/{id}?include=tree`; `null`\neverywhere else, so polling stays light."
+              }
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        }
+      },
+      "AsanaImportFailure": {
+        "type": "object",
+        "description": "A project or task the import could not create or fill.",
+        "required": [
+          "asana_gid",
+          "kind",
+          "title",
+          "error"
+        ],
+        "properties": {
+          "asana_gid": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "description": "`project` or `task`."
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
+      "AsanaImportList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AsanaImport"
+            }
+          }
+        }
+      },
+      "AsanaImportProgress": {
+        "type": "object",
+        "required": [
+          "total",
+          "done",
+          "failed"
+        ],
+        "properties": {
+          "done": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Tasks imported with their comments, files and dependencies.",
+            "minimum": 0
+          },
+          "failed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Tasks and projects that could not be imported.",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Tasks found so far (subtasks included); grows while projects are listed.",
+            "minimum": 0
+          }
+        }
+      },
+      "AsanaImportProject": {
+        "type": "object",
+        "description": "An Asana project in the scan tree.",
+        "required": [
+          "gid",
+          "name",
+          "archived",
+          "team_gid",
+          "team_name"
+        ],
+        "properties": {
+          "archived": {
+            "type": "boolean"
+          },
+          "gid": {
+            "type": "string",
+            "description": "Use it in `project_gids` to import this project."
+          },
+          "name": {
+            "type": "string"
+          },
+          "team_gid": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`null` in workspaces without teams (Asana teams exist only in organizations)."
+          },
+          "team_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "AsanaImportReport": {
+        "type": "object",
+        "description": "What the import carried over besides the tasks themselves.",
+        "required": [
+          "comments_imported",
+          "files_imported",
+          "missing_files",
+          "links_added",
+          "dependencies_linked",
+          "unmatched_assignees",
+          "skipped_subtasks",
+          "failures"
+        ],
+        "properties": {
+          "comments_imported": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "dependencies_linked": {
+            "type": "integer",
+            "format": "int32",
+            "description": "\"Blocked by\" relations between imported tasks.",
+            "minimum": 0
+          },
+          "failures": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AsanaImportFailure"
+            },
+            "description": "The first 200 failures."
+          },
+          "files_imported": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Asana-hosted files downloaded and attached to the tasks.",
+            "minimum": 0
+          },
+          "links_added": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Google Drive, Dropbox and other linked attachments, added to the descriptions as links.",
+            "minimum": 0
+          },
+          "missing_files": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Asana-hosted files that could not be downloaded (too large, gone, refused).",
+            "minimum": 0
+          },
+          "skipped_subtasks": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Subtasks deeper than five levels, not imported.",
+            "minimum": 0
+          },
+          "unmatched_assignees": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Tasks whose Asana assignee has no Orbit member with the same email (left unassigned).",
+            "minimum": 0
+          }
+        }
+      },
+      "AsanaImportStatus": {
+        "type": "string",
+        "description": "`asana_imports.status`.",
+        "enum": [
+          "scanning",
+          "ready",
+          "queued",
+          "importing",
+          "completed",
+          "failed",
+          "cancelled",
+          "expired"
+        ]
+      },
+      "AsanaImportTree": {
+        "type": "object",
+        "description": "What the token can see.",
+        "required": [
+          "workspaces",
+          "truncated"
+        ],
+        "properties": {
+          "truncated": {
+            "type": "boolean",
+            "description": "The token sees more than 5,000 projects; only the first 5,000 are listed."
+          },
+          "workspaces": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AsanaImportWorkspace"
+            }
+          }
+        }
+      },
+      "AsanaImportWorkspace": {
+        "type": "object",
+        "required": [
+          "gid",
+          "name",
+          "projects"
+        ],
+        "properties": {
+          "gid": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "projects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AsanaImportProject"
+            },
+            "description": "Sorted by team, then by name."
+          }
+        }
+      },
       "AttachmentComment": {
         "type": "object",
         "required": [
@@ -38551,6 +39547,19 @@
           },
           "service_account": {
             "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateAsanaImportBody": {
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "An Asana personal access token. Validated with Asana, stored encrypted, and deleted\nwhen the import ends."
           }
         },
         "additionalProperties": false
@@ -44169,6 +45178,22 @@
             "description": "Pass as the `ticket` query parameter of the co-editing socket of the requested document,\nwithout a cookie."
           }
         }
+      },
+      "StartAsanaImportBody": {
+        "type": "object",
+        "required": [
+          "project_gids"
+        ],
+        "properties": {
+          "project_gids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Projects of the scan tree to import (each becomes a new Orbit project)."
+          }
+        },
+        "additionalProperties": false
       },
       "StartNotionImportBody": {
         "type": "object",

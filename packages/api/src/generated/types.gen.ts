@@ -76,6 +76,141 @@ export type ApiTokenRecord = {
 
 export type ApiTokenScope = 'read' | 'write' | 'docs:read' | 'chat:read';
 
+/**
+ * An Asana import. Never contains the token.
+ */
+export type AsanaImport = {
+    /**
+     * The Asana user the token belongs to.
+     */
+    asana_user_name: string | null;
+    created_at: string;
+    /**
+     * Why the import failed or expired.
+     */
+    error: string | null;
+    id: string;
+    progress: AsanaImportProgress;
+    /**
+     * The Orbit projects the import created that still exist, in selection order.
+     */
+    project_ids: Array<string>;
+    report: null | AsanaImportReport;
+    status: AsanaImportStatus;
+    tree: null | AsanaImportTree;
+    updated_at: string;
+    workspace_id: string;
+};
+
+/**
+ * A project or task the import could not create or fill.
+ */
+export type AsanaImportFailure = {
+    asana_gid: string;
+    error: string;
+    /**
+     * `project` or `task`.
+     */
+    kind: string;
+    title: string;
+};
+
+export type AsanaImportList = {
+    items: Array<AsanaImport>;
+};
+
+export type AsanaImportProgress = {
+    /**
+     * Tasks imported with their comments, files and dependencies.
+     */
+    done: number;
+    /**
+     * Tasks and projects that could not be imported.
+     */
+    failed: number;
+    /**
+     * Tasks found so far (subtasks included); grows while projects are listed.
+     */
+    total: number;
+};
+
+/**
+ * An Asana project in the scan tree.
+ */
+export type AsanaImportProject = {
+    archived: boolean;
+    /**
+     * Use it in `project_gids` to import this project.
+     */
+    gid: string;
+    name: string;
+    /**
+     * `null` in workspaces without teams (Asana teams exist only in organizations).
+     */
+    team_gid: string | null;
+    team_name: string | null;
+};
+
+/**
+ * What the import carried over besides the tasks themselves.
+ */
+export type AsanaImportReport = {
+    comments_imported: number;
+    /**
+     * "Blocked by" relations between imported tasks.
+     */
+    dependencies_linked: number;
+    /**
+     * The first 200 failures.
+     */
+    failures: Array<AsanaImportFailure>;
+    /**
+     * Asana-hosted files downloaded and attached to the tasks.
+     */
+    files_imported: number;
+    /**
+     * Google Drive, Dropbox and other linked attachments, added to the descriptions as links.
+     */
+    links_added: number;
+    /**
+     * Asana-hosted files that could not be downloaded (too large, gone, refused).
+     */
+    missing_files: number;
+    /**
+     * Subtasks deeper than five levels, not imported.
+     */
+    skipped_subtasks: number;
+    /**
+     * Tasks whose Asana assignee has no Orbit member with the same email (left unassigned).
+     */
+    unmatched_assignees: number;
+};
+
+/**
+ * `asana_imports.status`.
+ */
+export type AsanaImportStatus = 'scanning' | 'ready' | 'queued' | 'importing' | 'completed' | 'failed' | 'cancelled' | 'expired';
+
+/**
+ * What the token can see.
+ */
+export type AsanaImportTree = {
+    /**
+     * The token sees more than 5,000 projects; only the first 5,000 are listed.
+     */
+    truncated: boolean;
+    workspaces: Array<AsanaImportWorkspace>;
+};
+
+export type AsanaImportWorkspace = {
+    gid: string;
+    name: string;
+    /**
+     * Sorted by team, then by name.
+     */
+    projects: Array<AsanaImportProject>;
+};
+
 export type AttachmentComment = {
     attachments: Array<AttachmentRecord>;
     comment: CommentRecord;
@@ -1022,6 +1157,14 @@ export type CreateApiTokenBody = {
     project_ids?: Array<string>;
     scopes: Array<ApiTokenScope>;
     service_account?: boolean;
+};
+
+export type CreateAsanaImportBody = {
+    /**
+     * An Asana personal access token. Validated with Asana, stored encrypted, and deleted
+     * when the import ends.
+     */
+    token: string;
 };
 
 export type CreateNotionImportBody = {
@@ -3215,6 +3358,13 @@ export type SocketTicketResponse = {
      * without a cookie.
      */
     ticket: string;
+};
+
+export type StartAsanaImportBody = {
+    /**
+     * Projects of the scan tree to import (each becomes a new Orbit project).
+     */
+    project_gids: Array<string>;
 };
 
 export type StartNotionImportBody = {
@@ -12653,6 +12803,308 @@ export type StartGithubManifestResponses = {
 };
 
 export type StartGithubManifestResponse = StartGithubManifestResponses[keyof StartGithubManifestResponses];
+
+export type ListAsanaImportsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/asana';
+};
+
+export type ListAsanaImportsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * asana_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListAsanaImportsError = ListAsanaImportsErrors[keyof ListAsanaImportsErrors];
+
+export type ListAsanaImportsResponses = {
+    200: AsanaImportList;
+};
+
+export type ListAsanaImportsResponse = ListAsanaImportsResponses[keyof ListAsanaImportsResponses];
+
+export type CreateAsanaImportData = {
+    body: CreateAsanaImportBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/asana';
+};
+
+export type CreateAsanaImportErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * asana_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, app_key_missing, import_in_progress
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * asana_token_invalid
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * asana_unavailable
+     */
+    502: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateAsanaImportError = CreateAsanaImportErrors[keyof CreateAsanaImportErrors];
+
+export type CreateAsanaImportResponses = {
+    201: AsanaImport;
+};
+
+export type CreateAsanaImportResponse = CreateAsanaImportResponses[keyof CreateAsanaImportResponses];
+
+export type GetAsanaImportData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        import_id: string;
+    };
+    query?: {
+        /**
+         * Optional parts of an import detail response.
+         */
+        include?: 'tree';
+    };
+    url: '/api/v1/workspaces/{workspace_id}/imports/asana/{import_id}';
+};
+
+export type GetAsanaImportErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * asana_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetAsanaImportError = GetAsanaImportErrors[keyof GetAsanaImportErrors];
+
+export type GetAsanaImportResponses = {
+    200: AsanaImport;
+};
+
+export type GetAsanaImportResponse = GetAsanaImportResponses[keyof GetAsanaImportResponses];
+
+export type CancelAsanaImportData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        import_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/asana/{import_id}/cancel';
+};
+
+export type CancelAsanaImportErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * asana_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, asana_import_state_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CancelAsanaImportError = CancelAsanaImportErrors[keyof CancelAsanaImportErrors];
+
+export type CancelAsanaImportResponses = {
+    200: AsanaImport;
+};
+
+export type CancelAsanaImportResponse = CancelAsanaImportResponses[keyof CancelAsanaImportResponses];
+
+export type StartAsanaImportData = {
+    body: StartAsanaImportBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        import_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/asana/{import_id}/start';
+};
+
+export type StartAsanaImportErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * asana_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, import_in_progress, asana_import_state_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type StartAsanaImportError = StartAsanaImportErrors[keyof StartAsanaImportErrors];
+
+export type StartAsanaImportResponses = {
+    200: AsanaImport;
+};
+
+export type StartAsanaImportResponse = StartAsanaImportResponses[keyof StartAsanaImportResponses];
 
 export type ListNotionImportsData = {
     body?: never;
