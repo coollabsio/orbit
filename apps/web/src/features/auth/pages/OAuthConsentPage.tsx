@@ -6,7 +6,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { LoadingScreen } from '@/components/common/LoadingScreen'
-import { ScopeAccess, type ScopeResource } from '@/components/common/ScopeAccess'
+import { AccessPicker, ProjectPicker, type ScopePreset, type ScopeResource } from '@/components/common/ScopeAccess'
 import { AuthBrand, AuthCard } from '@/features/auth/components/AuthForm'
 import { currentUserQueryOptions } from '@/features/auth/api'
 import { createApiClient } from '@/api/client'
@@ -24,7 +24,7 @@ const RESOURCES: ScopeResource<Scope>[] = [
   { name: 'Chat', hint: 'Including private channels and direct messages', read: 'chat:read' },
 ]
 
-const PRESETS: { id: string; label: string; scopes: Scope[] }[] = [
+const PRESETS: ScopePreset<Scope>[] = [
   { id: 'tasks-read', label: 'Tasks read-only', scopes: [] },
   { id: 'read-all', label: 'Read everything', scopes: ['docs:read', 'chat:read'] },
   { id: 'all', label: 'Full access', scopes: ['tasks:write', 'docs:read', 'chat:read'] },
@@ -78,7 +78,6 @@ export function OAuthConsentPage() {
   </div></AuthCard>
   if (user.isPending) return <LoadingScreen />
   if (user.data === null) return <Navigate to={`/login?return_to=${encodeURIComponent(`/oauth/consent?request=${request}`)}`} replace />
-  const preset = PRESETS.find((p) => p.scopes.length === scopes.length && p.scopes.every((scope) => scopes.includes(scope)))
   const workspaceProjects = consent.data?.projects.filter((project) => project.workspace_id === workspace) ?? []
   const workspaces = [...new Map(consent.data?.projects.map((project) => [project.workspace_id, project.workspace_name])).entries()]
   return <AuthCard><div className="grid gap-5">
@@ -91,34 +90,8 @@ export function OAuthConsentPage() {
         <SelectTrigger><SelectValue placeholder="Select a workspace">{workspaces.find(([id]) => id === workspace)?.[1] ?? 'Select a workspace'}</SelectValue></SelectTrigger>
         <SelectContent>{workspaces.map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}</SelectContent>
       </Select></Label>
-      <div role="group" aria-labelledby="consent-projects" className="grid gap-3">
-        <div className="flex items-center justify-between gap-3">
-          <span id="consent-projects" className="text-sm font-medium">Projects</span>
-          {workspaceProjects.length > 1 ? <Label className="flex items-center gap-2 text-sm font-normal text-muted-foreground">
-            <Checkbox checked={selected.length === workspaceProjects.length} indeterminate={selected.length > 0 && selected.length < workspaceProjects.length} onCheckedChange={(checked) => setSelected(checked ? workspaceProjects.map((project) => project.id) : [])} />
-            Select all
-          </Label> : null}
-        </div>
-        {workspaceProjects.map((project) => <Label key={project.id} className="flex items-center gap-2">
-          <Checkbox checked={selected.includes(project.id)} onCheckedChange={(checked) => setSelected((ids) => checked ? [...ids, project.id] : ids.filter((id) => id !== project.id))} />
-          {project.name}
-        </Label>)}
-        {!workspaces.length ? <p className="text-sm text-muted-foreground">No active projects are available to your account.</p> : null}
-      </div>
-      <div role="group" aria-labelledby="consent-access" className="grid gap-3">
-        <div className="flex items-center justify-between gap-3">
-          <span id="consent-access" className="text-sm font-medium">Access</span>
-          <Select value={preset?.id ?? 'custom'} onValueChange={(value) => { const next = PRESETS.find((p) => p.id === value); if (next) setScopes(next.scopes) }}>
-            <SelectTrigger size="sm" aria-label="Access preset" className="w-auto"><SelectValue>{preset?.label ?? 'Custom'}</SelectValue></SelectTrigger>
-            <SelectContent>
-              {PRESETS.map((p) => <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>)}
-              {preset ? null : <SelectItem value="custom" disabled>Custom</SelectItem>}
-            </SelectContent>
-          </Select>
-        </div>
-        <p className="text-sm text-muted-foreground">Pick a preset or set each one.</p>
-        <ScopeAccess resources={RESOURCES} scopes={scopes} onChange={setScopes} />
-      </div>
+      <ProjectPicker id="consent-projects" projects={workspaceProjects} selected={selected} onChange={setSelected} empty={workspaces.length ? undefined : 'No active projects are available to your account.'} />
+      <AccessPicker id="consent-access" resources={RESOURCES} presets={PRESETS} scopes={scopes} onChange={setScopes} />
       <div className="grid gap-2">
         <Label className="flex items-center gap-2">
           <Checkbox checked={remote} disabled={approve.isPending} onCheckedChange={(checked) => setRemote(Boolean(checked))} />

@@ -5,7 +5,7 @@ import { confirmAction } from '@/components/common/confirmAction'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Field, FieldContent, FieldDescription, FieldLabel, FieldLegend, FieldSet, FieldTitle } from '@/components/ui/field'
+import { Field, FieldContent, FieldDescription, FieldLabel, FieldTitle } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { relativeTime, shortDate } from '@/lib/format'
@@ -13,7 +13,7 @@ import { useCan } from '@/features/workspaces/permissions'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useProjects } from '@/features/tasks/api/projects'
 import { SettingsCard } from '@/components/common/SettingsCard'
-import { ScopeAccess, type ScopeResource } from '@/components/common/ScopeAccess'
+import { AccessPicker, ProjectPicker, type ScopePreset, type ScopeResource } from '@/components/common/ScopeAccess'
 import { FieldGrid, RequiredMark, RowIcon, SettingsRow } from '@/features/settings/components/SettingsParts'
 import { useApiTokens, useCreateApiToken, useRevokeApiToken } from '@/features/settings/api/apiTokens'
 import type { ApiTokenScope } from '@orbit/api/generated/types.gen'
@@ -27,6 +27,13 @@ const EXPIRATION_OPTIONS = [
 ] as const
 
 type ExpirationValue = typeof EXPIRATION_OPTIONS[number]['value']
+
+const PRESETS: ScopePreset<ApiTokenScope>[] = [
+  { id: 'tasks-read', label: 'Tasks read-only', scopes: ['tasks:read'] },
+  { id: 'tasks-write', label: 'Tasks read and write', scopes: ['tasks:read', 'tasks:write'] },
+  { id: 'read-all', label: 'Read everything', scopes: ['tasks:read', 'docs:read', 'chat:read'] },
+  { id: 'all', label: 'Full access', scopes: ['tasks:read', 'tasks:write', 'docs:read', 'chat:read'] },
+]
 
 function tokenResources(serviceAccount: boolean): ScopeResource<ApiTokenScope>[] {
   return [
@@ -71,22 +78,6 @@ export function ApiTokensPage() {
         <FieldGrid>
         <Field><FieldLabel htmlFor="api-token-name">Name <RequiredMark /></FieldLabel><Input id="api-token-name" value={name} maxLength={100} onChange={(event) => setName(event.target.value)} placeholder="Discord bot" /></Field>
         <Field>
-          <FieldLabel htmlFor="api-token-projects">Projects <RequiredMark /></FieldLabel>
-          {/* Base UI's `multiple` replaces the old Listbox `selectedValues` + `closeOnSelect={false}` pair: the popup stays open while toggling projects. */}
-          <Select multiple value={projectIds} disabled={projectsQuery.isPending || projects.length === 0} onValueChange={(value) => setProjectIds(value)}>
-            <SelectTrigger id="api-token-projects" aria-label="Projects">
-              <SelectValue>
-                {(value: string[]) => value.length === 0
-                  ? <span className="text-muted-foreground">{projectsQuery.isPending ? 'Loading projects…' : 'Select projects…'}</span>
-                  : value.length === 1 ? projectNames.get(value[0]) : `${value.length} projects selected`}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {projects.map((project) => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </Field>
-        <Field>
           <FieldLabel htmlFor="api-token-expiration">Expiration</FieldLabel>
           {/* `items` lets Select.Value render the option label instead of the raw value. */}
           <Select items={EXPIRATION_OPTIONS} value={expiration} onValueChange={(value) => setExpiration(value as ExpirationValue)}>
@@ -98,10 +89,12 @@ export function ApiTokensPage() {
             </SelectContent>
           </Select>
         </Field>
-        <FieldSet className="gap-3 min-[900px]:col-span-2">
-          <FieldLegend variant="label">Access</FieldLegend>
-          <ScopeAccess resources={tokenResources(serviceAccount)} scopes={scopes} onChange={setScopes} />
-        </FieldSet>
+        <div className="min-[900px]:col-span-2">
+          <ProjectPicker id="api-token-projects" projects={projects} selected={projectIds} onChange={setProjectIds} empty={projectsQuery.isPending ? 'Loading projects…' : projects.length ? undefined : 'This workspace has no active projects.'} />
+        </div>
+        <div className="min-[900px]:col-span-2">
+          <AccessPicker id="api-token-access" resources={tokenResources(serviceAccount)} presets={PRESETS} scopes={scopes} onChange={setScopes} />
+        </div>
         {/* a choice card: the whole card toggles the checkbox and tints while checked */}
         <FieldLabel className="min-[900px]:col-span-2">
           <Field orientation="horizontal">
