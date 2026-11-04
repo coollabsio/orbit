@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { LoadingScreen } from '@/components/common/LoadingScreen'
 import { AuthBrand, AuthCard } from '@/features/auth/components/AuthForm'
 import { currentUserQueryOptions } from '@/features/auth/api'
@@ -14,16 +15,19 @@ import { oauthRequest, type OAuthConsent } from '@/features/auth/oauth'
 // Anonymous consent sessions must not trigger the app-wide /login redirect.
 const consentClient = createApiClient()
 
-const SCOPES = [
-  ['tasks:write', 'Create, change and delete tasks in selected projects'],
-  ['docs:read', 'Read workspace docs visible to you, including private docs'],
-  ['chat:read', 'Read chat visible to you, including private channels and direct messages'],
-] as const
-type Scope = (typeof SCOPES)[number][0]
+type Scope = 'tasks:write' | 'docs:read' | 'chat:read'
+type Level = 'none' | 'read' | 'write'
+
+// Task read access comes with every grant, and docs and chat have no write scope.
+const RESOURCES: { name: string; hint: string; read?: Scope; write?: Scope }[] = [
+  { name: 'Tasks', hint: 'In the selected projects', write: 'tasks:write' },
+  { name: 'Docs', hint: 'Including private docs', read: 'docs:read' },
+  { name: 'Chat', hint: 'Including private channels and direct messages', read: 'chat:read' },
+]
 
 const PRESETS: { id: string; label: string; scopes: Scope[] }[] = [
-  { id: 'tasks-read', label: 'Read tasks only', scopes: [] },
-  { id: 'read-all', label: 'Read tasks, docs and chat', scopes: ['docs:read', 'chat:read'] },
+  { id: 'tasks-read', label: 'Tasks read-only', scopes: [] },
+  { id: 'read-all', label: 'Read everything', scopes: ['docs:read', 'chat:read'] },
   { id: 'all', label: 'Full access', scopes: ['tasks:write', 'docs:read', 'chat:read'] },
 ]
 
@@ -102,18 +106,43 @@ export function OAuthConsentPage() {
         </Label>)}
         {!workspaces.length ? <p className="text-sm text-muted-foreground">No active projects are available to your account.</p> : null}
       </div>
-      <Label>Access<Select value={preset?.id ?? 'custom'} onValueChange={(value) => { const next = PRESETS.find((p) => p.id === value); if (next) setScopes(next.scopes) }}>
-        <SelectTrigger><SelectValue>{preset?.label ?? 'Custom'}</SelectValue></SelectTrigger>
-        <SelectContent>
-          {PRESETS.map((p) => <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>)}
-          {preset ? null : <SelectItem value="custom" disabled>Custom</SelectItem>}
-        </SelectContent>
-      </Select></Label>
-      <fieldset className="grid gap-3"><legend className="sr-only">Permissions</legend>
-        {SCOPES.map(([scope, label]) => <Label key={scope} className="flex items-center gap-2">
-          <Checkbox checked={scopes.includes(scope)} onCheckedChange={(checked) => setScopes((current) => checked ? [...current, scope] : current.filter((s) => s !== scope))} />{label}
-        </Label>)}
-      </fieldset>
+      <div role="group" aria-labelledby="consent-access" className="grid gap-3">
+        <div className="flex items-center justify-between gap-3">
+          <span id="consent-access" className="text-sm font-medium">Access</span>
+          <Select value={preset?.id ?? 'custom'} onValueChange={(value) => { const next = PRESETS.find((p) => p.id === value); if (next) setScopes(next.scopes) }}>
+            <SelectTrigger size="sm" aria-label="Access preset" className="w-auto"><SelectValue>{preset?.label ?? 'Custom'}</SelectValue></SelectTrigger>
+            <SelectContent>
+              {PRESETS.map((p) => <SelectItem key={p.id} value={p.id}>{p.label}</SelectItem>)}
+              {preset ? null : <SelectItem value="custom" disabled>Custom</SelectItem>}
+            </SelectContent>
+          </Select>
+        </div>
+        <p className="text-sm text-muted-foreground">Pick a preset or set each one.</p>
+        {RESOURCES.map((resource) => {
+          const level: Level = resource.write && scopes.includes(resource.write) ? 'write' : !resource.read || scopes.includes(resource.read) ? 'read' : 'none'
+          const setLevel = (next: Level) => setScopes((current) => [
+            ...current.filter((scope) => scope !== resource.read && scope !== resource.write),
+            ...(next !== 'none' && resource.read ? [resource.read] : []),
+            ...(next === 'write' && resource.write ? [resource.write] : []),
+          ])
+          return <div key={resource.name} className="flex items-center justify-between gap-3">
+            <div className="grid gap-0.5">
+              <span className="text-sm font-medium">{resource.name}</span>
+              <span className="text-xs text-muted-foreground">{resource.hint}</span>
+            </div>
+            <ToggleGroup aria-label={resource.name} variant="outline" size="sm" spacing={0} value={[level]} onValueChange={(value) => {
+              const next = value.at(-1)
+              if (next === 'none' || next === 'read' || next === 'write') setLevel(next)
+            }}>
+              {(['none', 'read', 'write'] as const).map((option) => <ToggleGroupItem key={option} value={option}
+                disabled={option === 'none' ? !resource.read : option === 'write' ? !resource.write : false}
+                className="disabled:opacity-25 aria-pressed:bg-primary aria-pressed:text-primary-foreground">
+                {option === 'none' ? 'No access' : option === 'read' ? 'Read' : 'Write'}
+              </ToggleGroupItem>)}
+            </ToggleGroup>
+          </div>
+        })}
+      </div>
       <div className="grid gap-2">
         <Label className="flex items-center gap-2">
           <Checkbox checked={remote} disabled={approve.isPending} onCheckedChange={(checked) => setRemote(Boolean(checked))} />

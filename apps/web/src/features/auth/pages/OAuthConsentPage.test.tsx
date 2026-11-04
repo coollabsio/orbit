@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'bun:test'
 import { useEffect } from 'react'
-import { render, waitFor } from '@testing-library/react'
+import { render, waitFor, within } from '@testing-library/react'
 import { Route, Routes, useLocation } from 'react-router'
 import { Providers } from '@/app/Providers'
 import { OAuthConsentPage } from './OAuthConsentPage'
@@ -98,10 +98,12 @@ test('select all projects and a permission preset send every project and scope',
   await userEvent.click(await view.findByRole('option', { name: 'Workspace One' }))
   await userEvent.click(view.getByRole('checkbox', { name: 'Select all' }))
   expect(view.getByRole('checkbox', { name: 'Two' }).getAttribute('aria-checked')).toBe('true')
-  fireEvent.click(view.getByRole('combobox', { name: /Access/ }))
+  fireEvent.click(view.getByRole('combobox', { name: 'Access preset' }))
   await userEvent.click(await view.findByRole('option', { name: 'Full access' }))
-  expect(view.getByRole('checkbox', { name: /^Read chat visible/ }).getAttribute('aria-checked')).toBe('true')
+  expect(within(view.getByRole('group', { name: 'Chat' })).getByRole('button', { name: 'Read' }).getAttribute('aria-pressed')).toBe('true')
+  await userEvent.click(within(view.getByRole('group', { name: 'Docs' })).getByRole('button', { name: 'No access' }))
+  expect(view.getByRole('combobox', { name: 'Access preset' }).textContent).toContain('Custom')
   fireEvent.click(view.getByRole('button', { name: 'Allow selected access' }))
   await view.findByRole('textbox', { name: 'Callback URL' })
-  expect(body).toEqual({ csrf_token: 'nonce', approved: true, workspace_id: 'w1', project_ids: ['p1', 'p2'], scopes: ['tasks:write', 'docs:read', 'chat:read'] })
+  expect(body).toEqual({ csrf_token: 'nonce', approved: true, workspace_id: 'w1', project_ids: ['p1', 'p2'], scopes: ['tasks:write', 'chat:read'] })
 })
