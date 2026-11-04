@@ -367,7 +367,7 @@ The domain's MX points to a mail provider, and the provider sends each message t
 - **Instance providers:** the root user adds them in **Admin → Mail → Mail providers**. Every workspace can route a domain to them.
 - **Workspace providers:** owners and admins add their own in **Settings → Mail → Providers**, with their own provider account. The root user can turn this off (**Workspaces can add their own providers**). Off stops new ones; existing ones keep receiving. Orbit Cloud keeps it off and receives all mail at its own MX.
 - In **Settings → Mail → Domains**, pick where each domain's mail arrives. The MX record on the page then shows the provider's hosts, and the domain check expects them. The verification TXT record stays required.
-- Add the domain at the provider yourself; Orbit shows the steps for each provider after you add it. Orbit makes the secrets of Cloudflare and Postmark and shows them once.
+- Add the domain at the provider yourself; Orbit shows the steps for each provider after you add it. Orbit makes the secrets of Cloudflare and Postmark and shows them once. **New secret** on the provider makes new ones: the old ones stop working at once, so set the new ones on the Worker or in Postmark right away.
 - Each request must carry the provider's signature or credentials. Orbit refuses requests older than 5 minutes and Mailgun tokens it has seen.
 - Orbit checks DKIM and DMARC itself and takes SPF from the provider (its `Received-SPF` header, or SES's verdict).
 - Mail for an address that no mailbox has: Cloudflare bounces it to the sender. The other providers have already accepted it, so Orbit lists it under **Settings → Mail → Failed messages → Not delivered** for 30 days, without its body.

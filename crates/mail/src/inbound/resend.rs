@@ -20,8 +20,6 @@ pub struct ResendEvent {
 
 #[derive(Deserialize)]
 struct Event {
-    #[serde(rename = "type")]
-    kind: String,
     data: Data,
 }
 
@@ -73,10 +71,17 @@ pub fn verify_webhook(
         return Err(InboundError::Unauthorized);
     }
     fresh(timestamp, now)?;
-    let event: Event = serde_json::from_slice(body).map_err(|_| InboundError::Malformed("json"))?;
-    if event.kind != "email.received" {
+    // the type first: events of other types have other data
+    #[derive(Deserialize)]
+    struct Kind {
+        #[serde(rename = "type")]
+        kind: String,
+    }
+    let kind: Kind = serde_json::from_slice(body).map_err(|_| InboundError::Malformed("json"))?;
+    if kind.kind != "email.received" {
         return Err(InboundError::Malformed("event_type"));
     }
+    let event: Event = serde_json::from_slice(body).map_err(|_| InboundError::Malformed("json"))?;
     let data = event.data;
     // the headers' To and Cc are not the envelope (a Bcc copy, a mailing list): without
     // `received_for` there is nothing to deliver to

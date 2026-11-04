@@ -394,6 +394,18 @@ async fn the_switch_persists_and_is_audited() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["domains_enabled"], false);
     assert!(!settings.mail_domains_enabled().await.unwrap());
+    // both switches together: one change, one audit event
+    let (status, body) = fixture
+        .call(
+            &fixture.root,
+            "PUT",
+            "/api/v1/admin/mail",
+            Some(json!({ "domains_enabled": true, "workspace_providers_enabled": false })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert!(settings.mail_domains_enabled().await.unwrap());
+    assert!(!settings.mail_workspace_providers_enabled().await.unwrap());
     assert_eq!(
         fixture
             .count(
@@ -401,7 +413,7 @@ async fn the_switch_persists_and_is_audited() {
                 "instance.mail_updated"
             )
             .await,
-        2
+        3
     );
 }
 

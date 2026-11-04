@@ -42,88 +42,129 @@ fn assert_delivery(delivery: &Delivery, recipients: &[&str]) {
 
 const CF_SECRET: &[u8] = b"cloudflare-signing-secret";
 
-fn cloudflare_body(raw: &str, to: &str) -> String {
-    serde_json::json!({ "from": "ann@sender.example", "to": to, "raw": base64(raw.as_bytes()) })
-        .to_string()
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::Digest as _;
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
-fn cloudflare_request(body: &str, timestamp: i64, secret: &[u8]) -> (String, String) {
+/// The headers the Email Worker sends with the raw message as the body.
+fn cloudflare_headers(raw: &[u8], to: &str, timestamp: i64, secret: &[u8]) -> [String; 4] {
     let timestamp = timestamp.to_string();
-    let signature = hmac_hex(secret, format!("{timestamp}.{body}").as_bytes());
-    (timestamp, signature)
+    let from = "ann%40sender.example".to_owned();
+    let to = to.replace('@', "%40");
+    let signature = hmac_hex(
+        secret,
+        format!("{timestamp}.{from}.{to}.{}", sha256_hex(raw)).as_bytes(),
+    );
+    [timestamp, signature, from, to]
+}
+
+fn cloudflare(headers: &[String; 4], raw: &[u8], max: usize) -> Result<Delivery, InboundError> {
+    let [timestamp, signature, from, to] = headers;
+    cloudflare::verify_and_parse(
+        cloudflare::Envelope {
+            timestamp: Some(timestamp),
+            signature: Some(signature),
+            from: Some(from),
+            to: Some(to),
+        },
+        raw,
+        CF_SECRET,
+        NOW,
+        max,
+    )
 }
 
 #[test]
 fn cloudflare_delivery_is_read_after_its_signature() {
     // the envelope recipient need not be in the headers (Bcc)
-    let body = cloudflare_body(RAW, "bcc-only@orbit.example");
-    let (timestamp, signature) = cloudflare_request(&body, NOW - 10, CF_SECRET);
-    let delivery = cloudflare::verify_and_parse(
-        Some(&timestamp),
-        Some(&signature),
-        body.as_bytes(),
+    let headers = cloudflare_headers(
+        RAW.as_bytes(),
+        "bcc-only@orbit.example",
+        NOW - 10,
         CF_SECRET,
-        NOW,
-        MAX,
-    )
-    .unwrap();
+    );
+    let delivery = cloudflare(&headers, RAW.as_bytes(), MAX).unwrap();
     assert_delivery(&delivery, &["bcc-only@orbit.example"]);
     assert_eq!(delivery.spf, SpfSource::Header(SpfHeaderOwned::ReceivedSpf));
 }
 
 #[test]
-fn cloudflare_refuses_a_wrong_secret_a_missing_signature_and_an_old_request() {
-    let body = cloudflare_body(RAW, "team@orbit.example");
-    let (timestamp, signature) = cloudflare_request(&body, NOW, b"another-secret");
-    let wrong = cloudflare::verify_and_parse(
-        Some(&timestamp),
-        Some(&signature),
-        body.as_bytes(),
+fn cloudflare_refuses_a_wrong_secret_a_changed_body_or_envelope_and_an_old_request() {
+    let wrong = cloudflare_headers(RAW.as_bytes(), "team@orbit.example", NOW, b"another-secret");
+    assert_eq!(
+        cloudflare(&wrong, RAW.as_bytes(), MAX).unwrap_err(),
+        InboundError::Unauthorized
+    );
+
+    let good = cloudflare_headers(RAW.as_bytes(), "team@orbit.example", NOW, CF_SECRET);
+    let changed = format!("{RAW}more");
+    assert_eq!(
+        cloudflare(&good, changed.as_bytes(), MAX).unwrap_err(),
+        InboundError::Unauthorized
+    );
+    let mut other_recipient = good.clone();
+    other_recipient[3] = "ceo%40orbit.example".to_owned();
+    assert_eq!(
+        cloudflare(&other_recipient, RAW.as_bytes(), MAX).unwrap_err(),
+        InboundError::Unauthorized
+    );
+    let missing = cloudflare::verify_and_parse(
+        cloudflare::Envelope {
+            timestamp: Some(&good[0]),
+            signature: None,
+            from: Some(&good[2]),
+            to: Some(&good[3]),
+        },
+        RAW.as_bytes(),
         CF_SECRET,
         NOW,
         MAX,
     );
-    assert_eq!(wrong.unwrap_err(), InboundError::Unauthorized);
-    let missing =
-        cloudflare::verify_and_parse(Some(&timestamp), None, body.as_bytes(), CF_SECRET, NOW, MAX);
     assert_eq!(missing.unwrap_err(), InboundError::Unauthorized);
 
-    let (old, signature) = cloudflare_request(&body, NOW - 6 * 60, CF_SECRET);
-    let replay = cloudflare::verify_and_parse(
-        Some(&old),
-        Some(&signature),
-        body.as_bytes(),
+    let old = cloudflare_headers(
+        RAW.as_bytes(),
+        "team@orbit.example",
+        NOW - 6 * 60,
         CF_SECRET,
-        NOW,
-        MAX,
     );
-    assert_eq!(replay.unwrap_err(), InboundError::Replay);
+    assert_eq!(
+        cloudflare(&old, RAW.as_bytes(), MAX).unwrap_err(),
+        InboundError::Replay
+    );
 }
 
 #[test]
 fn cloudflare_refuses_a_message_over_the_limit() {
     let big = format!("{RAW}{}", "x".repeat(2000));
-    let body = cloudflare_body(&big, "team@orbit.example");
-    let (timestamp, signature) = cloudflare_request(&body, NOW, CF_SECRET);
-    let refused = cloudflare::verify_and_parse(
-        Some(&timestamp),
-        Some(&signature),
-        body.as_bytes(),
-        CF_SECRET,
-        NOW,
-        1000,
+    let headers = cloudflare_headers(big.as_bytes(), "team@orbit.example", NOW, CF_SECRET);
+    assert_eq!(
+        cloudflare(&headers, big.as_bytes(), 1000).unwrap_err(),
+        InboundError::TooLarge
     );
-    assert_eq!(refused.unwrap_err(), InboundError::TooLarge);
 }
 
 #[test]
 fn cloudflare_worker_script_signs_the_way_orbit_checks() {
     let script = cloudflare::WORKER_SCRIPT;
-    assert!(script.contains("env.ORBIT_WEBHOOK_URL"));
-    assert!(script.contains("env.ORBIT_SIGNING_SECRET"));
-    assert!(script.contains("x-orbit-timestamp"));
-    assert!(script.contains("x-orbit-signature"));
-    assert!(script.contains("setReject"));
+    for part in [
+        "env.ORBIT_WEBHOOK_URL",
+        "env.ORBIT_SIGNING_SECRET",
+        "x-orbit-timestamp",
+        "x-orbit-signature",
+        "x-orbit-from",
+        "x-orbit-to",
+        "SHA-256",
+        "setReject",
+    ] {
+        assert!(script.contains(part), "{part}");
+    }
+    // the raw message goes as the body: no base64 or JSON copies of a 25 MiB message
+    assert!(!script.contains("btoa"));
 }
 
 // ---------------------------------------------------------------- Postmark
@@ -294,6 +335,24 @@ fn resend_webhook_gives_the_email_id_and_envelope_recipients() {
 }
 
 #[test]
+fn resend_events_of_other_types_are_recognized_without_their_data() {
+    let event = r#"{"type":"domain.updated","data":{"id":"d_1"}}"#;
+    let signature = svix_signature("msg_2", NOW, event, SVIX_KEY);
+    assert_eq!(
+        resend::verify_webhook(
+            Some("msg_2"),
+            Some(&NOW.to_string()),
+            Some(&signature),
+            event.as_bytes(),
+            &svix_secret(),
+            NOW
+        )
+        .unwrap_err(),
+        InboundError::Malformed("event_type")
+    );
+}
+
+#[test]
 fn resend_without_envelope_recipients_is_refused() {
     // the headers' To and Cc are not the envelope (Bcc, lists): no `received_for`, no delivery
     let event = RESEND_EVENT.replace(r#""received_for":["bcc-only@orbit.example"],"#, "");
@@ -425,6 +484,27 @@ fn ses_notification_verifies_and_names_the_s3_object() {
             verdict: Verdict::Pass,
             domain: "sender.example".to_owned()
         }
+    );
+}
+
+#[test]
+fn ses_notifications_older_than_two_hours_are_refused() {
+    let mut fields = notification_fields(ses_notification());
+    fields[2].1 = "2026-10-28T10:00:00.000Z".to_owned();
+    let body = signed_sns(&fields, "Notification");
+    let message = ses::parse_sns(body.as_bytes()).unwrap();
+    // 2026-10-28T10:00:00Z is 1_793_181_600
+    assert!(ses::fresh(&message, 1_793_181_600 + 60 * 60).is_ok());
+    assert_eq!(
+        ses::fresh(&message, 1_793_181_600 + 3 * 60 * 60).unwrap_err(),
+        InboundError::Replay
+    );
+    let mut bad = notification_fields(ses_notification());
+    bad[2].1 = "yesterday".to_owned();
+    let message = ses::parse_sns(signed_sns(&bad, "Notification").as_bytes()).unwrap();
+    assert_eq!(
+        ses::fresh(&message, 1_793_181_600).unwrap_err(),
+        InboundError::Replay
     );
 }
 

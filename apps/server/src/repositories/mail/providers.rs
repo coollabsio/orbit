@@ -274,6 +274,8 @@ pub struct ProviderChange {
     /// Replaces the secrets (of the same kind).
     pub secrets: Option<ProviderSecrets>,
     pub settings: Option<ProviderSettings>,
+    /// Makes new secrets for a provider whose secrets Orbit makes (Cloudflare, Postmark).
+    pub regenerate: bool,
 }
 
 /// A provider without its secret values.
@@ -293,7 +295,7 @@ pub struct MailProvider {
     pub updated_at: TimestampMillis,
 }
 
-/// A created provider, with the secrets Orbit made for it (shown once).
+/// A created or changed provider, with the secrets Orbit made for it (shown once).
 #[derive(Clone, Debug)]
 pub struct CreatedProvider {
     pub provider: MailProvider,
@@ -349,6 +351,12 @@ pub struct NewRejection {
 const PROVIDER_COLUMNS: &str = "p.id, p.workspace_id, p.kind, p.name, p.secrets, p.settings, \
     p.last_received_at, p.last_error, p.created_at, p.updated_at, \
     (SELECT COUNT(*) FROM mail_domains d WHERE d.provider_id = p.id) AS domain_count";
+
+/// [`PROVIDER_COLUMNS`] with the domain count of the workspace `$1`.
+const WORKSPACE_PROVIDER_COLUMNS: &str = "p.id, p.workspace_id, p.kind, p.name, p.secrets, \
+    p.settings, p.last_received_at, p.last_error, p.created_at, p.updated_at, \
+    (SELECT COUNT(*) FROM mail_domains d WHERE d.provider_id = p.id AND d.workspace_id = $1) \
+    AS domain_count";
 
 #[must_use]
 pub fn provider_aad(provider_id: Id) -> String {
@@ -545,7 +553,7 @@ impl MailRepository {
         provider_id: Id,
         change: ProviderChange,
         request_id: &str,
-    ) -> Result<MailProvider, MailError> {
+    ) -> Result<CreatedProvider, MailError> {
         let now = self.database.database_now().await?;
         let mut transaction = self.database.immediate_transaction().await?;
         Self::provider_scope(&mut transaction, scope, actor_id).await?;
@@ -563,10 +571,19 @@ impl MailRepository {
             .map(|settings| settings.cleaned(current.kind))
             .transpose()?
             .unwrap_or(current.settings);
-        let secrets = match change.secrets {
-            Some(given) if given.kind() == current.kind && given_complete(&given) => given,
-            Some(_) => return Err(MailError::Invalid { field: "secrets" }),
-            None => current_secrets,
+        let generated = if change.regenerate {
+            let new = ProviderSecrets::generate(current.kind).filter(|_| change.secrets.is_none());
+            Some(new.ok_or(MailError::Invalid {
+                field: "regenerate_secrets",
+            })?)
+        } else {
+            None
+        };
+        let secrets = match (change.secrets, &generated) {
+            (_, Some(new)) => new.clone(),
+            (Some(given), None) if given.kind() == current.kind && given_complete(&given) => given,
+            (Some(_), None) => return Err(MailError::Invalid { field: "secrets" }),
+            (None, None) => current_secrets,
         };
         sqlx::query(
             "UPDATE mail_providers SET name = $1, settings = $2, secrets = $3, updated_at = $4 \
@@ -589,7 +606,7 @@ impl MailRepository {
             "mail.provider_updated",
             provider_id,
             request_id,
-            json!({ "name": name }),
+            json!({ "name": name, "secrets_regenerated": generated.is_some() }),
             now,
         )
         .await?;
@@ -597,7 +614,10 @@ impl MailRepository {
             .load_in_scope(&mut transaction, scope, provider_id)
             .await?;
         transaction.commit().await?;
-        Ok(provider)
+        Ok(CreatedProvider {
+            provider,
+            generated,
+        })
     }
 
     /// Refuses a provider that a domain still uses (`Conflict("provider_in_use")`).
@@ -657,7 +677,8 @@ impl MailRepository {
             .collect()
     }
 
-    /// The providers a workspace may route a domain to: the instance ones and its own.
+    /// The providers a workspace may route a domain to: the instance ones and its own. The domain
+    /// count is of this workspace's domains (an instance provider serves other workspaces too).
     pub async fn providers_for_workspace(
         &self,
         workspace_id: Id,
@@ -666,7 +687,7 @@ impl MailRepository {
         let mut transaction = self.database.pool().begin().await?;
         manager(&mut transaction, workspace_id, actor_id).await?;
         let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
-            "SELECT {PROVIDER_COLUMNS} FROM mail_providers p \
+            "SELECT {WORKSPACE_PROVIDER_COLUMNS} FROM mail_providers p \
              WHERE p.workspace_id IS NULL OR p.workspace_id = $1 \
              ORDER BY p.workspace_id IS NULL, lower(p.name), p.id"
         )))

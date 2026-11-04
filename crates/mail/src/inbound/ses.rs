@@ -35,6 +35,8 @@ pub struct Signed {
     pub signature: Vec<u8>,
     pub version: String,
     pub cert_url: String,
+    /// The SNS `Timestamp`, as sent (RFC 3339, UTC).
+    pub timestamp: String,
 }
 
 /// An SES `Received` notification with an S3 action.
@@ -124,6 +126,62 @@ struct Action {
     object_key: Option<String>,
 }
 
+/// How old an SNS message may be: SNS retries an HTTP endpoint for about an hour by default.
+pub const SNS_WINDOW_SECS: i64 = 2 * 60 * 60;
+
+/// The SNS `Timestamp` of `message` is within [`SNS_WINDOW_SECS`] of `now_secs`, so a captured
+/// request cannot be sent again later. Check it after the signature, which covers the timestamp.
+pub fn fresh(message: &SnsMessage, now_secs: i64) -> Result<(), InboundError> {
+    let sent = rfc3339_secs(&message.signed().timestamp).ok_or(InboundError::Replay)?;
+    if (now_secs - sent).abs() > SNS_WINDOW_SECS {
+        Err(InboundError::Replay)
+    } else {
+        Ok(())
+    }
+}
+
+/// Seconds since 1970 of a UTC timestamp `YYYY-MM-DDTHH:MM:SS[.fff]Z`.
+fn rfc3339_secs(value: &str) -> Option<i64> {
+    let bytes = value.as_bytes();
+    if bytes.len() < 20 || !value.ends_with('Z') || bytes[4] != b'-' || bytes[7] != b'-' {
+        return None;
+    }
+    if bytes[10] != b'T' || bytes[13] != b':' || bytes[16] != b':' {
+        return None;
+    }
+    let number = |from: usize, to: usize| -> Option<i64> {
+        let part = value.get(from..to)?;
+        part.bytes()
+            .all(|byte| byte.is_ascii_digit())
+            .then(|| part.parse().ok())
+            .flatten()
+    };
+    let fraction = &value[19..value.len() - 1];
+    if !(fraction.is_empty()
+        || (fraction.starts_with('.') && fraction[1..].bytes().all(|byte| byte.is_ascii_digit())))
+    {
+        return None;
+    }
+    let (year, month, day) = (number(0, 4)?, number(5, 7)?, number(8, 10)?);
+    let (hour, minute, second) = (number(11, 13)?, number(14, 16)?, number(17, 19)?);
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 60
+    {
+        return None;
+    }
+    // days from 1970-01-01 (Howard Hinnant's days_from_civil)
+    let year = if month <= 2 { year - 1 } else { year };
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400;
+    let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days = era * 146_097 + day_of_era - 719_468;
+    Some(days * 86_400 + hour * 3_600 + minute * 60 + second)
+}
+
 /// Reads an SNS message (not yet verified).
 pub fn parse_sns(body: &[u8]) -> Result<SnsMessage, InboundError> {
     let envelope: Envelope =
@@ -168,6 +226,7 @@ pub fn parse_sns(body: &[u8]) -> Result<SnsMessage, InboundError> {
         signature,
         version: envelope.signature_version,
         cert_url: envelope.signing_cert_url,
+        timestamp: envelope.timestamp,
     };
     match envelope.kind.as_str() {
         "SubscriptionConfirmation" => Ok(SnsMessage::SubscriptionConfirmation {

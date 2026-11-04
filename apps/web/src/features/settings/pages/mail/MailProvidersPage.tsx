@@ -9,7 +9,7 @@ import { SettingsCard } from '@/components/common/SettingsCard'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { useDeleteProvider } from '@/features/mail/api/mutations'
+import { useDeleteProvider, useUpdateProvider } from '@/features/mail/api/mutations'
 import { useMailProviders, type ProviderScope } from '@/features/mail/api/queries'
 import { useCan } from '@/features/workspaces/permissions'
 import { MailManagersOnly } from './MailDomainsPage'
@@ -31,7 +31,8 @@ export function MailProviders({ scope }: { scope: ProviderScope }) {
   const providers = useMailProviders(scope)
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<MailProviderView | null>(null)
-  const [created, setCreated] = useState<MailProviderView | null>(null)
+  // a provider with secrets that Orbit just made: shown once
+  const [shown, setShown] = useState<{ provider: MailProviderView; title: string } | null>(null)
   const canAdd = scope === 'instance' || providers.data?.workspace_providers_enabled === true
 
   return (
@@ -65,23 +66,44 @@ export function MailProviders({ scope }: { scope: ProviderScope }) {
         ) : null}
         <div className="flex flex-col divide-y">
           {providers.data?.providers.map((provider) => (
-            <ProviderRow key={provider.id} scope={scope} provider={provider} onEdit={() => setEditing(provider)} />
+            <ProviderRow
+              key={provider.id}
+              scope={scope}
+              provider={provider}
+              onEdit={() => setEditing(provider)}
+              onNewSecret={(changed) => setShown({ provider: changed, title: `New secret for ${changed.name}` })}
+            />
           ))}
         </div>
       </SettingsCard>
-      {adding ? <ProviderForm scope={scope} onClose={() => setAdding(false)} onCreated={setCreated} /> : null}
+      {adding ? (
+        <ProviderForm scope={scope} onClose={() => setAdding(false)} onCreated={(created) => setShown({ provider: created, title: `Set up ${created.name}` })} />
+      ) : null}
       {editing ? <ProviderForm scope={scope} provider={editing} onClose={() => setEditing(null)} /> : null}
-      {created?.setup ? (
-        <Modal title={`Set up ${created.name}`} description={`Do these steps at ${PROVIDER_LABELS[created.kind]}.`} onClose={() => setCreated(null)}>
-          <ProviderSetup setup={created.setup} generated={created.generated_secrets} />
+      {shown?.provider.setup ? (
+        <Modal title={shown.title} description={`Do these steps at ${PROVIDER_LABELS[shown.provider.kind]}.`} onClose={() => setShown(null)}>
+          <ProviderSetup setup={shown.provider.setup} generated={shown.provider.generated_secrets} />
         </Modal>
       ) : null}
     </>
   )
 }
 
-function ProviderRow({ scope, provider, onEdit }: { scope: ProviderScope; provider: MailProviderView; onEdit: () => void }) {
+function ProviderRow({
+  scope,
+  provider,
+  onEdit,
+  onNewSecret,
+}: {
+  scope: ProviderScope
+  provider: MailProviderView
+  onEdit: () => void
+  onNewSecret: (changed: MailProviderView) => void
+}) {
   const remove = useDeleteProvider(scope)
+  const update = useUpdateProvider(scope)
+  // Orbit makes these secrets, so Orbit can replace them
+  const madeByOrbit = provider.kind === 'cloudflare' || provider.kind === 'postmark'
   const [open, setOpen] = useState(false)
   const own = provider.setup !== null && provider.setup !== undefined
 
@@ -97,6 +119,26 @@ function ProviderRow({ scope, provider, onEdit }: { scope: ProviderScope; provid
       onSuccess: () => toast(`${provider.name} removed`),
       onError: (error) => toast.error(mailProblem(error, 'The provider could not be removed.')),
     })
+  }
+
+  async function newSecret() {
+    const confirmed = await confirmAction({
+      title: `Make a new secret for ${provider.name}?`,
+      description:
+        provider.kind === 'cloudflare'
+          ? 'The old signing secret stops working now. Mail is refused until you set the new one on the Worker.'
+          : 'The old credentials stop working now. Mail is refused until you set the new webhook URL in Postmark.',
+      confirmLabel: 'Make new secret',
+      danger: true,
+    })
+    if (!confirmed) return
+    update.mutate(
+      { providerId: provider.id, body: { regenerate_secrets: true } },
+      {
+        onSuccess: onNewSecret,
+        onError: (error) => toast.error(mailProblem(error, 'The new secret could not be made.')),
+      },
+    )
   }
 
   return (
@@ -118,6 +160,9 @@ function ProviderRow({ scope, provider, onEdit }: { scope: ProviderScope; provid
           <div className="flex items-center gap-1">
             <Button type="button" variant="outline" size="sm" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? 'Hide setup' : 'Setup'}</Button>
             <Button type="button" variant="ghost" size="sm" onClick={onEdit}>Change</Button>
+            {madeByOrbit ? (
+              <Button type="button" variant="ghost" size="sm" disabled={update.isPending} onClick={() => void newSecret()}>New secret</Button>
+            ) : null}
             <Button type="button" variant="ghost" size="sm" className="text-destructive" disabled={remove.isPending} onClick={() => void removeProvider()}>Remove</Button>
           </div>
         ) : null}

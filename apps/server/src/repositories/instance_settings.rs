@@ -273,14 +273,42 @@ impl InstanceSettingsRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<(), sqlx::Error> {
+        self.set_mail_switches(actor_id, Some(enabled), None, request_id, now)
+            .await
+    }
+
+    /// Sets the given mail switches together, in one transaction with one audit event.
+    pub async fn set_mail_switches(
+        &self,
+        actor_id: Id,
+        domains_enabled: Option<bool>,
+        workspace_providers_enabled: Option<bool>,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), sqlx::Error> {
         let mut transaction = self.database.immediate_transaction().await?;
-        sqlx::query(
-            "UPDATE instance_settings SET mail_domains_enabled = $1, updated_at = $2 WHERE id = 1",
-        )
-        .bind(i64::from(enabled))
-        .bind(now.as_millis())
-        .execute(&mut *transaction)
-        .await?;
+        let mut changed = serde_json::Map::new();
+        for (column, field, value) in [
+            ("mail_domains_enabled", "domains_enabled", domains_enabled),
+            (
+                "mail_workspace_providers_enabled",
+                "workspace_providers_enabled",
+                workspace_providers_enabled,
+            ),
+        ] {
+            let Some(enabled) = value else { continue };
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "UPDATE instance_settings SET {column} = $1, updated_at = $2 WHERE id = 1"
+            )))
+            .bind(i64::from(enabled))
+            .bind(now.as_millis())
+            .execute(&mut *transaction)
+            .await?;
+            changed.insert(field.to_owned(), enabled.into());
+        }
+        if changed.is_empty() {
+            return Ok(());
+        }
         audit::record_global(
             &mut transaction,
             Some(actor_id),
@@ -289,7 +317,7 @@ impl InstanceSettingsRepository {
             "installation",
             None,
             request_id,
-            serde_json::json!({ "domains_enabled": enabled }),
+            serde_json::Value::Object(changed),
             now,
         )
         .await?;
@@ -314,28 +342,8 @@ impl InstanceSettingsRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<(), sqlx::Error> {
-        let mut transaction = self.database.immediate_transaction().await?;
-        sqlx::query(
-            "UPDATE instance_settings SET mail_workspace_providers_enabled = $1, updated_at = $2 \
-             WHERE id = 1",
-        )
-        .bind(i64::from(enabled))
-        .bind(now.as_millis())
-        .execute(&mut *transaction)
-        .await?;
-        audit::record_global(
-            &mut transaction,
-            Some(actor_id),
-            "instance.mail_updated",
-            AuditOutcome::Success,
-            "installation",
-            None,
-            request_id,
-            serde_json::json!({ "workspace_providers_enabled": enabled }),
-            now,
-        )
-        .await?;
-        transaction.commit().await
+        self.set_mail_switches(actor_id, None, Some(enabled), request_id, now)
+            .await
     }
 
     pub async fn save_smtp(

@@ -15,7 +15,7 @@ use orbit_mail::{Authenticator, authentication_results, provider_spf, strip_auth
 use orbit_platform::{S3Bucket, S3Config, TimestampMillis};
 use serde::Deserialize;
 
-use crate::mail_image_proxy::{FetchError, SafeFetch};
+use crate::mail_image_proxy::{FetchError, Fetching, SafeFetch};
 
 use crate::mail_intake::{InboundMessage, IntakeError, MailIntake, Recipient, Source};
 use crate::repositories::mail::{
@@ -53,6 +53,9 @@ pub enum DeliveryResult {
     },
     /// An SNS subscription was confirmed (SES).
     Confirmed,
+    /// Handled before: SNS sent a notification again after Orbit stored the message and deleted
+    /// S3's copy.
+    AlreadyHandled,
     /// Storage, the database or a DNS lookup failed: the provider should send it again.
     Temporary(String),
     TooLarge,
@@ -146,7 +149,7 @@ impl ProviderIntake {
                 "application/json",
                 Some(api_key),
                 API_TIMEOUT,
-                true,
+                Fetching::Provider,
             )
             .await
         {
@@ -171,7 +174,7 @@ impl ProviderIntake {
                 "message/rfc822, */*",
                 None,
                 DOWNLOAD_TIMEOUT,
-                true,
+                Fetching::Provider,
             )
             .await
         {
@@ -208,19 +211,42 @@ impl ProviderIntake {
         if settings.topic_arn.as_deref() != Some(message.topic_arn()) {
             return Err(InboundError::Unauthorized);
         }
+        ses::fresh(&message, now.as_millis() / 1000)?;
         let cert_url = message.signed().cert_url.clone();
         if !ses::cert_url_ok(&cert_url) {
             return Err(InboundError::Unauthorized);
         }
+        // not noted on the provider: the request is not verified yet
         let cert = match self.cert(&cert_url).await {
             Ok(cert) => cert,
             Err(error) => {
-                return Ok(self
-                    .failed(provider, now, format!("SNS certificate: {error}"))
-                    .await);
+                return Ok(DeliveryResult::Temporary(format!(
+                    "SNS certificate: {error}"
+                )));
             }
         };
         ses::verify_sns(&message, &cert)?;
+        // from here the request is AWS's: its errors show on the provider
+        let result = self.receive_sns(provider, access_key_id, secret_access_key, message, now);
+        match result.await {
+            Err(error) => {
+                self.note(provider, now, &error.to_string()).await;
+                Err(error)
+            }
+            ok => ok,
+        }
+    }
+
+    /// A verified SNS message: confirms the subscription, or stores the message from S3.
+    async fn receive_sns(
+        &self,
+        provider: &MailProvider,
+        access_key_id: &str,
+        secret_access_key: &str,
+        message: ses::SnsMessage,
+        now: TimestampMillis,
+    ) -> Result<DeliveryResult, InboundError> {
+        let settings = &provider.settings;
         let receipt = match message {
             ses::SnsMessage::SubscriptionConfirmation { subscribe_url, .. } => {
                 if !ses::sns_url_ok(&subscribe_url) {
@@ -228,7 +254,14 @@ impl ProviderIntake {
                 }
                 let confirmed = self
                     .fetch
-                    .get(&subscribe_url, SMALL_BYTES, "*/*", None, API_TIMEOUT, true)
+                    .get(
+                        &subscribe_url,
+                        SMALL_BYTES,
+                        "*/*",
+                        None,
+                        API_TIMEOUT,
+                        Fetching::Provider,
+                    )
                     .await;
                 return Ok(match confirmed {
                     Ok(_) => DeliveryResult::Confirmed,
@@ -264,15 +297,9 @@ impl ProviderIntake {
         };
         let raw = match s3.get_bytes(&receipt.key).await {
             Ok(Some(raw)) => raw,
-            Ok(None) => {
-                return Ok(self
-                    .failed(
-                        provider,
-                        now,
-                        "S3: the message object is missing".to_owned(),
-                    )
-                    .await);
-            }
+            // SNS sends a notification again when Orbit's answer is late; the first one already
+            // stored the message and deleted the object
+            Ok(None) => return Ok(DeliveryResult::AlreadyHandled),
             Err(error) => return Ok(self.failed(provider, now, format!("S3: {error}")).await),
         };
         let delivery = Delivery {
@@ -309,7 +336,14 @@ impl ProviderIntake {
         }
         let cert = self
             .fetch
-            .get(url, SMALL_BYTES, "*/*", None, API_TIMEOUT, true)
+            .get(
+                url,
+                SMALL_BYTES,
+                "*/*",
+                None,
+                API_TIMEOUT,
+                Fetching::Provider,
+            )
             .await?;
         self.certs
             .lock()
@@ -325,14 +359,19 @@ impl ProviderIntake {
         now: TimestampMillis,
         error: String,
     ) -> DeliveryResult {
+        self.note(provider, now, &error).await;
+        DeliveryResult::Temporary(error)
+    }
+
+    /// Shows `error` on the provider in settings (only for a verified request).
+    pub async fn note(&self, provider: &MailProvider, now: TimestampMillis, error: &str) {
         if let Err(problem) = self
             .mail
-            .record_provider_receipt(provider.id, now, Some(&error))
+            .record_provider_receipt(provider.id, now, Some(error))
             .await
         {
             tracing::warn!(error = %problem, "mail provider status not saved");
         }
-        DeliveryResult::Temporary(error)
     }
 
     #[must_use]

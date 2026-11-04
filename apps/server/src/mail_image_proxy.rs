@@ -10,8 +10,9 @@
 //! - a host name is resolved by [`CheckedResolver`], which refuses the name when any of its
 //!   addresses is not public. reqwest connects to exactly the addresses it returns, so there is
 //!   no second lookup a DNS rebind could change;
-//! - reqwest follows no redirect: [`SafeFetch::get`] follows up to [`MAX_REDIRECTS`] itself
-//!   and checks each hop the same way;
+//! - reqwest follows no redirect: for an image, [`SafeFetch::get`] follows up to
+//!   [`MAX_REDIRECTS`] itself and checks each hop the same way; a provider fetch follows none
+//!   ([`Fetching::Provider`]);
 //! - no proxy from the environment (it would resolve the host itself), no cookie store (reqwest's
 //!   `cookies` feature is off), no `Referer`;
 //! - [`FETCH_TIMEOUT`] for all hops together, the body is read in chunks and dropped past
@@ -139,7 +140,7 @@ impl ImageProxy {
                 IMAGE_ACCEPT,
                 None,
                 FETCH_TIMEOUT,
-                false,
+                Fetching::Image,
             )
             .await?;
         let content_type = orbit_mail::sniff_image(&bytes).ok_or(ImageProxyError::NotImage)?;
@@ -148,6 +149,16 @@ impl ImageProxy {
             bytes,
         })
     }
+}
+
+/// The rules of one [`SafeFetch::get`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fetching {
+    /// A mail image: `http` or `https`, redirects followed (each hop checked).
+    Image,
+    /// A provider API, download or certificate: `https` only, and a redirect is an error (the
+    /// provider's own URLs do not redirect, so a redirect can only lead somewhere else).
+    Provider,
 }
 
 /// An HTTP client for URLs that others pick (mail images, provider downloads): the rules of the
@@ -203,9 +214,8 @@ impl SafeFetch {
         }
     }
 
-    /// GETs `raw` and its redirects (each checked), and returns at most `max_bytes` of a
-    /// successful body within `timeout`. `bearer` is sent only to the first host; `https_only`
-    /// refuses `http` URLs.
+    /// GETs `raw` (and, for an image, its redirects, each checked), and returns at most
+    /// `max_bytes` of a successful body within `timeout`. `bearer` is sent only to the first host.
     pub async fn get(
         &self,
         raw: &str,
@@ -213,20 +223,17 @@ impl SafeFetch {
         accept: &str,
         bearer: Option<&str>,
         timeout: Duration,
-        https_only: bool,
+        rules: Fetching,
     ) -> Result<Vec<u8>, FetchError> {
-        let url = target(raw, https_only)?;
+        let url = target(raw, rules == Fetching::Provider)?;
         let _permit = self
             .fetches
             .acquire()
             .await
             .map_err(|_| FetchError::Fetch("the client is closed".to_owned()))?;
-        tokio::time::timeout(
-            timeout,
-            self.follow(url, max_bytes, accept, bearer, https_only),
-        )
-        .await
-        .map_err(|_| FetchError::Fetch("timed out".to_owned()))?
+        tokio::time::timeout(timeout, self.follow(url, max_bytes, accept, bearer, rules))
+            .await
+            .map_err(|_| FetchError::Fetch("timed out".to_owned()))?
     }
 
     async fn follow(
@@ -235,7 +242,7 @@ impl SafeFetch {
         max_bytes: usize,
         accept: &str,
         bearer: Option<&str>,
-        https_only: bool,
+        rules: Fetching,
     ) -> Result<Vec<u8>, FetchError> {
         let first_host = url.host_str().map(str::to_owned);
         for hop in 0..=MAX_REDIRECTS {
@@ -254,7 +261,7 @@ impl SafeFetch {
             }
             let response = request.send().await.map_err(fetch_error)?;
             let status = response.status();
-            if status.is_redirection() {
+            if status.is_redirection() && rules == Fetching::Image {
                 if hop == MAX_REDIRECTS {
                     return Err(FetchError::TooManyRedirects);
                 }
@@ -264,7 +271,7 @@ impl SafeFetch {
                     .and_then(|value| value.to_str().ok())
                     .ok_or(FetchError::Status(status.as_u16()))?;
                 let next = url.join(location).map_err(|_| FetchError::Refused)?;
-                url = target(next.as_str(), https_only)?;
+                url = target(next.as_str(), false)?;
                 continue;
             }
             if !status.is_success() {
@@ -339,7 +346,9 @@ fn fetch_error(error: reqwest::Error) -> FetchError {
     if error.is_timeout() {
         FetchError::Fetch("timed out".to_owned())
     } else {
-        FetchError::Fetch(error.to_string())
+        // the URL can be a presigned download link: keep it out of the error text (it is logged
+        // and shown on the provider in settings)
+        FetchError::Fetch(error.without_url().to_string())
     }
 }
 

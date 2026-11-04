@@ -2084,11 +2084,11 @@ export type MailProviderSetup = {
 export type MailProviderView = {
     created_at: string;
     /**
-     * Domains routed to it, of every workspace.
+     * Domains routed to it: of every workspace for the root user, of this workspace otherwise.
      */
     domain_count: number;
     /**
-     * The secrets Orbit made (Cloudflare, Postmark), in the create response only.
+     * The secrets Orbit made (Cloudflare, Postmark), only in the response that made them.
      */
     generated_secrets?: {
         [key: string]: string;
@@ -4626,6 +4626,11 @@ export type UpdateMailLabelBody = {
 
 export type UpdateMailProviderBody = {
     name?: string | null;
+    /**
+     * Cloudflare and Postmark: makes new secrets, shown in this response only. The old ones stop
+     * working at once.
+     */
+    regenerate_secrets?: boolean;
     secrets?: null | MailProviderSecretsBody;
     settings?: null | MailProviderSettings;
 };

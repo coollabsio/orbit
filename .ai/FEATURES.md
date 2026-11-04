@@ -469,12 +469,8 @@ Not done yet (mail stays **Beta** until slices 1 to 5 are done):
 - Checked only by automated tests: no real mail from Gmail or Outlook in direct or relay mode, no real Cloudflare,
   Postmark, Mailgun, Resend or SES account, no click-through of the UI, no `docker build`.
 - Mobile has no mail screens: the mail app, its settings, the Mail badge and the PDF preview are web only.
-- Open review minors of provider intake: no rotation of the secrets Orbit makes (Cloudflare, Postmark); the
-  Cloudflare Worker can run out of memory near 25 MiB; no SNS timestamp check; unsigned requests can set a
-  provider's last error; workspace admins see an instance provider's domain count, last error and S3 settings; the
-  Resend download host is not pinned; a provider update reads the kind before the scope check (422 instead of 404);
-  a Resend event without `email_id` answers 400; error text can contain a presigned URL; the admin PUT saves its two
-  switches in separate transactions.
+- The Resend download host is not pinned (Resend's docs do not name it); the fetch must be `https`, public and
+  without redirects.
 - Rejected deliveries for domains that no workspace has are stored but not listed (Admin has no such list).
 - Next slices: 2 send (compose, reply, forward, DKIM signing, sending through a provider's SMTP, send queue,
   bounces), 3 spam and safety, 4 client access (IMAP server, SMTP submission, app passwords), 5 migration (import

@@ -65,26 +65,37 @@ pub(crate) async fn post_inbound(
             basic_password,
         )
         .is_ok(),
-        ProviderSecrets::Cloudflare { .. } => {
-            header("x-orbit-signature").is_some() && header("x-orbit-timestamp").is_some()
-        }
+        ProviderSecrets::Cloudflare { .. } => [
+            "x-orbit-signature",
+            "x-orbit-timestamp",
+            "x-orbit-from",
+            "x-orbit-to",
+        ]
+        .iter()
+        .all(|name| header(name).is_some()),
         ProviderSecrets::Resend { .. } => header("svix-signature").is_some(),
         ProviderSecrets::Mailgun { .. } | ProviderSecrets::Ses { .. } => true,
     };
     if !signed {
-        return refused(&intake, &provider, InboundError::Unauthorized, now).await;
+        return refused(&intake, &provider, InboundError::Unauthorized, now, false).await;
     }
     let Some(_permit) = intake.body_permit().await else {
         return reply(StatusCode::SERVICE_UNAVAILABLE, "try again later");
     };
     let Ok(body) = axum::body::to_bytes(body, body_limit(kind, max)).await else {
-        return refused(&intake, &provider, InboundError::TooLarge, now).await;
+        // only Postmark's credentials are checked before the body
+        let checked = kind == ProviderKind::Postmark;
+        return refused(&intake, &provider, InboundError::TooLarge, now, checked).await;
     };
 
     let parsed = match &secrets {
         ProviderSecrets::Cloudflare { signing_secret } => inbound::cloudflare::verify_and_parse(
-            header("x-orbit-timestamp"),
-            header("x-orbit-signature"),
+            inbound::cloudflare::Envelope {
+                timestamp: header("x-orbit-timestamp"),
+                signature: header("x-orbit-signature"),
+                from: header("x-orbit-from"),
+                to: header("x-orbit-to"),
+            },
             &body,
             signing_secret.as_bytes(),
             now_secs,
@@ -106,8 +117,8 @@ pub(crate) async fn post_inbound(
                 match multipart_form(content_type, body).await {
                     Some(form) => form,
                     None => {
-                        return refused(&intake, &provider, InboundError::Malformed("form"), now)
-                            .await;
+                        let error = InboundError::Malformed("form");
+                        return refused(&intake, &provider, error, now, false).await;
                     }
                 }
             } else {
@@ -120,8 +131,8 @@ pub(crate) async fn post_inbound(
                 max,
             ) {
                 Ok(parsed) if !intake.token_seen(&parsed.1, now_secs) => parsed,
-                Ok(_) => return refused(&intake, &provider, InboundError::Replay, now).await,
-                Err(error) => return refused(&intake, &provider, error, now).await,
+                Ok(_) => return refused(&intake, &provider, InboundError::Replay, now, true).await,
+                Err(error) => return refused(&intake, &provider, error, now, true).await,
             };
             let result = intake.deliver(&provider, delivery, now).await;
             if matches!(
@@ -149,14 +160,15 @@ pub(crate) async fn post_inbound(
                 Err(InboundError::Malformed("event_type")) => {
                     return (StatusCode::OK, Json(json!({ "ignored": true }))).into_response();
                 }
-                Err(error) => return refused(&intake, &provider, error, now).await,
+                Err(error) => return refused(&intake, &provider, error, now, true).await,
             };
             if !event
                 .email_id
                 .bytes()
                 .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
             {
-                return refused(&intake, &provider, InboundError::Malformed("email_id"), now).await;
+                let error = InboundError::Malformed("email_id");
+                return refused(&intake, &provider, error, now, true).await;
             }
             return delivered(
                 kind,
@@ -172,30 +184,30 @@ pub(crate) async fn post_inbound(
                 .await
             {
                 Ok(result) => delivered(kind, result),
-                Err(error) => refused(&intake, &provider, error, now).await,
+                // receive_ses notes the errors that come after the SNS signature
+                Err(error) => refused(&intake, &provider, error, now, false).await,
             };
         }
     };
     let delivery = match parsed {
         Ok(delivery) => delivery,
-        Err(error) => return refused(&intake, &provider, error, now).await,
+        Err(error) => return refused(&intake, &provider, error, now, true).await,
     };
     delivered(kind, intake.deliver(&provider, delivery, now).await)
 }
 
-/// A request the provider must not send again; its error shows on the provider in settings.
+/// A request the provider must not send again. When `checked` (the request passed the signature
+/// or credential check), its error shows on the provider in settings: anyone can post to the URL,
+/// so an unchecked request, a bad signature or a replay must not hide the provider's real status.
 async fn refused(
     intake: &ProviderIntake,
     provider: &MailProvider,
     error: InboundError,
     now: TimestampMillis,
+    checked: bool,
 ) -> Response {
-    if let Err(problem) = intake
-        .mail()
-        .record_provider_receipt(provider.id, now, Some(&error.to_string()))
-        .await
-    {
-        tracing::warn!(error = %problem, "mail provider status not saved");
+    if checked && !matches!(error, InboundError::Unauthorized | InboundError::Replay) {
+        intake.note(provider, now, &error.to_string()).await;
     }
     let status = match (provider.kind, error) {
         (ProviderKind::Postmark, _) => StatusCode::FORBIDDEN,
@@ -223,6 +235,9 @@ fn delivered(kind: ProviderKind, result: DeliveryResult) -> Response {
         DeliveryResult::Confirmed => {
             (StatusCode::OK, Json(json!({ "confirmed": true }))).into_response()
         }
+        DeliveryResult::AlreadyHandled => {
+            (StatusCode::OK, Json(json!({ "stored": 0 }))).into_response()
+        }
         DeliveryResult::Temporary(error) => {
             tracing::warn!(%error, provider = kind.as_str(), "provider mail not stored");
             reply(StatusCode::SERVICE_UNAVAILABLE, "try again later")
@@ -235,12 +250,12 @@ fn delivered(kind: ProviderKind, result: DeliveryResult) -> Response {
     }
 }
 
-/// The largest body each provider's request may have: base64 (Cloudflare), JSON escapes (Postmark)
-/// and percent-encoding (Mailgun) grow a message; Resend and SES send small JSON events.
+/// The largest body each provider's request may have: JSON escapes (Postmark) and percent-encoding
+/// (Mailgun) grow a message; Cloudflare sends the raw message; Resend and SES send small events.
 fn body_limit(kind: ProviderKind, max: usize) -> usize {
     const MIB: usize = 1024 * 1024;
     match kind {
-        ProviderKind::Cloudflare => (max / 3).saturating_mul(4).saturating_add(64 * 1024),
+        ProviderKind::Cloudflare => max.saturating_add(64 * 1024),
         ProviderKind::Postmark => max.saturating_mul(2).saturating_add(MIB),
         ProviderKind::Mailgun => max.saturating_mul(3).saturating_add(MIB),
         ProviderKind::Resend | ProviderKind::Ses => 256 * 1024,

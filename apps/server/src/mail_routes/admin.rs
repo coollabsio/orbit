@@ -218,28 +218,16 @@ pub(crate) async fn set_mail_admin(
     let (actor_id, instance) = require_root(&state, &headers, &uri, request_id).await?;
     let settings = InstanceSettingsRepository::new(state.identity.database().clone());
     let fail = |error| problem(MailError::Unavailable(error), &instance, request_id);
-    if let Some(enabled) = body.domains_enabled {
-        settings
-            .set_mail_domains_enabled(
-                actor_id,
-                enabled,
-                request_id_value(request_id),
-                TimestampMillis::now(),
-            )
-            .await
-            .map_err(fail)?;
-    }
-    if let Some(enabled) = body.workspace_providers_enabled {
-        settings
-            .set_mail_workspace_providers_enabled(
-                actor_id,
-                enabled,
-                request_id_value(request_id),
-                TimestampMillis::now(),
-            )
-            .await
-            .map_err(fail)?;
-    }
+    settings
+        .set_mail_switches(
+            actor_id,
+            body.domains_enabled,
+            body.workspace_providers_enabled,
+            request_id_value(request_id),
+            TimestampMillis::now(),
+        )
+        .await
+        .map_err(fail)?;
     admin_view(&state, &instance, request_id).await
 }
 

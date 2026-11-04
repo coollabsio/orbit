@@ -121,11 +121,11 @@ pub(crate) struct MailProviderView {
     last_received_at: Option<TimestampMillis>,
     /// The last failed delivery, cleared by the next good one.
     last_error: Option<String>,
-    /// Domains routed to it, of every workspace.
+    /// Domains routed to it: of every workspace for the root user, of this workspace otherwise.
     domain_count: i64,
     /// `null` for an instance provider listed to a workspace.
     setup: Option<MailProviderSetup>,
-    /// The secrets Orbit made (Cloudflare, Postmark), in the create response only.
+    /// The secrets Orbit made (Cloudflare, Postmark), only in the response that made them.
     generated_secrets: Option<BTreeMap<String, String>>,
     #[schema(value_type = String, format = DateTime)]
     created_at: TimestampMillis,
@@ -174,6 +174,10 @@ pub(crate) struct UpdateMailProviderBody {
     secrets: Option<MailProviderSecretsBody>,
     #[serde(default)]
     settings: Option<MailProviderSettings>,
+    /// Cloudflare and Postmark: makes new secrets, shown in this response only. The old ones stop
+    /// working at once.
+    #[serde(default)]
+    regenerate_secrets: bool,
 }
 
 /// The secrets of `kind` from the body; `None` when a value is missing.
@@ -293,6 +297,34 @@ fn view(
         }) => Some((basic_user.as_str(), basic_password.as_str())),
         _ => None,
     };
+    // an instance provider listed to a workspace: its name, kind and MX hosts only, not the
+    // instance's account (region, bucket, topic) or its delivery status
+    let ProviderSettings {
+        mx_hosts,
+        region,
+        bucket,
+        prefix,
+        topic_arn,
+    } = provider.settings.clone();
+    let settings = if own {
+        MailProviderSettings {
+            mx_hosts,
+            region,
+            bucket,
+            prefix,
+            topic_arn,
+        }
+    } else {
+        MailProviderSettings {
+            mx_hosts,
+            ..MailProviderSettings::default()
+        }
+    };
+    let (last_received_at, last_error) = if own {
+        (provider.last_received_at, provider.last_error.clone())
+    } else {
+        (None, None)
+    };
     let setup = own.then(|| MailProviderSetup {
         webhook_url: webhook_url(state, &provider, postmark),
         steps: steps(&provider),
@@ -308,20 +340,14 @@ fn view(
         },
         kind: provider.kind.into(),
         name: provider.name,
-        settings: MailProviderSettings {
-            mx_hosts: provider.settings.mx_hosts,
-            region: provider.settings.region,
-            bucket: provider.settings.bucket,
-            prefix: provider.settings.prefix,
-            topic_arn: provider.settings.topic_arn,
-        },
+        settings,
         secrets_set: provider
             .secrets_set
             .iter()
             .map(|name| (*name).to_owned())
             .collect(),
-        last_received_at: provider.last_received_at,
-        last_error: provider.last_error,
+        last_received_at,
+        last_error,
         domain_count: provider.domain_count,
         setup,
         generated_secrets: generated_secrets.map(generated),
@@ -386,13 +412,15 @@ async fn update(
 ) -> Result<Json<MailProviderView>, ApiError> {
     let fail = |error| problem(error, instance, request_id);
     let provider_id: Id = provider.parse().map_err(|_| fail(MailError::NotFound))?;
+    // the caller's providers only: another scope's provider is not found (and its kind not used)
     let kind = state
         .mail
-        .load_provider(provider_id)
+        .list_providers(scope, actor_id)
         .await
         .map_err(fail)?
+        .into_iter()
+        .find(|listed| listed.id == provider_id)
         .ok_or_else(|| fail(MailError::NotFound))?
-        .0
         .kind;
     let secrets = match body.secrets {
         Some(given) => Some(
@@ -400,7 +428,7 @@ async fn update(
         ),
         None => None,
     };
-    let provider = state
+    let changed = state
         .mail
         .update_provider(
             scope,
@@ -410,12 +438,18 @@ async fn update(
                 name: body.name,
                 secrets,
                 settings: body.settings.map(Into::into),
+                regenerate: body.regenerate_secrets,
             },
             request_id_value(request_id),
         )
         .await
         .map_err(fail)?;
-    Ok(Json(view(state, provider, true, None)))
+    Ok(Json(view(
+        state,
+        changed.provider,
+        true,
+        changed.generated.as_ref(),
+    )))
 }
 
 async fn delete(

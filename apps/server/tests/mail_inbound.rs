@@ -344,25 +344,27 @@ impl Fixture {
         let ProviderSecrets::Cloudflare { signing_secret } = &provider.secrets else {
             panic!("not cloudflare");
         };
-        let body = json!({
-            "from": "ann@sender.example",
-            "to": to,
-            "raw": base64::engine::general_purpose::STANDARD.encode(raw),
-        })
-        .to_string();
         let timestamp = (TimestampMillis::now().as_millis() / 1000).to_string();
+        let from = "ann%40sender.example".to_owned();
+        let to = to.replace('@', "%40");
+        let digest: String = <Sha256 as sha2::Digest>::digest(raw.as_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
         let signature = hmac_hex(
             signing_secret.as_bytes(),
-            format!("{timestamp}.{body}").as_bytes(),
+            format!("{timestamp}.{from}.{to}.{digest}").as_bytes(),
         );
         self.post(
             &format!("/api/v1/mail/inbound/cloudflare/{}", provider.id),
-            "application/json",
+            "application/octet-stream",
             &[
                 ("x-orbit-timestamp", timestamp),
                 ("x-orbit-signature", signature),
+                ("x-orbit-from", from),
+                ("x-orbit-to", to),
             ],
-            body.into_bytes(),
+            raw.as_bytes().to_vec(),
         )
         .await
     }
@@ -755,8 +757,10 @@ async fn bodies_over_the_limit_are_refused() {
             &[
                 ("x-orbit-timestamp", "1".to_owned()),
                 ("x-orbit-signature", "00".to_owned()),
+                ("x-orbit-from", String::new()),
+                ("x-orbit-to", "box%40one.test".to_owned()),
             ],
-            vec![b'x'; (MAX as usize) * 3 + 2 * 1024 * 1024],
+            vec![b'x'; (MAX as usize) + 128 * 1024],
         )
         .await;
     assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
@@ -1026,6 +1030,13 @@ fn sns_body(fields: &[(&str, String)], cert_url: &str, topic: &str) -> String {
     body.to_string()
 }
 
+/// An SNS `Timestamp` of now.
+fn sns_now() -> String {
+    chrono::Utc::now()
+        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+        .to_string()
+}
+
 const CERT_URL: &str = "https://sns.us-east-1.amazonaws.com/SimpleNotificationService-test.pem";
 
 fn ses_notification_fields(key: &str) -> Vec<(&'static str, String)> {
@@ -1042,7 +1053,7 @@ fn ses_notification_fields(key: &str) -> Vec<(&'static str, String)> {
     vec![
         ("Message", message),
         ("MessageId", "m-1".to_owned()),
-        ("Timestamp", "2026-10-30T10:00:00.000Z".to_owned()),
+        ("Timestamp", sns_now()),
         ("TopicArn", TOPIC.to_owned()),
         ("Type", "Notification".to_owned()),
     ]
@@ -1082,7 +1093,7 @@ async fn ses_subscription_is_confirmed() {
             "SubscribeURL",
             format!("https://{SNS_HOST}/?Action=ConfirmSubscription&TopicArn={TOPIC}&Token=t"),
         ),
-        ("Timestamp", "2026-10-30T10:00:00.000Z".to_owned()),
+        ("Timestamp", sns_now()),
         ("Token", "t".to_owned()),
         ("TopicArn", TOPIC.to_owned()),
         ("Type", "SubscriptionConfirmation".to_owned()),
@@ -1265,4 +1276,76 @@ async fn a_workspace_provider_cannot_fill_another_workspaces_list() {
         .unwrap();
     assert_eq!(theirs.rejected.len(), 1);
     assert_eq!(theirs.rejected[0].reason, RejectReason::WrongRoute);
+}
+
+#[tokio::test]
+async fn unverified_requests_leave_the_provider_status_alone() {
+    let mut fixture = fetching_fixture(Fake::default()).await;
+    let cloudflare = fixture
+        .provider(ProviderKind::Cloudflare, &[fixture.one])
+        .await;
+    let ses_provider = fixture
+        .provider_with(ProviderKind::Ses, &[fixture.two], ses_settings())
+        .await;
+    let status = |id| {
+        let mail = Arc::clone(&fixture.mail);
+        async move { mail.load_provider(id).await.unwrap().unwrap().0.last_error }
+    };
+    // anyone can post to the URL: a bad signature is refused and not noted
+    let (code, _) = fixture
+        .post(
+            &format!("/api/v1/mail/inbound/cloudflare/{}", cloudflare.id),
+            "application/octet-stream",
+            &[
+                ("x-orbit-timestamp", "1".to_owned()),
+                ("x-orbit-signature", "00".to_owned()),
+                ("x-orbit-from", String::new()),
+                ("x-orbit-to", "box%40one.test".to_owned()),
+            ],
+            b"Subject: x\r\n\r\nx\r\n".to_vec(),
+        )
+        .await;
+    assert_eq!(code, StatusCode::UNAUTHORIZED);
+    assert_eq!(status(cloudflare.id).await, None);
+    // an SNS message from before the window is a replay, also before its certificate is fetched
+    let mut old = ses_notification_fields("inbound/o1");
+    old[2].1 = "2020-01-01T00:00:00.000Z".to_owned();
+    let (code, _) = ses(&fixture, &ses_provider, sns_body(&old, CERT_URL, TOPIC)).await;
+    assert_eq!(code, StatusCode::UNAUTHORIZED);
+    // a certificate that cannot be fetched is not noted either (nothing is verified yet)
+    let (code, _) = ses(
+        &fixture,
+        &ses_provider,
+        sns_body(
+            &ses_notification_fields("inbound/o1"),
+            "https://sns.us-east-1.amazonaws.com/SimpleNotificationService-missing.pem",
+            TOPIC,
+        ),
+    )
+    .await;
+    assert_eq!(code, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(status(ses_provider.id).await, None);
+    assert!(fixture.receipts().await.is_empty());
+}
+
+#[tokio::test]
+async fn ses_retry_after_the_object_is_gone_is_ok() {
+    let fake = Fake::default();
+    let mut fixture = fetching_fixture(fake.clone()).await;
+    let provider = fixture
+        .provider_with(ProviderKind::Ses, &[fixture.one], ses_settings())
+        .await;
+    // SNS sends the notification again; the first one stored the message and deleted the object
+    let body = sns_body(&ses_notification_fields("inbound/gone"), CERT_URL, TOPIC);
+    let (status, reply) = ses(&fixture, &provider, body).await;
+    assert_eq!(status, StatusCode::OK, "{reply}");
+    assert!(fixture.receipts().await.is_empty());
+    let loaded = fixture
+        .mail
+        .load_provider(provider.id)
+        .await
+        .unwrap()
+        .unwrap()
+        .0;
+    assert_eq!(loaded.last_error, None);
 }

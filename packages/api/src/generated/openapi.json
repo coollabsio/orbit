@@ -48297,14 +48297,14 @@
           "domain_count": {
             "type": "integer",
             "format": "int64",
-            "description": "Domains routed to it, of every workspace."
+            "description": "Domains routed to it: of every workspace for the root user, of this workspace otherwise."
           },
           "generated_secrets": {
             "type": [
               "object",
               "null"
             ],
-            "description": "The secrets Orbit made (Cloudflare, Postmark), in the create response only.",
+            "description": "The secrets Orbit made (Cloudflare, Postmark), only in the response that made them.",
             "additionalProperties": {
               "type": "string"
             },
@@ -54740,6 +54740,10 @@
               "string",
               "null"
             ]
+          },
+          "regenerate_secrets": {
+            "type": "boolean",
+            "description": "Cloudflare and Postmark: makes new secrets, shown in this response only. The old ones stop\nworking at once."
           },
           "secrets": {
             "oneOf": [

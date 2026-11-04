@@ -1304,6 +1304,17 @@ async fn workspace_lists_instance_providers_read_only() {
         .call(&fixture.owner, fixture.first, "DELETE", &path, None)
         .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+    // not this workspace's provider: 404 before the body is read for the provider's kind
+    let (status, _) = fixture
+        .call(
+            &fixture.owner,
+            fixture.first,
+            "PATCH",
+            &path,
+            Some(json!({ "secrets": { "signing_key": "k" } })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
     // the other workspace sees the instance provider only
     let (_, other) = fixture
         .call(&fixture.owner, fixture.second, "GET", "/providers", None)
@@ -1442,4 +1453,130 @@ async fn a_domain_with_a_foreign_provider_is_not_created() {
         .call(&fixture.owner, fixture.first, "GET", "/domains", None)
         .await;
     assert_eq!(domains, json!([]));
+}
+
+#[tokio::test]
+async fn a_workspace_sees_no_details_of_instance_providers() {
+    let fixture = Fixture::new().await;
+    let (status, instance) = fixture
+        .admin_call(
+            &fixture.owner,
+            "POST",
+            "/providers",
+            Some(json!({
+                "kind": "ses",
+                "name": "Shared SES",
+                "secrets": { "access_key_id": "AKIA", "secret_access_key": "s" },
+                "settings": {
+                    "region": "eu-west-1",
+                    "bucket": "instance-bucket",
+                    "prefix": "inbound/",
+                    "topic_arn": "arn:aws:sns:eu-west-1:123456789012:instance-topic"
+                }
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{instance}");
+    // the second workspace routes a domain to it
+    let domain = fixture.add(fixture.second, "second.example").await;
+    let route = format!("/domains/{}/route", domain["id"].as_str().unwrap());
+    let (status, routed) = fixture
+        .call(
+            &fixture.owner,
+            fixture.second,
+            "PUT",
+            &route,
+            Some(json!({ "provider_id": instance["id"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{routed}");
+    let (_, listed) = fixture
+        .call(&fixture.owner, fixture.first, "GET", "/providers", None)
+        .await;
+    let shared = &listed["providers"][0];
+    assert_eq!(shared["id"], instance["id"]);
+    let text = shared.to_string();
+    // the MX hosts stay: the domain's MX must point to them
+    for hidden in ["instance-bucket", "instance-topic", "inbound/"] {
+        assert!(!text.contains(hidden), "{hidden}: {text}");
+    }
+    assert!(shared["last_error"].is_null());
+    // only the domains of this workspace count
+    assert_eq!(shared["domain_count"], 0);
+    let (_, second) = fixture
+        .call(&fixture.owner, fixture.second, "GET", "/providers", None)
+        .await;
+    assert_eq!(second["providers"][0]["domain_count"], 1);
+    // the root user sees everything
+    let (_, admin) = fixture
+        .admin_call(&fixture.owner, "GET", "/providers", None)
+        .await;
+    assert_eq!(
+        admin["providers"][0]["settings"]["bucket"],
+        "instance-bucket"
+    );
+    assert_eq!(admin["providers"][0]["domain_count"], 1);
+}
+
+#[tokio::test]
+async fn new_secrets_replace_the_ones_orbit_made() {
+    let fixture = Fixture::new().await;
+    let (_, created) = fixture
+        .admin_call(
+            &fixture.owner,
+            "POST",
+            "/providers",
+            Some(json!({ "kind": "postmark", "name": "Postmark" })),
+        )
+        .await;
+    let old = created["generated_secrets"]["basic_password"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let path = format!("/providers/{}", created["id"].as_str().unwrap());
+    let (status, changed) = fixture
+        .admin_call(
+            &fixture.owner,
+            "PATCH",
+            &path,
+            Some(json!({ "regenerate_secrets": true })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    let new = changed["generated_secrets"]["basic_password"]
+        .as_str()
+        .unwrap();
+    assert_ne!(new, old);
+    // shown once, in the webhook URL too
+    assert!(
+        changed["setup"]["webhook_url"]
+            .as_str()
+            .unwrap()
+            .contains(new)
+    );
+    let (_, listed) = fixture
+        .admin_call(&fixture.owner, "GET", "/providers", None)
+        .await;
+    assert!(!listed.to_string().contains(new));
+    // a provider whose secrets come from the provider cannot regenerate them
+    let (_, mailgun) = fixture
+        .admin_call(
+            &fixture.owner,
+            "POST",
+            "/providers",
+            Some(
+                json!({ "kind": "mailgun", "name": "Mailgun", "secrets": { "signing_key": "k" } }),
+            ),
+        )
+        .await;
+    let path = format!("/providers/{}", mailgun["id"].as_str().unwrap());
+    let (status, _) = fixture
+        .admin_call(
+            &fixture.owner,
+            "PATCH",
+            &path,
+            Some(json!({ "regenerate_secrets": true })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 }
