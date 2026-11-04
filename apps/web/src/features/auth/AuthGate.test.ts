@@ -22,14 +22,14 @@ describe('AuthGate state', () => {
     expect(
       authGateState({
         setupComplete: true,
-        user: { id: 'user-one', email: 'owner@orbit.test', display_name: 'Owner', installation_admin: true, root: false, status: { presence: 'online' } },
+        user: { id: 'user-one', email: 'owner@orbit.test', display_name: 'Owner', installation_admin: true, root: false, has_password: true, status: { presence: 'online' } },
         failed: false,
       }),
     ).toBe('authenticated')
   })
 
   test('a failed refetch keeps a signed-in user in the app', () => {
-    const user = { id: 'user-one', email: 'owner@orbit.test', display_name: 'Owner', installation_admin: true, root: false, status: { presence: 'online' as const } }
+    const user = { id: 'user-one', email: 'owner@orbit.test', display_name: 'Owner', installation_admin: true, root: false, has_password: true, status: { presence: 'online' as const } }
     // The gate has the user from before; both queries now say error (server restart, wifi rejoin).
     const cached = { data: user, isError: true, error: new TypeError('Failed to fetch'), failureCount: 7, failureReason: null }
     const failed = firstLoadFailed({ ...cached, data: { complete: true } }) || firstLoadFailed(cached)
@@ -42,7 +42,7 @@ describe('AuthGate state', () => {
   })
 
   test('a refetch the server refused shows the unavailable message, even with a user from before', () => {
-    const user = { id: 'user-one', email: 'owner@orbit.test', display_name: 'Owner', installation_admin: true, root: false, status: { presence: 'online' as const } }
+    const user = { id: 'user-one', email: 'owner@orbit.test', display_name: 'Owner', installation_admin: true, root: false, has_password: true, status: { presence: 'online' as const } }
     // An old tab after a deploy: 409 `contract_mismatch`. No banner tells the user, so the gate must.
     const refused = { data: user, isError: true, error: { status: 409 }, failureCount: 1, failureReason: null }
     const ok = { data: { complete: true }, isError: false, error: null, failureCount: 0, failureReason: null }

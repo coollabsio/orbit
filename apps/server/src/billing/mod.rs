@@ -4,6 +4,8 @@
 //! work, writes answer 402 `workspace_read_only` ([`guard`]). On a self-hosted server none of this
 //! is mounted.
 
+mod cancel;
+mod customer_email;
 pub mod guard;
 pub(crate) mod routes;
 pub mod stripe;
@@ -17,6 +19,10 @@ use serde::Serialize;
 use tokio::sync::OnceCell;
 use utoipa::ToSchema;
 
+pub use cancel::CANCEL_JOB;
+pub(crate) use cancel::enqueue_in as enqueue_cancel_in;
+pub use customer_email::CUSTOMER_EMAIL_JOB;
+pub(crate) use customer_email::enqueue_in as enqueue_customer_email_in;
 pub use routes::router;
 use routes::{PlanInterval, PlanView};
 pub use sync::{SYNC_JOB, register_jobs};

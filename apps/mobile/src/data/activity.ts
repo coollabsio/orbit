@@ -140,6 +140,10 @@ function changeRows(metadata: Record<string, unknown>, context: ActivityContext)
   })
 }
 
+const ACTIVITY_TEXT: Record<string, string> = {
+  'backup.item_restored': 'restored from a backup',
+}
+
 /** Audit events to feed rows: a `task.updated` event gives one row per field, the rest one row each. */
 export function activityRows(events: readonly TaskActivityEvent[], context: ActivityContext): ActivityRow[] {
   return events.flatMap((event) => {
@@ -149,7 +153,7 @@ export function activityRows(events: readonly TaskActivityEvent[], context: Acti
     if (changes) return changes.map((change) => ({ ...base, id: `${event.id}:${change.field}`, text: change.text, statusId: change.statusId }))
     const related = relationText(event.action, metadata, context)
     const subIssue = related ? null : subIssueText(event.action, metadata, context)
-    return [{ ...base, text: related ?? subIssue?.text ?? event.action.split('.').reverse().join(' '), statusId: subIssue?.statusId }]
+    return [{ ...base, text: related ?? subIssue?.text ?? ACTIVITY_TEXT[event.action] ?? event.action.split('.').reverse().join(' '), statusId: subIssue?.statusId }]
   })
 }
 

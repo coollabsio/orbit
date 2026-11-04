@@ -74,7 +74,7 @@ async fn github_schema_is_in_one_draft_migration() {
         db.scalar::<i64>("SELECT MAX(version) FROM schema_migrations")
             .await
             .unwrap(),
-        61
+        66
     );
     assert_eq!(
         db.scalar::<i64>("SELECT COUNT(*) FROM pragma_table_info('github_issue_links') WHERE name IN ('kind', 'pull_state', 'sync_paused')")
@@ -211,7 +211,7 @@ async fn rejects_a_schema_newer_than_the_binary() {
         error,
         MigrationError::SchemaNewer {
             database_version: 999,
-            binary_version: 61
+            binary_version: 66
         }
     ));
 }
@@ -2594,7 +2594,7 @@ async fn guests_migration_keeps_every_membership_child_row() {
     let db = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
         .await
         .unwrap();
-    MigrationRunner::embedded_through("test", 60)
+    MigrationRunner::embedded_through("test", 65)
         .run(&db)
         .await
         .unwrap();
@@ -2813,4 +2813,44 @@ async fn guests_migration_keeps_every_membership_child_row() {
             "ok"
         );
     }
+}
+
+#[tokio::test]
+async fn setup_owner_email_migration_confirms_only_the_setup_owner() {
+    if orbit_platform::testing_postgres() {
+        return; // SQLite migration history (embedded_through)
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let db = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
+        .await
+        .unwrap();
+    MigrationRunner::embedded_through("test", 64)
+        .run(&db)
+        .await
+        .unwrap();
+    db.execute(
+        "BEGIN;
+         INSERT INTO installation_state (id, initialized, initialized_at) VALUES (1, 1, 1000)
+         ON CONFLICT (id) DO UPDATE SET initialized = 1, initialized_at = 1000;
+         INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at)
+         VALUES ('owner', 'owner@example.com', 'owner@example.com', 'Owner', 'x', 1000, 1000),
+                ('invited', 'invited@example.com', 'invited@example.com', 'Invited', 'x', 2000, 2000);
+         COMMIT;",
+    )
+    .await
+    .unwrap();
+
+    MigrationRunner::embedded("test").run(&db).await.unwrap();
+
+    let verified = |id: &str| format!("SELECT email_verified_at FROM users WHERE id = '{id}'");
+    assert_eq!(
+        db.scalar::<Option<i64>>(&verified("owner")).await.unwrap(),
+        Some(1000)
+    );
+    assert_eq!(
+        db.scalar::<Option<i64>>(&verified("invited"))
+            .await
+            .unwrap(),
+        None
+    );
 }

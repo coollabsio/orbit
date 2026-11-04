@@ -53,13 +53,19 @@ pub struct SetupRequest {
     pub project_name: String,
 }
 
+/// How `users.password_hash` spells "no password" for an account a sign-in provider created. SQLite cannot drop
+/// `NOT NULL` without rebuilding `users`, so the column keeps a value no password verifier accepts. Rows are decoded
+/// into `Option` here; nothing else may compare against it.
+pub(crate) const NO_PASSWORD: &str = "!";
+
 #[derive(Clone, Eq, PartialEq)]
 pub struct StoredIdentity {
     pub id: Id,
     pub email: String,
     pub normalized_email: String,
     pub display_name: String,
-    pub password_hash: String,
+    /// `None`: the account signs in only with a provider or a passkey.
+    pub password_hash: Option<String>,
     pub suspended: bool,
     pub installation_admin: bool,
 }
@@ -230,6 +236,12 @@ pub enum AdminAccountError {
     OwnAccount,
     #[error("the account is suspended")]
     Suspended,
+    #[error("the account was deleted")]
+    Deleted,
+    #[error("the account already has this email")]
+    SameEmail,
+    #[error("another account has this email")]
+    EmailTaken,
     #[error("identity repository is unavailable")]
     Unavailable(#[from] sqlx::Error),
 }
@@ -245,6 +257,8 @@ pub struct AdminUser {
     /// Can open Admin: the root user and the instance admins the root user chose.
     pub admin: bool,
     pub suspended: bool,
+    /// The person deleted their account: it is anonymized and can never sign in or be reinstated.
+    pub deleted: bool,
     /// Sign-in asks for an authenticator app code. An admin can turn it off for a user who lost the device.
     pub two_factor: bool,
     #[schema(value_type = String, format = DateTime)]
@@ -550,16 +564,17 @@ impl IdentityRepository {
         let session_id = Id::new_v7();
         let session_token = generate_opaque_token();
         let timestamp = now.as_millis();
+        // The owner typed this email while holding the setup token, so it counts as confirmed.
         sqlx::query(
             "INSERT INTO users (id, email, normalized_email, display_name, password_hash, \
-             installation_admin, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, 1, $6, $7)",
+             installation_admin, email_verified_at, created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, $5, 1, $6, $6, $6)",
         )
         .bind(user_id.to_string())
         .bind(email)
         .bind(normalized_email)
         .bind(request.display_name)
         .bind(request.password_hash)
-        .bind(timestamp)
         .bind(timestamp)
         .execute(&mut *transaction)
         .await
@@ -618,6 +633,18 @@ impl IdentityRepository {
         .fetch_optional(self.database.pool())
         .await?;
         row.map(decode_identity).transpose()
+    }
+
+    /// Whether the account has a password (provider-created accounts start without one).
+    pub async fn has_password(&self, user_id: Id) -> Result<bool, IdentityError> {
+        Ok(sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM users WHERE id = $1 AND password_hash <> $2",
+        )
+        .bind(user_id.to_string())
+        .bind(NO_PASSWORD)
+        .fetch_one(self.database.pool())
+        .await?
+            == 1)
     }
 
     pub async fn is_installation_admin(&self, user_id: Id) -> Result<bool, IdentityError> {
@@ -862,7 +889,7 @@ impl IdentityRepository {
                  THEN 0 ELSE 1 END AS root_rank, \
                1 - users.installation_admin AS admin_rank FROM users) \
              SELECT keyed.id, keyed.email, keyed.display_name, keyed.installation_admin, keyed.suspended_at, \
-             keyed.created_at, 1 - keyed.root_rank AS root, \
+             keyed.deleted_at, keyed.created_at, 1 - keyed.root_rank AS root, \
              EXISTS (SELECT 1 FROM user_totp WHERE user_totp.user_id = keyed.id \
                AND user_totp.enabled_at IS NOT NULL) AS two_factor, \
              (SELECT MAX(sessions.last_activity_at) FROM sessions WHERE sessions.user_id = keyed.id) \
@@ -892,6 +919,7 @@ impl IdentityRepository {
                 root: row.get::<i64, _>("root") == 1,
                 admin: row.get::<i64, _>("installation_admin") == 1,
                 suspended: row.get::<Option<i64>, _>("suspended_at").is_some(),
+                deleted: row.get::<Option<i64>, _>("deleted_at").is_some(),
                 two_factor: row.get::<bool, _>("two_factor"),
                 created_at: TimestampMillis::from_millis(row.get("created_at")),
                 last_active_at: row
@@ -906,8 +934,9 @@ impl IdentityRepository {
         Ok((users, next))
     }
 
-    /// Stores a one-time recovery token for another account, issued from the Admin area. An admin's own password
-    /// changes in Profile, which asks for the current password; a recovery link would skip that.
+    /// Stores a one-time recovery token for another account, issued from the Admin area, and returns the account's
+    /// email. An admin's own password changes in Profile, which asks for the current password; a recovery link would
+    /// skip that.
     pub async fn issue_recovery_token_as_admin(
         &self,
         actor_id: Id,
@@ -915,7 +944,7 @@ impl IdentityRepository {
         token: &str,
         expires_at: TimestampMillis,
         request_id: &str,
-    ) -> Result<(), AdminAccountError> {
+    ) -> Result<String, AdminAccountError> {
         let now = self.database.database_now().await?;
         let mut transaction = self.database.immediate_transaction().await?;
         if !Self::is_active_admin(&mut transaction, actor_id).await? {
@@ -925,13 +954,12 @@ impl IdentityRepository {
             return Err(AdminAccountError::OwnAccount);
         }
         Self::may_manage(&mut transaction, actor_id, user_id).await?;
-        let suspended_at =
-            sqlx::query_scalar::<_, Option<i64>>("SELECT suspended_at FROM users WHERE id = $1")
-                .bind(user_id.to_string())
-                .fetch_optional(&mut *transaction)
-                .await?
-                .ok_or(AdminAccountError::NotFound)?;
-        if suspended_at.is_some() {
+        let account = sqlx::query("SELECT email, suspended_at FROM users WHERE id = $1")
+            .bind(user_id.to_string())
+            .fetch_optional(&mut *transaction)
+            .await?
+            .ok_or(AdminAccountError::NotFound)?;
+        if account.get::<Option<i64>, _>("suspended_at").is_some() {
             return Err(AdminAccountError::Suspended);
         }
         insert_recovery_token(
@@ -955,7 +983,7 @@ impl IdentityRepository {
         )
         .await?;
         transaction.commit().await?;
-        Ok(())
+        Ok(account.get("email"))
     }
 
     /// Makes an account an instance admin, or takes that back. Only the root user may, and never for the root account.
@@ -1040,11 +1068,13 @@ impl IdentityRepository {
         if initialized == 0 {
             return Err(RootChangeError::SetupIncomplete);
         }
-        let target = sqlx::query("SELECT id, suspended_at FROM users WHERE normalized_email = $1")
-            .bind(normalize_email(email))
-            .fetch_optional(&mut *transaction)
-            .await?
-            .ok_or(RootChangeError::NotFound)?;
+        let target = sqlx::query(
+            "SELECT id, suspended_at FROM users WHERE normalized_email = $1 AND deleted_at IS NULL",
+        )
+        .bind(normalize_email(email))
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or(RootChangeError::NotFound)?;
         let target_id: String = target.get("id");
         let reinstated = target.get::<Option<i64>, _>("suspended_at").is_some();
         let previous = sqlx::query_scalar::<_, Option<String>>(
@@ -1102,7 +1132,7 @@ impl IdentityRepository {
             != 0)
     }
 
-    async fn is_root_account(
+    pub(super) async fn is_root_account(
         transaction: &mut Transaction<'_, Any>,
         user_id: Id,
     ) -> Result<bool, sqlx::Error> {
@@ -1124,6 +1154,15 @@ impl IdentityRepository {
     ) -> Result<(), AdminAccountError> {
         if Self::is_root_account(transaction, target_id).await? {
             return Err(AdminAccountError::RootAccount);
+        }
+        let deleted = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM users WHERE id = $1 AND deleted_at IS NOT NULL",
+        )
+        .bind(target_id.to_string())
+        .fetch_one(&mut **transaction)
+        .await?;
+        if deleted != 0 {
+            return Err(AdminAccountError::Deleted);
         }
         let target_admin =
             sqlx::query_scalar::<_, i64>("SELECT installation_admin FROM users WHERE id = $1")
@@ -1421,6 +1460,7 @@ impl IdentityRepository {
         .bind(keep_session_id.to_string())
         .execute(&mut *transaction)
         .await?;
+        revoke_oauth_grants(&mut transaction, user_id, now).await?;
         audit::record_global(
             &mut transaction,
             Some(user_id),
@@ -1434,6 +1474,8 @@ impl IdentityRepository {
         )
         .await?;
         transaction.commit().await?;
+        // Open sockets of the revoked sessions close now.
+        crate::collab::CollabHub::revalidate_database(&self.database, None);
         Ok(())
     }
 
@@ -1541,11 +1583,14 @@ impl IdentityRepository {
         .bind(user_id.to_string())
         .execute(&mut *transaction)
         .await?;
+        revoke_oauth_grants(&mut transaction, user_id, now).await?;
         sqlx::query("DELETE FROM recovery_tokens WHERE token_hash = $1")
             .bind(stored)
             .execute(&mut *transaction)
             .await?;
         transaction.commit().await?;
+        // Open sockets of the revoked sessions close now.
+        crate::collab::CollabHub::revalidate_database(&self.database, None);
         Ok(user_id)
     }
 
@@ -1604,6 +1649,7 @@ impl IdentityRepository {
         .bind(user_id.to_string())
         .execute(&mut *transaction)
         .await?;
+        revoke_oauth_grants(&mut transaction, user_id, now).await?;
         sqlx::query("DELETE FROM recovery_tokens WHERE token_hash = $1")
             .bind(stored)
             .execute(&mut *transaction)
@@ -1621,6 +1667,8 @@ impl IdentityRepository {
         )
         .await?;
         transaction.commit().await?;
+        // Open sockets of the revoked sessions close now.
+        crate::collab::CollabHub::revalidate_database(&self.database, None);
         Ok(user_id)
     }
 
@@ -2068,7 +2116,8 @@ fn decode_identity(row: sqlx::any::AnyRow) -> Result<StoredIdentity, IdentityErr
         email: row.get("email"),
         normalized_email: row.get("normalized_email"),
         display_name: row.get("display_name"),
-        password_hash: row.get("password_hash"),
+        password_hash: Some(row.get::<String, _>("password_hash"))
+            .filter(|hash| hash != NO_PASSWORD),
         suspended: row.get::<Option<i64>, _>("suspended_at").is_some(),
         installation_admin: row.get("installation_admin"),
     })
@@ -2113,6 +2162,23 @@ fn constant_time_eq(stored: &[u8], supplied: &[u8; 32]) -> bool {
         difference |= left ^ right;
     }
     difference == 0
+}
+
+/// Ends the user's MCP OAuth grants (and so their tokens), as a new password ends the sessions. Passkeys and
+/// provider identities stay: the person manages those in Security.
+async fn revoke_oauth_grants(
+    transaction: &mut Transaction<'_, Any>,
+    user_id: Id,
+    now: TimestampMillis,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE oauth_grants SET revoked_at = $1 WHERE user_id = $2 AND revoked_at IS NULL",
+    )
+    .bind(now.as_millis())
+    .bind(user_id.to_string())
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
 }
 
 /// Audits a profile change globally and in each of the user's workspaces. The workspace
@@ -2217,7 +2283,7 @@ mod tests {
                     email: observed.email,
                     display_name: observed.display_name,
                 },
-                &observed.password_hash,
+                observed.password_hash.as_deref().unwrap(),
                 Some("rehash-of-old-password"),
                 "login-request",
                 TimestampMillis::from_millis(3_000),
@@ -2281,7 +2347,7 @@ mod tests {
                     email: observed.email,
                     display_name: observed.display_name,
                 },
-                &observed.password_hash,
+                observed.password_hash.as_deref().unwrap(),
                 None,
                 "login-request",
                 TimestampMillis::from_millis(3_000),

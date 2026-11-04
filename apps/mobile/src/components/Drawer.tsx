@@ -20,11 +20,29 @@ import { isGuestRole } from '../data/guest'
 
 const DrawerContext = createContext<(() => void) | null>(null)
 
-/** The ☰ button of every tab header: opens the sidebar drawer, like the web's mobile topbar. */
+/** The ☰ button of every tab header, and the Activity bell beside it: like the web's phone top bar. */
 export function MenuButton() {
   const { colors } = useTheme()
   const open = use(DrawerContext)
-  return <IconButton icon="menu" label="Menu" iconSize={18} color={alpha(colors.mutedForeground, 0.7)} onPress={open ?? undefined} />
+  const pathname = usePathname()
+  const unread = (useUnreadNotifications().data?.length ?? 0) > 0
+  const onActivity = pathname === '/activity'
+  return (
+    <>
+      <IconButton icon="menu" label="Menu" iconSize={18} color={alpha(colors.mutedForeground, 0.7)} onPress={open ?? undefined} />
+      <Pressable
+        accessibilityRole="link"
+        accessibilityLabel={unread ? 'Activity, unread' : 'Activity'}
+        accessibilityState={{ selected: onActivity }}
+        onPress={() => router.navigate('/activity')}
+        hitSlop={6}
+        className={`size-7 items-center justify-center rounded-md active:bg-muted ${onActivity ? 'bg-muted' : ''}`}
+      >
+        <Icon name="bell" size={17} color={onActivity ? colors.foreground : alpha(colors.mutedForeground, 0.7)} />
+        {unread ? <View className="absolute top-0.5 right-0.5 size-2 rounded-full bg-primary" /> : null}
+      </Pressable>
+    </>
+  )
 }
 
 /** The tab roots: on a pushed screen the same edge swipe is iOS's back gesture. */
@@ -211,32 +229,44 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
   const onTasks = pathname === '/tasks' || pathname.startsWith('/tasks/')
   const onSettings = pathname === '/settings' || pathname.startsWith('/settings/')
   const onAdmin = pathname.startsWith('/settings/admin')
+  const onActivity = pathname === '/activity'
   const taskView = (name: string) => pathname === '/tasks' && view === name
   const workspaceLinks: NavLink[] = [
     { label: 'Home', icon: 'home', href: '/', active: pathname === '/' },
     { label: 'Tasks', icon: 'tasks', href: tasksHref({ project }, {}), active: onTasks && !view },
   ]
-  const personal: NavLink[] = [
-    { label: 'Activity', icon: 'inbox', href: '/activity', active: pathname === '/activity', dot: inboxUnread },
-    // the new UI keeps the task presets in the Tasks area
-    ...(newUi ? [] : TASK_PRESETS.map((preset) => ({ label: preset.label, icon: preset.icon, href: tasksHref({ project }, { view: preset.view }), active: taskView(preset.view) }))),
-  ]
+  // the new UI keeps the task presets in the Tasks area
+  const personal: NavLink[] = newUi ? [] : TASK_PRESETS.map((preset) => ({ label: preset.label, icon: preset.icon, href: tasksHref({ project }, { view: preset.view }), active: taskView(preset.view) }))
   const dark = scheme === 'dark'
 
   return (
     <View className="flex-1 border-r border-sidebar-edge bg-sidebar px-3" style={{ paddingTop: insets.top, paddingBottom: 12 + insets.bottom }}>
       <Wash color={colors.sidebarWash} width={width} />
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`Workspace: ${workspace.name}`}
-        onPress={() => setSwitching(true)}
-        className="mb-2 h-12 flex-row items-center gap-[7px] px-1.5"
-      >
-        <RNText numberOfLines={1} className="shrink font-noto-bold text-[17px] tracking-[-0.34px] text-foreground">
-          {workspace.name}
-        </RNText>
-        <Icon name="chevronDown" size={13} color={alpha(colors.mutedForeground, 0.7)} />
-      </Pressable>
+      <View className="mb-2 h-12 flex-row items-center justify-between gap-2 px-1.5">
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Workspace: ${workspace.name}`}
+          onPress={() => setSwitching(true)}
+          className="shrink flex-row items-center gap-[7px]"
+        >
+          <RNText numberOfLines={1} className="shrink font-noto-bold text-[17px] tracking-[-0.34px] text-foreground">
+            {workspace.name}
+          </RNText>
+          <Icon name="chevronDown" size={13} color={alpha(colors.mutedForeground, 0.7)} />
+        </Pressable>
+        {/* the web's `ActivityBell`: Activity stays in view in every drawer area */}
+        <Pressable
+          accessibilityRole="link"
+          accessibilityLabel={inboxUnread ? 'Activity, unread' : 'Activity'}
+          accessibilityState={{ selected: onActivity }}
+          onPress={() => go('/activity')}
+          hitSlop={6}
+          className={`size-8 items-center justify-center rounded-md active:bg-neutral-100 dark:active:bg-white/6 ${onActivity ? 'bg-neutral-100 dark:bg-white/6' : ''}`}
+        >
+          <Icon name="bell" size={18} color={onActivity ? colors.sidebarNavActive : colors.sidebarNav} />
+          {inboxUnread ? <View className="absolute top-1.5 right-1.5 size-2 rounded-full bg-primary" /> : null}
+        </Pressable>
+      </View>
 
       {guest ? null : <View className="px-1 pb-3">
         <Pressable
@@ -286,7 +316,7 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
               <NavRow link={{ label: 'Docs', icon: 'docs', href: '/docs', active: pathname.startsWith('/docs') }} onPress={() => go('/docs')} />
               <NavRow link={{ label: 'Chat', icon: 'chat', href: '/chat', active: pathname.startsWith('/chat'), badge: chatBadge.count, dot: chatBadge.unread }} onPress={() => go('/chat')} />
               <NavRow link={{ label: 'Mail', icon: 'mail', href: '/', active: false }} comingSoon />
-              <Section label="Personal" />
+              {personal.length > 0 ? <Section label="Personal" /> : null}
               {personal.map((link) => (
                 <NavRow key={link.label} link={link} onPress={() => go(link.href)} />
               ))}

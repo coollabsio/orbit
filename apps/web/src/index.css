@@ -605,3 +605,13 @@ img.ProseMirror-separator {
 .ProseMirror-focused .ProseMirror-gapcursor {
   display: block;
 }
+
+/* BlockNote pins its touch formatting toolbar (portaled to <body>) above the on-screen keyboard, which is where iOS
+   scrolls the field being typed in, so the toolbar covers it. Pin it to the top of the visual viewport instead, over
+   the page header. Same `--bn-vv-*` variables BlockNote publishes; `html` outranks its unlayered rule. */
+html .bn-mobile-formatting-toolbar {
+  transform: translate(var(--bn-vv-left, 0px), var(--bn-vv-top, 0px)) scale(calc(1 / var(--bn-vv-scale, 1)));
+  transform-origin: left top;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: 0;
+}

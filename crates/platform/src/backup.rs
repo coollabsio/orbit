@@ -1,9 +1,10 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
+use std::time::Instant;
 
 use chrono::{Datelike, TimeZone, Utc};
 use fs2::FileExt;
@@ -18,15 +19,21 @@ use crate::{
     Backend, Database, DatabaseError, MigrationRunner, ObjectStorage, S3Bucket, S3Error,
     lock_database_ownership,
 };
+use crate::files::TEMPORARY_DIRECTORY;
 
 mod postgres;
+mod reader;
+
+pub use reader::{SnapshotReader, SnapshotRow};
 
 const DATABASE_FILE: &str = "database.sqlite";
 const MANIFEST_FILE: &str = "manifest.json";
 /// Snapshots fetched from S3 for verify, download or restore.
 const DOWNLOADS: &str = "downloads";
 const DOWNLOAD_CACHE_MILLIS: u128 = 60 * 60 * 1000;
-const SUPPORTED_SCHEMA_VERSION: i64 = 61;
+/// [`BackupService::verified_snapshot`] checks a snapshot's hashes again after this long.
+const VERIFIED_FOR: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+const SUPPORTED_SCHEMA_VERSION: i64 = 66;
 /// Retention keeps up to this many snapshots from the last day, so a manual or hourly backup does not replace an
 /// earlier one from the same day.
 const RECENT_SNAPSHOTS: usize = 24;
@@ -94,6 +101,9 @@ pub struct BackupService {
     attachment_root: PathBuf,
     attachment_mutations: AttachmentMutationCoordinator,
     storage: ObjectStorage,
+    /// Snapshots [`Self::verified_snapshot`] checked, by id, with the time of the check. Per process: it only saves
+    /// work.
+    verified: Arc<std::sync::Mutex<HashMap<String, (Instant, BackupSnapshot)>>>,
 }
 
 #[derive(Debug, Error)]
@@ -160,6 +170,8 @@ pub enum BackupError {
     Postgres(#[source] sqlx::Error),
     #[error("backup snapshot is invalid: {0}")]
     InvalidSnapshot(String),
+    #[error("backup snapshot could not be read: {0}")]
+    SnapshotRead(#[source] sqlx::Error),
     #[error(
         "backup {id} is a {snapshot:?} snapshot and cannot be restored into a {database:?} database"
     )]
@@ -178,6 +190,7 @@ impl BackupService {
             attachment_root: attachment_root.into(),
             attachment_mutations: AttachmentMutationCoordinator::default(),
             storage: ObjectStorage::default(),
+            verified: Arc::default(),
         }
     }
 
@@ -204,8 +217,28 @@ impl BackupService {
         database: &Database,
         cancellation: CancellationToken,
     ) -> Result<BackupSnapshot, BackupError> {
+        let snapshot = self.create_stored(database, cancellation.clone()).await?;
+        self.apply_retention(cancellation).await?;
+        Ok(snapshot)
+    }
+
+    /// A snapshot of the data that a restore is about to replace. Retention does not run, so it cannot remove
+    /// the snapshot that is restored next.
+    pub async fn create_before_restore(
+        &self,
+        database: &Database,
+    ) -> Result<BackupSnapshot, BackupError> {
+        self.create_stored(database, CancellationToken::new()).await
+    }
+
+    /// A snapshot, moved to S3 when backups go there.
+    async fn create_stored(
+        &self,
+        database: &Database,
+        cancellation: CancellationToken,
+    ) -> Result<BackupSnapshot, BackupError> {
         let mut snapshot = self
-            .create_kind(database, BackupKind::Snapshot, cancellation.clone())
+            .create_kind(database, BackupKind::Snapshot, cancellation)
             .await?;
         if let Some(bucket) = self.storage.backup_bucket() {
             // On failure the local snapshot stays, so the backup is not lost.
@@ -213,7 +246,6 @@ impl BackupService {
             remove_dir_all(&snapshot.path)?;
             snapshot.in_object_storage = true;
         }
-        self.apply_retention(cancellation).await?;
         Ok(snapshot)
     }
 
@@ -284,6 +316,45 @@ impl BackupService {
     pub async fn verify(&self, id: &str) -> Result<BackupSnapshot, BackupError> {
         let snapshot = self.find(id).await?;
         verify_snapshot(&snapshot)?;
+        Ok(snapshot)
+    }
+
+    /// [`Self::verify`] for reading many times: a snapshot verified in the last [`VERIFIED_FOR`] by this process
+    /// is not checked again while its files are still there (a snapshot fetched from S3 is removed from
+    /// `downloads/` an hour after the fetch). A snapshot from S3 counts as fetched again when it is verified, so
+    /// it stays for an hour after that.
+    pub async fn verified_snapshot(&self, id: &str) -> Result<BackupSnapshot, BackupError> {
+        let cached = self
+            .verified
+            .lock()
+            .expect("verified snapshot cache is not poisoned")
+            .get(id)
+            .filter(|(at, snapshot)| {
+                at.elapsed() < VERIFIED_FOR && snapshot.path.join(MANIFEST_FILE).is_file()
+            })
+            .map(|(_, snapshot)| snapshot.clone());
+        if let Some(snapshot) = cached {
+            return Ok(snapshot);
+        }
+        let snapshot = self.find(id).await?;
+        let checked = snapshot.clone();
+        tokio::task::spawn_blocking(move || {
+            verify_snapshot(&checked)?;
+            if checked.in_object_storage {
+                // Best effort: `remove_stale_downloads` goes by the directory's modification time.
+                let _ = File::open(&checked.path)
+                    .and_then(|directory| directory.set_modified(std::time::SystemTime::now()));
+            }
+            Ok::<_, BackupError>(())
+        })
+        .await
+        .map_err(|error| BackupError::BlockingTask(error.to_string()))??;
+        let mut verified = self
+            .verified
+            .lock()
+            .expect("verified snapshot cache is not poisoned");
+        verified.retain(|_, (at, _)| at.elapsed() < VERIFIED_FOR);
+        verified.insert(id.to_owned(), (Instant::now(), snapshot.clone()));
         Ok(snapshot)
     }
 
@@ -627,6 +698,7 @@ impl BackupService {
                     &attachment_root,
                     &temporary.join("attachments"),
                     &temporary,
+                    &attachment_root.join(TEMPORARY_DIRECTORY),
                     &mut files,
                     &cancellation,
                 )?;
@@ -898,6 +970,7 @@ fn copy_directory_cancellable(
     source: &Path,
     destination: &Path,
     backup_root: &Path,
+    skip: &Path,
     files: &mut Vec<BackupFile>,
     cancellation: &CancellationToken,
 ) -> Result<(), BackupError> {
@@ -914,6 +987,9 @@ fn copy_directory_cancellable(
     for entry in entries {
         check_cancelled(cancellation)?;
         let source_path = entry.path();
+        if source_path == skip {
+            continue;
+        }
         let destination_path = destination.join(entry.file_name());
         let file_type = entry
             .file_type()
@@ -923,6 +999,7 @@ fn copy_directory_cancellable(
                 &source_path,
                 &destination_path,
                 backup_root,
+                skip,
                 files,
                 cancellation,
             )?;

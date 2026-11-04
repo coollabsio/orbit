@@ -13,6 +13,7 @@ use sqlx::{Any, Transaction};
 use thiserror::Error;
 use utoipa::ToSchema;
 
+use super::billing::{TrialCapacityError, TrialLimitReached, ensure_trial_capacity};
 use super::page_files::{page_file_url, page_has_file, parse_page_file_url};
 use super::page_mentions::notify_new_mentions;
 use super::page_versions::{
@@ -22,7 +23,9 @@ use super::tasks::{TaskError, record_mutation, require_access, require_access_tx
 use super::teamspaces::{default_teamspace, teamspace_exists};
 use super::workspaces::WorkspaceError;
 use crate::audit::{self, AuditOutcome};
-use crate::collab::{CollabError, CollabHub, CollabLock, DocKey};
+use crate::billing::TrialLimit;
+use crate::collab::sanitize::sanitize_blocks_for;
+use crate::collab::{CollabError, CollabHub, CollabLock, DocKey, DocKind, LinkPolicy};
 
 const TRASH_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
 const SEARCH_LIMIT: i64 = 20;
@@ -71,14 +74,14 @@ pub enum PageSpace {
 }
 
 impl PageSpace {
-    fn teamspace_column(self) -> Option<String> {
+    pub(super) fn teamspace_column(self) -> Option<String> {
         match self {
             Self::Teamspace(id) => Some(id.to_string()),
             Self::Private(_) => None,
         }
     }
 
-    fn owner_column(self) -> Option<String> {
+    pub(super) fn owner_column(self) -> Option<String> {
         match self {
             Self::Teamspace(_) => None,
             Self::Private(owner) => Some(owner.to_string()),
@@ -347,6 +350,10 @@ pub enum PageError {
     /// Deleting teamspace pages forever needs a workspace owner or admin.
     #[error("page action is not permitted")]
     Forbidden,
+    /// Moving teamspace pages created by others into a private space needs a workspace owner
+    /// or admin.
+    #[error("page action is not permitted")]
+    MoveToPrivateForbidden,
     /// Only pages in the trash (trashed directly) can be deleted forever.
     #[error("page is not in the trash")]
     NotTrashed,
@@ -355,6 +362,9 @@ pub enum PageError {
     Locked,
     #[error("stored page data is invalid")]
     Corrupt,
+    /// Orbit Cloud: the trial workspace holds as many pages as the trial allows.
+    #[error("trial limit reached")]
+    TrialLimit(TrialLimitReached),
     #[error("page repository is unavailable")]
     Unavailable(#[from] sqlx::Error),
     /// Co-editing is at its memory budget, or another server reset the document: try again.
@@ -380,6 +390,15 @@ impl From<WorkspaceError> for PageError {
             WorkspaceError::Unavailable(error) => Self::Unavailable(error),
             WorkspaceError::NotFound => Self::NotFound,
             _ => Self::Corrupt,
+        }
+    }
+}
+
+impl From<TrialCapacityError> for PageError {
+    fn from(error: TrialCapacityError) -> Self {
+        match error {
+            TrialCapacityError::Reached(reached) => Self::TrialLimit(reached),
+            TrialCapacityError::Database(error) => Self::Unavailable(error),
         }
     }
 }
@@ -477,6 +496,7 @@ impl PageRepository {
     ) -> Result<PageRecord, PageError> {
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
+        ensure_trial_capacity(&self.database, &mut tx, workspace_id, TrialLimit::Pages, 1).await?;
         let space = resolve_space(
             &mut tx,
             workspace_id,
@@ -611,6 +631,10 @@ impl PageRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<PageRecord, PageError> {
+        let mut changes = changes;
+        if let Some(content) = &mut changes.content {
+            *content = sanitize_page_blocks(content, workspace_id, page_id);
+        }
         // A content write replaces the live collaborative document too: take its room first
         // (never while a transaction is open), after a cheap visibility check.
         let mut collab = match &changes.content {
@@ -759,7 +783,7 @@ impl PageRepository {
     }
 
     /// Fails with `NotFound` unless the page is live and visible to a member.
-    async fn get_visible(
+    pub(super) async fn get_visible(
         &self,
         workspace_id: Id,
         page_id: Id,
@@ -797,7 +821,7 @@ impl PageRepository {
         now: TimestampMillis,
     ) -> Result<PageRecord, PageError> {
         let mut tx = self.database.immediate_transaction().await?;
-        require_access_tx(&mut tx, workspace_id, actor_id).await?;
+        let actor = require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let current = page_in_tx(&mut tx, workspace_id, page_id, actor_id, false).await?;
         check_version(expected_version, current.version, &current)?;
         if parent_id == Some(page_id) {
@@ -813,6 +837,16 @@ impl PageRepository {
             Some(current_space),
         )
         .await?;
+        let to_private = matches!(
+            (current_space, space),
+            (PageSpace::Teamspace(_), PageSpace::Private(_))
+        );
+        if to_private
+            && !actor
+                .can_move_pages_to_private(created_whole_subtree(&mut tx, page_id, actor_id).await?)
+        {
+            return Err(PageError::MoveToPrivateForbidden);
+        }
         if let Some(parent_id) = parent_id
             && is_ancestor(&mut tx, page_id, parent_id).await?
         {
@@ -861,6 +895,21 @@ impl PageRepository {
             now,
         )
         .await?;
+        if let (true, Some(teamspace_id)) = (to_private, current.teamspace_id) {
+            audit::record(
+                &mut tx,
+                workspace_id,
+                Some(actor_id),
+                "page.moved_to_private",
+                AuditOutcome::Success,
+                "page",
+                Some(page_id),
+                request_id,
+                json!({"from_teamspace_id": teamspace_id.to_string()}),
+                now,
+            )
+            .await?;
+        }
         let updated_by_user = user_in_tx(&mut tx, actor_id).await?;
         tx.commit().await?;
         // A page (and its subtree) moved into someone's private space closes other editors.
@@ -1028,6 +1077,29 @@ impl PageRepository {
                 .bind(page_id.to_string())
                 .fetch_one(&mut *tx)
                 .await?;
+        let restored: i64 = sqlx::query_scalar(
+            "WITH RECURSIVE subtree(id) AS ( \
+                 SELECT $1 \
+                 UNION ALL \
+                 SELECT pages.id FROM pages JOIN subtree ON pages.parent_id = subtree.id \
+                 WHERE pages.deleted_at IS NOT NULL AND pages.trashed_with = $2 \
+             ) \
+             SELECT CAST(COUNT(*) AS BIGINT) FROM pages \
+             WHERE workspace_id = $3 AND deleted_at IS NOT NULL AND id IN (SELECT id FROM subtree)",
+        )
+        .bind(page_id.to_string())
+        .bind(&batch)
+        .bind(workspace_id.to_string())
+        .fetch_one(&mut *tx)
+        .await?;
+        ensure_trial_capacity(
+            &self.database,
+            &mut tx,
+            workspace_id,
+            TrialLimit::Pages,
+            restored,
+        )
+        .await?;
         let space = current.space(actor_id);
         let parent_id = match current.parent_id {
             Some(parent_id)
@@ -1275,6 +1347,15 @@ impl PageRepository {
                 originals.push(page_from_row(row)?);
             }
         }
+        let copies = i64::try_from(originals.len()).unwrap_or(i64::MAX);
+        ensure_trial_capacity(
+            &self.database,
+            &mut tx,
+            workspace_id,
+            TrialLimit::Pages,
+            copies,
+        )
+        .await?;
         let pages: HashMap<Id, Id> = originals
             .iter()
             .map(|page| (page.id, Id::new_v7()))
@@ -1875,6 +1956,17 @@ async fn renumber_favorites(
 /// Collects every string under a `"text"` key, in document order, joined with spaces; a mention
 /// contributes `@<name>` (so search finds who a page mentions).
 #[must_use]
+/// Blocks from a REST write or a stored version, cleaned the way the live document cleans them, so
+/// `content_json` never holds a link or file URL that the editor would drop.
+pub(crate) fn sanitize_page_blocks(content: &[Value], workspace_id: Id, page_id: Id) -> Vec<Value> {
+    let policy = LinkPolicy {
+        kind: DocKind::Page,
+        workspace_id,
+        doc_id: page_id,
+    };
+    sanitize_blocks_for(content, &policy)
+}
+
 pub fn content_text(content: &[Value]) -> String {
     let mut parts = Vec::new();
     for block in content {
@@ -2069,18 +2161,18 @@ fn copy_title(title: &str) -> String {
 }
 
 /// Rewrites references into a duplicated set of pages to their copies.
-struct Remap<'a> {
-    workspace_id: Id,
+pub(super) struct Remap<'a> {
+    pub(super) workspace_id: Id,
     /// Original page id → copy id.
-    pages: &'a HashMap<Id, Id>,
+    pub(super) pages: &'a HashMap<Id, Id>,
     /// (original page id, original file id) → (copy page id, copy file id).
-    files: &'a HashMap<(Id, Id), (Id, Id)>,
+    pub(super) files: &'a HashMap<(Id, Id), (Id, Id)>,
 }
 
 impl Remap<'_> {
     /// Walks block JSON: `pageId` props of `page` blocks, page-file URLs (image/file `url`
     /// props and anything else holding one) and `/docs/<id>` link targets. Text is left alone.
-    fn value(&self, value: &mut Value, key: Option<&str>) {
+    pub(super) fn value(&self, value: &mut Value, key: Option<&str>) {
         match value {
             Value::Array(items) => {
                 for item in items {
@@ -2110,7 +2202,7 @@ impl Remap<'_> {
     }
 
     /// The copy's URL for a file of a copied page or a `/docs/<id>` link to a copied page.
-    fn url(&self, url: &str) -> Option<String> {
+    pub(super) fn url(&self, url: &str) -> Option<String> {
         if let Some((workspace, page, file)) = parse_page_file_url(url) {
             if workspace != self.workspace_id {
                 return None;
@@ -2152,7 +2244,7 @@ fn insert_index(position: Option<i64>, len: usize) -> usize {
 
 /// Live siblings in `space` under `parent_id` (the space's root when `None`), excluding
 /// `exclude`, in order.
-async fn sibling_ids(
+pub(super) async fn sibling_ids(
     tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     space: PageSpace,
@@ -2175,7 +2267,7 @@ async fn sibling_ids(
     .collect()
 }
 
-async fn renumber(tx: &mut Transaction<'_, Any>, ids: &[Id]) -> Result<(), PageError> {
+pub(super) async fn renumber(tx: &mut Transaction<'_, Any>, ids: &[Id]) -> Result<(), PageError> {
     for (position, id) in ids.iter().enumerate() {
         let position = position as i64;
         sqlx::query("UPDATE pages SET position = $1 WHERE id = $2 AND position <> $3")
@@ -2292,6 +2384,28 @@ async fn resolve_space(
         .await?
         .map(PageSpace::Teamspace)
         .ok_or(PageError::TeamspaceNotFound)
+}
+
+/// Whether `actor_id` created the page and every descendant, trashed ones too (they move along).
+async fn created_whole_subtree(
+    tx: &mut Transaction<'_, Any>,
+    page_id: Id,
+    actor_id: Id,
+) -> Result<bool, PageError> {
+    let others: i64 = sqlx::query_scalar(
+        "WITH RECURSIVE subtree(id) AS ( \
+             SELECT $1 \
+             UNION ALL \
+             SELECT pages.id FROM pages JOIN subtree ON pages.parent_id = subtree.id \
+         ) \
+         SELECT CAST(COUNT(*) AS BIGINT) FROM pages \
+         WHERE id IN (SELECT id FROM subtree) AND creator_id != $2",
+    )
+    .bind(page_id.to_string())
+    .bind(actor_id.to_string())
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(others == 0)
 }
 
 /// Moves every descendant (trashed ones too, so a later restore stays consistent) into `space`,

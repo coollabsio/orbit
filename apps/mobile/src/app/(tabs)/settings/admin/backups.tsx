@@ -1,3 +1,4 @@
+import { router } from 'expo-router'
 import { useState } from 'react'
 import { View } from 'react-native'
 
@@ -9,8 +10,8 @@ import { errorMessage } from '../../../../session-context'
 import { Button, Text } from '../../../../ui'
 
 /**
- * The web's Admin → Backups: snapshots of the whole instance, created and deleted here. Downloading one stays on the
- * web: a snapshot of every workspace and attachment is no file for a phone.
+ * The web's Admin → Backups: snapshots of the whole instance, created, browsed (to restore one page or task as a copy)
+ * and deleted here. Downloading one stays on the web: a snapshot of every workspace and attachment is no file for a phone.
  */
 export default function AdminBackupsScreen() {
   const backups = useBackups()
@@ -41,32 +42,38 @@ export default function AdminBackupsScreen() {
           return (
             <SettingsRow key={backup.id} first={index === 0}>
               <RowIcon icon="archiveBox" />
-              <RowText
-                title={created}
-                subtitle={`${formatBytes(backup.byte_size)} · ${backup.file_count} ${backup.file_count === 1 ? 'file' : 'files'} · Orbit ${backup.application_version}`}
-                badges={
-                  <>
-                    {backup.kind === 'pre_migration' ? <Badge label="Before upgrade" tone="secondary" /> : null}
-                    {backup.location === 's3' ? <Badge label="S3" tone="secondary" /> : null}
-                  </>
-                }
-              />
-              <Button
-                label={deleting ? 'Deleting…' : 'Delete'}
-                icon="trash"
-                size="sm"
-                variant="outline"
-                disabled={deleting}
-                onPress={() =>
-                  setConfirm({
-                    title: 'Delete this backup?',
-                    description: `The backup from ${created} is removed for good. You cannot undo this.`,
-                    confirmLabel: 'Delete',
-                    danger: true,
-                    onConfirm: () => writes.remove.mutate(backup.id),
-                  })
-                }
-              />
+              <View className="flex-1 min-w-0 gap-2">
+                <RowText
+                  title={created}
+                  subtitle={`${formatBytes(backup.byte_size)} · ${backup.file_count} ${backup.file_count === 1 ? 'file' : 'files'} · Orbit ${backup.application_version}`}
+                  badges={
+                    <>
+                      {backup.kind === 'pre_migration' ? <Badge label="Before upgrade" tone="secondary" /> : null}
+                      {backup.location === 's3' ? <Badge label="S3" tone="secondary" /> : null}
+                    </>
+                  }
+                />
+                {/* two buttons beside the text leave it no room on a phone */}
+                <View className="flex-row gap-2">
+                  <Button label="Browse" icon="search" size="sm" variant="outline" onPress={() => router.push(`/settings/admin/backup/${backup.id}`)} />
+                  <Button
+                    label={deleting ? 'Deleting…' : 'Delete'}
+                    icon="trash"
+                    size="sm"
+                    variant="outline"
+                    disabled={deleting}
+                    onPress={() =>
+                      setConfirm({
+                        title: 'Delete this backup?',
+                        description: `The backup from ${created} is removed for good. You cannot undo this.`,
+                        confirmLabel: 'Delete',
+                        danger: true,
+                        onConfirm: () => writes.remove.mutate(backup.id),
+                      })
+                    }
+                  />
+                </View>
+              </View>
             </SettingsRow>
           )
         })}

@@ -27,7 +27,7 @@ use utoipa::ToSchema;
 use super::page_mentions::notify_new_mentions;
 use super::pages::{
     PageError, PageRecord, PageRepository, check_version, content_text, page_by_id_in_tx,
-    page_in_tx, parse_id, user_in_tx, visible,
+    page_in_tx, parse_id, sanitize_page_blocks, user_in_tx, visible,
 };
 use super::tasks::{record_mutation, require_access, require_access_tx};
 use crate::audit::{self, AuditOutcome};
@@ -234,6 +234,8 @@ impl PageRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<PageRecord, PageError> {
+        // Someone who cannot see the page must not load its document into memory.
+        self.get_visible(workspace_id, page_id, actor_id).await?;
         // The live document's latest edits are projected first, so the `restore` version holds
         // them; the room stays locked until the replacement is broadcast.
         let mut collab = CollabHub::of(&self.database)
@@ -242,7 +244,8 @@ impl PageRepository {
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let current = page_in_tx(&mut tx, workspace_id, page_id, actor_id, false).await?;
-        let version = version_in_tx(&mut tx, workspace_id, page_id, version_id).await?;
+        let mut version = version_in_tx(&mut tx, workspace_id, page_id, version_id).await?;
+        version.content = sanitize_page_blocks(&version.content, workspace_id, page_id);
         if current.locked_at.is_some() {
             return Err(PageError::Locked);
         }

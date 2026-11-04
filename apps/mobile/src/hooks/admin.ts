@@ -3,6 +3,7 @@ import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClie
 
 import { accountKeys } from '../data/account-api'
 import * as admin from '../data/admin-api'
+import { keys } from '../data/keys'
 import { useOrbit } from '../orbit-context'
 
 export function useAdminUsers(search: string) {
@@ -43,6 +44,37 @@ export function useBackupWrites() {
   }
 }
 
+export function useBackupWorkspaces(backupId: string) {
+  const { client } = useOrbit()
+  return useQuery({ queryKey: admin.adminKeys.backupWorkspaces(backupId), queryFn: () => admin.backupWorkspaces(client, backupId), staleTime: Infinity })
+}
+
+/** A backup workspace's pages or tasks; `workspaceId: null` waits for a workspace. */
+export function useBackupItems(backupId: string, workspaceId: string | null, kind: admin.BackupItemKind, search: string) {
+  const { client } = useOrbit()
+  return useQuery({
+    queryKey: admin.adminKeys.backupItems(backupId, workspaceId ?? '', kind, search),
+    queryFn: () => admin.backupItems(client, backupId, workspaceId!, kind, search),
+    enabled: workspaceId !== null,
+    // a backup does not change; the list stays while the next search loads
+    staleTime: Infinity,
+    placeholderData: keepPreviousData,
+  })
+}
+
+export function useRestoreBackupItem(backupId: string) {
+  const { client } = useOrbit()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ workspaceId, body }: { workspaceId: string; body: Parameters<typeof admin.restoreBackupItem>[3] }) => admin.restoreBackupItem(client, backupId, workspaceId, body),
+    // the copy is a new page or task of the live workspace
+    onSuccess: (_, { workspaceId }) => {
+      void queryClient.invalidateQueries({ queryKey: keys.pages(workspaceId) })
+      void queryClient.invalidateQueries({ queryKey: keys.tasks(workspaceId) })
+    },
+  })
+}
+
 export function useJobLimits() {
   const { client } = useOrbit()
   return useQuery({ queryKey: admin.adminKeys.jobs, queryFn: () => admin.jobLimits(client) })
@@ -72,6 +104,7 @@ export function useAdminUserWrites() {
     setAdmin: useMutation({ mutationFn: ({ userId, isAdmin }: { userId: string; isAdmin: boolean }) => admin.setAdmin(client, userId, isAdmin), onSettled }),
     resetTwoFactor: useMutation({ mutationFn: (userId: string) => admin.clearTwoFactor(client, userId), onSettled }),
     recoveryLink: useMutation({ mutationFn: (userId: string) => admin.recoveryLink(client, userId), onSettled: audit }),
+    changeEmail: useMutation({ mutationFn: ({ userId, email }: { userId: string; email: string }) => admin.changeEmail(client, userId, email), onSettled }),
   }
 }
 

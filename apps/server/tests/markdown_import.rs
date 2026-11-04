@@ -171,3 +171,39 @@ fn empty_markdown_has_no_blocks() {
     assert!(import("").is_empty());
     assert!(import("  \n\n").is_empty());
 }
+
+/// How deep `blocks` nest (1 = top level only).
+fn nesting(blocks: &[Value]) -> usize {
+    let mut deepest = 0;
+    let mut stack: Vec<(&Value, usize)> = blocks.iter().map(|block| (block, 1)).collect();
+    while let Some((block, depth)) = stack.pop() {
+        deepest = deepest.max(depth);
+        for child in block["children"].as_array().into_iter().flatten() {
+            stack.push((child, depth + 1));
+        }
+    }
+    deepest
+}
+
+#[test]
+fn deeply_nested_markdown_is_flattened_without_recursing() {
+    // Runs on a test thread (2 MB stack): one frame per level would overflow it.
+    let quotes = format!("{} deep", ">".repeat(100_000));
+    let blocks = import(&quotes);
+    assert!(nesting(&blocks) <= orbit_server::collab::blocknote::MAX_BLOCK_DEPTH + 1);
+    assert!(
+        blocks
+            .iter()
+            .any(|block| block["content"][0]["text"] == "deep")
+    );
+
+    let list = format!("{}deep", "- ".repeat(100_000));
+    let blocks = import(&list);
+    let depth = nesting(&blocks);
+    assert!(depth > 10 && depth <= orbit_server::collab::blocknote::MAX_BLOCK_DEPTH + 1);
+    assert!(round_trip(&list).contains("deep"));
+
+    // Shallow nesting is unchanged.
+    let blocks = import("- a\n  - b\n    - c");
+    assert_eq!(nesting(&blocks), 3);
+}

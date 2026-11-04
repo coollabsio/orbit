@@ -18,12 +18,15 @@ import { Outlet, useLocation } from 'react-router'
 import { SidebarLeft as PanelLeft } from 'reicon-react'
 import { cn } from 'cn'
 import { SideSheet, SideSheetContent } from '@/components/common/SideSheet'
+import { ErrorBoundary } from '@/components/common/ErrorBoundary'
 import { Tip } from '@/components/common/Tip'
 import { useWorkspace, WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { useIsGuest, useIsInstallationAdmin } from '@/features/workspaces/permissions'
 import { WorkspaceSwitcher } from './WorkspaceSwitcher'
+import { ActivityBell } from './ActivityBell'
 import { CommandPalette } from './CommandPalette'
 import { ConnectionBanner } from './ConnectionBanner'
+import { MailServerBanner } from './MailServerBanner'
 import { ReadOnlyBanner } from './ReadOnlyBanner'
 import { SidebarNav } from './SidebarNav'
 import { Topbar } from './Topbar'
@@ -134,13 +137,8 @@ function Shell() {
 
   useEffect(() => {
     const onOpen = () => setPaletteOpen(true)
-    const onOpenSidebar = () => setDrawerOpen(true)
     window.addEventListener('open-command-palette', onOpen)
-    window.addEventListener('open-sidebar', onOpenSidebar)
-    return () => {
-      window.removeEventListener('open-command-palette', onOpen)
-      window.removeEventListener('open-sidebar', onOpenSidebar)
-    }
+    return () => window.removeEventListener('open-command-palette', onOpen)
   }, [])
 
   useEffect(() => {
@@ -168,12 +166,15 @@ function Shell() {
           <div
             className={cn(
               'mb-2 flex h-12 shrink-0 items-center gap-2',
-              sidebarCollapsed ? 'justify-center px-0' : 'justify-between px-1.5',
+              // collapsed, the bell sits under the workspace letter
+              sidebarCollapsed ? 'h-auto flex-col justify-center gap-1 px-0 pt-2' : 'justify-between px-1.5',
             )}
           >
             <WorkspaceSwitcher collapsed={sidebarCollapsed} />
+            {/* a guest has no Activity page */}
+            {guest ? null : <ActivityBell unread={inboxUnread} />}
           </div>
-          <SidebarNav contextual={newUi} collapsed={sidebarCollapsed} chatBadge={chatBadge} chatUnread={chatUnread} inboxUnread={inboxUnread} isRoot={isRoot} pageListRef={hostsList ? setPageListSlot : undefined} />
+          <SidebarNav contextual={newUi} collapsed={sidebarCollapsed} chatBadge={chatBadge} chatUnread={chatUnread} isRoot={isRoot} pageListRef={hostsList ? setPageListSlot : undefined} />
           <div
             className={cn(
               'flex shrink-0 items-center justify-between gap-1 py-2',
@@ -195,32 +196,29 @@ function Shell() {
         </MenuSurfaceContext>
       </aside>
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col bg-background min-[900px]:floating:overflow-hidden min-[900px]:floating:rounded-lg min-[900px]:floating:border">
+      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-background min-[900px]:floating:overflow-hidden min-[900px]:floating:rounded-lg min-[900px]:floating:border">
         <ConnectionBanner live={live} />
+        <MailServerBanner />
         <ReadOnlyBanner />
         {/* the phone header loads tasks and projects; a guest has its dock (Chat, Settings) instead */}
-        {guest ? null : <Topbar onOpenDrawer={() => setDrawerOpen(true)} onOpenPalette={() => setPaletteOpen(true)} />}
+        {guest ? null : <Topbar onOpenDrawer={() => setDrawerOpen(true)} inboxUnread={inboxUnread} />}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <Outlet />
+          <ErrorBoundary resetKey={pathname}>
+            <Outlet />
+          </ErrorBoundary>
         </div>
         <MobileDock chatBadge={chatBadge} chatUnread={chatUnread} />
       </div>
 
       <SideSheet open={drawerOpen} onOpenChange={setDrawerOpen}>
         <SideSheetContent
-          side="left"
+          side="right"
           aria-label="Navigation"
-          className={cn(sidebarTheme.scheme, 'z-[41] w-[min(280px,84vw)] overflow-hidden border-r border-sidebar-edge bg-sidebar bg-linear-to-b from-sidebar-wash to-transparent to-[520px] px-3 pt-[env(safe-area-inset-top,0px)] pb-[calc(12px+env(safe-area-inset-bottom,0px))] text-sidebar-foreground')}
+          className={cn(sidebarTheme.scheme, 'z-[41] w-[min(280px,84vw)] overflow-hidden rounded-l-2xl border-l border-sidebar-edge bg-sidebar bg-linear-to-b from-sidebar-wash to-transparent to-[520px] px-3 pt-[calc(12px+env(safe-area-inset-top,0px))] pb-[calc(12px+env(safe-area-inset-bottom,0px))] text-sidebar-foreground')}
           style={sidebarTheme.style}
         >
           <MenuSurfaceContext value={menuSurface}>
-            <div className="mb-2 flex h-12 shrink-0 items-center justify-start gap-2 px-1.5">
-              <WorkspaceSwitcher onSelect={() => setDrawerOpen(false)} />
-            </div>
-            <SidebarNav contextual={newUi} backShowsMenu onNavigate={() => setDrawerOpen(false)} chatBadge={chatBadge} chatUnread={chatUnread} inboxUnread={inboxUnread} isRoot={isRoot} />
-            <div className="flex shrink-0 items-center pt-2">
-              <UserMenu />
-            </div>
+            <SidebarNav contextual={newUi} backShowsMenu onNavigate={() => setDrawerOpen(false)} chatBadge={chatBadge} chatUnread={chatUnread} isRoot={isRoot} />
           </MenuSurfaceContext>
         </SideSheetContent>
       </SideSheet>

@@ -1,10 +1,7 @@
 use std::fs::OpenOptions;
 use std::io::{Seek, SeekFrom, Write};
 
-use orbit_platform::{
-    Database, DatabaseConfig, HealthCheck, HealthRegistry, IntegrityError, IntegrityService,
-    MigrationRunner,
-};
+use orbit_platform::{Database, DatabaseConfig, IntegrityError, IntegrityService, MigrationRunner};
 
 #[tokio::test]
 async fn quick_and_full_checks_accept_a_healthy_database() {
@@ -44,7 +41,7 @@ async fn full_check_accepts_updated_fts5_tables() {
 }
 
 #[tokio::test]
-async fn a_failed_quick_check_makes_readiness_fail() {
+async fn a_damaged_file_fails_the_quick_check() {
     if orbit_platform::testing_postgres() {
         return; // SQLite-only checks (FTS5, file damage, PRAGMA foreign_key_check)
     }
@@ -77,22 +74,6 @@ async fn a_failed_quick_check_makes_readiness_fail() {
         integrity.quick().await,
         Err(IntegrityError::Failed { .. })
     ));
-
-    let mut health = HealthRegistry::new();
-    integrity.register_readiness(&mut health);
-    for check in [
-        HealthCheck::Migrations,
-        HealthCheck::WritableStorage,
-        HealthCheck::Scheduler,
-        HealthCheck::CriticalConfig,
-        HealthCheck::Accepting,
-    ] {
-        health.register(check, || async { Ok(()) });
-    }
-
-    let readiness = health.readiness().await;
-    assert!(!readiness.ready);
-    assert!(!readiness.checks["database_integrity"].ready);
 }
 
 #[tokio::test]

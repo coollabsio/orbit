@@ -9,7 +9,7 @@ import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { PasswordInput } from '@/components/ui/password-input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { useCurrentUser } from '@/features/auth/api'
+import { useAuthOptions, useCurrentUser } from '@/features/auth/api'
 import { useInstanceSettings, useRemoveSmtp, useSaveSmtp, useSendTestEmail } from '@/features/admin/api'
 import { FieldGrid, RequiredMark } from '@/features/settings/components/SettingsParts'
 
@@ -37,6 +37,8 @@ export function AdminEmailPage() {
 
 function EmailCard({ smtp }: { smtp: SmtpView | null }) {
   const currentUser = useCurrentUser()
+  // Orbit Cloud always needs a mail server: it can be replaced, not removed.
+  const cloud = useAuthOptions().data?.billing_enabled ?? false
   const save = useSaveSmtp()
   const remove = useRemoveSmtp()
   const test = useSendTestEmail()
@@ -86,7 +88,7 @@ function EmailCard({ smtp }: { smtp: SmtpView | null }) {
     <form onSubmit={submit}>
       <SettingsCard
         title="Email"
-        description="The SMTP server Orbit sends invitations, sign-up links and password reset links through. Nothing else is sent."
+        description="The SMTP server for invitations, sign-up links, password reset links and email changes. Orbit sends no other email."
         actions={smtp ? (
           <>
             <Button type="button" variant="outline" disabled={test.isPending} onClick={() => test.mutate(undefined, {
@@ -95,7 +97,7 @@ function EmailCard({ smtp }: { smtp: SmtpView | null }) {
             })}>
               {test.isPending ? 'Sending…' : 'Send test email'}
             </Button>
-            <Button type="button" variant="ghost" className="text-destructive" disabled={remove.isPending} onClick={() => void removeServer()}>Remove</Button>
+            {cloud ? null : <Button type="button" variant="ghost" className="text-destructive" disabled={remove.isPending} onClick={() => void removeServer()}>Remove</Button>}
           </>
         ) : undefined}
       >
@@ -137,7 +139,8 @@ function EmailCard({ smtp }: { smtp: SmtpView | null }) {
             <Input id="smtp-from-name" placeholder="Orbit" value={draft.from_name} onChange={set('from_name')} />
           </Field>
         </FieldGrid>
-        <div className="mt-4 flex justify-end">
+        <div className="mt-4 flex items-center justify-end gap-3">
+          {cloud && smtp ? <p className="mr-auto text-xs text-muted-foreground">Orbit Cloud needs a mail server. Save a different one instead.</p> : null}
           <Button type="submit" disabled={save.isPending}>{save.isPending ? 'Saving…' : 'Save mail settings'}</Button>
         </div>
       </SettingsCard>

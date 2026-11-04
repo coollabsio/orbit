@@ -103,6 +103,51 @@ async fn scenario(database: &Database) {
         Err(ApiTokenError::Forbidden)
     ));
 
+    let docs = tokens
+        .create_scoped(
+            seed.workspace,
+            seed.owner,
+            "Docs reader".into(),
+            seed.projects.to_vec(),
+            false,
+            false,
+            false,
+            None,
+            "test",
+            now,
+            "docs:read chat:read",
+        )
+        .await
+        .unwrap();
+    assert_eq!(docs.api_token.scopes, vec!["docs:read", "chat:read"]);
+    let principal = tokens
+        .authenticate(&docs.token, ApiTokenScope::Mcp, now)
+        .await
+        .unwrap();
+    assert!(principal.scopes.contains(&ApiTokenScope::DocsRead));
+    assert!(principal.scopes.contains(&ApiTokenScope::ChatRead));
+    assert!(!principal.scopes.contains(&ApiTokenScope::Read));
+    assert!(!principal.scopes.contains(&ApiTokenScope::Write));
+    assert!(
+        tokens
+            .list(seed.workspace, seed.owner)
+            .await
+            .unwrap()
+            .iter()
+            .any(|token| token.id == docs.api_token.id
+                && token.scopes.contains(&"docs:read".to_owned()))
+    );
+    tokens
+        .revoke(seed.workspace, docs.api_token.id, seed.owner, "test", now)
+        .await
+        .unwrap();
+    assert!(
+        tokens
+            .authenticate(&docs.token, ApiTokenScope::Mcp, now)
+            .await
+            .is_err()
+    );
+
     // Service accounts are matched by name without case.
     let bot = tokens
         .create(
@@ -203,7 +248,7 @@ async fn scenario(database: &Database) {
             .scalar::<i64>("SELECT COUNT(*) FROM audit_events")
             .await
             .unwrap(),
-        4
+        6
     );
 
     // The schema trigger refuses a project from another workspace on both backends.

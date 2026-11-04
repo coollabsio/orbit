@@ -372,7 +372,7 @@ async fn bearer_credentials_are_required_and_checked_on_every_request() {
         .oneshot(request(Some(&issued.token), "tools/list", json!({})))
         .await
         .unwrap();
-    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(response.status(), StatusCode::OK);
     let listing = fixture.rpc("tools/list", json!({})).await;
     assert!(listing.get("error").is_none(), "{listing}");
     fixture
@@ -661,6 +661,315 @@ async fn tools_list_includes_required_cache_fields_for_current_protocol() {
         let result: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(result["result"]["ttlMs"], 0, "{result}");
         assert_eq!(result["result"]["cacheScope"], "private", "{result}");
-        assert_eq!(result["result"]["tools"].as_array().unwrap().len(), 3);
+        assert_eq!(result["result"]["tools"].as_array().unwrap().len(), 4);
     }
+}
+
+#[tokio::test]
+async fn task_writes_require_scope_and_versions_and_stay_in_granted_projects() {
+    let f = Fixture::new().await;
+    let current = f.tasks.get_task(f.workspace, f.task, f.user).await.unwrap();
+    let denied = f
+        .tool(
+            "update_task",
+            json!({"task_id": f.task, "expected_version": current.version, "title": "Changed"}),
+        )
+        .await;
+    assert!(denied.get("error").is_some(), "{denied}");
+    sqlx::query("UPDATE api_tokens SET can_write = 1 WHERE id = $1")
+        .bind(f.token_id.to_string())
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    let updated = f
+        .tool(
+            "update_task",
+            json!({"task_id": f.task, "expected_version": current.version, "title": "Changed"}),
+        )
+        .await;
+    assert_eq!(
+        updated["result"]["structuredContent"]["title"], "Changed",
+        "{updated}"
+    );
+    let stale = f
+        .tool(
+            "delete_task",
+            json!({"task_id": f.task, "expected_version": current.version}),
+        )
+        .await;
+    assert_eq!(stale["result"]["isError"], true, "{stale}");
+    let secret = f
+        .tasks
+        .get_task(f.workspace, f.other_task, f.user)
+        .await
+        .unwrap();
+    let denied = f
+        .tool(
+            "delete_task",
+            json!({"task_id": f.other_task, "expected_version": secret.version}),
+        )
+        .await;
+    assert_eq!(denied["result"]["isError"], true, "{denied}");
+    let statuses = f
+        .tool("list_task_statuses", json!({"project_id": f.project}))
+        .await;
+    assert!(
+        !statuses["result"]["structuredContent"]["items"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let status = current.status_id;
+    let created = f
+        .tool(
+            "create_task",
+            json!({"project_id": f.project, "status_id": status, "title": "Created by MCP"}),
+        )
+        .await;
+    assert_eq!(
+        created["result"]["structuredContent"]["title"], "Created by MCP",
+        "{created}"
+    );
+    let id = &created["result"]["structuredContent"]["id"];
+    let version = &created["result"]["structuredContent"]["version"];
+    let deleted = f
+        .tool(
+            "delete_task",
+            json!({"task_id": id, "expected_version": version}),
+        )
+        .await;
+    assert_eq!(
+        deleted["result"]["structuredContent"]["deleted"], true,
+        "{deleted}"
+    );
+    // An approved parent must not trash an unapproved child.
+    sqlx::query("UPDATE tasks SET parent_task_id = $1 WHERE id = $2")
+        .bind(f.task.to_string())
+        .bind(f.other_task.to_string())
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    let current = f.tasks.get_task(f.workspace, f.task, f.user).await.unwrap();
+    let denied = f
+        .tool(
+            "delete_task",
+            json!({"task_id": f.task, "expected_version": current.version}),
+        )
+        .await;
+    assert_eq!(denied["result"]["isError"], true, "{denied}");
+    assert!(
+        f.tasks
+            .get_task(f.workspace, f.other_task, f.user)
+            .await
+            .is_ok()
+    );
+    let denied = f.tool("update_task", json!({"task_id": f.task, "expected_version": current.version, "title": "Forbidden tree write"})).await;
+    assert_eq!(denied["result"]["isError"], true, "{denied}");
+}
+
+#[tokio::test]
+async fn docs_and_chat_require_explicit_scopes_and_never_expose_write_tools() {
+    use orbit_platform::{
+        AttachmentMutationCoordinator, LocalBlobStore, UploadLimits, UploadService,
+    };
+    use orbit_server::repositories::{
+        chat::{ChannelCreate, ChatRepository, ConversationKind},
+        pages::{CreatePage, PageRepository, SpaceRequest},
+    };
+    let mut f = Fixture::new().await;
+    let root = tempfile::tempdir().unwrap();
+    let uploads = UploadService::new(
+        (*f.database).clone(),
+        Arc::new(LocalBlobStore::new(root.path().join("files"))),
+        AttachmentMutationCoordinator::default(),
+        UploadLimits::default(),
+    );
+    let pages = Arc::new(PageRepository::new((*f.database).clone()));
+    let chat = Arc::new(ChatRepository::new((*f.database).clone(), uploads));
+    let page = pages
+        .create_page(
+            f.workspace,
+            f.user,
+            CreatePage {
+                parent_id: None,
+                space: SpaceRequest::default(),
+                title: "MCP document".into(),
+                icon: None,
+                position: None,
+            },
+            "test",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    let channel = chat
+        .create_channel(
+            f.workspace,
+            f.user,
+            ChannelCreate {
+                name: "mcp-channel".into(),
+                topic: "".into(),
+                category_id: None,
+                kind: ConversationKind::Public,
+                member_ids: vec![],
+            },
+        )
+        .await
+        .unwrap();
+    let outsider = Id::new_v7();
+    let mut tx = f.database.immediate_transaction().await.unwrap();
+    sqlx::query("INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) VALUES ($1, 'outsider@example.com', 'outsider@example.com', 'Outsider', 'x', 1, 1)").bind(outsider.to_string()).execute(&mut *tx).await.unwrap();
+    sqlx::query("INSERT INTO memberships (id, workspace_id, user_id, role, created_at, updated_at) VALUES ($1, $2, $3, 'member', 1, 1)").bind(Id::new_v7().to_string()).bind(f.workspace.to_string()).bind(outsider.to_string()).execute(&mut *tx).await.unwrap();
+    tx.commit().await.unwrap();
+    let secret_page = pages
+        .create_page(
+            f.workspace,
+            outsider,
+            CreatePage {
+                parent_id: None,
+                space: SpaceRequest {
+                    private: Some(true),
+                    teamspace_id: None,
+                },
+                title: "Hidden private document".into(),
+                icon: None,
+                position: None,
+            },
+            "test",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    let secret_channel = chat
+        .create_channel(
+            f.workspace,
+            outsider,
+            ChannelCreate {
+                name: "hidden-private-channel".into(),
+                topic: "".into(),
+                category_id: None,
+                kind: ConversationKind::Private,
+                member_ids: vec![],
+            },
+        )
+        .await
+        .unwrap();
+    f.app = router(
+        McpState::new(Arc::new(f.tokens.clone()), Arc::new(f.tasks.clone()))
+            .with_content(pages, chat),
+        "https://orbit.test",
+    );
+    for name in ["list_docs", "list_conversations"] {
+        let r = f.tool(name, json!({})).await;
+        assert!(r.get("error").is_some(), "{r}");
+    }
+    sqlx::query("UPDATE api_tokens SET mcp_scopes = 'docs:read chat:read' WHERE id = $1")
+        .bind(f.token_id.to_string())
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    let docs = f.tool("list_docs", json!({})).await;
+    assert!(docs.to_string().contains("MCP document"), "{docs}");
+    let doc = f.tool("get_doc", json!({"page_id": page.id})).await;
+    assert_eq!(
+        doc["result"]["structuredContent"]["title"], "MCP document",
+        "{doc}"
+    );
+    let messages = f
+        .tool(
+            "list_messages",
+            json!({"conversation_id": channel.value.id, "limit": 1}),
+        )
+        .await;
+    assert!(
+        messages["result"]["structuredContent"]["items"].is_array(),
+        "{messages}"
+    );
+    let invalid = f
+        .tool(
+            "list_messages",
+            json!({"conversation_id": channel.value.id, "limit": 101}),
+        )
+        .await;
+    assert!(invalid.get("error").is_some(), "{invalid}");
+    let chats = f.tool("list_conversations", json!({})).await;
+    assert!(chats.to_string().contains("mcp-channel"), "{chats}");
+    assert!(!docs.to_string().contains("Hidden private document"));
+    assert!(!chats.to_string().contains("hidden-private-channel"));
+    let denied = f.tool("get_doc", json!({"page_id": secret_page.id})).await;
+    assert_eq!(denied["result"]["isError"], true, "{denied}");
+    let denied = f
+        .tool(
+            "list_messages",
+            json!({"conversation_id": secret_channel.value.id}),
+        )
+        .await;
+    assert_eq!(denied["result"]["isError"], true, "{denied}");
+    let listing = f.rpc("tools/list", json!({})).await;
+    assert!(!listing.to_string().contains("send_message"));
+    assert!(!listing.to_string().contains("create_doc"));
+    let denied = f.tool("get_doc", json!({"page_id": Id::new_v7()})).await;
+    assert_eq!(denied["result"]["isError"], true, "{denied}");
+}
+
+#[tokio::test]
+async fn task_writes_are_refused_in_a_read_only_cloud_workspace() {
+    let f = Fixture::new().await;
+    sqlx::query("UPDATE api_tokens SET can_write = 1 WHERE id = $1")
+        .bind(f.token_id.to_string())
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    // Not the exempt root workspace and past its trial, so without a subscription it is read-only.
+    sqlx::query("UPDATE workspaces SET created_at = 0, billing_exempt = 0 WHERE id = $1")
+        .bind(f.workspace.to_string())
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    let _billing = orbit_server::billing::Billing::new(
+        orbit_platform::BillingConfig::new(
+            orbit_platform::Secret::new("sk_test_unused"),
+            orbit_platform::Secret::new("whsec_unused"),
+            vec![],
+        ),
+        (*f.database).clone(),
+        "https://orbit.test",
+    );
+    let current = f.tasks.get_task(f.workspace, f.task, f.user).await.unwrap();
+    let calls = [
+        (
+            "create_task",
+            json!({"project_id": f.project, "status_id": current.status_id, "title": "Created"}),
+        ),
+        (
+            "update_task",
+            json!({"task_id": f.task, "expected_version": current.version, "title": "Changed"}),
+        ),
+        (
+            "delete_task",
+            json!({"task_id": f.task, "expected_version": current.version}),
+        ),
+    ];
+    for (name, arguments) in calls {
+        let refused = f.tool(name, arguments).await;
+        assert_eq!(refused["result"]["isError"], true, "{name}: {refused}");
+        assert!(
+            refused.to_string().contains("read-only"),
+            "{name}: {refused}"
+        );
+    }
+    let after = f.tasks.get_task(f.workspace, f.task, f.user).await.unwrap();
+    assert_eq!(after.version, current.version);
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM tasks WHERE workspace_id = $1")
+        .bind(f.workspace.to_string())
+        .fetch_one(f.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(count, 2);
+    // Reads stay open.
+    let read = f.tool("get_task", json!({"task_id": f.task})).await;
+    assert_eq!(
+        read["result"]["structuredContent"]["title"],
+        "Approved task"
+    );
 }

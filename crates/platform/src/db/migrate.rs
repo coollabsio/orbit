@@ -432,7 +432,34 @@ impl MigrationRunner {
                 ),
                 Migration::new(
                     61,
-                    include_str!("../../../../apps/server/migrations/0061_guests.sql"),
+                    include_str!("../../../../apps/server/migrations/0061_sign_in_providers.sql"),
+                    false,
+                ),
+                Migration::new(
+                    62,
+                    include_str!("../../../../apps/server/migrations/0062_account_lifecycle.sql"),
+                    false,
+                ),
+                Migration::new(
+                    63,
+                    include_str!("../../../../apps/server/migrations/0063_workspace_exports.sql"),
+                    false,
+                ),
+                Migration::new(
+                    64,
+                    include_str!("../../../../apps/server/migrations/0064_mcp_permissions.sql"),
+                    false,
+                ),
+                Migration::new(
+                    65,
+                    include_str!(
+                        "../../../../apps/server/migrations/0065_confirm_setup_owner_email.sql"
+                    ),
+                    false,
+                ),
+                Migration::new(
+                    66,
+                    include_str!("../../../../apps/server/migrations/0066_guests.sql"),
                     false,
                 ),
             ],
@@ -514,14 +541,47 @@ impl MigrationRunner {
             ),
             Migration::new(
                 60,
-                include_str!(
-                    "../../../../apps/server/migrations/postgres/0060_deleted_files.sql"
-                ),
+                include_str!("../../../../apps/server/migrations/postgres/0060_deleted_files.sql"),
                 false,
             ),
             Migration::new(
                 61,
-                include_str!("../../../../apps/server/migrations/postgres/0061_guests.sql"),
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0061_sign_in_providers.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                62,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0062_account_lifecycle.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                63,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0063_workspace_exports.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                64,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0064_mcp_permissions.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                65,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0065_confirm_setup_owner_email.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                66,
+                include_str!("../../../../apps/server/migrations/postgres/0066_guests.sql"),
                 false,
             ),
         ];

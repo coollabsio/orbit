@@ -13,14 +13,14 @@ use webauthn_rs::prelude::{
 };
 use webauthn_rs::{Webauthn, WebauthnBuilder};
 
-use super::two_factor::{Pending, busy, confirm_password};
+use super::two_factor::{Pending, busy, confirm_identity};
 use super::{
     ApiError, ApiJson, AuthState, LoginResponse, ProblemBody, SessionDelivery, authenticate,
-    request_id_value, signed_in_response,
+    last_sign_in_method, request_id_value, signed_in_response,
 };
 use crate::audit::AuditOutcome;
 use crate::repositories::identity::IdentityError;
-use crate::repositories::two_factor::{PasskeyRecord, PasskeySaveError};
+use crate::repositories::two_factor::{PasskeyRecord, PasskeyRemoval, PasskeySaveError};
 
 /// Passkeys for `public_origin`, or `None` when its host is not a domain name (browsers refuse passkeys for IP
 /// addresses).
@@ -107,11 +107,12 @@ pub(super) async fn list_passkeys(
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 pub(super) struct StartPasskeyRegistrationBody {
-    /// The current password: a new passkey is a new way into the account.
-    password: String,
+    /// The current password: a new passkey is a new way into the account. Leave it out when the account has none
+    /// (see `reauthentication_required`).
+    password: Option<String>,
 }
 
-#[utoipa::path(post, path = "/api/v1/auth/passkeys/register/start", request_body = StartPasskeyRegistrationBody, responses((status = 200, body = PasskeyChallenge), (status = 401, description = "authentication_required or invalid_credentials", body = ProblemBody, content_type = "application/problem+json"), (status = 409, description = "passkeys_unavailable", body = ProblemBody, content_type = "application/problem+json"), (status = 429, description = "authentication_throttled", body = ProblemBody, content_type = "application/problem+json")))]
+#[utoipa::path(post, path = "/api/v1/auth/passkeys/register/start", request_body = StartPasskeyRegistrationBody, responses((status = 200, body = PasskeyChallenge), (status = 401, description = "authentication_required, invalid_credentials, password_required or reauthentication_required", body = ProblemBody, content_type = "application/problem+json"), (status = 409, description = "passkeys_unavailable", body = ProblemBody, content_type = "application/problem+json"), (status = 429, description = "authentication_throttled", body = ProblemBody, content_type = "application/problem+json")))]
 pub(super) async fn start_passkey_registration(
     State(state): State<AuthState>,
     headers: HeaderMap,
@@ -125,7 +126,7 @@ pub(super) async fn start_passkey_registration(
         .webauthn
         .clone()
         .ok_or_else(|| unavailable(instance, request_id.as_ref()))?;
-    confirm_password(
+    confirm_identity(
         &state,
         &session,
         body.password,
@@ -277,7 +278,7 @@ pub(super) async fn finish_passkey_registration(
     Ok((StatusCode::CREATED, Json(record)).into_response())
 }
 
-#[utoipa::path(delete, path = "/api/v1/auth/passkeys/{id}", params(("id" = String, Path)), responses((status = 204), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json"), (status = 404, description = "passkey_not_found", body = ProblemBody, content_type = "application/problem+json")))]
+#[utoipa::path(delete, path = "/api/v1/auth/passkeys/{id}", params(("id" = String, Path)), responses((status = 204), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json"), (status = 404, description = "passkey_not_found", body = ProblemBody, content_type = "application/problem+json"), (status = 409, description = "last_sign_in_method", body = ProblemBody, content_type = "application/problem+json")))]
 pub(super) async fn delete_passkey(
     State(state): State<AuthState>,
     headers: HeaderMap,
@@ -297,7 +298,7 @@ pub(super) async fn delete_passkey(
         )
     };
     let id = id.parse::<Id>().map_err(|_| not_found())?;
-    let deleted = state
+    let removal = state
         .repository
         .delete_passkey(
             session.user.id,
@@ -307,10 +308,11 @@ pub(super) async fn delete_passkey(
         )
         .await
         .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
-    if !deleted {
-        return Err(not_found());
+    match removal {
+        PasskeyRemoval::Removed => Ok(StatusCode::NO_CONTENT),
+        PasskeyRemoval::NotFound => Err(not_found()),
+        PasskeyRemoval::LastSignInMethod => Err(last_sign_in_method(instance, request_id.as_ref())),
     }
-    Ok(StatusCode::NO_CONTENT)
 }
 
 /// Starts a sign-in with a passkey. The browser lets the user pick one of the passkeys it has for this site.

@@ -11,6 +11,7 @@ use orbit_platform::{
 
 use crate::attachment_routes::{AttachmentState, attachment_router};
 use crate::auth_routes::{AuthState, auth_router};
+use crate::backup_item_routes::{BackupItemState, backup_item_router};
 use crate::chat_routes::{ChatState, chat_router};
 use crate::export_routes::{ExportState, export_router};
 use crate::import_routes::{ImportState, import_router};
@@ -22,6 +23,7 @@ use crate::static_assets::StaticAssets;
 use crate::task_routes::{TaskState, task_router};
 use crate::teamspace_routes::{TeamspaceState, teamspace_router};
 use crate::view_routes::view_router;
+use crate::workspace_export_routes::{WorkspaceExportState, workspace_export_router};
 use crate::workspace_routes::{WorkspaceState, workspace_router};
 
 pub struct ApiRoutes {
@@ -31,11 +33,13 @@ pub struct ApiRoutes {
     pub oauth: Router,
     pub auth: AuthState,
     pub workspaces: WorkspaceState,
+    pub backup_items: BackupItemState,
     pub tasks: TaskState,
     pub pages: PageState,
     pub page_files: PageFileState,
     pub page_comments: PageCommentState,
     pub exports: ExportState,
+    pub workspace_exports: WorkspaceExportState,
     pub teamspaces: TeamspaceState,
     pub attachments: AttachmentState,
     pub integrations: IntegrationState,
@@ -64,12 +68,14 @@ pub fn production_router(
         .merge(api.oauth)
         .merge(realtime)
         .merge(workspace_router(api.workspaces))
+        .merge(backup_item_router(api.backup_items))
         .merge(task_router(api.tasks))
         .merge(views)
         .merge(page_router(api.pages))
         .merge(page_file_router(api.page_files))
         .merge(page_comment_router(api.page_comments))
         .merge(export_router(api.exports))
+        .merge(workspace_export_router(api.workspace_exports))
         .merge(teamspace_router(api.teamspaces))
         .merge(attachment_router(api.attachments))
         .merge(integration_router(api.integrations))

@@ -4,6 +4,7 @@ import { Tabs } from 'expo-router/js-tabs'
 import { BillingBanner } from '../../components/BillingBanner'
 import { Dock } from '../../components/Dock'
 import { DrawerProvider } from '../../components/Drawer'
+import { MailServerBanner } from '../../components/MailServerBanner'
 import { guestHome, guestMayOpen } from '../../data/guest'
 import { useLiveUpdates } from '../../live'
 import { useIsGuest } from '../../orbit-context'
@@ -20,6 +21,7 @@ export default function TabsLayout() {
     <DrawerProvider>
       <Tabs tabBar={(props) => (
           <>
+            <MailServerBanner />
             <BillingBanner />
             <Dock {...props} />
           </>

@@ -664,7 +664,7 @@ async fn body_limit_is_streaming_and_does_not_poll_before_inner_auth_rejection()
 async fn readiness_requires_every_named_platform_check() {
     let registry = HealthRegistry::new()
         .with_check(HealthCheck::Migrations, || async { Ok(()) })
-        .with_check(HealthCheck::DatabaseIntegrity, || async { Ok(()) })
+        .with_check(HealthCheck::Database, || async { Ok(()) })
         .with_check(HealthCheck::WritableStorage, || async { Ok(()) })
         .with_check(HealthCheck::Scheduler, || async {
             Err("worker stopped".to_owned())
@@ -723,6 +723,53 @@ async fn endpoint_class_limits_return_correlated_problem_details() {
         serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(problem["code"], "rate_limit_exceeded");
     assert_eq!(problem["request_id"], response_request_id);
+}
+
+#[tokio::test]
+async fn refused_credentials_do_not_use_up_a_workspace_budget() {
+    let app = Router::new()
+        .route(
+            "/api/v1/workspaces/w1/tasks",
+            get(|headers: HeaderMap| async move {
+                let member = headers
+                    .get("cookie")
+                    .is_some_and(|cookie| cookie.as_bytes().starts_with(b"session=member"));
+                if member {
+                    StatusCode::OK
+                } else {
+                    StatusCode::UNAUTHORIZED
+                }
+            }),
+        )
+        .layer(
+            HttpPlatformLayer::new(OriginPolicy::new("http://127.0.0.1"))
+                .with_session_cookie("session")
+                .with_rate_limits(RateLimitConfig {
+                    general_per_minute: 2,
+                    workspace_multiplier: 1,
+                    ..RateLimitConfig::default()
+                }),
+        );
+    let request = |host: u8, cookie: &str| {
+        Request::get("/api/v1/workspaces/w1/tasks")
+            .header("cookie", cookie)
+            .extension(ConnectInfo(SocketAddr::from(([10, 0, 0, host], 4567))))
+            .body(Body::empty())
+            .unwrap()
+    };
+    // Made-up cookies from many hosts are all refused by the route.
+    for host in 1..=20 {
+        let cookie = format!("session=made-up-{host}");
+        let response = app.clone().oneshot(request(host, &cookie)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+    // Members still have the whole workspace budget, and then it ends.
+    for (host, cookie) in [(100, "session=member-a"), (101, "session=member-b")] {
+        let response = app.clone().oneshot(request(host, cookie)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+    let response = app.oneshot(request(102, "session=member-c")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
 }
 
 #[tokio::test]
@@ -886,4 +933,47 @@ async fn oauth_protocol_and_mcp_requests_are_rate_limited_without_session_origin
         app.oneshot(request("POST", "/mcp")).await.unwrap().status(),
         StatusCode::TOO_MANY_REQUESTS
     );
+}
+
+#[tokio::test]
+async fn native_provider_sign_in_posts_need_no_origin_but_other_paths_do() {
+    let app = Router::new()
+        .route(
+            "/api/v1/auth/providers/{provider}/start",
+            post(|| async { StatusCode::NO_CONTENT }),
+        )
+        .route(
+            "/api/v1/auth/providers/exchange",
+            post(|| async { StatusCode::NO_CONTENT }),
+        )
+        .route(
+            "/api/v1/auth/providers/{provider}/other",
+            post(|| async { StatusCode::NO_CONTENT }),
+        )
+        .route(
+            "/api/v1/auth/connected-accounts",
+            post(|| async { StatusCode::NO_CONTENT }),
+        )
+        .layer(HttpPlatformLayer::new(OriginPolicy::new(
+            "https://orbit.test",
+        )));
+    for (path, status) in [
+        (
+            "/api/v1/auth/providers/google/start",
+            StatusCode::NO_CONTENT,
+        ),
+        ("/api/v1/auth/providers/exchange", StatusCode::NO_CONTENT),
+        ("/api/v1/auth/providers/google/other", StatusCode::FORBIDDEN),
+        ("/api/v1/auth/providers/a/b/start", StatusCode::FORBIDDEN),
+        ("/api/v1/auth/connected-accounts", StatusCode::FORBIDDEN),
+    ] {
+        let response = app.clone().oneshot(request("POST", path)).await.unwrap();
+        assert_eq!(response.status(), status, "{path}");
+    }
+    let mut with_cookie = request("POST", "/api/v1/auth/providers/exchange");
+    with_cookie
+        .headers_mut()
+        .insert("cookie", HeaderValue::from_static("session=browser"));
+    let response = app.oneshot(with_cookie).await.unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }

@@ -1330,6 +1330,12 @@ impl NotionImportService {
             {
                 Ok(_) => {}
                 Err(PageError::Unavailable(error)) => return Err(Failure::from(error)),
+                Err(PageError::TrialLimit(reached)) => {
+                    return Err(Failure::Fatal(format!(
+                        "The import stopped at the trial's limit. {}",
+                        reached.detail()
+                    )));
+                }
                 Err(_) if is_root => {
                     return Err(Failure::Fatal(
                         "The import destination is no longer available.".to_owned(),

@@ -145,7 +145,7 @@ async fn a_ticket_opens_the_description_socket_without_the_cookie() {
         .as_str()
         .unwrap()
         .to_owned();
-    let ticket = server.socket_ticket(&users.member).await;
+    let ticket = server.socket_ticket(&users.member, "task", id).await;
     let url = server.doc_ws_url(
         &users.workspace,
         "tasks",

@@ -8,6 +8,7 @@ import {
   changeMemberRole,
   changePassword as changePasswordRequest,
   createInvitation,
+  deleteAccount as deleteAccountRequest,
   deleteStorageFile as deleteStorageFileRequest,
   disableTwoFactor,
   enableTotp,
@@ -24,6 +25,7 @@ import {
   removeMember,
   removeWorkspaceBucket,
   renameWorkspace as renameWorkspaceRequest,
+  requestEmailChange as requestEmailChangeRequest,
   revokeInvitation as revokeInvitationRequest,
   revokeSession as revokeSessionRequest,
   saveWorkspaceBucket,
@@ -33,6 +35,8 @@ import {
 } from '@orbit/api/generated/sdk.gen'
 import type {
   AuthOptions,
+  AuthProblem,
+  OwnedWorkspace,
   InvitationRecord,
   NotificationPrefs,
   S3Body,
@@ -45,16 +49,21 @@ import type {
   WorkspaceStorage,
 } from '@orbit/api/generated/types.gen'
 
+import { ApiProblem } from '@orbit/api/problem'
+
 import type { MemberRecord, OrbitClient, User, WorkspaceRecord } from './orbit'
+import type { OAuthConnection } from '@orbit/api/mcp'
 import { STORAGE_FILES_PAGE } from '@orbit/api/storage'
 
-export type { InvitationRecord, NotificationPrefs, SessionRecord, TotpSetup, TwoFactorStatus, WorkspaceBucketView, WorkspaceStorage }
+export type { InvitationRecord, NotificationPrefs, OwnedWorkspace, SessionRecord, TotpSetup, TwoFactorStatus, WorkspaceBucketView, WorkspaceStorage }
 
 /** Query keys of the account (not per workspace) and of the workspace settings. */
 export const accountKeys = {
   notificationPrefs: ['account', 'notification-prefs'] as const,
   sessions: ['account', 'sessions'] as const,
   twoFactor: ['account', 'two-factor'] as const,
+  connectedAccounts: ['account', 'connected-accounts'] as const,
+  oauthConnections: ['account', 'oauth-connections'] as const,
   /** Under the `members` prefix, so the workspace events socket refreshes it with the members. */
   invitations: (workspaceId: string) => ['members', workspaceId, 'invitations'] as const,
   storage: (workspaceId: string) => ['workspace-storage', workspaceId] as const,
@@ -103,6 +112,31 @@ export function passwordProblem(current: string, next: string, confirm: string):
   return null
 }
 
+// ---- email and deleting the account
+
+/**
+ * Emails a link to the new address; the email changes when it is opened (on the web). `password` is left out for an
+ * account without one (see `withReauthentication`).
+ */
+export async function requestEmailChange(client: OrbitClient, email: string, password?: string): Promise<void> {
+  await requestEmailChangeRequest({ client, body: { email, password }, throwOnError: true })
+}
+
+/** Deletes the account for good; `email` is the typed confirmation. Every session ends. */
+export async function deleteAccount(client: OrbitClient, email: string, password?: string): Promise<void> {
+  await deleteAccountRequest({ client, body: { email, password }, throwOnError: true })
+}
+
+/** The typed confirmation matches the account's email, as the server compares them (case and spaces aside). */
+export const confirmsEmail = (typed: string, email: string) => typed.trim().toLowerCase() === email.trim().toLowerCase()
+
+/** 409 `owns_workspaces` lists the workspaces to delete first in the problem body; `null` for any other error. */
+export function ownedWorkspaces(error: unknown): OwnedWorkspace[] | null {
+  if (!(error instanceof ApiProblem) || error.code !== 'owns_workspaces') return null
+  const { workspaces } = error.problem as AuthProblem
+  return Array.isArray(workspaces) ? workspaces : []
+}
+
 // ---- status
 
 /** Sets the presence and the custom status; answers with the user. */
@@ -116,7 +150,8 @@ export async function twoFactor(client: OrbitClient): Promise<TwoFactorStatus> {
   return (await getTwoFactor({ client, throwOnError: true })).data
 }
 
-export async function startTotpSetup(client: OrbitClient, password: string): Promise<TotpSetup> {
+/** `password` is left out for an account without one (see `withReauthentication`). */
+export async function startTotpSetup(client: OrbitClient, password?: string): Promise<TotpSetup> {
   return (await setupTotp({ client, body: { password }, throwOnError: true })).data
 }
 
@@ -125,11 +160,11 @@ export async function turnOnTotp(client: OrbitClient, code: string): Promise<str
   return (await enableTotp({ client, body: { code }, throwOnError: true })).data.recovery_codes
 }
 
-export async function turnOffTwoFactor(client: OrbitClient, password: string): Promise<void> {
+export async function turnOffTwoFactor(client: OrbitClient, password?: string): Promise<void> {
   await disableTwoFactor({ client, body: { password }, throwOnError: true })
 }
 
-export async function newRecoveryCodes(client: OrbitClient, password: string): Promise<string[]> {
+export async function newRecoveryCodes(client: OrbitClient, password?: string): Promise<string[]> {
   return (await regenerateRecoveryCodes({ client, body: { password }, throwOnError: true })).data.recovery_codes
 }
 
@@ -148,6 +183,16 @@ export async function sessions(client: OrbitClient): Promise<SessionRecord[]> {
 
 export async function revokeSession(client: OrbitClient, id: string): Promise<void> {
   await revokeSessionRequest({ client, path: { id }, throwOnError: true })
+}
+
+/** The MCP clients this person approved. The OAuth routes are not in the OpenAPI contract, so they have no SDK function. */
+export async function oauthConnections(client: OrbitClient): Promise<OAuthConnection[]> {
+  return (await client.get<{ 200: { items: OAuthConnection[] } }, unknown, true>({ url: '/api/v1/oauth/grants', throwOnError: true })).data.items
+}
+
+/** Stops the client's access and refresh tokens. */
+export async function disconnectOAuth(client: OrbitClient, id: string): Promise<void> {
+  await client.delete({ url: '/api/v1/oauth/grants/{id}', path: { id }, throwOnError: true })
 }
 
 /** The current session first, then the most recently active. */

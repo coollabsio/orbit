@@ -1,5 +1,5 @@
 import { useLocation, useNavigate, useSearchParams } from 'react-router'
-import { Menu, Notification as Bell } from 'reicon-react'
+import { Notification as Bell } from 'reicon-react'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -50,16 +50,6 @@ export function InboxPage() {
     <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background">
       <Pane>
         <PaneHeader>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            className="hidden shrink-0 text-muted-foreground/70 max-[899px]:inline-flex"
-            aria-label="Menu"
-            onClick={() => window.dispatchEvent(new CustomEvent('open-sidebar'))}
-          >
-            <Menu className="size-[18px]" />
-          </Button>
           <PaneTitle>Activity</PaneTitle>
           {unreadCount > 0 ? <Badge className="h-4 min-w-4 px-1 text-[10px] tabular-nums">{unreadCount}</Badge> : null}
           <span className="flex-1" />

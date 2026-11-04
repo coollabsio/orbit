@@ -24,7 +24,7 @@ pub use auth::{
 };
 pub use backup::{
     AttachmentMutationCoordinator, AttachmentMutationGuard, BackupError, BackupFile, BackupKind,
-    BackupManifest, BackupService, BackupSnapshot,
+    BackupManifest, BackupService, BackupSnapshot, SnapshotReader, SnapshotRow,
 };
 pub use config::{
     AppKey, BillingConfig, Config, ConfigError, DataConfig, EnvironmentMode, HttpConfig,
@@ -37,6 +37,8 @@ pub use db::{
     Singleton, SqlBuilder, TestDatabase, TestDatabaseError, lock_database_ownership,
     run_guarded_migrations, testing_postgres,
 };
+#[cfg(any(test, feature = "test-support"))]
+pub use files::start_fake_s3;
 pub use files::{
     AuthorizedAttachment, BLOB_REFERENCE_COUNT, BlobDownload, BlobFuture, BlobMoveStatus,
     BlobObject, BlobReader, BlobStore, BlobStoreError, ContentDisposition, DownloadMetadata,
@@ -44,7 +46,7 @@ pub use files::{
     ObjectStorage, ObjectStorageState, ReconcileResult, S3_DELETE_DELAY_MILLIS, S3Bucket, S3Config,
     S3Error, S3Object, StagedUpload, StoredObject, TieredBlobStore, UploadError,
     UploadFinalization, UploadLimitError, UploadLimits, UploadService, WORKSPACE_STORAGE_USED,
-    WorkspaceBucket, start_fake_s3,
+    WorkspaceBucket,
 };
 pub use health::{HealthCheck, HealthCheckResult, HealthRegistry, ReadinessReport};
 pub use http::{

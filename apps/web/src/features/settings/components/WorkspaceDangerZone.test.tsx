@@ -30,6 +30,7 @@ function setup(role: WorkspaceRole = 'owner', last = false) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } } })
   // Signed in: the app shell has the user before any workspace page.
   client.setQueryData(queryKeys.currentUser, { id: 'user-1', email: 'owner@orbit.test', display_name: 'Owner', installation_admin: false, root: false })
+  client.setQueryData(queryKeys.authOptions, { billing_enabled: false })
   client.setQueryData(['workspaces'], [
     testWorkspace(role, { id: 'alpha', name: 'Alpha', version: 7 }),
     ...last ? [] : [BETA],
@@ -116,4 +117,17 @@ test('pending deletion blocks duplicate requests and dialog dismissal', async ()
   expect(calls).toBe(1)
   finish(new Response(null, { status: 204 }))
   await view.findByText('Beta', { selector: 'output' })
+})
+
+test('with billing, the dialog says that deleting cancels the subscription at once', async () => {
+  for (const [status, warned] of [['active', true], ['past_due', true], ['canceled', false], [null, false]] as const) {
+    const { view, client } = setup()
+    client.setQueryData(queryKeys.authOptions, { billing_enabled: true })
+    client.setQueryData(queryKeys.billing('alpha'), { status, access: 'full' })
+    fireEvent.click(view.getByRole('button', { name: 'Delete workspace' }))
+    const dialog = within(view.getByRole('dialog'))
+    expect(dialog.queryAllByText(/cancels the subscription at once, with no refund/).length).toBe(warned ? 1 : 0)
+    expect(dialog.queryAllByText(/stays in the trash for 30 days/).length).toBe(warned ? 1 : 0)
+    view.unmount()
+  }
 })

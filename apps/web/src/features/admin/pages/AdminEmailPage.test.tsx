@@ -33,3 +33,27 @@ test('saving with an empty password field keeps the saved password', async () =>
   expect(bodies[0]).toEqual({ host: 'smtp.example.com', port: 587, security: 'starttls', username: null, from_address: 'orbit@example.com', from_name: null })
   expect(await view.findByRole('button', { name: 'Send test email' })).toBeTruthy()
 })
+
+function renderSaved(billingEnabled: boolean) {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const path = new URL((input as Request).url).pathname
+    if (path === '/api/v1/auth/options') {
+      return Response.json({ registration_open: false, email_enabled: true, passkeys_enabled: false, billing_enabled: billingEnabled, providers: [], provider_registration_open: false })
+    }
+    return Response.json({ registration_open: false, smtp: SMTP, storage: STORAGE, limits: LIMITS })
+  }) as unknown as typeof fetch
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  return render(<QueryClientProvider client={client}><AdminEmailPage /></QueryClientProvider>)
+}
+
+test('Orbit Cloud offers no Remove and says why', async () => {
+  const view = renderSaved(true)
+  expect(await view.findByText('Orbit Cloud needs a mail server. Save a different one instead.')).toBeTruthy()
+  expect(view.queryByRole('button', { name: 'Remove' })).toBeNull()
+})
+
+test('a self-hosted server can remove its mail server', async () => {
+  const view = renderSaved(false)
+  expect(await view.findByRole('button', { name: 'Remove' })).toBeTruthy()
+  expect(view.queryByText('Orbit Cloud needs a mail server. Save a different one instead.')).toBeNull()
+})

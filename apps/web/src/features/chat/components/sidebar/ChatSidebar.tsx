@@ -1,6 +1,6 @@
 import { useState, type ComponentType, type PointerEvent } from 'react'
 import { toast } from 'sonner'
-import { Add, Brush, ChevronDown, ChevronRight, DirectInbox, Edit, Hashtag, Layer, Menu, MoreH, Trash } from 'reicon-react'
+import { Add, Brush, ChevronDown, ChevronRight, DirectInbox, Edit, Hashtag, Layer, MoreH, Trash } from 'reicon-react'
 import { confirmAction } from '@/components/common/confirmAction'
 import { PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { cn } from 'cn'
@@ -306,10 +306,6 @@ export function ChatSidebar() {
         </SidebarListHeader>
       ) : (
         <PaneHeader className="gap-1 pr-2">
-          {/* phones have no app sidebar here: the burger opens the drawer, like the docs page list */}
-          <Button type="button" variant="ghost" size="icon-sm" className="hidden shrink-0 text-muted-foreground/70 max-[899px]:inline-flex" aria-label="Menu" onClick={() => window.dispatchEvent(new CustomEvent('open-sidebar'))}>
-            <Menu className="size-[18px]" />
-          </Button>
           <PaneTitle render={<h1 />} className="flex-1">
             Chat
           </PaneTitle>

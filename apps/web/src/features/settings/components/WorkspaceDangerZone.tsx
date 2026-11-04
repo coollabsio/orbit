@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { DialogFooter, DialogClose } from '@/components/ui/dialog'
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { useDeleteWorkspace } from '@/features/workspaces/api'
+import { useWorkspaceBilling } from '@/features/workspaces/billing'
 import { useCan } from '@/features/workspaces/permissions'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { SettingsCard } from '@/components/common/SettingsCard'
@@ -15,6 +16,9 @@ export function WorkspaceDangerZone() {
   const canDelete = useCan('workspace.delete')
   const navigate = useNavigate()
   const deletion = useDeleteWorkspace(workspace.id)
+  // The server cancels a subscription that has not ended when the workspace is deleted.
+  const status = useWorkspaceBilling().data?.status
+  const subscribed = status != null && status !== 'canceled' && status !== 'incomplete_expired'
   const [open, setOpen] = useState(false)
   const [confirmation, setConfirmation] = useState('')
   const inputId = useId()
@@ -46,6 +50,7 @@ export function WorkspaceDangerZone() {
       <Modal title="Delete workspace?" description={`Deleting "${workspace.name}" removes access to its projects and tasks for everyone.`} onClose={() => setOpen(false)} dismissible={!deletion.isPending} className="sm:max-w-120">
         <form onSubmit={(event) => { event.preventDefault(); void deleteConfirmed() }}>
           {workspaces.length === 1 ? <p className="my-3 text-[13px] text-destructive">This is your last workspace. After deletion, you will have no workspace access.</p> : null}
+          {subscribed ? <p className="my-3 text-[13px] text-destructive">Deleting cancels the subscription at once, with no refund for the rest of the billing period. The workspace stays in the trash for 30 days; restoring it does not restore the subscription.</p> : null}
           <Field>
             <FieldLabel htmlFor={inputId}>Confirm workspace name</FieldLabel>
             <FieldDescription>Type <strong>{workspace.name}</strong> to confirm deletion.</FieldDescription>

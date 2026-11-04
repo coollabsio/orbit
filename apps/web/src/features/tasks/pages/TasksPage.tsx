@@ -9,7 +9,7 @@ import { toast } from 'sonner'
 import { UNDO_TOAST_DURATION } from '@/lib/toast'
 import { loadFailed } from '@/lib/connection'
 import { useScrollMemory } from '@/lib/useScrollMemory'
-import { Bookmark, ChevronDown, Menu, Add as Plus, Setting2 as Settings, TaskSquare as SquareCheck } from 'reicon-react'
+import { Bookmark, ChevronDown, Add as Plus, Setting2 as Settings, TaskSquare as SquareCheck } from 'reicon-react'
 import { cn } from 'cn'
 import { ApiProblem } from '@orbit/api/problem'
 import { Button } from '@/components/ui/button'
@@ -393,9 +393,6 @@ function WorkspaceTasksPage() {
       ) : (
         <Pane className="relative">
           <PaneHeader className="bg-background text-foreground max-[899px]:min-h-11 max-[899px]:flex-wrap max-[899px]:px-2 max-[899px]:py-1.5">
-            <Button type="button" variant="ghost" size="icon-sm" className="hidden shrink-0 text-muted-foreground/70 max-[899px]:inline-flex" aria-label="Menu" onClick={() => window.dispatchEvent(new CustomEvent('open-sidebar'))}>
-              <Menu className="size-[18px]" />
-            </Button>
             {source.kind === 'view' ? (
               <ViewHeader
                 workspaceId={workspace.id}

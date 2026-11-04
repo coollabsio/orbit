@@ -78,6 +78,14 @@ async function settle(page) {
   await page.waitForFunction(() => !document.querySelector('[aria-busy="true"], .animate-spin'), null, { timeout: 5000 }).catch(() => {})
 }
 
+// The task layout is saved per page now (no `?layout=` param): pick it in the Display menu.
+async function setLayout(page, name) {
+  await page.getByRole('button', { name: 'Display' }).click()
+  await page.getByRole('group', { name: 'Layout' }).getByRole('button', { name }).click()
+  await page.keyboard.press('Escape')
+  await settle(page)
+}
+
 async function go(page, path) {
   await page.goto(`${BASE}${path}`)
   await settle(page)
@@ -163,14 +171,16 @@ async function listRegions(page) {
 // ---------- shots ----------
 const shots = {
   async list(page) {
-    await go(page, '/tasks?layout=list')
+    await go(page, '/tasks')
+    await setLayout(page, 'List')
     const { regions, targets } = await listRegions(page)
     await shoot(page, 'list.png')
     record('list.png', 'All tasks, list layout grouped by status (dark).', regions, targets)
   },
 
   async board(page) {
-    await go(page, '/tasks?layout=board')
+    await go(page, '/tasks')
+    await setLayout(page, 'Board')
     const cols = page.locator('.group\\/col')
     const card = page.locator('[data-board-card]')
     const regions = {
@@ -190,7 +200,8 @@ const shots = {
   },
 
   async roadmap(page) {
-    await go(page, '/tasks?layout=timeline')
+    await go(page, '/tasks')
+    await setLayout(page, 'Timeline')
     const bars = page.locator('[aria-label*=", "][role="button"], [data-timeline-bar]')
     const regions = {
       sidebar: await sidebar(page),
@@ -263,7 +274,8 @@ const shots = {
   },
 
   async bulk(page) {
-    await go(page, '/tasks?layout=list')
+    await go(page, '/tasks')
+    await setLayout(page, 'List')
     const boxes = page.getByRole('checkbox', { name: /^Select / })
     const picks = [1, 2, 4, 6]
     const picked = []
@@ -293,7 +305,8 @@ const shots = {
 
   async listLight() {
     const page = await newPage('light')
-    await go(page, '/tasks?layout=list')
+    await go(page, '/tasks')
+    await setLayout(page, 'List')
     const { regions, targets } = await listRegions(page)
     await shoot(page, 'list-light.png')
     record('list-light.png', 'All tasks, list layout (light theme).', regions, targets)
@@ -302,7 +315,8 @@ const shots = {
 
   async boardLight() {
     const page = await newPage('light')
-    await go(page, '/tasks?layout=board')
+    await go(page, '/tasks')
+    await setLayout(page, 'Board')
     const cols = page.locator('.group\\/col')
     const regions = { firstTwoColumns: union(await box(cols.nth(0)), await box(cols.nth(1))), card: await box(page.locator('[data-board-card]').first()) }
     await shoot(page, 'board-light.png')
@@ -331,7 +345,8 @@ const shots = {
 
   async sidebarCollapsed() {
     const page = await newPage('dark', { collapsed: true })
-    await go(page, '/tasks?layout=list')
+    await go(page, '/tasks')
+    await setLayout(page, 'List')
     const { regions, targets } = await listRegions(page)
     await shoot(page, 'sidebar-collapsed.png')
     record('sidebar-collapsed.png', 'List layout with the sidebar collapsed to an icon rail.', regions, targets)
@@ -746,25 +761,16 @@ const chatShots = {
   },
 
   async chat(page) {
-    await go(page, '/chat/c_engineering')
-    await assertRoute(page, '/chat/')
-    await page.locator('#message-cm_reactions').waitFor()
-    await page.waitForTimeout(400)
-    const regions = {
-      channelSidebar: await box(page.locator('.group\\/chat > div').first()),
-      messages: await ancestorBox(page, '#message-cm_reactions', { classRe: /\boverflow-y-auto\b/ }),
-      composer: await ancestorBox(page, 'textarea[placeholder="Message #engineering"]', { classRe: /\bpx-3 pb-2\b/ }),
-      reactionMessage: await box(page.locator('#message-cm_reactions')),
-      codeBlock: await box(page.locator('#message-cm_code pre')),
-      githubChip: await box(page.locator('[id^="message-"] a[href*="github.com/orbit-hq"]')),
-      mention: await box(page.locator('[data-mention="true"]')),
-    }
+    // Chat is real now: scripts/seed-demo-chat.ts fills #engineering.
+    await go(page, '/chat')
+    await page.getByRole('link', { name: /engineering/ }).first().click()
+    await page.getByText('less memory than one browser tab').waitFor()
+    await settle(page)
+    const last = page.locator('[id^="message-"]').filter({ hasText: 'less memory than one browser tab' })
+    const code = page.locator('[id^="message-"] pre').first()
+    const regions = { messages: await ancestorBox(page, '[id^="message-"] pre', { classRe: /\boverflow-y-auto\b/ }), codeBlock: await box(code), reactionMessage: await box(last) }
     await shoot(page, 'chat.png')
-    record('chat.png', 'Chat (upcoming, mock data): #engineering with grouped messages, a Rust code block, GitHub PR chip + GitHub bot post, reactions, @mention highlight, thread preview card, member list.', regions, {
-      reactionMessage: center(regions.reactionMessage),
-      threadPreview: center(await box(page.locator('#message-cm_thread_root').getByRole('button').filter({ hasText: /Messages/ }))),
-      composer: center(regions.composer),
-    })
+    record('chat.png', 'Chat: #engineering with reactions, a thread, a Rust code block (seed-demo-chat.ts).', regions, { reactionMessage: center(regions.reactionMessage) })
   },
 
   async chatThread(page) {

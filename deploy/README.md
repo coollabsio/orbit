@@ -10,7 +10,7 @@ cp deploy/.env.example deploy/.env
 docker compose --env-file deploy/.env -f deploy/compose.yaml up -d --build
 ```
 
-Orbit reads its configuration only from `ORBIT_*` environment variables. The image sets production mode, the bind address, the data paths and `ORBIT_TRUSTED_PROXIES=0.0.0.0/0,::/0`. A container needs only `ORBIT_PUBLIC_ORIGIN` and `ORBIT_APP_KEY`. The image trusts forwarding headers from every address, so only the reverse proxy may reach port 8080. If anything else can reach it, set `ORBIT_TRUSTED_PROXIES` to the proxy network. To use Postgres, also set `ORBIT_DATABASE_URL`. Keep a copy of `ORBIT_APP_KEY` outside the server: without it, Orbit cannot read the secrets it saved. For all variables, see [Configuration](../docs/operations.md#configuration).
+Orbit reads its configuration only from `ORBIT_*` environment variables. The image sets production mode, the bind address and the data paths. A container also needs `ORBIT_PUBLIC_ORIGIN`, `ORBIT_APP_KEY` and `ORBIT_TRUSTED_PROXIES`: Orbit does not start in production without them. Set `ORBIT_TRUSTED_PROXIES` to the reverse proxy addresses plus `127.0.0.1/32` for the image healthcheck (`deploy/compose.yaml` uses `127.0.0.1/32,172.30.0.2/32`). Orbit reads the client IP address and `https` from forwarding headers only on connections from these addresses. Do not use `0.0.0.0/0` or `::/0`: then anyone who reaches port 8080 can fake their address (and get around rate limits) and HTTPS, and Orbit logs a warning at startup. To use Postgres, also set `ORBIT_DATABASE_URL`. Keep a copy of `ORBIT_APP_KEY` outside the server: without it, Orbit cannot read the secrets it saved. For all variables, see [Configuration](../docs/operations.md#configuration).
 
 The application port is not published. Only Caddy can reach it through the deployment network. Caddy forwards WebSocket upgrades automatically. The application runs as UID 65532 with a read-only root filesystem and separate named volumes for SQLite/attachments and backups.
 
@@ -52,7 +52,17 @@ export ORBIT_ENV=production \
 ./orbit serve
 ```
 
-Run under an unprivileged service account and an HTTPS reverse proxy. The binary architecture matches the Docker build platform. The latest commit on `main` publishes one image manifest for `linux/amd64` and `linux/arm64` to `ghcr.io/<owner>/<repository>:<seven-character-commit-sha>`. A newer commit cancels an older image build. Each image is built and smoke-tested on a native runner; the image workflow does not use QEMU. The workflow does not create GitHub Releases or downloadable binaries. Local builds do not publish anything.
+Run under an unprivileged service account and an HTTPS reverse proxy. The binary architecture matches the Docker build platform. The latest commit on `main` publishes one image manifest for `linux/amd64` and `linux/arm64` to `ghcr.io/<owner>/<repository>:<seven-character-commit-sha>` and `:main`. A newer commit cancels an older image build. Each image is built and smoke-tested on a native runner; the image workflow does not use QEMU. Local builds do not publish anything.
+
+## Versions and releases
+
+`[workspace.package] version` in `Cargo.toml` is the Orbit version (now `0.1.0`). The server returns it in `GET /api/v1/auth/options` (`version`), and Settings → General shows it as `Orbit v0.1.0`. To publish a versioned image:
+
+1. Run `just version 0.2.0`. This sets the version in `Cargo.toml` and updates `Cargo.lock`.
+2. Commit both files and push them to `main`.
+3. On GitHub, publish a release with the tag `v0.2.0`.
+
+The image workflow then publishes `ghcr.io/<owner>/<repository>:0.2.0`, `:0.2` and `:latest`. A pre-release gets only its exact tag (for example `:0.3.0-rc.1`). If the tag is not `v` plus the version in `Cargo.toml`, the workflow stops before it builds. The workflow does not attach downloadable binaries to the release. Run `just version` to print the current version.
 
 ## Backups and upgrades
 

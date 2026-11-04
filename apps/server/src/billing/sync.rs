@@ -55,10 +55,21 @@ pub(super) async fn enqueue(
 }
 
 pub fn register_jobs(worker: Worker, billing: Billing) -> Result<Worker, JobKindRegistrationError> {
-    worker.with_handler(job_kind(), move |context| {
-        let billing = billing.clone();
-        async move { sync(&billing, &context.job.payload).await }
-    })
+    let canceling = billing.clone();
+    let updating = billing.clone();
+    worker
+        .with_handler(job_kind(), move |context| {
+            let billing = billing.clone();
+            async move { sync(&billing, &context.job.payload).await }
+        })?
+        .with_handler(super::cancel::job_kind(), move |context| {
+            let billing = canceling.clone();
+            async move { super::cancel::cancel(&billing, &context.job.payload).await }
+        })?
+        .with_handler(super::customer_email::job_kind(), move |context| {
+            let billing = updating.clone();
+            async move { super::customer_email::update(&billing, &context.job.payload).await }
+        })
 }
 
 async fn sync(billing: &Billing, payload: &Value) -> Result<(), JobError> {

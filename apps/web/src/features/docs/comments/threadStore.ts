@@ -72,8 +72,13 @@ export class OrbitThreadStoreAuth extends ThreadStoreAuth {
   canDeleteComment(comment: CommentData) {
     return !comment.deletedAt && comment.userId === this.userId()
   }
+  /** The creator deletes the thread while nobody else has a live comment in it (the server refuses it then). */
   canDeleteThread(thread: ThreadData) {
-    return (thread.metadata as OrbitThreadMetadata | undefined)?.createdBy === this.userId()
+    const userId = this.userId()
+    return (
+      (thread.metadata as OrbitThreadMetadata | undefined)?.createdBy === userId &&
+      thread.comments.every((comment) => comment.deletedAt || comment.userId === userId)
+    )
   }
   canResolveThread() {
     return this.userId() !== null

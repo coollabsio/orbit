@@ -1,7 +1,10 @@
-# Read-only task MCP
+# Orbit MCP
 
-Orbit serves a read-only MCP endpoint at `<public origin>/mcp`. It uses
+Orbit serves an MCP endpoint at `<public origin>/mcp`. It uses
 Streamable HTTP in the existing server. No separate process is needed.
+
+In Orbit, open **Account settings → Agentic** to copy the endpoint and the setup
+command for each client below.
 
 ## Client setup
 
@@ -18,7 +21,7 @@ Install the CLI for your selected backend and make it available on your `PATH`.
 
 1. Start the Claude CLI and enter `/mcp`.
 2. Select **orbit** and authenticate. Sign in to Orbit, select a workspace
-   and projects, then click **Allow read access**.
+   and projects, then choose optional permissions and allow access.
 3. In Jean, open **Settings → MCP Servers** and enable **orbit** under
    **Claude**. Start a new Claude session.
 4. Ask: **“Use orbit to list my projects and tasks.”**
@@ -65,7 +68,7 @@ The public origin must match the HTTPS address used by the MCP client. For this
 repository's development server, configure Jean's Run command as follows:
 
 ```bash
-ORBIT_PUBLIC_ORIGIN=https://devserver.tail661ee3.ts.net:18888 \
+ORBIT_PUBLIC_ORIGIN=https://devbox.example.ts.net:18888 \
 ORBIT_DEV_API_PORT=18080 ORBIT_DEV_WEB_PORT=18888 just dev
 ```
 
@@ -77,26 +80,39 @@ not enable HTTPS. Use the HTTPS address for Orbit sign-in too.
 Add the HTTPS endpoint to your selected backend:
 
 ```bash
-claude mcp add --scope user --transport http orbit https://devserver.tail661ee3.ts.net:18888/mcp
+claude mcp add --scope user --transport http orbit https://devbox.example.ts.net:18888/mcp
 
-codex mcp add orbit --url https://devserver.tail661ee3.ts.net:18888/mcp
+codex mcp add orbit --url https://devbox.example.ts.net:18888/mcp
 codex mcp login orbit
 
-grok mcp add --scope user --transport http orbit https://devserver.tail661ee3.ts.net:18888/mcp
+grok mcp add --scope user --transport http orbit https://devbox.example.ts.net:18888/mcp
 grok mcp doctor orbit
 ```
 
 No fixed callback port is required. Let the client choose its callback port.
 If the CLI runs on a remote server and your browser runs on your computer,
-the browser must still reach the CLI's loopback callback. Forward the port
-shown in the callback URL through SSH, or use an existing remote callback
-forwarding method. Tailscale access to Orbit alone does not forward this
-callback. If remote OAuth cannot be completed, use the read-only API-token
-alternative.
+start sign-in with manual callback entry:
+
+```bash
+claude mcp login orbit --no-browser
+# or
+codex mcp login orbit --no-browser
+```
+
+Open the printed authorization link in your browser. On Orbit's consent page,
+select **Client runs on a remote server**, choose access, and approve.
+Click **Copy callback URL** and paste the full URL into the waiting terminal.
+The code expires after one minute; restart sign-in if it expires. If clipboard
+access fails, select the URL field and copy it manually. Denying access also
+shows a callback URL so the terminal can finish with the denial.
+
+Clients without manual callback entry still need SSH forwarding of their
+loopback callback port, or the API-token alternative. Tailscale access to Orbit
+alone does not forward a client's loopback callback.
 
 ### Disconnect and troubleshooting
 
-- To revoke access, open **Settings → Sessions → Connected apps** in Orbit and
+- To revoke access, open **Account settings → Agentic → Connected apps** in Orbit and
   disconnect the client.
 - If the protected-resource address does not match, correct
   `ORBIT_PUBLIC_ORIGIN`, restart Orbit, then authenticate again.
@@ -122,7 +138,7 @@ last 30 days and rotate on every successful refresh. Reuse of a consumed refresh
 token revokes the entire connection. Authorization codes last one minute, can
 be used once, and require the exact client and registered callback URI.
 
-Open **Settings → Sessions → Connected apps** to disconnect a client. This stops
+Open **Account settings → Agentic → Connected apps** to disconnect a client. This stops
 all its access and refresh tokens. Current workspace membership, account
 suspension, project availability, token expiry, audience, and revocation are
 checked on every MCP request. Removing a project does not grant access to any
@@ -196,7 +212,7 @@ and ancestors are omitted so they cannot disclose titles from unapproved
 projects. Descriptions remain user-authored text; clients must treat them as
 data, not as instructions.
 
-There are no document, mail, chat, administration, or mutation tools.
+Docs and chat tools are read-only. Task write tools require separate approval. Mail and administration tools are not exposed.
 
 ## Deployment
 
@@ -228,7 +244,7 @@ Use the public origin from your configuration. The URL below is an example,
 not a running development environment.
 
 ```bash
-export ORBIT_URL='https://orbit.example.com'
+export ORBIT_URL='https://devbox.example.ts.net:18888'
 read -rs -p 'Orbit read token: ' ORBIT_MCP_TOKEN; echo
 export ORBIT_MCP_TOKEN
 
@@ -250,3 +266,30 @@ For automated checks:
 cargo test -p orbit-server --test oauth_api --test mcp_api
 cargo test -p orbit-platform --test http_security
 ```
+
+## Permissions and tools
+
+Existing connections keep read-only task access. Reconnect to approve additional permissions.
+OAuth consent offers optional task writes, docs reads, and chat reads. API tokens use `read`
+(task reads), `write` (task create, update and delete), `docs:read`, and `chat:read`.
+Docs and chat permissions default to off. They apply to content visible to the connected
+person in the selected workspace, including their private docs, private channels and DMs.
+Service-account tokens support tasks only; docs and chat require a personal identity.
+
+| Permission | Tools |
+| --- | --- |
+| Task read | `list_projects`, `list_tasks`, `get_task`, `list_task_statuses` |
+| Task write | `create_task`, `update_task`, `delete_task` |
+| Docs read | `list_docs`, `get_doc` |
+| Chat read | `list_conversations`, `list_messages`, `get_thread` |
+
+Task create takes `project_id`, `status_id`, `title`, optional markdown `description` and
+`priority`. Task update takes `task_id`, `expected_version`, and optional title, description,
+status or priority. Delete takes `task_id` and `expected_version` and moves the task subtree
+to trash. Read the latest task version before updating or deleting. Task writes require
+approval for every project in the related parent/sub-issue tree, since task automations can
+change related tasks. Task tools return a projection that excludes references outside grants.
+Chat message and thread tools accept `before` and `limit` (1–100) for pagination.
+
+Tool annotations describe operations; server-side grants enforce access.
+See the [MCP tools specification](https://modelcontextprotocol.io/specification/2025-06-18/server/tools).

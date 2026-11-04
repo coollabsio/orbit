@@ -1,5 +1,5 @@
 -- Guests: outside people who only see the private chat channels they are invited to (see the
--- SQLite 0061, which must rebuild both tables to change their CHECK).
+-- SQLite 0066, which must rebuild both tables to change their CHECK).
 ALTER TABLE workspace_invitations DROP CONSTRAINT workspace_invitations_role_check;
 ALTER TABLE workspace_invitations ADD CONSTRAINT workspace_invitations_role_check
     CHECK (role IN ('admin', 'member', 'guest'));

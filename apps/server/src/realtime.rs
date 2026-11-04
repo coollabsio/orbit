@@ -15,8 +15,13 @@ use axum::{
 };
 use orbit_platform::{Database, Flag, Id, TimestampMillis};
 use serde::Deserialize;
+use tokio::sync::broadcast;
 
 const RETENTION_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+/// How often an idle socket checks its session and membership. Every batch of events is checked
+/// before it goes out, and removals, suspensions and revoked sessions are checked at once
+/// ([`crate::live::LiveHub::revalidations`]).
+const RECHECK: Duration = Duration::from_secs(15);
 
 pub fn router(state: TaskState) -> Router {
     Router::new()
@@ -40,6 +45,8 @@ async fn connect(
         .await
         .ok_or(StatusCode::UNAUTHORIZED)?;
     let database = state.identity.database().clone();
+    // Subscribed before the check, so access that ends after it reaches the socket.
+    let revalidations = crate::live::LiveHub::of(&database).revalidations();
     if !authorized(&database, workspace, session.id)
         .await
         .unwrap_or(false)
@@ -49,7 +56,16 @@ async fn connect(
     Ok(upgrade
         .max_message_size(1024)
         .max_frame_size(1024)
-        .on_upgrade(move |socket| serve(socket, database, workspace, session.id, cursor.after)))
+        .on_upgrade(move |socket| {
+            serve(
+                socket,
+                database,
+                workspace,
+                session.id,
+                cursor.after,
+                revalidations,
+            )
+        }))
 }
 
 pub async fn authorized(
@@ -140,14 +156,27 @@ async fn serve(
     workspace: Id,
     session: Id,
     mut after: Option<i64>,
+    mut revalidations: broadcast::Receiver<Option<Id>>,
 ) {
     let mut tick = tokio::time::interval(Duration::from_secs(1));
+    let start = tokio::time::Instant::now();
+    let mut recheck = tokio::time::interval_at(start + RECHECK, RECHECK);
     let mut heartbeat = tokio::time::interval(Duration::from_secs(20));
     let mut last_pong = Instant::now();
     loop {
         tokio::select! {
-            _ = tick.tick() => {
+            _ = recheck.tick() => {
                 if !authorized(&database, workspace, session).await.unwrap_or(false) { break; }
+            }
+            changed = revalidations.recv() => {
+                let ours = match changed {
+                    Ok(changed) => changed.is_none_or(|changed| changed == workspace),
+                    Err(broadcast::error::RecvError::Lagged(_)) => true,
+                    Err(broadcast::error::RecvError::Closed) => break,
+                };
+                if ours && !authorized(&database, workspace, session).await.unwrap_or(false) { break; }
+            }
+            _ = tick.tick() => {
                 let Ok(event) = replay(&database, workspace, after).await else { break; };
                 let sequence = event.sequence.parse::<i64>().ok();
                 if after != sequence || event.kind == "resync_required" {

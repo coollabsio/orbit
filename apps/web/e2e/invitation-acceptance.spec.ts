@@ -66,6 +66,6 @@ for (const mode of ['new', 'existing', 'wrong-account']) {
     await page.getByRole('button', { name: mode === 'new' ? 'Accept invitation' : 'Sign in and accept invitation', exact: true }).click()
     await expect(page).toHaveURL(/\/tasks/)
     expect(accepted).toBe(true)
-    await expect(page.getByRole('button', { name: 'Menu', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Open sidebar', exact: true })).toBeVisible()
   })
 }

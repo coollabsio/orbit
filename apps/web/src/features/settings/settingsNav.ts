@@ -1,6 +1,7 @@
 import { useContext, type ComponentType } from 'react'
-import { ArchiveBox, Brush, Card, Chart, ClipboardText, CloudConnection, Cpu, SecurityUser, Driver, Key, Keyboard, Link2, Lock, Notification as Bell, Setting2 as Settings, ShieldTick as ShieldCheck, SmileCircle, Sms as Mail, Sticker, Danger as TriangleAlert, User, People as Users } from 'reicon-react'
+import { ArchiveBox, Brush, Card, Chart, ClipboardText, CloudConnection, Cpu, SecurityUser, Driver, Key, Keyboard, Link2, Lock, Login, Notification as Bell, Setting2 as Settings, ShieldTick as ShieldCheck, SmileCircle, Sms as Mail, Sticker, Danger as TriangleAlert, DocumentDownload, User, People as Users } from 'reicon-react'
 import type { Permission } from '@orbit/api/generated/types.gen'
+import { RobotIcon } from '@/components/common/icons/RobotIcon'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { useBillingEnabled } from '@/features/workspaces/billing'
 
@@ -52,14 +53,16 @@ const AREAS: Record<SettingsAreaName, SettingsArea> = {
       {
         label: 'Integrations',
         items: [
-          { to: '/settings/file-storage', label: 'File storage', icon: CloudConnection, permission: 'storage.manage' },
+          { to: '/settings/file-storage', label: 'File storage', icon: CloudConnection },
           { to: '/settings/github', label: 'GitHub', icon: Link2 },
+          { to: '/settings/agentic', label: 'Agentic', icon: RobotIcon },
           { to: '/settings/api-tokens', label: 'API tokens', icon: Key, permission: 'api_tokens.manage' },
         ],
       },
       {
         label: 'Advanced',
         items: [
+          { to: '/settings/export', label: 'Export', icon: DocumentDownload, permission: 'workspace.export' },
           { to: '/settings/danger-zone', label: 'Danger zone', icon: TriangleAlert, permission: 'workspace.delete' },
         ],
       },
@@ -74,11 +77,22 @@ const AREAS: Record<SettingsAreaName, SettingsArea> = {
         label: 'Account',
         items: [
           { to: '/profile', label: 'Profile', icon: User, end: true },
-          { to: '/profile/appearance', label: 'Appearance', icon: Brush },
-          { to: '/profile/notifications', label: 'Notifications', icon: Bell },
           { to: '/profile/security', label: 'Security', icon: Lock },
           { to: '/profile/sessions', label: 'Sessions', icon: ShieldCheck },
+        ],
+      },
+      {
+        label: 'Preferences',
+        items: [
+          { to: '/profile/appearance', label: 'Appearance', icon: Brush },
+          { to: '/profile/notifications', label: 'Notifications', icon: Bell },
           { to: '/profile/shortcuts', label: 'Keyboard shortcuts', icon: Keyboard },
+        ],
+      },
+      {
+        label: 'Advanced',
+        items: [
+          { to: '/profile/agentic', label: 'Agentic', icon: RobotIcon },
           { to: '/profile/storage', label: 'Storage', icon: Driver },
         ],
       },
@@ -95,6 +109,7 @@ const AREAS: Record<SettingsAreaName, SettingsArea> = {
           { to: '/admin', label: 'General', icon: Settings, end: true },
           { to: '/admin/users', label: 'Users', icon: Users },
           { to: '/admin/email', label: 'Email', icon: Mail },
+          { to: '/admin/sign-in-providers', label: 'Sign-in providers', icon: Login },
           { to: '/admin/limits', label: 'Limits', icon: Chart },
         ],
       },

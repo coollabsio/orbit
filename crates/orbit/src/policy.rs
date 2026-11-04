@@ -47,10 +47,13 @@ pub enum Permission {
     /// Connect the workspace's own S3 bucket for its files.
     #[serde(rename = "storage.manage")]
     StorageManage,
+    /// Export the whole workspace as a ZIP archive and download its exports.
+    #[serde(rename = "workspace.export")]
+    WorkspaceExport,
 }
 
 impl Permission {
-    pub const ALL: [Self; 14] = [
+    pub const ALL: [Self; 15] = [
         Self::WorkspaceUpdate,
         Self::WorkspaceDelete,
         Self::WorkspaceTransfer,
@@ -65,6 +68,7 @@ impl Permission {
         Self::ChatManage,
         Self::BillingManage,
         Self::StorageManage,
+        Self::WorkspaceExport,
     ];
 }
 
@@ -146,6 +150,14 @@ impl Actor {
         private || self.can(Permission::PagesPurge)
     }
 
+    /// Moving teamspace pages into a private space hides them from everyone else and lets the
+    /// new owner delete them forever, so it takes [`Permission::PagesPurge`] unless the actor
+    /// created every page that moves.
+    #[must_use]
+    pub const fn can_move_pages_to_private(self, created_all: bool) -> bool {
+        created_all || self.can(Permission::PagesPurge)
+    }
+
     pub fn invite(self, role: WorkspaceRole) -> Result<(), MembershipDenied> {
         if !self.can(Permission::MembersManage) {
             return Err(MembershipDenied::RoleForbidden);
@@ -171,20 +183,33 @@ impl Actor {
         if new_role == WorkspaceRole::Guest {
             return Err(MembershipDenied::GuestDowngrade);
         }
-        Ok(())
+        self.admin_protected(target_role)
     }
 
-    /// Any member may remove themselves (leave); removing others needs `MembersManage`.
+    /// Any member may remove themselves (leave); removing others needs `MembersManage`, and
+    /// removing an admin needs the owner.
     pub fn remove_member(
         self,
         target_user_id: Id,
         target_role: WorkspaceRole,
     ) -> Result<(), MembershipDenied> {
         self.owner_protected(target_role)?;
-        if self.user_id != target_user_id && !self.can(Permission::MembersManage) {
+        if self.user_id == target_user_id {
+            return Ok(());
+        }
+        if !self.can(Permission::MembersManage) {
             return Err(MembershipDenied::RoleForbidden);
         }
-        Ok(())
+        self.admin_protected(target_role)
+    }
+
+    /// Only the owner changes or removes an admin's membership.
+    fn admin_protected(self, target_role: WorkspaceRole) -> Result<(), MembershipDenied> {
+        if target_role == WorkspaceRole::Admin && self.role != WorkspaceRole::Owner {
+            Err(MembershipDenied::RoleForbidden)
+        } else {
+            Ok(())
+        }
     }
 
     #[must_use]
@@ -243,7 +268,8 @@ impl Policy {
             | Permission::ViewsManageShared
             | Permission::CommentsModerate
             | Permission::ChatManage
-            | Permission::StorageManage => {
+            | Permission::StorageManage
+            | Permission::WorkspaceExport => {
                 matches!(role, WorkspaceRole::Owner | WorkspaceRole::Admin)
             }
         }

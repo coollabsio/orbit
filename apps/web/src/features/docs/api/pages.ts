@@ -18,7 +18,7 @@ import {
 import type { CreatePageBody, Page, PageFile, PageSummary, PageTrashEmptied, PageUpdateBody, TrashedPage } from '@orbit/api/generated/types.gen'
 import { ApiProblem } from '@orbit/api/problem'
 import { queryKeys } from '@/api/queryKeys'
-import { shrinkImage } from '@/lib/shrinkImage'
+import { shrinkUpload } from '@/lib/shrinkUpload'
 import { confirmAction } from '@/components/common/confirmAction'
 import { isTaskVersionConflict } from '@/features/tasks/api/conflicts'
 import { applyMove, descendantsOf, removeSubtree, type MoveTarget } from '../pageTree'
@@ -33,6 +33,11 @@ function required<T>(data: T | undefined, message: string): T {
 /** Same 409 shape as tasks (`conflict` with `current_version`, `current`, `refresh`). */
 export function isPageVersionConflict(error: unknown): error is ApiProblem {
   return isTaskVersionConflict(error)
+}
+
+/** The toast for a failed move: the server's reason when it forbids the move, else a generic one. */
+export function movePageErrorMessage(error: unknown): string {
+  return error instanceof ApiProblem && error.status === 403 ? error.detail : 'Could not move the page.'
 }
 
 export function isPageNotFound(error: unknown): boolean {
@@ -103,7 +108,7 @@ export async function savePage(client: ApiClient, workspaceId: string, pageId: s
  * download path that the page's readers can load, so it can go straight into a block or `cover_url`.
  */
 export async function uploadPageFileRequest(client: ApiClient, workspaceId: string, pageId: string, file: File): Promise<PageFile> {
-  const { data } = await uploadPageFile({ client, path: { workspace_id: workspaceId, page_id: pageId }, body: { file: await shrinkImage(file) }, throwOnError: true })
+  const { data } = await uploadPageFile({ client, path: { workspace_id: workspaceId, page_id: pageId }, body: { file: await shrinkUpload(file) }, throwOnError: true })
   return required(data, 'Upload response was empty.')
 }
 

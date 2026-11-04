@@ -592,3 +592,34 @@ fn trial_settings_without_cloud_mode_are_rejected() {
         );
     }
 }
+
+#[test]
+fn dev_native_redirects_are_parsed_and_refused_in_production() {
+    let development = load([(
+        "ORBIT_DEV_NATIVE_REDIRECTS",
+        " exp://100.64.0.5:8082/--/auth/callback ,,exp://127.0.0.1:8081/--/auth/callback",
+    )])
+    .unwrap();
+    assert_eq!(
+        development.http.dev_native_redirects,
+        vec![
+            "exp://100.64.0.5:8082/--/auth/callback".to_owned(),
+            "exp://127.0.0.1:8081/--/auth/callback".to_owned(),
+        ]
+    );
+
+    let production = load([
+        ("ORBIT_ENV", "production"),
+        ("ORBIT_PUBLIC_ORIGIN", "https://orbit.example"),
+        ("ORBIT_TRUSTED_PROXIES", "10.0.0.0/8"),
+        (
+            "ORBIT_DEV_NATIVE_REDIRECTS",
+            "exp://100.64.0.5:8082/--/auth/callback",
+        ),
+    ])
+    .unwrap_err();
+    assert_eq!(
+        production.to_string(),
+        "invalid configuration setting ORBIT_DEV_NATIVE_REDIRECTS: is for development only and cannot be set in production mode"
+    );
+}

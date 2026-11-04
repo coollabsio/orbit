@@ -262,7 +262,7 @@ where
                 ));
             }
 
-            if let Err(refused) = rate_limiter
+            let workspace_charge = match rate_limiter
                 .check(
                     client_ip.0,
                     request.method(),
@@ -271,25 +271,28 @@ where
                 )
                 .await
             {
-                let mut response = problem_response(
-                    StatusCode::TOO_MANY_REQUESTS,
-                    "rate_limit_exceeded",
-                    "Rate limit exceeded",
-                    "Too many requests were made to this endpoint class.",
-                    &request_id,
-                    request.uri().path(),
-                );
-                response.headers_mut().insert(
-                    RETRY_AFTER,
-                    HeaderValue::from(refused.retry_after.as_secs()),
-                );
-                return Ok(finish_response(
-                    response,
-                    &request_id,
-                    transport.is_secure(),
-                    csp_script_hash.as_deref(),
-                ));
-            }
+                Ok(charge) => charge,
+                Err(refused) => {
+                    let mut response = problem_response(
+                        StatusCode::TOO_MANY_REQUESTS,
+                        "rate_limit_exceeded",
+                        "Rate limit exceeded",
+                        "Too many requests were made to this endpoint class.",
+                        &request_id,
+                        request.uri().path(),
+                    );
+                    response.headers_mut().insert(
+                        RETRY_AFTER,
+                        HeaderValue::from(refused.retry_after.as_secs()),
+                    );
+                    return Ok(finish_response(
+                        response,
+                        &request_id,
+                        transport.is_secure(),
+                        csp_script_hash.as_deref(),
+                    ));
+                }
+            };
 
             if limits.request_is_too_large(&request) {
                 return Ok(finish_response(
@@ -314,11 +317,13 @@ where
                 ));
             }
 
+            let body_limit = limits.body_limit(&request);
+            let timeout = limits.request_timeout(&request);
             let (mut parts, body) = request.into_parts();
             let instance = parts.uri.path().to_owned();
             let method = parts.method.clone();
             // Keep the body lazy so route authentication runs before an upload is read.
-            let body = Body::new(http_body_util::Limited::new(body, limits.max_body_bytes));
+            let body = Body::new(http_body_util::Limited::new(body, body_limit));
             strip_forwarding_headers(&mut parts.headers);
             parts.extensions.insert(request_id.clone());
             parts.extensions.insert(client_ip);
@@ -329,7 +334,30 @@ where
                 %method,
                 "http request"
             );
-            let response = match inner.call(Request::from_parts(parts, body)).await {
+            let call = inner.call(Request::from_parts(parts, body));
+            let result = match timeout {
+                Some(timeout) => match tokio::time::timeout(timeout, call).await {
+                    Ok(result) => result,
+                    Err(_) => {
+                        tracing::warn!(request_id = request_id.as_str(), "request timed out");
+                        return Ok(finish_response(
+                            problem_response(
+                                StatusCode::REQUEST_TIMEOUT,
+                                "request_timeout",
+                                "Request timed out",
+                                "The request took too long. Try again.",
+                                &request_id,
+                                &instance,
+                            ),
+                            &request_id,
+                            transport.is_secure(),
+                            csp_script_hash.as_deref(),
+                        ));
+                    }
+                },
+                None => call.await,
+            };
+            let response = match result {
                 Ok(response) => response,
                 Err(_) => {
                     tracing::error!(
@@ -345,6 +373,11 @@ where
                     ));
                 }
             };
+            if let Some(charge) = workspace_charge
+                && rate_limit::WorkspaceCharge::applies_to(response.status())
+            {
+                rate_limiter.charge(charge).await;
+            }
             let response = if response.status() == StatusCode::INTERNAL_SERVER_ERROR {
                 let status = response.status();
                 tracing::error!(request_id = request_id.as_str(), %status, "http request failed");
@@ -429,4 +462,50 @@ fn finish_response(
         .insert(HeaderName::from_static("x-request-id"), request_id);
     add_security_headers(response.headers_mut(), secure, csp_script_hash);
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use axum::Router;
+    use axum::routing::get;
+    use tower::ServiceExt;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn a_timed_out_request_gets_the_request_id_and_security_headers() {
+        let app = Router::new()
+            .route(
+                "/slow",
+                get(|| async {
+                    tokio::time::sleep(Duration::from_secs(30)).await;
+                    StatusCode::NO_CONTENT
+                }),
+            )
+            .layer(
+                HttpPlatformLayer::new(OriginPolicy::new("https://orbit.test")).with_limits(
+                    HttpLimits {
+                        request_timeout: Some(Duration::from_millis(50)),
+                        ..HttpLimits::default()
+                    },
+                ),
+            );
+        let response = app
+            .oneshot(Request::builder().uri("/slow").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::REQUEST_TIMEOUT);
+        assert_eq!(response.headers()[CONTENT_TYPE], "application/problem+json");
+        for name in [
+            "x-request-id",
+            "content-security-policy",
+            "x-content-type-options",
+            "x-frame-options",
+            "cross-origin-opener-policy",
+        ] {
+            assert!(response.headers().contains_key(name), "{name}");
+        }
+    }
 }

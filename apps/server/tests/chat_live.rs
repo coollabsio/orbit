@@ -676,6 +676,86 @@ async fn servers_of_one_database_share_events_presence_and_replay() {
     database.drop().await;
 }
 
+/// Waits for the socket to end; returns its close code (`None`: closed without one).
+async fn closed_within(socket: &mut Socket, limit: Duration) -> Option<u16> {
+    tokio::time::timeout(limit, async {
+        loop {
+            match socket.next().await {
+                Some(Ok(Ws::Close(frame))) => return frame.map(|frame| u16::from(frame.code)),
+                Some(Ok(_)) => {}
+                _ => return None,
+            }
+        }
+    })
+    .await
+    .expect("the socket closed before its periodic access check")
+}
+
+#[tokio::test]
+async fn a_removed_member_loses_the_live_and_event_sockets_at_once() {
+    // On Postgres the member is connected to another server than the one that removes them.
+    let shared = shared_postgres::SharedDatabase::create().await;
+    let url = shared.as_ref().map(|database| database.url.clone());
+    let (one, owner) = Server::start_on(url.as_deref()).await;
+    let two = match &url {
+        Some(url) => Some(one.beside(url).await),
+        None => None,
+    };
+    let viewer = two.as_ref().unwrap_or(&one);
+    let ada = one.user("ada", true).await;
+    let (mut live, _) = viewer.client(&ada).await;
+    let events_url = format!(
+        "{}/api/v1/workspaces/{}/events",
+        viewer.base.replacen("http", "ws", 1),
+        viewer.workspace
+    );
+    let mut request = events_url.into_client_request().unwrap();
+    request
+        .headers_mut()
+        .insert("origin", HeaderValue::from_str(&viewer.base).unwrap());
+    request.headers_mut().insert(
+        "cookie",
+        HeaderValue::from_str(&format!("{COOKIE}={}", ada.token)).unwrap(),
+    );
+    let (mut events, _) = tokio_tungstenite::connect_async(request).await.unwrap();
+    // The cluster has its listener up before the removal (the first beat comes within 5 s).
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    let membership: String =
+        sqlx::query_scalar("SELECT id FROM memberships WHERE workspace_id = $1 AND user_id = $2")
+            .bind(&one.workspace)
+            .bind(ada.id.to_string())
+            .fetch_one(one.database.pool())
+            .await
+            .unwrap();
+    let removed = one
+        .http
+        .delete(format!(
+            "{}/api/v1/workspaces/{}/members/{membership}?expected_version=0",
+            one.base, one.workspace
+        ))
+        .header("origin", &one.base)
+        .header("cookie", format!("{COOKIE}={}", owner.token))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(removed.status().as_u16(), 204);
+
+    // Both re-check every 15 s; the removal makes them check now.
+    assert_eq!(
+        closed_within(&mut live, Duration::from_secs(5)).await,
+        Some(4401)
+    );
+    closed_within(&mut events, Duration::from_secs(5)).await;
+    if let Some(two) = two {
+        two.stop().await;
+    }
+    one.stop().await;
+    if let Some(shared) = shared {
+        shared.drop().await;
+    }
+}
+
 #[tokio::test]
 async fn a_server_that_stops_closes_live_sockets_with_service_restart() {
     let (server, owner) = Server::start().await;

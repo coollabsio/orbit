@@ -11,7 +11,7 @@ use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, T
 use serde_json::{Map, Value, json};
 use yrs::{Transact, WriteTxn};
 
-use super::blocknote::{FRAGMENT, doc_to_blocks, new_doc, write_blocks};
+use super::blocknote::{FRAGMENT, MAX_BLOCK_DEPTH, doc_to_blocks, new_doc, write_blocks};
 
 /// Converts markdown into BlockNote blocks; `members` are `(user id, display name)` pairs.
 #[must_use]
@@ -22,6 +22,7 @@ pub fn markdown_to_blocks(markdown: &str, members: &[(Id, String)]) -> Vec<Value
     let mut reader = Reader {
         events,
         index: 0,
+        depth: 0,
         members,
     };
     let blocks = reader.blocks(None);
@@ -47,6 +48,8 @@ enum Inline {
 struct Reader<'a, 'm> {
     events: Vec<Event<'a>>,
     index: usize,
+    /// Blocks being read around the current one; see [`Reader::flat`].
+    depth: usize,
     members: &'m [(Id, String)],
 }
 
@@ -93,6 +96,64 @@ impl<'a> Reader<'a, '_> {
     }
 
     fn block(&mut self, tag: Tag<'a>, out: &mut Vec<Value>) {
+        if self.depth >= MAX_BLOCK_DEPTH {
+            self.flat(out);
+            return;
+        }
+        self.depth += 1;
+        self.read_block(tag, out);
+        self.depth -= 1;
+    }
+
+    /// A block nested deeper than [`MAX_BLOCK_DEPTH`] (markdown has no nesting limit), read
+    /// without recursion: its text becomes plain paragraphs at this depth.
+    fn flat(&mut self, out: &mut Vec<Value>) {
+        let inline = |tag: &TagEnd| {
+            matches!(
+                tag,
+                TagEnd::Emphasis
+                    | TagEnd::Strong
+                    | TagEnd::Strikethrough
+                    | TagEnd::Link
+                    | TagEnd::Image
+            )
+        };
+        let mut open = 1_usize;
+        let mut paragraph = String::new();
+        while let Some(event) = self.next() {
+            let tag = match event {
+                Event::Start(tag) => {
+                    open += 1;
+                    tag.to_end()
+                }
+                Event::End(tag) => {
+                    open -= 1;
+                    tag
+                }
+                Event::Text(value)
+                | Event::Code(value)
+                | Event::Html(value)
+                | Event::InlineHtml(value) => {
+                    paragraph.push_str(&value);
+                    continue;
+                }
+                Event::SoftBreak | Event::HardBreak => {
+                    paragraph.push('\n');
+                    continue;
+                }
+                _ => continue,
+            };
+            if !inline(&tag) {
+                push_paragraph(out, std::mem::take(&mut paragraph).trim_end_matches('\n'));
+            }
+            if open == 0 {
+                break;
+            }
+        }
+        push_paragraph(out, paragraph.trim_end_matches('\n'));
+    }
+
+    fn read_block(&mut self, tag: Tag<'a>, out: &mut Vec<Value>) {
         match tag {
             Tag::Paragraph => {
                 let inline = self.inline(TagEnd::Paragraph);

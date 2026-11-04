@@ -29,12 +29,12 @@ export function ReadOnlyBanner() {
       <div
         data-slot="trial-banner"
         role="status"
-        className="flex min-h-8 shrink-0 items-center justify-center gap-2 border-b border-border px-3 py-1 text-xs text-muted-foreground"
+        className="flex min-h-8 shrink-0 items-center justify-center gap-2 border-b border-destructive/20 bg-destructive/10 px-3 py-1 text-xs text-destructive dark:bg-destructive/20"
       >
-        <span className="min-w-0 truncate">
+        <span className="min-w-0 truncate font-medium">
           Trial: {days} {days === 1 ? 'day' : 'days'} left
         </span>
-        <Link to="/settings/billing" className="shrink-0 font-medium text-foreground underline-offset-4 hover:underline">
+        <Link to="/settings/billing" className="shrink-0 font-semibold text-destructive underline underline-offset-4">
           {data.can_manage ? 'Choose a plan' : 'View billing'}
         </Link>
       </div>

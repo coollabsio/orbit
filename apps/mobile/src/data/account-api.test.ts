@@ -1,6 +1,7 @@
+import { createOrbitClient } from '@orbit/api/client'
 import { expect, test } from 'bun:test'
 
-import { bucketMovingText, bucketPollInterval, filterMembers, formatBytes, invitationProblem, memberActions, passwordProblem, pickedImageName, sortedSessions, storageUse, twoFactorSummary } from './account-api'
+import { bucketMovingText, bucketPollInterval, confirmsEmail, deleteAccount, filterMembers, formatBytes, invitationProblem, memberActions, ownedWorkspaces, passwordProblem, pickedImageName, requestEmailChange, sortedSessions, storageUse, twoFactorSummary } from './account-api'
 import type { MemberRecord } from './orbit'
 
 const member = (id: string, fields: Partial<MemberRecord>): MemberRecord => ({
@@ -88,4 +89,51 @@ test('a guest invitation needs one or more channels', () => {
   expect(invitationProblem('guest', [])).toBe('Choose one or more channels for the guest.')
   expect(invitationProblem('guest', ['c1'])).toBeNull()
   expect(invitationProblem('member', [])).toBeNull()
+})
+
+/** A client whose fetch records each request and answers with `reply`. */
+function server(reply: { status: number; body?: unknown }) {
+  const sent: { method: string; url: string; body: unknown }[] = []
+  const client = createOrbitClient({
+    baseUrl: 'https://orbit.test',
+    token: () => 'session-token',
+    fetch: async (request) => {
+      sent.push({ method: request.method, url: request.url, body: JSON.parse(await request.text()) })
+      return reply.body === undefined
+        ? new Response(null, { status: reply.status })
+        : new Response(JSON.stringify(reply.body), { status: reply.status, headers: { 'content-type': 'application/problem+json' } })
+    },
+  })
+  return { client, sent }
+}
+
+test('an email change sends the new address, and the password only when there is one', async () => {
+  const withPassword = server({ status: 202, body: { detail: 'We sent a link.' } })
+  await requestEmailChange(withPassword.client, 'new@orbit.test', 'secret')
+  expect(withPassword.sent).toEqual([{ method: 'POST', url: 'https://orbit.test/api/v1/auth/me/email', body: { email: 'new@orbit.test', password: 'secret' } }])
+  const without = server({ status: 202, body: { detail: 'We sent a link.' } })
+  await requestEmailChange(without.client, 'new@orbit.test')
+  expect(without.sent[0].body).toEqual({ email: 'new@orbit.test' })
+})
+
+const problem = (status: number, code: string, extra: object = {}) => ({ type: 'about:blank', title: 'Refused', status, code, detail: `The ${code} detail.`, instance: '/api/v1/auth/me', request_id: 'r', ...extra })
+
+test('deleting the account sends the typed email and the password; owned workspaces come back from the 409', async () => {
+  const ok = server({ status: 204 })
+  await deleteAccount(ok.client, 'me@orbit.test', 'secret')
+  expect(ok.sent).toEqual([{ method: 'DELETE', url: 'https://orbit.test/api/v1/auth/me', body: { email: 'me@orbit.test', password: 'secret' } }])
+
+  const owns = server({ status: 409, body: problem(409, 'owns_workspaces', { workspaces: [{ id: 'w1', name: 'Alpha' }, { id: 'w2', name: 'Beta' }] }) })
+  const error = await deleteAccount(owns.client, 'me@orbit.test', 'secret').catch((reason: unknown) => reason)
+  expect(ownedWorkspaces(error)).toEqual([{ id: 'w1', name: 'Alpha' }, { id: 'w2', name: 'Beta' }])
+
+  const root = server({ status: 409, body: problem(409, 'root_account') })
+  const rootError = await deleteAccount(root.client, 'me@orbit.test', 'secret').catch((reason: unknown) => reason)
+  expect(ownedWorkspaces(rootError)).toBeNull()
+  expect((rootError as Error).message).toBe('The root_account detail.')
+})
+
+test('the typed confirmation matches the email regardless of case and spaces', () => {
+  expect(confirmsEmail(' Me@Orbit.test ', 'me@orbit.test')).toBe(true)
+  expect(confirmsEmail('me@orbit.tes', 'me@orbit.test')).toBe(false)
 })

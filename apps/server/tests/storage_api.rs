@@ -9,6 +9,7 @@ use orbit_platform::{
     TieredBlobStore, TimestampMillis, start_fake_s3,
 };
 use orbit_server::mail::Mailer;
+use orbit_server::object_storage::saved_storage;
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
 use orbit_server::workspace_routes::{WorkspaceState, workspace_router};
 use serde_json::{Value, json};
@@ -243,4 +244,52 @@ async fn settings_another_server_saved_apply_on_reload() {
         .await
         .unwrap();
     assert!(fixture.storage.current().backups);
+}
+
+#[tokio::test]
+async fn a_command_without_the_server_finds_the_backups_in_the_saved_bucket() {
+    let fixture = fixture().await;
+    let (status, _) = fixture
+        .call("PUT", "/api/v1/admin/settings/s3", Some(s3_body().await))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = fixture
+        .call(
+            "PUT",
+            "/api/v1/admin/settings/storage",
+            Some(json!({"attachments_in_s3": false, "backups_in_s3": true, "backup_schedule": "off"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (mailer, _) = Mailer::recording((*fixture.database).clone(), "https://orbit.test");
+    let app_key = *mailer.app_key().unwrap();
+    let backups = tempfile::tempdir().unwrap();
+    let attachments = tempfile::tempdir().unwrap();
+    let service = |storage| {
+        orbit_platform::BackupService::new(backups.path(), attachments.path())
+            .with_object_storage(storage)
+    };
+
+    let storage = saved_storage(&fixture.database, Some(&app_key))
+        .await
+        .unwrap();
+    let created = service(storage).create(&fixture.database).await.unwrap();
+    assert!(created.in_object_storage);
+
+    let listed = service(
+        saved_storage(&fixture.database, Some(&app_key))
+            .await
+            .unwrap(),
+    )
+    .list()
+    .await
+    .unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, created.id);
+    assert!(listed[0].in_object_storage);
+
+    let error = saved_storage(&fixture.database, Some(&[9; 32]))
+        .await
+        .unwrap_err();
+    assert!(error.contains("cannot be decrypted"), "{error}");
 }

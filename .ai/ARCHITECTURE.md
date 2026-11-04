@@ -35,7 +35,7 @@ On shutdown, the HTTP server stops accepting new connections and drains active r
 
 React Query and the generated OpenAPI client own persistent server state. Query keys begin with `['workspace', workspaceId]` for workspace-scoped data. Optimistic task writes snapshot relevant caches, roll back rejected requests, and refresh conflict state.
 
-Identity, workspaces, tasks, comments, attachments, trash, sessions, docs, the inbox and chat use the API. Mail, profile, and home summaries keep their isolated in-memory mock domains. `MockFeatureBadge` labels those routes in development and production.
+Identity, workspaces, tasks, comments, attachments, trash, sessions, docs, the inbox and chat use the API. Only the unrouted Mail UI (`features/mail`) still reads the in-memory mock store (`src/mock`); nothing routed imports it, so its seed data stays out of the production bundle.
 
 Chat is the exception to the query-key rule: its keys begin with `['chat', workspaceId]`, outside the workspace prefix, because chat is not in the workspace change feed. `features/chat/api/httpClient.ts` implements the `ChatClient` contract; every write returns the chat events it caused, and the same events arrive for other members over the live socket (`liveSocket.ts`). `applyChatEvent` writes both into the cache.
 

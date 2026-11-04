@@ -12,7 +12,6 @@ import {
   DocumentText as FileText,
   Lock,
   Import,
-  Menu,
   Edit as Pencil,
   Add as Plus,
   Star,
@@ -52,7 +51,7 @@ import {
   type SpaceKey,
 } from '@/features/docs/pageTree'
 import { favoriteDropIndex, useMoveFavorite, usePageFavorites, useToggleFavorite } from '@/features/docs/api/favorites'
-import { isPageVersionConflict, useCreatePage, useMovePage } from '@/features/docs/api/pages'
+import { isPageVersionConflict, movePageErrorMessage, useCreatePage, useMovePage } from '@/features/docs/api/pages'
 import {
   teamspaceDeleteError,
   teamspaceDropIndex,
@@ -245,7 +244,7 @@ export function DocTree({
           if (from !== to) toast.success(`Moved to ${spaceLabel(to, teamspaces)}`)
         },
         onError: (error) => {
-          if (!isPageVersionConflict(error)) toast.error('Could not move the page.')
+          if (!isPageVersionConflict(error)) toast.error(movePageErrorMessage(error))
         },
       },
     )
@@ -553,9 +552,6 @@ export function DocTree({
         </SidebarListHeader>
       ) : (
         <PaneHeader className="max-[899px]:min-h-11 max-[899px]:px-2 max-[899px]:py-1.5">
-          <Button type="button" variant="ghost" size="icon-sm" className="hidden shrink-0 text-muted-foreground/70 max-[899px]:inline-flex" aria-label="Menu" onClick={() => window.dispatchEvent(new CustomEvent('open-sidebar'))}>
-            <Menu className="size-[18px]" />
-          </Button>
           <PaneTitle>Documents</PaneTitle>
           <span className="flex-1" />
           {optionsMenu(<Button type="button" variant="ghost" size="icon-sm" aria-label="Documents options" />)}

@@ -32,7 +32,9 @@ use crate::repositories::identity::{
 use crate::repositories::instance_settings::InstanceSettingsRepository;
 use crate::socket_ticket::SocketTickets;
 
+pub(crate) mod account;
 pub(crate) mod passkeys;
+pub(crate) mod providers;
 pub(crate) mod push;
 pub(crate) mod throttle;
 pub(crate) mod two_factor;
@@ -180,6 +182,12 @@ pub struct AuthState {
     uploads: Option<UploadService>,
     /// Orbit Cloud billing is on (`ORBIT_CLOUD`).
     billing_enabled: bool,
+    /// Where people open Orbit, without a trailing slash: the provider callback URLs and the web return page.
+    public_origin: Arc<str>,
+    /// Google and GitHub over HTTP.
+    providers: crate::sign_in_providers::ProviderClient,
+    /// Where a native provider sign-in may return to.
+    native_redirects: Arc<crate::sign_in_providers::NativeRedirects>,
 }
 
 impl AuthState {
@@ -218,6 +226,24 @@ impl AuthState {
     #[must_use]
     pub fn with_public_origin(mut self, public_origin: &str) -> Self {
         self.webauthn = passkeys::relying_party(public_origin).map(Arc::new);
+        self.public_origin = Arc::from(public_origin.trim_end_matches('/'));
+        self
+    }
+
+    /// Points Google and GitHub at other hosts, for tests.
+    #[must_use]
+    pub fn with_provider_endpoints(
+        mut self,
+        endpoints: crate::sign_in_providers::ProviderEndpoints,
+    ) -> Self {
+        self.providers = crate::sign_in_providers::ProviderClient::new(endpoints);
+        self
+    }
+
+    /// Redirect URIs a native provider sign-in may use besides `orbit://auth/callback` (`ORBIT_DEV_NATIVE_REDIRECTS`).
+    #[must_use]
+    pub fn with_native_redirects(mut self, redirects: &[String]) -> Self {
+        self.native_redirects = Arc::new(crate::sign_in_providers::NativeRedirects::new(redirects));
         self
     }
 
@@ -279,6 +305,9 @@ impl AuthState {
             pending,
             uploads: None,
             billing_enabled: false,
+            public_origin: Arc::from(""),
+            providers: crate::sign_in_providers::ProviderClient::default(),
+            native_redirects: Arc::default(),
         }
     }
 }
@@ -353,7 +382,15 @@ pub fn auth_router(state: AuthState) -> Router {
         )
         .route("/api/v1/auth/logout", post(logout))
         .route("/api/v1/auth/socket-ticket", post(socket_ticket))
-        .route("/api/v1/auth/me", get(me).patch(update_me))
+        .route(
+            "/api/v1/auth/me",
+            get(me).patch(update_me).delete(account::delete_account),
+        )
+        .route("/api/v1/auth/me/email", post(account::request_email_change))
+        .route(
+            "/api/v1/auth/email-change/confirm",
+            post(account::confirm_email_change),
+        )
         .route("/api/v1/auth/status", put(put_status))
         .route("/api/v1/push/key", get(push::get_push_key))
         .route(
@@ -390,6 +427,30 @@ pub fn auth_router(state: AuthState) -> Router {
         )
         .route("/api/v1/auth/recovery/request", post(recovery_request))
         .route("/api/v1/auth/recovery/complete", post(recovery_complete))
+        .route(
+            "/api/v1/auth/providers/{provider}/start",
+            post(providers::start_provider_sign_in),
+        )
+        .route(
+            "/api/v1/auth/providers/{provider}/callback",
+            get(providers::provider_callback),
+        )
+        .route(
+            "/api/v1/auth/providers/exchange",
+            post(providers::exchange_provider_sign_in),
+        )
+        .route(
+            "/api/v1/auth/providers/link",
+            post(providers::link_provider_sign_in),
+        )
+        .route(
+            "/api/v1/auth/connected-accounts",
+            get(providers::list_connected_accounts),
+        )
+        .route(
+            "/api/v1/auth/connected-accounts/{provider}",
+            delete(providers::disconnect_connected_account),
+        )
         .route("/api/v1/auth/sessions", get(list_sessions))
         .route("/api/v1/auth/sessions/{id}", delete(revoke_session))
         .with_state(state)
@@ -576,6 +637,9 @@ struct AuthUserResponse {
     installation_admin: bool,
     /// The root user (the account created at setup), who also chooses the instance admins.
     root: bool,
+    /// The account has a password. Accounts created with Google or GitHub start without one; they confirm security
+    /// changes with a fresh provider sign-in instead.
+    has_password: bool,
     /// The profile picture; absent while the user has none. The URL changes with each upload.
     avatar_url: Option<String>,
     /// The presence and custom status the user set for themselves.
@@ -620,6 +684,11 @@ async fn user_response(
         .profile_fields(user.id)
         .await
         .map_err(|_| ApiError::internal(instance, request_id))?;
+    let has_password = state
+        .repository
+        .has_password(user.id)
+        .await
+        .map_err(|_| ApiError::internal(instance, request_id))?;
     Ok(AuthUserResponse {
         status,
         profile,
@@ -629,6 +698,7 @@ async fn user_response(
         display_name: user.display_name,
         installation_admin,
         root,
+        has_password,
     })
 }
 
@@ -679,19 +749,24 @@ async fn login(
         .await
         .ok()
         .flatten();
-    let hash = identity
+    // An unknown email and an account without a password cost the same verification as a wrong password.
+    let password_hash = identity
         .as_ref()
-        .map_or(state.dummy_hash.as_str(), |identity| {
-            identity.password_hash.as_str()
-        });
+        .and_then(|identity| identity.password_hash.clone());
     let verification = state
         .passwords
-        .verify(body.password, hash.to_owned())
+        .verify(
+            body.password,
+            password_hash
+                .clone()
+                .unwrap_or_else(|| state.dummy_hash.clone()),
+        )
         .await
         .ok();
     let valid = identity
         .as_ref()
         .is_some_and(|identity| !identity.suspended)
+        && password_hash.is_some()
         && verification.as_ref().is_some_and(|result| result.valid);
     if !valid {
         state
@@ -724,6 +799,7 @@ async fn login(
     }
 
     let identity = identity.expect("valid login has an identity");
+    let password_hash = password_hash.expect("valid login has a password");
     let replacement_hash = verification.and_then(|result| result.replacement_hash);
     let user = AuthenticatedUser {
         id: identity.id,
@@ -741,8 +817,11 @@ async fn login(
         return two_factor::challenge(
             &state,
             user,
-            identity.password_hash,
-            replacement_hash,
+            two_factor::FirstFactor::Password {
+                password_hash,
+                replacement_hash,
+            },
+            "/api/v1/auth/login",
             request_id.as_ref(),
         )
         .await;
@@ -751,7 +830,7 @@ async fn login(
         .repository
         .create_session_audited(
             &user,
-            &identity.password_hash,
+            &password_hash,
             replacement_hash.as_deref(),
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
@@ -830,6 +909,7 @@ async fn signed_in_response(
             id: user.id.to_string(),
             installation_admin,
             root: state.repository.is_root(user.id).await.unwrap_or(false),
+            has_password: state.repository.has_password(user.id).await.unwrap_or(true),
             email: user.email,
             display_name: user.display_name,
         },
@@ -916,21 +996,34 @@ async fn me(
     Ok(response)
 }
 
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct SocketTicketBody {
+    /// The document the socket opens: a page or a task description.
+    kind: crate::collab::DocKind,
+    /// The page or task id.
+    #[schema(value_type = String)]
+    id: Id,
+}
+
 #[derive(Serialize, ToSchema)]
 struct SocketTicketResponse {
-    /// Pass as the `ticket` query parameter of a co-editing socket, without a cookie.
+    /// Pass as the `ticket` query parameter of the co-editing socket of the requested document,
+    /// without a cookie.
     ticket: String,
     #[schema(value_type = String, format = DateTime)]
     expires_at: TimestampMillis,
 }
 
-/// A ticket that opens a co-editing socket (`…/collab?ticket=…`) of this session for 60 s, for
-/// sockets that cannot send the session cookie or `Authorization` header (a native app's WebView).
-#[utoipa::path(post, path = "/api/v1/auth/socket-ticket", responses((status = 200, body = SocketTicketResponse), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json")))]
+/// A ticket that opens the co-editing socket (`…/collab?ticket=…`) of one page or task for this
+/// session for 60 s, for sockets that cannot send the session cookie or `Authorization` header (a
+/// native app's WebView). Access to the document is checked when the socket opens.
+#[utoipa::path(post, path = "/api/v1/auth/socket-ticket", request_body = SocketTicketBody, responses((status = 200, body = SocketTicketResponse), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json")))]
 async fn socket_ticket(
     State(state): State<AuthState>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<SocketTicketBody>,
 ) -> Result<Json<SocketTicketResponse>, ApiError> {
     const INSTANCE: &str = "/api/v1/auth/socket-ticket";
     let session = authenticate(&state, &headers, INSTANCE, request_id.as_ref()).await?;
@@ -940,8 +1033,12 @@ async fn socket_ticket(
     let expires_at = TimestampMillis::from_millis(
         TimestampMillis::now().as_millis() + crate::socket_ticket::TICKET_LIFETIME_MS,
     );
+    let document = crate::collab::DocKey {
+        kind: body.kind,
+        id: body.id,
+    };
     Ok(Json(SocketTicketResponse {
-        ticket: SocketTickets::new(&app_key).issue(session.id, expires_at),
+        ticket: SocketTickets::new(&app_key).issue(session.id, document, expires_at),
         expires_at,
     }))
 }
@@ -1376,14 +1473,17 @@ async fn user_avatar(
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct ChangePasswordBody {
-    current_password: String,
+    /// Required when the account has a password. An account without one sets its first password with a session
+    /// that signed in (or confirmed with a provider) in the last 10 minutes.
+    current_password: Option<String>,
     new_password: String,
 }
 
-#[utoipa::path(post, path = "/api/v1/auth/password", request_body = ChangePasswordBody, responses((status = 204), (status = 401, description = "invalid_credentials", body = ProblemBody, content_type = "application/problem+json"), (status = 422, description = "invalid_password", body = ProblemBody, content_type = "application/problem+json")))]
+#[utoipa::path(post, path = "/api/v1/auth/password", request_body = ChangePasswordBody, responses((status = 204), (status = 401, description = "invalid_credentials or reauthentication_required", body = ProblemBody, content_type = "application/problem+json"), (status = 422, description = "invalid_password", body = ProblemBody, content_type = "application/problem+json")))]
 async fn change_password(
     State(state): State<AuthState>,
     headers: HeaderMap,
+    client_ip: Option<Extension<ClientIp>>,
     request_id: Option<Extension<RequestId>>,
     ApiJson(body): ApiJson<ChangePasswordBody>,
 ) -> Result<StatusCode, ApiError> {
@@ -1395,12 +1495,52 @@ async fn change_password(
         .await
         .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
         .ok_or_else(|| ApiError::internal(instance, request_id.as_ref()))?;
-    let verification = state
-        .passwords
-        .verify(body.current_password, identity.password_hash)
-        .await
-        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
-    if !verification.valid {
+    let valid = match identity.password_hash {
+        // Throttled like sign-in, so a stolen session cannot guess the password here.
+        Some(password_hash) => {
+            let ip = client_ip
+                .map(|Extension(client_ip)| client_ip.0)
+                .unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+            let reservation = state
+                .throttler
+                .reserve(&session.user.email, ip, TimestampMillis::now())
+                .await
+                .map_err(|decision| match decision {
+                    ThrottleDecision::RetryAfter(delay) => {
+                        ApiError::throttled(delay, instance, request_id.as_ref())
+                    }
+                    ThrottleDecision::Allowed => ApiError::internal(instance, request_id.as_ref()),
+                })?;
+            let valid = state
+                .passwords
+                .verify(body.current_password.unwrap_or_default(), password_hash)
+                .await
+                .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
+                .valid;
+            if valid {
+                state.throttler.finish_success(reservation).await;
+            } else {
+                state
+                    .throttler
+                    .finish_failure(reservation, TimestampMillis::now())
+                    .await;
+            }
+            valid
+        }
+        None => {
+            two_factor::confirm_identity(
+                &state,
+                &session,
+                None,
+                client_ip,
+                instance,
+                request_id.as_ref(),
+            )
+            .await?;
+            true
+        }
+    };
+    if !valid {
         state
             .repository
             .record_security_event(
@@ -1465,40 +1605,44 @@ async fn recovery_request(
     let Some(mailer) = state.mailer().await else {
         return Ok(accepted(GENERIC_RECOVERY_DETAIL));
     };
-    // The answer is the same whether or not the account exists or reached its email limit, and the
-    // email goes out in the background.
+    // The answer is the same whether or not the account exists or reached its email limit. The
+    // account's work (email limit, link, email) runs in the background, so an existing account does
+    // not answer later than an unknown address.
     let account = state
         .repository
         .find_by_email(body.email.trim())
         .await
         .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
         .filter(|account| !account.suspended);
-    let account = match account {
-        Some(account) => state
-            .account_email_allowed(&account.email)
-            .await
-            .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
-            .then_some(account),
-        None => None,
-    };
     if let Some(account) = account {
-        let token = orbit_platform::generate_opaque_token();
-        let expires_at =
-            TimestampMillis::from_millis(TimestampMillis::now().as_millis() + LIFETIME_MILLIS);
-        state
-            .repository
-            .store_recovery_token_audited(
-                account.id,
-                &token,
-                expires_at,
-                request_id_value(request_id.as_ref()),
-            )
-            .await
-            .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
-        mailer.send_later(mail::templates::recovery(
-            &account.email,
-            &mailer.link(&format!("/recovery?token={token}")),
-        ));
+        let state = state.clone();
+        let mailer = mailer.clone();
+        let request_id = request_id_value(request_id.as_ref()).to_owned();
+        tokio::spawn(async move {
+            match state.account_email_allowed(&account.email).await {
+                Ok(true) => {}
+                Ok(false) => return,
+                Err(error) => {
+                    tracing::warn!(%error, "password reset link not issued");
+                    return;
+                }
+            }
+            let token = orbit_platform::generate_opaque_token();
+            let expires_at =
+                TimestampMillis::from_millis(TimestampMillis::now().as_millis() + LIFETIME_MILLIS);
+            if let Err(error) = state
+                .repository
+                .store_recovery_token_audited(account.id, &token, expires_at, &request_id)
+                .await
+            {
+                tracing::warn!(%error, "password reset link not issued");
+                return;
+            }
+            mailer.send_later(mail::templates::recovery(
+                &account.email,
+                &mailer.link(&format!("/recovery?token={token}")),
+            ));
+        });
     }
     Ok(accepted(EMAILED_RECOVERY_DETAIL))
 }
@@ -1521,6 +1665,12 @@ struct AuthOptions {
     passkeys_enabled: bool,
     /// Orbit Cloud: workspaces need a subscription (Settings → Billing) to be writable.
     billing_enabled: bool,
+    /// The sign-in providers an admin configured ("Continue with Google").
+    providers: Vec<crate::sign_in_providers::Provider>,
+    /// A first sign-in with one of `providers` creates an account (registration is open; no mail server needed).
+    provider_registration_open: bool,
+    /// The Orbit release this server runs, from `[workspace.package] version` in `Cargo.toml` (for example `0.1.0`).
+    version: &'static str,
 }
 
 /// What the sign-in pages offer. Public.
@@ -1534,11 +1684,17 @@ async fn auth_options(
         .get()
         .await
         .map_err(|_| ApiError::internal("/api/v1/auth/options", request_id.as_ref()))?;
+    let providers = providers::configured(&state)
+        .await
+        .map_err(|_| ApiError::internal("/api/v1/auth/options", request_id.as_ref()))?;
     Ok(Json(AuthOptions {
         registration_open: email_enabled && settings.registration_open,
         email_enabled,
         passkeys_enabled: state.webauthn.is_some(),
         billing_enabled: state.billing_enabled,
+        provider_registration_open: settings.registration_open && !providers.is_empty(),
+        providers,
+        version: env!("CARGO_PKG_VERSION"),
     }))
 }
 
@@ -1585,28 +1741,41 @@ async fn registration_request(
         .await
         .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
         .is_some();
-    if !exists
-        && state
-            .account_email_allowed(email)
-            .await
-            .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?
-    {
-        let token = orbit_platform::generate_opaque_token();
-        let now = TimestampMillis::now();
-        state
-            .repository
-            .store_registration_token(
-                email,
-                &token,
-                TimestampMillis::from_millis(now.as_millis() + LIFETIME_MILLIS),
-                now,
-            )
-            .await
-            .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
-        mailer.send_later(mail::templates::registration(
-            email,
-            &mailer.link(&format!("/register?token={token}")),
-        ));
+    // As with password reset: the email limit, link and email run in the background, so a new
+    // address does not answer later than one that already has an account.
+    if !exists {
+        let state = state.clone();
+        let mailer = mailer.clone();
+        let email = email.to_owned();
+        tokio::spawn(async move {
+            match state.account_email_allowed(&email).await {
+                Ok(true) => {}
+                Ok(false) => return,
+                Err(error) => {
+                    tracing::warn!(%error, "registration link not issued");
+                    return;
+                }
+            }
+            let token = orbit_platform::generate_opaque_token();
+            let now = TimestampMillis::now();
+            if let Err(error) = state
+                .repository
+                .store_registration_token(
+                    &email,
+                    &token,
+                    TimestampMillis::from_millis(now.as_millis() + LIFETIME_MILLIS),
+                    now,
+                )
+                .await
+            {
+                tracing::warn!(%error, "registration link not issued");
+                return;
+            }
+            mailer.send_later(mail::templates::registration(
+                &email,
+                &mailer.link(&format!("/register?token={token}")),
+            ));
+        });
     }
     Ok(accepted(
         "We sent a link to that address. Open it to finish creating your account.",
@@ -1857,6 +2026,20 @@ async fn revoke_session(
     Ok(response)
 }
 
+fn last_sign_in_method(
+    instance: &'static str,
+    request_id: Option<&Extension<RequestId>>,
+) -> ApiError {
+    ApiError::new(
+        StatusCode::CONFLICT,
+        "last_sign_in_method",
+        "Last sign-in method",
+        "This is the only way to sign in to your account. Add a password, a passkey or another connected account first.",
+        instance,
+        request_id,
+    )
+}
+
 fn request_id_value(request_id: Option<&Extension<RequestId>>) -> &str {
     request_id.map_or("unknown", |Extension(value)| value.as_str())
 }
@@ -1952,6 +2135,9 @@ struct ProblemBody {
     detail: &'static str,
     instance: String,
     request_id: String,
+    /// `owns_workspaces` only: the workspaces to delete first.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    workspaces: Option<Vec<crate::repositories::account::OwnedWorkspace>>,
 }
 
 struct ApiError {
@@ -1981,6 +2167,7 @@ impl ApiError {
                 request_id: request_id
                     .map(|Extension(value)| value.as_str().to_owned())
                     .unwrap_or_else(|| "unknown".to_owned()),
+                workspaces: None,
             }),
             retry_after: None,
         }
@@ -3177,13 +3364,27 @@ mod tests {
             "https://orbit.test",
         )));
         let tickets = crate::socket_ticket::SocketTickets::new(&[7; 32]);
+        let page = crate::collab::DocKey::page(orbit_platform::Id::new_v7());
+        let ticket_body = json!({"kind": "page", "id": page.id.to_string()});
+        let with_body = |mut request: Request<Body>| {
+            request.headers_mut().insert(
+                header::CONTENT_TYPE,
+                axum::http::HeaderValue::from_static("application/json"),
+            );
+            *request.body_mut() = Body::from(ticket_body.to_string());
+            request
+        };
         let issued = |response: Value| {
             assert_eq!(response.as_object().unwrap().len(), 2, "{response}");
             let expires_at: TimestampMillis =
                 serde_json::from_value(response["expires_at"].clone()).unwrap();
             let lifetime = expires_at.as_millis() - TimestampMillis::now().as_millis();
             assert!((55_000..=60_000).contains(&lifetime), "{lifetime}");
-            tickets.verify(response["ticket"].as_str().unwrap(), TimestampMillis::now())
+            let ticket = response["ticket"].as_str().unwrap();
+            // The ticket opens only the page it was asked for.
+            let other = crate::collab::DocKey::task(page.id);
+            assert_eq!(tickets.verify(ticket, other, TimestampMillis::now()), None);
+            tickets.verify(ticket, page, TimestampMillis::now())
         };
 
         let login = app.clone().oneshot(native_login_request()).await.unwrap();
@@ -3196,7 +3397,11 @@ mod tests {
             .id;
         let response = app
             .clone()
-            .oneshot(bearer_request("POST", "/api/v1/auth/socket-ticket", token))
+            .oneshot(with_body(bearer_request(
+                "POST",
+                "/api/v1/auth/socket-ticket",
+                token,
+            )))
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
@@ -3211,11 +3416,11 @@ mod tests {
             .id;
         let response = app
             .clone()
-            .oneshot(cookie_request(
+            .oneshot(with_body(cookie_request(
                 "POST",
                 "/api/v1/auth/socket-ticket",
                 &cookie,
-            ))
+            )))
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
@@ -3223,18 +3428,17 @@ mod tests {
         assert_eq!(issued(response), Some(cookie_session));
         assert_ne!(cookie_session, bearer_session);
 
-        let anonymous = Request::builder()
-            .method("POST")
-            .uri("/api/v1/auth/socket-ticket")
-            .header(header::ORIGIN, "https://orbit.test")
-            .body(Body::empty())
-            .unwrap();
+        let anonymous = json_request("/api/v1/auth/socket-ticket", ticket_body.clone());
         assert_eq!(
             app.clone().oneshot(anonymous).await.unwrap().status(),
             StatusCode::UNAUTHORIZED
         );
         // A cookie keeps the browser's Origin rule.
-        let mut foreign = cookie_request("POST", "/api/v1/auth/socket-ticket", &cookie);
+        let mut foreign = with_body(cookie_request(
+            "POST",
+            "/api/v1/auth/socket-ticket",
+            &cookie,
+        ));
         foreign
             .headers_mut()
             .insert(header::ORIGIN, "https://evil.example".parse().unwrap());

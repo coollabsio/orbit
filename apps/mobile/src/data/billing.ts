@@ -11,18 +11,15 @@ export async function workspaceBilling(client: OrbitClient, workspaceId: string)
   return (await getBilling({ client, path: { workspace_id: workspaceId }, throwOnError: true })).data
 }
 
-export type BillingBanner =
-  | { kind: 'trial'; text: string; action: string }
-  | { kind: 'read_only'; text: string; action: string }
+export type BillingBanner = { kind: 'trial' | 'read_only'; text: string }
 
-/** The web's `ReadOnlyBanner`: the trial's days left (at least 1), or the read-only line; nothing with full access. */
+/** The web's `ReadOnlyBanner` text without its billing link: the trial's days left (at least 1), or the read-only line; nothing with full access. */
 export function billingBanner(view: BillingView | undefined, now: number): BillingBanner | null {
   if (!view) return null
-  const action = view.can_manage ? 'Choose a plan' : 'View billing'
   if (view.access === 'trial' && view.trial) {
     const days = Math.max(1, Math.ceil((Date.parse(view.trial.ends_at) - now) / DAY_MILLIS))
-    return { kind: 'trial', text: `Trial: ${days} ${days === 1 ? 'day' : 'days'} left`, action }
+    return { kind: 'trial', text: `Trial: ${days} ${days === 1 ? 'day' : 'days'} left` }
   }
-  if (view.access === 'read_only') return { kind: 'read_only', text: 'This workspace is read-only because it has no active subscription.', action }
+  if (view.access === 'read_only') return { kind: 'read_only', text: 'This workspace is read-only.' }
   return null
 }

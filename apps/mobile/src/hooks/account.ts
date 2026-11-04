@@ -7,8 +7,10 @@ import { Alert } from 'react-native'
 import * as account from '../data/account-api'
 import { keys } from '../data/keys'
 import type { MemberRecord, User } from '../data/orbit'
+import * as providers from '../data/sign-in-provider'
 import { currentStatus, type OwnStatus, type UserStatus } from '../data/status'
 import { useOrbit } from '../orbit-context'
+import { providerDevice } from '../sign-in-provider'
 import { uploadPart } from '../upload-part'
 
 /**
@@ -137,29 +139,69 @@ export function useRevokeSessions() {
   })
 }
 
+export function useOAuthConnections() {
+  const { client } = useOrbit()
+  return useQuery({ queryKey: account.accountKeys.oauthConnections, queryFn: () => account.oauthConnections(client) })
+}
+
+export function useDisconnectOAuth() {
+  const { client } = useOrbit()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => account.disconnectOAuth(client, id),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: account.accountKeys.oauthConnections }),
+  })
+}
+
 export function useTwoFactor() {
   const { client } = useOrbit()
   return useQuery({ queryKey: account.accountKeys.twoFactor, queryFn: () => account.twoFactor(client) })
 }
 
-/** The password-confirmed two-factor writes: each refreshes the status. */
+/** The two-factor writes, confirmed with the password (or a fresh provider sign-in without one): each refreshes the status. */
 export function useTwoFactorWrites() {
   const { client } = useOrbit()
   const queryClient = useQueryClient()
   const onSuccess = () => void queryClient.invalidateQueries({ queryKey: account.accountKeys.twoFactor })
   return {
-    setup: useMutation({ mutationFn: (password: string) => account.startTotpSetup(client, password) }),
+    setup: useMutation({ mutationFn: (password?: string) => account.startTotpSetup(client, password) }),
     enable: useMutation({ mutationFn: (code: string) => account.turnOnTotp(client, code), onSuccess }),
-    disable: useMutation({ mutationFn: (password: string) => account.turnOffTwoFactor(client, password), onSuccess }),
-    regenerate: useMutation({ mutationFn: (password: string) => account.newRecoveryCodes(client, password), onSuccess }),
+    disable: useMutation({ mutationFn: (password?: string) => account.turnOffTwoFactor(client, password), onSuccess }),
+    regenerate: useMutation({ mutationFn: (password?: string) => account.newRecoveryCodes(client, password), onSuccess }),
   }
 }
 
-/** `enabled` is off for a guest: the server shows it no storage. */
-export function useWorkspaceStorage(offset = 0, enabled = true) {
+export function useConnectedAccounts() {
+  const { client } = useOrbit()
+  return useQuery({ queryKey: account.accountKeys.connectedAccounts, queryFn: () => providers.connectedAccounts(client) })
+}
+
+/**
+ * For an account without a password: a fresh sign-in with its connected provider, the answer to 401
+ * `reauthentication_required` (pass it to `withReauthentication`). `false` when the person cancels.
+ */
+export function useConfirmIdentity() {
+  const { client } = useOrbit()
+  const accounts = useConnectedAccounts()
+  return async () => {
+    const provider = accounts.data?.[0]?.provider
+    if (!provider) throw new Error('Sign out and sign in again to confirm this change.')
+    return (await providers.startProviderSignIn(client, provider, 'confirm', providerDevice)).kind === 'confirmed'
+  }
+}
+
+export function useDisconnectAccount() {
+  const { client } = useOrbit()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (provider: providers.Provider) => providers.disconnect(client, provider),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: account.accountKeys.connectedAccounts }),
+  })
+}
+
+export function useWorkspaceStorage(offset = 0) {
   const { client, workspaceId } = useOrbit()
   return useQuery({
-    enabled,
     queryKey: [...account.accountKeys.storage(workspaceId), offset],
     queryFn: () => account.workspaceStorage(client, workspaceId, offset),
     placeholderData: keepPreviousData,

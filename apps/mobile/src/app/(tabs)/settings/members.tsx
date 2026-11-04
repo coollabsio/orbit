@@ -149,7 +149,7 @@ function Invite() {
         <Segmented label="Role" value={role} options={INVITE_ROLES} onChange={setRole} />
         {role === 'guest' ? <GuestChannels value={channelIds} onChange={setChannelIds} /> : null}
         {problem ? <Note error>{problem}</Note> : null}
-        {!emailEnabled ? <Note>Email delivery is not configured on this server.</Note> : null}
+        {!emailEnabled ? <Note>Email delivery is not configured. Share the invitation link instead.</Note> : null}
         {link ? (
           <View className="gap-2">
             <Input label={`Invitation link (${roleLabel(role)})`} value={link} editable={false} selectTextOnFocus />

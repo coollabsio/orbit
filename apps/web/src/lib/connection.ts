@@ -7,7 +7,7 @@ import { useSyncExternalStore } from 'react'
  */
 export type ConnectionSource = 'events' | 'chat' | 'queries' | 'browser'
 
-/** `lost`: reconnecting, a banner says so. `failed`: still down after a minute, "Orbit is unavailable" covers the app. */
+/** `lost`: reconnecting for more than 2 seconds, a small pill says so. `failed`: still down after a minute, "Orbit is unavailable" covers the app. */
 export type ConnectionPhase = 'connected' | 'lost' | 'failed'
 
 export interface ConnectionState {
@@ -17,7 +17,7 @@ export interface ConnectionState {
 }
 
 export interface ConnectionStoreOptions {
-  /** A drop shorter than this never shows. Default 1000. */
+  /** A drop shorter than this never shows. Default 2000. */
   showAfterMs?: number
   /** A drop longer than this is `failed`. Default 60000. */
   failAfterMs?: number
@@ -27,7 +27,7 @@ const CONNECTED: ConnectionState = { phase: 'connected', lostAt: null }
 
 /** One store for the app (`connection` below); a test makes its own with short times. */
 export function createConnectionStore(options: ConnectionStoreOptions = {}) {
-  const showAfterMs = options.showAfterMs ?? 1000
+  const showAfterMs = options.showAfterMs ?? 2000
   const failAfterMs = options.failAfterMs ?? 60_000
   const down = new Set<ConnectionSource>()
   const listeners = new Set<() => void>()

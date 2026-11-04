@@ -836,6 +836,19 @@ async fn github_webhook_from_database(
         .and_then(|value| value.to_str().ok())
         .unwrap_or("")
         .to_owned();
+    // GitHub names the App a delivery is for, so only that App's secret is tried.
+    let app_id = {
+        let header = |name| {
+            request
+                .headers()
+                .get(name)
+                .and_then(|value| value.to_str().ok())
+        };
+        (header("x-github-hook-installation-target-type") == Some("integration"))
+            .then(|| header("x-github-hook-installation-target-id"))
+            .flatten()
+            .and_then(|value| value.parse::<i64>().ok())
+    };
     let body = to_bytes(request.into_body(), 1_048_576)
         .await
         .map_err(|_| {
@@ -847,14 +860,39 @@ async fn github_webhook_from_database(
                 id,
             )
         })?;
-    let rows = sqlx::query("SELECT workspace_id, webhook_secret_encrypted FROM github_apps")
-        .fetch_all(state.tasks.database().pool())
-        .await
-        .map_err(|_| ApiError::internal(id))?;
+    let rows = match app_id {
+        Some(app_id) => sqlx::query(
+            "SELECT workspace_id, webhook_secret_encrypted FROM github_apps WHERE app_id = $1",
+        )
+        .bind(app_id),
+        None => sqlx::query("SELECT workspace_id, webhook_secret_encrypted FROM github_apps"),
+    }
+    .fetch_all(state.tasks.database().pool())
+    .await
+    .map_err(|_| ApiError::internal(id))?;
     let mut workspace = None;
+    let mut unreadable = false;
     for row in &rows {
         let secret: Vec<u8> = row.get("webhook_secret_encrypted");
-        let secret = decrypt_github_secret(&key, &secret).map_err(|_| {
+        // One unreadable secret must not block every other workspace's deliveries.
+        let Ok(secret) = decrypt_github_secret(&key, &secret) else {
+            let workspace_id: String = row.get("workspace_id");
+            tracing::warn!(
+                workspace_id,
+                "GitHub webhook secret cannot be decrypted; skipped"
+            );
+            unreadable = true;
+            continue;
+        };
+        if verify_github_signature(secret.as_bytes(), &signature, &body).is_ok() {
+            workspace = Some(row.get::<String, _>("workspace_id"));
+            break;
+        }
+    }
+    let workspace = workspace.ok_or_else(|| {
+        if unreadable {
+            // The delivery may be for the App whose secret Orbit cannot read: GitHub can
+            // redeliver it once the app key is fixed.
             ApiError::new(
                 StatusCode::SERVICE_UNAVAILABLE,
                 "app_key_invalid",
@@ -862,20 +900,15 @@ async fn github_webhook_from_database(
                 "Orbit cannot read the saved GitHub credentials.",
                 id,
             )
-        })?;
-        if verify_github_signature(secret.as_bytes(), &signature, &body).is_ok() {
-            workspace = Some(row.get::<String, _>("workspace_id"));
-            break;
+        } else {
+            ApiError::new(
+                StatusCode::UNAUTHORIZED,
+                "invalid_github_signature",
+                "Invalid GitHub signature",
+                "The webhook signature is invalid.",
+                id,
+            )
         }
-    }
-    let workspace = workspace.ok_or_else(|| {
-        ApiError::new(
-            StatusCode::UNAUTHORIZED,
-            "invalid_github_signature",
-            "Invalid GitHub signature",
-            "The webhook signature is invalid.",
-            id,
-        )
     })?;
     let payload: Value = serde_json::from_slice(&body).map_err(|_| {
         ApiError::new(
@@ -1037,7 +1070,7 @@ async fn github_webhook_from_database(
     } else {
         "open"
     };
-    state
+    let synced = state
         .tasks
         .sync_github_work_item(
             workspace_id,
@@ -1055,31 +1088,36 @@ async fn github_webhook_from_database(
             id.map_or("github-webhook", RequestId::as_str),
             TimestampMillis::now(),
         )
-        .await
-        .map_err(|cause| match cause {
-            TaskError::IntegrationConflict => ApiError::new(
-                StatusCode::CONFLICT,
-                "github_project_conflict",
-                "GitHub project conflict",
-                "This GitHub item is already linked to a task in another project.",
+        .await;
+    if let Err(TaskError::TrialLimit(reached)) = &synced {
+        // A 2xx keeps GitHub from disabling the hook; the change is dropped, as when read-only.
+        tracing::info!(%workspace_id, event, detail = reached.detail(), "GitHub event dropped: trial limit reached");
+        return Ok(StatusCode::ACCEPTED);
+    }
+    synced.map_err(|cause| match cause {
+        TaskError::IntegrationConflict => ApiError::new(
+            StatusCode::CONFLICT,
+            "github_project_conflict",
+            "GitHub project conflict",
+            "This GitHub item is already linked to a task in another project.",
+            id,
+        ),
+        // GitHub does not redeliver by itself; the delivery shows as failed and can be redelivered
+        TaskError::Busy => {
+            tracing::warn!("GitHub work item sync refused: the task's description is busy");
+            ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "task_busy",
+                "Task busy",
+                "The task's description is busy on the server. Redeliver the event in a moment.",
                 id,
-            ),
-            // GitHub does not redeliver by itself; the delivery shows as failed and can be redelivered
-            TaskError::Busy => {
-                tracing::warn!("GitHub work item sync refused: the task's description is busy");
-                ApiError::new(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "task_busy",
-                    "Task busy",
-                    "The task's description is busy on the server. Redeliver the event in a moment.",
-                    id,
-                )
-            }
-            _ => {
-                tracing::warn!(error = ?cause, "GitHub work item sync failed");
-                ApiError::internal(id)
-            }
-        })?;
+            )
+        }
+        _ => {
+            tracing::warn!(error = ?cause, "GitHub work item sync failed");
+            ApiError::internal(id)
+        }
+    })?;
     Ok(StatusCode::OK)
 }
 
@@ -1466,6 +1504,14 @@ fn task_problem(error: TaskError, request_id: Option<&RequestId>) -> ApiError {
             request_id,
         ),
         TaskError::Invalid { field } => validation(field, request_id),
+        // The bot is told why, as any API client of a trial workspace is.
+        TaskError::TrialLimit(reached) => ApiError::new(
+            StatusCode::PAYMENT_REQUIRED,
+            "trial_limit_reached",
+            "Trial limit reached",
+            &reached.detail(),
+            request_id,
+        ),
         TaskError::Conflict
         | TaskError::Busy
         | TaskError::GithubContentReadOnly

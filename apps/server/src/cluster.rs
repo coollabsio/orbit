@@ -239,6 +239,10 @@ async fn serve(
                         Message::StorageChanged => reload_storage(database).await,
                         Message::Live(message) => live.receive(&envelope.server, message).await,
                         Message::Collab(message) => {
+                            // Access changed: the live and event sockets check theirs too.
+                            if let CollabMessage::Revalidate { workspace_id } = &message {
+                                live.revalidate_here(*workspace_id);
+                            }
                             if let Some(collab) = CollabHub::existing(database) {
                                 collab.receive(message).await;
                             }

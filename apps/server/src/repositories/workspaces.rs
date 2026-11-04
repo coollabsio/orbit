@@ -246,6 +246,8 @@ pub enum WorkspaceError {
     Forbidden,
     #[error("workspace owner must transfer ownership first")]
     TransferRequired,
+    #[error("ownership transfer is not available with billing")]
+    TransferUnavailable,
     #[error("workspace invitation is invalid or expired")]
     InvalidInvitation,
     #[error("workspace invitation belongs to another email address")]
@@ -538,14 +540,15 @@ impl WorkspaceRepository {
         if !workspace.permissions.contains(&Permission::WorkspaceUpdate) {
             return Err(WorkspaceError::Forbidden);
         }
-        let deleted = uploads
-            .delete_blob(workspace_id, file_id)
-            .await
-            .map_err(|error| match error {
-                UploadError::Database(error) => WorkspaceError::Unavailable(error),
-                UploadError::BlobStore(error) => WorkspaceError::Storage(error),
-                _ => WorkspaceError::Conflict,
-            })?;
+        let deleted =
+            uploads
+                .delete_blob(workspace_id, file_id)
+                .await
+                .map_err(|error| match error {
+                    UploadError::Database(error) => WorkspaceError::Unavailable(error),
+                    UploadError::BlobStore(error) => WorkspaceError::Storage(error),
+                    _ => WorkspaceError::Conflict,
+                })?;
         if !deleted {
             return Err(WorkspaceError::NotFound);
         }
@@ -676,7 +679,10 @@ impl WorkspaceRepository {
         .bind(actor_id.to_string())
         .fetch_all(self.database.pool())
         .await?;
-        page(rows, limit, |row| member_from_row(row, actor))
+        let transfer_available = !crate::repositories::billing::enabled(&self.database);
+        page(rows, limit, |row| {
+            member_from_row(row, actor, transfer_available)
+        })
     }
 
     /// The profile of a member of the workspace, with the caller's private note about them.
@@ -1592,6 +1598,33 @@ impl WorkspaceRepository {
             .bind(expected_version as i64)
             .execute(&mut *transaction)
             .await?;
+        // A removed member's own credentials end here, so they do not work again if the person rejoins.
+        // Service-account tokens belong to the workspace and stay.
+        sqlx::query(
+            "UPDATE api_tokens SET revoked_at = $1 WHERE workspace_id = $2 AND created_by = $3 \
+             AND service_account_id IS NULL AND revoked_at IS NULL",
+        )
+        .bind(now.as_millis())
+        .bind(workspace_id.to_string())
+        .bind(target.user_id.to_string())
+        .execute(&mut *transaction)
+        .await?;
+        sqlx::query(
+            "UPDATE oauth_grants SET revoked_at = $1 WHERE workspace_id = $2 AND user_id = $3 \
+             AND revoked_at IS NULL",
+        )
+        .bind(now.as_millis())
+        .bind(workspace_id.to_string())
+        .bind(target.user_id.to_string())
+        .execute(&mut *transaction)
+        .await?;
+        crate::workspace_export::expire_for_user(
+            &mut transaction,
+            Some(workspace_id),
+            target.user_id,
+            now,
+        )
+        .await?;
         audit::record(
             &mut transaction,
             workspace_id,
@@ -1620,6 +1653,10 @@ impl WorkspaceRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<(), WorkspaceError> {
+        // Billing belongs to the owner, so Orbit Cloud cannot hand a workspace over yet.
+        if crate::repositories::billing::enabled(&self.database) {
+            return Err(WorkspaceError::TransferUnavailable);
+        }
         let mut transaction = self.database.immediate_transaction().await?;
         let actor = require_actor(&mut *transaction, workspace_id, actor_id).await?;
         if !actor.can(Permission::WorkspaceTransfer) {
@@ -1816,6 +1853,16 @@ impl WorkspaceRepository {
         };
         if changed == 0 {
             return Err(WorkspaceError::NotFound);
+        }
+        // Restoring does not resume billing: the owner subscribes again.
+        if deleted {
+            crate::repositories::billing::cancel_on_delete(
+                &self.database,
+                &mut transaction,
+                workspace_id,
+                now,
+            )
+            .await?;
         }
         audit::record(
             &mut transaction,
@@ -2415,7 +2462,11 @@ fn workspace_from_row(row: sqlx::any::AnyRow) -> Result<WorkspaceRecord, Workspa
     })
 }
 
-fn member_from_row(row: sqlx::any::AnyRow, actor: Actor) -> Result<MemberRecord, WorkspaceError> {
+fn member_from_row(
+    row: sqlx::any::AnyRow,
+    actor: Actor,
+    transfer_available: bool,
+) -> Result<MemberRecord, WorkspaceError> {
     let user_id = parse_id(row.get("user_id"))?;
     let role = parse_role(&row.get::<String, _>("role"))?;
     Ok(MemberRecord {
@@ -2434,7 +2485,7 @@ fn member_from_row(row: sqlx::any::AnyRow, actor: Actor) -> Result<MemberRecord,
             .change_member_role(role, WorkspaceRole::Member)
             .is_ok(),
         can_remove: actor.remove_member(user_id, role).is_ok(),
-        can_transfer_ownership: actor.can_transfer_ownership_to(user_id),
+        can_transfer_ownership: transfer_available && actor.can_transfer_ownership_to(user_id),
         version: u64::try_from(row.get::<i64, _>("version"))
             .map_err(|_| WorkspaceError::Conflict)?,
         created_at: TimestampMillis::from_millis(row.get("created_at")),

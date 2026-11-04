@@ -110,6 +110,18 @@ pub struct Product {
     pub name: String,
 }
 
+/// A list as `GET /v1/{collection}` returns it.
+#[derive(Deserialize)]
+struct List<T> {
+    data: Vec<T>,
+}
+
+/// A Checkout Session, reduced to its id.
+#[derive(Deserialize)]
+struct Session {
+    id: String,
+}
+
 #[derive(Deserialize)]
 struct Created {
     id: String,
@@ -206,6 +218,14 @@ impl StripeClient {
         Ok(session.url)
     }
 
+    /// Sets the customer's email (receipts go there). Setting the same value twice is harmless.
+    pub async fn update_customer_email(&self, id: &str, email: &str) -> Result<(), StripeError> {
+        let _: Created = self
+            .post(&format!("/v1/customers/{id}"), &[("email", email)], None)
+            .await?;
+        Ok(())
+    }
+
     /// A Billing Portal session for the customer; returns its URL.
     pub async fn create_portal_session(
         &self,
@@ -223,29 +243,94 @@ impl StripeClient {
     }
 
     pub async fn subscription(&self, id: &str) -> Result<Subscription, StripeError> {
-        self.get("/v1/subscriptions/", id, &[]).await
-    }
-
-    pub async fn price(&self, id: &str) -> Result<PriceDetails, StripeError> {
-        self.get("/v1/prices/", id, &[("expand[]", "product")])
+        self.send(reqwest::Method::GET, "/v1/subscriptions", &[id], &[])
             .await
     }
 
-    /// `GET {collection}{id}`, with `id` as one escaped path segment.
-    async fn get<T: DeserializeOwned>(
+    /// Cancels the subscription now: no proration credit and no final invoice (Stripe's
+    /// defaults for `prorate` and `invoice_now`).
+    pub async fn cancel_subscription(&self, id: &str) -> Result<Subscription, StripeError> {
+        self.send(reqwest::Method::DELETE, "/v1/subscriptions", &[id], &[])
+            .await
+    }
+
+    /// The customer's subscriptions that are not canceled (up to 100, plenty for one workspace).
+    pub async fn customer_subscriptions(
         &self,
+        customer_id: &str,
+    ) -> Result<Vec<Subscription>, StripeError> {
+        let list: List<Subscription> = self
+            .send(
+                reqwest::Method::GET,
+                "/v1/subscriptions",
+                &[],
+                &[("customer", customer_id), ("limit", "100")],
+            )
+            .await?;
+        Ok(list.data)
+    }
+
+    /// Expires every open Checkout Session of the customer, so only the next one can subscribe.
+    /// A session that completed or expired meanwhile (Stripe answers 400) is skipped.
+    pub async fn expire_open_checkout_sessions(
+        &self,
+        customer_id: &str,
+    ) -> Result<(), StripeError> {
+        let open: List<Session> = self
+            .send(
+                reqwest::Method::GET,
+                "/v1/checkout/sessions",
+                &[],
+                &[
+                    ("customer", customer_id),
+                    ("status", "open"),
+                    ("limit", "100"),
+                ],
+            )
+            .await?;
+        for session in open.data {
+            match self
+                .send::<Session>(
+                    reqwest::Method::POST,
+                    "/v1/checkout/sessions",
+                    &[&session.id, "expire"],
+                    &[],
+                )
+                .await
+            {
+                Ok(_) | Err(StripeError::Api { status: 400, .. }) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        Ok(())
+    }
+
+    pub async fn price(&self, id: &str) -> Result<PriceDetails, StripeError> {
+        self.send(
+            reqwest::Method::GET,
+            "/v1/prices",
+            &[id],
+            &[("expand[]", "product")],
+        )
+        .await
+    }
+
+    /// `{method} {collection}/{segments…}?{query}`, each segment escaped as one path segment.
+    async fn send<T: DeserializeOwned>(
+        &self,
+        method: reqwest::Method,
         collection: &str,
-        id: &str,
+        segments: &[&str],
         query: &[(&str, &str)],
     ) -> Result<T, StripeError> {
         let mut url = self.url(collection)?;
         url.path_segments_mut()
             .map_err(|()| StripeError::Decode("the Stripe API base cannot have a path".to_owned()))?
             .pop_if_empty()
-            .push(id);
+            .extend(segments);
         let response = self
             .http
-            .get(url)
+            .request(method, url)
             .query(query)
             .bearer_auth(self.secret_key.expose())
             .header("Stripe-Version", API_VERSION)

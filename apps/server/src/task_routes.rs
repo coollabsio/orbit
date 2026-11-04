@@ -16,6 +16,7 @@ use serde_json::Value;
 use utoipa::{IntoParams, ToSchema};
 
 use crate::auth_routes::{CookieMode, request_session};
+use crate::repositories::billing::TrialLimitReached;
 use crate::repositories::identity::{AuthenticatedSession, IdentityRepository};
 use crate::repositories::sub_issues::AutoClosed;
 use crate::repositories::task_filter::{
@@ -2406,6 +2407,7 @@ pub(crate) fn task_problem(
             instance,
             request_id,
         ),
+        TaskError::TrialLimit(reached) => ApiError::trial_limit(reached, instance, request_id),
         TaskError::Unavailable(_) => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",
@@ -2441,7 +2443,7 @@ pub(crate) struct ProblemBody {
     title: &'static str,
     status: u16,
     code: &'static str,
-    detail: &'static str,
+    detail: std::borrow::Cow<'static, str>,
     instance: String,
     request_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2486,7 +2488,7 @@ impl ApiError {
                 title,
                 status: status.as_u16(),
                 code,
-                detail,
+                detail: detail.into(),
                 instance: instance.into(),
                 request_id: request_id
                     .map(|Extension(value)| value.as_str().to_owned())
@@ -2495,6 +2497,24 @@ impl ApiError {
                 path: None,
             }),
         }
+    }
+
+    /// 402 `trial_limit_reached`, as the billing guard words it.
+    pub(crate) fn trial_limit(
+        reached: TrialLimitReached,
+        instance: impl Into<String>,
+        request_id: Option<&Extension<RequestId>>,
+    ) -> Self {
+        let mut error = Self::new(
+            StatusCode::PAYMENT_REQUIRED,
+            "trial_limit_reached",
+            "Trial limit reached",
+            "",
+            instance,
+            request_id,
+        );
+        error.body.detail = reached.detail().into();
+        error
     }
 
     pub(crate) fn version_conflict(

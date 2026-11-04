@@ -21,15 +21,18 @@ import { AdminJobsPage } from '@/features/admin/pages/AdminJobsPage'
 import { AdminLimitsPage } from '@/features/admin/pages/AdminLimitsPage'
 import { AdminStoragePage } from '@/features/admin/pages/AdminStoragePage'
 import { AdminSettingsPage } from '@/features/admin/pages/AdminSettingsPage'
+import { AdminSignInProvidersPage } from '@/features/admin/pages/AdminSignInProvidersPage'
 import { AdminUsersPage } from '@/features/admin/pages/AdminUsersPage'
 import { GeneralPage } from '@/features/settings/pages/GeneralPage'
 import { GithubPage } from '@/features/settings/pages/GithubPage'
 import { EmojiPage } from '@/features/settings/pages/EmojiPage'
 import { DangerZonePage } from '@/features/settings/pages/DangerZonePage'
+import { ExportPage } from '@/features/settings/pages/ExportPage'
 import { BillingPage } from '@/features/settings/pages/BillingPage'
 import { MembersPage } from '@/features/settings/pages/MembersPage'
 import { SecurityPage } from '@/features/settings/pages/SecurityPage'
 import { SessionsPage } from '@/features/settings/pages/SessionsPage'
+import { AgenticPage } from '@/features/settings/pages/AgenticPage'
 import { ShortcutsPage } from '@/features/settings/pages/ShortcutsPage'
 import { StickersPage } from '@/features/settings/pages/StickersPage'
 import { StoragePage } from '@/features/settings/pages/StoragePage'
@@ -42,8 +45,10 @@ import { InboxPage } from '@/features/inbox/pages/InboxPage'
 import { AuthGate, GuestGate } from '@/features/auth/AuthGate'
 import { AcceptInvitationPage } from '@/features/auth/pages/AcceptInvitationPage'
 import { OAuthConsentPage } from '@/features/auth/pages/OAuthConsentPage'
+import { ProviderCallbackPage } from '@/features/auth/pages/ProviderCallbackPage'
 import { LoginPage } from '@/features/auth/pages/LoginPage'
 import { RecoveryPage } from '@/features/auth/pages/RecoveryPage'
+import { ConfirmEmailPage } from '@/features/auth/pages/ConfirmEmailPage'
 import { RegisterPage } from '@/features/auth/pages/RegisterPage'
 import { SetupPage } from '@/features/auth/pages/SetupPage'
 import { OnboardingPage } from '@/features/onboarding/OnboardingPage'
@@ -82,7 +87,10 @@ export default function App() {
           <Route path="register" element={<RegisterPage />} />
         </Route>
         <Route path="oauth/consent" element={<OAuthConsentPage />} />
+        {/* outside GuestGate: connect and confirm come back here signed in */}
+        <Route path="login/callback" element={<ProviderCallbackPage />} />
         <Route path="accept-invitation" element={<AcceptInvitationPage />} />
+        <Route path="confirm-email" element={<ConfirmEmailPage />} />
         <Route element={<AuthGate />}>
           <Route path="onboarding" element={<OnboardingPage />} />
           <Route element={<WorkspaceProvider><Outlet /></WorkspaceProvider>}>
@@ -120,6 +128,7 @@ export default function App() {
                   <Route path="notifications" element={<NotificationsPage />} />
                   <Route path="security" element={<SecurityPage />} />
                   <Route path="sessions" element={<SessionsPage />} />
+                  <Route path="agentic" element={<AgenticPage />} />
                   <Route path="shortcuts" element={<ShortcutsPage />} />
                   <Route path="storage" element={<StoragePage />} />
                 </Route>
@@ -127,6 +136,7 @@ export default function App() {
                   <Route index element={<AdminSettingsPage />} />
                   <Route path="users" element={<AdminUsersPage />} />
                   <Route path="email" element={<AdminEmailPage />} />
+                  <Route path="sign-in-providers" element={<AdminSignInProvidersPage />} />
                   <Route path="limits" element={<AdminLimitsPage />} />
                   <Route path="audit" element={<AdminAuditPage />} />
                   <Route path="storage" element={<AdminStoragePage />} />
@@ -140,7 +150,9 @@ export default function App() {
                   <Route path="emoji" element={<EmojiPage />} />
                   <Route path="stickers" element={<StickersPage />} />
                   <Route path="github" element={<GithubPage />} />
+                  <Route path="agentic" element={<AgenticPage />} />
                   <Route path="billing" element={<BillingPage />} />
+                  <Route path="export" element={<ExportPage />} />
                   <Route path="danger-zone" element={<DangerZonePage />} />
                   <Route path="members" element={<MembersPage />} />
                   <Route path="invitations" element={<Navigate to="/settings/members" replace />} />

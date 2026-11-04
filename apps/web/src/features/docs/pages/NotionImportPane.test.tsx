@@ -142,7 +142,7 @@ test('connect: the token field is a password field and problems show friendly me
   code = 'app_key_missing'
   fireEvent.click(scan)
   await waitFor(() =>
-    expect(view.getByRole('alert').textContent).toContain('The server administrator must set an app key'),
+    expect(view.getByRole('alert').textContent).toContain('Ask the Orbit administrator to set the app key'),
   )
 })
 

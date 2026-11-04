@@ -29,6 +29,14 @@ use yrs::{
 /// The Y.Doc root BlockNote binds the editor to (`withCollaboration({ fragment })`).
 pub const FRAGMENT: &str = "prosemirror";
 
+/// Deepest block nesting in [`doc_to_blocks`] and the markdown import: deeper blocks become flat
+/// children of the block at this depth. Keeps the JSON (two levels per block) under serde_json's
+/// recursion limit of 128 and bounds every recursive walk over blocks.
+pub const MAX_BLOCK_DEPTH: usize = 50;
+
+/// Deepest element nesting a live document may reach (two elements per block level).
+pub const MAX_XML_DEPTH: usize = 256;
+
 /// Bump when the conversion code changes in a way that should rebuild stored documents; the
 /// schema table's content is hashed in as well (see [`converter_version`]).
 const CONVERTER_REVISION: u32 = 1;
@@ -601,15 +609,287 @@ pub fn fragment_to_blocks<T: ReadTxn>(txn: &T, fragment: &XmlFragmentRef) -> Vec
     let Some(XmlOut::Element(group)) = fragment.get(txn, 0) else {
         return Vec::new();
     };
-    group
+    containers(txn, &group)
+        .filter_map(|container| container_to_block(txn, &container, 1))
+        .collect()
+}
+
+/// Whether the document nests elements deeper than [`MAX_XML_DEPTH`].
+pub fn too_deep<T: ReadTxn>(txn: &T, fragment: &XmlFragmentRef) -> bool {
+    let mut stack: Vec<(XmlElementRef, usize)> = fragment
         .children(txn)
         .filter_map(|node| match node {
-            XmlOut::Element(element) if element.tag().as_ref() == "blockContainer" => {
-                container_to_block(txn, &element)
-            }
+            XmlOut::Element(element) => Some((element, 1)),
             _ => None,
         })
-        .collect()
+        .collect();
+    while let Some((element, depth)) = stack.pop() {
+        if depth > MAX_XML_DEPTH {
+            return true;
+        }
+        for child in element.children(txn) {
+            if let XmlOut::Element(child) = child {
+                stack.push((child, depth + 1));
+            }
+        }
+    }
+    false
+}
+
+/// Whether `update` (v1) nests shared types more than [`MAX_XML_DEPTH`] levels below where it
+/// attaches to the document, or holds an `Any` value nested that deep. yrs recurses once per
+/// level to decode such a value and to delete or collect such a subtree, so the hub runs this
+/// before yrs sees an update. It reads the blocks like yrs's `Update::decode`, without recursion.
+pub fn update_too_deep(update: &[u8]) -> Result<bool, yrs::encoding::read::Error> {
+    use yrs::block::{
+        BLOCK_GC_REF_NUMBER, BLOCK_SKIP_REF_NUMBER, HAS_ORIGIN, HAS_PARENT_SUB, HAS_RIGHT_ORIGIN,
+    };
+    use yrs::encoding::read::{Cursor, Error, Read};
+    use yrs::updates::decoder::{Decoder, DecoderV1};
+
+    /// How an item attaches: under a type (one level deeper) or next to an item (same level).
+    enum Link {
+        Root,
+        Parent(yrs::ID),
+        Sibling(yrs::ID),
+    }
+    struct Entry {
+        clock: u32,
+        len: u32,
+        link: Link,
+        /// Levels below the attachment point; `None` until computed.
+        depth: Option<usize>,
+    }
+
+    let mut decoder = DecoderV1::new(Cursor::new(update));
+    let mut clients: HashMap<yrs::ClientID, Vec<Entry>> = HashMap::new();
+    let sections: u32 = decoder.read_var()?;
+    for _ in 0..sections {
+        let blocks: u32 = decoder.read_var()?;
+        let client = decoder.read_client()?;
+        let mut clock: u32 = decoder.read_var()?;
+        let entries = clients.entry(client).or_default();
+        for _ in 0..blocks {
+            let info = decoder.read_info()?;
+            let len = match info {
+                BLOCK_SKIP_REF_NUMBER => decoder.read_var()?,
+                BLOCK_GC_REF_NUMBER => decoder.read_len()?,
+                info => {
+                    let origin = if info & HAS_ORIGIN != 0 {
+                        Some(decoder.read_left_id()?)
+                    } else {
+                        None
+                    };
+                    let right = if info & HAS_RIGHT_ORIGIN != 0 {
+                        Some(decoder.read_right_id()?)
+                    } else {
+                        None
+                    };
+                    let link = match origin.or(right) {
+                        Some(id) => Link::Sibling(id),
+                        None => {
+                            let link = if decoder.read_parent_info()? {
+                                decoder.read_string()?;
+                                Link::Root
+                            } else {
+                                Link::Parent(decoder.read_left_id()?)
+                            };
+                            if info & HAS_PARENT_SUB != 0 {
+                                decoder.read_string()?;
+                            }
+                            link
+                        }
+                    };
+                    let Some(len) = content_len(&mut decoder, info)? else {
+                        return Ok(true);
+                    };
+                    if len == 0 {
+                        // yrs drops empty items without advancing the clock.
+                        continue;
+                    }
+                    entries.push(Entry {
+                        clock,
+                        len,
+                        link,
+                        depth: None,
+                    });
+                    len
+                }
+            };
+            clock = clock.checked_add(len).ok_or(Error::UnexpectedValue)?;
+        }
+    }
+    for entries in clients.values_mut() {
+        entries.sort_by_key(|entry| entry.clock);
+    }
+    let find = |clients: &HashMap<yrs::ClientID, Vec<Entry>>, id: &yrs::ID| {
+        let entries = clients.get(&id.client)?;
+        let index = entries
+            .partition_point(|entry| entry.clock <= id.clock)
+            .checked_sub(1)?;
+        let entry = &entries[index];
+        (id.clock - entry.clock < entry.len).then_some((id.client, index))
+    };
+    let total: usize = clients.values().map(Vec::len).sum();
+    let keys: Vec<(yrs::ClientID, usize)> = clients
+        .iter()
+        .flat_map(|(client, entries)| (0..entries.len()).map(|index| (*client, index)))
+        .collect();
+    for key in keys {
+        // Follows the links with an explicit stack; a chain longer than the update is a cycle.
+        let mut stack = vec![key];
+        while let Some(&(client, index)) = stack.last() {
+            let entry = &clients[&client][index];
+            if entry.depth.is_some() {
+                stack.pop();
+                continue;
+            }
+            let (target, step) = match &entry.link {
+                Link::Root => (None, 0),
+                Link::Parent(id) => (find(&clients, id), 1),
+                Link::Sibling(id) => (find(&clients, id), 0),
+            };
+            let depth = match target {
+                None => step,
+                Some(target) => match clients[&target.0][target.1].depth {
+                    Some(depth) => depth + step,
+                    None => {
+                        if stack.len() > total {
+                            return Err(Error::UnexpectedValue);
+                        }
+                        stack.push(target);
+                        continue;
+                    }
+                },
+            };
+            if depth > MAX_XML_DEPTH {
+                return Ok(true);
+            }
+            clients.get_mut(&client).expect("entry")[index].depth = Some(depth);
+            stack.pop();
+        }
+    }
+    Ok(false)
+}
+
+/// Reads an item's content like `ItemContent::decode`; returns its length in clock units, or
+/// `None` for an `Any` nested deeper than [`MAX_XML_DEPTH`].
+fn content_len(
+    decoder: &mut yrs::updates::decoder::DecoderV1<'_>,
+    info: u8,
+) -> Result<Option<u32>, yrs::encoding::read::Error> {
+    use yrs::encoding::read::{Error, Read};
+    use yrs::updates::decoder::Decoder;
+    Ok(Some(match info & 0b1111 {
+        1 => decoder.read_len()?,
+        2 => {
+            let count = decoder.read_len()?;
+            for _ in 0..=count {
+                decoder.read_string()?;
+            }
+            count.checked_add(1).ok_or(Error::UnexpectedValue)?
+        }
+        3 => {
+            decoder.read_buf()?;
+            1
+        }
+        4 => u32::try_from(decoder.read_string()?.encode_utf16().count())
+            .map_err(|_| Error::UnexpectedValue)?,
+        5 => {
+            decoder.read_string()?;
+            1
+        }
+        6 => {
+            decoder.read_string()?;
+            decoder.read_string()?;
+            1
+        }
+        7 => {
+            match decoder.read_type_ref()? {
+                yrs::types::TYPE_REFS_XML_ELEMENT => {
+                    decoder.read_string()?;
+                }
+                0..=6 | 9 | 15 => {}
+                _ => return Err(Error::UnexpectedValue),
+            }
+            1
+        }
+        8 => {
+            let count = decoder.read_len()?;
+            for _ in 0..count {
+                if !skip_any(decoder)? {
+                    return Ok(None);
+                }
+            }
+            count
+        }
+        9 => {
+            decoder.read_string()?;
+            if !skip_any(decoder)? {
+                return Ok(None);
+            }
+            1
+        }
+        _ => return Err(Error::UnexpectedValue),
+    }))
+}
+
+/// Reads one lib0 `Any` like `Any::decode`; `false` when it nests deeper than
+/// [`MAX_XML_DEPTH`].
+fn skip_any(
+    decoder: &mut yrs::updates::decoder::DecoderV1<'_>,
+) -> Result<bool, yrs::encoding::read::Error> {
+    use yrs::encoding::read::{Error, Read};
+    // Values still to read at each open level, and whether that level is a map.
+    let mut open: Vec<(usize, bool)> = vec![(1, false)];
+    while let Some((left, map)) = open.last_mut() {
+        if *left == 0 {
+            open.pop();
+            continue;
+        }
+        *left -= 1;
+        if *map {
+            decoder.read_string()?;
+        }
+        match decoder.read_u8()? {
+            127 | 126 | 121 | 120 => {}
+            125 => {
+                decoder.read_var::<i64>()?;
+            }
+            124 => {
+                decoder.read_exact(4)?;
+            }
+            123 | 122 => {
+                decoder.read_exact(8)?;
+            }
+            119 => {
+                decoder.read_string()?;
+            }
+            116 => {
+                decoder.read_buf()?;
+            }
+            kind @ (117 | 118) => {
+                let len: usize = decoder.read_var()?;
+                open.push((len, kind == 118));
+                if open.len() > MAX_XML_DEPTH {
+                    return Ok(false);
+                }
+            }
+            _ => return Err(Error::UnexpectedValue),
+        }
+    }
+    Ok(true)
+}
+
+/// The `blockContainer` children of a `blockGroup`.
+fn containers<'a, T: ReadTxn>(
+    txn: &'a T,
+    group: &XmlElementRef,
+) -> impl Iterator<Item = XmlElementRef> + 'a {
+    group.children(txn).filter_map(|node| match node {
+        XmlOut::Element(element) if element.tag().as_ref() == "blockContainer" => Some(element),
+        _ => None,
+    })
 }
 
 /// [`fragment_to_blocks`] of a whole document.
@@ -631,7 +911,47 @@ fn attr<T: ReadTxn>(txn: &T, element: &XmlElementRef, name: &str) -> Option<Valu
     }
 }
 
-fn container_to_block<T: ReadTxn>(txn: &T, container: &XmlElementRef) -> Option<Value> {
+/// The block of a `blockContainer` at nesting `depth` (1 = top level). Below
+/// [`MAX_BLOCK_DEPTH`] the nested blocks are read without recursion and kept as flat children.
+fn container_to_block<T: ReadTxn>(
+    txn: &T,
+    container: &XmlElementRef,
+    depth: usize,
+) -> Option<Value> {
+    let (mut block, group) = container_parts(txn, container)?;
+    let children: Vec<Value> = match group {
+        Some(group) if depth < MAX_BLOCK_DEPTH => containers(txn, &group)
+            .filter_map(|child| container_to_block(txn, &child, depth + 1))
+            .collect(),
+        Some(group) => {
+            let mut flat = Vec::new();
+            let mut stack: Vec<XmlElementRef> = containers(txn, &group).collect();
+            stack.reverse();
+            while let Some(child) = stack.pop() {
+                let Some((mut child_block, child_group)) = container_parts(txn, &child) else {
+                    continue;
+                };
+                if let Some(child_group) = child_group {
+                    let start = stack.len();
+                    stack.extend(containers(txn, &child_group));
+                    stack[start..].reverse();
+                }
+                child_block.insert("children".into(), json!([]));
+                flat.push(Value::Object(child_block));
+            }
+            flat
+        }
+        None => Vec::new(),
+    };
+    block.insert("children".into(), Value::Array(children));
+    Some(Value::Object(block))
+}
+
+/// A container's block without `children`, and its `blockGroup` of nested blocks.
+fn container_parts<T: ReadTxn>(
+    txn: &T,
+    container: &XmlElementRef,
+) -> Option<(Map<String, Value>, Option<XmlElementRef>)> {
     let id = attr(txn, container, "id").unwrap_or_else(|| Value::String(new_block_id()));
     let mut children_el = container.children(txn);
     let Some(XmlOut::Element(content_node)) = children_el.next() else {
@@ -652,17 +972,9 @@ fn container_to_block<T: ReadTxn>(txn: &T, container: &XmlElementRef) -> Option<
             None => {}
         }
     }
-    let children: Vec<Value> = match group {
-        Some(XmlOut::Element(group)) if group.tag().as_ref() == "blockGroup" => group
-            .children(txn)
-            .filter_map(|node| match node {
-                XmlOut::Element(element) if element.tag().as_ref() == "blockContainer" => {
-                    container_to_block(txn, &element)
-                }
-                _ => None,
-            })
-            .collect(),
-        _ => Vec::new(),
+    let group = match group {
+        Some(XmlOut::Element(group)) if group.tag().as_ref() == "blockGroup" => Some(group),
+        _ => None,
     };
     let mut block = Map::new();
     block.insert("id".into(), id);
@@ -691,13 +1003,15 @@ fn container_to_block<T: ReadTxn>(txn: &T, container: &XmlElementRef) -> Option<
         }
         _ => {}
     }
-    block.insert("children".into(), Value::Array(children));
-    Some(Value::Object(block))
+    Some((block, group))
 }
 
+/// The text under `element`, in document order (an explicit stack: nesting is unbounded).
 fn text_content<T: ReadTxn>(txn: &T, element: &XmlElementRef) -> String {
     let mut out = String::new();
-    for child in element.children(txn) {
+    let mut stack: Vec<XmlOut> = element.children(txn).collect();
+    stack.reverse();
+    while let Some(child) = stack.pop() {
         match child {
             XmlOut::Text(text) => {
                 for chunk in text.diff(txn, YChange::identity) {
@@ -706,7 +1020,11 @@ fn text_content<T: ReadTxn>(txn: &T, element: &XmlElementRef) -> String {
                     }
                 }
             }
-            XmlOut::Element(element) => out.push_str(&text_content(txn, &element)),
+            XmlOut::Element(element) => {
+                let start = stack.len();
+                stack.extend(element.children(txn));
+                stack[start..].reverse();
+            }
             XmlOut::Fragment(_) => {}
         }
     }
@@ -1006,5 +1324,129 @@ mod tests {
         );
     }
 
+    /// A document whose first block nests `levels` blocks deep, its innermost one a code block
+    /// whose text sits `levels` elements deep.
+    fn deep_doc(levels: usize) -> Doc {
+        let doc = new_doc(None);
+        {
+            let mut txn = doc.transact_mut();
+            let fragment = txn.get_or_insert_xml_fragment(FRAGMENT);
+            let mut group = fragment.push_back(&mut txn, XmlElementPrelim::empty("blockGroup"));
+            for level in 0..levels {
+                let container =
+                    group.push_back(&mut txn, XmlElementPrelim::empty("blockContainer"));
+                container.insert_attribute(&mut txn, "id", level.to_string());
+                if level + 1 == levels {
+                    let mut node =
+                        container.push_back(&mut txn, XmlElementPrelim::empty("codeBlock"));
+                    for _ in 0..levels {
+                        node = node.push_back(&mut txn, XmlElementPrelim::empty("span"));
+                    }
+                    node.push_back(&mut txn, XmlTextPrelim::new("deep"));
+                } else {
+                    let paragraph =
+                        container.push_back(&mut txn, XmlElementPrelim::empty("paragraph"));
+                    paragraph.push_back(&mut txn, XmlTextPrelim::new(level.to_string()));
+                    group = container.push_back(&mut txn, XmlElementPrelim::empty("blockGroup"));
+                }
+            }
+        }
+        doc
+    }
+
+    #[test]
+    fn deeply_nested_documents_are_read_without_recursing() {
+        // Runs on a test thread (2 MB stack): one frame per level would overflow it.
+        let doc = deep_doc(100_000);
+        {
+            let txn = doc.transact();
+            let fragment = txn.get_xml_fragment(FRAGMENT).unwrap();
+            assert!(too_deep(&txn, &fragment));
+        }
+        let blocks = doc_to_blocks(&doc);
+        let mut block = &blocks[0];
+        for _ in 1..MAX_BLOCK_DEPTH {
+            block = &block["children"][0];
+        }
+        // The blocks below the limit are kept, in order, as flat children of the last one.
+        let flat = block["children"].as_array().unwrap();
+        assert_eq!(flat.len(), 100_000 - MAX_BLOCK_DEPTH);
+        assert_eq!(flat[0]["id"], MAX_BLOCK_DEPTH.to_string());
+        assert_eq!(flat[0]["content"][0]["text"], MAX_BLOCK_DEPTH.to_string());
+        assert!(flat.iter().all(|child| child["children"] == json!([])));
+        let last = flat.last().unwrap();
+        assert_eq!(last["type"], "codeBlock");
+        assert_eq!(last["content"][0]["text"], "deep");
+        // The capped blocks fit serde_json's recursion limit.
+        let encoded = serde_json::to_string(&blocks).unwrap();
+        assert!(serde_json::from_str::<Value>(&encoded).is_ok());
+
+        let mut txn = doc.transact_mut();
+        let fragment = txn.get_or_insert_xml_fragment(FRAGMENT);
+        assert!(!crate::collab::sanitize::repair_document(
+            &mut txn, &fragment
+        ));
+    }
+
+    #[test]
+    fn documents_past_the_element_depth_limit_are_too_deep() {
+        let depth = |doc: &Doc| {
+            let txn = doc.transact();
+            too_deep(&txn, &txn.get_xml_fragment(FRAGMENT).unwrap())
+        };
+        // 1 + 2 * 39 + 2 + 40 = 121 elements deep, then 1 + 2 * 99 + 2 + 100 = 301.
+        assert!(!depth(&deep_doc(40)));
+        assert!(depth(&deep_doc(100)));
+    }
+
+    /// A v1 update with one `Any` value nested `levels` arrays deep in a root named `x`.
+    fn nested_any_update(levels: usize) -> Vec<u8> {
+        let mut update = vec![1, 1, 7, 0, 8, 1, 1, b'x', 1];
+        for _ in 0..levels {
+            update.extend([117, 1]);
+        }
+        update.extend([126, 0]);
+        update
+    }
+
+    /// A v1 update of `levels` elements, each inside the previous one.
+    fn chain_update(levels: usize) -> Vec<u8> {
+        let doc = new_doc(Some(7));
+        {
+            let mut txn = doc.transact_mut();
+            let mut node = txn
+                .get_or_insert_xml_fragment(FRAGMENT)
+                .push_back(&mut txn, XmlElementPrelim::empty("a"));
+            for _ in 1..levels {
+                node = node.push_back(&mut txn, XmlElementPrelim::empty("a"));
+            }
+        }
+        doc.transact()
+            .encode_state_as_update_v1(&StateVector::default())
+    }
+
+    #[test]
+    fn updates_nesting_past_the_limit_are_found_before_yrs_reads_them() {
+        let blocks = vec![
+            json!({"type": "paragraph", "content": [
+                {"type": "text", "text": "héllo 🙂", "styles": {"bold": true}},
+                {"type": "link", "href": "https://example.com", "content": "x"},
+                {"type": "mention", "props": {"userId": "u", "name": "n"}},
+            ], "children": [{"type": "bulletListItem", "content": "child"}]}),
+            json!({"type": "table", "content": {"type": "tableContent", "columnWidths": [100, null],
+                "rows": [{"cells": [[{"type": "text", "text": "a", "styles": {}}], []]}]}}),
+            json!({"type": "codeBlock", "props": {"language": "rust"}, "content": "fn main() {}"}),
+        ];
+        assert!(!update_too_deep(&blocks_to_update(&blocks, Some(7))).unwrap());
+        assert!(!update_too_deep(&chain_update(MAX_XML_DEPTH)).unwrap());
+        assert!(update_too_deep(&chain_update(MAX_XML_DEPTH + 2)).unwrap());
+        // The crafted bytes are what yrs reads.
+        assert!(yrs::Update::decode_v1(&nested_any_update(3)).is_ok());
+        assert!(!update_too_deep(&nested_any_update(3)).unwrap());
+        assert!(update_too_deep(&nested_any_update(100_000)).unwrap());
+        assert!(update_too_deep(&[1, 1, 7, 0, 8, 1, 1]).is_err());
+    }
+
+    use yrs::WriteTxn;
     use yrs::updates::decoder::Decode;
 }

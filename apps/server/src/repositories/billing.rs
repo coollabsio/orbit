@@ -2,6 +2,7 @@
 
 use orbit_platform::{Database, Id, Row, TimestampMillis, TrialConfig};
 use serde_json::json;
+use sqlx::{Any, Transaction};
 
 use crate::audit::{self, AuditOutcome};
 use crate::billing::{SubscriptionStatus, TrialLimit, WorkspaceAccess, access, grants_access};
@@ -62,6 +63,38 @@ pub(crate) fn enable(database: &Database, trial: TrialConfig) {
     database.extension(|| BillingOn(trial));
 }
 
+/// Whether this server runs Orbit Cloud billing.
+pub(crate) fn enabled(database: &Database) -> bool {
+    database.existing_extension::<BillingOn>().is_some()
+}
+
+/// Inside the transaction that moves a workspace to the trash: with billing on, queues the
+/// cancellation of its Stripe subscription unless that has already ended.
+pub(crate) async fn cancel_on_delete(
+    database: &Database,
+    transaction: &mut Transaction<'_, Any>,
+    workspace_id: Id,
+    now: TimestampMillis,
+) -> Result<(), sqlx::Error> {
+    if !enabled(database) {
+        return Ok(());
+    }
+    let subscription_id: Option<String> = sqlx::query_scalar(
+        "SELECT stripe_subscription_id FROM workspace_subscriptions WHERE workspace_id = $1 \
+         AND stripe_subscription_id IS NOT NULL \
+         AND (status IS NULL OR status NOT IN ('canceled', 'incomplete_expired'))",
+    )
+    .bind(workspace_id.to_string())
+    .fetch_optional(&mut **transaction)
+    .await?;
+    if let Some(subscription_id) = subscription_id {
+        crate::billing::enqueue_cancel_in(transaction, workspace_id, &subscription_id, now)
+            .await
+            .map_err(|error| sqlx::Error::Protocol(error.to_string()))?;
+    }
+    Ok(())
+}
+
 /// Whether something may write to the workspace: `Full` on a self-hosted server (no query),
 /// else the workspace's subscription decides. Every writer outside the HTTP guard (co-editing
 /// sockets, webhooks, integration jobs) asks this.
@@ -91,6 +124,13 @@ pub async fn subscription(
     database: &Database,
     workspace_id: Id,
 ) -> Result<WorkspaceSubscription, sqlx::Error> {
+    subscription_in(database.pool(), workspace_id).await
+}
+
+async fn subscription_in<'e>(
+    executor: impl sqlx::Executor<'e, Database = Any>,
+    workspace_id: Id,
+) -> Result<WorkspaceSubscription, sqlx::Error> {
     let row = sqlx::query(
         "SELECT workspaces.created_at, workspaces.billing_exempt, s.stripe_customer_id, s.plan, s.status, \
          s.cancel_at_period_end, s.current_period_end FROM workspaces \
@@ -98,7 +138,7 @@ pub async fn subscription(
          WHERE workspaces.id = $1",
     )
     .bind(workspace_id.to_string())
-    .fetch_optional(database.pool())
+    .fetch_optional(executor)
     .await?;
     Ok(row.map_or_else(WorkspaceSubscription::default, |row| {
         WorkspaceSubscription {
@@ -125,6 +165,15 @@ pub async fn trial_usage(
     limit: TrialLimit,
     now: TimestampMillis,
 ) -> Result<i64, sqlx::Error> {
+    trial_usage_in(database.pool(), workspace_id, limit, now).await
+}
+
+async fn trial_usage_in<'e>(
+    executor: impl sqlx::Executor<'e, Database = Any>,
+    workspace_id: Id,
+    limit: TrialLimit,
+    now: TimestampMillis,
+) -> Result<i64, sqlx::Error> {
     let query = match limit {
         TrialLimit::Tasks => sqlx::query_scalar(
             "SELECT CAST(COUNT(*) AS BIGINT) FROM tasks \
@@ -145,7 +194,68 @@ pub async fn trial_usage(
         .bind(workspace_id.to_string())
         .bind(now.as_millis()),
     };
-    query.fetch_one(database.pool()).await
+    query.fetch_one(executor).await
+}
+
+/// A trial workspace refused new records: it would hold more than the trial allows.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TrialLimitReached {
+    pub limit: TrialLimit,
+    /// The configured limit.
+    pub allowed: i64,
+}
+
+impl TrialLimitReached {
+    /// The `detail` of the 402 `trial_limit_reached` problem.
+    #[must_use]
+    pub fn detail(self) -> String {
+        format!(
+            "The trial allows {} {}. Choose a plan to add more.",
+            self.allowed,
+            self.limit.noun()
+        )
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum TrialCapacityError {
+    #[error("trial limit reached")]
+    Reached(TrialLimitReached),
+    #[error(transparent)]
+    Database(#[from] sqlx::Error),
+}
+
+/// Inside the transaction that adds (creates, restores, copies or imports) `added` records of
+/// `limit`: refuses when a trial workspace would then hold more than the trial allows. Free
+/// without billing (self-hosted) and for workspaces with full access. Writers serialize on
+/// `immediate_transaction`, so concurrent creates cannot pass the limit together.
+pub(crate) async fn ensure_trial_capacity(
+    database: &Database,
+    transaction: &mut Transaction<'_, Any>,
+    workspace_id: Id,
+    limit: TrialLimit,
+    added: i64,
+) -> Result<(), TrialCapacityError> {
+    let Some(billing) = database.existing_extension::<BillingOn>() else {
+        return Ok(());
+    };
+    if added <= 0 {
+        return Ok(());
+    }
+    let now = TimestampMillis::now();
+    let subscription = subscription_in(&mut **transaction, workspace_id).await?;
+    if subscription.access(now, &billing.0) != WorkspaceAccess::Trial {
+        return Ok(());
+    }
+    let allowed = limit.limit(&billing.0);
+    let used = trial_usage_in(&mut **transaction, workspace_id, limit, now).await?;
+    if used.saturating_add(added) > allowed {
+        return Err(TrialCapacityError::Reached(TrialLimitReached {
+            limit,
+            allowed,
+        }));
+    }
+    Ok(())
 }
 
 /// Saves the workspace's Stripe customer unless it already has one; returns the one it has.
@@ -170,6 +280,33 @@ pub async fn save_customer(
     .bind(workspace_id.to_string())
     .fetch_one(database.pool())
     .await
+}
+
+/// Records a billing action of a member (checkout started, portal opened) in the audit log.
+pub async fn record_audit(
+    database: &Database,
+    workspace_id: Id,
+    actor_id: Id,
+    action: &str,
+    request_id: &str,
+    metadata: serde_json::Value,
+    now: TimestampMillis,
+) -> Result<(), sqlx::Error> {
+    let mut transaction = database.immediate_transaction().await?;
+    audit::record(
+        &mut transaction,
+        workspace_id,
+        Some(actor_id),
+        action,
+        AuditOutcome::Success,
+        "workspace",
+        Some(workspace_id),
+        request_id,
+        metadata,
+        now,
+    )
+    .await?;
+    transaction.commit().await
 }
 
 /// Records a webhook event; `false` when it was already recorded (a redelivery).

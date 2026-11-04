@@ -6,7 +6,7 @@ This runbook covers the failure paths that need an operator decision. Exact buil
 
 Orbit reads its configuration only from environment variables that start with `ORBIT_`. Orbit refuses to start when it finds an unknown `ORBIT_` variable. Orbit ignores variables that start with `ORBIT_DEV_` or `ORBIT_TEST_`: scripts and tests use them. The CLI flags `--database`, `--attachments`, `--backups`, `--attachment-max-file-bytes` and `--attachment-max-request-bytes` override the related variables.
 
-- `orbit config check` validates the configuration and prints `configuration is valid`.
+- `orbit config check` validates the configuration and prints `configuration is valid`, then a `warning:` line for each risky setting (a trusted proxy network of `/0`, a metrics listener that is not loopback). Warnings do not change the exit code.
 - `orbit config show` prints the effective configuration as `ORBIT_…=value` lines. Secrets show as `[REDACTED]`. The password in the database URL is redacted.
 
 | Variable | Default | Notes |
@@ -15,7 +15,7 @@ Orbit reads its configuration only from environment variables that start with `O
 | `ORBIT_BIND` | `127.0.0.1` | `0.0.0.0` works for containers and Tailscale interfaces. Firewall the port. |
 | `ORBIT_PORT` | `8080` | |
 | `ORBIT_PUBLIC_ORIGIN` | `http://<bind>:<port>` | The exact external origin. Production requires `https://`. |
-| `ORBIT_TRUSTED_PROXIES` | none (image: `0.0.0.0/0,::/0`) | Comma-separated CIDRs, for example `127.0.0.1/32,::1/128`. Production requires at least one. Orbit reads the client IP and `https` from forwarding headers only on connections from these networks. The image default trusts every address: use it only when the reverse proxy is the only way to reach port 8080. |
+| `ORBIT_TRUSTED_PROXIES` | none | Comma-separated CIDRs of the reverse proxies, for example `127.0.0.1/32,::1/128`. Production requires at least one, also in the image. Orbit reads the client IP and `https` from forwarding headers only on connections from these networks. In the image, add `127.0.0.1/32`: the container healthcheck connects from loopback. Do not trust `0.0.0.0/0` or `::/0`: anyone who reaches the port could then fake their IP address (and get around rate limits) and HTTPS. Orbit logs a warning at startup for such a network. |
 | `ORBIT_SHUTDOWN_DELAY_SECONDS` | `0` | 0 to 300. Use it behind a load balancer: after SIGTERM, `/health/ready` reports 503 and the server continues to serve for this time. See [Orbit Cloud](#deployment). |
 | `ORBIT_DATABASE_PATH` | `data/orbit.sqlite` | The SQLite database file. Keep the database, attachment directory and backup directory separate. |
 | `ORBIT_DATABASE_URL` | none | Postgres instead of SQLite, for example `postgres://orbit:password@db.internal:5432/orbit`. See [Postgres](#postgres). |
@@ -24,7 +24,7 @@ Orbit reads its configuration only from environment variables that start with `O
 | `ORBIT_JOBS_CONCURRENCY` | `4` | |
 | `ORBIT_UPLOAD_MAX_FILE_BYTES` | `26214400` (25 MiB) | |
 | `ORBIT_UPLOAD_MAX_REQUEST_BYTES` | `104857600` (100 MiB) | |
-| `ORBIT_METRICS_LISTEN` | none (metrics off) | A private listener, for example `127.0.0.1:9090`. Never send it through the public site. |
+| `ORBIT_METRICS_LISTEN` | none (metrics off) | A private listener, for example `127.0.0.1:9090`. `/metrics` has no authentication: never send it through the public site. Orbit logs a warning at startup when the address is not loopback; then only the monitoring network may reach it. |
 | `ORBIT_RATE_LIMIT_*` | see notes | Request limits and email caps. See [Request limits and email caps](#request-limits-and-email-caps). |
 | `ORBIT_APP_KEY` | none | **Required.** The key for saved secrets: base64 of 32 random bytes. |
 | `ORBIT_APP_KEY_FILE` | none | The path of a file that contains the app key, instead of `ORBIT_APP_KEY`. Do not set both. |
@@ -56,7 +56,7 @@ Orbit deliberately binds last. Read the first error and keep the process stopped
 
 ## Integrity or readiness fails
 
-`/health/ready` returns 503 when a required check fails. Orbit also runs a durable weekly full SQLite integrity and foreign-key check (on Postgres it only checks the connection). A failed or interrupted full check stops normal HTTP traffic and exits the process; an unfinished integrity job forces another full check before a restart can bind. Remove the instance from proxy traffic and preserve the current data directory.
+`/health/ready` returns 503 when a required check fails. Its database check is only a `SELECT 1`, so the public endpoint stays cheap to call. Orbit runs SQLite's quick check at startup, and a durable weekly full SQLite integrity and foreign-key check (on Postgres both only check the connection). A failed or interrupted full check stops normal HTTP traffic and exits the process; an unfinished integrity job forces another full check before a restart can bind. Remove the instance from proxy traffic and preserve the current data directory.
 
 Do not attempt automatic repair. Verify a known-good backup, restore it with the documented stopped-server procedure, and retain the damaged copy for investigation. `/health/live` may remain 200 because it reports process liveness, not data safety.
 
@@ -66,9 +66,11 @@ Retention, reconciliation, scheduler, or integrity supervision failure cancels n
 
 ## Restore rollback or ownership error
 
+Before it replaces anything, `orbit backup restore <id>` backs up the current data (in S3 when backups go there) and prints the ID of that backup: restore that ID to undo the restore. If the current database cannot be backed up, nothing is restored; copy the data by hand, then add `--no-safety-backup`.
+
 Restore refuses an active database ownership lock (the `<database>.lock` file next to the database; do not delete it while Orbit runs). Stop every Orbit process that uses that file. If restore reports rollback failure, do not start Orbit. Preserve the target and rollback paths named by the error and recover from a separate verified snapshot.
 
-On Postgres (`ORBIT_DATABASE_URL`), the ownership lock is a Postgres advisory lock. Each server holds it shared; `backup restore`, `migrate run --reset` and `db-reset` need it exclusive, so stop every Orbit server that uses the database first. A server whose lock connection drops (network, Postgres failover) stops with `lost the database ownership lock`; start it again. A Postgres snapshot holds one `COPY` file per table (`database/<table>.copy`) instead of `database.sqlite`. Restore replaces every table in one transaction: if it fails, the database is unchanged. A snapshot restores only into the same kind of database it came from.
+On Postgres (`ORBIT_DATABASE_URL`), the ownership lock is a Postgres advisory lock. Each server holds it shared; `backup restore`, `migrate run --reset` and `db-reset` need it exclusive, so stop every Orbit server that uses the database first. A server whose lock connection drops (network, Postgres failover) stops with `lost the database ownership lock`; start it again. A Postgres snapshot holds one zstd-compressed `COPY` file per table (`database/<table>.copy.zst`) instead of `database.sqlite`; restore also reads the plain `<table>.copy` files of older snapshots. Restore replaces every table in one transaction: if it fails, the database is unchanged. A snapshot restores only into the same kind of database it came from.
 
 ## Lost or expired setup token
 
@@ -76,7 +78,7 @@ Run `orbit setup-token rotate` (on SQLite, stop Orbit first; on Postgres it work
 
 ## Root user and Admin area
 
-The account created at setup is the root user. **Admin** in the sidebar (`/admin`) has accounts (suspend, reinstate, password recovery links), the global audit log with CSV export, backups, and instance settings (email, registration).
+The account created at setup is the root user. **Admin** in the sidebar (`/admin`) has accounts (suspend, reinstate, password recovery links, email changes), the global audit log with CSV export, backups, and instance settings (email, registration).
 
 The root user can make other accounts **instance admins** (Admin → Users → Manage → Make admin). Admins see the same Admin area, but they cannot suspend or reset the root account or another admin, and they cannot choose admins. Nobody can suspend, reset or demote the root account. Removing an admin takes their Admin access away at once.
 
@@ -101,13 +103,57 @@ docker compose --env-file deploy/.env -f deploy/compose.yaml start orbit
 
 ## Email, registration and the app key
 
-Orbit sends email only for invitations, open-registration sign-up links and password reset links. The root user saves the SMTP server in **Admin → Settings → Email** and checks it with **Send test email**. Without a mail server, invitations are shared as links and password recovery works as described below.
+Orbit sends email only for invitations, open-registration sign-up links, password reset links and email changes. The root user saves the SMTP server in **Admin → Settings → Email** and checks it with **Send test email**. Without a mail server, invitations are shared as links and password recovery works as described below. Orbit Cloud is different: it always needs a mail server (see [Billing](#billing-orbit-cloud)).
 
-Registration is closed after setup: people join only by invitation. The root user can turn on **Open registration** in **Admin → Settings** once a mail server is saved. A new person then enters their email, opens the emailed link (60 minutes, one use) and chooses a name and password. Removing the mail server closes registration.
+Registration is closed after setup: people join only by invitation. The root user can turn on **Open registration** in **Admin → Settings** once a mail server or a [sign-in provider](#sign-in-with-google-and-github) is saved. On Orbit Cloud, only a mail server counts. A new person then enters their email, opens the emailed link (60 minutes, one use) and chooses a name and password. Removing the mail server closes registration.
+
+A person changes their email in **Account → Profile** (needs a mail server). Orbit asks for the current password (or a sign-in in the last 10 minutes for an account without one) and emails a one-use link, valid for 60 minutes, to the new address. The email changes only when the link is opened: the address is verified, every other session of the account is signed out, open password reset links stop working, and the old address gets a notice ("Your Orbit email was changed") that names the new address. Like registration, the request never tells whether another account has the new address: Orbit then sends nothing. If someone takes the address before the link is opened, the link answers `409 email_taken`. On Orbit Cloud, the Stripe customer of each workspace the person owns gets the new address (job `billing.stripe_customer_email`), so receipts follow the owner.
+
+Without a mail server, Profile tells the person to ask an administrator. An admin opens **Admin → Users → Manage → Change email**, which works with or without a mail server. The new address is set at once and marked verified, and no confirmation email is sent, so confirm who is asking first. The person is signed out everywhere, and pending email change and password reset links stop working. If a mail server is saved, the old address gets the same notice. On Orbit Cloud this action needs a mail server (`409 smtp_required`), and both addresses get an email: the old one the notice, the new one "An Orbit administrator set this address as the email of your account". An admin can change their own email there too and stays signed in on the current device. The same rules as the other account actions apply: nobody can change the root account's email except the root user, and only the root user can change another admin's. A taken address answers `409 email_taken`, a deleted account `409 account_deleted`. The audit log records `account.email_changed` with the admin as the actor.
+
+A person can also delete their account in **Account → Profile**, after typing their email and their password (or a fresh sign-in). Orbit refuses while they own a workspace outside the trash (`409 owns_workspaces`, delete those first) and for the root user (`409 root_account`). The account row stays so tasks, comments and messages keep their author, but it is anonymized: the name becomes "Deleted user", the email becomes `deleted-<id>@deleted.invalid` (so the address can register again), and the password, second factors, passkeys, connected accounts, sessions, OAuth grants, personal API tokens, push subscriptions, avatar, profile fields and memberships are removed. **Admin → Users** shows it as **Deleted**; it can never be reinstated (`409 account_deleted`). The audit log has `account.deleted`.
 
 Saved secrets (the SMTP password, GitHub App keys, Notion import tokens) are encrypted with the app key. `ORBIT_APP_KEY` (base64 of 32 random bytes, from `openssl rand -base64 32`) is required. Orbit does not create a key. Keep a copy outside the server and its backups: a database restored without the same key cannot read its saved secrets, and the root user must enter them again. Users with two-factor authentication must set it up again.
 
 Older versions created an `app.key` file beside the SQLite database. If that file still exists, Orbit starts only when `ORBIT_APP_KEY` holds the same key. Set `ORBIT_APP_KEY` to the contents of the file, start Orbit, and then you can delete the file.
+
+## Sign in with Google and GitHub
+
+People can sign in with a Google or GitHub account when the root user configures the provider. A provider that is not configured does not show on the sign-in pages.
+
+Each provider needs an OAuth client. Register this callback URL at the provider. Replace `{ORBIT_PUBLIC_ORIGIN}` with the public origin of the server:
+
+- Google: `{ORBIT_PUBLIC_ORIGIN}/api/v1/auth/providers/google/callback`
+- GitHub: `{ORBIT_PUBLIC_ORIGIN}/api/v1/auth/providers/github/callback`
+
+To create the Google client:
+
+1. Open the Google Cloud console and select or create a project.
+2. Go to **APIs & Services → OAuth consent screen**. Configure the app name and the support email. Add the scopes `openid`, `email` and `profile`.
+3. Go to **APIs & Services → Credentials → Create credentials → OAuth client ID**.
+4. Select **Web application**. Add the Google callback URL to **Authorized redirect URIs**.
+5. Copy the client ID and the client secret.
+
+To create the GitHub client:
+
+1. Open GitHub **Settings → Developer settings → OAuth Apps → New OAuth App**. For an organization, use the organization settings.
+2. Set **Homepage URL** to the public origin. Set **Authorization callback URL** to the GitHub callback URL.
+3. Register the app. Generate a client secret.
+4. Copy the client ID and the client secret.
+
+Then open **Admin → Sign-in providers**. Enter the client ID and the client secret, and save. Orbit encrypts the secret with the app key. To change only the client ID, leave the secret empty: Orbit keeps the saved secret. **Remove** stops the provider. Accounts keep their connections, so if you save the provider again, these accounts can sign in with it again.
+
+Orbit uses these rules:
+
+- Orbit finds an account by the provider account ID, not by the email. A changed provider email does not change the account.
+- A first sign-in connects to the Orbit account with the same email only if the provider verified that email. Google must report the email as verified. GitHub must have a verified primary email.
+- If no account has that email, Orbit creates an account only when **Open registration** is on. Open registration does not need a mail server when a sign-in provider is configured (Orbit Cloud still needs one). A new account has no password. The person can add one in the profile settings within 10 minutes of a sign-in.
+- An account with two-factor authentication must still enter its code after the provider sign-in.
+- People connect and disconnect providers in their security settings. Orbit does not let a person remove the last sign-in method (password, passkey or provider).
+
+### Native app redirects
+
+The mobile app receives the result at `orbit://auth/callback`. Orbit accepts no other redirect in production. For Expo Go in development, set `ORBIT_DEV_NATIVE_REDIRECTS` to the exact Expo URLs, separated by commas, for example `exp://100.64.0.5:8082/--/auth/callback`. Orbit compares each URL exactly. Orbit does not start when `ORBIT_ENV=production` and this variable is set.
 
 ## Postgres
 
@@ -159,7 +205,7 @@ A request, a live socket or a co-editing socket can go to any server; sticky ses
 Two settings control how many background jobs run at the same time:
 
 - **Per server:** `jobs.concurrency` (`ORBIT__JOBS__CONCURRENCY`, default 4) is the number of jobs one server runs at the same time. It sets the size of the server, so it stays in the configuration file and a change needs a restart.
-- **Per job kind:** in **Admin → Background jobs**, the root user sets two limits for each job kind that customers start (Notion scans and Notion imports):
+- **Per job kind:** in **Admin → Background jobs**, the root user sets two limits for each job kind that customers start (Notion scans, Notion imports and workspace exports):
   - **All servers:** the number of jobs of the kind that run at the same time on all servers together. Default: 2.
   - **Per workspace:** the number of jobs of the kind that one workspace runs at the same time while a different workspace has a job of the kind waiting. Default: 1. When no other workspace waits, one workspace can use all the slots of the kind. Thus, one customer cannot stop the imports of the other customers.
 
@@ -193,14 +239,40 @@ Both checks run in the serialized write transaction, so they hold for concurrent
 
 With `ORBIT_CLOUD=true`, every workspace needs a Stripe subscription to stay writable after its trial (7 days by default, `ORBIT_TRIAL_DAYS`). Each workspace pays one flat price for its plan; the plan is the Stripe price in `ORBIT_STRIPE_PRICES`. There is no free plan. A self-hosted server (`ORBIT_CLOUD` not set) has no billing routes, no billing page and no read-only check.
 
-- **Access.** A workspace whose subscription is `active`, `trialing` or `past_due` (Stripe still retries the card) has full access. Without one, a workspace is on a trial for `ORBIT_TRIAL_DAYS` days (default 7) from its creation: it is writable, but holds at most `ORBIT_TRIAL_TASKS` tasks (default 50) and `ORBIT_TRIAL_PAGES` pages (default 20), not counting the trash, and `ORBIT_TRIAL_MEMBERS` members (default 3, pending invitations count). A change applies to every workspace without a subscription at the next restart, including ones already on a trial. A member's create past a limit (a task, a page, a page copy, an invitation) fails with 402 `trial_limit_reached`. The limits are checked before the write, so concurrent creates can pass them by a few. Integrations and Notion imports are not limited. After the trial, without a subscription or with any other status (`canceled`, `unpaid`, `paused`, `incomplete`…), the workspace is read-only: members can read, search and export everything, but a member's write fails with 402 `workspace_read_only` (anyone else gets the usual 401 or 404). Co-editing sockets still show documents and drop edits; a socket that was editing when the workspace became read-only closes, on every server, and the editor reconnects read-only. Writes that stay open: subscribing (**Settings → Billing**), deleting or restoring the workspace, transferring ownership, removing members or leaving, revoking invitations, creating and revoking API tokens, disconnecting GitHub, cancelling a Notion import, and the reader's own read markers and list preferences. Integrations do not write: a GitHub `issues` or `pull_request` webhook is answered with 202 and dropped (installation events still update the connected repositories), a Discord event gets 402 `workspace_read_only`, and a running Notion import fails with a read-only message.
+- **Access.** A workspace whose subscription is `active`, `trialing` or `past_due` (Stripe still retries the card) has full access. Without one, a workspace is on a trial for `ORBIT_TRIAL_DAYS` days (default 7) from its creation: it is writable, but holds at most `ORBIT_TRIAL_TASKS` tasks (default 50) and `ORBIT_TRIAL_PAGES` pages (default 20), not counting the trash, and `ORBIT_TRIAL_MEMBERS` members (default 3, pending invitations count). A change applies to every workspace without a subscription at the next restart, including ones already on a trial. Anything that would add tasks or pages past a limit fails with 402 `trial_limit_reached`: creating them, restoring them from the trash, and copying pages (a copy with sub-pages counts every page it copies); these are counted inside the write's transaction, so concurrent creates cannot pass a limit. An invitation past the members limit also fails with 402 `trial_limit_reached`. At the tasks limit, a GitHub `issues` or `pull_request` webhook that would create or restore a task is answered with 202 and dropped, and a Discord event gets 402 `trial_limit_reached`. A Notion import stops at the pages limit with a message. After the trial, without a subscription or with any other status (`canceled`, `unpaid`, `paused`, `incomplete`…), the workspace is read-only: members can read and search everything, and owners and admins can still export the whole workspace (see [Workspace export](#workspace-export)), but a member's write fails with 402 `workspace_read_only` (anyone else gets the usual 401 or 404). Co-editing sockets still show documents and drop edits; a socket that was editing when the workspace became read-only closes, on every server, and the editor reconnects read-only. Writes that stay open: subscribing (**Settings → Billing**), starting a workspace export, deleting or restoring the workspace, removing members or leaving, revoking invitations, creating and revoking API tokens, disconnecting GitHub, cancelling a Notion import, and the reader's own read markers and list preferences. Integrations do not write: a GitHub `issues` or `pull_request` webhook is answered with 202 and dropped (installation events still update the connected repositories), a Discord event gets 402 `workspace_read_only`, and a running Notion import fails with a read-only message.
 - **Subscribing.** The workspace owner chooses a plan in **Settings → Billing**. Orbit creates a Stripe customer for the workspace and sends the owner to Stripe Checkout. Afterwards the owner opens the Stripe Billing Portal from the same page to change the card, the plan, or cancel. Other members see the status only.
+- **Duplicate checkouts.** Before it opens a new Checkout for a workspace that already has a Stripe customer, Orbit asks Stripe for the customer's subscriptions. If one is `active`, `trialing` or `past_due`, the checkout fails with 409 `subscription_active` and Orbit queues a `billing.stripe_sync` job for that subscription, so a missed or late webhook cannot lead to a second subscription. Otherwise Orbit expires the customer's open Checkout Sessions first, so an older Checkout tab cannot subscribe the workspace again.
+- **Deleting a workspace.** When the owner moves a workspace with a subscription to the trash, Orbit cancels the subscription at Stripe at once, with no proration credit and no final invoice. The delete queues a `billing.stripe_cancel` job in the same transaction, with the subscription id in its payload, so the cancel still runs after a Stripe outage (it retries with backoff for about two days) and after the workspace is purged. A subscription that Stripe has already cancelled, or no longer knows, counts as done. After the cancel, the job queues `billing.stripe_sync`, which stores the `canceled` status. The workspace stays in the trash for 30 days. Restoring it does not resume billing: after its trial, the restored workspace is read-only until the owner subscribes again.
+- **Orbit Cloud needs a mail server.** Save one in **Admin → Settings → Email** right after setup. The mail settings live in the database, so the server starts without them, but until one is saved email change, invitations by email, password reset and sign-up do not work. Meanwhile the server logs a warning at startup, and installation admins see a red banner in the web and mobile apps that links to Admin → Email. Customers see nothing. Removing the mail server fails with 409 `smtp_required` (save a different one instead), and **Open registration** needs it even when a sign-in provider is configured (409 `email_not_configured`).
+- **Admin actions on customer accounts are never silent.** In **Admin → Users**, Change email, the password reset and Reset two-factor need the mail server (`409 smtp_required`, and the apps turn the actions off with the reason) and email the person: both addresses for an email change, the reset link to the account's address, and a notice for a two-factor reset. The admin never sees a password reset link: the action is **Send password reset email** and answers `202` with `sent_to` instead of `url`. A failed send does not undo the action; the server logs a warning.
+- **Ownership transfer.** Orbit Cloud does not support ownership transfer yet: the request fails with 409 `transfer_unavailable`, and the clients hide the action. A self-hosted server keeps it.
 - **Webhook.** In the Stripe Dashboard (Workbench → Webhooks), add a destination with the **Snapshot** payload for `https://<public origin>/api/v1/billing/stripe/webhook` and these events: `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`. Put its signing secret in `ORBIT_STRIPE_WEBHOOK_SECRET`. Orbit checks the signature (at most 5 minutes old), records each event once, and queues a `billing.stripe_sync` job that reads the subscription again from Stripe. Events that arrive late, twice or out of order therefore all end in Stripe's current state. A failed job retries with backoff for several hours; see **Admin → Background jobs**.
 - **Billing Portal.** Turn on the customer portal in the Stripe Dashboard (Settings → Billing → Customer portal) in each mode you use. Without a saved portal configuration, Stripe refuses to open the portal and Orbit answers 502 `stripe_unavailable`.
 - **Your own workspace.** The root user's first workspace needs no subscription: it always has full access, with no trial and no limits. Orbit marks it when the root user creates it (at setup, or later if the root user had none). On an installation that existed before this rule, the upgrade marks the oldest workspace the root user owns, including one in the trash. Other workspaces of the root user pay like any other workspace. Changing the root user (`orbit root set`) does not move the mark.
 - **Products and prices.** `STRIPE_SECRET_KEY=sk_… scripts/stripe-setup.sh` creates the Orbit product with a monthly and an annual price per workspace, and the default Billing Portal configuration (customers can switch between monthly and annual, update their card, and cancel), and prints `ORBIT_STRIPE_PRICES`. Run it once in each mode: the price ids differ, and a second run creates nothing new. With `ORBIT_WEBHOOK_URL` set, it also creates the webhook and prints its signing secret.
 - **Local testing.** Use test-mode keys (`sk_test_…`) and forward events with the Stripe CLI: `stripe listen --forward-to http://127.0.0.1:8080/api/v1/billing/stripe/webhook`. The CLI prints the signing secret (`whsec_…`) to put in `ORBIT_STRIPE_WEBHOOK_SECRET`. Pay with the test card `4242 4242 4242 4242`.
 - **API version.** Orbit sends `Stripe-Version: 2026-09-30.endive` with each request. Webhook events use the endpoint's own API version; Orbit only reads ids from them, so that version does not matter.
+
+## Workspace export
+
+A workspace owner or admin exports the whole workspace in **Settings → Export** (`POST /api/v1/workspaces/{id}/exports`). The export is for data portability and for customers who leave, so it also works on a read-only workspace. A `workspace.export` background job writes one ZIP file. Only one export of a workspace is queued or running at a time; a second start fails with 409 `export_in_progress`. The job kind has the usual limits in **Admin → Background jobs** (default: 2 on all servers, 1 per workspace while another waits).
+
+- **Who sees what.** The export uses the view of the member who starts it. It contains every task (also tasks in the trash), every live teamspace page, every public chat channel, the member's own private pages, and the private channels and direct messages that the member is in. Other members' private pages, private channels and direct messages are not in it. The job checks the permission again when it runs.
+- **Download.** `GET /api/v1/workspaces/{id}/exports` lists the exports that have not expired. `GET …/exports/{export_id}/download` streams the ZIP to an owner or admin of the workspace; there are no public links. Orbit writes `workspace.export_created` and `workspace.export_downloaded` to the audit log.
+- **Storage.** The job writes the ZIP to a temporary file under the backups directory (`ORBIT_BACKUPS_PATH`), then stores it as `exports/{workspace_id}/{export_id}.zip` where new attachments of the workspace go: the workspace's own bucket, else the bucket of **Admin → Storage** when attachments are in S3, else `<backups>/exports/` on the server's disk. On Orbit Cloud (attachments in S3) every server can serve the download. Backups do not include exports. The server needs free disk space for one ZIP while an export runs. A ZIP in S3 is one PUT, so it can be at most 5 GiB.
+- **Expiry.** An export is deleted with its ZIP 7 days after it is ready, by the daily retention job. An export that is still queued or running after 24 hours is marked failed. A failed export is removed after 7 days.
+- **Archive layout.** Each ZIP has a `README.txt` that describes it. JSON field names are snake_case and stable; times are RFC 3339 in UTC.
+
+| Path | Content |
+|---|---|
+| `workspace.json` | Name, creation time, who exported it, members (name, email, role), teamspaces, projects with their statuses and labels |
+| `tasks/<KEY>-<number>.json` | One task: title, Markdown description, status, priority, dates, creator, assignees, labels, relations, comments, attachments, activity (its audit events), `deleted` for the trash |
+| `pages/<Teamspace>/<Page>.md`, `pages/Private/<Page>.md` | Each live page as Markdown (the same converter as the page export); sub-pages in `<Page>/`, page files in `<Page>/assets/` |
+| `pages/comments.json` | The comment threads of the exported pages |
+| `chat/<channel>.json`, `chat/DM - <names>.json` | One conversation: members, messages with reactions, files and thread replies |
+| `files/<file-id>/<name>` | Each file of a task, comment or chat message, once; the JSON refers to it by `path` |
+
+Not in the export: pages in the trash, page version history, notifications, saved views, API tokens, integration settings, custom emoji and stickers. Orbit has no custom task fields. A file that is missing from storage is listed at the end of `README.txt` and the export continues.
 
 ## Object storage (S3), backups and a lost server
 
@@ -212,7 +284,14 @@ The root user saves an S3-compatible bucket (AWS S3, Cloudflare R2, MinIO, …) 
 
 With attachments in S3, a backup holds the database (and the files still on this server), not the bucket's files. So Orbit does not delete an unused file from the bucket at once: it keeps it 40 days, longer than any kept backup, so a restored older database still finds its files.
 
-When the server is lost, restore on a new server from the bucket. The command line reads the bucket from environment variables, not from the (lost) database:
+The `orbit backup` commands use the bucket saved in Admin → Storage and decrypt its secret with `ORBIT_APP_KEY`. With Postgres, or with SQLite on a server that still has its database, stop the servers and restore:
+
+```sh
+orbit backup list            # the last column says local or s3
+orbit backup restore <id>
+```
+
+When the database is lost too (an SQLite server is gone), restore on a new server and give the bucket in environment variables. They come before the saved bucket:
 
 ```sh
 export ORBIT_BACKUP_S3_ENDPOINT=https://s3.eu-central-1.amazonaws.com ORBIT_BACKUP_S3_BUCKET=orbit-files \
@@ -222,6 +301,19 @@ orbit backup restore <id>
 ```
 
 Set the same `ORBIT_APP_KEY` on the new server before you start Orbit: without it, Orbit cannot read the saved S3 secret and does not start while a bucket is saved. Data written after the last backup is lost, so choose the schedule by how much data you can lose.
+
+### Restore one page or one task
+
+To get back one page or one task, you do not need to stop the server or restore the whole database. An instance admin opens a backup, picks a workspace and an item, and Orbit copies the item into the live workspace as a new item. Nothing else in the live database changes. The API is `GET /api/v1/admin/backups/{id}/workspaces`, `GET …/workspaces/{workspace_id}/items?kind=page|task&q=` and `POST …/workspaces/{workspace_id}/restore`.
+
+- Orbit verifies the backup's checksums first. It checks each backup at most once in 10 minutes per server. A backup in S3 is fetched into `<backups>/downloads/` as for a download.
+- Orbit reads the snapshot and never writes to it: the SQLite file opens read-only, and Postgres `COPY` files (`.copy.zst`, or `.copy` in older backups) are parsed.
+- The workspace must still exist and must not be in the trash.
+- A page gets the title "<title> (restored)". With sub-pages, the copy keeps their structure and titles. It goes under its old parent when that page is live in the same space, else to the top level of its teamspace. If the teamspace is gone, the restore fails (`teamspace_missing`). A private page goes back only to its owner's private space, and only while the owner is a member.
+- A task gets the title "<title> (restored)" and a new number in its old project. If the project is gone or in the trash, the restore fails (`project_missing`). The status and labels are matched by name in the live project; without a match the task gets the first status and no label. Assignees who left the workspace are dropped.
+- Files are shared with the live workspace when it still has the same bytes. Otherwise Orbit uploads them again from the backup's `attachments/` folder, or from the blob store (S3 keeps unused files for 40 days). The response counts the files it could not find in `missing_files`. Restored files count toward the storage quota.
+- Not restored: comments, page versions, favorites, visits, task relations, sub-tasks and activity.
+- Each restore writes the audit event `backup.item_restored` with the backup id, the kind, the old id and the new id.
 
 ### A workspace's own bucket
 
@@ -252,6 +344,10 @@ orbit attachments compress
 
 The root user opens **Admin → Users**, selects **Manage → Create password recovery link** for the account and shares the 30-minute link through an authenticated channel. The root user changes their own password in Profile instead.
 
+If the person also lost access to their email address, first change it in **Manage → Change email** (see [Email, registration and the app key](#email-registration-and-the-app-key)), then create the recovery link. Changing the email deletes recovery links created before it.
+
+On Orbit Cloud the admin never gets the link. **Manage → Send password reset email** emails it to the account's address (same 30 minutes, the email says an administrator started it), and the request answers `202` with `sent_to` and no `url`. It needs the mail server (`409 smtp_required`), like Change email and Reset two-factor. A person who lost access to their address gets the email changed first, which also emails the new address.
+
 If the root user lost their own password, use (on SQLite, after you stop Orbit) `orbit recovery-link --email <email> --origin <https-origin>`. Never log a link. Unknown or suspended accounts do not receive a link.
 
 ## Security checks after proxy changes
@@ -278,15 +374,16 @@ Set them with `ORBIT_RATE_LIMIT_<KEY>`, the key in upper case (for example `ORBI
 | `upload_per_minute` | 120 | Attachment and chat file uploads. Per server. |
 | `general_per_minute` | 600 | Every other API and MCP request (chat: 3 times this). Per server. |
 | `workspace_multiplier` | 10 | A workspace may make this many times each limit above. |
-| `account_email_cooldown_seconds` | 60 | Time between two registration or password reset emails to one address. |
-| `account_emails_per_day` | 5 | Registration and password reset emails to one address in 24 hours. |
+| `account_email_cooldown_seconds` | 60 | Time between two registration, password reset or email change emails to one address. |
+| `account_emails_per_day` | 5 | Registration, password reset and email change emails to one address in 24 hours. |
 | `invitation_emails_per_workspace_per_day` | 100 | Invitation emails of one workspace in 24 hours. |
 | `invitation_emails_per_inviter_per_day` | 50 | Invitation emails one person sends in 24 hours, in all workspaces. |
 
 - **Who a request counts against:** first its client IP address, then its credential (the session cookie or the `Authorization` header: a session, an API token, an MCP token), then, for a request with a credential, the workspace in its path (`/api/v1/workspaces/{id}/…`). The first one over its limit refuses the request with `429 rate_limit_exceeded`, and the ones after it do not count it. So a client without a credential cannot use up a workspace's budget, and one address can use at most its own limit of it.
-- **Account emails:** registration and password reset links to one address share the cooldown and the daily cap, on every server. Over the cap, Orbit sends nothing and gives the usual `202` answer, so the answer does not tell whether an account exists. Requests for which no email goes out (an unknown address for a reset, an existing account for registration) do not count.
+- **Account emails:** registration, password reset and email change links to one address share the cooldown and the daily cap, on every server. Over the cap, Orbit sends nothing and gives the usual `202` answer, so the answer does not tell whether an account exists. Requests for which no email goes out (an unknown address for a reset, an existing account for registration or an email change) do not count. The notice to the old address after an email change has no cap.
 - **Invitation emails:** an email invitation over a cap is taken back and answered with `429 invitation_email_limit` and `Retry-After`. Invitation links (`"delivery": "manual"`) have no cap. The subject is always "You have been invited to Orbit"; the body names the workspace on one line, in quotes, without control or direction characters, and at most 60 characters long. The inviter's name is not in the email.
 - Values: the per-minute limits 1 to 1,000,000; `workspace_multiplier` 1 to 1000; the cooldown 0 to 86,400 seconds; the daily caps 1 to 100,000.
+- **Fixed HTTP limits:** a client must send a request's headers within 30 seconds, or Orbit closes the connection. A request that has no response after 60 seconds gets `408 request_timeout`; WebSockets, uploads, downloads, exports and the Admin routes have no such limit. A request body may be at most 2 MiB, except a `multipart/form-data` upload, which may be up to `ORBIT_UPLOAD_MAX_REQUEST_BYTES`. Give the reverse proxy timeouts at least this long.
 
 ## Monitoring and operational ownership
 

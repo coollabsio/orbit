@@ -14,6 +14,12 @@ import {
 } from '@orbit/api/generated/sdk.gen'
 import { createPasskey } from '@/features/auth/passkey'
 
+/**
+ * The current password a security change asks for again. `null` for an account without one: the server then wants a
+ * recent provider sign-in and answers 401 `reauthentication_required` without it.
+ */
+type CurrentPassword = string | null
+
 function required<T>(data: T | undefined, message: string): T {
   if (data === undefined) throw new Error(message)
   return data
@@ -32,7 +38,7 @@ export function useTwoFactor() {
 /** Starts the authenticator app setup: a new secret and its QR code. Asks for the current password. */
 export function useSetupTotp() {
   return useMutation({
-    mutationFn: async (password: string) => {
+    mutationFn: async (password: CurrentPassword) => {
       const { data } = await setupTotp({ client: apiClient, body: { password }, throwOnError: true })
       return required(data, 'Setup response was empty.')
     },
@@ -54,7 +60,7 @@ export function useEnableTotp() {
 export function useDisableTwoFactor() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async (password: string) => {
+    mutationFn: async (password: CurrentPassword) => {
       await disableTwoFactor({ client: apiClient, body: { password }, throwOnError: true })
     },
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.twoFactor }),
@@ -65,7 +71,7 @@ export function useDisableTwoFactor() {
 export function useRegenerateRecoveryCodes() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async (password: string) => {
+    mutationFn: async (password: CurrentPassword) => {
       const { data } = await regenerateRecoveryCodes({ client: apiClient, body: { password }, throwOnError: true })
       return required(data, 'Recovery codes response was empty.').recovery_codes
     },
@@ -91,7 +97,7 @@ export function usePasskeys() {
 export function useAddPasskey() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async ({ name, password, beforePrompt }: { name: string; password: string; beforePrompt: () => Promise<void> }) => {
+    mutationFn: async ({ name, password, beforePrompt }: { name: string; password: CurrentPassword; beforePrompt: () => Promise<void> }) => {
       const { data: challenge } = await startPasskeyRegistration({ client: apiClient, body: { password }, throwOnError: true })
       await beforePrompt()
       const credential = await createPasskey(required(challenge, 'Passkey challenge was empty.').options)
