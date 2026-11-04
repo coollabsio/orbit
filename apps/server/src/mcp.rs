@@ -110,7 +110,7 @@ async fn authenticate(State(state): State<McpState>, mut request: Request, next:
     }
     match state
         .tokens
-        .authenticate(token, ApiTokenScope::Mcp, TimestampMillis::now())
+        .authenticate(token, None, TimestampMillis::now())
         .await
     {
         Ok(principal) => {
@@ -251,10 +251,10 @@ fn write_definition<T: JsonSchema>(
 }
 fn required_scope(name: &str) -> ApiTokenScope {
     match name {
-        "create_task" | "update_task" | "delete_task" => ApiTokenScope::Write,
+        "create_task" | "update_task" | "delete_task" => ApiTokenScope::TasksWrite,
         "list_docs" | "get_doc" => ApiTokenScope::DocsRead,
         "list_conversations" | "list_messages" | "get_thread" => ApiTokenScope::ChatRead,
-        _ => ApiTokenScope::Read,
+        _ => ApiTokenScope::TasksRead,
     }
 }
 fn tools() -> Vec<Tool> {
@@ -336,9 +336,7 @@ impl ServerHandler for TaskTools {
         Ok(ListToolsResult::with_all_items(
             tools()
                 .into_iter()
-                .filter(|t| {
-                    principal(&context).is_ok_and(|p| p.scopes.contains(&required_scope(&t.name)))
-                })
+                .filter(|t| principal(&context).is_ok_and(|p| p.allows(required_scope(&t.name))))
                 .collect(),
         )
         .with_ttl_ms(0)

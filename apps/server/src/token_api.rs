@@ -213,10 +213,10 @@ impl TokenApi {
         scope: ApiTokenScope,
         request_id: &'a str,
     ) -> Result<Authorized<'a>> {
-        if !principal.scopes.contains(&scope) {
+        if !principal.allows(scope) {
             return Err(TokenApiError::MissingScope);
         }
-        if scope == ApiTokenScope::Write {
+        if scope == ApiTokenScope::TasksWrite {
             match write_access(self.tasks.database(), principal.workspace_id).await {
                 Ok(WorkspaceAccess::ReadOnly) => return Err(TokenApiError::ReadOnly),
                 Ok(_) => {}
@@ -317,7 +317,7 @@ impl Authorized<'_> {
     }
 
     pub async fn projects(&self) -> Result<Vec<ProjectRecord>> {
-        self.need(ApiTokenScope::Read)?;
+        self.need(ApiTokenScope::TasksRead)?;
         let p = self.principal;
         // Apply the grant in SQL; never paginate across unapproved projects.
         Ok(self
@@ -333,7 +333,7 @@ impl Authorized<'_> {
         cursor: Option<&str>,
         limit: Option<usize>,
     ) -> Result<Page<StatusRecord>> {
-        self.need(ApiTokenScope::Read)?;
+        self.need(ApiTokenScope::TasksRead)?;
         let limit = page_limit(cursor, limit)?;
         if !self.approved(project_id) {
             return Err(TokenApiError::NotAvailable);
@@ -346,7 +346,7 @@ impl Authorized<'_> {
     }
 
     pub async fn list_tasks(&self, query: TaskQuery) -> Result<Page<TaskView>> {
-        self.need(ApiTokenScope::Read)?;
+        self.need(ApiTokenScope::TasksRead)?;
         let limit = query.limit.unwrap_or(50);
         if !(1..=100).contains(&limit)
             || query
@@ -454,7 +454,7 @@ impl Authorized<'_> {
     }
 
     pub async fn get_task(&self, task_ref: &str) -> Result<TaskView> {
-        self.need(ApiTokenScope::Read)?;
+        self.need(ApiTokenScope::TasksRead)?;
         let p = self.principal;
         let id = match self
             .api
@@ -482,7 +482,7 @@ impl Authorized<'_> {
     }
 
     pub async fn create_task(&self, input: NewTask) -> Result<TaskView> {
-        self.need(ApiTokenScope::Write)?;
+        self.need(ApiTokenScope::TasksWrite)?;
         validate_task_input(
             Some(&input.title),
             Some(&input.description),
@@ -525,7 +525,7 @@ impl Authorized<'_> {
         expected_version: u64,
         patch: TaskPatch,
     ) -> Result<TaskView> {
-        self.need(ApiTokenScope::Write)?;
+        self.need(ApiTokenScope::TasksWrite)?;
         validate_task_input(
             patch.title.as_deref(),
             patch.description.as_deref(),
@@ -564,7 +564,7 @@ impl Authorized<'_> {
 
     /// Moves the task and its sub-issues to the trash.
     pub async fn delete_task(&self, task_ref: &str, expected_version: u64) -> Result<()> {
-        self.need(ApiTokenScope::Write)?;
+        self.need(ApiTokenScope::TasksWrite)?;
         let p = self.principal;
         let id = self
             .api

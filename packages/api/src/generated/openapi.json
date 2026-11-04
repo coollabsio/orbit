@@ -36031,7 +36031,7 @@
           "scopes": {
             "type": "array",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/ApiTokenScope"
             }
           },
           "service_account_id": {
@@ -36053,9 +36053,10 @@
       },
       "ApiTokenScope": {
         "type": "string",
+        "description": "What a credential may do. API tokens and OAuth grants use the same names; `tasks:write`\nincludes `tasks:read`.",
         "enum": [
-          "read",
-          "write",
+          "tasks:read",
+          "tasks:write",
           "docs:read",
           "chat:read"
         ]

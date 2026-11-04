@@ -38,15 +38,18 @@ tasks only, not docs.
 
 ## Scopes
 
-| Scope | Name in **Settings → API tokens** | Endpoints |
-| --- | --- | --- |
-| `read` | Read | Projects, statuses and tasks (read) |
-| `write` | Write | Create, update and delete tasks |
-| `docs:read` | Docs read | `GET /docs`, `GET /docs/{page_id}` |
+API tokens and MCP OAuth connections use the same four scopes. In
+**Settings → API tokens**, set the access for each resource to **No access**,
+**Read** or **Write**.
 
-The public API does not serve chat. A token with the `chat:read` scope can read
-chat through MCP only. `GET /me` works with each valid token. The `write` scope
-does not include `read`.
+| Scope | Access in **Settings → API tokens** | Public API endpoints |
+| --- | --- | --- |
+| `tasks:read` | Tasks: **Read** | `GET /projects`, `GET /projects/{id}/statuses`, `GET /tasks`, `GET /tasks/{task}` |
+| `tasks:write` | Tasks: **Write** | `POST /tasks`, `PATCH /tasks/{task}`, `DELETE /tasks/{task}`, `POST /integrations/discord/events` |
+| `docs:read` | Docs: **Read** | `GET /docs`, `GET /docs/{page_id}` |
+| `chat:read` | Chat: **Read** | None. Chat is available through MCP only. |
+
+`tasks:write` includes `tasks:read`. `GET /me` works with each valid token.
 
 ## Conventions
 
@@ -76,7 +79,7 @@ curl -sS "$ORBIT_URL/api/public/v1/me" -H "Authorization: Bearer $ORBIT_TOKEN"
 
 ```json
 {
-  "token": {"id": "…", "name": "ci", "scopes": ["read", "write"],
+  "token": {"id": "…", "name": "ci", "scopes": ["tasks:read", "tasks:write"],
             "project_ids": ["…"], "expires_at": "2026-12-01T00:00:00.000Z"},
   "workspace": {"id": "…", "name": "Acme"},
   "user": {"id": "…", "email": "dev@example.com", "display_name": "Dev"},
@@ -89,14 +92,14 @@ For a service-account token, `user` is `null` and `service_account` is
 
 ### Projects and statuses
 
-`GET /projects`. Scope: `read`. The approved live projects. Item:
+`GET /projects`. Scope: `tasks:read`. The approved live projects. Item:
 `{id, name, key, color, version, created_at, updated_at}`.
 
 ```bash
 curl -sS "$ORBIT_URL/api/public/v1/projects" -H "Authorization: Bearer $ORBIT_TOKEN"
 ```
 
-`GET /projects/{project_id}/statuses?cursor&limit`. Scope: `read`. Item:
+`GET /projects/{project_id}/statuses?cursor&limit`. Scope: `tasks:read`. Item:
 `{id, project_id, name, description, color, category, position, version}`.
 `category` is `unstarted`, `started`, `completed`, `cancelled` or `duplicate`.
 
@@ -122,7 +125,7 @@ A task:
 
 `priority` is `none`, `low`, `medium`, `high` or `urgent`.
 
-`GET /tasks`. Scope: `read`. Tasks in the approved projects, newest first,
+`GET /tasks`. Scope: `tasks:read`. Tasks in the approved projects, newest first,
 including completed tasks and sub-issues. Optional parameters: `project_id`,
 `status_id`, `assignee_id`, `label_id`, `priority`, `q` (text in the title or
 description, or an identifier), `cursor` and `limit`.
@@ -132,13 +135,13 @@ curl -sS -G "$ORBIT_URL/api/public/v1/tasks" -H "Authorization: Bearer $ORBIT_TO
   --data-urlencode "project_id=$PROJECT_ID" --data-urlencode 'q=login' -d limit=20
 ```
 
-`GET /tasks/{task}`. Scope: `read`.
+`GET /tasks/{task}`. Scope: `tasks:read`.
 
 ```bash
 curl -sS "$ORBIT_URL/api/public/v1/tasks/ENG-12" -H "Authorization: Bearer $ORBIT_TOKEN"
 ```
 
-`POST /tasks`. Scope: `write`. Response: `201` with the task. Body:
+`POST /tasks`. Scope: `tasks:write`. Response: `201` with the task. Body:
 `project_id` and `status_id` (required), `title` (required, 1 to 500
 characters), and the optional `description` (Markdown, up to 50,000 bytes),
 `priority` (default `none`), `assignee_ids`, `label_ids` and `parent_task_id`.
@@ -152,7 +155,7 @@ curl -sS "$ORBIT_URL/api/public/v1/tasks" -H "Authorization: Bearer $ORBIT_TOKEN
   -d "{\"project_id\":\"$PROJECT_ID\",\"status_id\":\"$STATUS_ID\",\"title\":\"Fix login\",\"priority\":\"high\"}"
 ```
 
-`PATCH /tasks/{task}`. Scope: `write`. Response: `200` with the task. Body:
+`PATCH /tasks/{task}`. Scope: `tasks:write`. Response: `200` with the task. Body:
 `expected_version` (required, the `version` that you read), and the optional
 `title`, `description`, `status_id`, `priority`, `assignee_ids` and `label_ids`.
 A list replaces the old list. If the task changed after you read it, the
@@ -165,7 +168,7 @@ curl -sS -X PATCH "$ORBIT_URL/api/public/v1/tasks/ENG-12" \
   -d '{"expected_version":3,"status_id":"…","assignee_ids":[]}'
 ```
 
-`DELETE /tasks/{task}?expected_version=N`. Scope: `write`. Moves the task and
+`DELETE /tasks/{task}?expected_version=N`. Scope: `tasks:write`. Moves the task and
 its sub-issues to the trash. Response: `204` with no body. The tasks stay in the Orbit
 trash for 30 days.
 
@@ -195,7 +198,7 @@ curl -sS "$ORBIT_URL/api/public/v1/docs/$PAGE_ID" -H "Authorization: Bearer $ORB
 
 ### Discord integration
 
-`POST /integrations/discord/events`. Scope: `write`. A Discord bot sends a
+`POST /integrations/discord/events`. Scope: `tasks:write`. A Discord bot sends a
 message here to make a task from it. Body: `event_id` (required, 1 to 200
 characters, the same ID for a retry), `message` (required), `message_url`
 (required, a `https://discord.com/channels/…` link) and `project_id` (optional

@@ -801,8 +801,8 @@ async fn optional_scopes_need_consent_and_survive_refresh() {
         .flatten()
         .unwrap();
     for scope in [
-        ApiTokenScope::Read,
-        ApiTokenScope::Write,
+        ApiTokenScope::TasksRead,
+        ApiTokenScope::TasksWrite,
         ApiTokenScope::DocsRead,
         ApiTokenScope::ChatRead,
     ] {
@@ -826,7 +826,7 @@ async fn optional_scopes_need_consent_and_survive_refresh() {
         .ok()
         .flatten()
         .unwrap();
-    assert_eq!(principal.scopes, vec![ApiTokenScope::Read]);
+    assert_eq!(principal.scopes, vec![ApiTokenScope::TasksRead]);
     let (status, _) = f
         .exchange(&[
             ("grant_type", "refresh_token"),

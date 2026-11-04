@@ -5,8 +5,8 @@ import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { LoadingScreen } from '@/components/common/LoadingScreen'
+import { ScopeAccess, type ScopeResource } from '@/components/common/ScopeAccess'
 import { AuthBrand, AuthCard } from '@/features/auth/components/AuthForm'
 import { currentUserQueryOptions } from '@/features/auth/api'
 import { createApiClient } from '@/api/client'
@@ -16,10 +16,9 @@ import { oauthRequest, type OAuthConsent } from '@/features/auth/oauth'
 const consentClient = createApiClient()
 
 type Scope = 'tasks:write' | 'docs:read' | 'chat:read'
-type Level = 'none' | 'read' | 'write'
 
 // Task read access comes with every grant, and docs and chat have no write scope.
-const RESOURCES: { name: string; hint: string; read?: Scope; write?: Scope }[] = [
+const RESOURCES: ScopeResource<Scope>[] = [
   { name: 'Tasks', hint: 'In the selected projects', write: 'tasks:write' },
   { name: 'Docs', hint: 'Including private docs', read: 'docs:read' },
   { name: 'Chat', hint: 'Including private channels and direct messages', read: 'chat:read' },
@@ -118,30 +117,7 @@ export function OAuthConsentPage() {
           </Select>
         </div>
         <p className="text-sm text-muted-foreground">Pick a preset or set each one.</p>
-        {RESOURCES.map((resource) => {
-          const level: Level = resource.write && scopes.includes(resource.write) ? 'write' : !resource.read || scopes.includes(resource.read) ? 'read' : 'none'
-          const setLevel = (next: Level) => setScopes((current) => [
-            ...current.filter((scope) => scope !== resource.read && scope !== resource.write),
-            ...(next !== 'none' && resource.read ? [resource.read] : []),
-            ...(next === 'write' && resource.write ? [resource.write] : []),
-          ])
-          return <div key={resource.name} className="flex items-center justify-between gap-3">
-            <div className="grid gap-0.5">
-              <span className="text-sm font-medium">{resource.name}</span>
-              <span className="text-xs text-muted-foreground">{resource.hint}</span>
-            </div>
-            <ToggleGroup aria-label={resource.name} variant="outline" size="sm" spacing={0} value={[level]} onValueChange={(value) => {
-              const next = value.at(-1)
-              if (next === 'none' || next === 'read' || next === 'write') setLevel(next)
-            }}>
-              {(['none', 'read', 'write'] as const).map((option) => <ToggleGroupItem key={option} value={option}
-                disabled={option === 'none' ? !resource.read : option === 'write' ? !resource.write : false}
-                className="disabled:opacity-25 aria-pressed:bg-primary aria-pressed:text-primary-foreground">
-                {option === 'none' ? 'No access' : option === 'read' ? 'Read' : 'Write'}
-              </ToggleGroupItem>)}
-            </ToggleGroup>
-          </div>
-        })}
+        <ScopeAccess resources={RESOURCES} scopes={scopes} onChange={setScopes} />
       </div>
       <div className="grid gap-2">
         <Label className="flex items-center gap-2">

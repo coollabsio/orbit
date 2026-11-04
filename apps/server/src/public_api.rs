@@ -85,7 +85,7 @@ async fn authenticate(
     };
     match state
         .tokens
-        .authenticate(&token, ApiTokenScope::Mcp, TimestampMillis::now())
+        .authenticate(&token, None, TimestampMillis::now())
         .await
     {
         Ok(principal) => {
@@ -481,7 +481,7 @@ async fn projects(State(s): State<PublicApiState>, ctx: Ctx) -> Response {
     let result = async {
         let api = s
             .api
-            .authorize(&ctx.principal, ApiTokenScope::Read, &ctx.request_id)
+            .authorize(&ctx.principal, ApiTokenScope::TasksRead, &ctx.request_id)
             .await?;
         Ok(list::<_, ProjectOut>(api.projects().await?, None))
     }
@@ -500,7 +500,7 @@ async fn statuses(
     let result = async {
         let api = s
             .api
-            .authorize(&ctx.principal, ApiTokenScope::Read, &ctx.request_id)
+            .authorize(&ctx.principal, ApiTokenScope::TasksRead, &ctx.request_id)
             .await?;
         let page = api
             .statuses(project, query.cursor.as_deref(), query.limit)
@@ -520,7 +520,7 @@ async fn list_tasks(
     let result = async {
         let api = s
             .api
-            .authorize(&ctx.principal, ApiTokenScope::Read, &ctx.request_id)
+            .authorize(&ctx.principal, ApiTokenScope::TasksRead, &ctx.request_id)
             .await?;
         api.list_tasks(TaskQuery {
             project_id: query.project_id,
@@ -542,7 +542,7 @@ async fn get_task(State(s): State<PublicApiState>, ctx: Ctx, Path(task): Path<St
     let result = async {
         let api = s
             .api
-            .authorize(&ctx.principal, ApiTokenScope::Read, &ctx.request_id)
+            .authorize(&ctx.principal, ApiTokenScope::TasksRead, &ctx.request_id)
             .await?;
         api.get_task(&task).await
     }
@@ -559,7 +559,7 @@ async fn create_task(
     let result = async {
         let api = s
             .api
-            .authorize(&ctx.principal, ApiTokenScope::Write, &ctx.request_id)
+            .authorize(&ctx.principal, ApiTokenScope::TasksWrite, &ctx.request_id)
             .await?;
         api.create_task(NewTask {
             project_id: body.project_id,
@@ -587,7 +587,7 @@ async fn update_task(
     let result = async {
         let api = s
             .api
-            .authorize(&ctx.principal, ApiTokenScope::Write, &ctx.request_id)
+            .authorize(&ctx.principal, ApiTokenScope::TasksWrite, &ctx.request_id)
             .await?;
         let patch = TaskPatch {
             title: body.title,
@@ -613,7 +613,7 @@ async fn delete_task(
     let result = async {
         let api = s
             .api
-            .authorize(&ctx.principal, ApiTokenScope::Write, &ctx.request_id)
+            .authorize(&ctx.principal, ApiTokenScope::TasksWrite, &ctx.request_id)
             .await?;
         api.delete_task(&task, query.expected_version).await
     }

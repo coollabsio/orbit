@@ -2063,7 +2063,7 @@ async fn workspace_api_tokens_are_admin_only_and_revealed_once() {
             "POST",
             &path,
             &member.1,
-            json!({"name":"Discord", "project_ids": [project_id], "scopes":["write"]}),
+            json!({"name":"Discord", "project_ids": [project_id], "scopes":["tasks:write"]}),
         ))
         .await
         .unwrap();
@@ -2073,7 +2073,7 @@ async fn workspace_api_tokens_are_admin_only_and_revealed_once() {
         "POST",
         &path,
         &owner_cookie,
-        json!({"name":"Invalid project", "project_ids": [Id::new_v7().to_string()], "scopes":["write"]}),
+        json!({"name":"Invalid project", "project_ids": [Id::new_v7().to_string()], "scopes":["tasks:write"]}),
     )).await.unwrap();
     assert_eq!(invalid_project.status(), StatusCode::NOT_FOUND);
 
@@ -2081,7 +2081,7 @@ async fn workspace_api_tokens_are_admin_only_and_revealed_once() {
         "POST",
         &path,
         &owner_cookie,
-        json!({"name":"Invalid expiration", "project_ids": [project_id], "scopes":["write"], "expires_in_days": 14}),
+        json!({"name":"Invalid expiration", "project_ids": [project_id], "scopes":["tasks:write"], "expires_in_days": 14}),
     )).await.unwrap();
     assert_eq!(
         invalid_expiration.status(),
@@ -2094,7 +2094,7 @@ async fn workspace_api_tokens_are_admin_only_and_revealed_once() {
             "POST",
             &path,
             &owner_cookie,
-            json!({"name":"Discord bot", "project_ids": [project_id], "scopes":["read", "write"]}),
+            json!({"name":"Discord bot", "project_ids": [project_id], "scopes":["tasks:read", "tasks:write"]}),
         ))
         .await
         .unwrap();
@@ -2107,7 +2107,7 @@ async fn workspace_api_tokens_are_admin_only_and_revealed_once() {
     let token = created["token"].as_str().unwrap();
     let token_id = created["id"].as_str().unwrap();
     assert!(token.starts_with("orb_"));
-    assert_eq!(created["scopes"], json!(["read", "write"]));
+    assert_eq!(created["scopes"], json!(["tasks:read", "tasks:write"]));
     assert_eq!(created["project_ids"], json!([project_id]));
     assert_eq!(created["service_account_id"], Value::Null);
     assert_eq!(created["service_account_name"], Value::Null);
@@ -2121,7 +2121,11 @@ async fn workspace_api_tokens_are_admin_only_and_revealed_once() {
     assert_ne!(stored, token.as_bytes());
     let token_repository = ApiTokenRepository::new((*database).clone());
     let principal = token_repository
-        .authenticate(token, ApiTokenScope::Write, TimestampMillis::now())
+        .authenticate(
+            token,
+            Some(ApiTokenScope::TasksWrite),
+            TimestampMillis::now(),
+        )
         .await
         .unwrap();
     assert_eq!(principal.workspace_id.to_string(), setup.0);
@@ -2156,7 +2160,11 @@ async fn workspace_api_tokens_are_admin_only_and_revealed_once() {
     assert_eq!(revoked.status(), StatusCode::NO_CONTENT);
     assert!(matches!(
         token_repository
-            .authenticate(token, ApiTokenScope::Read, TimestampMillis::now())
+            .authenticate(
+                token,
+                Some(ApiTokenScope::TasksRead),
+                TimestampMillis::now()
+            )
             .await,
         Err(ApiTokenError::NotFound)
     ));
@@ -2749,7 +2757,7 @@ async fn removing_a_member_revokes_their_own_api_tokens_for_good() {
             "POST",
             &format!("/api/v1/workspaces/{}/api-tokens", setup.0),
             &admin.1,
-            json!({"name":"Script", "project_ids": [project_id], "scopes":["read"]}),
+            json!({"name":"Script", "project_ids": [project_id], "scopes":["tasks:read"]}),
         ))
         .await
         .unwrap();
@@ -2776,7 +2784,11 @@ async fn removing_a_member_revokes_their_own_api_tokens_for_good() {
     let tokens = ApiTokenRepository::new((*database).clone());
     assert!(
         tokens
-            .authenticate(&token, ApiTokenScope::Read, TimestampMillis::now())
+            .authenticate(
+                &token,
+                Some(ApiTokenScope::TasksRead),
+                TimestampMillis::now()
+            )
             .await
             .is_err()
     );

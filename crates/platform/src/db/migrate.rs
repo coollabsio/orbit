@@ -457,6 +457,11 @@ impl MigrationRunner {
                     ),
                     false,
                 ),
+                Migration::new(
+                    66,
+                    include_str!("../../../../apps/server/migrations/0066_api_token_scopes.sql"),
+                    false,
+                ),
             ],
         );
         runner.postgres = vec![
@@ -571,6 +576,13 @@ impl MigrationRunner {
                 65,
                 include_str!(
                     "../../../../apps/server/migrations/postgres/0065_confirm_setup_owner_email.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                66,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0066_api_token_scopes.sql"
                 ),
                 false,
             ),

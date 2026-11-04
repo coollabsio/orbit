@@ -29,7 +29,7 @@ use crate::image_compression::{CompressionStatus, ImageCompressor};
 use crate::mail::{self, Mailer};
 use crate::object_storage::Owner;
 use crate::repositories::api_tokens::{
-    ApiTokenError, ApiTokenRecord, ApiTokenRepository, IssuedApiToken,
+    ApiTokenError, ApiTokenRecord, ApiTokenRepository, ApiTokenScope, IssuedApiToken,
 };
 use crate::repositories::identity::{
     AdminAccountError, AdminUser, AuthenticatedSession, IdentityRepository,
@@ -632,17 +632,6 @@ async fn put_member_note(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[derive(Clone, Copy, Deserialize, ToSchema)]
-#[serde(rename_all = "lowercase")]
-enum ApiTokenScope {
-    Read,
-    Write,
-    #[serde(rename = "docs:read")]
-    DocsRead,
-    #[serde(rename = "chat:read")]
-    ChatRead,
-}
-
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct CreateApiTokenBody {
@@ -716,24 +705,6 @@ async fn create_api_token(
             request_id.as_ref(),
         ));
     }
-    let can_read = body
-        .scopes
-        .iter()
-        .any(|scope| matches!(scope, ApiTokenScope::Read));
-    let can_write = body
-        .scopes
-        .iter()
-        .any(|scope| matches!(scope, ApiTokenScope::Write));
-    let mcp_scopes = body
-        .scopes
-        .iter()
-        .filter_map(|s| match s {
-            ApiTokenScope::DocsRead => Some("docs:read"),
-            ApiTokenScope::ChatRead => Some("chat:read"),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join(" ");
     let now = TimestampMillis::now();
     let expires_at = match body.expires_in_days {
         None => None,
@@ -753,18 +724,16 @@ async fn create_api_token(
     };
     let issued = state
         .api_tokens
-        .create_scoped(
+        .create(
             workspace_id,
             session.user.id,
             name.to_owned(),
             project_ids,
-            can_read,
-            can_write,
+            &body.scopes,
             body.service_account,
             expires_at,
             request_id_value(request_id.as_ref()),
             now,
-            &mcp_scopes,
         )
         .await
         .map_err(|error| api_token_problem(error, &instance, request_id.as_ref()))?;

@@ -111,20 +111,7 @@ impl OAuthState {
                 .parse()
                 .map_err(|_| OAuthError::server())?,
             service_account_id: None,
-            scopes: {
-                let extra: String = row.get("mcp_scopes");
-                let mut scopes = vec![ApiTokenScope::Read];
-                for (name, scope) in [
-                    ("tasks:write", ApiTokenScope::Write),
-                    ("docs:read", ApiTokenScope::DocsRead),
-                    ("chat:read", ApiTokenScope::ChatRead),
-                ] {
-                    if extra.split_whitespace().any(|s| s == name) {
-                        scopes.push(scope);
-                    }
-                }
-                scopes
-            },
+            scopes: ApiTokenScope::parse_list(&granted_scopes(row.get("mcp_scopes"))),
         }))
     }
 }

@@ -6,7 +6,7 @@ use orbit_platform::{
     HttpPlatformLayer, Id, OriginPolicy, PasswordService, TestDatabase, TimestampMillis,
 };
 use orbit_server::mcp::{McpState, router};
-use orbit_server::repositories::api_tokens::ApiTokenRepository;
+use orbit_server::repositories::api_tokens::{ApiTokenRepository, ApiTokenScope};
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
 use orbit_server::repositories::tasks::{CreateTask, TaskRepository};
 use serde_json::{Value, json};
@@ -93,8 +93,7 @@ impl Fixture {
                 setup.user_id,
                 "MCP".into(),
                 vec![setup.project_id],
-                true,
-                false,
+                &[ApiTokenScope::TasksRead],
                 false,
                 None,
                 "test",
@@ -357,8 +356,7 @@ async fn bearer_credentials_are_required_and_checked_on_every_request() {
             fixture.user,
             "Write only".into(),
             vec![fixture.project],
-            false,
-            true,
+            &[ApiTokenScope::TasksWrite],
             false,
             None,
             "test",
@@ -455,8 +453,7 @@ async fn identity_is_request_local_and_not_reused_between_connections() {
             fixture.user,
             "Other".into(),
             vec![fixture.other_project],
-            true,
-            false,
+            &[ApiTokenScope::TasksRead],
             false,
             None,
             "test",
@@ -676,7 +673,7 @@ async fn task_writes_require_scope_and_versions_and_stay_in_granted_projects() {
         )
         .await;
     assert!(denied.get("error").is_some(), "{denied}");
-    sqlx::query("UPDATE api_tokens SET can_write = 1 WHERE id = $1")
+    sqlx::query("UPDATE api_tokens SET scopes = 'tasks:read tasks:write' WHERE id = $1")
         .bind(f.token_id.to_string())
         .execute(f.database.pool())
         .await
@@ -863,7 +860,7 @@ async fn docs_and_chat_require_explicit_scopes_and_never_expose_write_tools() {
         let r = f.tool(name, json!({})).await;
         assert!(r.get("error").is_some(), "{r}");
     }
-    sqlx::query("UPDATE api_tokens SET mcp_scopes = 'docs:read chat:read' WHERE id = $1")
+    sqlx::query("UPDATE api_tokens SET scopes = 'tasks:read docs:read chat:read' WHERE id = $1")
         .bind(f.token_id.to_string())
         .execute(f.database.pool())
         .await
@@ -915,7 +912,7 @@ async fn docs_and_chat_require_explicit_scopes_and_never_expose_write_tools() {
 #[tokio::test]
 async fn task_writes_are_refused_in_a_read_only_cloud_workspace() {
     let f = Fixture::new().await;
-    sqlx::query("UPDATE api_tokens SET can_write = 1 WHERE id = $1")
+    sqlx::query("UPDATE api_tokens SET scopes = 'tasks:read tasks:write' WHERE id = $1")
         .bind(f.token_id.to_string())
         .execute(f.database.pool())
         .await

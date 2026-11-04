@@ -68,13 +68,17 @@ export type ApiTokenRecord = {
     name: string;
     project_id: string;
     project_ids: Array<string>;
-    scopes: Array<string>;
+    scopes: Array<ApiTokenScope>;
     service_account_id?: string | null;
     service_account_name?: string | null;
     token_prefix: string;
 };
 
-export type ApiTokenScope = 'read' | 'write' | 'docs:read' | 'chat:read';
+/**
+ * What a credential may do. API tokens and OAuth grants use the same names; `tasks:write`
+ * includes `tasks:read`.
+ */
+export type ApiTokenScope = 'tasks:read' | 'tasks:write' | 'docs:read' | 'chat:read';
 
 export type AttachmentComment = {
     attachments: Array<AttachmentRecord>;

@@ -1329,7 +1329,11 @@ pub(crate) async fn create_discord_event(
     })?;
     let principal = state
         .tokens
-        .authenticate(token, ApiTokenScope::Write, TimestampMillis::now())
+        .authenticate(
+            token,
+            Some(ApiTokenScope::TasksWrite),
+            TimestampMillis::now(),
+        )
         .await
         .map_err(|error| token_problem(error, request_id.as_ref().map(|value| &value.0)))?;
     let project_id = match body.project_id.as_deref() {

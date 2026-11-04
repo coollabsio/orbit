@@ -187,8 +187,8 @@ internet without separate access controls. Production still requires HTTPS.
 ## API-token alternative
 
 API tokens remain supported for scripts or clients with custom HTTP headers.
-As a workspace owner or administrator, open **Settings → API tokens**, enable
-**Read**, disable **Write**, select projects, and set an expiry. Configure
+As a workspace owner or administrator, open **Settings → API tokens**, set
+Tasks to **Read**, select projects, and set an expiry. Configure
 `Authorization: Bearer <token>` on the MCP client. Never put the token in a URL
 or a repository. A service-account token does not bypass the creator's current
 workspace membership check for repository reads.
@@ -274,8 +274,9 @@ cargo test -p orbit-platform --test http_security
 ## Permissions and tools
 
 Existing connections keep read-only task access. Reconnect to approve additional permissions.
-OAuth consent offers optional task writes, docs reads, and chat reads. API tokens use `read`
-(task reads), `write` (task create, update and delete), `docs:read`, and `chat:read`.
+OAuth consent offers optional task writes, docs reads, and chat reads. API tokens use the
+same scopes: `tasks:read`, `tasks:write` (task create, update and delete; includes
+`tasks:read`), `docs:read`, and `chat:read`.
 Docs and chat permissions default to off. They apply to content visible to the connected
 person in the selected workspace, including their private docs, private channels and DMs.
 Service-account tokens support tasks only; docs and chat require a personal identity.

@@ -80,8 +80,7 @@ async fn scenario(database: &Database) {
             seed.owner,
             "Reader".into(),
             seed.projects.to_vec(),
-            true,
-            false,
+            &[ApiTokenScope::TasksRead],
             false,
             None,
             "req-1",
@@ -90,7 +89,7 @@ async fn scenario(database: &Database) {
         .await
         .unwrap();
     let principal = tokens
-        .authenticate(&reader.token, ApiTokenScope::Read, now)
+        .authenticate(&reader.token, Some(ApiTokenScope::TasksRead), now)
         .await
         .unwrap();
     assert_eq!(principal.workspace_id, seed.workspace);
@@ -98,36 +97,34 @@ async fn scenario(database: &Database) {
     assert_eq!(principal.project_ids, seed.projects.to_vec());
     assert!(matches!(
         tokens
-            .authenticate(&reader.token, ApiTokenScope::Write, now)
+            .authenticate(&reader.token, Some(ApiTokenScope::TasksWrite), now)
             .await,
         Err(ApiTokenError::Forbidden)
     ));
 
     let docs = tokens
-        .create_scoped(
+        .create(
             seed.workspace,
             seed.owner,
             "Docs reader".into(),
             seed.projects.to_vec(),
-            false,
-            false,
+            &[ApiTokenScope::DocsRead, ApiTokenScope::ChatRead],
             false,
             None,
             "test",
             now,
-            "docs:read chat:read",
         )
         .await
         .unwrap();
-    assert_eq!(docs.api_token.scopes, vec!["docs:read", "chat:read"]);
-    let principal = tokens
-        .authenticate(&docs.token, ApiTokenScope::Mcp, now)
-        .await
-        .unwrap();
+    assert_eq!(
+        docs.api_token.scopes,
+        vec![ApiTokenScope::DocsRead, ApiTokenScope::ChatRead]
+    );
+    let principal = tokens.authenticate(&docs.token, None, now).await.unwrap();
     assert!(principal.scopes.contains(&ApiTokenScope::DocsRead));
     assert!(principal.scopes.contains(&ApiTokenScope::ChatRead));
-    assert!(!principal.scopes.contains(&ApiTokenScope::Read));
-    assert!(!principal.scopes.contains(&ApiTokenScope::Write));
+    assert!(!principal.scopes.contains(&ApiTokenScope::TasksRead));
+    assert!(!principal.scopes.contains(&ApiTokenScope::TasksWrite));
     assert!(
         tokens
             .list(seed.workspace, seed.owner)
@@ -135,18 +132,13 @@ async fn scenario(database: &Database) {
             .unwrap()
             .iter()
             .any(|token| token.id == docs.api_token.id
-                && token.scopes.contains(&"docs:read".to_owned()))
+                && token.scopes.contains(&ApiTokenScope::DocsRead))
     );
     tokens
         .revoke(seed.workspace, docs.api_token.id, seed.owner, "test", now)
         .await
         .unwrap();
-    assert!(
-        tokens
-            .authenticate(&docs.token, ApiTokenScope::Mcp, now)
-            .await
-            .is_err()
-    );
+    assert!(tokens.authenticate(&docs.token, None, now).await.is_err());
 
     // Service accounts are matched by name without case.
     let bot = tokens
@@ -155,8 +147,7 @@ async fn scenario(database: &Database) {
             seed.owner,
             "Bot".into(),
             vec![seed.projects[1]],
-            true,
-            true,
+            &[ApiTokenScope::TasksRead, ApiTokenScope::TasksWrite],
             true,
             Some(TimestampMillis::from_millis(now.as_millis() + 60_000)),
             "req-2",
@@ -170,8 +161,7 @@ async fn scenario(database: &Database) {
             seed.owner,
             "bot".into(),
             vec![seed.projects[1]],
-            true,
-            false,
+            &[ApiTokenScope::TasksRead],
             true,
             None,
             "req-3",
@@ -185,7 +175,7 @@ async fn scenario(database: &Database) {
         bot_again.api_token.service_account_id
     );
     let bot_principal = tokens
-        .authenticate(&bot.token, ApiTokenScope::Write, now)
+        .authenticate(&bot.token, Some(ApiTokenScope::TasksWrite), now)
         .await
         .unwrap();
     assert_eq!(
@@ -195,7 +185,7 @@ async fn scenario(database: &Database) {
     let expired = TimestampMillis::from_millis(now.as_millis() + 120_000);
     assert!(matches!(
         tokens
-            .authenticate(&bot.token, ApiTokenScope::Read, expired)
+            .authenticate(&bot.token, Some(ApiTokenScope::TasksRead), expired)
             .await,
         Err(ApiTokenError::NotFound)
     ));
@@ -212,7 +202,7 @@ async fn scenario(database: &Database) {
         .unwrap();
     assert!(matches!(
         tokens
-            .authenticate(&reader.token, ApiTokenScope::Read, now)
+            .authenticate(&reader.token, Some(ApiTokenScope::TasksRead), now)
             .await,
         Err(ApiTokenError::NotFound)
     ));
@@ -236,8 +226,11 @@ async fn scenario(database: &Database) {
             .iter()
             .all(|token| token.service_account_name.as_deref() == Some("Bot"))
     );
-    assert_eq!(listed[0].scopes, ["read"]);
-    assert_eq!(listed[1].scopes, ["read", "write"]);
+    assert_eq!(listed[0].scopes, [ApiTokenScope::TasksRead]);
+    assert_eq!(
+        listed[1].scopes,
+        [ApiTokenScope::TasksRead, ApiTokenScope::TasksWrite]
+    );
     assert_eq!(listed[1].last_used_at, Some(now));
     assert!(matches!(
         tokens.list(seed.workspace, seed.outsider).await,

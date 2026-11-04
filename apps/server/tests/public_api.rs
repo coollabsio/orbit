@@ -8,7 +8,7 @@ use orbit_platform::{
     HttpPlatformLayer, Id, OriginPolicy, PasswordService, TestDatabase, TimestampMillis,
 };
 use orbit_server::public_api::{PublicApiState, router};
-use orbit_server::repositories::api_tokens::ApiTokenRepository;
+use orbit_server::repositories::api_tokens::{ApiTokenRepository, ApiTokenScope};
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
 use orbit_server::repositories::pages::{CreatePage, PageRepository, SpaceRequest};
 use orbit_server::repositories::tasks::{CreateTask, TaskRepository};
@@ -114,28 +114,19 @@ impl Fixture {
         }
     }
 
-    /// A token for the approved project with these scopes (`read`, `write`, `docs:read`, …).
-    async fn token(&self, scopes: &[&str], service_account: bool) -> (String, Id) {
-        let extra = scopes
-            .iter()
-            .filter(|scope| scope.contains(':'))
-            .copied()
-            .collect::<Vec<_>>()
-            .join(" ");
+    async fn token(&self, scopes: &[ApiTokenScope], service_account: bool) -> (String, Id) {
         let issued = self
             .tokens
-            .create_scoped(
+            .create(
                 self.workspace,
                 self.user,
                 format!("cli-{}", Id::new_v7()),
                 vec![self.project],
-                scopes.contains(&"read"),
-                scopes.contains(&"write"),
+                scopes,
                 service_account,
                 None,
                 "test",
                 TimestampMillis::now(),
-                &extra,
             )
             .await
             .unwrap();
@@ -249,12 +240,12 @@ async fn read_endpoints_return_public_fields_of_approved_projects_only() {
         )
         .await
         .unwrap();
-    let (token, token_id) = f.token(&["read"], false).await;
+    let (token, token_id) = f.token(&[ApiTokenScope::TasksRead], false).await;
 
     let (status, me) = f.call(Some(&token), "GET", "/me", None).await;
     assert_eq!(status, StatusCode::OK, "{me}");
     assert_eq!(me["token"]["id"], token_id.to_string());
-    assert_eq!(me["token"]["scopes"], json!(["read"]));
+    assert_eq!(me["token"]["scopes"], json!(["tasks:read"]));
     assert_eq!(me["token"]["project_ids"], json!([f.project]));
     assert_eq!(me["token"]["expires_at"], Value::Null);
     assert_eq!(me["workspace"], json!({"id": f.workspace, "name": "Orbit"}));
@@ -386,7 +377,12 @@ async fn read_endpoints_return_public_fields_of_approved_projects_only() {
 #[tokio::test]
 async fn resources_of_unapproved_projects_are_not_found() {
     let f = Fixture::new().await;
-    let (token, _) = f.token(&["read", "write"], false).await;
+    let (token, _) = f
+        .token(
+            &[ApiTokenScope::TasksRead, ApiTokenScope::TasksWrite],
+            false,
+        )
+        .await;
     let other = f.other_project;
     let task = f.other_task;
     let current = f.tasks.get_task(f.workspace, task, f.user).await.unwrap();
@@ -439,7 +435,7 @@ async fn task_writes_follow_scope_version_and_workspace_rules() {
     let f = Fixture::new().await;
     let status = f.first_status(f.project).await;
     let current = f.tasks.get_task(f.workspace, f.task, f.user).await.unwrap();
-    let (read_only, _) = f.token(&["read"], false).await;
+    let (read_only, _) = f.token(&[ApiTokenScope::TasksRead], false).await;
     for (method, path, body) in [
         (
             "POST",
@@ -462,9 +458,10 @@ async fn task_writes_follow_scope_version_and_workspace_rules() {
         assert_eq!(problem["code"], "insufficient_scope");
     }
 
-    let (write_only, _) = f.token(&["write"], false).await;
+    let (write_only, _) = f.token(&[ApiTokenScope::TasksWrite], false).await;
+    // `tasks:write` includes `tasks:read`.
     let (code, _) = f.call(Some(&write_only), "GET", "/tasks", None).await;
-    assert_eq!(code, StatusCode::FORBIDDEN);
+    assert_eq!(code, StatusCode::OK);
 
     let label = f
         .tasks
@@ -492,7 +489,12 @@ async fn task_writes_follow_scope_version_and_workspace_rules() {
         )
         .await
         .unwrap();
-    let (token, _) = f.token(&["read", "write"], false).await;
+    let (token, _) = f
+        .token(
+            &[ApiTokenScope::TasksRead, ApiTokenScope::TasksWrite],
+            false,
+        )
+        .await;
     let (code, created) = f
         .call(
             Some(&token),
@@ -643,7 +645,12 @@ async fn a_parent_in_an_unapproved_project_does_not_leak() {
         Some(f.other_task),
     )
     .await;
-    let (token, _) = f.token(&["read", "write"], false).await;
+    let (token, _) = f
+        .token(
+            &[ApiTokenScope::TasksRead, ApiTokenScope::TasksWrite],
+            false,
+        )
+        .await;
     let (code, task) = f
         .call(Some(&token), "GET", &format!("/tasks/{child}"), None)
         .await;
@@ -686,19 +693,28 @@ async fn docs_need_their_scope_and_a_personal_token_and_unserved_paths_are_not_f
         )
         .await
         .unwrap();
-    let (plain, _) = f.token(&["read"], false).await;
+    let (plain, _) = f.token(&[ApiTokenScope::TasksRead], false).await;
     for path in ["/docs".to_owned(), format!("/docs/{}", page.id)] {
         let (code, problem) = f.call(Some(&plain), "GET", &path, None).await;
         assert_eq!(code, StatusCode::FORBIDDEN, "{path}");
         assert_eq!(problem["code"], "insufficient_scope");
     }
 
-    let (token, _) = f.token(&["read", "docs:read", "chat:read"], false).await;
+    let (token, _) = f
+        .token(
+            &[
+                ApiTokenScope::TasksRead,
+                ApiTokenScope::DocsRead,
+                ApiTokenScope::ChatRead,
+            ],
+            false,
+        )
+        .await;
     let (code, me) = f.call(Some(&token), "GET", "/me", None).await;
     assert_eq!(code, StatusCode::OK);
     assert_eq!(
         me["token"]["scopes"],
-        json!(["read", "docs:read", "chat:read"])
+        json!(["tasks:read", "docs:read", "chat:read"])
     );
     let (code, docs) = f.call(Some(&token), "GET", "/docs", None).await;
     assert_eq!(code, StatusCode::OK, "{docs}");
@@ -747,7 +763,16 @@ async fn docs_need_their_scope_and_a_personal_token_and_unserved_paths_are_not_f
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
     }
 
-    let (service, _) = f.token(&["read", "docs:read", "chat:read"], true).await;
+    let (service, _) = f
+        .token(
+            &[
+                ApiTokenScope::TasksRead,
+                ApiTokenScope::DocsRead,
+                ApiTokenScope::ChatRead,
+            ],
+            true,
+        )
+        .await;
     let (code, me) = f.call(Some(&service), "GET", "/me", None).await;
     assert_eq!(code, StatusCode::OK, "{me}");
     assert_eq!(me["user"], Value::Null);
@@ -769,14 +794,14 @@ async fn docs_need_their_scope_and_a_personal_token_and_unserved_paths_are_not_f
 #[tokio::test]
 async fn bad_expired_and_revoked_tokens_are_unauthorized() {
     let f = Fixture::new().await;
-    let (expired, expired_id) = f.token(&["read"], false).await;
+    let (expired, expired_id) = f.token(&[ApiTokenScope::TasksRead], false).await;
     sqlx::query("UPDATE api_tokens SET expires_at = $1 WHERE id = $2")
         .bind(TimestampMillis::now().as_millis() - 1)
         .bind(expired_id.to_string())
         .execute(f.database.pool())
         .await
         .unwrap();
-    let (revoked, revoked_id) = f.token(&["read"], false).await;
+    let (revoked, revoked_id) = f.token(&[ApiTokenScope::TasksRead], false).await;
     f.tokens
         .revoke(
             f.workspace,

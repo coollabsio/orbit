@@ -74,7 +74,7 @@ async fn github_schema_is_in_one_draft_migration() {
         db.scalar::<i64>("SELECT MAX(version) FROM schema_migrations")
             .await
             .unwrap(),
-        65
+        66
     );
     assert_eq!(
         db.scalar::<i64>("SELECT COUNT(*) FROM pragma_table_info('github_issue_links') WHERE name IN ('kind', 'pull_state', 'sync_paused')")
@@ -211,7 +211,7 @@ async fn rejects_a_schema_newer_than_the_binary() {
         error,
         MigrationError::SchemaNewer {
             database_version: 999,
-            binary_version: 65
+            binary_version: 66
         }
     ));
 }
@@ -2626,4 +2626,80 @@ async fn setup_owner_email_migration_confirms_only_the_setup_owner() {
             .unwrap(),
         None
     );
+}
+
+#[tokio::test]
+async fn api_token_scopes_migration_keeps_each_token_s_access() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
+        .await
+        .unwrap();
+    MigrationRunner::embedded_through("test", 65)
+        .run(&database)
+        .await
+        .unwrap();
+    let mut transaction = database.immediate_transaction().await.unwrap();
+    sqlx::raw_sql(
+        "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at)
+         VALUES ('u', 'u@example.com', 'u@example.com', 'U', 'x', 1, 1);
+         INSERT INTO workspaces (id, name, owner_membership_id, created_at, updated_at) VALUES ('w', 'W', 'm', 1, 1);
+         INSERT INTO memberships (id, workspace_id, user_id, role, created_at, updated_at) VALUES ('m', 'w', 'u', 'owner', 1, 1);
+         INSERT INTO projects (id, workspace_id, name, project_key, color, created_at, updated_at)
+         VALUES ('p', 'w', 'P', 'P', '#ff0000', 1, 1);",
+    )
+    .execute(&mut *transaction)
+    .await
+    .unwrap();
+    for (byte, (id, read, write, extra)) in [
+        ("read", 1_i64, 0_i64, ""),
+        ("write", 0, 1, ""),
+        ("all", 1, 1, "docs:read chat:read"),
+        ("docs", 0, 0, "docs:read"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        sqlx::query(
+            "INSERT INTO api_tokens (id, workspace_id, project_id, name, token_hash, token_prefix, \
+             can_read, can_write, created_by, created_at, mcp_scopes) \
+             VALUES ($1, 'w', 'p', $2, $3, 'orb_x', $4, $5, 'u', 1, $6)",
+        )
+        .bind(id)
+        .bind(id)
+        .bind(vec![u8::try_from(byte).unwrap(); 32])
+        .bind(read)
+        .bind(write)
+        .bind(extra)
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
+    }
+    transaction.commit().await.unwrap();
+
+    MigrationRunner::embedded("test")
+        .run(&database)
+        .await
+        .unwrap();
+
+    let scopes: Vec<(String, String)> =
+        sqlx::query_as("SELECT id, scopes FROM api_tokens ORDER BY id")
+            .fetch_all(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        scopes,
+        [
+            (
+                "all".to_owned(),
+                "tasks:read tasks:write docs:read chat:read".to_owned()
+            ),
+            ("docs".to_owned(), "docs:read".to_owned()),
+            ("read".to_owned(), "tasks:read".to_owned()),
+            ("write".to_owned(), "tasks:write".to_owned()),
+        ]
+    );
+    let old_flag = sqlx::query("SELECT can_read FROM api_tokens")
+        .fetch_all(database.pool())
+        .await;
+    assert!(old_flag.is_err(), "the read and write flags are gone");
 }

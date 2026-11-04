@@ -1,6 +1,6 @@
 use orbit_domain::{Actor, Permission};
 use orbit_platform::{Database, Id, Row, TimestampMillis, generate_opaque_token};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 use utoipa::ToSchema;
@@ -14,7 +14,7 @@ pub struct ApiTokenRecord {
     pub id: Id,
     pub name: String,
     pub token_prefix: String,
-    pub scopes: Vec<String>,
+    pub scopes: Vec<ApiTokenScope>,
     #[schema(value_type = String)]
     pub project_id: Id,
     #[schema(value_type = Vec<String>)]
@@ -37,26 +37,55 @@ pub struct IssuedApiToken {
     pub token: String,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+/// What a credential may do. API tokens and OAuth grants use the same names; `tasks:write`
+/// includes `tasks:read`.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize, ToSchema)]
 pub enum ApiTokenScope {
-    Read,
-    Write,
+    #[serde(rename = "tasks:read")]
+    TasksRead,
+    #[serde(rename = "tasks:write")]
+    TasksWrite,
+    #[serde(rename = "docs:read")]
     DocsRead,
+    #[serde(rename = "chat:read")]
     ChatRead,
-    Mcp,
 }
 
 impl ApiTokenScope {
-    /// The name in token records and the public API; `Mcp` is "any scope", never stored.
+    pub const ALL: [Self; 4] = [
+        Self::TasksRead,
+        Self::TasksWrite,
+        Self::DocsRead,
+        Self::ChatRead,
+    ];
+
     #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
-            Self::Read => "read",
-            Self::Write => "write",
+            Self::TasksRead => "tasks:read",
+            Self::TasksWrite => "tasks:write",
             Self::DocsRead => "docs:read",
             Self::ChatRead => "chat:read",
-            Self::Mcp => "mcp",
         }
+    }
+
+    /// The scopes of a stored space-separated list, in canonical order; unknown names are dropped.
+    #[must_use]
+    pub fn parse_list(value: &str) -> Vec<Self> {
+        Self::ALL
+            .into_iter()
+            .filter(|scope| value.split_whitespace().any(|name| name == scope.as_str()))
+            .collect()
+    }
+
+    #[must_use]
+    pub fn format_list(scopes: &[Self]) -> String {
+        Self::ALL
+            .into_iter()
+            .filter(|scope| scopes.contains(scope))
+            .map(Self::as_str)
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 }
 
@@ -68,6 +97,15 @@ pub struct ApiTokenPrincipal {
     pub creator_id: Id,
     pub service_account_id: Option<Id>,
     pub scopes: Vec<ApiTokenScope>,
+}
+
+impl ApiTokenPrincipal {
+    #[must_use]
+    pub fn allows(&self, scope: ApiTokenScope) -> bool {
+        self.scopes.contains(&scope)
+            || (scope == ApiTokenScope::TasksRead
+                && self.scopes.contains(&ApiTokenScope::TasksWrite))
+    }
 }
 
 #[derive(Debug, Error)]
@@ -99,7 +137,7 @@ impl ApiTokenRepository {
         actor_id: Id,
     ) -> Result<Vec<ApiTokenRecord>, ApiTokenError> {
         self.require_manager(workspace_id, actor_id).await?;
-        let rows = sqlx::query("SELECT api_tokens.id, api_tokens.name, api_tokens.token_prefix, api_tokens.can_read, api_tokens.can_write, api_tokens.mcp_scopes, api_tokens.project_id, api_tokens.created_at, api_tokens.last_used_at, api_tokens.expires_at, api_tokens.service_account_id, service_accounts.name AS service_account_name FROM api_tokens LEFT JOIN service_accounts ON service_accounts.id = api_tokens.service_account_id WHERE api_tokens.workspace_id = $1 AND api_tokens.revoked_at IS NULL ORDER BY api_tokens.created_at DESC, api_tokens.id DESC")
+        let rows = sqlx::query("SELECT api_tokens.id, api_tokens.name, api_tokens.token_prefix, api_tokens.scopes, api_tokens.project_id, api_tokens.created_at, api_tokens.last_used_at, api_tokens.expires_at, api_tokens.service_account_id, service_accounts.name AS service_account_name FROM api_tokens LEFT JOIN service_accounts ON service_accounts.id = api_tokens.service_account_id WHERE api_tokens.workspace_id = $1 AND api_tokens.revoked_at IS NULL ORDER BY api_tokens.created_at DESC, api_tokens.id DESC")
             .bind(workspace_id.to_string()).fetch_all(self.database.pool()).await?;
         let mut records = Vec::with_capacity(rows.len());
         for row in rows {
@@ -116,44 +154,16 @@ impl ApiTokenRepository {
         actor_id: Id,
         name: String,
         project_ids: Vec<Id>,
-        can_read: bool,
-        can_write: bool,
+        scopes: &[ApiTokenScope],
         service_account: bool,
         expires_at: Option<TimestampMillis>,
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<IssuedApiToken, ApiTokenError> {
-        self.create_scoped(
-            workspace_id,
-            actor_id,
-            name,
-            project_ids,
-            can_read,
-            can_write,
-            service_account,
-            expires_at,
-            request_id,
-            now,
-            "",
-        )
-        .await
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub async fn create_scoped(
-        &self,
-        workspace_id: Id,
-        actor_id: Id,
-        name: String,
-        project_ids: Vec<Id>,
-        can_read: bool,
-        can_write: bool,
-        service_account: bool,
-        expires_at: Option<TimestampMillis>,
-        request_id: &str,
-        now: TimestampMillis,
-        mcp_scopes: &str,
-    ) -> Result<IssuedApiToken, ApiTokenError> {
+        let scopes = ApiTokenScope::parse_list(&ApiTokenScope::format_list(scopes));
+        if scopes.is_empty() {
+            return Err(ApiTokenError::NotFound);
+        }
         let mut transaction = self.database.immediate_transaction().await?;
         require_manager_in(&mut transaction, workspace_id, actor_id).await?;
         if project_ids.is_empty() {
@@ -190,15 +200,10 @@ impl ApiTokenRepository {
         let token = format!("orb_{}", generate_opaque_token());
         let hash: [u8; 32] = Sha256::digest(token.as_bytes()).into();
         let prefix: String = token.chars().take(12).collect();
-        sqlx::query("INSERT INTO api_tokens (id, workspace_id, project_id, name, token_hash, token_prefix, can_read, can_write, created_by, created_at, service_account_id, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)")
+        sqlx::query("INSERT INTO api_tokens (id, workspace_id, project_id, name, token_hash, token_prefix, scopes, created_by, created_at, service_account_id, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)")
             .bind(id.to_string()).bind(workspace_id.to_string()).bind(project_ids[0].to_string()).bind(&name).bind(hash.to_vec()).bind(&prefix)
-            .bind(i64::from(can_read)).bind(i64::from(can_write)).bind(actor_id.to_string()).bind(now.as_millis()).bind(service_account_id.map(|id| id.to_string())).bind(expires_at.map(TimestampMillis::as_millis))
+            .bind(ApiTokenScope::format_list(&scopes)).bind(actor_id.to_string()).bind(now.as_millis()).bind(service_account_id.map(|id| id.to_string())).bind(expires_at.map(TimestampMillis::as_millis))
             .execute(&mut *transaction).await?;
-        sqlx::query("UPDATE api_tokens SET mcp_scopes = $1 WHERE id = $2")
-            .bind(mcp_scopes)
-            .bind(id.to_string())
-            .execute(&mut *transaction)
-            .await?;
         for project_id in &project_ids {
             sqlx::query("INSERT INTO api_token_projects (token_id, project_id) VALUES ($1, $2)")
                 .bind(id.to_string())
@@ -215,7 +220,7 @@ impl ApiTokenRepository {
             "api_token",
             Some(id),
             request_id,
-            serde_json::json!({"scopes": ( { let mut scopes = scopes(can_read, can_write); scopes.extend(mcp_scopes.split_whitespace().map(str::to_owned)); scopes } ), "project_ids": project_ids}),
+            serde_json::json!({"scopes": scopes, "project_ids": project_ids}),
             now,
         )
         .await?;
@@ -225,11 +230,7 @@ impl ApiTokenRepository {
                 id,
                 name: name.clone(),
                 token_prefix: prefix,
-                scopes: {
-                    let mut scopes = scopes(can_read, can_write);
-                    scopes.extend(mcp_scopes.split_whitespace().map(str::to_owned));
-                    scopes
-                },
+                scopes,
                 project_id: project_ids[0],
                 project_ids,
                 service_account_id,
@@ -245,12 +246,12 @@ impl ApiTokenRepository {
     pub async fn authenticate(
         &self,
         token: &str,
-        required_scope: ApiTokenScope,
+        required: Option<ApiTokenScope>,
         now: TimestampMillis,
     ) -> Result<ApiTokenPrincipal, ApiTokenError> {
         let hash: [u8; 32] = Sha256::digest(token.as_bytes()).into();
         let row = sqlx::query(
-            "SELECT api_tokens.id, api_tokens.workspace_id, api_tokens.created_by, api_tokens.service_account_id, api_tokens.can_read, api_tokens.can_write, api_tokens.mcp_scopes \
+            "SELECT api_tokens.id, api_tokens.workspace_id, api_tokens.created_by, api_tokens.service_account_id, api_tokens.scopes \
              FROM api_tokens JOIN workspaces ON workspaces.id = api_tokens.workspace_id \
              LEFT JOIN users ON users.id = api_tokens.created_by AND users.suspended_at IS NULL \
              LEFT JOIN memberships ON memberships.workspace_id = api_tokens.workspace_id AND memberships.user_id = api_tokens.created_by \
@@ -265,25 +266,9 @@ impl ApiTokenRepository {
         .fetch_optional(self.database.pool())
         .await?
         .ok_or(ApiTokenError::NotFound)?;
-        let can_read = row.get::<i64, _>("can_read") != 0;
-        let can_write = row.get::<i64, _>("can_write") != 0;
-        let allowed = match required_scope {
-            ApiTokenScope::Read => can_read,
-            ApiTokenScope::Write => can_write,
-            ApiTokenScope::DocsRead => row
-                .get::<String, _>("mcp_scopes")
-                .split_whitespace()
-                .any(|s| s == "docs:read"),
-            ApiTokenScope::ChatRead => row
-                .get::<String, _>("mcp_scopes")
-                .split_whitespace()
-                .any(|s| s == "chat:read"),
-            ApiTokenScope::Mcp => {
-                can_read || can_write || !row.get::<String, _>("mcp_scopes").is_empty()
-            }
-        };
-        if !allowed {
-            return Err(ApiTokenError::Forbidden);
+        let scopes = ApiTokenScope::parse_list(&row.get::<String, _>("scopes"));
+        if scopes.is_empty() {
+            return Err(ApiTokenError::NotFound);
         }
         let token_id: Id = row
             .get::<String, _>("id")
@@ -305,34 +290,23 @@ impl ApiTokenRepository {
             .get::<Option<String>, _>("service_account_id")
             .map(|value| value.parse().map_err(|_| ApiTokenError::InvalidIdentifier))
             .transpose()?;
-        sqlx::query("UPDATE api_tokens SET last_used_at = $1 WHERE id = $2")
-            .bind(now.as_millis())
-            .bind(token_id.to_string())
-            .execute(self.database.pool())
-            .await?;
-        Ok(ApiTokenPrincipal {
+        let principal = ApiTokenPrincipal {
             token_id,
             workspace_id,
             project_ids,
             creator_id,
             service_account_id,
-            scopes: [
-                (can_read, ApiTokenScope::Read),
-                (can_write, ApiTokenScope::Write),
-                (
-                    row.get::<String, _>("mcp_scopes").contains("docs:read"),
-                    ApiTokenScope::DocsRead,
-                ),
-                (
-                    row.get::<String, _>("mcp_scopes").contains("chat:read"),
-                    ApiTokenScope::ChatRead,
-                ),
-            ]
-            .into_iter()
-            .filter(|(enabled, _)| *enabled)
-            .map(|(_, scope)| scope)
-            .collect(),
-        })
+            scopes,
+        };
+        if required.is_some_and(|scope| !principal.allows(scope)) {
+            return Err(ApiTokenError::Forbidden);
+        }
+        sqlx::query("UPDATE api_tokens SET last_used_at = $1 WHERE id = $2")
+            .bind(now.as_millis())
+            .bind(token_id.to_string())
+            .execute(self.database.pool())
+            .await?;
+        Ok(principal)
     }
 
     async fn project_ids(&self, token_id: Id) -> Result<Vec<Id>, ApiTokenError> {
@@ -434,21 +408,11 @@ fn parse_id(row: &sqlx::any::AnyRow, column: &str) -> Result<Id, ApiTokenError> 
 
 fn decode(row: sqlx::any::AnyRow, project_ids: Vec<Id>) -> Result<ApiTokenRecord, ApiTokenError> {
     let id = parse_id(&row, "id")?;
-    let can_read = row.get::<i64, _>("can_read") != 0;
-    let can_write = row.get::<i64, _>("can_write") != 0;
     Ok(ApiTokenRecord {
         id,
         name: row.get("name"),
         token_prefix: row.get("token_prefix"),
-        scopes: {
-            let mut scopes = scopes(can_read, can_write);
-            scopes.extend(
-                row.get::<String, _>("mcp_scopes")
-                    .split_whitespace()
-                    .map(str::to_owned),
-            );
-            scopes
-        },
+        scopes: ApiTokenScope::parse_list(&row.get::<String, _>("scopes")),
         project_id: parse_id(&row, "project_id")?,
         project_ids,
         service_account_id: row
@@ -464,12 +428,4 @@ fn decode(row: sqlx::any::AnyRow, project_ids: Vec<Id>) -> Result<ApiTokenRecord
             .get::<Option<i64>, _>("last_used_at")
             .map(TimestampMillis::from_millis),
     })
-}
-
-fn scopes(read: bool, write: bool) -> Vec<String> {
-    [(read, "read"), (write, "write")]
-        .into_iter()
-        .filter(|(enabled, _)| *enabled)
-        .map(|(_, scope)| scope.to_owned())
-        .collect()
 }
