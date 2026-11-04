@@ -726,6 +726,53 @@ async fn endpoint_class_limits_return_correlated_problem_details() {
 }
 
 #[tokio::test]
+async fn refused_credentials_do_not_use_up_a_workspace_budget() {
+    let app = Router::new()
+        .route(
+            "/api/v1/workspaces/w1/tasks",
+            get(|headers: HeaderMap| async move {
+                let member = headers
+                    .get("cookie")
+                    .is_some_and(|cookie| cookie.as_bytes().starts_with(b"session=member"));
+                if member {
+                    StatusCode::OK
+                } else {
+                    StatusCode::UNAUTHORIZED
+                }
+            }),
+        )
+        .layer(
+            HttpPlatformLayer::new(OriginPolicy::new("http://127.0.0.1"))
+                .with_session_cookie("session")
+                .with_rate_limits(RateLimitConfig {
+                    general_per_minute: 2,
+                    workspace_multiplier: 1,
+                    ..RateLimitConfig::default()
+                }),
+        );
+    let request = |host: u8, cookie: &str| {
+        Request::get("/api/v1/workspaces/w1/tasks")
+            .header("cookie", cookie)
+            .extension(ConnectInfo(SocketAddr::from(([10, 0, 0, host], 4567))))
+            .body(Body::empty())
+            .unwrap()
+    };
+    // Made-up cookies from many hosts are all refused by the route.
+    for host in 1..=20 {
+        let cookie = format!("session=made-up-{host}");
+        let response = app.clone().oneshot(request(host, &cookie)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+    // Members still have the whole workspace budget, and then it ends.
+    for (host, cookie) in [(100, "session=member-a"), (101, "session=member-b")] {
+        let response = app.clone().oneshot(request(host, cookie)).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+    let response = app.oneshot(request(102, "session=member-c")).await.unwrap();
+    assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+}
+
+#[tokio::test]
 async fn csp_allows_only_the_verified_bootstrap_hash_and_local_image_variants() {
     let app = Router::new()
         .route("/", get(|| async { StatusCode::OK }))

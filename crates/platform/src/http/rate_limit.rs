@@ -1,7 +1,9 @@
 //! Request limits for each endpoint class. A request counts against its client IP address, then
 //! its credential (the session cookie or the `Authorization` header) and, when it has a credential,
 //! the workspace in its path. The first of these over its limit refuses the request, so refused
-//! requests do not use up the budget of the subjects after it.
+//! requests do not use up the budget of the subjects after it. The workspace is charged only once
+//! the response shows the credential was accepted ([`WorkspaceCharge`]): anyone can send a made-up
+//! cookie, and it must not use up the budget of the workspace's members.
 //!
 //! The sensitive classes (sign-in, recovery and registration, invitations) are counted in the
 //! database (`rate_limit_windows`), so their limits hold for every server of the database. They are
@@ -99,6 +101,24 @@ pub(super) struct Refused {
     pub retry_after: Duration,
 }
 
+/// The workspace a request is charged to, once its response is known ([`RateLimiter::charge`]).
+pub(super) struct WorkspaceCharge {
+    subject: Subject,
+    class: EndpointClass,
+    minute: i64,
+}
+
+impl WorkspaceCharge {
+    /// Whether a response with `status` was served to an accepted credential of the workspace.
+    pub(super) fn applies_to(status: axum::http::StatusCode) -> bool {
+        use axum::http::StatusCode;
+        !matches!(
+            status,
+            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN | StatusCode::NOT_FOUND
+        )
+    }
+}
+
 impl Default for RateLimiter {
     fn default() -> Self {
         Self::new(RateLimitConfig::default())
@@ -137,9 +157,9 @@ impl RateLimiter {
         method: &Method,
         path: &str,
         headers: &HeaderMap,
-    ) -> Result<(), Refused> {
+    ) -> Result<Option<WorkspaceCharge>, Refused> {
         let Some(class) = endpoint_class(method, path) else {
-            return Ok(());
+            return Ok(None);
         };
         let limit = self.limit(class);
         let seconds = SystemTime::now()
@@ -147,24 +167,64 @@ impl RateLimiter {
             .unwrap_or_default()
             .as_secs();
         let minute = i64::try_from(seconds / 60).unwrap_or(i64::MAX);
-        let mut subjects = vec![(Subject::Ip(rate_limit_ip(ip)), limit)];
-        if let Some(credential) = self.credential(headers) {
-            subjects.push((Subject::Credential(credential), limit));
-            if let Some(workspace) = workspace_in(path) {
-                subjects.push((
-                    Subject::Workspace(digest(workspace.as_bytes())),
-                    limit.saturating_mul(self.config.workspace_multiplier),
-                ));
-            }
+        let refused = Refused {
+            retry_after: Duration::from_secs(60 - seconds % 60),
+        };
+        let mut subjects = vec![Subject::Ip(rate_limit_ip(ip))];
+        let credential = self.credential(headers);
+        if let Some(credential) = credential {
+            subjects.push(Subject::Credential(credential));
         }
-        for (subject, limit) in subjects {
+        for subject in subjects {
             if !self.count(subject, class, limit, minute).await {
-                return Err(Refused {
-                    retry_after: Duration::from_secs(60 - seconds % 60),
-                });
+                return Err(refused);
             }
         }
-        Ok(())
+        let Some(workspace) = workspace_in(path).filter(|_| credential.is_some()) else {
+            return Ok(None);
+        };
+        let subject = Subject::Workspace(digest(workspace.as_bytes()));
+        let workspace_limit = limit.saturating_mul(self.config.workspace_multiplier);
+        if self.hits(subject, class, minute).await >= workspace_limit {
+            return Err(refused);
+        }
+        Ok(Some(WorkspaceCharge {
+            subject,
+            class,
+            minute,
+        }))
+    }
+
+    /// Counts a request whose credential the workspace accepted.
+    pub(super) async fn charge(&self, charge: WorkspaceCharge) {
+        self.count(charge.subject, charge.class, u32::MAX, charge.minute)
+            .await;
+    }
+
+    /// The requests counted for `subject` in `minute`, without counting one.
+    async fn hits(&self, subject: Subject, class: EndpointClass, minute: i64) -> u32 {
+        if class.shared()
+            && let Some(database) = &self.shared
+        {
+            match sqlx::query_scalar::<_, i64>(
+                "SELECT hits FROM rate_limit_windows WHERE bucket = $1 AND window_minute = $2",
+            )
+            .bind(subject.bucket(class))
+            .bind(minute)
+            .fetch_optional(database.pool())
+            .await
+            {
+                Ok(hits) => return u32::try_from(hits.unwrap_or(0)).unwrap_or(u32::MAX),
+                Err(error) => {
+                    tracing::warn!(%error, "shared rate limit; counting on this server");
+                }
+            }
+        }
+        let entries = self.local.lock().unwrap_or_else(PoisonError::into_inner);
+        entries
+            .get(&(subject, class))
+            .filter(|(window, _)| *window == minute)
+            .map_or(0, |(_, hits)| *hits)
     }
 
     fn limit(&self, class: EndpointClass) -> u32 {
@@ -490,12 +550,9 @@ mod tests {
         for client in 0..4_u32 {
             let headers = with_cookie(&format!("token-{client}"));
             let ip = IpAddr::V4(client.into());
-            assert!(
-                limiter
-                    .check(ip, &Method::GET, path, &headers)
-                    .await
-                    .is_ok()
-            );
+            let charge = limiter.check(ip, &Method::GET, path, &headers).await;
+            // The credentials were accepted.
+            limiter.charge(charge.ok().flatten().unwrap()).await;
         }
         let headers = with_cookie("token-9");
         let ip = IpAddr::V4(9_u32.into());
@@ -510,6 +567,38 @@ mod tests {
         assert!(
             limiter
                 .check(ip, &Method::GET, other, &headers)
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn refused_credentials_do_not_count_against_a_workspace() {
+        let limiter = RateLimiter::new(RateLimitConfig {
+            general_per_minute: 1,
+            workspace_multiplier: 1,
+            ..RateLimitConfig::default()
+        })
+        .with_session_cookie("session");
+        let path = "/api/v1/workspaces/w1/tasks";
+        // Made-up cookies from many hosts: each answer is a 401, so nothing is charged.
+        for host in 0..10_u32 {
+            let headers = with_cookie(&format!("made-up-{host}"));
+            assert!(
+                limiter
+                    .check(IpAddr::V4(host.into()), &Method::GET, path, &headers)
+                    .await
+                    .is_ok()
+            );
+        }
+        assert!(!WorkspaceCharge::applies_to(
+            axum::http::StatusCode::UNAUTHORIZED
+        ));
+        assert!(WorkspaceCharge::applies_to(axum::http::StatusCode::OK));
+        let headers = with_cookie("member");
+        assert!(
+            limiter
+                .check(IpAddr::V4(99_u32.into()), &Method::GET, path, &headers)
                 .await
                 .is_ok()
         );
