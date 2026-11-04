@@ -1,7 +1,7 @@
 use sqlx::{query, query_scalar};
 use thiserror::Error;
 
-use crate::{Backend, Database, HealthCheck, HealthRegistry};
+use crate::{Backend, Database};
 
 /// Runs SQLite's own checks of the database file. Postgres has no equivalent cheap enough to run
 /// here (it enforces foreign keys on every write, and page damage needs `amcheck`), so on Postgres
@@ -60,14 +60,6 @@ impl IntegrityService {
             check: "foreign_key_check",
             details: format!("{} violation(s)", violations.len()),
         })
-    }
-
-    pub fn register_readiness(&self, registry: &mut HealthRegistry) {
-        let service = self.clone();
-        registry.register(HealthCheck::DatabaseIntegrity, move || {
-            let service = service.clone();
-            async move { service.quick().await.map_err(|error| error.to_string()) }
-        });
     }
 
     /// `PRAGMA integrity_check`, except that FTS5 index findings are confirmed with FTS5's own

@@ -56,7 +56,7 @@ Orbit deliberately binds last. Read the first error and keep the process stopped
 
 ## Integrity or readiness fails
 
-`/health/ready` returns 503 when a required check fails. Orbit also runs a durable weekly full SQLite integrity and foreign-key check (on Postgres it only checks the connection). A failed or interrupted full check stops normal HTTP traffic and exits the process; an unfinished integrity job forces another full check before a restart can bind. Remove the instance from proxy traffic and preserve the current data directory.
+`/health/ready` returns 503 when a required check fails. Its database check is only a `SELECT 1`, so the public endpoint stays cheap to call. Orbit runs SQLite's quick check at startup, and a durable weekly full SQLite integrity and foreign-key check (on Postgres both only check the connection). A failed or interrupted full check stops normal HTTP traffic and exits the process; an unfinished integrity job forces another full check before a restart can bind. Remove the instance from proxy traffic and preserve the current data directory.
 
 Do not attempt automatic repair. Verify a known-good backup, restore it with the documented stopped-server procedure, and retain the damaged copy for investigation. `/health/live` may remain 200 because it reports process liveness, not data safety.
 

@@ -664,7 +664,7 @@ async fn body_limit_is_streaming_and_does_not_poll_before_inner_auth_rejection()
 async fn readiness_requires_every_named_platform_check() {
     let registry = HealthRegistry::new()
         .with_check(HealthCheck::Migrations, || async { Ok(()) })
-        .with_check(HealthCheck::DatabaseIntegrity, || async { Ok(()) })
+        .with_check(HealthCheck::Database, || async { Ok(()) })
         .with_check(HealthCheck::WritableStorage, || async { Ok(()) })
         .with_check(HealthCheck::Scheduler, || async {
             Err("worker stopped".to_owned())

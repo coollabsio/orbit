@@ -12,7 +12,9 @@ type CheckFn = Arc<dyn Fn() -> CheckFuture + Send + Sync>;
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum HealthCheck {
     Migrations,
-    DatabaseIntegrity,
+    /// The database answers a trivial query. Readiness is polled often and is public, so it must stay cheap:
+    /// the integrity checks run at startup and in the weekly integrity job instead.
+    Database,
     WritableStorage,
     Scheduler,
     CriticalConfig,
@@ -23,7 +25,7 @@ pub enum HealthCheck {
 impl HealthCheck {
     const ALL: [Self; 6] = [
         Self::Migrations,
-        Self::DatabaseIntegrity,
+        Self::Database,
         Self::WritableStorage,
         Self::Scheduler,
         Self::CriticalConfig,
@@ -34,7 +36,7 @@ impl HealthCheck {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Migrations => "migrations",
-            Self::DatabaseIntegrity => "database_integrity",
+            Self::Database => "database",
             Self::WritableStorage => "writable_storage",
             Self::Scheduler => "scheduler",
             Self::CriticalConfig => "critical_config",

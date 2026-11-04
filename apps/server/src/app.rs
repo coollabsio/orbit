@@ -297,7 +297,7 @@ impl App {
         .await?;
 
         let draining = Arc::new(AtomicBool::new(false));
-        let health = health_registry(&config, &database, &integrity, &draining);
+        let health = health_registry(&config, &database, &draining);
         if !health.readiness().await.ready {
             return Err(AppError::Readiness);
         }
@@ -775,7 +775,6 @@ fn ensure_safe_data_layout(
 fn health_registry(
     config: &Config,
     database: &Database,
-    integrity: &IntegrityService,
     draining: &Arc<AtomicBool>,
 ) -> HealthRegistry {
     let migrations_database = database.clone();
@@ -795,7 +794,17 @@ fn health_registry(
             }
         }
     });
-    integrity.register_readiness(&mut health);
+    let readiness_database = database.clone();
+    health.register(HealthCheck::Database, move || {
+        let database = readiness_database.clone();
+        async move {
+            database
+                .scalar::<i64>("SELECT 1")
+                .await
+                .map(drop)
+                .map_err(|error| error.to_string())
+        }
+    });
     let attachment_path = config.data.attachments.clone();
     let backup_path = config.data.backups.clone();
     health.register(HealthCheck::WritableStorage, move || {
