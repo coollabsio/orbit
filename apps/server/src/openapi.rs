@@ -242,6 +242,11 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::import_routes::get_notion_import,
         crate::import_routes::start_notion_import,
         crate::import_routes::cancel_notion_import,
+        crate::asana_import_routes::create_asana_import,
+        crate::asana_import_routes::list_asana_imports,
+        crate::asana_import_routes::get_asana_import,
+        crate::asana_import_routes::start_asana_import,
+        crate::asana_import_routes::cancel_asana_import,
         crate::chat_routes::conversations::list_chat_conversations,
         crate::chat_routes::conversations::create_chat_channel,
         crate::chat_routes::conversations::update_chat_channel,
@@ -830,6 +835,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "413", "export_too_large");
         }
         id if notion_import_operation(id) => notion_import_errors(id, &mut responses),
+        id if asana_import_operation(id) => asana_import_errors(id, &mut responses),
         id if task_operation(id) => task_errors(id, &mut responses),
         id if page_comment_operation(id) => page_comment_errors(id, &mut responses),
         id if page_operation(id) => page_errors(id, &mut responses),
@@ -986,6 +992,9 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "create_notion_import"
             | "get_notion_import"
             | "start_notion_import"
+            | "create_asana_import"
+            | "get_asana_import"
+            | "start_asana_import"
     )
 }
 
@@ -1021,6 +1030,39 @@ fn notion_import_errors(
             add_code(responses, "422", "notion_import_too_large");
         }
         "cancel_notion_import" => add_code(responses, "409", "notion_import_state_conflict"),
+        _ => {}
+    }
+}
+
+fn asana_import_operation(operation_id: &str) -> bool {
+    matches!(
+        operation_id,
+        "create_asana_import"
+            | "list_asana_imports"
+            | "get_asana_import"
+            | "start_asana_import"
+            | "cancel_asana_import"
+    )
+}
+
+fn asana_import_errors(
+    operation_id: &str,
+    responses: &mut BTreeMap<&'static str, Vec<&'static str>>,
+) {
+    add_code(responses, "404", "asana_import_not_found");
+    match operation_id {
+        "create_asana_import" => {
+            add_code(responses, "409", "app_key_missing");
+            add_code(responses, "409", "import_in_progress");
+            add_code(responses, "422", "asana_token_invalid");
+            add_code(responses, "502", "asana_unavailable");
+        }
+        "start_asana_import" => {
+            add_code(responses, "409", "import_in_progress");
+            add_code(responses, "409", "asana_import_state_conflict");
+            add_code(responses, "422", "validation_failed");
+        }
+        "cancel_asana_import" => add_code(responses, "409", "asana_import_state_conflict"),
         _ => {}
     }
 }

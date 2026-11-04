@@ -94,6 +94,10 @@ async fn the_root_user_changes_and_resets_job_limits() {
          "default_concurrency": 2, "default_workspace_concurrency": 1},
         {"kind": "notion.import", "concurrency": 2, "workspace_concurrency": 1,
          "default_concurrency": 2, "default_workspace_concurrency": 1},
+        {"kind": "asana.scan", "concurrency": 2, "workspace_concurrency": 1,
+         "default_concurrency": 2, "default_workspace_concurrency": 1},
+        {"kind": "asana.import", "concurrency": 2, "workspace_concurrency": 1,
+         "default_concurrency": 2, "default_workspace_concurrency": 1},
         {"kind": "workspace.export", "concurrency": 2, "workspace_concurrency": 1,
          "default_concurrency": 2, "default_workspace_concurrency": 1},
     ]});

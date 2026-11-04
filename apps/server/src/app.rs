@@ -24,6 +24,9 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tower::ServiceExt;
 
+use crate::asana::client::AsanaClientConfig;
+use crate::asana::import::{AsanaImportService, AsanaImportSettings};
+use crate::asana_import_routes::AsanaImportState;
 use crate::attachment_routes::AttachmentState;
 use crate::auth_routes::{CookieMode, initialize_auth};
 use crate::chat_routes::ChatState;
@@ -267,6 +270,19 @@ impl App {
             },
         );
 
+        let asana_imports = AsanaImportService::new(
+            database.clone(),
+            crate::repositories::attachments::AttachmentRepository::new(
+                database.clone(),
+                attachment_state.uploads.clone(),
+            ),
+            AsanaImportSettings {
+                client: AsanaClientConfig::default(),
+                app_key,
+                max_file_bytes: config.uploads.max_file_bytes,
+            },
+        );
+
         let billing = config.billing.clone().map(|billing| {
             crate::billing::Billing::new(billing, database.clone(), &config.http.public_origin)
         });
@@ -290,6 +306,7 @@ impl App {
             Arc::clone(&workspaces),
             integrity.clone(),
             notion_imports.clone(),
+            asana_imports.clone(),
             workspace_exports.clone(),
             billing.clone(),
             config.jobs.concurrency,
@@ -407,6 +424,11 @@ impl App {
                     app_key,
                 ),
                 imports: ImportState::new(Arc::clone(&identity), notion_imports, cookie_mode),
+                asana_imports: AsanaImportState::new(
+                    Arc::clone(&identity),
+                    asana_imports,
+                    cookie_mode,
+                ),
                 chat: ChatState::new(
                     Arc::clone(&identity),
                     attachment_state.uploads.clone(),
@@ -866,6 +888,7 @@ async fn initialize_production_services(
     workspaces: Arc<WorkspaceRepository>,
     integrity: IntegrityService,
     notion_imports: NotionImportService,
+    asana_imports: AsanaImportService,
     workspace_exports: WorkspaceExportService,
     billing: Option<crate::billing::Billing>,
     concurrency: usize,
@@ -913,14 +936,24 @@ async fn initialize_production_services(
         })
         .and_then(|worker| {
             let cleanup = notion_imports.clone();
+            let asana_cleanup = asana_imports.clone();
+            // One hourly schedule expires and fails stale imports of both sources.
             worker.with_handler(maintenance_kind(NOTION_CLEANUP), move |_| {
                 let service = cleanup.clone();
+                let asana = asana_cleanup.clone();
                 async move {
                     service
                         .expire_stale(TimestampMillis::now())
                         .await
                         .map(|_| ())
-                        .map_err(|_| JobError::Retryable("Notion import cleanup failed".to_owned()))
+                        .map_err(|_| {
+                            JobError::Retryable("Notion import cleanup failed".to_owned())
+                        })?;
+                    asana
+                        .expire_stale(TimestampMillis::now())
+                        .await
+                        .map(|_| ())
+                        .map_err(|_| JobError::Retryable("Asana import cleanup failed".to_owned()))
                 }
             })
         })
@@ -937,6 +970,7 @@ async fn initialize_production_services(
             })
         })
         .and_then(|worker| crate::notion::import::register_jobs(worker, notion_imports))
+        .and_then(|worker| crate::asana::import::register_jobs(worker, asana_imports))
         .and_then(|worker| crate::workspace_export::register_job(worker, workspace_exports))
         .and_then(|worker| match billing {
             Some(billing) => crate::billing::register_jobs(worker, billing),

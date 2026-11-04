@@ -9,6 +9,7 @@ use orbit_platform::{
     RequestId,
 };
 
+use crate::asana_import_routes::{AsanaImportState, asana_import_router};
 use crate::attachment_routes::{AttachmentState, attachment_router};
 use crate::auth_routes::{AuthState, auth_router};
 use crate::backup_item_routes::{BackupItemState, backup_item_router};
@@ -44,6 +45,7 @@ pub struct ApiRoutes {
     pub attachments: AttachmentState,
     pub integrations: IntegrationState,
     pub imports: ImportState,
+    pub asana_imports: AsanaImportState,
     pub chat: ChatState,
 }
 
@@ -80,6 +82,7 @@ pub fn production_router(
         .merge(attachment_router(api.attachments))
         .merge(integration_router(api.integrations))
         .merge(import_router(api.imports))
+        .merge(asana_import_router(api.asana_imports))
         .merge(crate::live::socket::live_router(api.chat.clone()))
         .merge(chat_router(api.chat))
         .merge(
