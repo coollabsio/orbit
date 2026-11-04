@@ -12,6 +12,8 @@ import { SettingsRow } from '@/features/settings/components/SettingsParts'
 const KIND_LABELS: Record<string, string> = {
   'notion.scan': 'Notion scans',
   'notion.import': 'Notion imports',
+  'asana.scan': 'Asana scans',
+  'asana.import': 'Asana imports',
   'workspace.export': 'Workspace exports',
 }
 

@@ -89,6 +89,13 @@ export const queryKeys = {
     detail: (workspaceId: string, importId: string) => ['notion-imports', workspaceId, 'detail', importId] as const,
     tree: (workspaceId: string, importId: string) => ['notion-imports', workspaceId, 'tree', importId] as const,
   },
+  /** Outside the workspace prefix for the same reason as `notionImports`: an import creates thousands of tasks. */
+  asanaImports: {
+    all: (workspaceId: string) => ['asana-imports', workspaceId] as const,
+    list: (workspaceId: string) => ['asana-imports', workspaceId, 'list'] as const,
+    detail: (workspaceId: string, importId: string) => ['asana-imports', workspaceId, 'detail', importId] as const,
+    tree: (workspaceId: string, importId: string) => ['asana-imports', workspaceId, 'tree', importId] as const,
+  },
   /**
    * Deliberately outside the workspace prefix: the list changes rarely, and the chat socket says when it does
    * (`emoji.changed`), so a task or page event must not fetch it again.
