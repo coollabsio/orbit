@@ -33,11 +33,11 @@ where
     let role: Option<String> = sqlx::query_scalar(
         "SELECT memberships.role FROM memberships JOIN workspaces ON workspaces.id = memberships.workspace_id \
          WHERE memberships.workspace_id = $1 AND memberships.user_id = $2 \
-         AND (workspaces.deleted_at IS NOT NULL) = $3",
+         AND (CASE WHEN workspaces.deleted_at IS NULL THEN 0 ELSE 1 END) = $3",
     )
     .bind(workspace_id.to_string())
     .bind(user_id.to_string())
-    .bind(trashed)
+    .bind(i64::from(trashed))
     .fetch_optional(executor)
     .await?;
     // The schema only stores known roles; an unknown one grants nothing.
