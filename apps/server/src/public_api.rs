@@ -4,7 +4,7 @@
 use std::sync::Arc;
 
 use axum::extract::rejection::{JsonRejection, QueryRejection};
-use axum::extract::{FromRequestParts, OriginalUri, Path, Query, Request, State};
+use axum::extract::{FromRequestParts, OriginalUri, Path, Query, RawPathParams, Request, State};
 use axum::http::request::Parts;
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
@@ -48,8 +48,9 @@ impl PublicApiState {
 }
 
 pub fn router(state: PublicApiState) -> Router {
-    let routes = Router::new()
-        .route("/me", get(me))
+    // Workspace paths leave room for tokens with more than one workspace; today the path must
+    // name the token's only workspace.
+    let workspace = Router::new()
         .route("/projects", get(projects))
         .route("/projects/{project_id}/statuses", get(statuses))
         .route("/tasks", get(list_tasks).post(create_task))
@@ -58,7 +59,10 @@ pub fn router(state: PublicApiState) -> Router {
             get(get_task).patch(update_task).delete(delete_task),
         )
         .route("/docs", get(docs))
-        .route("/docs/{page_id}", get(doc))
+        .route("/docs/{page_id}", get(doc));
+    let routes = Router::new()
+        .route("/me", get(me))
+        .nest("/workspaces/{workspace_id}", workspace)
         .route_layer(middleware::from_fn_with_state(state.clone(), authenticate))
         .with_state(state);
     Router::new().nest(BASE_PATH, routes)
@@ -121,15 +125,20 @@ impl std::ops::Deref for Ctx {
 impl<S: Send + Sync> FromRequestParts<S> for Ctx {
     type Rejection = Response;
 
-    async fn from_request_parts(parts: &mut Parts, _: &S) -> Result<Self, Response> {
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Response> {
         let out = Responder::new(&parts.extensions, &parts.uri);
-        match parts.extensions.get::<ApiTokenPrincipal>() {
-            Some(principal) => Ok(Self {
-                principal: principal.clone(),
-                out,
-            }),
-            None => Err(out.error(TokenApiError::Internal)),
+        let Some(principal) = parts.extensions.get::<ApiTokenPrincipal>().cloned() else {
+            return Err(out.error(TokenApiError::Internal));
+        };
+        let params = RawPathParams::from_request_parts(parts, state)
+            .await
+            .map_err(|_| out.error(TokenApiError::Internal))?;
+        if params.iter().any(|(name, value)| {
+            name == "workspace_id" && value.parse::<Id>().ok() != Some(principal.workspace_id)
+        }) {
+            return Err(out.error(TokenApiError::NotAvailable));
         }
+        Ok(Self { principal, out })
     }
 }
 
@@ -497,7 +506,7 @@ async fn projects(State(s): State<PublicApiState>, ctx: Ctx) -> Response {
 async fn statuses(
     State(s): State<PublicApiState>,
     ctx: Ctx,
-    Path(project): Path<String>,
+    Path((_, project)): Path<(String, String)>,
     query: Result<Query<PageQuery>, QueryRejection>,
 ) -> Response {
     let project = path_id!(ctx, project);
@@ -543,7 +552,11 @@ async fn list_tasks(
     ctx.reply(StatusCode::OK, result)
 }
 
-async fn get_task(State(s): State<PublicApiState>, ctx: Ctx, Path(task): Path<String>) -> Response {
+async fn get_task(
+    State(s): State<PublicApiState>,
+    ctx: Ctx,
+    Path((_, task)): Path<(String, String)>,
+) -> Response {
     let result = async {
         let api = s
             .api
@@ -585,7 +598,7 @@ async fn create_task(
 async fn update_task(
     State(s): State<PublicApiState>,
     ctx: Ctx,
-    Path(task): Path<String>,
+    Path((_, task)): Path<(String, String)>,
     body: Result<Json<UpdateTaskBody>, JsonRejection>,
 ) -> Response {
     let body = input!(ctx, body);
@@ -611,7 +624,7 @@ async fn update_task(
 async fn delete_task(
     State(s): State<PublicApiState>,
     ctx: Ctx,
-    Path(task): Path<String>,
+    Path((_, task)): Path<(String, String)>,
     query: Result<Query<DeleteQuery>, QueryRejection>,
 ) -> Response {
     let query = input!(ctx, query);
@@ -644,7 +657,11 @@ async fn docs(State(s): State<PublicApiState>, ctx: Ctx) -> Response {
     ctx.reply(StatusCode::OK, result)
 }
 
-async fn doc(State(s): State<PublicApiState>, ctx: Ctx, Path(page): Path<String>) -> Response {
+async fn doc(
+    State(s): State<PublicApiState>,
+    ctx: Ctx,
+    Path((_, page)): Path<(String, String)>,
+) -> Response {
     let page = path_id!(ctx, page);
     let result = async {
         let api = s

@@ -133,6 +133,8 @@ impl Fixture {
         (issued.token, issued.api_token.id)
     }
 
+    /// Calls `/api/public/v1{path}`; a path that is not `/me` or `/workspaces/…` is a path of
+    /// the fixture's workspace (`/tasks` is `/workspaces/{workspace}/tasks`).
     async fn call(
         &self,
         token: Option<&str>,
@@ -140,6 +142,11 @@ impl Fixture {
         path: &str,
         body: Option<Value>,
     ) -> (StatusCode, Value) {
+        let path = if path == "/me" || path.starts_with("/workspaces/") {
+            path.to_owned()
+        } else {
+            format!("/workspaces/{}{path}", self.workspace)
+        };
         let mut builder = Request::builder()
             .method(method)
             .uri(format!("/api/public/v1{path}"));
@@ -855,7 +862,7 @@ async fn the_application_mounts_the_router_without_origin_or_contract_checks() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/api/public/v1/tasks")
+                .uri(format!("/api/public/v1/workspaces/{}/tasks", Id::new_v7()))
                 .header(header::AUTHORIZATION, "Bearer orb_unknown")
                 .header(header::CONTENT_TYPE, "application/json")
                 .body(Body::from("{}"))
@@ -967,4 +974,64 @@ async fn invalid_input_gets_a_fixed_message() {
         !problem.to_string().contains("secret_param_xyz"),
         "{problem}"
     );
+}
+
+#[tokio::test]
+async fn paths_name_the_token_s_workspace() {
+    let f = Fixture::new().await;
+    let (token, token_id) = f.token(&[ApiTokenScope::TasksRead], false).await;
+    let (code, me) = f.call(Some(&token), "GET", "/me", None).await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(
+        me["workspaces"],
+        json!([{"id": f.workspace, "name": "Orbit", "scopes": ["tasks:read"], "project_ids": [f.project]}])
+    );
+    assert_eq!(me["token"]["id"], json!(token_id));
+
+    let (code, _) = f
+        .call(
+            Some(&token),
+            "GET",
+            &format!("/workspaces/{}/tasks", f.workspace),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK);
+    for workspace in [Id::new_v7().to_string(), "not-an-id".to_owned()] {
+        for path in [
+            "tasks".to_owned(),
+            format!("tasks/{}", f.task),
+            "projects".to_owned(),
+        ] {
+            let (code, problem) = f
+                .call(
+                    Some(&token),
+                    "GET",
+                    &format!("/workspaces/{workspace}/{path}"),
+                    None,
+                )
+                .await;
+            assert_eq!(code, StatusCode::NOT_FOUND, "{workspace}/{path}: {problem}");
+            assert!(!problem.to_string().contains("Approved task"));
+        }
+    }
+    for path in [
+        "/api/public/v1/tasks",
+        "/api/public/v1/projects",
+        "/api/public/v1/docs",
+    ] {
+        let response = f
+            .app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(path)
+                    .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
+    }
 }

@@ -116,8 +116,18 @@ impl TaskView {
 pub struct Me {
     pub token: TokenInfo,
     pub workspace: Named,
+    /// Every workspace the token may use, with its access there. Always one item today.
+    pub workspaces: Vec<WorkspaceGrant>,
     pub user: Option<UserInfo>,
     pub service_account: Option<Named>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct WorkspaceGrant {
+    pub id: Id,
+    pub name: String,
+    pub scopes: Vec<&'static str>,
+    pub project_ids: Vec<Id>,
 }
 
 #[derive(Debug, Serialize)]
@@ -259,15 +269,23 @@ impl TokenApi {
                     .unwrap_or_default(),
             }),
         };
+        let scopes: Vec<&'static str> = principal
+            .scopes
+            .iter()
+            .map(|scope| scope.as_str())
+            .collect();
+        let workspace_name: String = row.get("workspace_name");
         Ok(Me {
+            workspaces: vec![WorkspaceGrant {
+                id: principal.workspace_id,
+                name: workspace_name.clone(),
+                scopes: scopes.clone(),
+                project_ids: principal.project_ids.clone(),
+            }],
             token: TokenInfo {
                 id: principal.token_id,
                 name: row.get("name"),
-                scopes: principal
-                    .scopes
-                    .iter()
-                    .map(|scope| scope.as_str())
-                    .collect(),
+                scopes,
                 project_ids: principal.project_ids.clone(),
                 expires_at: row
                     .get::<Option<i64>, _>("expires_at")
@@ -275,7 +293,7 @@ impl TokenApi {
             },
             workspace: Named {
                 id: principal.workspace_id,
-                name: row.get("workspace_name"),
+                name: workspace_name,
             },
             user,
             service_account,

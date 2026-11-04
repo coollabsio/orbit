@@ -24,8 +24,10 @@ curl -sS "$ORBIT_URL/api/public/v1/me" -H "Authorization: Bearer $ORBIT_TOKEN"
 
 Do not put the token in a URL, in a repository, or in a shared shell history.
 
-The token sets the workspace and the projects. Requests do not contain a
-workspace ID. The API does not use cookies, sessions or CSRF tokens. Requests
+Each token belongs to one workspace and to the projects that you selected.
+Task and doc paths contain the workspace ID:
+`/api/public/v1/workspaces/{workspace_id}/…`. Get the ID from `GET /me`. A
+path with another workspace ID returns `404`. The API does not use cookies, sessions or CSRF tokens. Requests
 without an `Origin` header are accepted. If a request has an `Origin` header, the
 origin must be the Orbit public origin. The `X-Orbit-Contract` header is not
 necessary.
@@ -86,6 +88,8 @@ curl -sS "$ORBIT_URL/api/public/v1/me" -H "Authorization: Bearer $ORBIT_TOKEN"
   "token": {"id": "…", "name": "ci", "scopes": ["tasks:read", "tasks:write"],
             "project_ids": ["…"], "expires_at": "2026-12-01T00:00:00.000Z"},
   "workspace": {"id": "…", "name": "Acme"},
+  "workspaces": [{"id": "…", "name": "Acme", "scopes": ["tasks:read", "tasks:write"],
+                  "project_ids": ["…"]}],
   "user": {"id": "…", "email": "dev@example.com", "display_name": "Dev"},
   "service_account": null
 }
@@ -94,21 +98,32 @@ curl -sS "$ORBIT_URL/api/public/v1/me" -H "Authorization: Bearer $ORBIT_TOKEN"
 For a service-account token, `user` is `null` and `service_account` is
 `{"id", "name"}`.
 
+`workspaces` lists each workspace that the token can use, with the scopes and
+projects there. Today a token has exactly one workspace, so the list has one
+item, the same as `workspace`. Read `workspaces` in new clients: a later version
+can give a token more than one workspace.
+
+In the examples below, set the workspace first:
+
+```bash
+export ORBIT_WS="$ORBIT_URL/api/public/v1/workspaces/$WORKSPACE_ID"
+```
+
 ### Projects and statuses
 
-`GET /projects`. Scope: `tasks:read`. The approved live projects. Item:
+`GET /workspaces/{workspace_id}/projects`. Scope: `tasks:read`. The approved live projects. Item:
 `{id, name, key, color, version, created_at, updated_at}`.
 
 ```bash
-curl -sS "$ORBIT_URL/api/public/v1/projects" -H "Authorization: Bearer $ORBIT_TOKEN"
+curl -sS "$ORBIT_WS/projects" -H "Authorization: Bearer $ORBIT_TOKEN"
 ```
 
-`GET /projects/{project_id}/statuses?cursor&limit`. Scope: `tasks:read`. Item:
+`GET /workspaces/{workspace_id}/projects/{project_id}/statuses?cursor&limit`. Scope: `tasks:read`. Item:
 `{id, project_id, name, description, color, category, position, version}`.
 `category` is `unstarted`, `started`, `completed`, `cancelled` or `duplicate`.
 
 ```bash
-curl -sS "$ORBIT_URL/api/public/v1/projects/$PROJECT_ID/statuses" \
+curl -sS "$ORBIT_WS/projects/$PROJECT_ID/statuses" \
   -H "Authorization: Bearer $ORBIT_TOKEN"
 ```
 
@@ -129,23 +144,23 @@ A task:
 
 `priority` is `none`, `low`, `medium`, `high` or `urgent`.
 
-`GET /tasks`. Scope: `tasks:read`. Tasks in the approved projects, newest first,
+`GET /workspaces/{workspace_id}/tasks`. Scope: `tasks:read`. Tasks in the approved projects, newest first,
 including completed tasks and sub-issues. Optional parameters: `project_id`,
 `status_id`, `assignee_id`, `label_id`, `priority`, `q` (text in the title or
 description, or an identifier), `cursor` and `limit`.
 
 ```bash
-curl -sS -G "$ORBIT_URL/api/public/v1/tasks" -H "Authorization: Bearer $ORBIT_TOKEN" \
+curl -sS -G "$ORBIT_WS/tasks" -H "Authorization: Bearer $ORBIT_TOKEN" \
   --data-urlencode "project_id=$PROJECT_ID" --data-urlencode 'q=login' -d limit=20
 ```
 
-`GET /tasks/{task}`. Scope: `tasks:read`.
+`GET /workspaces/{workspace_id}/tasks/{task}`. Scope: `tasks:read`.
 
 ```bash
-curl -sS "$ORBIT_URL/api/public/v1/tasks/ENG-12" -H "Authorization: Bearer $ORBIT_TOKEN"
+curl -sS "$ORBIT_WS/tasks/ENG-12" -H "Authorization: Bearer $ORBIT_TOKEN"
 ```
 
-`POST /tasks`. Scope: `tasks:write`. Response: `201` with the task. Body:
+`POST /workspaces/{workspace_id}/tasks`. Scope: `tasks:write`. Response: `201` with the task. Body:
 `project_id` and `status_id` (required), `title` (required, 1 to 500
 characters), and the optional `description` (Markdown, up to 50,000 bytes),
 `priority` (default `none`), `assignee_ids`, `label_ids` and `parent_task_id`.
@@ -154,12 +169,12 @@ be in the task's project. The parent and all the tasks related to it must be in
 approved projects.
 
 ```bash
-curl -sS "$ORBIT_URL/api/public/v1/tasks" -H "Authorization: Bearer $ORBIT_TOKEN" \
+curl -sS "$ORBIT_WS/tasks" -H "Authorization: Bearer $ORBIT_TOKEN" \
   -H 'Content-Type: application/json' \
   -d "{\"project_id\":\"$PROJECT_ID\",\"status_id\":\"$STATUS_ID\",\"title\":\"Fix login\",\"priority\":\"high\"}"
 ```
 
-`PATCH /tasks/{task}`. Scope: `tasks:write`. Response: `200` with the task. Body:
+`PATCH /workspaces/{workspace_id}/tasks/{task}`. Scope: `tasks:write`. Response: `200` with the task. Body:
 `expected_version` (required, the `version` that you read), and the optional
 `title`, `description`, `status_id`, `priority`, `assignee_ids` and `label_ids`.
 A list replaces the old list. If the task changed after you read it, the
@@ -167,17 +182,17 @@ response is `409`. Read the task again, then try again. All the tasks in the
 task's parent and sub-issue tree must be in approved projects.
 
 ```bash
-curl -sS -X PATCH "$ORBIT_URL/api/public/v1/tasks/ENG-12" \
+curl -sS -X PATCH "$ORBIT_WS/tasks/ENG-12" \
   -H "Authorization: Bearer $ORBIT_TOKEN" -H 'Content-Type: application/json' \
   -d '{"expected_version":3,"status_id":"…","assignee_ids":[]}'
 ```
 
-`DELETE /tasks/{task}?expected_version=N`. Scope: `tasks:write`. Moves the task and
+`DELETE /workspaces/{workspace_id}/tasks/{task}?expected_version=N`. Scope: `tasks:write`. Moves the task and
 its sub-issues to the trash. Response: `204` with no body. The tasks stay in the Orbit
 trash for 30 days.
 
 ```bash
-curl -sS -X DELETE "$ORBIT_URL/api/public/v1/tasks/ENG-12?expected_version=4" \
+curl -sS -X DELETE "$ORBIT_WS/tasks/ENG-12?expected_version=4" \
   -H "Authorization: Bearer $ORBIT_TOKEN"
 ```
 
@@ -186,18 +201,18 @@ curl -sS -X DELETE "$ORBIT_URL/api/public/v1/tasks/ENG-12?expected_version=4" \
 Docs show only the documents that the token's creator can see, including their
 private docs. The `docs:read` scope is off by default.
 
-`GET /docs`. Scope: `docs:read`. Item: `{id, parent_id, teamspace_id, private,
+`GET /workspaces/{workspace_id}/docs`. Scope: `docs:read`. Item: `{id, parent_id, teamspace_id, private,
 title, icon, position, version, updated_at}`. `next_cursor` is always `null`.
 
 ```bash
-curl -sS "$ORBIT_URL/api/public/v1/docs" -H "Authorization: Bearer $ORBIT_TOKEN"
+curl -sS "$ORBIT_WS/docs" -H "Authorization: Bearer $ORBIT_TOKEN"
 ```
 
-`GET /docs/{page_id}`. Scope: `docs:read`. The document record, as the MCP
+`GET /workspaces/{workspace_id}/docs/{page_id}`. Scope: `docs:read`. The document record, as the MCP
 `get_doc` tool returns it.
 
 ```bash
-curl -sS "$ORBIT_URL/api/public/v1/docs/$PAGE_ID" -H "Authorization: Bearer $ORBIT_TOKEN"
+curl -sS "$ORBIT_WS/docs/$PAGE_ID" -H "Authorization: Bearer $ORBIT_TOKEN"
 ```
 
 ### Discord integration
@@ -227,7 +242,7 @@ Errors are RFC 9457 problem documents (`Content-Type: application/problem+json`)
   "type": "https://docs.orbit.dev/problems/not_found",
   "title": "Not found", "status": 404, "code": "not_found",
   "detail": "The resource does not exist or this token cannot use it.",
-  "instance": "/api/public/v1/tasks/PRV-3",
+  "instance": "/api/public/v1/workspaces/…/tasks/PRV-3",
   "request_id": "…"
 }
 ```
@@ -251,7 +266,9 @@ cannot use. Thus a token cannot find out which other resources exist.
 ## Limits
 
 - Rate limit: the general API limit (`ORBIT_RATE_LIMIT_GENERAL_PER_MINUTE`)
-  for each client IP address and, separately, for each token.
+  for each client IP address and, separately, for each token. All the tokens of
+  one workspace also share a workspace budget
+  (`ORBIT_RATE_LIMIT_WORKSPACE_MULTIPLIER` times the general limit).
 - The usual request body limit and request timeout of the Orbit server apply.
 - The token's expiry, its revocation and the projects in its grant apply
   immediately. A deleted project leaves the grant.

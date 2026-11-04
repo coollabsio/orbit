@@ -345,9 +345,10 @@ fn rate_limit_ip(ip: IpAddr) -> IpAddr {
     }
 }
 
-/// The workspace ID of a `/api/v1/workspaces/{id}/…` path.
+/// The workspace ID of a `/api/v1/workspaces/{id}/…` or `/api/public/v1/workspaces/{id}/…` path.
 fn workspace_in(path: &str) -> Option<&str> {
-    path.strip_prefix("/api/v1/workspaces/")?
+    path.strip_prefix("/api/v1/workspaces/")
+        .or_else(|| path.strip_prefix("/api/public/v1/workspaces/"))?
         .split('/')
         .next()
         .filter(|id| !id.is_empty())
@@ -569,6 +570,35 @@ mod tests {
                 .check(ip, &Method::GET, other, &headers)
                 .await
                 .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn public_api_tokens_share_their_workspace_budget() {
+        let limiter = RateLimiter::new(RateLimitConfig {
+            general_per_minute: 2,
+            workspace_multiplier: 2,
+            ..RateLimitConfig::default()
+        });
+        let path = "/api/public/v1/workspaces/w1/tasks";
+        for client in 0..4_u32 {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                AUTHORIZATION,
+                format!("Bearer orb_{client}").parse().unwrap(),
+            );
+            let charge = limiter
+                .check(IpAddr::V4(client.into()), &Method::GET, path, &headers)
+                .await;
+            limiter.charge(charge.ok().flatten().unwrap()).await;
+        }
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, "Bearer orb_9".parse().unwrap());
+        assert!(
+            limiter
+                .check(IpAddr::V4(9_u32.into()), &Method::GET, path, &headers)
+                .await
+                .is_err()
         );
     }
 
