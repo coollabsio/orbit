@@ -446,6 +446,100 @@ impl AttachmentRepository {
         Ok((attachment, comment.expect("comment creation requested")))
     }
 
+    /// Attaches bytes the server already holds (a file an importer downloaded) to a task as
+    /// `actor_id`. Goes through the same staging as an HTTP upload (size limit, file-name
+    /// validation, content sniffing, blob dedup); the actor must be an active member and the
+    /// task and its project live.
+    pub async fn create_from_bytes(
+        &self,
+        workspace_id: Id,
+        task_id: Id,
+        actor_id: Id,
+        file_name: &str,
+        bytes: &[u8],
+    ) -> Result<CreatedAttachment, AttachmentRepositoryError> {
+        let upload = self
+            .uploads
+            .stage(workspace_id, actor_id, file_name, bytes)
+            .await?;
+        let result = self
+            .finalize_for_member(workspace_id, task_id, actor_id, &upload)
+            .await;
+        if result.is_err() {
+            let _ = self.uploads.discard(&upload).await;
+        }
+        result
+    }
+
+    async fn finalize_for_member(
+        &self,
+        workspace_id: Id,
+        task_id: Id,
+        actor_id: Id,
+        upload: &StagedUpload,
+    ) -> Result<CreatedAttachment, AttachmentRepositoryError> {
+        let finalization = self.uploads.begin_finalization().await;
+        let now = self.database.database_now().await?;
+        let mut transaction = self.database.immediate_transaction().await?;
+        let Flag(allowed) = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM memberships JOIN users ON users.id = memberships.user_id \
+             JOIN tasks ON tasks.workspace_id = memberships.workspace_id AND tasks.id = $1 \
+             JOIN projects ON projects.id = tasks.project_id \
+             JOIN workspaces ON workspaces.id = tasks.workspace_id \
+             WHERE memberships.workspace_id = $2 AND memberships.user_id = $3 \
+             AND users.suspended_at IS NULL AND tasks.deleted_at IS NULL \
+             AND projects.deleted_at IS NULL AND workspaces.deleted_at IS NULL)",
+        )
+        .bind(task_id.to_string())
+        .bind(workspace_id.to_string())
+        .bind(actor_id.to_string())
+        .fetch_one(&mut *transaction)
+        .await?;
+        if !allowed {
+            return Err(AttachmentRepositoryError::NotFound);
+        }
+        let finalized = finalization
+            .finalize_in_transaction(
+                &mut transaction,
+                upload,
+                NewAttachmentReference::new(task_id, None),
+                now,
+            )
+            .await?;
+        transaction.commit().await?;
+        Ok(CreatedAttachment {
+            id: finalized.reference_id,
+            workspace_id,
+            task_id,
+            comment_id: None,
+            owner_id: actor_id,
+            display_name: upload.display_name.clone(),
+            media_type: upload.detected_media_type.clone(),
+            byte_size: upload.size_bytes,
+            created_at: finalized.created_at,
+            deleted: false,
+        })
+    }
+
+    /// `(sha256, byte_size)` of the task's own attachments (not comment or inline files), so an
+    /// importer that retries a task can skip files it already attached.
+    pub async fn task_file_hashes(
+        &self,
+        workspace_id: Id,
+        task_id: Id,
+    ) -> Result<Vec<(String, i64)>, AttachmentRepositoryError> {
+        Ok(sqlx::query_as(
+            "SELECT attachment_blobs.sha256, attachment_blobs.byte_size FROM attachment_references \
+             JOIN attachment_blobs ON attachment_blobs.id = attachment_references.blob_id \
+             WHERE attachment_references.workspace_id = $1 AND attachment_references.task_id = $2 \
+             AND attachment_references.comment_id IS NULL AND attachment_references.inline = 0",
+        )
+        .bind(workspace_id.to_string())
+        .bind(task_id.to_string())
+        .fetch_all(self.database.pool())
+        .await?)
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn finalize_inner(
         &self,
