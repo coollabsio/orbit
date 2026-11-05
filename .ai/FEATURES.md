@@ -82,6 +82,22 @@ Core files: `TasksPage.tsx`, `components/TaskList.tsx`, `components/TaskBoard.ts
   and dependencies (blocked by). Tasks are created with `TaskRepository::import_task`: no notifications, no sub-issue
   auto-close, Asana's `completed_at`. A restart resumes from `asana_import_items` without duplicates. A failed or cancelled
   import keeps what it made.
+- Linear import (`pages/LinearImportPage.tsx`, `api/linearImports.ts`; server `linear/`, routes `/imports/linear`,
+  migration 0067): "Import from Linear" in the header project menu and in Settings → Import opens `/tasks-import/linear`.
+  Same states and key rules as the Asana import (personal API key encrypted, wiped in every final state; private to its
+  creator). Choose lists teams with issue counts (archived ones unselected). Each team becomes a new Orbit project keyed
+  by the team key. Workflow states become statuses: the same name is reused (Canceled matches Cancelled), otherwise
+  triage/backlog/unstarted → `unstarted`, started → `started`, completed → `completed`, canceled → `cancelled`; Linear's
+  "Duplicate" state lands on Cancelled until its duplicate relation moves it. Issues keep the markdown description, title,
+  priority (0-4 → none/urgent/high/medium/low), labels (`Group/Name` for grouped labels), assignee matched by email (else a
+  description line), due date (12:00 UTC), completed or canceled time, URL as source, sub-issues (five levels; deeper ones
+  and ones whose parent is in another team go to the top level with a "Parent" line). Linear project, cycle, milestone,
+  estimate and SLA become description lines; linked attachments a Links section. Uploads (`uploads.linear.app`) in the
+  description and comments are downloaded with the key, attached, and their URLs rewritten. Comments are written by the
+  importer with author and time, replies flattened in time order. Relations: blocks, related and duplicate (similar is
+  skipped); a relation Orbit cannot hold (one per pair of tasks, one duplicate per task, no chains) is checked before the
+  write, skipped and counted. Trashed issues are left out. Shared importer code: server `task_import.rs`, web
+  `api/importStatus.ts` and `components/ImportLayout.tsx`.
 
 ### Sub-issues
 

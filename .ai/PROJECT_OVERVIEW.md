@@ -11,7 +11,7 @@ The production binary embeds the matching Vite build. It serves the SPA and `/ap
 These routes use the production API and the database:
 
 - `/setup`, `/login`, `/register`, `/recovery`, `/onboarding`, and `/accept-invitation`
-- `/` (home summaries), `/tasks`, `/views`, task trash, project settings, and Asana import (`/tasks-import`)
+- `/` (home summaries), `/tasks`, `/views`, task trash, project settings, Asana import (`/tasks-import`) and Linear import (`/tasks-import/linear`)
 - `/docs` (collaborative pages, trash, Notion import)
 - `/chat` (channels, DMs, threads); `/dm/*` redirects to `/chat`
 - `/activity` (`/inbox` redirects to it), `/profile`, `/settings`, and `/admin`
