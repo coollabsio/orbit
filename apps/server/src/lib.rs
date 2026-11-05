@@ -23,6 +23,7 @@ pub mod mail;
 pub mod mcp;
 pub mod metrics;
 pub mod notion;
+pub mod obsidian;
 pub mod oauth;
 pub mod object_storage;
 pub mod openapi;
