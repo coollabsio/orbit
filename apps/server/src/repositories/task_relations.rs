@@ -729,7 +729,16 @@ impl TaskRepository {
                     ..TaskChanges::default()
                 },
             };
-            update_task_in_tx(&mut tx, workspace_id, actor_id, &update, request_id, now).await?;
+            update_task_in_tx(
+                &mut tx,
+                workspace_id,
+                actor_id,
+                &update,
+                request_id,
+                now,
+                true,
+            )
+            .await?;
             record_mutation(
                 &mut tx,
                 workspace_id,

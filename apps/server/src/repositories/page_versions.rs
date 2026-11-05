@@ -360,8 +360,10 @@ pub async fn replace_content(
 /// as `content_json` / `content_text`. Applies the history rule of edits (the previous state
 /// becomes an `auto` version when the newest one is 10 minutes old), sets `updated_by` (the last
 /// editor, when known) and `updated_at`, and does not bump `pages.version` (the metadata
-/// concurrency token). With `audit`, records `page.updated` (audit + realtime outbox); the hub
-/// asks for that at most once per page per 10 minutes. Returns whether the content changed.
+/// concurrency token). `updated_at` always moves forward, also within one millisecond, so the
+/// page's `revision` changes with every projected edit. With `audit`, records `page.updated`
+/// (audit + realtime outbox); the hub asks for that at most once per page per 10 minutes.
+/// Returns whether the content changed.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn project_collab_content(
     tx: &mut Transaction<'_, Any>,
@@ -381,7 +383,7 @@ pub(crate) async fn project_collab_content(
     snapshot_before_edit(tx, &current, now).await?;
     sqlx::query(
         "UPDATE pages SET content_json = $1, content_text = $2, updated_by = COALESCE($3, updated_by), \
-         updated_at = $4 WHERE id = $5",
+         updated_at = CASE WHEN updated_at < $4 THEN $4 ELSE updated_at + 1 END WHERE id = $5",
     )
     .bind(serde_json::to_string(content).map_err(|_| PageError::Corrupt)?)
     .bind(content_text(content))

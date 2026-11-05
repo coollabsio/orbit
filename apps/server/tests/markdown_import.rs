@@ -117,7 +117,124 @@ fn image_block() {
     assert_eq!(blocks.len(), 1);
     assert_eq!(blocks[0]["type"], "image");
     assert_eq!(blocks[0]["props"]["url"], "https://x.dev/a.png");
-    assert_eq!(blocks[0]["props"]["caption"], "alt");
+    assert_eq!(blocks[0]["props"]["name"], "alt");
+    assert_eq!(blocks[0]["props"]["caption"], "");
+}
+
+#[test]
+fn an_italic_paragraph_after_an_image_is_its_caption() {
+    let blocks = import("![Chart](https://x.dev/a.png)\n\n*Sales by month*\n\n*not a caption*");
+    assert_eq!(blocks.len(), 2, "{blocks:#?}");
+    assert_eq!(blocks[0]["props"]["name"], "Chart");
+    assert_eq!(blocks[0]["props"]["caption"], "Sales by month");
+    assert_eq!(blocks[1]["type"], "paragraph");
+    // Italic text with other styles is no caption.
+    let blocks = import("![a](https://x.dev/a.png)\n\n***bold too***");
+    assert_eq!(blocks.len(), 2);
+    assert_eq!(blocks[0]["props"]["caption"], "");
+}
+
+#[test]
+fn underline_tags_become_underline_and_br_a_line_break() {
+    let blocks = import("a <u>under *both*</u> b");
+    assert_eq!(
+        texts(&blocks[0]),
+        vec![
+            ("a ".to_owned(), json!({})),
+            ("under ".to_owned(), json!({"underline": true})),
+            (
+                "both".to_owned(),
+                json!({"underline": true, "italic": true})
+            ),
+            (" b".to_owned(), json!({})),
+        ]
+    );
+    let blocks = import("| a<br>b |\n| - |\n| c |");
+    assert_eq!(
+        blocks[0]["content"]["rows"][0]["cells"][0]["content"][0]["text"],
+        "a\nb"
+    );
+    // Escaped tags stay text.
+    assert_eq!(import("\\<u>x")[0]["content"][0]["text"], "<u>x");
+}
+
+#[test]
+fn numbered_lists_keep_their_start_on_the_first_item() {
+    let blocks = import("5. five\n6. six");
+    assert_eq!(blocks[0]["props"]["start"], 5);
+    assert!(blocks[1]["props"].get("start").is_none(), "{blocks:#?}");
+    let blocks = import("1. one\n2. two");
+    assert!(blocks[0]["props"].get("start").is_none());
+}
+
+#[test]
+fn a_quote_s_first_paragraph_is_its_text_and_the_rest_its_children() {
+    let blocks = import("> head\n>\n> child\n>\n> - item");
+    assert_eq!(blocks.len(), 1, "{blocks:#?}");
+    assert_eq!(blocks[0]["type"], "quote");
+    assert_eq!(blocks[0]["content"][0]["text"], "head");
+    let children = blocks[0]["children"].as_array().unwrap();
+    assert_eq!(children.len(), 2);
+    assert_eq!(children[0]["type"], "paragraph");
+    assert_eq!(children[1]["type"], "bulletListItem");
+}
+
+#[test]
+fn spans_name_the_lines_of_each_block() {
+    let (blocks, spans) = orbit_server::collab::markdown_import::markdown_to_blocks_with_spans(
+        "# Title\n\ntext\nmore\n\n- a\n  - b\n\n- c\n\n> q\n>\n> r\n",
+        &[],
+    );
+    assert_eq!(blocks.len(), 5, "{blocks:#?}");
+    let lines: Vec<_> = spans.iter().map(|span| span.full.clone()).collect();
+    assert_eq!(lines, vec![0..1, 2..4, 5..7, 8..9, 10..13]);
+    assert_eq!(spans[2].head, 5..6);
+    assert_eq!(spans[2].children[0].full, 6..7);
+    assert_eq!(spans[4].head, 10..11);
+    assert_eq!(spans[4].children[0].full, 12..13);
+}
+
+/// What the exporter writes reads back as the same Markdown (the fixtures hold every block type).
+#[test]
+fn exported_markdown_reads_back_to_the_same_markdown() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/collab");
+    let mut checked = 0;
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_none_or(|extension| extension != "json") {
+            continue;
+        }
+        let golden: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        let Some(blocks) = golden["expected"].as_array() else {
+            continue;
+        };
+        let markdown = blocks_to_markdown(blocks, &KeepLinks);
+        let expected = if path.ends_with("editor_mentions.json") {
+            // Known limit: bold text that starts with punctuation right after a word cannot open
+            // emphasis in CommonMark, so it reads back as literal asterisks.
+            markdown.replace("**, see**", "\\*\\*, see\\*\\*")
+        } else {
+            markdown.clone()
+        };
+        assert_eq!(round_trip(&markdown), expected, "{}", path.display());
+        checked += 1;
+    }
+    assert!(checked > 5);
+}
+
+/// Every text in the blocks, nested ones included.
+fn all_texts(blocks: &[Value]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut stack: Vec<&Value> = blocks.iter().collect();
+    while let Some(block) = stack.pop() {
+        for item in block["content"].as_array().into_iter().flatten() {
+            if let Some(text) = item["text"].as_str() {
+                out.push(text.to_owned());
+            }
+        }
+        stack.extend(block["children"].as_array().into_iter().flatten());
+    }
+    out
 }
 
 #[test]
@@ -191,11 +308,7 @@ fn deeply_nested_markdown_is_flattened_without_recursing() {
     let quotes = format!("{} deep", ">".repeat(100_000));
     let blocks = import(&quotes);
     assert!(nesting(&blocks) <= orbit_server::collab::blocknote::MAX_BLOCK_DEPTH + 1);
-    assert!(
-        blocks
-            .iter()
-            .any(|block| block["content"][0]["text"] == "deep")
-    );
+    assert!(all_texts(&blocks).iter().any(|text| text == "deep"));
 
     let list = format!("{}deep", "- ".repeat(100_000));
     let blocks = import(&list);

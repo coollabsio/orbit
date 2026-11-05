@@ -29,7 +29,13 @@ use crate::repositories::identity::IdentityRepository;
 use crate::task_routes::authenticate_session;
 
 const SCOPE: &str = "tasks:read";
-const SCOPES: [&str; 4] = ["tasks:read", "tasks:write", "docs:read", "chat:read"];
+const SCOPES: [&str; 5] = [
+    "tasks:read",
+    "tasks:write",
+    "docs:read",
+    "docs:write",
+    "chat:read",
+];
 fn valid_scopes(scope: &str) -> bool {
     !scope.is_empty() && scope.len() < 128 && scope.split_whitespace().all(|s| SCOPES.contains(&s))
 }
@@ -110,21 +116,12 @@ impl OAuthState {
                 .get::<String, _>("user_id")
                 .parse()
                 .map_err(|_| OAuthError::server())?,
-            service_account_id: None,
-            scopes: {
-                let extra: String = row.get("mcp_scopes");
-                let mut scopes = vec![ApiTokenScope::Read];
-                for (name, scope) in [
-                    ("tasks:write", ApiTokenScope::Write),
-                    ("docs:read", ApiTokenScope::DocsRead),
-                    ("chat:read", ApiTokenScope::ChatRead),
-                ] {
-                    if extra.split_whitespace().any(|s| s == name) {
-                        scopes.push(scope);
-                    }
-                }
-                scopes
-            },
+            actor_id: row
+                .get::<String, _>("user_id")
+                .parse()
+                .map_err(|_| OAuthError::server())?,
+            service_account: None,
+            scopes: ApiTokenScope::parse_list(&granted_scopes(row.get("mcp_scopes"))),
         }))
     }
 }

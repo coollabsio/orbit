@@ -113,11 +113,16 @@ fn only_the_author_edits_a_comment_and_managers_may_also_delete_it() {
     let other = actor(WorkspaceRole::Member);
     let admin = actor(WorkspaceRole::Admin);
 
-    assert!(author.can_edit_comment(author.user_id));
-    assert!(!admin.can_edit_comment(author.user_id));
-    assert!(author.can_delete_comment(author.user_id));
-    assert!(admin.can_delete_comment(author.user_id));
-    assert!(!other.can_delete_comment(author.user_id));
+    assert!(author.can_edit_comment(Some(author.user_id)));
+    assert!(!admin.can_edit_comment(Some(author.user_id)));
+    assert!(author.can_delete_comment(Some(author.user_id)));
+    assert!(admin.can_delete_comment(Some(author.user_id)));
+    assert!(!other.can_delete_comment(Some(author.user_id)));
+    // A service account's comment: nobody edits it as its author; moderators delete it.
+    assert!(!author.can_edit_comment(None));
+    assert!(!admin.can_edit_comment(None));
+    assert!(admin.can_delete_comment(None));
+    assert!(!other.can_delete_comment(None));
 }
 
 #[test]
