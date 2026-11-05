@@ -12,7 +12,8 @@ use crate::billing::WorkspaceAccess;
 use crate::repositories::api_tokens::{ApiTokenPrincipal, ApiTokenScope};
 use crate::repositories::billing::write_access;
 use crate::repositories::chat::{
-    ChatRepository, ConversationRecord, MessageCursor, MessagePage, ThreadPage,
+    ChatRepository, ConversationRecord, MessageCursor, MessagePage, SearchInput, SearchPage,
+    ThreadPage,
 };
 use crate::repositories::pages::{PageList, PageRecord, PageRepository};
 use crate::repositories::task_filter::{
@@ -423,13 +424,7 @@ impl Authorized<'_> {
         Ok(self
             .api
             .tasks
-            .labels(
-                p.workspace_id,
-                Some(project_id),
-                p.actor_id,
-                cursor,
-                limit,
-            )
+            .labels(p.workspace_id, Some(project_id), p.actor_id, cursor, limit)
             .await?)
     }
 
@@ -882,6 +877,17 @@ impl Authorized<'_> {
         )
         .await
         .map_err(|_| TokenApiError::NotAvailable)
+    }
+
+    pub async fn search_messages(&self, input: SearchInput) -> Result<SearchPage> {
+        let chat = self.content(ApiTokenScope::ChatRead, &self.api.chat)?;
+        if input.query.chars().count() > 500 {
+            return Err(TokenApiError::Invalid("Invalid query length"));
+        }
+        let p = self.principal;
+        chat.search_messages(p.workspace_id, p.actor_id, input)
+            .await
+            .map_err(|_| TokenApiError::NotAvailable)
     }
 }
 

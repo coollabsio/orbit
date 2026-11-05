@@ -236,6 +236,22 @@ struct ThreadArgs {
     before: Option<String>,
     limit: Option<usize>,
 }
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SearchMessagesArgs {
+    /// Every word must match; the last one matches as a prefix. May be empty with a filter.
+    #[serde(default)]
+    query: String,
+    /// Only this conversation.
+    conversation_id: Option<String>,
+    /// Only messages of this member.
+    author_id: Option<String>,
+    /// Only messages with a file.
+    #[serde(default)]
+    has_file: bool,
+    /// The `cursor` of the previous page: messages older than it.
+    cursor: Option<String>,
+}
 fn write_definition<T: JsonSchema>(
     name: &'static str,
     description: &'static str,
@@ -253,7 +269,9 @@ fn required_scope(name: &str) -> ApiTokenScope {
     match name {
         "create_task" | "update_task" | "delete_task" => ApiTokenScope::TasksWrite,
         "list_docs" | "get_doc" => ApiTokenScope::DocsRead,
-        "list_conversations" | "list_messages" | "get_thread" => ApiTokenScope::ChatRead,
+        "list_conversations" | "list_messages" | "get_thread" | "search_messages" => {
+            ApiTokenScope::ChatRead
+        }
         _ => ApiTokenScope::TasksRead,
     }
 }
@@ -285,6 +303,10 @@ fn tools() -> Vec<Tool> {
             "Read a page of messages from a visible conversation.",
         ),
         definition::<ThreadArgs>("get_thread", "Read a visible message thread."),
+        definition::<SearchMessagesArgs>(
+            "search_messages",
+            "Search messages in visible conversations, newest first, 20 per page.",
+        ),
         definition::<StatusArgs>(
             "list_task_statuses",
             "List workflow statuses in an approved project, including IDs needed to create tasks.",
@@ -433,6 +455,18 @@ impl TaskTools {
                 api.thread(parse_id(&a.message_id)?, before, a.limit)
                     .await
                     .map(|p| json!(p))
+            }
+            "search_messages" => {
+                let a: SearchMessagesArgs = arguments(&request)?;
+                api.search_messages(crate::repositories::chat::SearchInput {
+                    query: a.query,
+                    conversation_id: a.conversation_id.as_deref().map(parse_id).transpose()?,
+                    author_id: a.author_id.as_deref().map(parse_id).transpose()?,
+                    has_file: a.has_file,
+                    cursor: a.cursor.as_deref().map(parse_id).transpose()?,
+                })
+                .await
+                .map(|p| json!(p))
             }
             "list_task_statuses" => {
                 let a: StatusArgs = arguments(&request)?;

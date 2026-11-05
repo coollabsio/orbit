@@ -770,7 +770,7 @@ async fn docs_and_chat_require_explicit_scopes_and_never_expose_write_tools() {
         AttachmentMutationCoordinator, LocalBlobStore, UploadLimits, UploadService,
     };
     use orbit_server::repositories::{
-        chat::{ChannelCreate, ChatRepository, ConversationKind},
+        chat::{ChannelCreate, ChatRepository, ConversationKind, SendInput},
         pages::{CreatePage, PageRepository, SpaceRequest},
     };
     let mut f = Fixture::new().await;
@@ -851,12 +851,29 @@ async fn docs_and_chat_require_explicit_scopes_and_never_expose_write_tools() {
         )
         .await
         .unwrap();
+    let send = |actor, conversation_id, body: &str| {
+        let chat = chat.clone();
+        let input = SendInput {
+            conversation_id,
+            thread_root_id: None,
+            reply_to_id: None,
+            body: body.into(),
+            sticker_id: None,
+            file_ids: vec![],
+            online: vec![],
+            also_in_channel: false,
+            nonce: Id::new_v7().to_string(),
+        };
+        async move { chat.send_message(f.workspace, actor, input).await.unwrap() }
+    };
+    send(f.user, channel.value.id, "deploy pineapple tonight").await;
+    send(outsider, secret_channel.value.id, "secret pineapple plan").await;
     f.app = router(
         McpState::new(Arc::new(f.tokens.clone()), Arc::new(f.tasks.clone()))
             .with_content(pages, chat),
         "https://orbit.test",
     );
-    for name in ["list_docs", "list_conversations"] {
+    for name in ["list_docs", "list_conversations", "search_messages"] {
         let r = f.tool(name, json!({})).await;
         assert!(r.get("error").is_some(), "{r}");
     }
@@ -902,7 +919,31 @@ async fn docs_and_chat_require_explicit_scopes_and_never_expose_write_tools() {
         )
         .await;
     assert_eq!(denied["result"]["isError"], true, "{denied}");
+    let found = f.tool("search_messages", json!({"query": "pineapp"})).await;
+    let items = &found["result"]["structuredContent"]["items"];
+    assert_eq!(items.as_array().map(Vec::len), Some(1), "{found}");
+    assert_eq!(
+        items[0]["message"]["body"], "deploy pineapple tonight",
+        "{found}"
+    );
+    assert_eq!(
+        items[0]["conversation_id"],
+        json!(channel.value.id),
+        "{found}"
+    );
+    let denied = f
+        .tool(
+            "search_messages",
+            json!({"query": "pineapple", "conversation_id": secret_channel.value.id}),
+        )
+        .await;
+    assert_eq!(denied["result"]["isError"], true, "{denied}");
+    let invalid = f
+        .tool("search_messages", json!({"query": "x".repeat(501)}))
+        .await;
+    assert!(invalid.get("error").is_some(), "{invalid}");
     let listing = f.rpc("tools/list", json!({})).await;
+    assert!(listing.to_string().contains("search_messages"), "{listing}");
     assert!(!listing.to_string().contains("send_message"));
     assert!(!listing.to_string().contains("create_doc"));
     let denied = f.tool("get_doc", json!({"page_id": Id::new_v7()})).await;
