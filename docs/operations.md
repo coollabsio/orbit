@@ -363,6 +363,8 @@ If the root user lost their own password, use (on SQLite, after you stop Orbit) 
 - An HTTPS request through a trusted proxy must receive HSTS.
 - A login response must use `__Host-orbit_session` with `Secure`, `HttpOnly`, `SameSite=Lax`, and no `Domain`.
 - Requests from untrusted peers cannot supply trusted request IDs or forwarded transport.
+- A trusted proxy's `X-Request-Id` is used only when it is 1–128 characters of `A-Z a-z 0-9 - . _ : /`. Orbit
+  generates a new ID for any other value; it does not reject the request.
 - Unsafe API calls with a missing or different `Origin` must return `origin_forbidden`.
 - Unknown `/api/*` paths must return `application/problem+json`, never SPA HTML.
 - `/api` itself and wrong methods on known API routes must return Problem Details.
