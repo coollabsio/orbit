@@ -100,6 +100,50 @@ jobs:
         run: |
           image="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA::7}-${ARCHITECTURE}"
           docker push "$image"
+      # A release also gets the smoke-tested executable, so people can run Orbit without Docker.
+      - name: Extract release binary
+        if: github.event_name == 'release'
+        env:
+          ARCHITECTURE: ${{ matrix.architecture }}
+          UNAME: ${{ matrix.uname }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA::7}-${ARCHITECTURE}"
+          binary="orbit-linux-$UNAME"
+          container=$(docker create "$image")
+          docker cp "$container:/orbit" "$binary"
+          docker rm -v "$container"
+          file "$binary" | tee file.txt
+          grep -E 'static(-pie|ally) linked' file.txt
+          "./$binary" --help > /dev/null
+      - name: Keep release binary for the release job
+        if: github.event_name == 'release'
+        uses: actions/upload-artifact@v7
+        with:
+          name: orbit-linux-${{ matrix.uname }}
+          path: orbit-linux-${{ matrix.uname }}
+          if-no-files-found: error
+          retention-days: 1
+
+  release-binaries:
+    if: github.event_name == 'release'
+    needs: [version, image]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: orbit-linux-*
+          merge-multiple: true
+      - name: Attach binaries and checksums to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          files=(orbit-linux-x86_64 orbit-linux-aarch64)
+          sha256sum "${files[@]}" | tee SHA256SUMS
+          # --clobber replaces the files when the workflow runs again for the same release.
+          gh release upload "$TAG" "${files[@]}" SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
 
   publish:
     needs: [version, image]
