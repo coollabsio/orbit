@@ -90,6 +90,13 @@ export const queryKeys = {
     detail: (workspaceId: string, importId: string) => ['notion-imports', workspaceId, 'detail', importId] as const,
     tree: (workspaceId: string, importId: string) => ['notion-imports', workspaceId, 'tree', importId] as const,
   },
+  /** Outside the workspace prefix for the same reason as `notionImports`. */
+  obsidianImports: {
+    all: (workspaceId: string) => ['obsidian-imports', workspaceId] as const,
+    list: (workspaceId: string) => ['obsidian-imports', workspaceId, 'list'] as const,
+    detail: (workspaceId: string, importId: string) => ['obsidian-imports', workspaceId, 'detail', importId] as const,
+    tree: (workspaceId: string, importId: string) => ['obsidian-imports', workspaceId, 'tree', importId] as const,
+  },
   /** Outside the workspace prefix for the same reason as `notionImports`: an import creates thousands of tasks. */
   asanaImports: {
     all: (workspaceId: string) => ['asana-imports', workspaceId] as const,

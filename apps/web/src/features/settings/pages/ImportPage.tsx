@@ -6,6 +6,7 @@ import { RowIcon, SettingsRow } from '@/features/settings/components/SettingsPar
 
 const SOURCES = [
   { name: 'Notion', description: 'Import pages and databases into Docs.', to: '/docs/import' },
+  { name: 'Obsidian', description: 'Import a vault (.zip) into Docs.', to: '/docs/import/obsidian' },
   { name: 'Asana', description: 'Import projects and their tasks into Tasks.', to: '/tasks-import' },
   { name: 'Linear', description: 'Import teams and their issues into Tasks.', to: '/tasks-import/linear' },
   { name: 'Trello', description: 'Import boards and their cards into Tasks.', to: '/tasks-import/trello' },
