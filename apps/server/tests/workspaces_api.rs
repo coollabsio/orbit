@@ -2087,6 +2087,20 @@ async fn workspace_api_tokens_are_admin_only_and_revealed_once() {
         invalid_expiration.status(),
         StatusCode::UNPROCESSABLE_ENTITY
     );
+    // Docs act as a person, so a service account cannot have a docs scope.
+    for scope in ["docs:read", "docs:write"] {
+        let refused = app.clone().oneshot(json_request(
+            "POST",
+            &path,
+            &owner_cookie,
+            json!({"name":"Docs bot", "project_ids": [project_id], "scopes":["tasks:read", scope], "service_account": true}),
+        )).await.unwrap();
+        assert_eq!(
+            refused.status(),
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{scope}"
+        );
+    }
 
     let created = app
         .clone()

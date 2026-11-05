@@ -13,7 +13,7 @@ This directory is the fast-start guide for a new maintainer and their AI agent. 
 
 ## Current status in one paragraph
 
-Orbit now ships a Rust, Axum, SQLx, and SQLite (or Postgres; see [`AGENTS.md`](../AGENTS.md)) foundation with persistent setup, authentication, workspaces, tasks, collaborative docs, chat, activity, profile, audit, backups, and operations. The matching React build is embedded in one production binary. Mail is the only area without a backend: its UI uses mock data, and `/mail` redirects to `/tasks`. The built-in AI assistant is planned; AI clients use tasks and read docs and chat through the scoped MCP endpoint (`docs/mcp.md`).
+Orbit now ships a Rust, Axum, SQLx, and SQLite (or Postgres; see [`AGENTS.md`](../AGENTS.md)) foundation with persistent setup, authentication, workspaces, tasks, collaborative docs, chat, activity, profile, audit, backups, and operations. The matching React build is embedded in one production binary. Mail is the only area without a backend: its UI uses mock data, and `/mail` redirects to `/tasks`. The built-in AI assistant is planned; AI clients use tasks and docs, and read chat, through the scoped MCP endpoint (`docs/mcp.md`).
 
 ## First commands
 

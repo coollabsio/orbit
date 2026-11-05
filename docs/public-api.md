@@ -50,7 +50,7 @@ service-account token shows the service account as the actor.
 
 ## Scopes
 
-API tokens and MCP OAuth connections use the same four scopes. In
+API tokens and MCP OAuth connections use the same five scopes. In
 **Settings → API tokens**, set the access for each resource to **No access**,
 **Read** or **Write**.
 
@@ -59,9 +59,11 @@ API tokens and MCP OAuth connections use the same four scopes. In
 | `tasks:read` | Tasks: **Read** | `GET` projects, statuses, labels, members, tasks and comments |
 | `tasks:write` | Tasks: **Write** | Create, update and delete tasks, add comments, `POST /integrations/discord/events` |
 | `docs:read` | Docs: **Read** | `GET /docs`, `GET /docs/{page_id}` |
+| `docs:write` | Docs: **Write** | `POST /docs`, `PATCH /docs/{page_id}` |
 | `chat:read` | Chat: **Read** | None. Chat is available through MCP only. |
 
-`tasks:write` includes `tasks:read`. `GET /me` works with each valid token.
+`tasks:write` includes `tasks:read`, and `docs:write` includes `docs:read`.
+`GET /me` works with each valid token.
 
 ## Conventions
 
@@ -257,7 +259,9 @@ curl -sS "$ORBIT_WS/tasks/ENG-12/comments" -H "Authorization: Bearer $ORBIT_TOKE
 ### Docs
 
 Docs show only the documents that the token's creator can see, including their
-private docs. The `docs:read` scope is off by default.
+private docs. The `docs:read` and `docs:write` scopes are off by default. Doc
+writes act as the token's creator: their name shows as the last editor, and
+mentions in the Markdown notify the mentioned members.
 
 `GET /workspaces/{workspace_id}/docs`. Scope: `docs:read`. Item: `{id, parent_id, teamspace_id, private,
 title, icon, position, version, updated_at}`. `next_cursor` is always `null`.
@@ -271,6 +275,30 @@ curl -sS "$ORBIT_WS/docs" -H "Authorization: Bearer $ORBIT_TOKEN"
 
 ```bash
 curl -sS "$ORBIT_WS/docs/$PAGE_ID" -H "Authorization: Bearer $ORBIT_TOKEN"
+```
+
+`POST /workspaces/{workspace_id}/docs`. Scope: `docs:write`. Body: `title`
+(optional, up to 500 characters), `markdown` (optional, up to 200,000 bytes),
+`icon` (optional, up to 64 characters) and the place of the doc: `parent_id`
+(the doc goes under this doc, in its space), or for a root doc `teamspace_id` or
+`"private": true`. Without a place, the doc goes to the root of the default
+teamspace. Response: `201` with the document record.
+
+```bash
+curl -sS "$ORBIT_WS/docs" -H "Authorization: Bearer $ORBIT_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"Release notes","markdown":"## Build 512\n\n- Faster sync"}'
+```
+
+`PATCH /workspaces/{workspace_id}/docs/{page_id}`. Scope: `docs:write`. Body:
+`expected_version` (required) and optional `title`, `icon` (`null` clears it)
+and `markdown`. `markdown` replaces the whole content, also for people who have
+the doc open. Response: `200` with the document record. A locked doc answers
+`423` (`page_locked`).
+
+```bash
+curl -sS -X PATCH "$ORBIT_WS/docs/$PAGE_ID" -H "Authorization: Bearer $ORBIT_TOKEN" \
+  -H 'Content-Type: application/json' -d '{"expected_version":3,"markdown":"Updated."}'
 ```
 
 ### Discord integration

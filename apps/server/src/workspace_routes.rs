@@ -691,10 +691,12 @@ async fn create_api_token(
         || project_ids.is_empty()
         || body.scopes.is_empty()
         || (body.service_account
-            && body
-                .scopes
-                .iter()
-                .any(|s| matches!(s, ApiTokenScope::DocsRead | ApiTokenScope::ChatRead)))
+            && body.scopes.iter().any(|s| {
+                matches!(
+                    s,
+                    ApiTokenScope::DocsRead | ApiTokenScope::DocsWrite | ApiTokenScope::ChatRead
+                )
+            }))
     {
         return Err(ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,

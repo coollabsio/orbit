@@ -275,9 +275,10 @@ cargo test -p orbit-platform --test http_security
 ## Permissions and tools
 
 Existing connections keep read-only task access. Reconnect to approve additional permissions.
-OAuth consent offers optional task writes, docs reads, and chat reads. API tokens use the
-same scopes: `tasks:read`, `tasks:write` (task create, update and delete; includes
-`tasks:read`), `docs:read`, and `chat:read`.
+OAuth consent offers optional task writes, docs reads, docs writes, and chat reads. API tokens
+use the same scopes: `tasks:read`, `tasks:write` (task create, update and delete; includes
+`tasks:read`), `docs:read`, `docs:write` (doc create and update; includes `docs:read`), and
+`chat:read`.
 Docs and chat permissions default to off. They apply to content visible to the connected
 person in the selected workspace, including their private docs, private channels and DMs.
 Service-account tokens support tasks only; docs and chat require a personal identity.
@@ -287,6 +288,7 @@ Service-account tokens support tasks only; docs and chat require a personal iden
 | Task read | `list_projects`, `list_tasks`, `get_task`, `list_task_statuses` |
 | Task write | `create_task`, `update_task`, `delete_task` |
 | Docs read | `list_docs`, `get_doc` |
+| Docs write | `create_doc`, `update_doc` |
 | Chat read | `list_conversations`, `list_messages`, `get_thread`, `search_messages` |
 
 Task create takes `project_id`, `status_id`, `title`, optional markdown `description` and
@@ -295,6 +297,10 @@ status or priority. Delete takes `task_id` and `expected_version` and moves the 
 to trash. Read the latest task version before updating or deleting. Task writes require
 approval for every project in the related parent/sub-issue tree, since task automations can
 change related tasks. Task tools return a projection that excludes references outside grants.
+Doc create takes optional `title`, Markdown `markdown`, and a place: `parent_id`, or for a
+root doc `teamspace_id` or `private: true` (omitted: the default teamspace). Doc update takes
+`page_id`, `expected_version`, and optional `title` or `markdown`. Markdown replaces the whole
+content, also in open editors. Doc writes act as the connected person and fail on a locked doc.
 Chat message and thread tools accept `before` and `limit` (1–100) for pagination.
 `search_messages` takes `query` (up to 500 characters; every word must match, the last one as a
 prefix) and optional `conversation_id`, `author_id`, `has_file` and `cursor` filters. It returns

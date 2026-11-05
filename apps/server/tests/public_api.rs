@@ -805,6 +805,134 @@ async fn docs_need_their_scope_and_a_personal_token_and_unserved_paths_are_not_f
 }
 
 #[tokio::test]
+async fn docs_write_creates_and_updates_docs_from_markdown() {
+    let f = Fixture::new().await;
+    let (reader, _) = f.token(&[ApiTokenScope::DocsRead], false).await;
+    let (code, problem) = f
+        .call(Some(&reader), "POST", "/docs", Some(json!({"title": "x"})))
+        .await;
+    assert_eq!(code, StatusCode::FORBIDDEN, "{problem}");
+    assert_eq!(problem["code"], "insufficient_scope");
+
+    let (writer, _) = f.token(&[ApiTokenScope::DocsWrite], false).await;
+    let (code, doc) = f
+        .call(
+            Some(&writer),
+            "POST",
+            "/docs",
+            Some(json!({"title": "Release plan", "private": true, "markdown": "# Steps\n\nShip **it**."})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{doc}");
+    assert_eq!(doc["title"], "Release plan");
+    assert_eq!(doc["private"], true);
+    assert_eq!(doc["content"][0]["type"], "heading", "{doc}");
+    assert_eq!(doc["content"][0]["content"][0]["text"], "Steps", "{doc}");
+    let id = doc["id"].as_str().unwrap().to_owned();
+    let version = doc["version"].as_u64().unwrap();
+
+    // `docs:write` includes `docs:read`, and the stored doc has the new content.
+    let (code, read) = f
+        .call(Some(&writer), "GET", &format!("/docs/{id}"), None)
+        .await;
+    assert_eq!(code, StatusCode::OK, "{read}");
+    assert_eq!(read["content"], doc["content"]);
+
+    let (code, child) = f
+        .call(
+            Some(&writer),
+            "POST",
+            "/docs",
+            Some(json!({"parent_id": id, "title": "Notes"})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{child}");
+    assert_eq!(child["parent_id"], id.as_str());
+    assert_eq!(child["content"], json!([]));
+
+    let path = format!("/docs/{id}");
+    let (code, updated) = f
+        .call(
+            Some(&writer),
+            "PATCH",
+            &path,
+            Some(json!({"expected_version": version, "title": "Release plan v2", "icon": "🚀", "markdown": "- one\n- two"})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK, "{updated}");
+    assert_eq!(updated["title"], "Release plan v2");
+    assert_eq!(updated["icon"], "🚀");
+    assert_eq!(updated["content"][0]["type"], "bulletListItem", "{updated}");
+    assert_eq!(updated["version"], version + 1);
+
+    let (code, problem) = f
+        .call(
+            Some(&writer),
+            "PATCH",
+            &path,
+            Some(json!({"expected_version": version, "title": "stale"})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::CONFLICT, "{problem}");
+
+    // `null` clears the icon; an absent field keeps the title and content.
+    let (code, cleared) = f
+        .call(
+            Some(&writer),
+            "PATCH",
+            &path,
+            Some(json!({"expected_version": version + 1, "icon": null})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK, "{cleared}");
+    assert_eq!(cleared["icon"], Value::Null);
+    assert_eq!(cleared["title"], "Release plan v2");
+    assert_eq!(cleared["content"], updated["content"]);
+
+    sqlx::query("UPDATE pages SET locked_at = 1 WHERE id = $1")
+        .bind(&id)
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    let (code, problem) = f
+        .call(
+            Some(&writer),
+            "PATCH",
+            &path,
+            Some(json!({"expected_version": version + 2, "markdown": "locked"})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::LOCKED, "{problem}");
+    assert_eq!(problem["code"], "page_locked");
+
+    let (code, _) = f
+        .call(
+            Some(&writer),
+            "PATCH",
+            &format!("/docs/{}", Id::new_v7()),
+            Some(json!({"expected_version": 0, "title": "x"})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::NOT_FOUND);
+    let (code, _) = f
+        .call(
+            Some(&writer),
+            "POST",
+            "/docs",
+            Some(json!({"title": "x".repeat(501)})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::BAD_REQUEST);
+
+    // Docs act as the token's creator, so a service account cannot write them.
+    let (service, _) = f.token(&[ApiTokenScope::DocsWrite], true).await;
+    let (code, _) = f
+        .call(Some(&service), "POST", "/docs", Some(json!({"title": "x"})))
+        .await;
+    assert_eq!(code, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
 async fn bad_expired_and_revoked_tokens_are_unauthorized() {
     let f = Fixture::new().await;
     let (expired, expired_id) = f.token(&[ApiTokenScope::TasksRead], false).await;

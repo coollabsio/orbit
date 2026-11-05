@@ -765,7 +765,7 @@ async fn task_writes_require_scope_and_versions_and_stay_in_granted_projects() {
 }
 
 #[tokio::test]
-async fn docs_and_chat_require_explicit_scopes_and_never_expose_write_tools() {
+async fn docs_and_chat_require_explicit_scopes_and_doc_writes_need_docs_write() {
     use orbit_platform::{
         AttachmentMutationCoordinator, LocalBlobStore, UploadLimits, UploadService,
     };
@@ -948,12 +948,49 @@ async fn docs_and_chat_require_explicit_scopes_and_never_expose_write_tools() {
     assert!(!listing.to_string().contains("create_doc"));
     let denied = f.tool("get_doc", json!({"page_id": Id::new_v7()})).await;
     assert_eq!(denied["result"]["isError"], true, "{denied}");
+    let refused = f.tool("create_doc", json!({"title": "x"})).await;
+    assert!(refused.get("error").is_some(), "{refused}");
+
+    sqlx::query("UPDATE api_tokens SET scopes = 'tasks:read docs:write' WHERE id = $1")
+        .bind(f.token_id.to_string())
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    let listing = f.rpc("tools/list", json!({})).await.to_string();
+    for name in ["create_doc", "update_doc", "get_doc"] {
+        assert!(listing.contains(name), "{name}: {listing}");
+    }
+    let created = f
+        .tool(
+            "create_doc",
+            json!({"title": "Agent notes", "markdown": "## Findings\n\nAll good."}),
+        )
+        .await;
+    let doc = &created["result"]["structuredContent"];
+    assert_eq!(doc["title"], "Agent notes", "{created}");
+    assert_eq!(doc["content"][0]["type"], "heading", "{created}");
+    let updated = f
+        .tool(
+            "update_doc",
+            json!({"page_id": doc["id"], "expected_version": doc["version"], "markdown": "Rewritten."}),
+        )
+        .await;
+    let text = &updated["result"]["structuredContent"]["content"][0]["content"][0]["text"];
+    assert_eq!(text, "Rewritten.", "{updated}");
+    let stale = f
+        .tool(
+            "update_doc",
+            json!({"page_id": doc["id"], "expected_version": doc["version"], "title": "x"}),
+        )
+        .await;
+    assert_eq!(stale["result"]["isError"], true, "{stale}");
+    assert!(stale.to_string().contains("version changed"), "{stale}");
 }
 
 #[tokio::test]
-async fn task_writes_are_refused_in_a_read_only_cloud_workspace() {
+async fn writes_are_refused_in_a_read_only_cloud_workspace() {
     let f = Fixture::new().await;
-    sqlx::query("UPDATE api_tokens SET scopes = 'tasks:read tasks:write' WHERE id = $1")
+    sqlx::query("UPDATE api_tokens SET scopes = 'tasks:read tasks:write docs:write' WHERE id = $1")
         .bind(f.token_id.to_string())
         .execute(f.database.pool())
         .await
@@ -987,6 +1024,7 @@ async fn task_writes_are_refused_in_a_read_only_cloud_workspace() {
             "delete_task",
             json!({"task_id": f.task, "expected_version": current.version}),
         ),
+        ("create_doc", json!({"title": "Created"})),
     ];
     for (name, arguments) in calls {
         let refused = f.tool(name, arguments).await;

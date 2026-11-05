@@ -19,13 +19,13 @@ use crate::billing::guard::READ_ONLY_DETAIL;
 use crate::repositories::api_tokens::{
     ApiTokenError, ApiTokenPrincipal, ApiTokenRepository, ApiTokenScope,
 };
-use crate::repositories::pages::PageRepository;
+use crate::repositories::pages::{PageError, PageRepository};
 use crate::repositories::tasks::{
     CommentRecord, LabelRecord, ProjectRecord, SortOrder, StatusRecord, TaskError, TaskRepository,
     TaskSort,
 };
 use crate::token_api::{
-    AssigneeFilter, Named, NewTask, TaskPatch, TaskQuery, TokenApi, TokenApiError,
+    AssigneeFilter, DocPatch, Named, NewDoc, NewTask, TaskPatch, TaskQuery, TokenApi, TokenApiError,
 };
 
 pub const BASE_PATH: &str = "/api/public/v1";
@@ -71,8 +71,8 @@ pub fn router(state: PublicApiState) -> Router {
             get(get_task).patch(update_task).delete(delete_task),
         )
         .route("/tasks/{task}/comments", get(comments).post(create_comment))
-        .route("/docs", get(docs))
-        .route("/docs/{page_id}", get(doc));
+        .route("/docs", get(docs).post(create_doc))
+        .route("/docs/{page_id}", get(doc).patch(update_doc));
     let routes = Router::new()
         .route("/me", get(me))
         .nest("/workspaces/{workspace_id}", workspace)
@@ -250,6 +250,7 @@ impl Responder {
             TokenApiError::NotAvailable => self.not_found(),
             TokenApiError::Internal => Problem::internal(&self.request_id, &self.instance),
             TokenApiError::Task(error) => self.task_problem(error),
+            TokenApiError::Page(error) => self.page_problem(error),
         };
         problem_response(problem)
     }
@@ -336,6 +337,63 @@ impl Responder {
             TaskError::Unavailable(_) => {
                 return Problem::internal(&self.request_id, &self.instance);
             }
+        };
+        self.problem(status, code, title, detail)
+    }
+
+    fn page_problem(&self, error: PageError) -> Problem {
+        let (status, code, title, detail) = match error {
+            PageError::Invalid { field } => {
+                return Problem::validation(
+                    &self.request_id,
+                    &self.instance,
+                    [(field, "The value is invalid for this workspace.")],
+                );
+            }
+            PageError::TeamspaceNotFound => {
+                return Problem::validation(
+                    &self.request_id,
+                    &self.instance,
+                    [(
+                        "teamspace_id",
+                        "The teamspace does not exist or is not visible.",
+                    )],
+                );
+            }
+            PageError::VersionConflict { current } => {
+                return Problem::conflict(
+                    &self.request_id,
+                    &self.instance,
+                    "The resource changed after it was read. Read it again and retry.",
+                    current.get("version").and_then(Value::as_i64).unwrap_or(0),
+                    None,
+                );
+            }
+            PageError::TrialLimit(reached) => {
+                let detail = reached.detail();
+                return self.problem(
+                    StatusCode::PAYMENT_REQUIRED,
+                    "trial_limit_reached",
+                    "Trial limit reached",
+                    &detail,
+                );
+            }
+            PageError::Locked => (
+                StatusCode::LOCKED,
+                "page_locked",
+                "Doc locked",
+                "The doc is locked. Unlock it in Orbit to change its title, icon or content.",
+            ),
+            PageError::Busy => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                "page_busy",
+                "Doc busy",
+                "The doc's content is busy on the server. Try again in a moment.",
+            ),
+            PageError::Unavailable(_) | PageError::Corrupt => {
+                return Problem::internal(&self.request_id, &self.instance);
+            }
+            _ => return self.not_found(),
         };
         self.problem(status, code, title, detail)
     }
@@ -533,16 +591,39 @@ struct UpdateTaskBody {
 }
 
 /// A field that is present, `null` included: `null` clears the value, a missing field keeps it.
-fn present<'de, D: serde::Deserializer<'de>>(
+fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
     deserializer: D,
-) -> Result<Option<Option<TimestampMillis>>, D::Error> {
-    Option::<TimestampMillis>::deserialize(deserializer).map(Some)
+) -> Result<Option<Option<T>>, D::Error> {
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CommentBody {
     body: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CreateDocBody {
+    parent_id: Option<Id>,
+    teamspace_id: Option<Id>,
+    private: Option<bool>,
+    #[serde(default)]
+    title: String,
+    icon: Option<String>,
+    #[serde(default)]
+    markdown: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UpdateDocBody {
+    expected_version: u64,
+    title: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    icon: Option<Option<String>>,
+    markdown: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -826,6 +907,55 @@ async fn doc(
             .authorize(&ctx.principal, ApiTokenScope::DocsRead, &ctx.request_id)
             .await?;
         api.get_doc(page).await
+    }
+    .await;
+    ctx.reply(StatusCode::OK, result)
+}
+
+async fn create_doc(
+    State(s): State<PublicApiState>,
+    ctx: Ctx,
+    body: Result<Json<CreateDocBody>, JsonRejection>,
+) -> Response {
+    let body = input!(ctx, body);
+    let result = async {
+        let api = s
+            .api
+            .authorize(&ctx.principal, ApiTokenScope::DocsWrite, &ctx.request_id)
+            .await?;
+        api.create_doc(NewDoc {
+            parent_id: body.parent_id,
+            teamspace_id: body.teamspace_id,
+            private: body.private,
+            title: body.title,
+            icon: body.icon,
+            markdown: body.markdown,
+        })
+        .await
+    }
+    .await;
+    ctx.reply(StatusCode::CREATED, result)
+}
+
+async fn update_doc(
+    State(s): State<PublicApiState>,
+    ctx: Ctx,
+    Path((_, page)): Path<(String, String)>,
+    body: Result<Json<UpdateDocBody>, JsonRejection>,
+) -> Response {
+    let page = path_id!(ctx, page);
+    let body = input!(ctx, body);
+    let result = async {
+        let api = s
+            .api
+            .authorize(&ctx.principal, ApiTokenScope::DocsWrite, &ctx.request_id)
+            .await?;
+        let patch = DocPatch {
+            title: body.title,
+            icon: body.icon,
+            markdown: body.markdown,
+        };
+        api.update_doc(page, body.expected_version, patch).await
     }
     .await;
     ctx.reply(StatusCode::OK, result)

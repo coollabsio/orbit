@@ -32,13 +32,13 @@ const PRESETS: ScopePreset<ApiTokenScope>[] = [
   { id: 'tasks-read', label: 'Tasks read-only', scopes: ['tasks:read'] },
   { id: 'tasks-write', label: 'Tasks read and write', scopes: ['tasks:read', 'tasks:write'] },
   { id: 'read-all', label: 'Read everything', scopes: ['tasks:read', 'docs:read', 'chat:read'] },
-  { id: 'all', label: 'Full access', scopes: ['tasks:read', 'tasks:write', 'docs:read', 'chat:read'] },
+  { id: 'all', label: 'Full access', scopes: ['tasks:read', 'tasks:write', 'docs:read', 'docs:write', 'chat:read'] },
 ]
 
 function tokenResources(serviceAccount: boolean): ScopeResource<ApiTokenScope>[] {
   return [
     { name: 'Tasks', hint: 'In the selected projects. Write includes delete.', read: 'tasks:read', write: 'tasks:write' },
-    { name: 'Docs', hint: 'Including your private docs', read: 'docs:read', disabled: serviceAccount },
+    { name: 'Docs', hint: 'Including your private docs', read: 'docs:read', write: 'docs:write', disabled: serviceAccount },
     { name: 'Chat', hint: 'Including your private channels and DMs. MCP only.', read: 'chat:read', disabled: serviceAccount },
   ]
 }
@@ -98,7 +98,7 @@ export function ApiTokensPage() {
         {/* a choice card: the whole card toggles the checkbox and tints while checked */}
         <FieldLabel className="min-[900px]:col-span-2">
           <Field orientation="horizontal">
-            <Checkbox checked={serviceAccount} disabled={scopes.includes('docs:read') || scopes.includes('chat:read')} onCheckedChange={setServiceAccount} />
+            <Checkbox checked={serviceAccount} disabled={scopes.some((scope) => scope.startsWith('docs:') || scope === 'chat:read')} onCheckedChange={setServiceAccount} />
             <FieldContent>
               <FieldTitle>Use a service account</FieldTitle>
               <FieldDescription>For Discord and other unattended integrations. Tokens with the same name reuse this identity.</FieldDescription>

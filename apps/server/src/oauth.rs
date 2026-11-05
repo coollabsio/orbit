@@ -29,7 +29,13 @@ use crate::repositories::identity::IdentityRepository;
 use crate::task_routes::authenticate_session;
 
 const SCOPE: &str = "tasks:read";
-const SCOPES: [&str; 4] = ["tasks:read", "tasks:write", "docs:read", "chat:read"];
+const SCOPES: [&str; 5] = [
+    "tasks:read",
+    "tasks:write",
+    "docs:read",
+    "docs:write",
+    "chat:read",
+];
 fn valid_scopes(scope: &str) -> bool {
     !scope.is_empty() && scope.len() < 128 && scope.split_whitespace().all(|s| SCOPES.contains(&s))
 }

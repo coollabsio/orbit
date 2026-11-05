@@ -36053,11 +36053,12 @@
       },
       "ApiTokenScope": {
         "type": "string",
-        "description": "What a credential may do. API tokens and OAuth grants use the same names; `tasks:write`\nincludes `tasks:read`.",
+        "description": "What a credential may do. API tokens and OAuth grants use the same names; `tasks:write`\nincludes `tasks:read`, and `docs:write` includes `docs:read`.",
         "enum": [
           "tasks:read",
           "tasks:write",
           "docs:read",
+          "docs:write",
           "chat:read"
         ]
       },

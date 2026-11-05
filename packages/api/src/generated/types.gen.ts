@@ -76,9 +76,9 @@ export type ApiTokenRecord = {
 
 /**
  * What a credential may do. API tokens and OAuth grants use the same names; `tasks:write`
- * includes `tasks:read`.
+ * includes `tasks:read`, and `docs:write` includes `docs:read`.
  */
-export type ApiTokenScope = 'tasks:read' | 'tasks:write' | 'docs:read' | 'chat:read';
+export type ApiTokenScope = 'tasks:read' | 'tasks:write' | 'docs:read' | 'docs:write' | 'chat:read';
 
 export type AttachmentComment = {
     attachments: Array<AttachmentRecord>;

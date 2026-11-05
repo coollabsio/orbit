@@ -38,7 +38,7 @@ pub struct IssuedApiToken {
 }
 
 /// What a credential may do. API tokens and OAuth grants use the same names; `tasks:write`
-/// includes `tasks:read`.
+/// includes `tasks:read`, and `docs:write` includes `docs:read`.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize, ToSchema)]
 pub enum ApiTokenScope {
     #[serde(rename = "tasks:read")]
@@ -47,15 +47,18 @@ pub enum ApiTokenScope {
     TasksWrite,
     #[serde(rename = "docs:read")]
     DocsRead,
+    #[serde(rename = "docs:write")]
+    DocsWrite,
     #[serde(rename = "chat:read")]
     ChatRead,
 }
 
 impl ApiTokenScope {
-    pub const ALL: [Self; 4] = [
+    pub const ALL: [Self; 5] = [
         Self::TasksRead,
         Self::TasksWrite,
         Self::DocsRead,
+        Self::DocsWrite,
         Self::ChatRead,
     ];
 
@@ -65,6 +68,7 @@ impl ApiTokenScope {
             Self::TasksRead => "tasks:read",
             Self::TasksWrite => "tasks:write",
             Self::DocsRead => "docs:read",
+            Self::DocsWrite => "docs:write",
             Self::ChatRead => "chat:read",
         }
     }
@@ -112,9 +116,12 @@ pub struct ServiceAccount {
 impl ApiTokenPrincipal {
     #[must_use]
     pub fn allows(&self, scope: ApiTokenScope) -> bool {
-        self.scopes.contains(&scope)
-            || (scope == ApiTokenScope::TasksRead
-                && self.scopes.contains(&ApiTokenScope::TasksWrite))
+        let write = match scope {
+            ApiTokenScope::TasksRead => Some(ApiTokenScope::TasksWrite),
+            ApiTokenScope::DocsRead => Some(ApiTokenScope::DocsWrite),
+            _ => None,
+        };
+        self.scopes.contains(&scope) || write.is_some_and(|write| self.scopes.contains(&write))
     }
 }
 

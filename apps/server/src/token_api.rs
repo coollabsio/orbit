@@ -9,13 +9,17 @@ use serde::Serialize;
 use serde_json::{Value, json};
 
 use crate::billing::WorkspaceAccess;
+use crate::collab::kind_task::members;
+use crate::collab::markdown_import::markdown_to_blocks;
 use crate::repositories::api_tokens::{ApiTokenPrincipal, ApiTokenScope};
 use crate::repositories::billing::write_access;
 use crate::repositories::chat::{
     ChatRepository, ConversationRecord, MessageCursor, MessagePage, SearchInput, SearchPage,
     ThreadPage,
 };
-use crate::repositories::pages::{PageList, PageRecord, PageRepository};
+use crate::repositories::pages::{
+    CreatePage, PageChanges, PageError, PageList, PageRecord, PageRepository, SpaceRequest,
+};
 use crate::repositories::task_filter::{
     Condition, FilterField, FilterGroup, FilterNode, FilterOperator, GroupOp, ShowCompleted,
     SubIssuesDisplay,
@@ -40,7 +44,17 @@ pub enum TokenApiError {
     /// Outside the grant, hidden, or missing: callers must not tell these apart.
     NotAvailable,
     Task(TaskError),
+    Page(PageError),
     Internal,
+}
+
+impl From<PageError> for TokenApiError {
+    fn from(error: PageError) -> Self {
+        match error {
+            PageError::Unavailable(_) | PageError::Corrupt => Self::Internal,
+            error => Self::Page(error),
+        }
+    }
 }
 
 impl From<TaskError> for TokenApiError {
@@ -207,6 +221,28 @@ pub struct NewTask {
 }
 
 #[derive(Debug, Default)]
+pub struct NewDoc {
+    /// With a parent the doc joins the parent's space.
+    pub parent_id: Option<Id>,
+    /// Root docs only: the teamspace; with neither this nor `private`, the default teamspace.
+    pub teamspace_id: Option<Id>,
+    /// Root docs only: `true` puts the doc in the token creator's private space.
+    pub private: Option<bool>,
+    pub title: String,
+    pub icon: Option<String>,
+    pub markdown: String,
+}
+
+#[derive(Debug, Default)]
+pub struct DocPatch {
+    pub title: Option<String>,
+    /// `Some(None)` clears the icon.
+    pub icon: Option<Option<String>>,
+    /// Replaces the whole content.
+    pub markdown: Option<String>,
+}
+
+#[derive(Debug, Default)]
 pub struct TaskPatch {
     pub title: Option<String>,
     pub description: Option<String>,
@@ -268,7 +304,7 @@ impl TokenApi {
         if !principal.allows(scope) {
             return Err(TokenApiError::MissingScope);
         }
-        if scope == ApiTokenScope::TasksWrite {
+        if matches!(scope, ApiTokenScope::TasksWrite | ApiTokenScope::DocsWrite) {
             match write_access(self.tasks.database(), principal.workspace_id).await {
                 Ok(WorkspaceAccess::ReadOnly) => return Err(TokenApiError::ReadOnly),
                 Ok(_) => {}
@@ -835,6 +871,95 @@ impl Authorized<'_> {
             .map_err(|_| TokenApiError::NotAvailable)
     }
 
+    pub async fn create_doc(&self, input: NewDoc) -> Result<PageRecord> {
+        let pages = self.content(ApiTokenScope::DocsWrite, &self.api.pages)?;
+        validate_doc_input(
+            Some(&input.title),
+            input.icon.as_deref(),
+            Some(&input.markdown),
+        )?;
+        let p = self.principal;
+        let now = TimestampMillis::now();
+        let page = pages
+            .create_page(
+                p.workspace_id,
+                p.actor_id,
+                CreatePage {
+                    parent_id: input.parent_id,
+                    space: SpaceRequest {
+                        teamspace_id: input.teamspace_id,
+                        private: input.private,
+                    },
+                    title: input.title,
+                    icon: input.icon,
+                    position: None,
+                },
+                self.request_id,
+                now,
+            )
+            .await?;
+        if input.markdown.trim().is_empty() {
+            return Ok(page);
+        }
+        let changes = PageChanges {
+            content: Some(self.blocks(&input.markdown).await?),
+            ..PageChanges::default()
+        };
+        Ok(pages
+            .update_page(
+                p.workspace_id,
+                page.id,
+                p.actor_id,
+                page.version,
+                changes,
+                self.request_id,
+                now,
+            )
+            .await?)
+    }
+
+    pub async fn update_doc(
+        &self,
+        page_id: Id,
+        expected_version: u64,
+        patch: DocPatch,
+    ) -> Result<PageRecord> {
+        let pages = self.content(ApiTokenScope::DocsWrite, &self.api.pages)?;
+        validate_doc_input(
+            patch.title.as_deref(),
+            patch.icon.as_ref().and_then(Option::as_deref),
+            patch.markdown.as_deref(),
+        )?;
+        let content = match &patch.markdown {
+            Some(markdown) => Some(self.blocks(markdown).await?),
+            None => None,
+        };
+        let p = self.principal;
+        Ok(pages
+            .update_page(
+                p.workspace_id,
+                page_id,
+                p.actor_id,
+                expected_version,
+                PageChanges {
+                    title: patch.title,
+                    icon: patch.icon,
+                    content,
+                    ..PageChanges::default()
+                },
+                self.request_id,
+                TimestampMillis::now(),
+            )
+            .await?)
+    }
+
+    /// Doc blocks from Markdown; `@Name` mentions of workspace members become mentions.
+    async fn blocks(&self, markdown: &str) -> Result<Vec<Value>> {
+        let database = self.api.tasks.database();
+        let members = members(database.pool(), self.principal.workspace_id).await?;
+        Ok(markdown_to_blocks(markdown, &members))
+    }
+
     pub async fn conversations(&self) -> Result<Vec<ConversationRecord>> {
         let chat = self.content(ApiTokenScope::ChatRead, &self.api.chat)?;
         let p = self.principal;
@@ -921,6 +1046,23 @@ fn validate_task_input(
     {
         return Err(TokenApiError::Invalid(
             "Invalid task title, description or priority",
+        ));
+    }
+    Ok(())
+}
+
+/// The limits of the web editor for the title and icon; content up to 200,000 bytes of Markdown.
+fn validate_doc_input(
+    title: Option<&str>,
+    icon: Option<&str>,
+    markdown: Option<&str>,
+) -> Result<()> {
+    if title.is_some_and(|s| s.chars().count() > 500 || s.len() > 2000)
+        || icon.is_some_and(|s| s.chars().count() > 64 || s.len() > 256)
+        || markdown.is_some_and(|s| s.len() > 200_000)
+    {
+        return Err(TokenApiError::Invalid(
+            "Invalid doc title, icon or markdown",
         ));
     }
     Ok(())

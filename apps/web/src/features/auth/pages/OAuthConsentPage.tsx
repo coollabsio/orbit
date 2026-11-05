@@ -15,19 +15,19 @@ import { oauthRequest, type OAuthConsent } from '@/features/auth/oauth'
 // Anonymous consent sessions must not trigger the app-wide /login redirect.
 const consentClient = createApiClient()
 
-type Scope = 'tasks:write' | 'docs:read' | 'chat:read'
+type Scope = 'tasks:write' | 'docs:read' | 'docs:write' | 'chat:read'
 
-// Task read access comes with every grant, and docs and chat have no write scope.
+// Task read access comes with every grant, and chat has no write scope.
 const RESOURCES: ScopeResource<Scope>[] = [
   { name: 'Tasks', hint: 'In the selected projects', write: 'tasks:write' },
-  { name: 'Docs', hint: 'Including private docs', read: 'docs:read' },
+  { name: 'Docs', hint: 'Including private docs', read: 'docs:read', write: 'docs:write' },
   { name: 'Chat', hint: 'Including private channels and direct messages', read: 'chat:read' },
 ]
 
 const PRESETS: ScopePreset<Scope>[] = [
   { id: 'tasks-read', label: 'Tasks read-only', scopes: [] },
   { id: 'read-all', label: 'Read everything', scopes: ['docs:read', 'chat:read'] },
-  { id: 'all', label: 'Full access', scopes: ['tasks:write', 'docs:read', 'chat:read'] },
+  { id: 'all', label: 'Full access', scopes: ['tasks:write', 'docs:read', 'docs:write', 'chat:read'] },
 ]
 
 export function OAuthConsentPage() {
