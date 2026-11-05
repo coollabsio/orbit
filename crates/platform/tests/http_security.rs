@@ -791,11 +791,11 @@ async fn csp_allows_only_the_verified_bootstrap_hash_and_local_image_variants() 
     assert!(csp.contains("script-src 'self' 'sha256-YWJj'"));
     // External https images load (covers, image blocks); plain http and other sources stay blocked.
     assert!(csp.contains("img-src 'self' data: blob: https:;"));
-    assert!(csp.contains("style-src 'self'; style-src-attr 'unsafe-inline'"));
+    assert!(csp.contains("style-src 'self' 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='; style-src-attr 'unsafe-inline'"));
     assert!(!csp.contains("http:"));
     assert_eq!(
         csp,
-        "default-src 'self'; script-src 'self' 'sha256-YWJj'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: https:; frame-src https://www.youtube-nocookie.com; media-src 'self' https://video.twimg.com; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self' https://github.com"
+        "default-src 'self'; script-src 'self' 'sha256-YWJj'; style-src 'self' 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: https:; frame-src https://www.youtube-nocookie.com; media-src 'self' https://video.twimg.com; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self' https://github.com"
     );
 }
 
