@@ -9,7 +9,7 @@ import { ProviderButtons } from '@/features/auth/components/ProviderButtons'
 import { TwoFactorStep } from '@/features/auth/components/TwoFactorStep'
 import { isPasskeyCancel, passkeysSupported } from '@/features/auth/passkey'
 
-import { oauthLoginDestination } from '@/features/auth/oauth'
+import { loginDestination } from '@/features/auth/returnTo'
 
 /** The server sends an expired or replayed provider sign-in back here with `?sign_in_error=provider_expired`. */
 function signInError(code: string | null): Error | null {
@@ -29,7 +29,7 @@ export function LoginPage() {
   const [twoFactorToken, setTwoFactorToken] = useState<string | null>(null)
   // Why the code step ended (expired or used-up challenge), or why a provider sign-in came back, shown on the password step.
   const [returnError, setReturnError] = useState<Error | null>(() => signInError(params.get('sign_in_error')))
-  const signedIn = () => navigate(oauthLoginDestination(params.get('return_to')), { replace: true })
+  const signedIn = () => navigate(loginDestination(params.get('return_to')), { replace: true })
 
   if (twoFactorToken) {
     return <TwoFactorStep token={twoFactorToken} onSignedIn={() => void signedIn()} onBack={(error) => {

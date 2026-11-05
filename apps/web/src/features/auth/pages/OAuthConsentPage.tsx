@@ -11,6 +11,7 @@ import { AuthBrand, AuthCard } from '@/features/auth/components/AuthForm'
 import { currentUserQueryOptions } from '@/features/auth/api'
 import { createApiClient } from '@/api/client'
 import { oauthRequest, type OAuthConsent } from '@/features/auth/oauth'
+import { loginPath } from '@/features/auth/returnTo'
 
 // Anonymous consent sessions must not trigger the app-wide /login redirect.
 const consentClient = createApiClient()
@@ -77,7 +78,7 @@ export function OAuthConsentPage() {
     <p role="status" className="text-sm text-muted-foreground">{copyState === 'copied' ? 'Callback URL copied.' : copyState === 'failed' ? 'Could not copy. Select the URL above and copy it manually.' : 'Keep this page open until the terminal confirms the result.'}</p>
   </div></AuthCard>
   if (user.isPending) return <LoadingScreen />
-  if (user.data === null) return <Navigate to={`/login?return_to=${encodeURIComponent(`/oauth/consent?request=${request}`)}`} replace />
+  if (user.data === null) return <Navigate to={loginPath(`/oauth/consent?request=${request}`)} replace />
   const workspaceProjects = consent.data?.projects.filter((project) => project.workspace_id === workspace) ?? []
   const workspaces = [...new Map(consent.data?.projects.map((project) => [project.workspace_id, project.workspace_name])).entries()]
   return <AuthCard><div className="grid gap-5">
