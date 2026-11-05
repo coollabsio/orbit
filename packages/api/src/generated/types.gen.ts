@@ -60,6 +60,17 @@ export type AdminUser = {
     workspace_count: number;
 };
 
+/**
+ * How many accounts and trials this instance has, for the Admin area.
+ */
+export type AdminUserSummary = {
+    trials?: null | TrialCounts;
+    /**
+     * Accounts, deleted accounts excluded.
+     */
+    users: number;
+};
+
 export type ApiTokenRecord = {
     created_at: string;
     expires_at?: string | null;
@@ -3700,6 +3711,20 @@ export type TrashedPage = {
 };
 
 /**
+ * Workspaces by trial state, for the Admin area. Deleted workspaces are not counted.
+ */
+export type TrialCounts = {
+    /**
+     * The trial ended without a subscription, so the workspace is read-only.
+     */
+    expired: number;
+    /**
+     * On a trial now: writable within the trial limits.
+     */
+    ongoing: number;
+};
+
+/**
  * A trial workspace's end and usage of its limits.
  */
 export type TrialView = {
@@ -5342,6 +5367,58 @@ export type ListAdminUsersResponses = {
 };
 
 export type ListAdminUsersResponse = ListAdminUsersResponses[keyof ListAdminUsersResponses];
+
+export type GetAdminUserSummaryData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/admin/users/summary';
+};
+
+export type GetAdminUserSummaryErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * installation_admin_required
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type GetAdminUserSummaryError = GetAdminUserSummaryErrors[keyof GetAdminUserSummaryErrors];
+
+export type GetAdminUserSummaryResponses = {
+    200: AdminUserSummary;
+};
+
+export type GetAdminUserSummaryResponse = GetAdminUserSummaryResponses[keyof GetAdminUserSummaryResponses];
 
 export type SetInstanceAdminData = {
     body: InstanceAdminBody;

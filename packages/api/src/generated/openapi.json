@@ -3060,6 +3060,113 @@
         ]
       }
     },
+    "/api/v1/admin/users/summary": {
+      "get": {
+        "tags": [
+          "crate::workspace_routes"
+        ],
+        "summary": "The number of accounts and of ongoing and expired trials.",
+        "operationId": "get_admin_user_summary",
+        "parameters": [
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserSummary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "installation_admin_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/admin/users/{user_id}/admin": {
       "put": {
         "tags": [
@@ -35983,6 +36090,31 @@
           }
         }
       },
+      "AdminUserSummary": {
+        "type": "object",
+        "description": "How many accounts and trials this instance has, for the Admin area.",
+        "required": [
+          "users"
+        ],
+        "properties": {
+          "trials": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TrialCounts",
+                "description": "Workspaces by trial state; `null` on a self-hosted server, which has no trials."
+              }
+            ]
+          },
+          "users": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Accounts, deleted accounts excluded."
+          }
+        }
+      },
       "ApiTokenRecord": {
         "type": "object",
         "required": [
@@ -45480,6 +45612,26 @@
             "type": "integer",
             "format": "int64",
             "minimum": 0
+          }
+        }
+      },
+      "TrialCounts": {
+        "type": "object",
+        "description": "Workspaces by trial state, for the Admin area. Deleted workspaces are not counted.",
+        "required": [
+          "ongoing",
+          "expired"
+        ],
+        "properties": {
+          "expired": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The trial ended without a subscription, so the workspace is read-only."
+          },
+          "ongoing": {
+            "type": "integer",
+            "format": "int64",
+            "description": "On a trial now: writable within the trial limits."
           }
         }
       },
