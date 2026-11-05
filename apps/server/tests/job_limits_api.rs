@@ -102,6 +102,10 @@ async fn the_root_user_changes_and_resets_job_limits() {
          "default_concurrency": 2, "default_workspace_concurrency": 1},
         {"kind": "linear.import", "concurrency": 2, "workspace_concurrency": 1,
          "default_concurrency": 2, "default_workspace_concurrency": 1},
+        {"kind": "trello.scan", "concurrency": 2, "workspace_concurrency": 1,
+         "default_concurrency": 2, "default_workspace_concurrency": 1},
+        {"kind": "trello.import", "concurrency": 2, "workspace_concurrency": 1,
+         "default_concurrency": 2, "default_workspace_concurrency": 1},
         {"kind": "workspace.export", "concurrency": 2, "workspace_concurrency": 1,
          "default_concurrency": 2, "default_workspace_concurrency": 1},
     ]});

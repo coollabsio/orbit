@@ -52,6 +52,9 @@ use crate::socket_ticket::SocketTickets;
 use crate::static_assets::{FRONTEND_REVISION, StaticAssetError, StaticAssets};
 use crate::task_routes::TaskState;
 use crate::teamspace_routes::TeamspaceState;
+use crate::trello::client::TrelloClientConfig;
+use crate::trello::import::{TrelloImportService, TrelloImportSettings};
+use crate::trello_import_routes::TrelloImportState;
 use crate::workspace_export::WorkspaceExportService;
 use crate::workspace_export_routes::WorkspaceExportState;
 use crate::workspace_routes::WorkspaceState;
@@ -285,6 +288,18 @@ impl App {
                 max_file_bytes: config.uploads.max_file_bytes,
             },
         );
+        let trello_imports = TrelloImportService::new(
+            database.clone(),
+            crate::repositories::attachments::AttachmentRepository::new(
+                database.clone(),
+                attachment_state.uploads.clone(),
+            ),
+            TrelloImportSettings {
+                client: TrelloClientConfig::default(),
+                app_key,
+                max_file_bytes: config.uploads.max_file_bytes,
+            },
+        );
         let asana_imports = AsanaImportService::new(
             database.clone(),
             crate::repositories::attachments::AttachmentRepository::new(
@@ -323,6 +338,7 @@ impl App {
             notion_imports.clone(),
             asana_imports.clone(),
             linear_imports.clone(),
+            trello_imports.clone(),
             workspace_exports.clone(),
             billing.clone(),
             config.jobs.concurrency,
@@ -448,6 +464,11 @@ impl App {
                 linear_imports: LinearImportState::new(
                     Arc::clone(&identity),
                     linear_imports,
+                    cookie_mode,
+                ),
+                trello_imports: TrelloImportState::new(
+                    Arc::clone(&identity),
+                    trello_imports,
                     cookie_mode,
                 ),
                 chat: ChatState::new(
@@ -911,6 +932,7 @@ async fn initialize_production_services(
     notion_imports: NotionImportService,
     asana_imports: AsanaImportService,
     linear_imports: LinearImportService,
+    trello_imports: TrelloImportService,
     workspace_exports: WorkspaceExportService,
     billing: Option<crate::billing::Billing>,
     concurrency: usize,
@@ -960,11 +982,13 @@ async fn initialize_production_services(
             let cleanup = notion_imports.clone();
             let asana_cleanup = asana_imports.clone();
             let linear_cleanup = linear_imports.clone();
+            let trello_cleanup = trello_imports.clone();
             // One hourly schedule expires and fails stale imports of every source.
             worker.with_handler(maintenance_kind(NOTION_CLEANUP), move |_| {
                 let service = cleanup.clone();
                 let asana = asana_cleanup.clone();
                 let linear = linear_cleanup.clone();
+                let trello = trello_cleanup.clone();
                 async move {
                     service
                         .expire_stale(TimestampMillis::now())
@@ -982,8 +1006,14 @@ async fn initialize_production_services(
                     linear
                         .expire_stale(TimestampMillis::now())
                         .await
+                        .map_err(|_| {
+                            JobError::Retryable("Linear import cleanup failed".to_owned())
+                        })?;
+                    trello
+                        .expire_stale(TimestampMillis::now())
+                        .await
                         .map(|_| ())
-                        .map_err(|_| JobError::Retryable("Linear import cleanup failed".to_owned()))
+                        .map_err(|_| JobError::Retryable("Trello import cleanup failed".to_owned()))
                 }
             })
         })
@@ -1002,6 +1032,7 @@ async fn initialize_production_services(
         .and_then(|worker| crate::notion::import::register_jobs(worker, notion_imports))
         .and_then(|worker| crate::asana::import::register_jobs(worker, asana_imports))
         .and_then(|worker| crate::linear::import::register_jobs(worker, linear_imports))
+        .and_then(|worker| crate::trello::import::register_jobs(worker, trello_imports))
         .and_then(|worker| crate::workspace_export::register_job(worker, workspace_exports))
         .and_then(|worker| match billing {
             Some(billing) => crate::billing::register_jobs(worker, billing),

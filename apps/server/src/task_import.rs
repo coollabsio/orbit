@@ -143,6 +143,36 @@ pub(crate) async fn member_emails(
     .collect())
 }
 
+/// Lowercase trimmed display name → user ids of the workspace's active members (assignees are
+/// matched by name when the source has no emails).
+pub(crate) async fn member_names(
+    database: &Database,
+    workspace_id: Id,
+) -> Result<HashMap<String, Vec<Id>>, sqlx::Error> {
+    let mut names: HashMap<String, Vec<Id>> = HashMap::new();
+    for member in sqlx::query(
+        "SELECT users.id, users.display_name FROM memberships \
+         JOIN users ON users.id = memberships.user_id \
+         WHERE memberships.workspace_id = $1 AND users.suspended_at IS NULL",
+    )
+    .bind(workspace_id.to_string())
+    .fetch_all(database.pool())
+    .await?
+    {
+        let Ok(id) = member.get::<String, _>("id").parse() else {
+            continue;
+        };
+        let name = member
+            .get::<String, _>("display_name")
+            .trim()
+            .to_lowercase();
+        if !name.is_empty() {
+            names.entry(name).or_default().push(id);
+        }
+    }
+    Ok(names)
+}
+
 /// `(id, name, category)` of the project's statuses in board order.
 pub(crate) async fn project_statuses(
     database: &Database,

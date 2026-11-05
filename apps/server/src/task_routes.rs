@@ -2499,6 +2499,12 @@ impl ApiError {
         }
     }
 
+    /// The same problem with a detail built at runtime.
+    pub(crate) fn with_detail(mut self, detail: String) -> Self {
+        self.body.detail = detail.into();
+        self
+    }
+
     /// 402 `trial_limit_reached`, as the billing guard words it.
     pub(crate) fn trial_limit(
         reached: TrialLimitReached,

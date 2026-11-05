@@ -24,6 +24,7 @@ use crate::page_routes::{PageState, page_router};
 use crate::static_assets::StaticAssets;
 use crate::task_routes::{TaskState, task_router};
 use crate::teamspace_routes::{TeamspaceState, teamspace_router};
+use crate::trello_import_routes::{TrelloImportState, trello_import_router};
 use crate::view_routes::view_router;
 use crate::workspace_export_routes::{WorkspaceExportState, workspace_export_router};
 use crate::workspace_routes::{WorkspaceState, workspace_router};
@@ -48,6 +49,7 @@ pub struct ApiRoutes {
     pub imports: ImportState,
     pub asana_imports: AsanaImportState,
     pub linear_imports: LinearImportState,
+    pub trello_imports: TrelloImportState,
     pub chat: ChatState,
 }
 
@@ -86,6 +88,7 @@ pub fn production_router(
         .merge(import_router(api.imports))
         .merge(asana_import_router(api.asana_imports))
         .merge(linear_import_router(api.linear_imports))
+        .merge(trello_import_router(api.trello_imports))
         .merge(crate::live::socket::live_router(api.chat.clone()))
         .merge(chat_router(api.chat))
         .merge(
