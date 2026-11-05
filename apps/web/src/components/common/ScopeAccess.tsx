@@ -65,7 +65,8 @@ export function ProjectPicker({ id, projects, selected, onChange, all, onAllChan
       <Checkbox checked={selected.length === projects.length} indeterminate={selected.length > 0 && selected.length < projects.length} onCheckedChange={(checked) => onChange(checked ? projects.map((project) => project.id) : [])} />
       Select all
     </Label> : null}
-    {projects.length ? <div className="-m-1 grid max-h-64 gap-3 overflow-y-auto p-1">
+    {/* py-2 holds the checkbox's 8px tap area, so a short list does not scroll and catch the page's wheel. */}
+    {projects.length ? <div className="-mx-1 -my-2 grid max-h-64 gap-3 overflow-y-auto px-1 py-2">
       {projects.map((project) => <Label key={project.id} className="flex items-center gap-2">
         <Checkbox checked={selected.includes(project.id)} onCheckedChange={(checked) => onChange(checked ? [...selected, project.id] : selected.filter((other) => other !== project.id))} />
         {project.name}
