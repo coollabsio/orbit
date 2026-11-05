@@ -68,11 +68,12 @@ tailnet_host() {
         python3 -c 'import json, sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))' 2>/dev/null || true
 }
 
-# Prints the directory of the process that listens on the port, and fails when the port is free.
+# Prints the directory of the process that listens on 127.0.0.1 at the port, and fails when the port is free there.
+# `tailscale serve` also listens on the port, but only on the tailnet address.
 port_owner() {
     local pid
-    [[ -n "$(ss -ltnH "sport = :$1" 2>/dev/null)" ]] || return 1
-    pid="$(ss -ltnpH "sport = :$1" 2>/dev/null | grep -oE 'pid=[0-9]+' | head -n1 | cut -d= -f2)"
+    [[ -n "$(ss -ltnH "src 127.0.0.1:$1" 2>/dev/null)" ]] || return 1
+    pid="$(ss -ltnpH "src 127.0.0.1:$1" 2>/dev/null | grep -oE 'pid=[0-9]+' | head -n1 | cut -d= -f2)"
     readlink "/proc/${pid:-0}/cwd" 2>/dev/null || echo "an unknown process"
 }
 
