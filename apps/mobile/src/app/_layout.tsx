@@ -11,6 +11,7 @@ import { useFonts } from 'expo-font'
 import { useEffect, useState } from 'react'
 import { AppState, View } from 'react-native'
 
+import { NoWorkspace } from '../components/NoWorkspace'
 import { OrbitProvider } from '../orbit-context'
 import { SessionProvider, useSession } from '../session-context'
 import { fonts, loadAppearance, palettes, type Theme, useTheme } from '../theme'
@@ -130,7 +131,7 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
     <AppColorScope>
       <ThemeProvider value={navigationTheme(theme)}>
         <StatusBar style={theme.scheme === 'dark' ? 'light' : 'dark'} />
-        {state.status === 'offline' ? <SessionOffline server={state.session.server} /> : signedIn ? <OrbitProvider>{stack}</OrbitProvider> : stack}
+        {state.status === 'offline' ? <SessionOffline server={state.session.server} /> : signedIn ? <OrbitProvider noWorkspace={<NoWorkspace />}>{stack}</OrbitProvider> : stack}
       </ThemeProvider>
     </AppColorScope>
   )

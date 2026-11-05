@@ -10,6 +10,7 @@ import type { MemberRecord, User } from '../data/orbit'
 import * as providers from '../data/sign-in-provider'
 import { currentStatus, type OwnStatus, type UserStatus } from '../data/status'
 import { useOrbit } from '../orbit-context'
+import { useSignedIn } from '../session-context'
 import { providerDevice } from '../sign-in-provider'
 import { uploadPart } from '../upload-part'
 
@@ -172,7 +173,7 @@ export function useTwoFactorWrites() {
 }
 
 export function useConnectedAccounts() {
-  const { client } = useOrbit()
+  const { client } = useSignedIn()
   return useQuery({ queryKey: account.accountKeys.connectedAccounts, queryFn: () => providers.connectedAccounts(client) })
 }
 
@@ -181,7 +182,7 @@ export function useConnectedAccounts() {
  * `reauthentication_required` (pass it to `withReauthentication`). `false` when the person cancels.
  */
 export function useConfirmIdentity() {
-  const { client } = useOrbit()
+  const { client } = useSignedIn()
   const accounts = useConnectedAccounts()
   return async () => {
     const provider = accounts.data?.[0]?.provider
@@ -248,7 +249,7 @@ export function useRenameWorkspace() {
 }
 
 export function useAuthOptions() {
-  const { client } = useOrbit()
+  const { client } = useSignedIn()
   return useQuery({ queryKey: account.accountKeys.authOptions, queryFn: () => account.authOptions(client), staleTime: Infinity })
 }
 

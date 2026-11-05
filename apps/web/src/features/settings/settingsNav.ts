@@ -1,5 +1,5 @@
 import { useContext, type ComponentType } from 'react'
-import { ArchiveBox, Brush, Card, Chart, ClipboardText, CloudConnection, Cpu, SecurityUser, Driver, Key, Keyboard, Link2, Lock, Login, Notification as Bell, Setting2 as Settings, ShieldTick as ShieldCheck, SmileCircle, Sms as Mail, Sticker, Danger as TriangleAlert, DocumentDownload, User, People as Users } from 'reicon-react'
+import { ArchiveBox, Brush, Card, Chart, ClipboardText, CloudConnection, Cpu, SecurityUser, Driver, Key, Keyboard, Link2, Lock, Login, Notification as Bell, Setting2 as Settings, ShieldTick as ShieldCheck, SmileCircle, Sms as Mail, Sticker, Danger as TriangleAlert, DocumentDownload, Import, User, People as Users } from 'reicon-react'
 import type { Permission } from '@orbit/api/generated/types.gen'
 import { RobotIcon } from '@/components/common/icons/RobotIcon'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
@@ -62,6 +62,7 @@ const AREAS: Record<SettingsAreaName, SettingsArea> = {
       {
         label: 'Advanced',
         items: [
+          { to: '/settings/import', label: 'Import', icon: Import },
           { to: '/settings/export', label: 'Export', icon: DocumentDownload, permission: 'workspace.export' },
           { to: '/settings/danger-zone', label: 'Danger zone', icon: TriangleAlert, permission: 'workspace.delete' },
         ],
@@ -142,14 +143,15 @@ export function settingsAreaOf(pathname: string): SettingsAreaName | null {
 }
 
 /** An area's title, icon and the links this person may open. */
-export function useSettingsArea(name: SettingsAreaName): SettingsArea {
+/** `profileOnly`: just the Profile page, all that someone with no workspace who is not an operator may open. */
+export function useSettingsArea(name: SettingsAreaName, profileOnly = false): SettingsArea {
   const permissions = useContext(WorkspaceContext)?.workspace.permissions ?? []
   const cloud = useBillingEnabled()
   const area = AREAS[name]
   const sections = area.sections
     .map((section) => ({
       ...section,
-      items: section.items.filter((item) => (!item.permission || permissions.includes(item.permission)) && (!item.cloud || cloud)),
+      items: section.items.filter((item) => (!item.permission || permissions.includes(item.permission)) && (!item.cloud || cloud) && (!profileOnly || item.to === '/profile')),
     }))
     .filter((section) => section.items.length > 0)
   return { ...area, sections }

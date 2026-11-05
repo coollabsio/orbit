@@ -341,21 +341,26 @@ function BackToApp({ label, onNavigate, onBack }: { label: string; onNavigate?: 
 
 /** Coolify's content-aware sidebar: inside Settings, Account settings or Admin, the area's links replace the app links. */
 function SettingsAreaNav({ area, onNavigate, onBack }: { area: SettingsAreaName; onNavigate?: () => void; onBack?: () => void }) {
-  const collapsed = useContext(SidebarNavCollapsed)
-  const { title, sections } = useSettingsArea(area)
+  const { title } = useSettingsArea(area)
   return (
     <>
       <BackToApp label={title} onNavigate={onNavigate} onBack={onBack} />
-      {sections.map((section) => (
-        <Fragment key={section.label}>
-          <SidebarSection label={section.label} collapsed={collapsed} />
-          {section.items.map((item) => (
-            <SidebarNavItem key={item.to} to={item.to} end={item.end} icon={item.icon} label={item.label} onClick={onNavigate} />
-          ))}
-        </Fragment>
-      ))}
+      <SettingsAreaLinks area={area} onNavigate={onNavigate} />
     </>
   )
+}
+
+/** A settings area's sections and links. `NoWorkspaceShell` shows them without Back: there is no app to go back to. */
+export function SettingsAreaLinks({ area, profileOnly, onNavigate }: { area: SettingsAreaName; profileOnly?: boolean; onNavigate?: () => void }) {
+  const collapsed = useContext(SidebarNavCollapsed)
+  return useSettingsArea(area, profileOnly).sections.map((section) => (
+    <Fragment key={section.label}>
+      <SidebarSection label={section.label} collapsed={collapsed} />
+      {section.items.map((item) => (
+        <SidebarNavItem key={item.to} to={item.to} end={item.end} icon={item.icon} label={item.label} onClick={onNavigate} />
+      ))}
+    </Fragment>
+  ))
 }
 
 /** Grouped sidebar navigation — shared by the desktop sidebar and the mobile drawer. */

@@ -20,12 +20,14 @@ export function WorkspaceLeave() {
 
   // The server allows everyone but the owner to leave.
   if (membership && !membership.can.remove) return (
-    <SettingsCard title="Leave workspace" description="You own this workspace.">
+    <SettingsCard title="Leave workspace">
       {billing ? (
-        <p className="text-[13px] text-muted-foreground">The owner cannot leave. Ownership transfer is not available on Orbit Cloud yet.</p>
+        <p className="text-[13px] text-muted-foreground">
+          The owner cannot leave. Ownership transfer is not available on Orbit Cloud yet. To remove the workspace, delete it in <Link to="/settings/danger-zone" className="text-foreground underline underline-offset-4">Danger zone</Link>.
+        </p>
       ) : (
         <p className="text-[13px] text-muted-foreground">
-          To leave, first transfer ownership to another member in <Link to="/settings/members" className="text-foreground underline underline-offset-4">Members</Link>.
+          To leave, first transfer ownership to another member in <Link to="/settings/members" className="text-foreground underline underline-offset-4">Members</Link>, or delete the workspace in <Link to="/settings/danger-zone" className="text-foreground underline underline-offset-4">Danger zone</Link>.
         </p>
       )}
     </SettingsCard>
@@ -51,7 +53,7 @@ export function WorkspaceLeave() {
   }
 
   return (
-    <SettingsCard title="Leave workspace" description="Remove yourself from this workspace.">
+    <SettingsCard title="Leave workspace">
       <div className="flex flex-col items-start gap-2">
         <Button type="button" variant="destructive" disabled={!membership || leave.isPending} onClick={() => void leaveConfirmed()}>
           {leave.isPending ? 'Leaving…' : 'Leave workspace'}

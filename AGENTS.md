@@ -39,3 +39,19 @@ Every change must work on both.
 - **Postgres setup:** the database must use `LOCALE_PROVIDER builtin BUILTIN_LOCALE 'C.UTF-8' LOCALE 'C.UTF-8'`
   (Orbit refuses other databases), and the server needs `ORBIT_APP_KEY`. S3 for files and backups stays optional
   and is set in Admin → Storage. Operator details: [`docs/operations.md`](docs/operations.md).
+
+## Development mail: Mailpit
+
+In development, Orbit sends mail to Mailpit (SMTP `127.0.0.1:11025`, inbox at `http://127.0.0.1:18026`). The dev
+seed (`just dev`, `just seed`) sets this mail server when none is set, and opens registration. If you test sign-up,
+invitations, recovery or email changes, make sure Mailpit runs (`docker ps --filter name=orbit-mailpit`), and start
+it if needed:
+
+```bash
+docker start orbit-mailpit 2>/dev/null || docker run -d --name orbit-mailpit --restart unless-stopped \
+  -p 127.0.0.1:11025:1025 -p 127.0.0.1:18026:8025 axllent/mailpit
+```
+
+Without Mailpit, sending fails. A mail server set in **Admin → Email** stays: the seed does not change it. If the
+container runs but `docker port orbit-mailpit` prints nothing, it lost its network (seen on 2026-11-04): run
+`docker network connect bridge orbit-mailpit && docker restart orbit-mailpit`.

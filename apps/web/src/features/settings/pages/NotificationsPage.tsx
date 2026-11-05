@@ -227,7 +227,7 @@ export function NotificationsPage() {
       <SettingsCard title="This device" description="Get a notification here when you are not looking at Orbit.">
         <ThisDevice />
       </SettingsCard>
-      <SettingsCard title="Devices" description="Every browser and device that gets your notifications." flush>
+      <SettingsCard title="Devices" flush>
         <Devices />
       </SettingsCard>
       <SettingsCard title="Other devices" description="When your phone and other browsers get a notification that this device already shows.">

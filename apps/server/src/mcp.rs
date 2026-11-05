@@ -316,6 +316,22 @@ struct ThreadArgs {
     before: Option<String>,
     limit: Option<usize>,
 }
+#[derive(Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct SearchMessagesArgs {
+    /// Every word must match; the last one matches as a prefix. May be empty with a filter.
+    #[serde(default)]
+    query: String,
+    /// Only this conversation.
+    conversation_id: Option<String>,
+    /// Only messages of this member.
+    author_id: Option<String>,
+    /// Only messages with a file.
+    #[serde(default)]
+    has_file: bool,
+    /// The `cursor` of the previous page: messages older than it.
+    cursor: Option<String>,
+}
 fn write_definition<T: JsonSchema>(
     name: &'static str,
     description: &'static str,
@@ -333,7 +349,9 @@ fn required_scope(name: &str) -> ApiTokenScope {
     match name {
         "create_task" | "update_task" | "delete_task" => ApiTokenScope::Write,
         "list_docs" | "get_doc" => ApiTokenScope::DocsRead,
-        "list_conversations" | "list_messages" | "get_thread" => ApiTokenScope::ChatRead,
+        "list_conversations" | "list_messages" | "get_thread" | "search_messages" => {
+            ApiTokenScope::ChatRead
+        }
         _ => ApiTokenScope::Read,
     }
 }
@@ -365,6 +383,10 @@ fn tools() -> Vec<Tool> {
             "Read a page of messages from a visible conversation.",
         ),
         definition::<ThreadArgs>("get_thread", "Read a visible message thread."),
+        definition::<SearchMessagesArgs>(
+            "search_messages",
+            "Search messages in visible conversations, newest first, 20 per page.",
+        ),
         definition::<StatusArgs>(
             "list_task_statuses",
             "List workflow statuses in an approved project, including IDs needed to create tasks.",
@@ -588,7 +610,8 @@ impl TaskTools {
                     )
                 }
             }
-            "list_docs" | "get_doc" | "list_conversations" | "list_messages" | "get_thread" => {
+            "list_docs" | "get_doc" | "list_conversations" | "list_messages" | "get_thread"
+            | "search_messages" => {
                 // Service accounts have no personal docs/chat identity.
                 if principal.service_account_id.is_some() {
                     return Ok(unavailable());
@@ -622,6 +645,27 @@ impl TaskTools {
                         chat.list_conversations(principal.workspace_id, principal.creator_id)
                             .await
                             .map(|p| json!({"items": p}))
+                            .map_err(|_| ())
+                    }
+                    "search_messages" => {
+                        let a: SearchMessagesArgs = arguments(&request)?;
+                        if a.query.chars().count() > 500 {
+                            return Err(ErrorData::invalid_params("Invalid query length", None));
+                        }
+                        let input = crate::repositories::chat::SearchInput {
+                            query: a.query,
+                            conversation_id: a
+                                .conversation_id
+                                .as_deref()
+                                .map(parse_id)
+                                .transpose()?,
+                            author_id: a.author_id.as_deref().map(parse_id).transpose()?,
+                            has_file: a.has_file,
+                            cursor: a.cursor.as_deref().map(parse_id).transpose()?,
+                        };
+                        chat.search_messages(principal.workspace_id, principal.creator_id, input)
+                            .await
+                            .map(|p| json!(p))
                             .map_err(|_| ())
                     }
                     name => {

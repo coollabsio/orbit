@@ -34,7 +34,7 @@ import { UserMenu } from './UserMenu'
 import { SidebarResizeHandle, usePageListWidth } from './pageListWidth'
 import { MobileDock } from './MobileDock'
 import { ProfilePopoverProvider } from './ProfilePopover'
-import { OperatorShell } from './OperatorShell'
+import { NoWorkspaceShell } from './NoWorkspaceShell'
 import { useAppSidebarTheme } from '@/lib/customTheme'
 import { MenuSurfaceContext } from '@/components/ui/menuSurface'
 import { useNewUi } from '@/lib/themeContext'
@@ -49,9 +49,9 @@ const subscribeDesktop = (onChange: () => void) => {
 }
 const isDesktop = () => window.matchMedia(desktopQuery).matches
 
-/** The signed-in app. An operator with no workspace (`WorkspaceProvider` lets only them in) gets Admin alone. */
+/** The signed-in app. With no workspace, `WorkspaceProvider` lets in only Admin (operators) and account settings. */
 export function AppShell() {
-  return useContext(WorkspaceContext) ? <WorkspaceShell /> : <OperatorShell />
+  return useContext(WorkspaceContext) ? <WorkspaceShell /> : <NoWorkspaceShell />
 }
 
 /** Shortcuts exist only here, with the user's own keys; the sign-in pages have none. */

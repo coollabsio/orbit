@@ -19,7 +19,7 @@ export function DeleteAccountCard() {
   return (
     <>
       <SettingsCard
-        className="shadow-[0_0_0_1px_var(--destructive)] hover:shadow-[0_0_0_1px_var(--destructive)] [&_h3]:text-destructive [&>div]:bg-transparent [&>div]:pt-0 [&>div]:shadow-none"
+        className="shadow-[0_0_0_1px_var(--destructive)] hover:shadow-[0_0_0_1px_var(--destructive)] [&_h3]:text-destructive [&>div]:bg-transparent [&>div]:shadow-none"
         title="Delete account"
         description={me.root
           ? 'The root account cannot be deleted.'

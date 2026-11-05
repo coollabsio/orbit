@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useContext, useRef, useState } from 'react'
 import { Link } from 'react-router'
 import { ApiProblem } from '@orbit/api/problem'
 import { UnsavedBar } from '@/components/common/UnsavedBar'
@@ -11,6 +11,8 @@ import { useAuthOptions, useChangePassword, useConnectedAccounts, useCurrentUser
 import { PROVIDER_NAMES } from '@/features/auth/providerSignIn'
 import { ConfirmWithProvider } from '@/features/auth/components/ConfirmWithProvider'
 import { userColor } from '@/features/workspaces/api'
+import { useIsInstallationAdmin } from '@/features/workspaces/permissions'
+import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { avatarImage } from '@/features/profile/avatarImage'
 import { TimeZonePicker } from '@/features/profile/components/TimeZonePicker'
@@ -112,10 +114,14 @@ function AvatarField() {
 function SignInMethods({ hasPassword }: { hasPassword: boolean }) {
   const connected = useConnectedAccounts()
   const methods = [...(hasPassword ? ['Password'] : []), ...(connected.data ?? []).map((account) => PROVIDER_NAMES[account.provider])]
+  // with no workspace, only an operator can open Security (`WorkspaceProvider`)
+  const inWorkspace = useContext(WorkspaceContext) !== null
+  const isOperator = useIsInstallationAdmin()
+  const canManage = inWorkspace || isOperator
   if (methods.length === 0) return null
   return (
     <FieldDescription>
-      Sign-in methods: {methods.join(' · ')}. <Link to="/profile/security" className="font-medium text-foreground underline-offset-4 hover:underline">Manage</Link>
+      Sign-in methods: {methods.join(' · ')}.{canManage ? <>{' '}<Link to="/profile/security" className="font-medium text-foreground underline-offset-4 hover:underline">Manage</Link></> : null}
     </FieldDescription>
   )
 }
@@ -194,7 +200,6 @@ export function ProfilePage() {
             <form ref={formRef} onSubmit={saveDetails}>
               <SettingsCard
                 title="Profile details"
-                description="Your picture, name and what the people in your workspaces see of you."
               >
                 <AvatarField />
                 <FieldGrid className="mt-4">

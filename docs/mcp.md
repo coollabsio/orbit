@@ -281,7 +281,7 @@ Service-account tokens support tasks only; docs and chat require a personal iden
 | Task read | `list_projects`, `list_tasks`, `get_task`, `list_task_statuses` |
 | Task write | `create_task`, `update_task`, `delete_task` |
 | Docs read | `list_docs`, `get_doc` |
-| Chat read | `list_conversations`, `list_messages`, `get_thread` |
+| Chat read | `list_conversations`, `list_messages`, `get_thread`, `search_messages` |
 
 Task create takes `project_id`, `status_id`, `title`, optional markdown `description` and
 `priority`. Task update takes `task_id`, `expected_version`, and optional title, description,
@@ -290,6 +290,10 @@ to trash. Read the latest task version before updating or deleting. Task writes 
 approval for every project in the related parent/sub-issue tree, since task automations can
 change related tasks. Task tools return a projection that excludes references outside grants.
 Chat message and thread tools accept `before` and `limit` (1–100) for pagination.
+`search_messages` takes `query` (up to 500 characters; every word must match, the last one as a
+prefix) and optional `conversation_id`, `author_id`, `has_file` and `cursor` filters. It returns
+20 hits per page, newest first, from conversations the user can read. Copy `cursor` from the
+result into the next request to get older hits. An empty query needs at least one filter.
 
 Tool annotations describe operations; server-side grants enforce access.
 See the [MCP tools specification](https://modelcontextprotocol.io/specification/2025-06-18/server/tools).

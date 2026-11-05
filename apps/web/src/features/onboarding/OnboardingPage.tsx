@@ -69,8 +69,10 @@ function WorkspaceStep({ onCreated }: { onCreated: (workspaceId: string) => void
         </Field>
         {createWorkspace.isError ? <p role="alert" className="text-[13px] text-destructive">{problemText(createWorkspace.error, 'The workspace could not be created.')}</p> : null}
         <Button type="submit" disabled={createWorkspace.isPending || !name.trim()}>{createWorkspace.isPending ? 'Please wait…' : 'Create workspace'}</Button>
-        {/* An operator does not need a workspace: Admin works without one. */}
-        {isOperator ? <Link to="/admin" className={cn(buttonVariants({ variant: 'ghost' }), '-mt-2')}>Back to Admin</Link> : null}
+        {/* Admin and the account settings work without a workspace: there, a person can also delete their account. */}
+        {isOperator
+          ? <Link to="/admin" className={cn(buttonVariants({ variant: 'ghost' }), '-mt-2')}>Back to Admin</Link>
+          : <Link to="/profile" className={cn(buttonVariants({ variant: 'ghost' }), '-mt-2')}>Account settings</Link>}
       </form>
     </AuthCard>
   )
