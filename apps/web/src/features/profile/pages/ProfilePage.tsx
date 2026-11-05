@@ -200,7 +200,6 @@ export function ProfilePage() {
             <form ref={formRef} onSubmit={saveDetails}>
               <SettingsCard
                 title="Profile details"
-                description="Your picture, name and what the people in your workspaces see of you."
               >
                 <AvatarField />
                 <FieldGrid className="mt-4">

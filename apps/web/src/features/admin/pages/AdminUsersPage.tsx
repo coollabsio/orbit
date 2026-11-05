@@ -116,7 +116,6 @@ export function AdminUsersPage() {
     <>
       <SettingsCard
         title="Users"
-        description="Every account on this Orbit instance."
         actions={<Input type="search" aria-label="Search users" placeholder="Search by name or email…" value={query} onChange={(event) => setQuery(event.target.value)} className="h-8 w-60 max-sm:w-40" />}
         flush
       >

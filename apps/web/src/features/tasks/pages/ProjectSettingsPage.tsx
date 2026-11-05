@@ -94,7 +94,7 @@ export function ProjectSettingsPage() {
             <div className="mx-auto flex w-full max-w-[800px] flex-col gap-6 px-10 pt-7 pb-12 max-[899px]:px-5">
               <ProjectGeneralCard key={`${project.id}:${project.name}:${project.key}:${project.color}`} project={project} onPendingChange={setGeneralPending} />
 
-              <SettingsCard title="Statuses" description="The workflow a task goes through from start to completion." flush>
+              <SettingsCard title="Statuses" flush>
                 <div className="flex flex-col py-3 pr-3 pl-[18px]">
                   {CATEGORY_ORDER.map((category) => {
                     const own = statuses.filter((s) => s.category === category)
@@ -325,7 +325,7 @@ function ProjectGeneralCard({ project, onPendingChange }: { project: Project; on
 
   return (
     <>
-      <SettingsCard title="General" description="Name, tag and color of this project.">
+      <SettingsCard title="General">
         <div className="grid grid-cols-2 gap-4 max-[899px]:grid-cols-1">
           <div className="w-full min-w-0">
             <Label className="mb-1.5 text-[13px] text-muted-foreground" htmlFor="project-name">
