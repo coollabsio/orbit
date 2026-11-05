@@ -2580,6 +2580,23 @@ async fn save_s3(
         crate::secret_box::encrypt_secret(key, &secret)
             .map_err(|()| internal(instance, request_id.as_ref()))?,
     );
+    let workspaces = WorkspaceStorageRepository::new(state.identity.database().clone())
+        .all()
+        .await
+        .map_err(|_| internal(instance, request_id.as_ref()))?;
+    if let Some(workspace) = workspaces
+        .iter()
+        .find(|workspace| crate::object_storage::overlap(&workspace.s3, &s3))
+    {
+        return Err(invalid(
+            "prefix",
+            &format!(
+                "workspace {} keeps its files in this bucket under this prefix, or a prefix inside or around \
+                 it; use another bucket or prefix.",
+                workspace.workspace_id
+            ),
+        ));
+    }
     if let Some(old) = &saved.s3 {
         let moved =
             (&old.endpoint, &old.bucket, &old.prefix) != (&s3.endpoint, &s3.bucket, &s3.prefix);
@@ -2805,11 +2822,12 @@ async fn save_workspace_bucket(
     if installation
         .s3
         .as_ref()
-        .is_some_and(|own| location_of(own) == location_of(&s3))
+        .is_some_and(|own| crate::object_storage::overlap(own, &s3))
     {
         return Err(invalid(
-            "bucket",
-            "the installation keeps its files under this bucket and prefix; use another prefix.",
+            "prefix",
+            "the installation keeps its files in this bucket under this prefix, or a prefix inside or around it; \
+             use another bucket or prefix.",
         ));
     }
     if let Some(old) = saved.filter(|old| location_of(&old.s3) != location_of(&s3)) {
