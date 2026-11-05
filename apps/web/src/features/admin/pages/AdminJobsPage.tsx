@@ -14,6 +14,8 @@ const KIND_LABELS: Record<string, string> = {
   'notion.import': 'Notion imports',
   'asana.scan': 'Asana scans',
   'asana.import': 'Asana imports',
+  'linear.scan': 'Linear scans',
+  'linear.import': 'Linear imports',
   'workspace.export': 'Workspace exports',
 }
 

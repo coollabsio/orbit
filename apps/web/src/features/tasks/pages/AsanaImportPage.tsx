@@ -2,7 +2,7 @@ import { useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { toast } from 'sonner'
 import { useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Import, Search4 as Search, TickCircle, Warning } from 'reicon-react'
+import { Import, Search4 as Search, TickCircle, Warning } from 'reicon-react'
 import type { AsanaImport, AsanaImportProject, AsanaImportTree } from '@orbit/api/generated/types.gen'
 import { apiClient } from '@/api/client'
 import { cn } from 'cn'
@@ -14,19 +14,18 @@ import { Label } from '@/components/ui/label'
 import { PasswordInput } from '@/components/ui/password-input'
 import { Spinner } from '@/components/ui/spinner'
 import { EmptyState } from '@/components/common/EmptyState'
-import { Pane, PaneTitle } from '@/components/common/Pane'
+import { Pane } from '@/components/common/Pane'
 import { confirmAction } from '@/components/common/confirmAction'
 import { relativeTime } from '@/lib/format'
 import { ApiProblem } from '@orbit/api/problem'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useProjects } from '@/features/tasks/api/projects'
+import { IMPORT_STATUS_LABELS, importStatusVariant as statusVariant, isActiveImport, isFinalImport } from '@/features/tasks/api/importStatus'
+import { ImportBody as Body, ImportHeader, ImportProgressBar as ProgressBar, ImportStat as Stat } from '@/features/tasks/components/ImportLayout'
 import {
-  ASANA_IMPORT_STATUS_LABELS,
   asanaImportErrorMessage,
   createAsanaImportRequest,
-  isActiveAsanaImport,
   isAsanaImportInProgress,
-  isFinalAsanaImport,
   reconcileAsanaImport,
   useAsanaImport,
   useAsanaImportTree,
@@ -37,43 +36,6 @@ import {
 
 const TOKEN_URL = 'https://app.asana.com/0/my-apps'
 
-function ImportHeader({ title, detail, actions }: { title: string; detail?: string | null; actions?: ReactNode }) {
-  const navigate = useNavigate()
-  return (
-    <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3">
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        className="hidden text-muted-foreground/70 max-[899px]:inline-flex"
-        aria-label="Back to tasks"
-        onClick={() => navigate('/tasks')}
-      >
-        <ArrowLeft className="size-4" />
-      </Button>
-      <PaneTitle render={<h1 />}>{title}</PaneTitle>
-      {detail ? <span className="truncate text-[13px] text-muted-foreground">{detail}</span> : null}
-      <span className="flex-1" />
-      {actions}
-    </div>
-  )
-}
-
-function Body({ children }: { children: ReactNode }) {
-  return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-6 max-[899px]:p-4">{children}</div>
-    </div>
-  )
-}
-
-function statusVariant(status: AsanaImport['status']): 'default' | 'secondary' | 'destructive' | 'outline' {
-  if (status === 'failed') return 'destructive'
-  if (status === 'completed') return 'secondary'
-  if (isActiveAsanaImport(status) || status === 'ready') return 'default'
-  return 'outline'
-}
-
 /** Step 1: paste a personal access token. Also lists the member's recent imports. */
 function ConnectStep({ workspaceId }: { workspaceId: string }) {
   const navigate = useNavigate()
@@ -82,7 +44,7 @@ function ConnectStep({ workspaceId }: { workspaceId: string }) {
   const [token, setToken] = useState('')
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<unknown>(null)
-  const running = imports.data?.find((item) => isActiveAsanaImport(item.status))
+  const running = imports.data?.find((item) => isActiveImport(item.status))
 
   const submit = async (event: FormEvent) => {
     event.preventDefault()
@@ -177,7 +139,7 @@ function RecentImports({ imports }: { imports: AsanaImport[] | undefined }) {
                 {item.progress.done} of {item.progress.total} tasks
               </span>
             ) : null}
-            <Badge variant={statusVariant(item.status)}>{ASANA_IMPORT_STATUS_LABELS[item.status]}</Badge>
+            <Badge variant={statusVariant(item.status)}>{IMPORT_STATUS_LABELS[item.status]}</Badge>
             <span className="w-12 shrink-0 text-right text-xs text-muted-foreground" title={new Date(item.created_at).toLocaleString()}>
               {relativeTime(item.created_at)}
             </span>
@@ -417,22 +379,6 @@ function ChooseStep({ workspaceId, item }: { workspaceId: string; item: AsanaImp
   )
 }
 
-function ProgressBar({ done, total }: { done: number; total: number }) {
-  const percent = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0
-  return (
-    <div
-      role="progressbar"
-      aria-label="Import progress"
-      aria-valuemin={0}
-      aria-valuemax={total}
-      aria-valuenow={done}
-      className="h-2 w-full overflow-hidden rounded-full bg-muted"
-    >
-      <div className="h-full rounded-full bg-primary transition-[width] duration-500" style={{ width: `${percent}%` }} />
-    </div>
-  )
-}
-
 /** Step 4: the import job runs. */
 function ImportingStep({ workspaceId, item }: { workspaceId: string; item: AsanaImport }) {
   const cancel = useCancel(workspaceId, item)
@@ -466,15 +412,6 @@ function ImportingStep({ workspaceId, item }: { workspaceId: string; item: Asana
         </section>
       </Body>
     </>
-  )
-}
-
-function Stat({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="flex flex-col gap-0.5 rounded-lg border border-border px-3 py-2">
-      <span className="text-lg font-semibold text-foreground tabular-nums">{value}</span>
-      <span className="text-xs text-muted-foreground">{label}</span>
-    </div>
   )
 }
 
@@ -597,7 +534,7 @@ export function AsanaImportPage() {
     if (item.status === 'scanning') content = <ScanningStep workspaceId={workspace.id} item={item} />
     else if (item.status === 'ready') content = <ChooseStep key={item.id} workspaceId={workspace.id} item={item} />
     else if (item.status === 'queued' || item.status === 'importing') content = <ImportingStep workspaceId={workspace.id} item={item} />
-    else if (isFinalAsanaImport(item.status)) content = <ResultStep workspaceId={workspace.id} item={item} />
+    else if (isFinalImport(item.status)) content = <ResultStep workspaceId={workspace.id} item={item} />
   } else if (query.isError) {
     const missing = query.error instanceof ApiProblem && query.error.status === 404
     content = (

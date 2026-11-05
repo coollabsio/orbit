@@ -2,35 +2,12 @@ import { useEffect, useRef } from 'react'
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { apiClient, type createApiClient } from '@/api/client'
 import { cancelAsanaImport, createAsanaImport, getAsanaImport, listAsanaImports, startAsanaImport } from '@orbit/api/generated/sdk.gen'
-import type { AsanaImport, AsanaImportStatus, AsanaImportTree } from '@orbit/api/generated/types.gen'
+import type { AsanaImport, AsanaImportTree } from '@orbit/api/generated/types.gen'
 import { ApiProblem } from '@orbit/api/problem'
 import { queryKeys } from '@/api/queryKeys'
+import { IMPORT_POLL_MS, isActiveImport, isFinalImport } from '@/features/tasks/api/importStatus'
 
 type ApiClient = ReturnType<typeof createApiClient>
-
-/** How often an import that is still working is polled. */
-export const ASANA_IMPORT_POLL_MS = 2000
-
-/** A job is working on it: poll. */
-export function isActiveAsanaImport(status: AsanaImportStatus | undefined): boolean {
-  return status === 'scanning' || status === 'queued' || status === 'importing'
-}
-
-/** Nothing will change any more. */
-export function isFinalAsanaImport(status: AsanaImportStatus | undefined): boolean {
-  return status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'expired'
-}
-
-export const ASANA_IMPORT_STATUS_LABELS: Record<AsanaImportStatus, string> = {
-  scanning: 'Scanning',
-  ready: 'Ready to import',
-  queued: 'Queued',
-  importing: 'Importing',
-  completed: 'Completed',
-  failed: 'Failed',
-  cancelled: 'Cancelled',
-  expired: 'Expired',
-}
 
 /** A user-facing sentence for a failed Asana import request. */
 export function asanaImportErrorMessage(error: unknown): string {
@@ -83,7 +60,7 @@ export function useAsanaImports(workspaceId: string) {
       if (!data) throw new Error('Imports response was empty.')
       return data.items
     },
-    refetchInterval: (query) => (query.state.data?.some((item) => isActiveAsanaImport(item.status)) ? ASANA_IMPORT_POLL_MS * 2 : false),
+    refetchInterval: (query) => (query.state.data?.some((item) => isActiveImport(item.status)) ? IMPORT_POLL_MS * 2 : false),
   })
 }
 
@@ -91,7 +68,7 @@ export function useAsanaImports(workspaceId: string) {
  * One import without its scan tree (status, progress, report), polled only while a job works on it. When it reaches
  * a final state the projects and tasks are refreshed, so the imported projects appear in the sidebar.
  */
-export function useAsanaImport(workspaceId: string, importId: string | undefined, pollMs = ASANA_IMPORT_POLL_MS) {
+export function useAsanaImport(workspaceId: string, importId: string | undefined, pollMs = IMPORT_POLL_MS) {
   const queryClient = useQueryClient()
   const query = useQuery({
     queryKey: queryKeys.asanaImports.detail(workspaceId, importId ?? ''),
@@ -105,14 +82,14 @@ export function useAsanaImport(workspaceId: string, importId: string | undefined
       if (!data) throw new Error('Import response was empty.')
       return data
     },
-    refetchInterval: (current) => (isActiveAsanaImport(current.state.data?.status) ? pollMs : false),
+    refetchInterval: (current) => (isActiveImport(current.state.data?.status) ? pollMs : false),
   })
   const status = query.data?.status
   const previous = useRef(status)
   useEffect(() => {
     const before = previous.current
     previous.current = status
-    if (before !== undefined && before !== status && isFinalAsanaImport(status)) {
+    if (before !== undefined && before !== status && isFinalImport(status)) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.projects(workspaceId) })
       void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) })
       void queryClient.invalidateQueries({ queryKey: queryKeys.asanaImports.list(workspaceId) })

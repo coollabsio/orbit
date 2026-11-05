@@ -7,6 +7,7 @@ import { RowIcon, SettingsRow } from '@/features/settings/components/SettingsPar
 const SOURCES = [
   { name: 'Notion', description: 'Import pages and databases into Docs.', to: '/docs/import' },
   { name: 'Asana', description: 'Import projects and their tasks into Tasks.', to: '/tasks-import' },
+  { name: 'Linear', description: 'Import teams and their issues into Tasks.', to: '/tasks-import/linear' },
 ]
 
 /** Where to bring data into the workspace from other tools. */

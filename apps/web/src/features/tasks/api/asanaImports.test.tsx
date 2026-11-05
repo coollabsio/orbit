@@ -9,8 +9,6 @@ import { queryKeys } from '@/api/queryKeys'
 import {
   asanaImportErrorMessage,
   createAsanaImportRequest,
-  isActiveAsanaImport,
-  isFinalAsanaImport,
   useAsanaImport,
   useAsanaImportTree,
   useCancelAsanaImport,
@@ -53,15 +51,6 @@ function setupClient() {
 }
 
 const base = '/api/v1/workspaces/workspace-1/imports/asana'
-
-test('status helpers: active imports poll, final ones never change', () => {
-  expect(['scanning', 'queued', 'importing'].map((status) => isActiveAsanaImport(status as AsanaImport['status']))).toEqual([true, true, true])
-  expect(isActiveAsanaImport('ready')).toBe(false)
-  expect(['completed', 'failed', 'cancelled', 'expired'].map((status) => isFinalAsanaImport(status as AsanaImport['status']))).toEqual([
-    true, true, true, true,
-  ])
-  expect(isFinalAsanaImport('ready')).toBe(false)
-})
 
 test('problems map to friendly messages', () => {
   expect(asanaImportErrorMessage(problem(422, 'asana_token_invalid'))).toBe(

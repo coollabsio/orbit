@@ -13,6 +13,7 @@ import { TasksPage } from '@/features/tasks/pages/TasksPage'
 import { HomePage } from '@/features/home/pages/HomePage'
 import { TaskTrashPage } from '@/features/tasks/pages/TaskTrashPage'
 import { AsanaImportPage } from '@/features/tasks/pages/AsanaImportPage'
+import { LinearImportPage } from '@/features/tasks/pages/LinearImportPage'
 import { DocsPage } from '@/features/docs/pages/DocsPage'
 import { AccountLayout, AdminLayout, SettingsLayout } from '@/features/settings/pages/SettingsLayout'
 import { AdminAuditPage } from '@/features/admin/pages/AdminAuditPage'
@@ -102,6 +103,7 @@ export default function App() {
               <Route path="tasks/:taskId" element={<TasksPage />} />
               <Route path="tasks-trash" element={<TaskTrashPage />} />
               <Route path="tasks-import/:importId?" element={<AsanaImportPage />} />
+              <Route path="tasks-import/linear/:importId?" element={<LinearImportPage />} />
               <Route path="views" element={<ViewsPage />} />
               <Route path="views/:viewId" element={<TasksPage />} />
               <Route path="views/:viewId/:taskId" element={<TasksPage />} />
