@@ -1167,6 +1167,14 @@ export type CreateAsanaImportBody = {
     token: string;
 };
 
+export type CreateLinearImportBody = {
+    /**
+     * A Linear personal API key (`lin_api_…`). Validated with Linear, stored encrypted, and
+     * deleted when the import ends.
+     */
+    token: string;
+};
+
 export type CreateNotionImportBody = {
     /**
      * A Notion personal access token (recommended) or internal connection token. Validated
@@ -1606,6 +1614,148 @@ export type LimitsView = {
      * counted once per workspace, however often it is attached.
      */
     workspace_storage_quota_bytes?: number | null;
+};
+
+/**
+ * A Linear import. Never contains the key.
+ */
+export type LinearImport = {
+    created_at: string;
+    /**
+     * Why the import failed or expired.
+     */
+    error: string | null;
+    id: string;
+    /**
+     * The Linear user the key belongs to.
+     */
+    linear_user_name: string | null;
+    progress: LinearImportProgress;
+    /**
+     * The Orbit projects the import created that still exist, in selection order.
+     */
+    project_ids: Array<string>;
+    report: null | LinearImportReport;
+    status: LinearImportStatus;
+    tree: null | LinearImportTree;
+    updated_at: string;
+    workspace_id: string;
+};
+
+/**
+ * A team, issue or relation the import could not create or fill.
+ */
+export type LinearImportFailure = {
+    error: string;
+    /**
+     * `team`, `issue` or `relation`.
+     */
+    kind: string;
+    linear_id: string;
+    title: string;
+};
+
+export type LinearImportList = {
+    items: Array<LinearImport>;
+};
+
+export type LinearImportProgress = {
+    /**
+     * Issues imported with their files and comments.
+     */
+    done: number;
+    /**
+     * Issues, teams and relations that could not be imported.
+     */
+    failed: number;
+    /**
+     * Issues found so far (sub-issues included); grows while teams are listed.
+     */
+    total: number;
+};
+
+/**
+ * What the import carried over besides the issues themselves.
+ */
+export type LinearImportReport = {
+    comments_imported: number;
+    /**
+     * Sub-issues imported at the top level: more than five levels deep, or with a parent in
+     * another team.
+     */
+    detached_sub_issues: number;
+    /**
+     * The first 200 failures.
+     */
+    failures: Array<LinearImportFailure>;
+    /**
+     * Files uploaded to Linear, downloaded and attached to the tasks.
+     */
+    files_imported: number;
+    /**
+     * Linked attachments (pull requests, Slack threads, URLs), added to the descriptions.
+     */
+    links_added: number;
+    /**
+     * Uploaded files that could not be downloaded (too large, gone, refused).
+     */
+    missing_files: number;
+    /**
+     * Blocks, related and duplicate relations between imported issues.
+     */
+    relations_linked: number;
+    /**
+     * Relations Orbit cannot hold: a second relation between the same two tasks, a second
+     * duplicate of one task, or a duplicate of a duplicate.
+     */
+    relations_skipped: number;
+    /**
+     * Issues whose Linear assignee has no Orbit member with the same email (left unassigned).
+     */
+    unmatched_assignees: number;
+};
+
+/**
+ * `linear_imports.status`.
+ */
+export type LinearImportStatus = 'scanning' | 'ready' | 'queued' | 'importing' | 'completed' | 'failed' | 'cancelled' | 'expired';
+
+/**
+ * A Linear team in the scan tree; importing it makes one Orbit project.
+ */
+export type LinearImportTeam = {
+    archived: boolean;
+    /**
+     * Use it in `team_ids` to import this team.
+     */
+    id: string;
+    /**
+     * Issues in the team, archived ones included.
+     */
+    issue_count: number;
+    /**
+     * The team's issue key prefix, e.g. `ENG`.
+     */
+    key: string;
+    name: string;
+};
+
+/**
+ * What the key can see.
+ */
+export type LinearImportTree = {
+    /**
+     * The Linear workspace (organization) name.
+     */
+    organization: string;
+    /**
+     * Sorted by name; archived teams last.
+     */
+    teams: Array<LinearImportTeam>;
+    /**
+     * The key sees more than 1,000 teams; only the first 1,000 are listed.
+     */
+    truncated: boolean;
 };
 
 /**
@@ -3365,6 +3515,13 @@ export type StartAsanaImportBody = {
      * Projects of the scan tree to import (each becomes a new Orbit project).
      */
     project_gids: Array<string>;
+};
+
+export type StartLinearImportBody = {
+    /**
+     * Teams of the scan tree to import (each becomes a new Orbit project).
+     */
+    team_ids: Array<string>;
 };
 
 export type StartNotionImportBody = {
@@ -13105,6 +13262,308 @@ export type StartAsanaImportResponses = {
 };
 
 export type StartAsanaImportResponse = StartAsanaImportResponses[keyof StartAsanaImportResponses];
+
+export type ListLinearImportsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/linear';
+};
+
+export type ListLinearImportsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * linear_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListLinearImportsError = ListLinearImportsErrors[keyof ListLinearImportsErrors];
+
+export type ListLinearImportsResponses = {
+    200: LinearImportList;
+};
+
+export type ListLinearImportsResponse = ListLinearImportsResponses[keyof ListLinearImportsResponses];
+
+export type CreateLinearImportData = {
+    body: CreateLinearImportBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/linear';
+};
+
+export type CreateLinearImportErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * linear_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, app_key_missing, import_in_progress
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * linear_token_invalid
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * linear_unavailable
+     */
+    502: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateLinearImportError = CreateLinearImportErrors[keyof CreateLinearImportErrors];
+
+export type CreateLinearImportResponses = {
+    201: LinearImport;
+};
+
+export type CreateLinearImportResponse = CreateLinearImportResponses[keyof CreateLinearImportResponses];
+
+export type GetLinearImportData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        import_id: string;
+    };
+    query?: {
+        /**
+         * Optional parts of an import detail response.
+         */
+        include?: 'tree';
+    };
+    url: '/api/v1/workspaces/{workspace_id}/imports/linear/{import_id}';
+};
+
+export type GetLinearImportErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * linear_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetLinearImportError = GetLinearImportErrors[keyof GetLinearImportErrors];
+
+export type GetLinearImportResponses = {
+    200: LinearImport;
+};
+
+export type GetLinearImportResponse = GetLinearImportResponses[keyof GetLinearImportResponses];
+
+export type CancelLinearImportData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        import_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/linear/{import_id}/cancel';
+};
+
+export type CancelLinearImportErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * linear_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, linear_import_state_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CancelLinearImportError = CancelLinearImportErrors[keyof CancelLinearImportErrors];
+
+export type CancelLinearImportResponses = {
+    200: LinearImport;
+};
+
+export type CancelLinearImportResponse = CancelLinearImportResponses[keyof CancelLinearImportResponses];
+
+export type StartLinearImportData = {
+    body: StartLinearImportBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        import_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/linear/{import_id}/start';
+};
+
+export type StartLinearImportErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * linear_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, import_in_progress, linear_import_state_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type StartLinearImportError = StartLinearImportErrors[keyof StartLinearImportErrors];
+
+export type StartLinearImportResponses = {
+    200: LinearImport;
+};
+
+export type StartLinearImportResponse = StartLinearImportResponses[keyof StartLinearImportResponses];
 
 export type ListNotionImportsData = {
     body?: never;

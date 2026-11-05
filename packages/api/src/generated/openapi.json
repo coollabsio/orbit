@@ -19933,6 +19933,696 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/imports/linear": {
+      "get": {
+        "tags": [
+          "crate::linear_import_routes"
+        ],
+        "summary": "The caller's 20 most recent Linear imports in this workspace (without trees).",
+        "operationId": "list_linear_imports",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinearImportList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "linear_import_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "crate::linear_import_routes"
+        ],
+        "summary": "Validates the API key with Linear, stores it encrypted and starts the scan.",
+        "operationId": "create_linear_import",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateLinearImportBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinearImport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "linear_import_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, app_key_missing, import_in_progress",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "linear_token_invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "linear_unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/imports/linear/{import_id}": {
+      "get": {
+        "tags": [
+          "crate::linear_import_routes"
+        ],
+        "summary": "One of the caller's Linear imports: status, progress and report. The scan tree (once\nscanned) only with `?include=tree`.",
+        "operationId": "get_linear_import",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "import_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include",
+            "in": "query",
+            "description": "`tree` adds the scan tree; without it `tree` is `null`.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Optional parts of an import detail response.",
+              "enum": [
+                "tree"
+              ]
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinearImport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "linear_import_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/imports/linear/{import_id}/cancel": {
+      "post": {
+        "tags": [
+          "crate::linear_import_routes"
+        ],
+        "summary": "Cancels a scan or import and deletes its API key; what was already imported stays.",
+        "operationId": "cancel_linear_import",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "import_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinearImport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "linear_import_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, linear_import_state_conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/imports/linear/{import_id}/start": {
+      "post": {
+        "tags": [
+          "crate::linear_import_routes"
+        ],
+        "summary": "Starts a scanned import with the teams to import.",
+        "operationId": "start_linear_import",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "import_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartLinearImportBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinearImport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "linear_import_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, import_in_progress, linear_import_state_conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/imports/notion": {
       "get": {
         "tags": [
@@ -39564,6 +40254,19 @@
         },
         "additionalProperties": false
       },
+      "CreateLinearImportBody": {
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "A Linear personal API key (`lin_api_…`). Validated with Linear, stored encrypted, and\ndeleted when the import ends."
+          }
+        },
+        "additionalProperties": false
+      },
       "CreateNotionImportBody": {
         "type": "object",
         "required": [
@@ -40730,6 +41433,299 @@
           }
         },
         "additionalProperties": false
+      },
+      "LinearImport": {
+        "type": "object",
+        "description": "A Linear import. Never contains the key.",
+        "required": [
+          "id",
+          "workspace_id",
+          "status",
+          "linear_user_name",
+          "progress",
+          "error",
+          "tree",
+          "report",
+          "project_ids",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the import failed or expired."
+          },
+          "id": {
+            "type": "string"
+          },
+          "linear_user_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The Linear user the key belongs to."
+          },
+          "progress": {
+            "$ref": "#/components/schemas/LinearImportProgress"
+          },
+          "project_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The Orbit projects the import created that still exist, in selection order."
+          },
+          "report": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LinearImportReport",
+                "description": "Set once the import was started."
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/LinearImportStatus"
+          },
+          "tree": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LinearImportTree",
+                "description": "The scan result, once ready. Only in `GET …/imports/linear/{id}?include=tree`; `null`\neverywhere else, so polling stays light."
+              }
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        }
+      },
+      "LinearImportFailure": {
+        "type": "object",
+        "description": "A team, issue or relation the import could not create or fill.",
+        "required": [
+          "linear_id",
+          "kind",
+          "title",
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "description": "`team`, `issue` or `relation`."
+          },
+          "linear_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
+      "LinearImportList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LinearImport"
+            }
+          }
+        }
+      },
+      "LinearImportProgress": {
+        "type": "object",
+        "required": [
+          "total",
+          "done",
+          "failed"
+        ],
+        "properties": {
+          "done": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Issues imported with their files and comments.",
+            "minimum": 0
+          },
+          "failed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Issues, teams and relations that could not be imported.",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Issues found so far (sub-issues included); grows while teams are listed.",
+            "minimum": 0
+          }
+        }
+      },
+      "LinearImportReport": {
+        "type": "object",
+        "description": "What the import carried over besides the issues themselves.",
+        "required": [
+          "comments_imported",
+          "files_imported",
+          "missing_files",
+          "links_added",
+          "relations_linked",
+          "relations_skipped",
+          "unmatched_assignees",
+          "detached_sub_issues",
+          "failures"
+        ],
+        "properties": {
+          "comments_imported": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "detached_sub_issues": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Sub-issues imported at the top level: more than five levels deep, or with a parent in\nanother team.",
+            "minimum": 0
+          },
+          "failures": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LinearImportFailure"
+            },
+            "description": "The first 200 failures."
+          },
+          "files_imported": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Files uploaded to Linear, downloaded and attached to the tasks.",
+            "minimum": 0
+          },
+          "links_added": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Linked attachments (pull requests, Slack threads, URLs), added to the descriptions.",
+            "minimum": 0
+          },
+          "missing_files": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Uploaded files that could not be downloaded (too large, gone, refused).",
+            "minimum": 0
+          },
+          "relations_linked": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Blocks, related and duplicate relations between imported issues.",
+            "minimum": 0
+          },
+          "relations_skipped": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Relations Orbit cannot hold: a second relation between the same two tasks, a second\nduplicate of one task, or a duplicate of a duplicate.",
+            "minimum": 0
+          },
+          "unmatched_assignees": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Issues whose Linear assignee has no Orbit member with the same email (left unassigned).",
+            "minimum": 0
+          }
+        }
+      },
+      "LinearImportStatus": {
+        "type": "string",
+        "description": "`linear_imports.status`.",
+        "enum": [
+          "scanning",
+          "ready",
+          "queued",
+          "importing",
+          "completed",
+          "failed",
+          "cancelled",
+          "expired"
+        ]
+      },
+      "LinearImportTeam": {
+        "type": "object",
+        "description": "A Linear team in the scan tree; importing it makes one Orbit project.",
+        "required": [
+          "id",
+          "key",
+          "name",
+          "issue_count",
+          "archived"
+        ],
+        "properties": {
+          "archived": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "description": "Use it in `team_ids` to import this team."
+          },
+          "issue_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Issues in the team, archived ones included.",
+            "minimum": 0
+          },
+          "key": {
+            "type": "string",
+            "description": "The team's issue key prefix, e.g. `ENG`."
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "LinearImportTree": {
+        "type": "object",
+        "description": "What the key can see.",
+        "required": [
+          "organization",
+          "teams",
+          "truncated"
+        ],
+        "properties": {
+          "organization": {
+            "type": "string",
+            "description": "The Linear workspace (organization) name."
+          },
+          "teams": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LinearImportTeam"
+            },
+            "description": "Sorted by name; archived teams last."
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "The key sees more than 1,000 teams; only the first 1,000 are listed."
+          }
+        }
       },
       "LinkPreview": {
         "type": "object",
@@ -45191,6 +46187,22 @@
               "type": "string"
             },
             "description": "Projects of the scan tree to import (each becomes a new Orbit project)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "StartLinearImportBody": {
+        "type": "object",
+        "required": [
+          "team_ids"
+        ],
+        "properties": {
+          "team_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Teams of the scan tree to import (each becomes a new Orbit project)."
           }
         },
         "additionalProperties": false
