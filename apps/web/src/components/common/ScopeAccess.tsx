@@ -72,10 +72,12 @@ export function ProjectPicker({ id, projects, selected, onChange, empty }: { id:
         Select all
       </Label> : null}
     </div>
-    {projects.map((project) => <Label key={project.id} className="flex items-center gap-2">
-      <Checkbox checked={selected.includes(project.id)} onCheckedChange={(checked) => onChange(checked ? [...selected, project.id] : selected.filter((other) => other !== project.id))} />
-      {project.name}
-    </Label>)}
+    {projects.length ? <div className="-m-1 grid max-h-64 gap-3 overflow-y-auto p-1">
+      {projects.map((project) => <Label key={project.id} className="flex items-center gap-2">
+        <Checkbox checked={selected.includes(project.id)} onCheckedChange={(checked) => onChange(checked ? [...selected, project.id] : selected.filter((other) => other !== project.id))} />
+        {project.name}
+      </Label>)}
+    </div> : null}
     {empty ? <p className="text-sm text-muted-foreground">{empty}</p> : null}
   </div>
 }

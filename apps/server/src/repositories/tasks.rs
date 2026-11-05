@@ -1,6 +1,6 @@
 use orbit_domain::{Actor, DEFAULT_STATUSES, StatusCategory};
 use orbit_platform::SqlBuilder;
-use orbit_platform::{Backend, Database, Flag, Id, Row, TimestampMillis};
+use orbit_platform::{BLOB_REFERENCE_COUNT, Backend, Database, Flag, Id, Row, TimestampMillis};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -11,6 +11,7 @@ use utoipa::ToSchema;
 use super::billing::{TrialCapacityError, TrialLimitReached, ensure_trial_capacity};
 use super::membership;
 use super::page_mentions::mentioned_users;
+use super::pages::revision;
 use super::sub_issues::{self, AutoClosed};
 use super::task_filter::{self, FilterError, FilterGroup, ShowCompleted, SubIssuesDisplay};
 use super::task_relations::{self, RelationActor};
@@ -461,6 +462,8 @@ pub struct TaskRepository {
     database: Database,
     project_grant: Option<Vec<Id>>,
     token: Option<TokenActor>,
+    /// `expected_version` of task updates and deletes is the task's [`revision`].
+    revisions: bool,
 }
 
 impl TaskRepository {
@@ -477,6 +480,35 @@ impl TaskRepository {
             token: Some(token),
             ..self
         }
+    }
+
+    /// Updates and deletes check the task's [`revision`] instead of its version, so they also
+    /// conflict with co-edits of the description made after the caller's read (the token API).
+    #[must_use]
+    pub fn with_revisions(self) -> Self {
+        Self {
+            revisions: true,
+            ..self
+        }
+    }
+
+    /// The task's version when `expected` proves that the caller saw `current`: `expected` is
+    /// the version, or with [`Self::with_revisions`] the revision.
+    fn expected_version(&self, expected: u64, current: &TaskRecord) -> Result<u64, TaskError> {
+        if !self.revisions {
+            check_version(expected, current.version, current)?;
+            return Ok(current.version);
+        }
+        let revision = revision(current.version, current.updated_at);
+        if expected != revision {
+            // The conflict names the value the caller sends next.
+            let mut record = serde_json::to_value(current).map_err(|_| TaskError::Conflict)?;
+            record["version"] = json!(revision);
+            return Err(TaskError::VersionConflict {
+                current: Box::new(record),
+            });
+        }
+        Ok(current.version)
     }
 
     /// Whether the write notifies members. A service account's write does not: a notification
@@ -631,6 +663,7 @@ impl TaskRepository {
             database,
             project_grant: None,
             token: None,
+            revisions: false,
         }
     }
 
@@ -2145,6 +2178,11 @@ impl TaskRepository {
             .await?;
         let before = sub_issues::snapshot_in_tx(&mut tx, update.id).await?;
         let task_before = task_in_tx(&mut tx, workspace_id, update.id, false).await?;
+        // Read after the description's pending co-edits were stored (the room lock above).
+        let update = &TaskUpdate {
+            expected_version: self.expected_version(update.expected_version, &task_before)?,
+            ..update.clone()
+        };
         let blocks = update_task_in_tx(
             &mut tx,
             workspace_id,
@@ -2359,21 +2397,112 @@ impl TaskRepository {
         self.check_project_grant(&mut tx, workspace_id, task_id)
             .await?;
         let current = task_in_tx(&mut tx, workspace_id, task_id, false).await?;
-        check_version(expected_version, current.version, &current)?;
-        let descendants = sub_issues::live_descendants(&mut *tx, task_id).await?;
+        self.trash_in_tx(
+            &mut tx,
+            workspace_id,
+            actor_id,
+            &current,
+            expected_version,
+            request_id,
+            now,
+        )
+        .await?;
+        tx.commit().await?;
+        // Open task descriptions re-check access (closed while the task is in the trash).
+        CollabHub::revalidate_database(&self.database, Some(workspace_id));
+        Ok(())
+    }
+
+    /// Deletes a task forever with the sub-issues that were trashed with it, as the trash
+    /// retention purge does after 30 days. A live task needs `expected_version` and is first
+    /// moved to the trash with its live sub-issues, like [`Self::delete_task`]. A task in the
+    /// trash cannot change, so its version is not checked. Like teamspace pages, it takes a
+    /// workspace owner or admin.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn purge_task(
+        &self,
+        workspace_id: Id,
+        task_id: Id,
+        actor_id: Id,
+        expected_version: u64,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), TaskError> {
+        let mut tx = self.database.immediate_transaction().await?;
+        let actor = require_access_tx(&mut tx, workspace_id, actor_id).await?;
+        self.check_project_grant(&mut tx, workspace_id, task_id)
+            .await?;
+        let task = match task_in_tx(&mut tx, workspace_id, task_id, false).await {
+            Err(TaskError::NotFound) => task_in_tx(&mut tx, workspace_id, task_id, true).await?,
+            result => result?,
+        };
+        if !actor.can_purge_task() {
+            return Err(TaskError::Forbidden);
+        }
+        let deleted_at = match task.deleted_at {
+            Some(deleted_at) => deleted_at.as_millis(),
+            None => {
+                self.trash_in_tx(
+                    &mut tx,
+                    workspace_id,
+                    actor_id,
+                    &task,
+                    expected_version,
+                    request_id,
+                    now,
+                )
+                .await?;
+                now.as_millis()
+            }
+        };
+        let batch = sub_issues::trashed_with(&mut *tx, task_id, deleted_at).await?;
+        for id in std::iter::once(task_id).chain(batch.iter().copied()) {
+            purge_task_in_tx(&mut tx, &id.to_string(), now).await?;
+        }
+        self.record_write(
+            &mut tx,
+            workspace_id,
+            actor_id,
+            ("task.purged", "task"),
+            task_id,
+            request_id,
+            json!({"tasks": batch.len() + 1}),
+            now,
+        )
+        .await?;
+        tx.commit().await?;
+        CollabHub::revalidate_database(&self.database, Some(workspace_id));
+        Ok(())
+    }
+
+    /// Moves the live task `current` and its live sub-issues to the trash.
+    #[allow(clippy::too_many_arguments)]
+    async fn trash_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Any>,
+        workspace_id: Id,
+        actor_id: Id,
+        current: &TaskRecord,
+        expected_version: u64,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), TaskError> {
+        let task_id = current.id;
+        let expected_version = self.expected_version(expected_version, current)?;
+        let descendants = sub_issues::live_descendants(&mut **tx, task_id).await?;
         sqlx::query("UPDATE tasks SET deleted_at = $1, version = version + 1, updated_at = $2 WHERE id = $3 AND workspace_id = $4 AND deleted_at IS NULL AND version = $5")
-            .bind(now.as_millis()).bind(now.as_millis()).bind(task_id.to_string()).bind(workspace_id.to_string()).bind(expected_version as i64).execute(&mut *tx).await?;
+            .bind(now.as_millis()).bind(now.as_millis()).bind(task_id.to_string()).bind(workspace_id.to_string()).bind(expected_version as i64).execute(&mut **tx).await?;
         for id in &descendants {
             sqlx::query("UPDATE tasks SET deleted_at = $1, version = version + 1, updated_at = $2 WHERE id = $3 AND deleted_at IS NULL")
                 .bind(now.as_millis())
                 .bind(now.as_millis())
                 .bind(id.to_string())
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await?;
         }
         for id in std::iter::once(task_id).chain(descendants.iter().copied()) {
             self.record_write(
-                &mut tx,
+                tx,
                 workspace_id,
                 actor_id,
                 ("task.deleted", "task"),
@@ -2395,12 +2524,9 @@ impl TaskRepository {
                 now,
             };
             let mut auto_closed = Vec::new();
-            sub_issues::close_ancestors_in_tx(&mut tx, actor, parent_id, task_id, &mut auto_closed)
+            sub_issues::close_ancestors_in_tx(tx, actor, parent_id, task_id, &mut auto_closed)
                 .await?;
         }
-        tx.commit().await?;
-        // Open task descriptions re-check access (closed while the task is in the trash).
-        CollabHub::revalidate_database(&self.database, Some(workspace_id));
         Ok(())
     }
 
@@ -3955,8 +4081,10 @@ async fn notify_description_mentions(
 }
 
 /// Writes a co-edited description: `description_json` and its markdown copy, without a version
-/// bump (title, status and the other fields keep their version check). With `audit`, records
-/// `task.updated` (which also tells other clients to refresh). Returns whether anything changed.
+/// bump (title, status and the other fields keep their version check). `updated_at` always moves
+/// forward, also within one millisecond, so the task's [`revision`] changes with every edit.
+/// With `audit`, records `task.updated` (which also tells other clients to refresh). Returns
+/// whether anything changed.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn project_task_description(
     tx: &mut Transaction<'_, Any>,
@@ -3994,7 +4122,8 @@ pub(crate) async fn project_task_description(
     }
     let markdown = description_markdown(blocks);
     sqlx::query(
-        "UPDATE tasks SET description_json = $1, description = $2, updated_at = $3 WHERE id = $4",
+        "UPDATE tasks SET description_json = $1, description = $2, \
+         updated_at = CASE WHEN updated_at < $3 THEN $3 ELSE updated_at + 1 END WHERE id = $4",
     )
     .bind(Value::Array(blocks.to_vec()).to_string())
     .bind(&markdown)
@@ -4053,8 +4182,10 @@ async fn github_service_account_in_tx(
     actor_id: Id,
     now: TimestampMillis,
 ) -> Result<(Id, String), TaskError> {
+    // Revoking tokens never disables this account; one disabled otherwise is enabled again, as
+    // the unique name allows only one.
     if let Some((id, name)) = sqlx::query_as::<_, (String, String)>(
-        "SELECT id, name FROM service_accounts WHERE workspace_id = $1 AND lower(name) = 'github' AND disabled_at IS NULL",
+        "UPDATE service_accounts SET disabled_at = NULL WHERE workspace_id = $1 AND lower(name) = 'github' RETURNING id, name",
     ).bind(workspace_id.to_string()).fetch_optional(&mut **tx).await? {
         return Ok((parse_id(id)?, name));
     }
@@ -4159,6 +4290,63 @@ async fn label_in_tx(
     let row = sqlx::query("SELECT id, workspace_id, project_id, name, color, version FROM labels WHERE id = $1 AND workspace_id = $2 AND project_id = $3")
         .bind(label_id.to_string()).bind(workspace_id.to_string()).bind(project_id.to_string()).fetch_optional(&mut **tx).await?.ok_or(TaskError::NotFound)?;
     label_from_row(row)
+}
+
+/// Deletes the task `task_id` forever, for the trash retention purge and [`TaskRepository::purge_task`]:
+/// its attachments (their blobs, and the stored files through `attachment_file_deletions`, when
+/// no other reference holds them), the duplicates it held, and through the foreign keys its
+/// comments, relations, description document and the rest. Returns how many attachment
+/// references and blobs went.
+pub(crate) async fn purge_task_in_tx(
+    tx: &mut Transaction<'_, Any>,
+    task_id: &str,
+    now: TimestampMillis,
+) -> Result<(u64, u64), TaskError> {
+    let blobs = sqlx::query(
+        "SELECT DISTINCT attachment_blobs.id, attachment_blobs.storage_key \
+         FROM attachment_references JOIN attachment_blobs ON attachment_blobs.id = attachment_references.blob_id \
+         WHERE attachment_references.task_id = $1",
+    )
+    .bind(task_id)
+    .fetch_all(&mut **tx)
+    .await?;
+    let references = sqlx::query("DELETE FROM attachment_references WHERE task_id = $1")
+        .bind(task_id)
+        .execute(&mut **tx)
+        .await?
+        .rows_affected();
+    task_relations::release_duplicates_in_tx(tx, task_id, now).await?;
+    sqlx::query("DELETE FROM tasks WHERE id = $1")
+        .bind(task_id)
+        .execute(&mut **tx)
+        .await?;
+    let mut blobs_purged = 0;
+    for blob in blobs {
+        let blob_id: String = blob.get("id");
+        let held: i64 = sqlx::query_scalar(BLOB_REFERENCE_COUNT)
+            .bind(&blob_id)
+            .bind(&blob_id)
+            .fetch_one(&mut **tx)
+            .await?;
+        if held == 0 {
+            sqlx::query(
+                "INSERT INTO attachment_file_deletions \
+                 (id, path_kind, path, created_at) VALUES ($1, 'blob', $2, $3) \
+                 ON CONFLICT DO NOTHING",
+            )
+            .bind(Id::new_v7().to_string())
+            .bind(blob.get::<String, _>("storage_key"))
+            .bind(now.as_millis())
+            .execute(&mut **tx)
+            .await?;
+            blobs_purged += sqlx::query("DELETE FROM attachment_blobs WHERE id = $1")
+                .bind(blob_id)
+                .execute(&mut **tx)
+                .await?
+                .rows_affected();
+        }
+    }
+    Ok((references, blobs_purged))
 }
 
 pub(super) async fn task_in_tx(

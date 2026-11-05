@@ -2807,3 +2807,73 @@ async fn removing_a_member_revokes_their_own_api_tokens_for_good() {
             .is_err()
     );
 }
+
+#[tokio::test]
+async fn a_token_without_a_task_scope_needs_no_project_and_gets_no_task_access() {
+    let database = TestDatabase::new().await.unwrap();
+    let identity = Arc::new(IdentityRepository::new((*database).clone()));
+    let (workspace_id, session) = setup_owner(&identity).await;
+    let owner_cookie = format!("__Host-orbit_session={session}");
+    let project_id: String = sqlx::query_scalar("SELECT id FROM projects WHERE workspace_id = $1 AND deleted_at IS NULL ORDER BY created_at LIMIT 1").bind(&workspace_id).fetch_one(database.pool()).await.unwrap();
+    let app = workspace_router(WorkspaceState::new(
+        Arc::clone(&identity),
+        "https://orbit.test".to_owned(),
+        CookieMode::secure(),
+    ))
+    .layer(HttpPlatformLayer::new(OriginPolicy::new(
+        "https://orbit.test",
+    )));
+    let path = format!("/api/v1/workspaces/{workspace_id}/api-tokens");
+
+    // A task scope still needs a project.
+    let no_project = app
+        .clone()
+        .oneshot(json_request(
+            "POST",
+            &path,
+            &owner_cookie,
+            json!({"name":"Tasks", "project_ids": [], "scopes":["tasks:read", "docs:read"]}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(no_project.status(), StatusCode::UNPROCESSABLE_ENTITY);
+
+    let token_repository = ApiTokenRepository::new((*database).clone());
+    // Projects sent without a task scope have no effect, so none are stored.
+    for (name, project_ids) in [
+        ("Docs", json!([])),
+        ("Docs with project", json!([project_id])),
+    ] {
+        let created = app
+            .clone()
+            .oneshot(json_request(
+                "POST",
+                &path,
+                &owner_cookie,
+                json!({"name": name, "project_ids": project_ids, "scopes":["docs:read", "chat:read"]}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(created.status(), StatusCode::CREATED, "{name}");
+        let created = response_json(created).await;
+        assert_eq!(created["project_ids"], json!([]), "{name}");
+        let token = created["token"].as_str().unwrap();
+
+        let principal = token_repository
+            .authenticate(token, Some(ApiTokenScope::DocsRead), TimestampMillis::now())
+            .await
+            .unwrap();
+        assert!(principal.project_ids.is_empty(), "{name}");
+        assert!(
+            token_repository
+                .authenticate(
+                    token,
+                    Some(ApiTokenScope::TasksRead),
+                    TimestampMillis::now()
+                )
+                .await
+                .is_err(),
+            "{name}"
+        );
+    }
+}

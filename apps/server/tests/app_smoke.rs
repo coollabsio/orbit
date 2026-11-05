@@ -205,7 +205,7 @@ async fn app_build_migrates_checks_readiness_and_returns_first_run_setup_url() {
             .scalar::<i64>("SELECT MAX(version) FROM schema_migrations")
             .await
             .unwrap(),
-        67
+        68
     );
 
     let readiness = app
@@ -713,6 +713,47 @@ async fn a_stopping_server_fails_readiness_and_serves_during_the_delay() {
     tokio::time::timeout(std::time::Duration::from_secs(5), server)
         .await
         .expect("the server stops after the delay")
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_writer_that_outlasts_the_busy_timeout_does_not_stop_the_server() {
+    if orbit_platform::testing_postgres() {
+        return; // Postgres writers wait for the write lock without a timeout.
+    }
+    let root = TempDir::new().unwrap();
+    let app = App::build(app_config(&root)).await.unwrap();
+    let database = app.database().clone();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let shutdown = CancellationToken::new();
+    let trigger = shutdown.clone();
+    let server = tokio::spawn(app.serve(listener, shutdown));
+    let http = reqwest::Client::new();
+    let live = || {
+        let request = http.get(format!("{base}/health/live"));
+        async move {
+            request
+                .send()
+                .await
+                .map(|response| response.status().as_u16())
+        }
+    };
+    assert_eq!(live().await.unwrap(), 200);
+
+    // Longer than the 5 s busy timeout: the job worker's polls fail with "database is locked".
+    let tx = database.immediate_transaction().await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(6_500)).await;
+    tx.rollback().await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+    assert!(!server.is_finished(), "the server stopped");
+    assert_eq!(live().await.unwrap(), 200);
+    trigger.cancel();
+    tokio::time::timeout(std::time::Duration::from_secs(10), server)
+        .await
+        .expect("the server stops on shutdown")
         .unwrap()
         .unwrap();
 }

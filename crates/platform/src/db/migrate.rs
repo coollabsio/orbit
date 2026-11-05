@@ -460,12 +460,19 @@ impl MigrationRunner {
                 Migration::new(
                     66,
                     include_str!("../../../../apps/server/migrations/0066_api_token_scopes.sql"),
-                    false,
+                    true,
                 ),
                 Migration::new(
                     67,
                     include_str!(
                         "../../../../apps/server/migrations/0067_comment_service_account.sql"
+                    ),
+                    false,
+                ),
+                Migration::new(
+                    68,
+                    include_str!(
+                        "../../../../apps/server/migrations/0068_api_token_optional_project.sql"
                     ),
                     false,
                 ),
@@ -591,12 +598,19 @@ impl MigrationRunner {
                 include_str!(
                     "../../../../apps/server/migrations/postgres/0066_api_token_scopes.sql"
                 ),
-                false,
+                true,
             ),
             Migration::new(
                 67,
                 include_str!(
                     "../../../../apps/server/migrations/postgres/0067_comment_service_account.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                68,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0068_api_token_optional_project.sql"
                 ),
                 false,
             ),

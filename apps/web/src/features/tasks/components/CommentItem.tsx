@@ -44,7 +44,7 @@ export function CommentItem({ state, taskId, comment, reply }: CommentItemProps)
   const [saved, setSaved] = useState<{ version: number; content: unknown[] } | null>(null)
   const shown = saved?.version === comment.version ? saved.content : null
   const author = comment.authorServiceAccountName ? undefined : state.users.find((u) => u.id === comment.authorId)
-  const name = comment.authorServiceAccountName ?? author?.name ?? 'Someone'
+  const name = comment.authorServiceAccountName || author?.name || 'Someone'
   const mentions = useMemo(() => ({ members: state.users, candidates: state.users.filter((user) => !user.suspended), privatePage: false }), [state.users])
   const fileScope = useMemo(() => ({ workspaceId: workspace.id, taskId }), [workspace.id, taskId])
   const [bodyRef, nearScreen] = useNearViewport<HTMLDivElement>()

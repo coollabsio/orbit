@@ -37,7 +37,9 @@ workspace.json
 tasks/<KEY>-<number>.json
     One file per task, also tasks in the trash (\"deleted\": true) and tasks of deleted
     projects: title, Markdown description, status, priority, dates, creator, assignees,
-    labels, relations, comments, attachments and activity (the task's audit events).
+    labels, relations, comments, attachments and activity (the task's audit events). A
+    comment written with a service account's API token has \"author_service_account\"
+    {\"id\", \"name\"} (else null); its \"author\" is the member the write was checked as.
 
 pages/<Teamspace>/<Page>.md, pages/Private/<Page>.md
     Every live page as Markdown, with its sub-pages in the folder <Page>/ next to it and its
@@ -509,18 +511,28 @@ async fn tasks(
     }
     let mut comments = HashMap::new();
     for row in fetch(
-        "SELECT id, task_id, parent_id, author_id, body, created_at, updated_at FROM task_comments \
-         WHERE workspace_id = $1 ORDER BY created_at, id",
+        "SELECT task_comments.id, task_comments.task_id, task_comments.parent_id, \
+         task_comments.author_id, task_comments.author_service_account_id, \
+         service_accounts.name AS author_service_account_name, task_comments.body, \
+         task_comments.created_at, task_comments.updated_at FROM task_comments \
+         LEFT JOIN service_accounts ON service_accounts.id = task_comments.author_service_account_id \
+         WHERE task_comments.workspace_id = $1 ORDER BY task_comments.created_at, task_comments.id",
     )
     .await?
     {
         let id: String = row.get("id");
+        let service_account = row
+            .get::<Option<String>, _>("author_service_account_id")
+            .map(|account| {
+                json!({"id": account, "name": row.get::<Option<String>, _>("author_service_account_name")})
+            });
         push(
             &mut comments,
             row.get("task_id"),
             json!({
                 "parent_id": row.get::<Option<String>, _>("parent_id"),
                 "author": people.of(row.get("author_id")),
+                "author_service_account": service_account,
                 "body": row.get::<String, _>("body"),
                 "created_at": time(row.get("created_at")),
                 "updated_at": time(row.get("updated_at")),

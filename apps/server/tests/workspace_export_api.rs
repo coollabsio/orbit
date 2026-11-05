@@ -383,6 +383,42 @@ async fn an_owner_exports_tasks_pages_chat_and_files_and_downloads_one_zip() {
         )
         .await;
     harness.attach(&task_id, "pixel.png", PNG).await;
+    let project = harness
+        .scalar("SELECT id FROM projects WHERE workspace_id = $1")
+        .await;
+    let bot = harness
+        .ok(
+            &harness.owner,
+            "POST",
+            &harness.workspace("/api-tokens"),
+            Some(json!({
+                "name": "Deploy bot",
+                "project_ids": [project],
+                "scopes": ["tasks:write"],
+                "service_account": true,
+            })),
+        )
+        .await;
+    let (status, _, _) = harness
+        .send(
+            Request::builder()
+                .method("POST")
+                .uri(format!(
+                    "/api/public/v1/workspaces/{}/tasks/{task_id}/comments",
+                    harness.workspace_id
+                ))
+                .header(
+                    header::AUTHORIZATION,
+                    format!("Bearer {}", bot["token"].as_str().unwrap()),
+                )
+                .header(header::CONTENT_TYPE, "application/json")
+                .extension(ConnectInfo(SocketAddr::from(([127, 0, 0, 1], 40_000))))
+                .body(Body::from(json!({"body": "Deployed"}).to_string()))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert!(bot["service_account_id"].is_string(), "{bot}");
     let task_key = harness
         .scalar(
             "SELECT projects.project_key || '-' || CAST(tasks.number AS TEXT) FROM tasks \
@@ -492,9 +528,20 @@ async fn an_owner_exports_tasks_pages_chat_and_files_and_downloads_one_zip() {
         assert_eq!(task["key"], task_key.as_str());
         assert_eq!(task["deleted"], false);
         assert_eq!(task["creator"]["name"], "Owner");
-        assert_eq!(task["comments"].as_array().unwrap().len(), 1);
+        assert_eq!(task["comments"].as_array().unwrap().len(), 2);
         assert_eq!(task["comments"][0]["body"], "Looks **good**");
         assert_eq!(task["comments"][0]["author"]["name"], "Owner");
+        assert_eq!(task["comments"][0]["author_service_account"], Value::Null);
+        // A service account's comment keeps the member it acted as, and names the account.
+        assert_eq!(task["comments"][1]["body"], "Deployed");
+        assert_eq!(task["comments"][1]["author"]["name"], "Owner");
+        assert_eq!(
+            task["comments"][1]["author_service_account"],
+            json!({
+                "id": bot["service_account_id"],
+                "name": "Deploy bot",
+            })
+        );
         assert_eq!(task["attachments"][0]["name"], "pixel.png");
         assert_eq!(task["attachments"][0]["media_type"], "image/png");
         assert_eq!(task["attachments"][0]["size_bytes"], PNG.len());

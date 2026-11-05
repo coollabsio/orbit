@@ -14,18 +14,21 @@ use axum::{Json, Router};
 use orbit_platform::{Id, Problem, RequestId, TimestampMillis};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use utoipa::{IntoParams, ToSchema};
 
 use crate::billing::guard::READ_ONLY_DETAIL;
 use crate::repositories::api_tokens::{
     ApiTokenError, ApiTokenPrincipal, ApiTokenRepository, ApiTokenScope,
 };
+use crate::repositories::pages::PageSummary;
 use crate::repositories::pages::{PageError, PageRepository};
 use crate::repositories::tasks::{
     CommentRecord, LabelRecord, ProjectRecord, SortOrder, StatusRecord, TaskError, TaskRepository,
     TaskSort,
 };
 use crate::token_api::{
-    AssigneeFilter, DocPatch, Named, NewDoc, NewTask, TaskPatch, TaskQuery, TokenApi, TokenApiError,
+    AssigneeFilter, DOC_TOO_LARGE_DETAIL, DocPatch, DocView, Me, MemberView, Named, NewDoc,
+    NewTask, TaskPatch, TaskQuery, TaskView, TokenApi, TokenApiError,
 };
 
 pub const BASE_PATH: &str = "/api/public/v1";
@@ -248,6 +251,12 @@ impl Responder {
             ),
             TokenApiError::Invalid(detail) => return self.invalid(detail),
             TokenApiError::NotAvailable => self.not_found(),
+            TokenApiError::PurgeForbidden => self.problem(
+                StatusCode::FORBIDDEN,
+                "workspace_action_forbidden",
+                "Workspace action forbidden",
+                "Only workspace owners and administrators may delete tasks forever.",
+            ),
             TokenApiError::Internal => Problem::internal(&self.request_id, &self.instance),
             TokenApiError::Task(error) => self.task_problem(error),
             TokenApiError::Page(error) => self.page_problem(error),
@@ -390,6 +399,12 @@ impl Responder {
                 "Doc busy",
                 "The doc's content is busy on the server. Try again in a moment.",
             ),
+            PageError::TooLarge => (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "doc_too_large",
+                "Doc too large",
+                DOC_TOO_LARGE_DETAIL,
+            ),
             PageError::Unavailable(_) | PageError::Corrupt => {
                 return Problem::internal(&self.request_id, &self.instance);
             }
@@ -409,9 +424,11 @@ fn problem_response(problem: Problem) -> Response {
         .into_response()
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
 struct List<T> {
     items: Vec<T>,
+    /// Send it as `cursor` for the next page; `null` on the last page.
+    #[schema(required = true)]
     next_cursor: Option<String>,
 }
 
@@ -422,14 +439,18 @@ fn list<T, U: From<T>>(items: Vec<T>, next_cursor: Option<String>) -> List<U> {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
+#[schema(as = PublicProject)]
 struct ProjectOut {
+    #[schema(value_type = String)]
     id: Id,
     name: String,
     key: String,
     color: String,
     version: u64,
+    #[schema(value_type = String, format = DateTime)]
     created_at: TimestampMillis,
+    #[schema(value_type = String, format = DateTime)]
     updated_at: TimestampMillis,
 }
 
@@ -447,13 +468,17 @@ impl From<ProjectRecord> for ProjectOut {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
+#[schema(as = PublicStatus)]
 struct StatusOut {
+    #[schema(value_type = String)]
     id: Id,
+    #[schema(value_type = String)]
     project_id: Id,
     name: String,
     description: String,
     color: String,
+    /// `unstarted`, `started`, `completed`, `cancelled` or `duplicate`.
     category: String,
     position: i64,
     version: u64,
@@ -474,9 +499,12 @@ impl From<StatusRecord> for StatusOut {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
+#[schema(as = PublicLabel)]
 struct LabelOut {
+    #[schema(value_type = String)]
     id: Id,
+    #[schema(value_type = String)]
     project_id: Id,
     name: String,
     color: String,
@@ -495,17 +523,26 @@ impl From<LabelRecord> for LabelOut {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, ToSchema)]
+#[schema(as = PublicComment)]
 struct CommentOut {
+    #[schema(value_type = String)]
     id: Id,
+    #[schema(value_type = String)]
     task_id: Id,
+    #[schema(value_type = String)]
     author_id: Id,
     /// Set when a service account wrote the comment; show it as the author then.
+    #[schema(required = true)]
     author_service_account: Option<Named>,
+    /// Markdown.
     body: String,
+    #[schema(value_type = Option<String>, required = true)]
     parent_id: Option<Id>,
     version: u64,
+    #[schema(value_type = String, format = DateTime)]
     created_at: TimestampMillis,
+    #[schema(value_type = String, format = DateTime)]
     updated_at: TimestampMillis,
 }
 
@@ -528,45 +565,77 @@ impl From<CommentRecord> for CommentOut {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 struct PageQuery {
+    /// The `next_cursor` of the previous page.
     cursor: Option<String>,
+    /// 1 to 100; 50 when unset.
+    #[param(minimum = 1, maximum = 100)]
     limit: Option<usize>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 struct TasksQuery {
+    #[param(value_type = Option<String>)]
     project_id: Option<Id>,
+    #[param(value_type = Option<String>)]
     status_id: Option<Id>,
     /// A member's user ID, or `none` for tasks without an assignee.
     assignee_id: Option<String>,
+    /// `created_at` (default), `updated_at`, `priority`, `due_date` or `title`.
     sort: Option<String>,
+    /// `desc` (default) or `asc`.
     order: Option<String>,
+    #[param(value_type = Option<String>)]
     label_id: Option<Id>,
+    /// `none`, `low`, `medium`, `high` or `urgent`.
     priority: Option<String>,
+    /// Text in the title or description, or a task identifier; up to 500 characters.
     q: Option<String>,
+    /// The `next_cursor` of the previous page. Keep the other parameters the same.
     cursor: Option<String>,
+    /// 1 to 100; 50 when unset.
+    #[param(minimum = 1, maximum = 100)]
     limit: Option<usize>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
+#[schema(as = PublicCreateTaskBody)]
 #[serde(deny_unknown_fields)]
 struct CreateTaskBody {
+    #[schema(value_type = String)]
     project_id: Id,
+    /// A status of the task's project.
+    #[schema(value_type = String)]
     status_id: Id,
+    /// 1 to 500 characters.
     title: String,
+    /// Markdown, up to 50,000 bytes.
     #[serde(default)]
     description: String,
+    /// `none`, `low`, `medium`, `high` or `urgent`.
     #[serde(default = "default_priority")]
+    #[schema(default = "none")]
     priority: String,
+    /// Members of the workspace.
     #[serde(default)]
+    #[schema(value_type = Vec<String>)]
     assignee_ids: Vec<Id>,
+    /// Labels of the task's project.
     #[serde(default)]
+    #[schema(value_type = Vec<String>)]
     label_ids: Vec<Id>,
+    /// A task in an approved project.
+    #[schema(value_type = Option<String>)]
     parent_task_id: Option<Id>,
+    /// Needs `due_at` and must not be after it.
+    #[schema(value_type = Option<String>, format = DateTime)]
     due_start_at: Option<TimestampMillis>,
+    #[schema(value_type = Option<String>, format = DateTime)]
     due_at: Option<TimestampMillis>,
 }
 
@@ -574,19 +643,34 @@ fn default_priority() -> String {
     "none".to_owned()
 }
 
-#[derive(Deserialize)]
+/// A missing field keeps its value.
+#[derive(Deserialize, ToSchema)]
+#[schema(as = PublicUpdateTaskBody)]
 #[serde(deny_unknown_fields)]
 struct UpdateTaskBody {
+    /// The `version` that you read: an opaque number below 2^53. Compare it for equality only.
     expected_version: u64,
+    /// 1 to 500 characters.
     title: Option<String>,
+    /// Markdown, up to 50,000 bytes.
     description: Option<String>,
+    #[schema(value_type = Option<String>)]
     status_id: Option<Id>,
+    /// `none`, `low`, `medium`, `high` or `urgent`.
     priority: Option<String>,
+    /// Replaces the assignees.
+    #[schema(value_type = Option<Vec<String>>)]
     assignee_ids: Option<Vec<Id>>,
+    /// Replaces the labels.
+    #[schema(value_type = Option<Vec<String>>)]
     label_ids: Option<Vec<Id>>,
+    /// `null` clears the date.
     #[serde(default, deserialize_with = "present")]
+    #[schema(value_type = Option<String>, format = DateTime)]
     due_start_at: Option<Option<TimestampMillis>>,
+    /// `null` clears the date.
     #[serde(default, deserialize_with = "present")]
+    #[schema(value_type = Option<String>, format = DateTime)]
     due_at: Option<Option<TimestampMillis>>,
 }
 
@@ -597,39 +681,70 @@ fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
     Option::<T>::deserialize(deserializer).map(Some)
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
+#[schema(as = PublicCommentBody)]
 #[serde(deny_unknown_fields)]
 struct CommentBody {
+    /// Markdown, 1 to 100,000 bytes in UTF-8, not only spaces.
     body: String,
 }
 
-#[derive(Deserialize)]
+/// Without `parent_id`, `teamspace_id` or `private`, the doc goes to the root of the default
+/// teamspace.
+#[derive(Deserialize, ToSchema)]
+#[schema(as = PublicCreateDocBody)]
 #[serde(deny_unknown_fields)]
 struct CreateDocBody {
+    /// The doc goes under this doc, in its space.
+    #[schema(value_type = Option<String>)]
     parent_id: Option<Id>,
+    /// Root docs only: the teamspace of the doc.
+    #[schema(value_type = Option<String>)]
     teamspace_id: Option<Id>,
+    /// Root docs only: `true` puts the doc in the token creator's private space.
     private: Option<bool>,
+    /// Up to 500 characters.
     #[serde(default)]
     title: String,
+    /// Up to 64 characters.
     icon: Option<String>,
+    /// GitHub-flavored Markdown, up to 200,000 bytes and 4,000 blocks (`413 doc_too_large`).
     #[serde(default)]
     markdown: String,
 }
 
-#[derive(Deserialize)]
+/// A missing field keeps its value.
+#[derive(Deserialize, ToSchema)]
+#[schema(as = PublicUpdateDocBody)]
 #[serde(deny_unknown_fields)]
 struct UpdateDocBody {
+    /// The `version` that you read: an opaque number below 2^53. Compare it for equality only.
     expected_version: u64,
+    /// Up to 500 characters.
     title: Option<String>,
+    /// Up to 64 characters; `null` clears the icon.
     #[serde(default, deserialize_with = "present")]
+    #[schema(value_type = Option<String>)]
     icon: Option<Option<String>>,
+    /// The new content as GitHub-flavored Markdown, up to 200,000 bytes. It is merged onto the
+    /// current content: blocks left as read stay exactly as they are, and edited blocks keep the
+    /// colors, alignment and other settings that Markdown cannot show. The doc can have at most
+    /// 4,000 blocks before and after the write (`413 doc_too_large`).
     markdown: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 #[serde(deny_unknown_fields)]
 struct DeleteQuery {
+    /// The `version` that you read: an opaque number below 2^53. Compare it for equality only.
+    /// Not checked when `permanent=true` deletes a task that is already in the trash.
     expected_version: u64,
+    /// `true` deletes the task and its sub-issues forever instead of moving them to the trash,
+    /// also when the task is already in the trash. Needs a token of a workspace owner or admin,
+    /// or a service account.
+    #[serde(default)]
+    permanent: bool,
 }
 
 /// Reads a query string or JSON body, or answers 400.
@@ -657,10 +772,29 @@ macro_rules! path_id {
     };
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/public/v1/me",
+    operation_id = "public_get_me",
+    tag = "public-api",
+    summary = "The token, its workspace and its identity",
+    responses((status = 200, description = "The token", body = Me)),
+    security(("bearerAuth" = []))
+)]
 async fn me(State(s): State<PublicApiState>, ctx: Ctx) -> Response {
     ctx.reply(StatusCode::OK, s.api.me(&ctx.principal).await)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/public/v1/workspaces/{workspace_id}/projects",
+    operation_id = "public_list_projects",
+    tag = "public-api",
+    summary = "The approved live projects",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`.")),
+    responses((status = 200, description = "Every approved project; `next_cursor` is `null`", body = List<ProjectOut>)),
+    security(("bearerAuth" = []))
+)]
 async fn projects(State(s): State<PublicApiState>, ctx: Ctx) -> Response {
     let result = async {
         let api = s
@@ -673,10 +807,20 @@ async fn projects(State(s): State<PublicApiState>, ctx: Ctx) -> Response {
     ctx.reply(StatusCode::OK, result)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/public/v1/workspaces/{workspace_id}/projects/{project_id}/statuses",
+    operation_id = "public_list_statuses",
+    tag = "public-api",
+    summary = "The statuses of a project",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("project_id" = String, Path), PageQuery),
+    responses((status = 200, description = "A page of statuses", body = List<StatusOut>)),
+    security(("bearerAuth" = []))
+)]
 async fn statuses(
     State(s): State<PublicApiState>,
     ctx: Ctx,
-    Path((_, project)): Path<(String, String)>,
+    Path((_workspace, project)): Path<(String, String)>,
     query: Result<Query<PageQuery>, QueryRejection>,
 ) -> Response {
     let project = path_id!(ctx, project);
@@ -695,10 +839,20 @@ async fn statuses(
     ctx.reply(StatusCode::OK, result)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/public/v1/workspaces/{workspace_id}/projects/{project_id}/labels",
+    operation_id = "public_list_labels",
+    tag = "public-api",
+    summary = "The labels of a project",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("project_id" = String, Path), PageQuery),
+    responses((status = 200, description = "A page of labels", body = List<LabelOut>)),
+    security(("bearerAuth" = []))
+)]
 async fn labels(
     State(s): State<PublicApiState>,
     ctx: Ctx,
-    Path((_, project)): Path<(String, String)>,
+    Path((_workspace, project)): Path<(String, String)>,
     query: Result<Query<PageQuery>, QueryRejection>,
 ) -> Response {
     let project = path_id!(ctx, project);
@@ -717,6 +871,16 @@ async fn labels(
     ctx.reply(StatusCode::OK, result)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/public/v1/workspaces/{workspace_id}/members",
+    operation_id = "public_list_members",
+    tag = "public-api",
+    summary = "The workspace members",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), PageQuery),
+    responses((status = 200, description = "A page of members", body = List<MemberView>)),
+    security(("bearerAuth" = []))
+)]
 async fn members(
     State(s): State<PublicApiState>,
     ctx: Ctx,
@@ -734,6 +898,16 @@ async fn members(
     ctx.reply(StatusCode::OK, result)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/public/v1/workspaces/{workspace_id}/tasks",
+    operation_id = "public_list_tasks",
+    tag = "public-api",
+    summary = "Tasks in the approved projects",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), TasksQuery),
+    responses((status = 200, description = "A page of tasks", body = List<TaskView>)),
+    security(("bearerAuth" = []))
+)]
 async fn list_tasks(
     State(s): State<PublicApiState>,
     ctx: Ctx,
@@ -786,10 +960,20 @@ async fn list_tasks(
     ctx.reply(StatusCode::OK, result)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/public/v1/workspaces/{workspace_id}/tasks/{task}",
+    operation_id = "public_get_task",
+    tag = "public-api",
+    summary = "A task",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("task" = String, Path, description = "A task UUID or identifier such as `ENG-12` (any letter case).")),
+    responses((status = 200, description = "The task", body = TaskView)),
+    security(("bearerAuth" = []))
+)]
 async fn get_task(
     State(s): State<PublicApiState>,
     ctx: Ctx,
-    Path((_, task)): Path<(String, String)>,
+    Path((_workspace, task)): Path<(String, String)>,
 ) -> Response {
     let result = async {
         let api = s
@@ -802,6 +986,17 @@ async fn get_task(
     ctx.reply(StatusCode::OK, result)
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/public/v1/workspaces/{workspace_id}/tasks",
+    operation_id = "public_create_task",
+    tag = "public-api",
+    summary = "Create a task",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`.")),
+    request_body = CreateTaskBody,
+    responses((status = 201, description = "The new task", body = TaskView)),
+    security(("bearerAuth" = []))
+)]
 async fn create_task(
     State(s): State<PublicApiState>,
     ctx: Ctx,
@@ -831,10 +1026,21 @@ async fn create_task(
     ctx.reply(StatusCode::CREATED, result)
 }
 
+#[utoipa::path(
+    patch,
+    path = "/api/public/v1/workspaces/{workspace_id}/tasks/{task}",
+    operation_id = "public_update_task",
+    tag = "public-api",
+    summary = "Update a task",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("task" = String, Path, description = "A task UUID or identifier such as `ENG-12` (any letter case).")),
+    request_body = UpdateTaskBody,
+    responses((status = 200, description = "The task", body = TaskView)),
+    security(("bearerAuth" = []))
+)]
 async fn update_task(
     State(s): State<PublicApiState>,
     ctx: Ctx,
-    Path((_, task)): Path<(String, String)>,
+    Path((_workspace, task)): Path<(String, String)>,
     body: Result<Json<UpdateTaskBody>, JsonRejection>,
 ) -> Response {
     let body = input!(ctx, body);
@@ -859,10 +1065,21 @@ async fn update_task(
     ctx.reply(StatusCode::OK, result)
 }
 
+#[utoipa::path(
+    delete,
+    path = "/api/public/v1/workspaces/{workspace_id}/tasks/{task}",
+    operation_id = "public_delete_task",
+    tag = "public-api",
+    summary = "Move a task and its sub-issues to the trash, or delete them forever",
+    description = "Moves the task and its live sub-issues to the trash, where they stay for 30 days. With `permanent=true`, deletes them forever, with their comments and attachments; a task that is already in the trash goes with the sub-issues trashed with it.",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("task" = String, Path, description = "A task UUID or identifier such as `ENG-12` (any letter case)."), DeleteQuery),
+    responses((status = 204, description = "The task is in the trash, or deleted forever with `permanent=true`")),
+    security(("bearerAuth" = []))
+)]
 async fn delete_task(
     State(s): State<PublicApiState>,
     ctx: Ctx,
-    Path((_, task)): Path<(String, String)>,
+    Path((_workspace, task)): Path<(String, String)>,
     query: Result<Query<DeleteQuery>, QueryRejection>,
 ) -> Response {
     let query = input!(ctx, query);
@@ -871,7 +1088,8 @@ async fn delete_task(
             .api
             .authorize(&ctx.principal, ApiTokenScope::TasksWrite, &ctx.request_id)
             .await?;
-        api.delete_task(&task, query.expected_version).await
+        api.delete_task(&task, query.expected_version, query.permanent)
+            .await
     }
     .await;
     match result {
@@ -880,6 +1098,16 @@ async fn delete_task(
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/public/v1/workspaces/{workspace_id}/docs",
+    operation_id = "public_list_docs",
+    tag = "public-api",
+    summary = "The docs that the token's creator can see",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`.")),
+    responses((status = 200, description = "Every visible doc; `next_cursor` is `null`", body = List<PageSummary>)),
+    security(("bearerAuth" = []))
+)]
 async fn docs(State(s): State<PublicApiState>, ctx: Ctx) -> Response {
     let result = async {
         let api = s
@@ -895,10 +1123,20 @@ async fn docs(State(s): State<PublicApiState>, ctx: Ctx) -> Response {
     ctx.reply(StatusCode::OK, result)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/public/v1/workspaces/{workspace_id}/docs/{page_id}",
+    operation_id = "public_get_doc",
+    tag = "public-api",
+    summary = "A doc with its content as Markdown",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("page_id" = String, Path)),
+    responses((status = 200, description = "The doc", body = DocView)),
+    security(("bearerAuth" = []))
+)]
 async fn doc(
     State(s): State<PublicApiState>,
     ctx: Ctx,
-    Path((_, page)): Path<(String, String)>,
+    Path((_workspace, page)): Path<(String, String)>,
 ) -> Response {
     let page = path_id!(ctx, page);
     let result = async {
@@ -912,6 +1150,17 @@ async fn doc(
     ctx.reply(StatusCode::OK, result)
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/public/v1/workspaces/{workspace_id}/docs",
+    operation_id = "public_create_doc",
+    tag = "public-api",
+    summary = "Create a doc from Markdown",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`.")),
+    request_body = CreateDocBody,
+    responses((status = 201, description = "The new doc", body = DocView)),
+    security(("bearerAuth" = []))
+)]
 async fn create_doc(
     State(s): State<PublicApiState>,
     ctx: Ctx,
@@ -937,10 +1186,21 @@ async fn create_doc(
     ctx.reply(StatusCode::CREATED, result)
 }
 
+#[utoipa::path(
+    patch,
+    path = "/api/public/v1/workspaces/{workspace_id}/docs/{page_id}",
+    operation_id = "public_update_doc",
+    tag = "public-api",
+    summary = "Update a doc",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("page_id" = String, Path)),
+    request_body = UpdateDocBody,
+    responses((status = 200, description = "The doc", body = DocView)),
+    security(("bearerAuth" = []))
+)]
 async fn update_doc(
     State(s): State<PublicApiState>,
     ctx: Ctx,
-    Path((_, page)): Path<(String, String)>,
+    Path((_workspace, page)): Path<(String, String)>,
     body: Result<Json<UpdateDocBody>, JsonRejection>,
 ) -> Response {
     let page = path_id!(ctx, page);
@@ -961,10 +1221,20 @@ async fn update_doc(
     ctx.reply(StatusCode::OK, result)
 }
 
+#[utoipa::path(
+    get,
+    path = "/api/public/v1/workspaces/{workspace_id}/tasks/{task}/comments",
+    operation_id = "public_list_comments",
+    tag = "public-api",
+    summary = "The comments of a task, oldest first",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("task" = String, Path, description = "A task UUID or identifier such as `ENG-12` (any letter case)."), PageQuery),
+    responses((status = 200, description = "A page of comments", body = List<CommentOut>)),
+    security(("bearerAuth" = []))
+)]
 async fn comments(
     State(s): State<PublicApiState>,
     ctx: Ctx,
-    Path((_, task)): Path<(String, String)>,
+    Path((_workspace, task)): Path<(String, String)>,
     query: Result<Query<PageQuery>, QueryRejection>,
 ) -> Response {
     let query = input!(ctx, query);
@@ -982,10 +1252,21 @@ async fn comments(
     ctx.reply(StatusCode::OK, result)
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/public/v1/workspaces/{workspace_id}/tasks/{task}/comments",
+    operation_id = "public_create_comment",
+    tag = "public-api",
+    summary = "Comment on a task",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`."), ("task" = String, Path, description = "A task UUID or identifier such as `ENG-12` (any letter case).")),
+    request_body = CommentBody,
+    responses((status = 201, description = "The new comment", body = CommentOut)),
+    security(("bearerAuth" = []))
+)]
 async fn create_comment(
     State(s): State<PublicApiState>,
     ctx: Ctx,
-    Path((_, task)): Path<(String, String)>,
+    Path((_workspace, task)): Path<(String, String)>,
     body: Result<Json<CommentBody>, JsonRejection>,
 ) -> Response {
     let body = input!(ctx, body);

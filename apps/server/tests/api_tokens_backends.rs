@@ -268,3 +268,166 @@ async fn api_tokens_on_the_configured_backend() {
     let database = TestDatabase::new().await.unwrap();
     scenario(&database).await;
 }
+
+#[tokio::test]
+async fn service_account_tokens_cannot_get_docs_or_chat_scopes() {
+    let database = TestDatabase::new().await.unwrap();
+    let now = TimestampMillis::now();
+    let seed = seed(&database, now.as_millis()).await;
+    let tokens = ApiTokenRepository::new(database.clone());
+
+    for scope in [
+        ApiTokenScope::DocsRead,
+        ApiTokenScope::DocsWrite,
+        ApiTokenScope::ChatRead,
+    ] {
+        let refused = tokens
+            .create(
+                seed.workspace,
+                seed.owner,
+                "Bot".into(),
+                vec![seed.projects[0]],
+                &[ApiTokenScope::TasksRead, scope],
+                true,
+                None,
+                "test",
+                now,
+            )
+            .await;
+        assert!(
+            matches!(refused, Err(ApiTokenError::NotFound)),
+            "{scope:?}: {refused:?}"
+        );
+    }
+    for table in ["api_tokens", "service_accounts", "audit_events"] {
+        assert_eq!(
+            database
+                .scalar::<i64>(&format!("SELECT COUNT(*) FROM {table}"))
+                .await
+                .unwrap(),
+            0,
+            "{table}"
+        );
+    }
+
+    // A personal token may still have them.
+    tokens
+        .create(
+            seed.workspace,
+            seed.owner,
+            "Docs".into(),
+            vec![seed.projects[0]],
+            &[ApiTokenScope::DocsWrite, ApiTokenScope::ChatRead],
+            false,
+            None,
+            "test",
+            now,
+        )
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn only_a_task_scope_needs_a_project() {
+    let database = TestDatabase::new().await.unwrap();
+    let now = TimestampMillis::now();
+    let seed = seed(&database, now.as_millis()).await;
+    let tokens = ApiTokenRepository::new(database.clone());
+    let create = |name: &str, project_ids: Vec<Id>, scopes: Vec<ApiTokenScope>| {
+        let tokens = tokens.clone();
+        let name = name.to_owned();
+        async move {
+            tokens
+                .create(
+                    seed.workspace,
+                    seed.owner,
+                    name,
+                    project_ids,
+                    &scopes,
+                    false,
+                    None,
+                    "test",
+                    now,
+                )
+                .await
+        }
+    };
+
+    let refused = create(
+        "Tasks",
+        vec![],
+        vec![ApiTokenScope::TasksRead, ApiTokenScope::DocsRead],
+    )
+    .await;
+    assert!(
+        matches!(refused, Err(ApiTokenError::NotFound)),
+        "{refused:?}"
+    );
+
+    // Projects only limit task access, so a token without a task scope stores none.
+    let docs = create("Docs", vec![], vec![ApiTokenScope::DocsRead])
+        .await
+        .unwrap();
+    let docs_with_project = create(
+        "Docs with project",
+        vec![seed.projects[0]],
+        vec![ApiTokenScope::DocsWrite, ApiTokenScope::ChatRead],
+    )
+    .await
+    .unwrap();
+    for issued in [&docs, &docs_with_project] {
+        assert!(issued.api_token.project_ids.is_empty());
+        let principal = tokens
+            .authenticate(&issued.token, Some(ApiTokenScope::DocsRead), now)
+            .await
+            .unwrap();
+        assert!(principal.project_ids.is_empty());
+        assert!(matches!(
+            tokens
+                .authenticate(&issued.token, Some(ApiTokenScope::TasksRead), now)
+                .await,
+            Err(ApiTokenError::Forbidden)
+        ));
+    }
+    assert_eq!(
+        database
+            .scalar::<i64>("SELECT COUNT(*) FROM api_tokens WHERE project_id IS NULL")
+            .await
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        database
+            .scalar::<i64>("SELECT COUNT(*) FROM api_token_projects")
+            .await
+            .unwrap(),
+        0
+    );
+    let listed = tokens.list(seed.workspace, seed.owner).await.unwrap();
+    assert!(listed.iter().all(|token| token.project_ids.is_empty()));
+
+    // A task token whose projects are all deleted stops working.
+    let tasks = create(
+        "Tasks",
+        vec![seed.projects[1]],
+        vec![ApiTokenScope::TasksRead, ApiTokenScope::DocsRead],
+    )
+    .await
+    .unwrap();
+    assert_eq!(tasks.api_token.project_ids, [seed.projects[1]]);
+    database
+        .execute(&format!(
+            "UPDATE projects SET deleted_at = {} WHERE id = '{}'",
+            now.as_millis(),
+            seed.projects[1]
+        ))
+        .await
+        .unwrap();
+    assert!(matches!(
+        tokens
+            .authenticate(&tasks.token, Some(ApiTokenScope::DocsRead), now)
+            .await,
+        Err(ApiTokenError::NotFound)
+    ));
+    tokens.authenticate(&docs.token, None, now).await.unwrap();
+}

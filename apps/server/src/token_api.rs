@@ -2,24 +2,28 @@
 //! REST API are thin layers over this module, so the token's limits live in one place: its
 //! workspace, its approved projects, its scopes, the billing write guard, and no docs or chat
 //! for service accounts.
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use orbit_platform::{Id, Row, TimestampMillis};
 use serde::Serialize;
 use serde_json::{Value, json};
+use utoipa::ToSchema;
 
 use crate::billing::WorkspaceAccess;
 use crate::collab::kind_task::members;
 use crate::collab::markdown_import::markdown_to_blocks;
-use crate::export::markdown::{KeepLinks, blocks_to_markdown};
+use crate::collab::markdown_merge::{MAX_BLOCKS, block_count};
+use crate::export::markdown::{KeepLinks, LinkResolver, PageLink, blocks_to_markdown};
 use crate::repositories::api_tokens::{ApiTokenPrincipal, ApiTokenScope};
 use crate::repositories::billing::write_access;
 use crate::repositories::chat::{
-    ChatRepository, ConversationRecord, MessageCursor, MessagePage, SearchInput, SearchPage,
-    ThreadPage,
+    ChatError, ChatRepository, ConversationRecord, MessageCursor, MessagePage, SearchInput,
+    SearchPage, ThreadPage,
 };
 use crate::repositories::pages::{
-    CreatePage, PageChanges, PageError, PageList, PageRecord, PageRepository, SpaceRequest,
+    CreatePage, MarkdownContent, PageChanges, PageError, PageList, PageRecord, PageRepository,
+    SpaceRequest, revision,
 };
 use crate::repositories::task_filter::{
     Condition, FilterField, FilterGroup, FilterNode, FilterOperator, GroupOp, ShowCompleted,
@@ -44,6 +48,8 @@ pub enum TokenApiError {
     Invalid(&'static str),
     /// Outside the grant, hidden, or missing: callers must not tell these apart.
     NotAvailable,
+    /// Deleting a task forever takes a workspace owner or admin.
+    PurgeForbidden,
     Task(TaskError),
     Page(PageError),
     Internal,
@@ -72,35 +78,65 @@ impl From<sqlx::Error> for TokenApiError {
 
 type Result<T> = std::result::Result<T, TokenApiError>;
 
+/// Why a doc write failed with [`PageError::TooLarge`].
+pub const DOC_TOO_LARGE_DETAIL: &str = "A doc can have at most 4,000 blocks (paragraphs, \
+    headings, list items and the like, nested ones included), before and after a write. Split \
+    the content into several docs.";
+const _: () = assert!(MAX_BLOCKS == 4_000, "DOC_TOO_LARGE_DETAIL names the limit");
+
 /// A task without `TaskRecord`'s embedded parent, duplicate and ancestor references: those can
 /// name tasks from projects outside the grant.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[schema(description = "A task's own fields.")]
 pub struct ReadTask {
+    #[schema(value_type = String)]
     pub id: Id,
+    #[schema(value_type = String)]
     pub project_id: Id,
     /// With the project key, the task identifier (`ENG-12`).
     pub number: i64,
+    #[schema(value_type = String)]
     pub status_id: Id,
     pub title: String,
+    /// Markdown.
     pub description: String,
+    /// `none`, `low`, `medium`, `high` or `urgent`.
     pub priority: String,
+    #[schema(value_type = Vec<String>)]
     pub assignee_ids: Vec<Id>,
+    #[schema(value_type = Vec<String>)]
     pub label_ids: Vec<Id>,
+    #[schema(value_type = Option<String>, format = DateTime, required = true)]
     pub due_start_at: Option<TimestampMillis>,
+    #[schema(value_type = Option<String>, format = DateTime, required = true)]
     pub due_at: Option<TimestampMillis>,
+    #[schema(value_type = String, format = DateTime)]
     pub created_at: TimestampMillis,
+    #[schema(value_type = String, format = DateTime)]
     pub updated_at: TimestampMillis,
+    /// The task's revision: an opaque number below 2^53 that changes with every change, live
+    /// edits of the description included. Compare it for equality only, and send it back as
+    /// `expected_version`.
     pub version: u64,
 }
 
 /// [`ReadTask`] plus the parent's id while the parent is visible and in an approved project, the
 /// identifier (`ENG-12`) and the task's page in the web app.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[schema(
+    as = PublicTask,
+    description = "A task, without embedded parent, duplicate or ancestor records."
+)]
 pub struct TaskView {
     #[serde(flatten)]
+    #[schema(inline)]
     pub task: ReadTask,
+    /// `null` when the task has no parent or the parent is not in an approved project.
+    #[schema(value_type = Option<String>, required = true)]
     pub parent_task_id: Option<Id>,
+    /// The project key and the task number (`ENG-12`), for `{task}` paths.
     pub identifier: String,
+    /// The task's page in the Orbit web app.
     pub url: String,
 }
 
@@ -131,7 +167,7 @@ impl TaskView {
                 due_at: task.due_at,
                 created_at: task.created_at,
                 updated_at: task.updated_at,
-                version: task.version,
+                version: revision(task.version, task.updated_at),
             },
             parent_task_id,
             identifier,
@@ -141,47 +177,67 @@ impl TaskView {
 }
 
 /// A workspace member as the public API shows it: no email or role.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[schema(as = PublicMember)]
 pub struct MemberView {
+    #[schema(value_type = String)]
     pub user_id: Id,
     pub display_name: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = PublicMe)]
 pub struct Me {
     pub token: TokenInfo,
     pub workspace: Named,
     /// Every workspace the token may use, with its access there. Always one item today.
     pub workspaces: Vec<WorkspaceGrant>,
+    /// The token's creator; `null` for a service-account token.
+    #[schema(required = true)]
     pub user: Option<UserInfo>,
+    /// Set for a service-account token.
+    #[schema(required = true)]
     pub service_account: Option<Named>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = PublicWorkspaceGrant)]
 pub struct WorkspaceGrant {
+    #[schema(value_type = String)]
     pub id: Id,
     pub name: String,
+    #[schema(value_type = Vec<ApiTokenScope>)]
     pub scopes: Vec<&'static str>,
+    #[schema(value_type = Vec<String>)]
     pub project_ids: Vec<Id>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = PublicTokenInfo)]
 pub struct TokenInfo {
+    #[schema(value_type = String)]
     pub id: Id,
     pub name: String,
+    #[schema(value_type = Vec<ApiTokenScope>)]
     pub scopes: Vec<&'static str>,
+    #[schema(value_type = Vec<String>)]
     pub project_ids: Vec<Id>,
+    #[schema(value_type = Option<String>, format = DateTime, required = true)]
     pub expires_at: Option<TimestampMillis>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = PublicNamed)]
 pub struct Named {
+    #[schema(value_type = String)]
     pub id: Id,
     pub name: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
+#[schema(as = PublicUser)]
 pub struct UserInfo {
+    #[schema(value_type = String)]
     pub id: Id,
     pub email: String,
     pub display_name: String,
@@ -221,18 +277,48 @@ pub struct NewTask {
     pub due_at: Option<TimestampMillis>,
 }
 
-/// A doc with its content also as Markdown, the format that doc writes take.
-#[derive(Clone, Debug, Serialize)]
+/// A doc with its content also as Markdown, the format that doc writes take. `version` is the
+/// page's [`revision`], so it changes with co-edits too.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[schema(
+    as = PublicDoc,
+    description = "A doc record. `version` is an opaque number below 2^53 that changes with every change, live edits included: compare it for equality only, and send it back as `expected_version`."
+)]
 pub struct DocView {
     #[serde(flatten)]
     pub page: PageRecord,
+    /// The content as GitHub-flavored Markdown, the format that doc writes take.
     pub markdown: String,
 }
 
-impl From<PageRecord> for DocView {
-    fn from(page: PageRecord) -> Self {
-        let markdown = blocks_to_markdown(&page.content, &KeepLinks);
-        Self { page, markdown }
+/// Links pages to `/docs/<id>` under the titles of the pages that the actor can see; any other
+/// page stays "Untitled", so a link does not tell what a hidden page is called.
+struct DocLinks(HashMap<String, String>);
+
+impl LinkResolver for DocLinks {
+    fn page(&self, page_id: &str) -> Option<PageLink> {
+        KeepLinks.page(page_id).map(|link| PageLink {
+            title: self.0.get(page_id).cloned().unwrap_or(link.title),
+            ..link
+        })
+    }
+
+    fn url(&self, url: &str) -> String {
+        KeepLinks.url(url)
+    }
+}
+
+/// The ids in the `page` blocks of `blocks`, nested blocks included.
+fn linked_pages(blocks: &[Value], ids: &mut HashSet<String>) {
+    for block in blocks {
+        if block["type"] == "page"
+            && let Some(id) = block["props"]["pageId"].as_str()
+        {
+            ids.insert(id.to_owned());
+        }
+        if let Some(children) = block["children"].as_array() {
+            linked_pages(children, ids);
+        }
     }
 }
 
@@ -254,7 +340,8 @@ pub struct DocPatch {
     pub title: Option<String>,
     /// `Some(None)` clears the icon.
     pub icon: Option<Option<String>>,
-    /// Replaces the whole content.
+    /// The whole new content, merged onto the current one (see
+    /// `PageRepository::update_page_markdown_at_revision`).
     pub markdown: Option<String>,
 }
 
@@ -428,6 +515,7 @@ impl Authorized<'_> {
                     .as_ref()
                     .map(|account| (account.id, account.name.clone())),
             })
+            .with_revisions()
     }
 
     /// The public form of `tasks`, with the identifiers built from the approved projects' keys.
@@ -660,30 +748,8 @@ impl Authorized<'_> {
 
     pub async fn get_task(&self, task_ref: &str) -> Result<TaskView> {
         self.need(ApiTokenScope::TasksRead)?;
-        let p = self.principal;
-        let id = match self
-            .api
-            .tasks
-            .resolve_task_id(p.workspace_id, task_ref)
-            .await
-        {
-            Ok(id) => id,
-            // Neither a UUID nor an identifier.
-            Err(TaskError::NotFound) if parse_task_identifier(task_ref).is_none() => {
-                return Err(TokenApiError::Invalid("Invalid identifier"));
-            }
-            Err(error) => return Err(error.into()),
-        };
-        let task = self
-            .api
-            .tasks
-            .get_task(p.workspace_id, id, p.actor_id)
-            .await?;
-        if self.approved(task.project_id) {
-            self.view(task).await
-        } else {
-            Err(TaskError::NotFound.into())
-        }
+        let task = self.task(task_ref).await?;
+        self.view(task).await
     }
 
     pub async fn create_task(&self, input: NewTask) -> Result<TaskView> {
@@ -737,11 +803,7 @@ impl Authorized<'_> {
             patch.priority.as_deref(),
         )?;
         let p = self.principal;
-        let id = self
-            .api
-            .tasks
-            .resolve_task_id(p.workspace_id, task_ref)
-            .await?;
+        let id = self.task_id(task_ref).await?;
         let outcome = self
             .granted()
             .update_task(
@@ -769,36 +831,66 @@ impl Authorized<'_> {
         self.view(outcome.task).await
     }
 
-    /// Moves the task and its sub-issues to the trash.
-    pub async fn delete_task(&self, task_ref: &str, expected_version: u64) -> Result<()> {
+    /// Moves the task and its sub-issues to the trash; with `permanent`, deletes it forever,
+    /// also from the trash (see [`TaskRepository::purge_task`]).
+    pub async fn delete_task(
+        &self,
+        task_ref: &str,
+        expected_version: u64,
+        permanent: bool,
+    ) -> Result<()> {
         self.need(ApiTokenScope::TasksWrite)?;
         let p = self.principal;
-        let id = self
-            .api
-            .tasks
-            .resolve_task_id(p.workspace_id, task_ref)
-            .await?;
-        self.granted()
-            .delete_task(
+        let id = self.task_id(task_ref).await?;
+        let (tasks, now) = (self.granted(), TimestampMillis::now());
+        if !permanent {
+            let deleted = tasks.delete_task(
                 p.workspace_id,
                 id,
                 p.actor_id,
                 expected_version,
                 self.request_id,
-                TimestampMillis::now(),
+                now,
+            );
+            return Ok(deleted.await?);
+        }
+        tasks
+            .purge_task(
+                p.workspace_id,
+                id,
+                p.actor_id,
+                expected_version,
+                self.request_id,
+                now,
             )
-            .await?;
-        Ok(())
+            .await
+            .map_err(|error| match error {
+                TaskError::Forbidden => TokenApiError::PurgeForbidden,
+                error => error.into(),
+            })
+    }
+
+    /// The id of a task by UUID or identifier (`ENG-12`), for every task operation: a value that
+    /// is neither is invalid, an identifier of no task is not found.
+    async fn task_id(&self, task_ref: &str) -> Result<Id> {
+        let p = self.principal;
+        match self
+            .api
+            .tasks
+            .resolve_task_id(p.workspace_id, task_ref)
+            .await
+        {
+            Err(TaskError::NotFound) if parse_task_identifier(task_ref).is_none() => {
+                Err(TokenApiError::Invalid("Invalid identifier"))
+            }
+            result => Ok(result?),
+        }
     }
 
     /// A live task in an approved project, by UUID or identifier (`ENG-12`).
     async fn task(&self, task_ref: &str) -> Result<TaskRecord> {
         let p = self.principal;
-        let id = self
-            .api
-            .tasks
-            .resolve_task_id(p.workspace_id, task_ref)
-            .await?;
+        let id = self.task_id(task_ref).await?;
         let task = self
             .api
             .tasks
@@ -834,11 +926,7 @@ impl Authorized<'_> {
             return Err(TokenApiError::Invalid("Invalid comment body"));
         }
         let p = self.principal;
-        let id = self
-            .api
-            .tasks
-            .resolve_task_id(p.workspace_id, task_ref)
-            .await?;
+        let id = self.task_id(task_ref).await?;
         Ok(self
             .granted()
             .create_comment(
@@ -869,23 +957,50 @@ impl Authorized<'_> {
         repository.as_ref().ok_or(TokenApiError::NotAvailable)
     }
 
+    /// Each doc's `version` is its [`revision`], as in [`DocView`].
     pub async fn list_docs(&self) -> Result<PageList> {
         let pages = self.content(ApiTokenScope::DocsRead, &self.api.pages)?;
         let p = self.principal;
-        pages
+        let mut list = pages
             .pages(p.workspace_id, p.actor_id)
             .await
-            .map_err(|_| TokenApiError::NotAvailable)
+            .map_err(hidden_page)?;
+        for page in &mut list.items {
+            page.version = revision(page.version, page.updated_at);
+        }
+        Ok(list)
     }
 
     pub async fn get_doc(&self, page_id: Id) -> Result<DocView> {
         let pages = self.content(ApiTokenScope::DocsRead, &self.api.pages)?;
         let p = self.principal;
-        pages
+        let page = pages
             .get_page(p.workspace_id, page_id, p.actor_id)
             .await
-            .map(DocView::from)
-            .map_err(|_| TokenApiError::NotAvailable)
+            .map_err(hidden_page)?;
+        self.doc_view(pages, page).await
+    }
+
+    async fn doc_view(&self, pages: &PageRepository, mut page: PageRecord) -> Result<DocView> {
+        let mut linked = HashSet::new();
+        linked_pages(&page.content, &mut linked);
+        let mut titles = HashMap::new();
+        if !linked.is_empty() {
+            let p = self.principal;
+            let visible = pages
+                .pages(p.workspace_id, p.actor_id)
+                .await
+                .map_err(hidden_page)?;
+            for summary in visible.items {
+                let id = summary.id.to_string();
+                if linked.contains(&id) {
+                    titles.insert(id, summary.title);
+                }
+            }
+        }
+        let markdown = blocks_to_markdown(&page.content, &DocLinks(titles));
+        page.version = revision(page.version, page.updated_at);
+        Ok(DocView { page, markdown })
     }
 
     pub async fn create_doc(&self, input: NewDoc) -> Result<DocView> {
@@ -895,10 +1010,16 @@ impl Authorized<'_> {
             input.icon.as_deref(),
             Some(&input.markdown),
         )?;
+        let content = match input.markdown.trim() {
+            "" => Vec::new(),
+            _ => self.blocks(&input.markdown).await?,
+        };
+        if block_count(&content) > MAX_BLOCKS {
+            return Err(PageError::TooLarge.into());
+        }
         let p = self.principal;
-        let now = TimestampMillis::now();
         let page = pages
-            .create_page(
+            .create_page_with_content(
                 p.workspace_id,
                 p.actor_id,
                 CreatePage {
@@ -911,31 +1032,15 @@ impl Authorized<'_> {
                     icon: input.icon,
                     position: None,
                 },
+                &content,
                 self.request_id,
-                now,
+                TimestampMillis::now(),
             )
             .await?;
-        if input.markdown.trim().is_empty() {
-            return Ok(page.into());
-        }
-        let changes = PageChanges {
-            content: Some(self.blocks(&input.markdown).await?),
-            ..PageChanges::default()
-        };
-        Ok(pages
-            .update_page(
-                p.workspace_id,
-                page.id,
-                p.actor_id,
-                page.version,
-                changes,
-                self.request_id,
-                now,
-            )
-            .await?
-            .into())
+        self.doc_view(pages, page).await
     }
 
+    /// `expected_version` is the doc's `version` as read (its [`revision`]).
     pub async fn update_doc(
         &self,
         page_id: Id,
@@ -948,28 +1053,57 @@ impl Authorized<'_> {
             patch.icon.as_ref().and_then(Option::as_deref),
             patch.markdown.as_deref(),
         )?;
-        let content = match &patch.markdown {
-            Some(markdown) => Some(self.blocks(markdown).await?),
-            None => None,
-        };
         let p = self.principal;
-        Ok(pages
-            .update_page(
-                p.workspace_id,
-                page_id,
-                p.actor_id,
-                expected_version,
-                PageChanges {
-                    title: patch.title,
-                    icon: patch.icon,
-                    content,
-                    ..PageChanges::default()
-                },
-                self.request_id,
-                TimestampMillis::now(),
-            )
-            .await?
-            .into())
+        let changes = PageChanges {
+            title: patch.title,
+            icon: patch.icon,
+            ..PageChanges::default()
+        };
+        let page = match patch.markdown {
+            // Merged onto the current document with the links of `doc_view`, so the blocks the
+            // Markdown leaves as read stay exactly as they are.
+            Some(markdown) => {
+                let titles = pages
+                    .pages(p.workspace_id, p.actor_id)
+                    .await
+                    .map_err(hidden_page)?
+                    .items
+                    .into_iter()
+                    .map(|summary| (summary.id.to_string(), summary.title))
+                    .collect();
+                let members = members(self.api.tasks.database().pool(), p.workspace_id).await?;
+                pages
+                    .update_page_markdown_at_revision(
+                        p.workspace_id,
+                        page_id,
+                        p.actor_id,
+                        expected_version,
+                        changes,
+                        MarkdownContent {
+                            markdown,
+                            members,
+                            links: Arc::new(DocLinks(titles)),
+                        },
+                        self.request_id,
+                        TimestampMillis::now(),
+                    )
+                    .await?
+            }
+            None => {
+                pages
+                    .update_page_at_revision(
+                        p.workspace_id,
+                        page_id,
+                        p.actor_id,
+                        expected_version,
+                        changes,
+                        self.request_id,
+                        TimestampMillis::now(),
+                    )
+                    .await?
+            }
+        };
+        self.doc_view(pages, page).await
     }
 
     /// Doc blocks from Markdown; `@Name` mentions of workspace members become mentions.
@@ -984,7 +1118,7 @@ impl Authorized<'_> {
         let p = self.principal;
         chat.list_conversations(p.workspace_id, p.actor_id)
             .await
-            .map_err(|_| TokenApiError::NotAvailable)
+            .map_err(hidden_chat)
     }
 
     pub async fn messages(
@@ -1002,7 +1136,7 @@ impl Authorized<'_> {
             message_cursor(before, limit)?,
         )
         .await
-        .map_err(|_| TokenApiError::NotAvailable)
+        .map_err(hidden_chat)
     }
 
     pub async fn thread(
@@ -1020,7 +1154,7 @@ impl Authorized<'_> {
             message_cursor(before, limit)?,
         )
         .await
-        .map_err(|_| TokenApiError::NotAvailable)
+        .map_err(hidden_chat)
     }
 
     pub async fn search_messages(&self, input: SearchInput) -> Result<SearchPage> {
@@ -1031,7 +1165,23 @@ impl Authorized<'_> {
         let p = self.principal;
         chat.search_messages(p.workspace_id, p.actor_id, input)
             .await
-            .map_err(|_| TokenApiError::NotAvailable)
+            .map_err(hidden_chat)
+    }
+}
+
+/// Doc reads tell no refusal apart from a missing doc; a failing database stays an error.
+fn hidden_page(error: PageError) -> TokenApiError {
+    match error {
+        PageError::Unavailable(_) | PageError::Corrupt => TokenApiError::Internal,
+        _ => TokenApiError::NotAvailable,
+    }
+}
+
+/// [`hidden_page`] for chat reads.
+fn hidden_chat(error: ChatError) -> TokenApiError {
+    match error {
+        ChatError::Unavailable(_) | ChatError::Upload(_) => TokenApiError::Internal,
+        _ => TokenApiError::NotAvailable,
     }
 }
 

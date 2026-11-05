@@ -165,3 +165,11 @@ test('a comment from a service account names the service account, not the member
   expect(view.queryAllByText('Orbit Developers').length).toBe(0)
   expect(view.queryAllByRole('button', { name: 'Edit comment' }).length).toBe(0)
 })
+
+test('an empty service account name falls back to the author name', () => {
+  const view = render(
+    <CommentItem state={state()} taskId="task-1" comment={comment({ authorServiceAccountName: '' })} />,
+    { wrapper: wrapper() },
+  )
+  expect(view.getAllByText('Orbit Developers').length).toBeGreaterThan(0)
+})

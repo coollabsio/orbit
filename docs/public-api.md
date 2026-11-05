@@ -2,6 +2,8 @@
 
 The public REST API lets scripts, CI jobs and the Orbit CLI use Orbit with a
 workspace API token. The base path is `<public origin>/api/public/v1`.
+The OpenAPI document in the repository (`packages/api/src/generated/openapi.json`,
+or `orbit openapi --output <file>`) describes this API under the tag `public-api`.
 
 This API is separate from the internal `/api/v1` API of the web and mobile apps.
 The internal API can change in each release. Use only the public API in your
@@ -11,6 +13,9 @@ scripts.
 
 1. As a workspace owner or administrator, open **Settings → API tokens**.
 2. Select the projects, the permissions and an expiry. Then create the token.
+   `project_ids` is required, with at least one project, when `scopes` includes
+   `tasks:read` or `tasks:write`. Without a task scope, projects have no effect:
+   the token stores none (`project_ids: []`).
 3. Copy the token (`orb_…`). Orbit shows it one time only.
 4. Send the token in the `Authorization` header of each request:
 
@@ -38,8 +43,13 @@ not suspended. If not, the token stops working.
 
 A service-account token does not depend on the person who created it. It keeps
 working when that person leaves the workspace, changes role or is suspended,
-until an owner or administrator revokes it or disables its service account. It
-can use tasks only, not docs. Its writes show the service account as the author:
+until an owner or administrator revokes it. When you revoke a token and the
+service account has no other token that is not revoked and not expired, Orbit
+disables the service account; its past work keeps its
+name. A new token with the same service-account name enables it again. The
+GitHub integration's service account (named `GitHub`) is never disabled this way.
+A service-account token can use tasks only, not docs. Orbit refuses to create a service-account token
+with `docs:read`, `docs:write` or `chat:read` (`422`). Its writes show the service account as the author:
 as the creator of the tasks that it makes, and as the author of its comments.
 Its writes do not send notifications (assignments and mentions), because no
 member made them.
@@ -73,6 +83,12 @@ API tokens and MCP OAuth connections use the same five scopes. In
   example `2026-11-04T09:30:00.000Z`.
 - A `{task}` path segment is a task UUID or a task identifier such as `ENG-12`
   (the letter case is not important).
+- A `{task}` value that is neither a UUID nor an identifier gives `400`
+  (`invalid_request`) on every method. An identifier of no visible task gives
+  `404`.
+- A task's or doc's `version` is an opaque number below 2^53. It changes with
+  every change, including live edits in the editor. Send it back unchanged as
+  `expected_version`, and compare it only for equality; it does not count up.
 - Lists return `{"items": [...], "next_cursor": string | null}`. To get the next
   page, send `next_cursor` as `cursor` with the same
   other parameters. `next_cursor` is `null` on the last page and on lists that
@@ -162,7 +178,7 @@ A task:
   "title": "Fix login", "description": "Markdown text", "priority": "high",
   "assignee_ids": ["…"], "label_ids": ["…"],
   "due_start_at": null, "due_at": null,
-  "created_at": "…", "updated_at": "…", "version": 3,
+  "created_at": "…", "updated_at": "…", "version": 4503599627370495,
   "parent_task_id": null,
   "identifier": "ENG-12",
   "url": "https://orbit.example.com/tasks/…?workspace=…"
@@ -214,21 +230,44 @@ curl -sS "$ORBIT_WS/tasks" -H "Authorization: Bearer $ORBIT_TOKEN" \
 `title`, `description`, `status_id`, `priority`, `assignee_ids`, `label_ids`,
 `due_start_at` and `due_at`. A list replaces the old list. A missing field keeps
 its value, and `null` clears a due date. If the task changed after you read it, the
-response is `409`. Read the task again, then try again. All the tasks in the
+response is `409`. This includes edits that people make to the description in
+the editor. Read the task again, then try again. All the tasks in the
 task's parent and sub-issue tree must be in approved projects.
 
 ```bash
 curl -sS -X PATCH "$ORBIT_WS/tasks/ENG-12" \
   -H "Authorization: Bearer $ORBIT_TOKEN" -H 'Content-Type: application/json' \
-  -d '{"expected_version":3,"status_id":"…","assignee_ids":[]}'
+  -d '{"expected_version":4503599627370495,"status_id":"…","assignee_ids":[]}'
 ```
 
-`DELETE /workspaces/{workspace_id}/tasks/{task}?expected_version=N`. Scope: `tasks:write`. Moves the task and
+`DELETE /workspaces/{workspace_id}/tasks/{task}?expected_version={version}`. Scope: `tasks:write`. Moves the task and
 its sub-issues to the trash. Response: `204` with no body. The tasks stay in the Orbit
-trash for 30 days.
+trash for 30 days, where members can restore them in Orbit. Then Orbit deletes them
+forever. After the delete, `GET` answers `404` for these tasks.
 
 ```bash
-curl -sS -X DELETE "$ORBIT_WS/tasks/ENG-12?expected_version=4" \
+curl -sS -X DELETE "$ORBIT_WS/tasks/ENG-12?expected_version=4503599627370495" \
+  -H "Authorization: Bearer $ORBIT_TOKEN"
+```
+
+Add `permanent=true` to delete the task forever. You cannot undo this. It removes
+the task and its sub-issues with their comments, attachments (and the stored
+files), relations and description, as the end of the 30 days in the trash does.
+Stored files are deleted at the next daily maintenance run. Response: `204`.
+
+- A task that is not in the trash needs its current `expected_version` (`409`
+  otherwise). Its sub-issues that are not in the trash go with it.
+- It also works for a task that is already in the trash, for example one that
+  you moved there earlier. The sub-issues that went to the trash with it go
+  too. A task in the trash cannot change, and `GET` cannot read it, so Orbit
+  does not check `expected_version` (send the last version that you read, or any
+  number).
+- Like deleting teamspace docs forever, it needs a token of a workspace owner or
+  admin, or a service account token. Other tokens get `403`
+  (`workspace_action_forbidden`), and the task does not change.
+
+```bash
+curl -sS -X DELETE "$ORBIT_WS/tasks/ENG-12?expected_version=4503599627370495&permanent=true" \
   -H "Authorization: Bearer $ORBIT_TOKEN"
 ```
 
@@ -247,7 +286,7 @@ curl -sS "$ORBIT_WS/tasks/ENG-12/comments" -H "Authorization: Bearer $ORBIT_TOKE
 ```
 
 `POST /workspaces/{workspace_id}/tasks/{task}/comments`. Scope: `tasks:write`.
-Body: `{"body": "Markdown"}` (1 to 100,000 characters). Response: `201` with
+Body: `{"body": "Markdown"}` (1 to 100,000 bytes in UTF-8, not only spaces). Response: `201` with
 the comment. The author is the token's creator, or for a service-account token
 the service account.
 
@@ -274,7 +313,8 @@ curl -sS "$ORBIT_WS/docs" -H "Authorization: Bearer $ORBIT_TOKEN"
 `get_doc` tool returns it. `content` is the editor's BlockNote JSON, and
 `markdown` is the same content as GitHub-flavored Markdown, the format that doc
 writes take. `POST` and `PATCH` return the same record. Links to other docs show
-as `[Untitled](/docs/{page_id})`.
+as `[Title](/docs/{page_id})`. A doc that the token's creator cannot see shows as
+`[Untitled](/docs/{page_id})`.
 
 ```bash
 curl -sS "$ORBIT_WS/docs/$PAGE_ID" -H "Authorization: Bearer $ORBIT_TOKEN"
@@ -285,7 +325,10 @@ curl -sS "$ORBIT_WS/docs/$PAGE_ID" -H "Authorization: Bearer $ORBIT_TOKEN"
 `icon` (optional, up to 64 characters) and the place of the doc: `parent_id`
 (the doc goes under this doc, in its space), or for a root doc `teamspace_id` or
 `"private": true`. Without a place, the doc goes to the root of the default
-teamspace. Response: `201` with the document record.
+teamspace. The doc and its content are created in one step. Response: `201`
+with the document record. A doc can have at most 4,000 blocks (paragraphs,
+headings, list items and other blocks, nested ones included). Markdown with
+more blocks gets `413` (`doc_too_large`), and no doc is created.
 
 ```bash
 curl -sS "$ORBIT_WS/docs" -H "Authorization: Bearer $ORBIT_TOKEN" \
@@ -295,13 +338,29 @@ curl -sS "$ORBIT_WS/docs" -H "Authorization: Bearer $ORBIT_TOKEN" \
 
 `PATCH /workspaces/{workspace_id}/docs/{page_id}`. Scope: `docs:write`. Body:
 `expected_version` (required) and optional `title`, `icon` (`null` clears it)
-and `markdown`. `markdown` replaces the whole content, also for people who have
-the doc open. Response: `200` with the document record. A locked doc answers
-`423` (`page_locked`).
+and `markdown`. `markdown` is the doc's whole new content. Send the `markdown`
+you read, with your edits. Orbit compares it with the current content and
+changes only what you changed, also for people who have the doc open. Blocks you
+leave as read stay exactly as they are, with their colors, comments and other
+settings. An edited block keeps its settings and its kind: a toggle stays a
+toggle, a callout stays a callout. Text you did not touch keeps its colors and
+comments. Markdown cannot create colors, alignment, toggles, callouts, comments,
+file or sub-page blocks, image sizes or table cell styling: new blocks get only
+what Markdown can show. A write that changes nothing (the same title, icon and
+content) changes no data: the response has the same `version`, so other clients
+that hold it can still write. Orbit checks `expected_version` first, so a stale
+version gets `409` also for such a write. If the doc changed after you read it (title, icon or content,
+including live edits in the editor), the response is `409`. Read the doc again,
+then try again. The `version` in the doc list is the same value. Response: `200`
+with the document record. A locked doc answers `423` (`page_locked`).
+`markdown` that gives the doc more than 4,000 blocks, or any `markdown` for a
+doc that already has more than 4,000 blocks (for example, from the editor), gets
+`413` (`doc_too_large`), and nothing changes. Such a doc keeps its title and
+icon writes; edit its content in Orbit, or split it into several docs.
 
 ```bash
 curl -sS -X PATCH "$ORBIT_WS/docs/$PAGE_ID" -H "Authorization: Bearer $ORBIT_TOKEN" \
-  -H 'Content-Type: application/json' -d '{"expected_version":3,"markdown":"Updated."}'
+  -H 'Content-Type: application/json' -d '{"expected_version":4503599627370495,"markdown":"Updated."}'
 ```
 
 ### Discord integration
@@ -315,6 +374,20 @@ when the token has one project only). Response: `201` with
 Orbit already has a task for this `event_id`. This endpoint was at
 `/api/v1/integrations/discord/events` before. Update the bot configuration to
 the new path.
+
+This endpoint has its own error codes, not the codes in [Errors](#errors):
+
+| Status | `code` | Cause |
+| --- | --- | --- |
+| 400 | `invalid_request` | The body is not valid JSON or has unknown fields. |
+| 401 | `api_token_required` | No `Authorization: Bearer` token. |
+| 401 | `invalid_api_token` | The token is not correct, expired or revoked. |
+| 402 | `workspace_read_only`, `trial_limit_reached` | Orbit Cloud: the workspace has no active subscription, or the trial limit is reached. |
+| 403 | `api_token_scope_forbidden` | The token does not have `tasks:write`. |
+| 409 | `integration_event_conflict` | The `event_id` was used before with a different message or `message_url`. |
+| 422 | `validation_failed` | A field is not valid, or `project_id` is not a project of the token. `errors` names the field. |
+| 422 | `integration_project_unavailable` | The project or its first status is not available. |
+| 500 | `internal_error` | Orbit could not complete the request. Try again later. |
 
 ```bash
 curl -sS "$ORBIT_URL/api/public/v1/integrations/discord/events" \
@@ -342,22 +415,33 @@ Errors are RFC 9457 problem documents (`Content-Type: application/problem+json`)
 | 401 | `unauthorized` | No token, or the token is not correct, expired or revoked. The response has `WWW-Authenticate: Bearer realm="orbit"`. |
 | 402 | `workspace_read_only`, `trial_limit_reached` | Orbit Cloud: the workspace has no active subscription, or the trial limit is reached. |
 | 403 | `insufficient_scope` | The token does not have the scope of the endpoint. |
+| 403 | `workspace_action_forbidden` | The token's member may not do this, for example delete a task forever (`permanent=true`) without being a workspace owner or admin. |
 | 404 | `not_found` | The resource does not exist, is in the trash, or is not in an approved project. |
-| 409 | `conflict` | `expected_version` is old. `conflict.current_version` has the current version. |
+| 405 | `method_not_allowed` | The path does not take this HTTP method, for example `PUT /tasks`. The `Allow` header lists the methods that it takes (`GET,HEAD,POST`). Orbit sends this before it checks the token. |
+| 409 | `conflict` | The resource changed after you read it (for docs and task descriptions, also through live edits). `conflict.current_version` has the current version. |
 | 409 | `task_conflict`, `github_content_read_only`, `github_linked_move` | The change conflicts with the task's current state. |
+| 413 | `doc_too_large` | The doc would have, or already has, more than 4,000 blocks. Nothing changed. |
 | 422 | `validation_failed`, `parent_cycle`, `parent_invalid` | A value is not valid for the workspace or project, for example an unknown assignee or label. `errors` names the field. |
+| 423 | `page_locked` | The doc is locked. Unlock it in Orbit to change its title, icon or content. |
 | 429 | `rate_limit_exceeded` | Too many requests. Wait as the `Retry-After` header tells (RFC 9110). Orbit sends a number of seconds. |
-| 503 | `task_busy`, `service_unavailable` | Try again later. |
+| 500 | `internal_error` | Orbit could not complete the request, for example because the database is unavailable. Try again later. |
+| 503 | `task_busy`, `page_busy`, `service_unavailable` | The task's description or the doc's content is busy on the server, or a service is unavailable. Try again later. |
 
 Orbit returns `404`, not `403`, for a resource in a project that the token
 cannot use. Thus a token cannot find out which other resources exist.
 
 ## Limits
 
-- Rate limit: the general API limit (`ORBIT_RATE_LIMIT_GENERAL_PER_MINUTE`)
-  for each client IP address and, separately, for each token. All the tokens of
-  one workspace also share a workspace budget
-  (`ORBIT_RATE_LIMIT_WORKSPACE_MULTIPLIER` times the general limit).
+- Rate limit: the public API has its own budget, apart from the web app's, so
+  busy tokens do not slow down the members who use Orbit in the browser. Every
+  `/api/public/` endpoint and MCP (`/mcp`) share it. Its limit is the general
+  limit (`ORBIT_RATE_LIMIT_GENERAL_PER_MINUTE`) for each client IP address and,
+  separately, for each token. All the tokens of one workspace also share a
+  workspace budget (`ORBIT_RATE_LIMIT_WORKSPACE_MULTIPLIER` times the general
+  limit) on the `/workspaces/{workspace_id}/…` paths. Only successful responses
+  (status below 400) count against the workspace budget, so requests with an
+  unknown token or a wrong method cannot use it up. Each server counts on its
+  own: with N servers, the limits are N times the setting.
 - The usual request body limit and request timeout of the Orbit server apply.
 - The token's expiry, its revocation and the projects in its grant apply
   immediately. A deleted project leaves the grant.

@@ -143,6 +143,12 @@ impl Actor {
         private || self.can(Permission::PagesPurge)
     }
 
+    /// Tasks are shared like teamspace pages, so deleting one forever takes the same role.
+    #[must_use]
+    pub const fn can_purge_task(self) -> bool {
+        self.can(Permission::PagesPurge)
+    }
+
     /// Moving teamspace pages into a private space hides them from everyone else and lets the
     /// new owner delete them forever, so it takes [`Permission::PagesPurge`] unless the actor
     /// created every page that moves.

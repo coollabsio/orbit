@@ -686,9 +686,14 @@ async fn create_api_token(
             project_ids.push(id);
         }
     }
+    // Projects only limit task access, so a token without a task scope stores none.
+    let task_scope = ApiTokenScope::grants_tasks(&body.scopes);
+    if !task_scope {
+        project_ids.clear();
+    }
     if name.is_empty()
         || name.chars().count() > 100
-        || project_ids.is_empty()
+        || (task_scope && project_ids.is_empty())
         || body.scopes.is_empty()
         || (body.service_account
             && body.scopes.iter().any(|s| {
@@ -702,7 +707,7 @@ async fn create_api_token(
             StatusCode::UNPROCESSABLE_ENTITY,
             "invalid_api_token",
             "Invalid API token",
-            "Token names must contain 1 to 100 characters, and at least one project and scope are required.",
+            "Token names must contain 1 to 100 characters, at least one scope is required, and a task scope needs at least one project.",
             instance,
             request_id.as_ref(),
         ));

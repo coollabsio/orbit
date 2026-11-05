@@ -860,13 +860,21 @@ async fn github_webhook_from_database(
                 id,
             )
         })?;
-    let rows = match app_id {
-        Some(app_id) => sqlx::query(
-            "SELECT workspace_id, webhook_secret_encrypted FROM github_apps WHERE app_id = $1",
-        )
-        .bind(app_id),
-        None => sqlx::query("SELECT workspace_id, webhook_secret_encrypted FROM github_apps"),
-    }
+    // Every delivery of a GitHub App names the App. Without it Orbit would have to try the secret
+    // of every workspace, so one unsigned request would cost an HMAC per connected workspace.
+    let Some(app_id) = app_id else {
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "invalid_github_signature",
+            "Invalid GitHub signature",
+            "The webhook signature is invalid.",
+            id,
+        ));
+    };
+    let rows = sqlx::query(
+        "SELECT workspace_id, webhook_secret_encrypted FROM github_apps WHERE app_id = $1",
+    )
+    .bind(app_id)
     .fetch_all(state.tasks.database().pool())
     .await
     .map_err(|_| ApiError::internal(id))?;
@@ -1305,6 +1313,7 @@ pub struct DiscordEventResponse {
 #[utoipa::path(
     post,
     path = "/api/public/v1/integrations/discord/events",
+    tag = "public-api",
     request_body = DiscordEventBody,
     responses(
         (status = 201, description = "Task created", body = DiscordEventResponse),

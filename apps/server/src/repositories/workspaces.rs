@@ -21,7 +21,6 @@ use utoipa::ToSchema;
 use super::chat::join_public_channels;
 use super::membership;
 use super::page_versions;
-use super::task_relations;
 use super::tasks::TaskError;
 use super::teamspaces::insert_default_teamspace;
 use crate::audit::{self, AuditEvent, AuditOutcome};
@@ -1997,56 +1996,15 @@ impl WorkspaceRepository {
         .fetch_all(&mut *transaction)
         .await?;
         for task_id in task_ids {
-            let blobs = sqlx::query(
-                "SELECT DISTINCT attachment_blobs.id, attachment_blobs.storage_key \
-                 FROM attachment_references JOIN attachment_blobs ON attachment_blobs.id = attachment_references.blob_id \
-                 WHERE attachment_references.task_id = $1",
-            )
-            .bind(&task_id)
-            .fetch_all(&mut *transaction)
-            .await?;
-            attachment_references_purged +=
-                sqlx::query("DELETE FROM attachment_references WHERE task_id = $1")
-                    .bind(&task_id)
-                    .execute(&mut *transaction)
-                    .await?
-                    .rows_affected();
-            task_relations::release_duplicates_in_tx(&mut transaction, &task_id, now)
-                .await
-                .map_err(|error| match error {
-                    TaskError::Unavailable(error) => WorkspaceError::Unavailable(error),
-                    _ => WorkspaceError::Conflict,
-                })?;
-            sqlx::query("DELETE FROM tasks WHERE id = $1")
-                .bind(&task_id)
-                .execute(&mut *transaction)
-                .await?;
-            for blob in blobs {
-                let blob_id: String = blob.get("id");
-                let references: i64 = sqlx::query_scalar(BLOB_REFERENCE_COUNT)
-                    .bind(&blob_id)
-                    .bind(&blob_id)
-                    .fetch_one(&mut *transaction)
-                    .await?;
-                if references == 0 {
-                    sqlx::query(
-                        "INSERT INTO attachment_file_deletions \
-                         (id, path_kind, path, created_at) VALUES ($1, 'blob', $2, $3) \
-                         ON CONFLICT DO NOTHING",
-                    )
-                    .bind(Id::new_v7().to_string())
-                    .bind(blob.get::<String, _>("storage_key"))
-                    .bind(now.as_millis())
-                    .execute(&mut *transaction)
-                    .await?;
-                    attachment_blobs_purged +=
-                        sqlx::query("DELETE FROM attachment_blobs WHERE id = $1")
-                            .bind(blob_id)
-                            .execute(&mut *transaction)
-                            .await?
-                            .rows_affected();
-                }
-            }
+            let (references, blobs) =
+                super::tasks::purge_task_in_tx(&mut transaction, &task_id, now)
+                    .await
+                    .map_err(|error| match error {
+                        TaskError::Unavailable(error) => WorkspaceError::Unavailable(error),
+                        _ => WorkspaceError::Conflict,
+                    })?;
+            attachment_references_purged += references;
+            attachment_blobs_purged += blobs;
         }
         // A trashed subtree shares one deleted_at, so it expires together; pages.parent_id is
         // ON DELETE SET NULL, so the delete order inside the batch does not matter.

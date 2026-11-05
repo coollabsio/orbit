@@ -8,7 +8,8 @@ use orbit_platform::{
 use orbit_server::mcp::{McpState, router};
 use orbit_server::repositories::api_tokens::{ApiTokenRepository, ApiTokenScope};
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
-use orbit_server::repositories::tasks::{CreateTask, TaskRepository};
+use orbit_server::repositories::pages::revision;
+use orbit_server::repositories::tasks::{CreateTask, TaskRecord, TaskRepository};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -175,6 +176,11 @@ async fn create_task(
         .unwrap()
         .task
         .id
+}
+
+/// The `version` that the tools show for `task` (its revision).
+fn token_version(task: &TaskRecord) -> u64 {
+    revision(task.version, task.updated_at)
 }
 
 fn request(token: Option<&str>, method: &str, params: Value) -> Request<Body> {
@@ -669,7 +675,7 @@ async fn task_writes_require_scope_and_versions_and_stay_in_granted_projects() {
     let denied = f
         .tool(
             "update_task",
-            json!({"task_id": f.task, "expected_version": current.version, "title": "Changed"}),
+            json!({"task_id": f.task, "expected_version": token_version(&current), "title": "Changed"}),
         )
         .await;
     assert!(denied.get("error").is_some(), "{denied}");
@@ -681,7 +687,7 @@ async fn task_writes_require_scope_and_versions_and_stay_in_granted_projects() {
     let updated = f
         .tool(
             "update_task",
-            json!({"task_id": f.task, "expected_version": current.version, "title": "Changed"}),
+            json!({"task_id": f.task, "expected_version": token_version(&current), "title": "Changed"}),
         )
         .await;
     assert_eq!(
@@ -691,7 +697,7 @@ async fn task_writes_require_scope_and_versions_and_stay_in_granted_projects() {
     let stale = f
         .tool(
             "delete_task",
-            json!({"task_id": f.task, "expected_version": current.version}),
+            json!({"task_id": f.task, "expected_version": token_version(&current)}),
         )
         .await;
     assert_eq!(stale["result"]["isError"], true, "{stale}");
@@ -703,7 +709,7 @@ async fn task_writes_require_scope_and_versions_and_stay_in_granted_projects() {
     let denied = f
         .tool(
             "delete_task",
-            json!({"task_id": f.other_task, "expected_version": secret.version}),
+            json!({"task_id": f.other_task, "expected_version": token_version(&secret)}),
         )
         .await;
     assert_eq!(denied["result"]["isError"], true, "{denied}");
@@ -739,6 +745,26 @@ async fn task_writes_require_scope_and_versions_and_stay_in_granted_projects() {
         deleted["result"]["structuredContent"]["deleted"], true,
         "{deleted}"
     );
+    // `permanent` deletes the task forever, also from the trash.
+    let task_rows = || async {
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM tasks WHERE id = $1")
+            .bind(id.as_str().unwrap())
+            .fetch_one(f.database.pool())
+            .await
+            .unwrap()
+    };
+    assert_eq!(task_rows().await, 1, "the default delete only trashes");
+    let purged = f
+        .tool(
+            "delete_task",
+            json!({"task_id": id, "expected_version": version, "permanent": true}),
+        )
+        .await;
+    assert_eq!(
+        purged["result"]["structuredContent"]["deleted"], true,
+        "{purged}"
+    );
+    assert_eq!(task_rows().await, 0);
     // An approved parent must not trash an unapproved child.
     sqlx::query("UPDATE tasks SET parent_task_id = $1 WHERE id = $2")
         .bind(f.task.to_string())
@@ -750,7 +776,7 @@ async fn task_writes_require_scope_and_versions_and_stay_in_granted_projects() {
     let denied = f
         .tool(
             "delete_task",
-            json!({"task_id": f.task, "expected_version": current.version}),
+            json!({"task_id": f.task, "expected_version": token_version(&current)}),
         )
         .await;
     assert_eq!(denied["result"]["isError"], true, "{denied}");
@@ -760,7 +786,7 @@ async fn task_writes_require_scope_and_versions_and_stay_in_granted_projects() {
             .await
             .is_ok()
     );
-    let denied = f.tool("update_task", json!({"task_id": f.task, "expected_version": current.version, "title": "Forbidden tree write"})).await;
+    let denied = f.tool("update_task", json!({"task_id": f.task, "expected_version": token_version(&current), "title": "Forbidden tree write"})).await;
     assert_eq!(denied["result"]["isError"], true, "{denied}");
 }
 
@@ -1021,11 +1047,11 @@ async fn writes_are_refused_in_a_read_only_cloud_workspace() {
         ),
         (
             "update_task",
-            json!({"task_id": f.task, "expected_version": current.version, "title": "Changed"}),
+            json!({"task_id": f.task, "expected_version": token_version(&current), "title": "Changed"}),
         ),
         (
             "delete_task",
-            json!({"task_id": f.task, "expected_version": current.version}),
+            json!({"task_id": f.task, "expected_version": token_version(&current)}),
         ),
         ("create_doc", json!({"title": "Created"})),
     ];
@@ -1051,4 +1077,50 @@ async fn writes_are_refused_in_a_read_only_cloud_workspace() {
         read["result"]["structuredContent"]["title"],
         "Approved task"
     );
+}
+
+#[tokio::test]
+async fn doc_and_chat_reads_report_database_errors_as_errors() {
+    use orbit_platform::{
+        AttachmentMutationCoordinator, LocalBlobStore, UploadLimits, UploadService,
+    };
+    use orbit_server::repositories::{chat::ChatRepository, pages::PageRepository};
+    let mut f = Fixture::new().await;
+    let root = tempfile::tempdir().unwrap();
+    let uploads = UploadService::new(
+        (*f.database).clone(),
+        Arc::new(LocalBlobStore::new(root.path().join("files"))),
+        AttachmentMutationCoordinator::default(),
+        UploadLimits::default(),
+    );
+    f.app = router(
+        McpState::new(Arc::new(f.tokens.clone()), Arc::new(f.tasks.clone())).with_content(
+            Arc::new(PageRepository::new((*f.database).clone())),
+            Arc::new(ChatRepository::new((*f.database).clone(), uploads)),
+        ),
+        "https://orbit.test",
+    );
+    sqlx::query("UPDATE api_tokens SET scopes = 'tasks:read docs:read chat:read' WHERE id = $1")
+        .bind(f.token_id.to_string())
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    let missing = f.tool("get_doc", json!({"page_id": Id::new_v7()})).await;
+    assert_eq!(missing["result"]["isError"], true, "{missing}");
+    for table in ["pages", "chat_conversations"] {
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "ALTER TABLE {table} RENAME TO {table}_unavailable"
+        )))
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    }
+    for (name, arguments) in [
+        ("list_docs", json!({})),
+        ("get_doc", json!({"page_id": Id::new_v7()})),
+        ("list_conversations", json!({})),
+    ] {
+        let failed = f.tool(name, arguments).await;
+        assert_eq!(failed["error"]["code"], -32603, "{name}: {failed}");
+    }
 }

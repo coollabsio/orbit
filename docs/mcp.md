@@ -192,7 +192,9 @@ Tasks to **Read**, select projects, and set an expiry. Configure
 `Authorization: Bearer <token>` on the MCP client. Never put the token in a URL
 or a repository. A personal token stops working when its creator leaves the
 workspace. A service-account token does not depend on its creator: it works until
-it is revoked or its service account is disabled.
+it is revoked. When you revoke a token and the service account has no other
+token that is not revoked and not expired, Orbit disables the service account; its past work keeps its name. A new token with
+the same service-account name enables it again.
 
 The same tokens also work with the public REST API at `/api/public/v1`, for
 scripts, CI jobs and the Orbit CLI. That API serves tasks and docs, not chat. See
@@ -212,7 +214,8 @@ tasks or tasks in deleted projects. Copy `next_cursor` into the next request and
 keep the same project and search query.
 
 Task results include title, description, project/status IDs, priority,
-assignee/label IDs, due dates, timestamps, and version. Embedded task relations
+assignee/label IDs, due dates, timestamps, and version (an opaque number that changes
+with every change, including live edits; pass it back unchanged). Embedded task relations
 and ancestors are omitted so they cannot disclose titles from unapproved
 projects. Descriptions remain user-authored text; clients must treat them as
 data, not as instructions.
@@ -234,7 +237,8 @@ a different host or port.
 The endpoint uses stateless requests and JSON responses. It supports older MCP
 initialization flows through the SDK. Credentials and project grants are never
 stored in a shared MCP session. Requests have a 64 KiB MCP body limit and use
-Orbit's existing rate and transport limits.
+Orbit's existing transport limits. MCP shares the rate-limit budget of the public REST API,
+apart from the web app's (see [Limits](public-api.md#limits)).
 
 Implementation references:
 [official Rust SDK](https://github.com/modelcontextprotocol/rust-sdk) and
@@ -294,14 +298,29 @@ Service-account tokens support tasks only; docs and chat require a personal iden
 Task create takes `project_id`, `status_id`, `title`, optional markdown `description` and
 `priority`. Task update takes `task_id`, `expected_version`, and optional title, description,
 status or priority. Delete takes `task_id` and `expected_version` and moves the task subtree
-to trash. Read the latest task version before updating or deleting. Task writes require
+to the trash for 30 days. With `permanent: true` it deletes the subtree forever instead, with
+its comments and attachments; this cannot be undone. It also works for a task that is
+already in the trash (then the version is not checked), and needs a connection of a workspace
+owner or admin. Read the latest task version before updating or deleting. `update_task`,
+`delete_task` and `update_doc` fail with "version changed" if the task or doc changed after
+your read, including edits in the editor. Read it again and retry. A malformed task
+identifier is an invalid-params error. Task writes require
 approval for every project in the related parent/sub-issue tree, since task automations can
 change related tasks. Task tools return a projection that excludes references outside grants.
 Doc create takes optional `title`, Markdown `markdown`, and a place: `parent_id`, or for a
 root doc `teamspace_id` or `private: true` (omitted: the default teamspace). Doc update takes
-`page_id`, `expected_version`, and optional `title` or `markdown`. Markdown replaces the whole
-content, also in open editors. `get_doc`, `create_doc` and `update_doc` return the doc with
-`markdown` (its content as Markdown) next to the BlockNote `content`. Doc writes act as the connected person and fail on a locked doc.
+`page_id`, `expected_version`, and optional `title` or `markdown`. `markdown` is the whole new content: send the Markdown that `get_doc` returned, with your
+edits. Only what you change changes, also in open editors. An update that changes nothing
+keeps the doc's version. Unchanged blocks keep their colors,
+comments and other settings, and edited blocks keep their settings and kind. New blocks get only
+what Markdown can express (no colors, toggles, callouts, comments or file blocks). `get_doc`, `create_doc` and `update_doc` return the doc with
+`markdown` (its content as Markdown) next to the BlockNote `content`. Sub-page links use the
+page's title, or "Untitled" for pages you cannot see. Doc writes act as the connected person
+and fail on a locked doc. A doc can have at most 4,000 blocks (nested ones included):
+`create_doc` with more, `update_doc` with `markdown` that gives more, or `update_doc` with
+`markdown` for a doc that already has more, fail with "A doc can have at most 4,000 blocks"
+and change nothing. A database outage on a doc or chat tool is a JSON-RPC internal error
+(-32603), not "Resource is not available".
 Chat message and thread tools accept `before` and `limit` (1–100) for pagination.
 `search_messages` takes `query` (up to 500 characters; every word must match, the last one as a
 prefix) and optional `conversation_id`, `author_id`, `has_file` and `cursor` filters. It returns

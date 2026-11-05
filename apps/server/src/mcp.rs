@@ -27,7 +27,9 @@ use crate::repositories::api_tokens::{
 };
 use crate::repositories::pages::PageError;
 use crate::repositories::tasks::{TaskError, TaskRepository};
-use crate::token_api::{DocPatch, NewDoc, NewTask, TaskPatch, TaskQuery, TokenApi, TokenApiError};
+use crate::token_api::{
+    DOC_TOO_LARGE_DETAIL, DocPatch, NewDoc, NewTask, TaskPatch, TaskQuery, TokenApi, TokenApiError,
+};
 
 #[derive(Clone)]
 pub struct McpState {
@@ -209,7 +211,12 @@ struct UpdateArgs {
 #[serde(deny_unknown_fields)]
 struct DeleteArgs {
     task_id: String,
+    /// The version you read. Not checked for a task that is already in the trash.
     expected_version: u64,
+    /// Delete the task and its sub-issues forever instead of moving them to the trash. It also
+    /// works for a task in the trash. Needs a workspace owner or admin.
+    #[serde(default)]
+    permanent: bool,
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -228,7 +235,7 @@ struct PageArgs {
 struct CreateDocArgs {
     #[serde(default)]
     title: String,
-    /// The content as Markdown.
+    /// The content as Markdown, at most 4,000 blocks.
     #[serde(default)]
     markdown: String,
     /// Creates the document under this document, in its space.
@@ -244,7 +251,9 @@ struct UpdateDocArgs {
     page_id: String,
     expected_version: u64,
     title: Option<String>,
-    /// Replaces the whole content with this Markdown.
+    /// The new content as Markdown: send what get_doc returned, with your edits. Blocks left as
+    /// read stay exactly as they are; edited blocks keep what Markdown cannot show. The doc can
+    /// have at most 4,000 blocks before and after the update.
     markdown: Option<String>,
 }
 #[derive(Deserialize, JsonSchema)]
@@ -315,7 +324,7 @@ fn tools() -> Vec<Tool> {
         ),
         write_definition::<DeleteArgs>(
             "delete_task",
-            "Move a task and its sub-issues to trash using its current version.",
+            "Move a task and its sub-issues to the trash for 30 days using its current version. With permanent: true, delete them forever instead (also a task in the trash); this cannot be undone.",
             true,
         ),
         definition::<EmptyArgs>(
@@ -326,7 +335,7 @@ fn tools() -> Vec<Tool> {
         write_definition::<CreateDocArgs>("create_doc", "Create a document from Markdown.", false),
         write_definition::<UpdateDocArgs>(
             "update_doc",
-            "Update a visible document using its current version. Markdown replaces the whole content.",
+            "Update a visible document using its current version. Send the document's Markdown with your edits; unchanged blocks stay exactly as they are.",
             true,
         ),
         definition::<EmptyArgs>("list_conversations", "List visible chat conversations."),
@@ -458,7 +467,7 @@ impl TaskTools {
             }
             "delete_task" => {
                 let a: DeleteArgs = arguments(&request)?;
-                api.delete_task(&a.task_id, a.expected_version)
+                api.delete_task(&a.task_id, a.expected_version, a.permanent)
                     .await
                     .map(|()| json!({"deleted": true}))
             }
@@ -581,6 +590,9 @@ fn tool_error(error: TokenApiError) -> Result<CallToolResult, ErrorData> {
         TokenApiError::Internal => Err(ErrorData::internal_error("Service is unavailable", None)),
         TokenApiError::ReadOnly => text(READ_ONLY_DETAIL),
         TokenApiError::NotAvailable => text("Resource is not available"),
+        TokenApiError::PurgeForbidden => {
+            text("Only workspace owners and administrators may delete tasks forever")
+        }
         TokenApiError::Task(error) => text(match error {
             TaskError::NotFound | TaskError::Forbidden => "Task resource is not available",
             TaskError::InvalidCursor => "Invalid pagination cursor",
@@ -598,6 +610,7 @@ fn tool_error(error: TokenApiError) -> Result<CallToolResult, ErrorData> {
             }
             PageError::Locked => "Document is locked",
             PageError::Busy => "Document is busy; try again in a moment",
+            PageError::TooLarge => DOC_TOO_LARGE_DETAIL,
             _ => "Document is not available",
         }),
     }

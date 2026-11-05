@@ -15,8 +15,7 @@ pub struct ApiTokenRecord {
     pub name: String,
     pub token_prefix: String,
     pub scopes: Vec<ApiTokenScope>,
-    #[schema(value_type = String)]
-    pub project_id: Id,
+    /// The projects whose tasks the token may use; empty when it has no task scope.
     #[schema(value_type = Vec<String>)]
     pub project_ids: Vec<Id>,
     #[schema(value_type = Option<String>)]
@@ -80,6 +79,14 @@ impl ApiTokenScope {
             .into_iter()
             .filter(|scope| value.split_whitespace().any(|name| name == scope.as_str()))
             .collect()
+    }
+
+    /// Whether the scopes give task access, which is limited to the approved projects.
+    #[must_use]
+    pub fn grants_tasks(scopes: &[Self]) -> bool {
+        scopes
+            .iter()
+            .any(|scope| matches!(scope, Self::TasksRead | Self::TasksWrite))
     }
 
     #[must_use]
@@ -154,12 +161,13 @@ impl ApiTokenRepository {
         actor_id: Id,
     ) -> Result<Vec<ApiTokenRecord>, ApiTokenError> {
         self.require_manager(workspace_id, actor_id).await?;
-        let rows = sqlx::query("SELECT api_tokens.id, api_tokens.name, api_tokens.token_prefix, api_tokens.scopes, api_tokens.project_id, api_tokens.created_at, api_tokens.last_used_at, api_tokens.expires_at, api_tokens.service_account_id, service_accounts.name AS service_account_name FROM api_tokens LEFT JOIN service_accounts ON service_accounts.id = api_tokens.service_account_id WHERE api_tokens.workspace_id = $1 AND api_tokens.revoked_at IS NULL ORDER BY api_tokens.created_at DESC, api_tokens.id DESC")
+        let rows = sqlx::query("SELECT api_tokens.id, api_tokens.name, api_tokens.token_prefix, api_tokens.scopes, api_tokens.created_at, api_tokens.last_used_at, api_tokens.expires_at, api_tokens.service_account_id, service_accounts.name AS service_account_name FROM api_tokens LEFT JOIN service_accounts ON service_accounts.id = api_tokens.service_account_id WHERE api_tokens.workspace_id = $1 AND api_tokens.revoked_at IS NULL ORDER BY api_tokens.created_at DESC, api_tokens.id DESC")
             .bind(workspace_id.to_string()).fetch_all(self.database.pool()).await?;
         let mut records = Vec::with_capacity(rows.len());
         for row in rows {
             let id = parse_id(&row, "id")?;
-            records.push(decode(row, self.project_ids(id).await?)?);
+            let scopes = ApiTokenScope::parse_list(&row.get::<String, _>("scopes"));
+            records.push(decode(row, self.project_ids(id, &scopes).await?)?);
         }
         Ok(records)
     }
@@ -170,7 +178,7 @@ impl ApiTokenRepository {
         workspace_id: Id,
         actor_id: Id,
         name: String,
-        project_ids: Vec<Id>,
+        mut project_ids: Vec<Id>,
         scopes: &[ApiTokenScope],
         service_account: bool,
         expires_at: Option<TimestampMillis>,
@@ -178,12 +186,24 @@ impl ApiTokenRepository {
         now: TimestampMillis,
     ) -> Result<IssuedApiToken, ApiTokenError> {
         let scopes = ApiTokenScope::parse_list(&ApiTokenScope::format_list(scopes));
-        if scopes.is_empty() {
+        // A service account acts as the workspace owner, so it gets no docs or chat access.
+        let content_scope = scopes.iter().any(|scope| {
+            matches!(
+                scope,
+                ApiTokenScope::DocsRead | ApiTokenScope::DocsWrite | ApiTokenScope::ChatRead
+            )
+        });
+        // Projects only limit task access, so a token without a task scope stores none.
+        let grants_tasks = ApiTokenScope::grants_tasks(&scopes);
+        if !grants_tasks {
+            project_ids.clear();
+        }
+        if scopes.is_empty() || (service_account && content_scope) {
             return Err(ApiTokenError::NotFound);
         }
         let mut transaction = self.database.immediate_transaction().await?;
         require_manager_in(&mut transaction, workspace_id, actor_id).await?;
-        if project_ids.is_empty() {
+        if grants_tasks && project_ids.is_empty() {
             return Err(ApiTokenError::NotFound);
         }
         for project_id in &project_ids {
@@ -191,18 +211,41 @@ impl ApiTokenRepository {
         }
         let id = Id::new_v7();
         let (service_account_id, service_account_name) = if service_account {
-            match sqlx::query_as::<_, (String, String)>(
-                "SELECT id, name FROM service_accounts WHERE workspace_id = $1 AND lower(name) = lower($2) AND disabled_at IS NULL",
+            // A disabled account of the same name is enabled again, so the name keeps one
+            // identity and its past work stays linked.
+            match sqlx::query_as::<_, (String, String, Option<i64>)>(
+                "SELECT id, name, disabled_at FROM service_accounts WHERE workspace_id = $1 AND lower(name) = lower($2)",
             )
             .bind(workspace_id.to_string())
             .bind(&name)
             .fetch_optional(&mut *transaction)
             .await?
             {
-                Some((id, account_name)) => (
-                    Some(id.parse().map_err(|_| ApiTokenError::InvalidIdentifier)?),
-                    Some(account_name),
-                ),
+                Some((account_id, account_name, disabled_at)) => {
+                    let account_id: Id = account_id
+                        .parse()
+                        .map_err(|_| ApiTokenError::InvalidIdentifier)?;
+                    if disabled_at.is_some() {
+                        sqlx::query("UPDATE service_accounts SET disabled_at = NULL WHERE id = $1")
+                            .bind(account_id.to_string())
+                            .execute(&mut *transaction)
+                            .await?;
+                        audit::record(
+                            &mut transaction,
+                            workspace_id,
+                            Some(actor_id),
+                            "service_account.enable",
+                            AuditOutcome::Success,
+                            "service_account",
+                            Some(account_id),
+                            request_id,
+                            serde_json::json!({"api_token_id": id}),
+                            now,
+                        )
+                        .await?;
+                    }
+                    (Some(account_id), Some(account_name))
+                }
                 None => {
                     let id = Id::new_v7();
                     sqlx::query("INSERT INTO service_accounts (id, workspace_id, name, created_by, created_at) VALUES ($1, $2, $3, $4, $5)")
@@ -218,7 +261,7 @@ impl ApiTokenRepository {
         let hash: [u8; 32] = Sha256::digest(token.as_bytes()).into();
         let prefix: String = token.chars().take(12).collect();
         sqlx::query("INSERT INTO api_tokens (id, workspace_id, project_id, name, token_hash, token_prefix, scopes, created_by, created_at, service_account_id, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)")
-            .bind(id.to_string()).bind(workspace_id.to_string()).bind(project_ids[0].to_string()).bind(&name).bind(hash.to_vec()).bind(&prefix)
+            .bind(id.to_string()).bind(workspace_id.to_string()).bind(project_ids.first().map(Id::to_string)).bind(&name).bind(hash.to_vec()).bind(&prefix)
             .bind(ApiTokenScope::format_list(&scopes)).bind(actor_id.to_string()).bind(now.as_millis()).bind(service_account_id.map(|id| id.to_string())).bind(expires_at.map(TimestampMillis::as_millis))
             .execute(&mut *transaction).await?;
         for project_id in &project_ids {
@@ -248,7 +291,6 @@ impl ApiTokenRepository {
                 name: name.clone(),
                 token_prefix: prefix,
                 scopes,
-                project_id: project_ids[0],
                 project_ids,
                 service_account_id,
                 service_account_name,
@@ -295,8 +337,9 @@ impl ApiTokenRepository {
             .get::<String, _>("workspace_id")
             .parse()
             .map_err(|_| ApiTokenError::InvalidIdentifier)?;
-        let project_ids = self.project_ids(token_id).await?;
-        if project_ids.is_empty() {
+        let project_ids = self.project_ids(token_id, &scopes).await?;
+        // A task token whose projects were all deleted no longer works at all.
+        if ApiTokenScope::grants_tasks(&scopes) && project_ids.is_empty() {
             return Err(ApiTokenError::NotFound);
         }
         let creator_id = row
@@ -348,7 +391,16 @@ impl ApiTokenRepository {
         Ok(principal)
     }
 
-    async fn project_ids(&self, token_id: Id) -> Result<Vec<Id>, ApiTokenError> {
+    /// The live projects of a token with a task scope. Older tokens without one may still have
+    /// stored projects, which give them nothing.
+    async fn project_ids(
+        &self,
+        token_id: Id,
+        scopes: &[ApiTokenScope],
+    ) -> Result<Vec<Id>, ApiTokenError> {
+        if !ApiTokenScope::grants_tasks(scopes) {
+            return Ok(Vec::new());
+        }
         let values = sqlx::query_scalar::<_, String>(
             "SELECT api_token_projects.project_id FROM api_token_projects JOIN projects ON projects.id = api_token_projects.project_id WHERE api_token_projects.token_id = $1 AND projects.deleted_at IS NULL ORDER BY projects.created_at, projects.id",
         )
@@ -371,11 +423,9 @@ impl ApiTokenRepository {
     ) -> Result<(), ApiTokenError> {
         let mut transaction = self.database.immediate_transaction().await?;
         require_manager_in(&mut transaction, workspace_id, actor_id).await?;
-        let result = sqlx::query("UPDATE api_tokens SET revoked_at = $1 WHERE id = $2 AND workspace_id = $3 AND revoked_at IS NULL")
-            .bind(now.as_millis()).bind(token_id.to_string()).bind(workspace_id.to_string()).execute(&mut *transaction).await?;
-        if result.rows_affected() == 0 {
-            return Err(ApiTokenError::NotFound);
-        }
+        let service_account_id = sqlx::query_scalar::<_, Option<String>>("UPDATE api_tokens SET revoked_at = $1 WHERE id = $2 AND workspace_id = $3 AND revoked_at IS NULL RETURNING service_account_id")
+            .bind(now.as_millis()).bind(token_id.to_string()).bind(workspace_id.to_string()).fetch_optional(&mut *transaction).await?
+            .ok_or(ApiTokenError::NotFound)?;
         audit::record(
             &mut transaction,
             workspace_id,
@@ -389,6 +439,18 @@ impl ApiTokenRepository {
             now,
         )
         .await?;
+        if let Some(account_id) = service_account_id {
+            disable_unused_service_account(
+                &mut transaction,
+                workspace_id,
+                account_id,
+                actor_id,
+                token_id,
+                request_id,
+                now,
+            )
+            .await?;
+        }
         transaction.commit().await?;
         Ok(())
     }
@@ -398,6 +460,53 @@ impl ApiTokenRepository {
             membership::actor(self.database.pool(), workspace_id, actor_id).await?,
         )
     }
+}
+
+/// Disables a service account once its last token is revoked. The GitHub integration's account
+/// is kept: `github_service_account_in_tx` finds it by its name, it acts without any token, and
+/// tokens named "GitHub" share it.
+async fn disable_unused_service_account(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Any>,
+    workspace_id: Id,
+    account_id: String,
+    actor_id: Id,
+    token_id: Id,
+    request_id: &str,
+    now: TimestampMillis,
+) -> Result<(), ApiTokenError> {
+    let disabled = sqlx::query(
+        "UPDATE service_accounts SET disabled_at = $1 WHERE id = $2 AND workspace_id = $3 \
+         AND disabled_at IS NULL AND lower(name) <> 'github' \
+         AND NOT EXISTS (SELECT 1 FROM api_tokens WHERE service_account_id = $4 AND revoked_at IS NULL \
+           AND (expires_at IS NULL OR expires_at > $1))",
+    )
+    .bind(now.as_millis())
+    .bind(&account_id)
+    .bind(workspace_id.to_string())
+    .bind(&account_id)
+    .execute(&mut **transaction)
+    .await?;
+    if disabled.rows_affected() == 0 {
+        return Ok(());
+    }
+    audit::record(
+        transaction,
+        workspace_id,
+        Some(actor_id),
+        "service_account.disable",
+        AuditOutcome::Success,
+        "service_account",
+        Some(
+            account_id
+                .parse()
+                .map_err(|_| ApiTokenError::InvalidIdentifier)?,
+        ),
+        request_id,
+        serde_json::json!({"api_token_id": token_id}),
+        now,
+    )
+    .await?;
+    Ok(())
 }
 
 async fn require_manager_in(
@@ -452,7 +561,6 @@ fn decode(row: sqlx::any::AnyRow, project_ids: Vec<Id>) -> Result<ApiTokenRecord
         name: row.get("name"),
         token_prefix: row.get("token_prefix"),
         scopes: ApiTokenScope::parse_list(&row.get::<String, _>("scopes")),
-        project_id: parse_id(&row, "project_id")?,
         project_ids,
         service_account_id: row
             .get::<Option<String>, _>("service_account_id")

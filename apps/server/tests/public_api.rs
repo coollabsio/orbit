@@ -10,10 +10,14 @@ use orbit_platform::{
 use orbit_server::public_api::{PublicApiState, router};
 use orbit_server::repositories::api_tokens::{ApiTokenError, ApiTokenRepository, ApiTokenScope};
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
-use orbit_server::repositories::pages::{CreatePage, PageRepository, SpaceRequest};
+use orbit_server::repositories::pages::{CreatePage, PageChanges, PageRepository, SpaceRequest};
 use orbit_server::repositories::tasks::{CreateTask, TaskRepository};
 use serde_json::{Value, json};
 use tower::ServiceExt;
+
+mod collab_support;
+#[allow(dead_code)] // `collab_support` needs it; the shared-database tests live elsewhere.
+mod shared_postgres;
 
 struct Fixture {
     database: TestDatabase,
@@ -534,7 +538,7 @@ async fn task_writes_follow_scope_version_and_workspace_rules() {
     assert_eq!(created["assignee_ids"], json!([f.user]));
     assert_eq!(created["label_ids"], json!([label.id]));
     assert_eq!(created["parent_task_id"], f.task.to_string());
-    assert_eq!(created["version"], 0);
+    assert!(created["version"].is_u64(), "{created}");
     let id = created["id"].as_str().unwrap().to_owned();
     let (actor, metadata) = audit_of(&f, &id, "task.created").await;
     assert_eq!(actor.as_deref(), Some(f.user.to_string().as_str()));
@@ -586,30 +590,30 @@ async fn task_writes_follow_scope_version_and_workspace_rules() {
             Some(&token),
             "PATCH",
             &format!("/tasks/{id}"),
-            Some(json!({"expected_version": 0, "title": "Renamed", "assignee_ids": [], "label_ids": []})),
+            Some(json!({"expected_version": created["version"], "title": "Renamed", "assignee_ids": [], "label_ids": []})),
         )
         .await;
     assert_eq!(code, StatusCode::OK, "{updated}");
     assert_eq!(updated["title"], "Renamed");
     assert_eq!(updated["assignee_ids"], json!([]));
-    assert_eq!(updated["version"], 1);
+    assert_ne!(updated["version"], created["version"]);
     let (code, stale) = f
         .call(
             Some(&token),
             "PATCH",
             &format!("/tasks/{id}"),
-            Some(json!({"expected_version": 0, "title": "Again"})),
+            Some(json!({"expected_version": created["version"], "title": "Again"})),
         )
         .await;
     assert_eq!(code, StatusCode::CONFLICT, "{stale}");
-    assert_eq!(stale["conflict"]["current_version"], 1);
+    assert_eq!(stale["conflict"]["current_version"], updated["version"]);
     assert!(stale["conflict"].get("current").is_none(), "{stale}");
     let (code, _) = f
         .call(
             Some(&token),
             "PATCH",
             &format!("/tasks/{id}"),
-            Some(json!({"expected_version": 1, "label_ids": [other_label.id]})),
+            Some(json!({"expected_version": updated["version"], "label_ids": [other_label.id]})),
         )
         .await;
     assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
@@ -618,7 +622,7 @@ async fn task_writes_follow_scope_version_and_workspace_rules() {
         .call(
             Some(&token),
             "DELETE",
-            &format!("/tasks/{id}?expected_version=0"),
+            &format!("/tasks/{id}?expected_version={}", created["version"]),
             None,
         )
         .await;
@@ -631,7 +635,7 @@ async fn task_writes_follow_scope_version_and_workspace_rules() {
         .call(
             Some(&token),
             "DELETE",
-            &format!("/tasks/{id}?expected_version=1"),
+            &format!("/tasks/{id}?expected_version={}", updated["version"]),
             None,
         )
         .await;
@@ -776,16 +780,15 @@ async fn docs_need_their_scope_and_a_personal_token_and_unserved_paths_are_not_f
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
     }
 
-    let (service, _) = f
-        .token(
-            &[
-                ApiTokenScope::TasksRead,
-                ApiTokenScope::DocsRead,
-                ApiTokenScope::ChatRead,
-            ],
-            true,
-        )
-        .await;
+    let service = old_service_account_token(
+        &f,
+        &[
+            ApiTokenScope::TasksRead,
+            ApiTokenScope::DocsRead,
+            ApiTokenScope::ChatRead,
+        ],
+    )
+    .await;
     let (code, me) = f.call(Some(&service), "GET", "/me", None).await;
     assert_eq!(code, StatusCode::OK, "{me}");
     assert_eq!(me["user"], Value::Null);
@@ -829,7 +832,7 @@ async fn docs_write_creates_and_updates_docs_from_markdown() {
     assert_eq!(doc["content"][0]["type"], "heading", "{doc}");
     assert_eq!(doc["content"][0]["content"][0]["text"], "Steps", "{doc}");
     let id = doc["id"].as_str().unwrap().to_owned();
-    let version = doc["version"].as_u64().unwrap();
+    let version = doc["version"].clone();
 
     // `docs:write` includes `docs:read`, and the stored doc has the new content.
     let (code, read) = f
@@ -840,6 +843,15 @@ async fn docs_write_creates_and_updates_docs_from_markdown() {
     // Reads also give the content as Markdown, the format that writes take.
     assert_eq!(read["markdown"], "# Steps\n\nShip **it**.\n", "{read}");
     assert_eq!(doc["markdown"], read["markdown"]);
+    // The list shows the same version, so a list read is enough for a write.
+    let (_, list) = f.call(Some(&writer), "GET", "/docs", None).await;
+    let listed = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == id.as_str())
+        .unwrap();
+    assert_eq!(listed["version"], read["version"], "{list}");
 
     let (code, child) = f
         .call(
@@ -867,7 +879,7 @@ async fn docs_write_creates_and_updates_docs_from_markdown() {
     assert_eq!(updated["title"], "Release plan v2");
     assert_eq!(updated["icon"], "🚀");
     assert_eq!(updated["content"][0]["type"], "bulletListItem", "{updated}");
-    assert_eq!(updated["version"], version + 1);
+    assert_ne!(updated["version"], version);
     assert_eq!(updated["markdown"], "- one\n- two\n", "{updated}");
 
     let (code, problem) = f
@@ -886,7 +898,7 @@ async fn docs_write_creates_and_updates_docs_from_markdown() {
             Some(&writer),
             "PATCH",
             &path,
-            Some(json!({"expected_version": version + 1, "icon": null})),
+            Some(json!({"expected_version": updated["version"], "icon": null})),
         )
         .await;
     assert_eq!(code, StatusCode::OK, "{cleared}");
@@ -904,7 +916,7 @@ async fn docs_write_creates_and_updates_docs_from_markdown() {
             Some(&writer),
             "PATCH",
             &path,
-            Some(json!({"expected_version": version + 2, "markdown": "locked"})),
+            Some(json!({"expected_version": cleared["version"], "markdown": "locked"})),
         )
         .await;
     assert_eq!(code, StatusCode::LOCKED, "{problem}");
@@ -930,11 +942,87 @@ async fn docs_write_creates_and_updates_docs_from_markdown() {
     assert_eq!(code, StatusCode::BAD_REQUEST);
 
     // Docs act as the token's creator, so a service account cannot write them.
-    let (service, _) = f.token(&[ApiTokenScope::DocsWrite], true).await;
+    let service = old_service_account_token(&f, &[ApiTokenScope::DocsWrite]).await;
     let (code, _) = f
         .call(Some(&service), "POST", "/docs", Some(json!({"title": "x"})))
         .await;
     assert_eq!(code, StatusCode::NOT_FOUND);
+}
+
+async fn count(f: &Fixture, sql: &str, id: &str) -> i64 {
+    sqlx::query_scalar(sqlx::AssertSqlSafe(sql.to_owned()))
+        .bind(id)
+        .fetch_one(f.database.pool())
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_doc_patch_that_changes_nothing_keeps_the_version() {
+    let f = Fixture::new().await;
+    let (writer, _) = f.token(&[ApiTokenScope::DocsWrite], false).await;
+    let (code, doc) = f
+        .call(
+            Some(&writer),
+            "POST",
+            "/docs",
+            Some(json!({"title": "Plan", "icon": "🚀", "markdown": "# Steps\n\nShip **it**."})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{doc}");
+    let id = doc["id"].as_str().unwrap().to_owned();
+    let path = format!("/docs/{id}");
+    let audits =
+        "SELECT COUNT(*) FROM audit_events WHERE resource_id = $1 AND action = 'page.updated'";
+    let snapshots = "SELECT COUNT(*) FROM page_versions WHERE page_id = $1";
+    let (audited, snapshotted) = (
+        count(&f, audits, &id).await,
+        count(&f, snapshots, &id).await,
+    );
+
+    for body in [
+        json!({"expected_version": doc["version"], "title": "Plan", "icon": "🚀", "markdown": doc["markdown"]}),
+        json!({"expected_version": doc["version"], "markdown": "# Steps\n\nShip **it**.\n"}),
+        json!({"expected_version": doc["version"]}),
+    ] {
+        let (code, same) = f
+            .call(Some(&writer), "PATCH", &path, Some(body.clone()))
+            .await;
+        assert_eq!(code, StatusCode::OK, "{body}: {same}");
+        assert_eq!(same["version"], doc["version"], "{body}");
+        assert_eq!(same["updated_at"], doc["updated_at"], "{body}");
+        assert_eq!(same["markdown"], doc["markdown"], "{body}");
+    }
+    assert_eq!(count(&f, audits, &id).await, audited);
+    assert_eq!(count(&f, snapshots, &id).await, snapshotted);
+    let (_, read) = f.call(Some(&writer), "GET", &path, None).await;
+    assert_eq!(read["version"], doc["version"]);
+
+    // A stale version still conflicts, even when the write would change nothing.
+    let (code, problem) = f
+        .call(
+            Some(&writer),
+            "PATCH",
+            &path,
+            Some(json!({"expected_version": 1, "title": "Plan"})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::CONFLICT, "{problem}");
+
+    // A real change still makes a new version.
+    let (code, changed) = f
+        .call(
+            Some(&writer),
+            "PATCH",
+            &path,
+            Some(
+                json!({"expected_version": doc["version"], "markdown": "# Steps\n\nShip it now."}),
+            ),
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK, "{changed}");
+    assert_ne!(changed["version"], doc["version"]);
+    assert_eq!(count(&f, audits, &id).await, audited + 1);
 }
 
 #[tokio::test]
@@ -1016,6 +1104,30 @@ async fn the_application_mounts_the_router_without_origin_or_contract_checks() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     assert!(response.headers().contains_key(header::WWW_AUTHENTICATE));
+
+    // A method that the path does not serve is a 405 problem that names the methods it serves.
+    let response = app
+        .router()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/public/v1/workspaces/{}/tasks", Id::new_v7()))
+                .header(header::AUTHORIZATION, "Bearer orb_unknown")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(response.headers()[header::ALLOW], "GET,HEAD,POST");
+    assert_eq!(
+        response.headers()[header::CONTENT_TYPE],
+        "application/problem+json"
+    );
+    let problem: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), 4096).await.unwrap()).unwrap();
+    assert_eq!(problem["code"], "method_not_allowed");
+    assert_eq!(problem["status"], 405);
 }
 
 async fn audit_of(f: &Fixture, resource_id: &str, action: &str) -> (Option<String>, Value) {
@@ -1054,12 +1166,12 @@ async fn service_account_writes_name_the_service_account_and_the_token() {
             .await
             .unwrap();
     assert_eq!(creator.as_deref(), account["id"].as_str());
-    let (code, _) = f
+    let (code, renamed) = f
         .call(
             Some(&token),
             "PATCH",
             &format!("/tasks/{id}"),
-            Some(json!({"expected_version": 0, "title": "Renamed"})),
+            Some(json!({"expected_version": created["version"], "title": "Renamed"})),
         )
         .await;
     assert_eq!(code, StatusCode::OK);
@@ -1067,7 +1179,7 @@ async fn service_account_writes_name_the_service_account_and_the_token() {
         .call(
             Some(&token),
             "DELETE",
-            &format!("/tasks/{id}?expected_version=1"),
+            &format!("/tasks/{id}?expected_version={}", renamed["version"]),
             None,
         )
         .await;
@@ -1342,7 +1454,7 @@ async fn due_dates_can_be_set_kept_and_cleared() {
             Some(&token),
             "PATCH",
             &format!("/tasks/{id}"),
-            Some(json!({"expected_version": 0, "title": "Due 2"})),
+            Some(json!({"expected_version": task["version"], "title": "Due 2"})),
         )
         .await;
     assert_eq!(code, StatusCode::OK, "{kept}");
@@ -1352,7 +1464,9 @@ async fn due_dates_can_be_set_kept_and_cleared() {
             Some(&token),
             "PATCH",
             &format!("/tasks/{id}"),
-            Some(json!({"expected_version": 1, "due_start_at": null, "due_at": null})),
+            Some(
+                json!({"expected_version": kept["version"], "due_start_at": null, "due_at": null}),
+            ),
         )
         .await;
     assert_eq!(code, StatusCode::OK, "{cleared}");
@@ -1464,6 +1578,37 @@ async fn add_member(f: &Fixture, email: &str, role: &str) -> Id {
         .execute(&mut *tx).await.unwrap();
     tx.commit().await.unwrap();
     user
+}
+
+/// A service-account token cannot get docs or chat scopes. One from before that rule (made here
+/// by changing a task token's stored scopes) is still refused docs when it is used.
+async fn old_service_account_token(f: &Fixture, scopes: &[ApiTokenScope]) -> String {
+    let refused = f
+        .tokens
+        .create(
+            f.workspace,
+            f.user,
+            format!("cli-{}", Id::new_v7()),
+            vec![f.project],
+            scopes,
+            true,
+            None,
+            "test",
+            TimestampMillis::now(),
+        )
+        .await;
+    assert!(
+        matches!(refused, Err(ApiTokenError::NotFound)),
+        "{refused:?}"
+    );
+    let (token, id) = f.token(&[ApiTokenScope::TasksRead], true).await;
+    sqlx::query("UPDATE api_tokens SET scopes = $1 WHERE id = $2")
+        .bind(ApiTokenScope::format_list(scopes))
+        .bind(id.to_string())
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    token
 }
 
 async fn token_by(
@@ -1614,12 +1759,12 @@ async fn service_account_tokens_do_not_depend_on_their_creator() {
             .await
             .unwrap();
     assert_eq!(creator.as_deref(), account["id"].as_str());
-    let (code, _) = f
+    let (code, assigned) = f
         .call(
             Some(&bot),
             "PATCH",
             &format!("/tasks/{id}"),
-            Some(json!({"expected_version": 0, "assignee_ids": [member, f.user]})),
+            Some(json!({"expected_version": task["version"], "assignee_ids": [member, f.user]})),
         )
         .await;
     assert_eq!(code, StatusCode::OK);
@@ -1670,7 +1815,7 @@ async fn service_account_tokens_do_not_depend_on_their_creator() {
         .call(
             Some(&bot),
             "DELETE",
-            &format!("/tasks/{id}?expected_version=1"),
+            &format!("/tasks/{id}?expected_version={}", assigned["version"]),
             None,
         )
         .await;
@@ -1693,4 +1838,710 @@ async fn personal_token_writes_still_notify() {
         .await;
     assert_eq!(code, StatusCode::CREATED);
     assert_eq!(notifications_for(&f, member).await, 1);
+}
+
+/// A real server (with co-editing sockets) and its users; `token` is the owner's token with
+/// `scopes` for the workspace's first project.
+async fn live_server(
+    root: &tempfile::TempDir,
+    scopes: &[ApiTokenScope],
+) -> (
+    collab_support::Server,
+    collab_support::Users,
+    String,
+    String,
+) {
+    let server =
+        collab_support::Server::start(root, orbit_server::collab::CollabConfig::default()).await;
+    let users = collab_support::setup(&server).await;
+    let project: String =
+        sqlx::query_scalar("SELECT id FROM projects WHERE workspace_id = $1 ORDER BY created_at")
+            .bind(&users.workspace)
+            .fetch_one(server.database.pool())
+            .await
+            .unwrap();
+    let token = ApiTokenRepository::new(server.database.clone())
+        .create(
+            users.workspace.parse().unwrap(),
+            users.owner_id,
+            "live".into(),
+            vec![project.parse().unwrap()],
+            scopes,
+            false,
+            None,
+            "test",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap()
+        .token;
+    (server, users, token, project)
+}
+
+/// Calls `/api/public/v1/workspaces/{workspace}{path}` of a real server with `token`.
+async fn public_call(
+    server: &collab_support::Server,
+    users: &collab_support::Users,
+    token: &str,
+    method: &str,
+    path: &str,
+    body: Option<Value>,
+) -> (u16, Value) {
+    let mut request = server
+        .http
+        .request(
+            method.parse().unwrap(),
+            format!(
+                "{}/api/public/v1/workspaces/{}{path}",
+                server.base, users.workspace
+            ),
+        )
+        .bearer_auth(token);
+    if let Some(body) = body {
+        request = request.json(&body);
+    }
+    let response = request.send().await.unwrap();
+    let status = response.status().as_u16();
+    let text = response.text().await.unwrap();
+    let value = if text.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_str(&text).unwrap()
+    };
+    (status, value)
+}
+
+#[tokio::test]
+async fn doc_writes_conflict_with_live_edits_made_after_the_read() {
+    let root = tempfile::TempDir::new().unwrap();
+    let (server, users, token, _) = live_server(&root, &[ApiTokenScope::DocsWrite]).await;
+    let (status, doc) = public_call(
+        &server,
+        &users,
+        &token,
+        "POST",
+        "/docs",
+        Some(json!({"title": "Plan", "markdown": "first"})),
+    )
+    .await;
+    assert_eq!(status, 201, "{doc}");
+    let id = doc["id"].as_str().unwrap().to_owned();
+    let path = format!("/docs/{id}");
+    let (_, read) = public_call(&server, &users, &token, "GET", &path, None).await;
+
+    // A member types after the token's read; the edit is still in the server's memory.
+    let mut member = collab_support::Client::open(&server, &users, &users.member, &id).await;
+    let mut watcher = collab_support::Client::open(&server, &users, &users.owner, &id).await;
+    member.type_text(5, " live").await;
+    watcher.wait_text("first live").await;
+
+    let (status, problem) = public_call(
+        &server,
+        &users,
+        &token,
+        "PATCH",
+        &path,
+        Some(json!({"expected_version": read["version"], "markdown": "from the token"})),
+    )
+    .await;
+    assert_eq!(
+        status, 409,
+        "a stale content write must conflict: {problem}"
+    );
+    assert_eq!(problem["code"], "conflict");
+    let (_, fresh) = public_call(&server, &users, &token, "GET", &path, None).await;
+    assert_eq!(fresh["markdown"], "first live\n", "{fresh}");
+    assert_eq!(problem["conflict"]["current_version"], fresh["version"]);
+    // A title write with the stale version conflicts too: the doc changed after the read.
+    let (status, _) = public_call(
+        &server,
+        &users,
+        &token,
+        "PATCH",
+        &path,
+        Some(json!({"expected_version": read["version"], "title": "Stale"})),
+    )
+    .await;
+    assert_eq!(status, 409);
+
+    // With the version of a read after the edit, the write goes through, also to open editors.
+    let (status, updated) = public_call(
+        &server,
+        &users,
+        &token,
+        "PATCH",
+        &path,
+        Some(json!({"expected_version": fresh["version"], "markdown": "from the token"})),
+    )
+    .await;
+    assert_eq!(status, 200, "{updated}");
+    assert_eq!(updated["markdown"], "from the token\n");
+    watcher.wait_text("from the token").await;
+    let (_, after) = public_call(&server, &users, &token, "GET", &path, None).await;
+    assert_eq!(after["version"], updated["version"], "{after}");
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn task_description_writes_conflict_with_live_edits_made_after_the_read() {
+    let root = tempfile::TempDir::new().unwrap();
+    let (server, users, token, project) = live_server(&root, &[ApiTokenScope::TasksWrite]).await;
+    let status_id: String = sqlx::query_scalar(
+        "SELECT id FROM task_statuses WHERE project_id = $1 ORDER BY position LIMIT 1",
+    )
+    .bind(&project)
+    .fetch_one(server.database.pool())
+    .await
+    .unwrap();
+    let (status, task) = public_call(
+        &server,
+        &users,
+        &token,
+        "POST",
+        "/tasks",
+        Some(json!({"project_id": project, "status_id": status_id, "title": "Task", "description": "first"})),
+    )
+    .await;
+    assert_eq!(status, 201, "{task}");
+    let id = task["id"].as_str().unwrap().to_owned();
+    let path = format!("/tasks/{id}");
+    let (_, read) = public_call(&server, &users, &token, "GET", &path, None).await;
+
+    let mut member =
+        collab_support::Client::open_doc(&server, &users, &users.member, "tasks", &id).await;
+    let mut watcher =
+        collab_support::Client::open_doc(&server, &users, &users.owner, "tasks", &id).await;
+    member.type_text(5, " live").await;
+    watcher.wait_text("first live").await;
+
+    let (status, problem) = public_call(
+        &server,
+        &users,
+        &token,
+        "PATCH",
+        &path,
+        Some(json!({"expected_version": read["version"], "description": "from the token"})),
+    )
+    .await;
+    assert_eq!(
+        status, 409,
+        "a stale description write must conflict: {problem}"
+    );
+    let (_, fresh) = public_call(&server, &users, &token, "GET", &path, None).await;
+    assert_eq!(fresh["description"], "first live\n", "{fresh}");
+    assert_eq!(problem["conflict"]["current_version"], fresh["version"]);
+
+    let (status, updated) = public_call(
+        &server,
+        &users,
+        &token,
+        "PATCH",
+        &path,
+        Some(json!({"expected_version": fresh["version"], "description": "from the token"})),
+    )
+    .await;
+    assert_eq!(status, 200, "{updated}");
+    assert_eq!(updated["description"], "from the token");
+    let (_, after) = public_call(&server, &users, &token, "GET", &path, None).await;
+    assert_eq!(after["version"], updated["version"], "{after}");
+    watcher.wait_text("from the token").await;
+    let (status, _) = public_call(
+        &server,
+        &users,
+        &token,
+        "DELETE",
+        &format!("{path}?expected_version={}", read["version"]),
+        None,
+    )
+    .await;
+    assert_eq!(status, 409, "a stale delete conflicts");
+    let (status, _) = public_call(
+        &server,
+        &users,
+        &token,
+        "DELETE",
+        &format!("{path}?expected_version={}", updated["version"]),
+        None,
+    )
+    .await;
+    assert_eq!(status, 204);
+    server.stop().await;
+}
+
+#[tokio::test]
+async fn creating_a_doc_with_markdown_is_one_write() {
+    let f = Fixture::new().await;
+    let (writer, _) = f.token(&[ApiTokenScope::DocsWrite], false).await;
+    let (code, doc) = f
+        .call(
+            Some(&writer),
+            "POST",
+            "/docs",
+            Some(json!({"title": "Notes", "markdown": "Hello **there**"})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{doc}");
+    assert_eq!(doc["markdown"], "Hello **there**\n", "{doc}");
+    let id = doc["id"].as_str().unwrap().to_owned();
+    let actions: Vec<String> =
+        sqlx::query_scalar("SELECT action FROM audit_events WHERE resource_id = $1")
+            .bind(&id)
+            .fetch_all(f.database.pool())
+            .await
+            .unwrap();
+    assert_eq!(actions, ["page.created"]);
+    let (_, read) = f
+        .call(Some(&writer), "GET", &format!("/docs/{id}"), None)
+        .await;
+    assert_eq!(read["content"], doc["content"]);
+    assert_eq!(read["version"], doc["version"], "{read}");
+}
+
+#[tokio::test]
+async fn a_malformed_task_ref_is_a_bad_request_for_every_method() {
+    let f = Fixture::new().await;
+    let (token, _) = f
+        .token(
+            &[ApiTokenScope::TasksRead, ApiTokenScope::TasksWrite],
+            false,
+        )
+        .await;
+    for task in ["not_a_ref", "GEN-999"] {
+        let expected = if task == "GEN-999" {
+            StatusCode::NOT_FOUND
+        } else {
+            StatusCode::BAD_REQUEST
+        };
+        for (method, path, body) in [
+            ("GET", format!("/tasks/{task}"), None),
+            (
+                "PATCH",
+                format!("/tasks/{task}"),
+                Some(json!({"expected_version": 0, "title": "x"})),
+            ),
+            ("DELETE", format!("/tasks/{task}?expected_version=0"), None),
+            ("GET", format!("/tasks/{task}/comments"), None),
+            (
+                "POST",
+                format!("/tasks/{task}/comments"),
+                Some(json!({"body": "x"})),
+            ),
+        ] {
+            let (code, problem) = f.call(Some(&token), method, &path, body).await;
+            assert_eq!(code, expected, "{method} {path}: {problem}");
+            if expected == StatusCode::BAD_REQUEST {
+                assert_eq!(problem["code"], "invalid_request", "{method} {path}");
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn doc_reads_report_database_errors_as_server_errors() {
+    let f = Fixture::new().await;
+    let (token, _) = f.token(&[ApiTokenScope::DocsRead], false).await;
+    let id = Id::new_v7();
+    let (code, _) = f
+        .call(Some(&token), "GET", &format!("/docs/{id}"), None)
+        .await;
+    assert_eq!(code, StatusCode::NOT_FOUND);
+    // A broken database is not a missing doc: clients must not drop their copy on a 404.
+    sqlx::query("ALTER TABLE pages RENAME TO pages_unavailable")
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    for path in ["/docs".to_owned(), format!("/docs/{id}")] {
+        let (code, problem) = f.call(Some(&token), "GET", &path, None).await;
+        assert_eq!(code, StatusCode::INTERNAL_SERVER_ERROR, "{path}: {problem}");
+    }
+}
+
+#[tokio::test]
+async fn doc_markdown_names_visible_sub_pages_and_hides_the_others() {
+    let f = Fixture::new().await;
+    let (writer, _) = f.token(&[ApiTokenScope::DocsWrite], false).await;
+    let (_, doc) = f
+        .call(
+            Some(&writer),
+            "POST",
+            "/docs",
+            Some(json!({"title": "Plan"})),
+        )
+        .await;
+    let id: Id = doc["id"].as_str().unwrap().parse().unwrap();
+    let (code, child) = f
+        .call(
+            Some(&writer),
+            "POST",
+            "/docs",
+            Some(json!({"parent_id": id, "title": "Launch [notes]"})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{child}");
+    let member = add_member(&f, "member@example.com", "member").await;
+    let secret = f
+        .pages
+        .create_page(
+            f.workspace,
+            member,
+            CreatePage {
+                parent_id: None,
+                space: SpaceRequest {
+                    private: Some(true),
+                    teamspace_id: None,
+                },
+                title: "Secret plans".into(),
+                icon: None,
+                position: None,
+            },
+            "test",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    let page = f.pages.get_page(f.workspace, id, f.user).await.unwrap();
+    let block = |page_id: String| json!({"id": page_id.clone(), "type": "page", "props": {"pageId": page_id}});
+    f.pages
+        .update_page(
+            f.workspace,
+            id,
+            f.user,
+            page.version,
+            PageChanges {
+                content: Some(vec![
+                    block(child["id"].as_str().unwrap().to_owned()),
+                    block(secret.id.to_string()),
+                ]),
+                ..PageChanges::default()
+            },
+            "test",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    let (code, read) = f
+        .call(Some(&writer), "GET", &format!("/docs/{id}"), None)
+        .await;
+    assert_eq!(code, StatusCode::OK, "{read}");
+    assert_eq!(
+        read["markdown"],
+        format!(
+            "[Launch \\[notes\\]](/docs/{})\n\n[Untitled](/docs/{})\n",
+            child["id"].as_str().unwrap(),
+            secret.id
+        ),
+        "{read}"
+    );
+    assert!(!read.to_string().contains("Secret plans"), "{read}");
+}
+
+/// A stored attachment of `task`, as an upload leaves it; returns the blob's storage key.
+async fn attach(f: &Fixture, task: Id) -> String {
+    let blob = Id::new_v7();
+    let key = format!("blobs/{blob}");
+    sqlx::query("INSERT INTO attachment_blobs (id, workspace_id, sha256, byte_size, storage_key, created_at, quarantine_until) VALUES ($1, $2, $3, 3, $4, 1, 1)")
+        .bind(blob.to_string()).bind(f.workspace.to_string()).bind(blob.to_string()).bind(&key)
+        .execute(f.database.pool()).await.unwrap();
+    sqlx::query("INSERT INTO attachment_references (id, workspace_id, task_id, comment_id, owner_id, blob_id, display_name, media_type, byte_size, created_at) VALUES ($1, $2, $3, NULL, $4, $5, 'a.txt', 'text/plain', 3, 1)")
+        .bind(Id::new_v7().to_string()).bind(f.workspace.to_string()).bind(task.to_string())
+        .bind(f.user.to_string()).bind(blob.to_string())
+        .execute(f.database.pool()).await.unwrap();
+    key
+}
+
+async fn trashed(f: &Fixture) -> Vec<String> {
+    f.tasks
+        .task_trash(f.workspace, f.user, None, 100, TimestampMillis::now())
+        .await
+        .unwrap()
+        .items
+        .into_iter()
+        .map(|task| task.id.to_string())
+        .collect()
+}
+
+async fn rows(f: &Fixture, table: &str, column: &str, ids: &[Id]) -> i64 {
+    let mut total = 0;
+    for id in ids {
+        total += count(
+            f,
+            &format!("SELECT COUNT(*) FROM {table} WHERE {column} = $1"),
+            &id.to_string(),
+        )
+        .await;
+    }
+    total
+}
+
+#[tokio::test]
+async fn permanent_delete_removes_a_trashed_or_live_task_like_the_trash_purge() {
+    let f = Fixture::new().await;
+    let (token, _) = f.token(&[ApiTokenScope::TasksWrite], false).await;
+    let new = |title: &'static str, parent: Option<Id>| {
+        create_task(
+            &f.tasks,
+            &f.database,
+            f.workspace,
+            f.user,
+            f.project,
+            title,
+            parent,
+        )
+    };
+    let version = |task: Id| {
+        let f = &f;
+        let token = token.clone();
+        async move {
+            let (code, read) = f
+                .call(Some(&token), "GET", &format!("/tasks/{task}"), None)
+                .await;
+            assert_eq!(code, StatusCode::OK, "{read}");
+            read["version"].clone()
+        }
+    };
+    let parent = new("Parent", None).await;
+    let child = new("Child", Some(parent)).await;
+    let key = attach(&f, parent).await;
+    let (code, _) = f
+        .call(
+            Some(&token),
+            "POST",
+            &format!("/tasks/{child}/comments"),
+            Some(json!({"body": "A comment"})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::CREATED);
+
+    // The default DELETE only moves the tree to the trash.
+    let (code, _) = f
+        .call(
+            Some(&token),
+            "DELETE",
+            &format!("/tasks/{parent}?expected_version={}", version(parent).await),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::NO_CONTENT);
+    let trash = trashed(&f).await;
+    assert!(trash.contains(&parent.to_string()) && trash.contains(&child.to_string()));
+    assert_eq!(
+        rows(&f, "attachment_references", "task_id", &[parent]).await,
+        1
+    );
+    assert_eq!(rows(&f, "task_comments", "task_id", &[child]).await, 1);
+
+    // A task in the trash cannot change and its version cannot be read, so it is not checked.
+    let (code, problem) = f
+        .call(
+            Some(&token),
+            "DELETE",
+            &format!("/tasks/{parent}?expected_version=1&permanent=true"),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::NO_CONTENT, "{problem}");
+    let trash = trashed(&f).await;
+    assert!(!trash.contains(&parent.to_string()) && !trash.contains(&child.to_string()));
+    assert_eq!(rows(&f, "tasks", "id", &[parent, child]).await, 0);
+    assert_eq!(
+        rows(&f, "attachment_references", "task_id", &[parent]).await,
+        0
+    );
+    assert_eq!(rows(&f, "task_comments", "task_id", &[child]).await, 0);
+    assert_eq!(
+        count(
+            &f,
+            "SELECT COUNT(*) FROM attachment_blobs WHERE storage_key = $1",
+            &key
+        )
+        .await,
+        0
+    );
+    // The stored file goes with the next maintenance run, as for the 30-day purge.
+    assert_eq!(
+        count(
+            &f,
+            "SELECT COUNT(*) FROM attachment_file_deletions WHERE path = $1",
+            &key
+        )
+        .await,
+        1
+    );
+    let (_, metadata) = audit_of(&f, &parent.to_string(), "task.purged").await;
+    assert_eq!(metadata["tasks"], 2, "{metadata}");
+    for task in [parent, child] {
+        let (code, _) = f
+            .call(Some(&token), "GET", &format!("/tasks/{task}"), None)
+            .await;
+        assert_eq!(code, StatusCode::NOT_FOUND);
+    }
+    let (code, _) = f
+        .call(
+            Some(&token),
+            "DELETE",
+            &format!("/tasks/{parent}?expected_version=1&permanent=true"),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::NOT_FOUND);
+
+    // A live task needs its current version, and goes with its live sub-issues.
+    let live = new("Live", None).await;
+    let sub = new("Live child", Some(live)).await;
+    let (code, problem) = f
+        .call(
+            Some(&token),
+            "DELETE",
+            &format!("/tasks/{live}?expected_version=1&permanent=true"),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::CONFLICT, "{problem}");
+    assert_eq!(rows(&f, "tasks", "id", &[live, sub]).await, 2);
+    let (code, problem) = f
+        .call(
+            Some(&token),
+            "DELETE",
+            &format!(
+                "/tasks/{live}?expected_version={}&permanent=true",
+                version(live).await
+            ),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::NO_CONTENT, "{problem}");
+    assert_eq!(rows(&f, "tasks", "id", &[live, sub]).await, 0);
+    assert!(!trashed(&f).await.contains(&live.to_string()));
+}
+
+#[tokio::test]
+async fn permanent_delete_needs_the_scope_the_grant_and_an_owner_or_admin() {
+    let f = Fixture::new().await;
+    let version = f
+        .tasks
+        .get_task(f.workspace, f.task, f.user)
+        .await
+        .unwrap()
+        .version;
+    let (reader, _) = f.token(&[ApiTokenScope::TasksRead], false).await;
+    let (code, problem) = f
+        .call(
+            Some(&reader),
+            "DELETE",
+            &format!(
+                "/tasks/{}?expected_version={version}&permanent=true",
+                f.task
+            ),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::FORBIDDEN, "{problem}");
+    assert_eq!(problem["code"], "insufficient_scope");
+
+    // Outside the grant (the token only has `project`).
+    let (writer, _) = f.token(&[ApiTokenScope::TasksWrite], false).await;
+    let other = f
+        .tasks
+        .get_task(f.workspace, f.other_task, f.user)
+        .await
+        .unwrap()
+        .version;
+    let (code, _) = f
+        .call(
+            Some(&writer),
+            "DELETE",
+            &format!(
+                "/tasks/{}?expected_version={other}&permanent=true",
+                f.other_task
+            ),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::NOT_FOUND);
+
+    // A member may move tasks to the trash but not delete them forever, like teamspace pages.
+    // Members cannot make tokens, so this one is from an admin who is now a member.
+    let member = add_member(&f, "member@example.com", "admin").await;
+    let (member_token, _) = token_by(&f, member, false).await.unwrap();
+    sqlx::query("UPDATE memberships SET role = 'member' WHERE user_id = $1")
+        .bind(member.to_string())
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    let path = |version: Value| {
+        format!(
+            "/tasks/{}?expected_version={version}&permanent=true",
+            f.task
+        )
+    };
+    let (_, read) = f
+        .call(
+            Some(&member_token),
+            "GET",
+            &format!("/tasks/{}", f.task),
+            None,
+        )
+        .await;
+    let (code, problem) = f
+        .call(
+            Some(&member_token),
+            "DELETE",
+            &path(read["version"].clone()),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::FORBIDDEN, "{problem}");
+    assert_eq!(problem["code"], "workspace_action_forbidden");
+    assert_eq!(rows(&f, "tasks", "id", &[f.task]).await, 1);
+    assert!(
+        !trashed(&f).await.contains(&f.task.to_string()),
+        "refused, yet trashed"
+    );
+
+    let admin = add_member(&f, "admin@example.com", "admin").await;
+    let (admin_token, _) = token_by(&f, admin, false).await.unwrap();
+    let (code, problem) = f
+        .call(
+            Some(&admin_token),
+            "DELETE",
+            &path(read["version"].clone()),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::NO_CONTENT, "{problem}");
+    assert_eq!(rows(&f, "tasks", "id", &[f.task]).await, 0);
+
+    // A service account acts as the workspace owner.
+    let (service, _) = f.token(&[ApiTokenScope::TasksWrite], true).await;
+    let task = create_task(
+        &f.tasks,
+        &f.database,
+        f.workspace,
+        f.user,
+        f.project,
+        "SA",
+        None,
+    )
+    .await;
+    let (_, read) = f
+        .call(Some(&service), "GET", &format!("/tasks/{task}"), None)
+        .await;
+    let (code, problem) = f
+        .call(
+            Some(&service),
+            "DELETE",
+            &format!(
+                "/tasks/{task}?expected_version={}&permanent=true",
+                read["version"]
+            ),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::NO_CONTENT, "{problem}");
+    let (actor, metadata) = audit_of(&f, &task.to_string(), "task.purged").await;
+    assert_eq!(actor, None);
+    assert!(
+        metadata["actor_service_account_id"].is_string(),
+        "{metadata}"
+    );
 }
