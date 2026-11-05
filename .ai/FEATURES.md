@@ -98,6 +98,21 @@ Core files: `TasksPage.tsx`, `components/TaskList.tsx`, `components/TaskBoard.ts
   skipped); a relation Orbit cannot hold (one per pair of tasks, one duplicate per task, no chains) is checked before the
   write, skipped and counted. Trashed issues are left out. Shared importer code: server `task_import.rs`, web
   `api/importStatus.ts` and `components/ImportLayout.tsx`.
+- Trello import (`pages/TrelloImportPage.tsx`, `api/trelloImports.ts`; server `trello/`, routes `/imports/trello`,
+  migration 0068): "Import from Trello" in the header project menu and in Settings → Import opens `/tasks-import/trello`.
+  Same states and rules as the Asana and Linear imports. Connect takes a Power-Up API key and a read-only token (the page
+  links Trello's authorization page for the typed key); both are encrypted and wiped in every final state, and a key or
+  token Trello rejects shows Trello's reason under its field. Choose lists boards by Trello Workspace with open card counts
+  (archived boards unselected). Each board becomes a new Orbit project. Open lists become statuses in board order (same
+  name reused; a done-like name is completed, the first list unstarted, the others started); archived lists and archived
+  cards are skipped and counted. Open cards keep title, markdown description, card URL as source, labels (unnamed ones
+  named after their color, Trello colors kept), start and due dates, and list and card order; a card on a completed list
+  gets its last activity as completed time. A card member is assigned only when exactly one active Orbit member has the
+  same full name (Trello hides other members' emails); otherwise a "Members" line. Checklists become task lists
+  (checklist blocks) in the description, not sub-issues. Custom field values and "Due date: marked complete" on an open
+  list become description lines; link attachments a Links section. Uploaded attachments and uploads linked from the
+  description and comments are downloaded, attached, and their URLs rewritten; a download Trello refuses is counted.
+  Comments are written by the importer, oldest first, with author and time.
 
 ### Sub-issues
 

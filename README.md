@@ -7,7 +7,7 @@ workspace without your data leaving your server.
 ## Features
 
 - **Tasks**: projects with custom workflows, list, board and timeline views,
-  sub-issues, labels, saved views, trash, GitHub sync, and Asana and Linear import.
+  sub-issues, labels, saved views, trash, GitHub sync, and Asana, Linear and Trello import.
 - **Docs**: page tree with live collaborative editing, version history, search,
   and Notion import.
 - **Chat**: channels, direct messages, threads, files, and search.
@@ -19,7 +19,7 @@ workspace without your data leaving your server.
 - **Backups**: scheduled, verified backups to S3, with restore of single pages
   or tasks.
 - **Mobile**: iOS and Android app (`apps/mobile`). Saved views, timeline, tasks
-  trash, GitHub settings, export, API tokens, and Notion, Asana and Linear import are web-only.
+  trash, GitHub settings, export, API tokens, and Notion, Asana, Linear and Trello import are web-only.
 
 ## How it works
 
