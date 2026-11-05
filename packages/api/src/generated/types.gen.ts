@@ -2434,6 +2434,219 @@ export type NotionImportTree = {
     truncated: boolean;
 };
 
+/**
+ * An Obsidian import.
+ */
+export type ObsidianImport = {
+    /**
+     * The uploaded file's size.
+     */
+    archive_bytes: number;
+    created_at: string;
+    destination: null | ObsidianImportDestination;
+    /**
+     * Why the archive was refused, or why the import failed or expired.
+     */
+    error: string | null;
+    /**
+     * The uploaded file's name.
+     */
+    file_name: string;
+    id: string;
+    progress: ObsidianImportProgress;
+    report: null | ObsidianImportReport;
+    /**
+     * The imported top-level pages that still exist, in order (for "Open imported pages").
+     */
+    root_page_ids: Array<string>;
+    status: ObsidianImportStatus;
+    tree: null | ObsidianImportTree;
+    updated_at: string;
+    workspace_id: string;
+};
+
+/**
+ * Where the import puts its top-level pages.
+ */
+export type ObsidianImportDestination = {
+    /**
+     * The page the imported top-level pages go under, if any.
+     */
+    parent_page_id: string | null;
+    private: boolean;
+    /**
+     * `null` for the importer's private space.
+     */
+    teamspace_id: string | null;
+};
+
+/**
+ * Where the imported top-level pages go. With `parent_page_id` they become its sub-pages
+ * (and join its space); otherwise they go to the root of `teamspace_id`, of the caller's
+ * private space (`private: true`), or of the default teamspace.
+ */
+export type ObsidianImportDestinationBody = {
+    parent_page_id?: string | null;
+    private?: boolean | null;
+    teamspace_id?: string | null;
+};
+
+/**
+ * A page the import could not create or fill.
+ */
+export type ObsidianImportFailure = {
+    error: string;
+    path: string;
+    title: string;
+};
+
+export type ObsidianImportList = {
+    items: Array<ObsidianImport>;
+};
+
+/**
+ * One node of the scan tree.
+ */
+export type ObsidianImportNode = {
+    child_count: number;
+    kind: ObsidianImportNodeKind;
+    /**
+     * The note with the page's content: the note itself, or a folder's folder note
+     * (`Folder/Folder.md`); `null` for a folder without one.
+     */
+    note_path: string | null;
+    /**
+     * The parent folder's `path`; `null` at the top of the vault.
+     */
+    parent_path: string | null;
+    /**
+     * The vault path (`Folder/Sub` or `Folder/Note.md`); use it in `selection.paths`.
+     */
+    path: string;
+    /**
+     * The folder name, or the note's file name without `.md`.
+     */
+    title: string;
+};
+
+/**
+ * A folder or a note in the scan tree.
+ */
+export type ObsidianImportNodeKind = 'folder' | 'note';
+
+export type ObsidianImportProgress = {
+    done: number;
+    failed: number;
+    /**
+     * Pages to import (folders and notes).
+     */
+    total: number;
+};
+
+/**
+ * What the import carried over and what it left out.
+ */
+export type ObsidianImportReport = {
+    /**
+     * The first 200 failed pages.
+     */
+    failures: Array<ObsidianImportFailure>;
+    /**
+     * Files attached to the new pages.
+     */
+    files_imported: number;
+    /**
+     * Linked or embedded files that could not be attached (for example a type page files do
+     * not accept).
+     */
+    missing_files: number;
+    /**
+     * Files of the archive that were not imported, by reason.
+     */
+    skipped_files: ObsidianSkippedFiles;
+    /**
+     * Top-level blocks cut from notes larger than the page size limit.
+     */
+    truncated_blocks: number;
+    /**
+     * Pages the import created but never filled because it failed or was cancelled; they
+     * were moved to the trash (a restored page no longer counts).
+     */
+    unfilled_pages_trashed: number;
+    /**
+     * Links whose target is not an imported page or file; they stayed as text.
+     */
+    unresolved_links: number;
+};
+
+/**
+ * `{ "all": true }` for the whole vault, or `{ "paths": [...] }` for these folders and notes
+ * (a folder brings everything in it).
+ */
+export type ObsidianImportSelectionBody = {
+    all?: boolean | null;
+    paths?: Array<string> | null;
+};
+
+/**
+ * `obsidian_imports.status`.
+ */
+export type ObsidianImportStatus = 'scanning' | 'ready' | 'queued' | 'importing' | 'completed' | 'failed' | 'cancelled' | 'expired';
+
+/**
+ * What the archive holds. `nodes` are in tree order: every folder before its children,
+ * folders before notes, each by name.
+ */
+export type ObsidianImportTree = {
+    /**
+     * Files (images, PDFs, …) that notes link to or embed; they are attached to those pages.
+     */
+    attachments: number;
+    nodes: Array<ObsidianImportNode>;
+    skipped: ObsidianSkippedFiles;
+    /**
+     * Links and embeds whose target is not in the vault; they stay as text.
+     */
+    unresolved_links: number;
+};
+
+/**
+ * The vault as one `.zip` file in the `file` field.
+ */
+export type ObsidianImportUploadBody = {
+    file: Blob | File;
+};
+
+/**
+ * Files the scan skipped, by reason.
+ */
+export type ObsidianSkippedFiles = {
+    /**
+     * Obsidian canvases (`.canvas`).
+     */
+    canvas: number;
+    /**
+     * CSV files.
+     */
+    csv: number;
+    /**
+     * Files whose path differs from another file's only in letter case.
+     */
+    duplicates: number;
+    /**
+     * `.obsidian/`, `.trash/`, `__MACOSX/` and dotfiles.
+     */
+    system: number;
+    /**
+     * Files over the upload size limit.
+     */
+    too_large: number;
+    /**
+     * Files no note links to or embeds.
+     */
+    unreferenced: number;
+};
+
 export type OrderBy = 'manual' | 'priority' | 'created' | 'updated' | 'title' | 'due_date';
 
 export type OrderDirection = 'asc' | 'desc';
@@ -4021,6 +4234,11 @@ export type StartLinearImportBody = {
 export type StartNotionImportBody = {
     destination?: NotionImportDestinationBody;
     selection: NotionImportSelectionBody;
+};
+
+export type StartObsidianImportBody = {
+    destination?: ObsidianImportDestinationBody;
+    selection: ObsidianImportSelectionBody;
 };
 
 export type StartPasskeyRegistrationBody = {
@@ -15842,6 +16060,304 @@ export type StartNotionImportResponses = {
 };
 
 export type StartNotionImportResponse = StartNotionImportResponses[keyof StartNotionImportResponses];
+
+export type ListObsidianImportsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/obsidian';
+};
+
+export type ListObsidianImportsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * obsidian_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListObsidianImportsError = ListObsidianImportsErrors[keyof ListObsidianImportsErrors];
+
+export type ListObsidianImportsResponses = {
+    200: ObsidianImportList;
+};
+
+export type ListObsidianImportsResponse = ListObsidianImportsResponses[keyof ListObsidianImportsResponses];
+
+export type CreateObsidianImportData = {
+    body: ObsidianImportUploadBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/obsidian';
+};
+
+export type CreateObsidianImportErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * obsidian_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, import_in_progress
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large, obsidian_archive_too_large
+     */
+    413: TaskProblem;
+    /**
+     * obsidian_archive_invalid
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateObsidianImportError = CreateObsidianImportErrors[keyof CreateObsidianImportErrors];
+
+export type CreateObsidianImportResponses = {
+    201: ObsidianImport;
+};
+
+export type CreateObsidianImportResponse = CreateObsidianImportResponses[keyof CreateObsidianImportResponses];
+
+export type GetObsidianImportData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        import_id: string;
+    };
+    query?: {
+        /**
+         * Optional parts of an import detail response.
+         */
+        include?: 'tree';
+    };
+    url: '/api/v1/workspaces/{workspace_id}/imports/obsidian/{import_id}';
+};
+
+export type GetObsidianImportErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * obsidian_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetObsidianImportError = GetObsidianImportErrors[keyof GetObsidianImportErrors];
+
+export type GetObsidianImportResponses = {
+    200: ObsidianImport;
+};
+
+export type GetObsidianImportResponse = GetObsidianImportResponses[keyof GetObsidianImportResponses];
+
+export type CancelObsidianImportData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        import_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/obsidian/{import_id}/cancel';
+};
+
+export type CancelObsidianImportErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * obsidian_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, obsidian_import_state_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CancelObsidianImportError = CancelObsidianImportErrors[keyof CancelObsidianImportErrors];
+
+export type CancelObsidianImportResponses = {
+    200: ObsidianImport;
+};
+
+export type CancelObsidianImportResponse = CancelObsidianImportResponses[keyof CancelObsidianImportResponses];
+
+export type StartObsidianImportData = {
+    body: StartObsidianImportBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        import_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/obsidian/{import_id}/start';
+};
+
+export type StartObsidianImportErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * obsidian_import_not_found, page_not_found, teamspace_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, import_in_progress, obsidian_import_state_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed, obsidian_import_too_large
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type StartObsidianImportError = StartObsidianImportErrors[keyof StartObsidianImportErrors];
+
+export type StartObsidianImportResponses = {
+    200: ObsidianImport;
+};
+
+export type StartObsidianImportResponse = StartObsidianImportResponses[keyof StartObsidianImportResponses];
 
 export type ListTrelloImportsData = {
     body?: never;
