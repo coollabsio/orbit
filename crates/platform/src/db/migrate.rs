@@ -491,6 +491,11 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0071_trello_imports.sql"),
                     false,
                 ),
+                Migration::new(
+                    72,
+                    include_str!("../../../../apps/server/migrations/0072_obsidian_imports.sql"),
+                    false,
+                ),
             ],
         );
         runner.postgres = vec![
@@ -642,6 +647,13 @@ impl MigrationRunner {
             Migration::new(
                 71,
                 include_str!("../../../../apps/server/migrations/postgres/0071_trello_imports.sql"),
+                false,
+            ),
+            Migration::new(
+                72,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0072_obsidian_imports.sql"
+                ),
                 false,
             ),
         ];
