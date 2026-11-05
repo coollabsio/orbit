@@ -16,6 +16,8 @@ const KIND_LABELS: Record<string, string> = {
   'asana.import': 'Asana imports',
   'linear.scan': 'Linear scans',
   'linear.import': 'Linear imports',
+  'trello.scan': 'Trello scans',
+  'trello.import': 'Trello imports',
   'workspace.export': 'Workspace exports',
 }
 

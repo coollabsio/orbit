@@ -425,6 +425,7 @@ function WorkspaceTasksPage() {
                     <DropdownMenuItem onClick={() => setShowNewProject(true)}><Plus />New project</DropdownMenuItem>
                     <DropdownMenuItem onClick={() => navigate('/tasks-import')}><Import />Import from Asana</DropdownMenuItem>
                     <DropdownMenuItem onClick={() => navigate('/tasks-import/linear')}><Import />Import from Linear</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => navigate('/tasks-import/trello')}><Import />Import from Trello</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
                 <PaneTitle className="max-[899px]:min-w-0 max-[899px]:flex-1 max-[899px]:basis-0">{viewTitle}</PaneTitle>

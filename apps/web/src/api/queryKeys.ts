@@ -103,6 +103,13 @@ export const queryKeys = {
     detail: (workspaceId: string, importId: string) => ['linear-imports', workspaceId, 'detail', importId] as const,
     tree: (workspaceId: string, importId: string) => ['linear-imports', workspaceId, 'tree', importId] as const,
   },
+  /** Outside the workspace prefix for the same reason as `notionImports`. */
+  trelloImports: {
+    all: (workspaceId: string) => ['trello-imports', workspaceId] as const,
+    list: (workspaceId: string) => ['trello-imports', workspaceId, 'list'] as const,
+    detail: (workspaceId: string, importId: string) => ['trello-imports', workspaceId, 'detail', importId] as const,
+    tree: (workspaceId: string, importId: string) => ['trello-imports', workspaceId, 'tree', importId] as const,
+  },
   /**
    * Deliberately outside the workspace prefix: the list changes rarely, and the chat socket says when it does
    * (`emoji.changed`), so a task or page event must not fetch it again.

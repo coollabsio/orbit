@@ -1,7 +1,7 @@
-import type { AsanaImportStatus, LinearImportStatus } from '@orbit/api/generated/types.gen'
+import type { AsanaImportStatus, LinearImportStatus, TrelloImportStatus } from '@orbit/api/generated/types.gen'
 
-/** The states every task import (Asana, Linear) goes through. */
-export type TaskImportStatus = AsanaImportStatus | LinearImportStatus
+/** The states every task import (Asana, Linear, Trello) goes through. */
+export type TaskImportStatus = AsanaImportStatus | LinearImportStatus | TrelloImportStatus
 
 /** How often an import that is still working is polled. */
 export const IMPORT_POLL_MS = 2000
