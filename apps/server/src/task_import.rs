@@ -15,6 +15,14 @@ use crate::notion::import::clamp;
 use crate::repositories::billing;
 use crate::repositories::tasks::{TaskError, TaskRepository};
 
+/// Colors of the projects and labels an importer creates, in turn.
+pub(crate) const PROJECT_COLORS: [&str; 6] = [
+    "#5e6ad2", "#26b5ce", "#4cb782", "#f2c94c", "#f2994a", "#eb5757",
+];
+pub(crate) const LABEL_COLORS: [&str; 6] = [
+    "#eb5757", "#f2994a", "#f2c94c", "#4cb782", "#26b5ce", "#bb87fc",
+];
+
 /// Both job kinds of an importer: two at a time on all servers and one per workspace (defaults;
 /// Admin can change them), a few retries for outages of the source. Same as the Notion import.
 #[must_use]

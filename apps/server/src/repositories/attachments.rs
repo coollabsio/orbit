@@ -35,6 +35,14 @@ pub struct CreatedAttachment {
     pub deleted: bool,
 }
 
+/// A file attached to a task, as [`AttachmentRepository::task_files`] lists it.
+#[derive(Clone, Debug)]
+pub struct TaskFile {
+    pub id: Id,
+    pub sha256: String,
+    pub byte_size: i64,
+}
+
 #[derive(Clone, Debug)]
 pub struct AttachmentList {
     pub items: Vec<CreatedAttachment>,
@@ -521,15 +529,16 @@ impl AttachmentRepository {
         })
     }
 
-    /// `(sha256, byte_size)` of the task's own attachments (not comment or inline files), so an
-    /// importer that retries a task can skip files it already attached.
-    pub async fn task_file_hashes(
+    /// The task's own attachments (not comment or inline files) with their content hash, so an
+    /// importer that retries a task can find the files it already attached.
+    pub async fn task_files(
         &self,
         workspace_id: Id,
         task_id: Id,
-    ) -> Result<Vec<(String, i64)>, AttachmentRepositoryError> {
-        Ok(sqlx::query_as(
-            "SELECT attachment_blobs.sha256, attachment_blobs.byte_size FROM attachment_references \
+    ) -> Result<Vec<TaskFile>, AttachmentRepositoryError> {
+        let rows: Vec<(String, String, i64)> = sqlx::query_as(
+            "SELECT attachment_references.id, attachment_blobs.sha256, attachment_blobs.byte_size \
+             FROM attachment_references \
              JOIN attachment_blobs ON attachment_blobs.id = attachment_references.blob_id \
              WHERE attachment_references.workspace_id = $1 AND attachment_references.task_id = $2 \
              AND attachment_references.comment_id IS NULL AND attachment_references.inline = 0",
@@ -537,7 +546,17 @@ impl AttachmentRepository {
         .bind(workspace_id.to_string())
         .bind(task_id.to_string())
         .fetch_all(self.database.pool())
-        .await?)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|(id, sha256, byte_size)| {
+                Some(TaskFile {
+                    id: id.parse().ok()?,
+                    sha256,
+                    byte_size,
+                })
+            })
+            .collect())
     }
 
     #[allow(clippy::too_many_arguments)]

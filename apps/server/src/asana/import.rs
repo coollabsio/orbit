@@ -49,9 +49,9 @@ use crate::repositories::tasks::{CommentContent, CreateTask, TaskError, TaskRepo
 use crate::secret_box::{decrypt_secret, encrypt_secret};
 pub use crate::task_import::JobRun;
 use crate::task_import::{
-    Failure, NewProject, display_instant, ensure_project, ensure_writable, find_or_create_label,
-    job_kind, member_emails, parse_date_millis, parse_instant_millis, parse_stored_id,
-    project_key_base, project_statuses, retryable, stopped,
+    Failure, LABEL_COLORS, NewProject, PROJECT_COLORS, display_instant, ensure_project,
+    ensure_writable, find_or_create_label, job_kind, member_emails, parse_date_millis,
+    parse_instant_millis, parse_stored_id, project_key_base, project_statuses, retryable, stopped,
 };
 
 /// Job kind names.
@@ -70,12 +70,6 @@ const MAX_FAILURES_LISTED: i64 = 200;
 const MAX_LISTED_IMPORTS: i64 = 20;
 const ACTIVE: &str = "('scanning', 'queued', 'importing')";
 const OPEN: &str = "('scanning', 'ready', 'queued', 'importing')";
-const PROJECT_COLORS: [&str; 6] = [
-    "#5e6ad2", "#26b5ce", "#4cb782", "#f2c94c", "#f2994a", "#eb5757",
-];
-const LABEL_COLORS: [&str; 6] = [
-    "#eb5757", "#f2994a", "#f2c94c", "#4cb782", "#26b5ce", "#bb87fc",
-];
 
 /// Both job kinds: [`job_kind`], as for the Notion import.
 #[must_use]
@@ -1625,7 +1619,7 @@ impl AsanaImportService {
         let attached = self
             .inner
             .attachments
-            .task_file_hashes(run.workspace_id, task_id)
+            .task_files(run.workspace_id, task_id)
             .await
             .map_err(|error| Failure::Transient(error.to_string()))?;
         let max_bytes = self.inner.settings.max_file_bytes;
@@ -1666,8 +1660,9 @@ impl AsanaImportService {
                 }
             };
             let sha256 = format!("{:x}", Sha256::digest(&bytes.bytes));
-            if attached.iter().any(|(hash, size)| {
-                *hash == sha256 && usize::try_from(*size).ok() == Some(bytes.bytes.len())
+            if attached.iter().any(|file| {
+                file.sha256 == sha256
+                    && usize::try_from(file.byte_size).ok() == Some(bytes.bytes.len())
             }) {
                 continue;
             }

@@ -247,6 +247,11 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::asana_import_routes::get_asana_import,
         crate::asana_import_routes::start_asana_import,
         crate::asana_import_routes::cancel_asana_import,
+        crate::linear_import_routes::create_linear_import,
+        crate::linear_import_routes::list_linear_imports,
+        crate::linear_import_routes::get_linear_import,
+        crate::linear_import_routes::start_linear_import,
+        crate::linear_import_routes::cancel_linear_import,
         crate::chat_routes::conversations::list_chat_conversations,
         crate::chat_routes::conversations::create_chat_channel,
         crate::chat_routes::conversations::update_chat_channel,
@@ -836,6 +841,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         }
         id if notion_import_operation(id) => notion_import_errors(id, &mut responses),
         id if asana_import_operation(id) => asana_import_errors(id, &mut responses),
+        id if linear_import_operation(id) => linear_import_errors(id, &mut responses),
         id if task_operation(id) => task_errors(id, &mut responses),
         id if page_comment_operation(id) => page_comment_errors(id, &mut responses),
         id if page_operation(id) => page_errors(id, &mut responses),
@@ -995,6 +1001,9 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "create_asana_import"
             | "get_asana_import"
             | "start_asana_import"
+            | "create_linear_import"
+            | "get_linear_import"
+            | "start_linear_import"
     )
 }
 
@@ -1063,6 +1072,39 @@ fn asana_import_errors(
             add_code(responses, "422", "validation_failed");
         }
         "cancel_asana_import" => add_code(responses, "409", "asana_import_state_conflict"),
+        _ => {}
+    }
+}
+
+fn linear_import_operation(operation_id: &str) -> bool {
+    matches!(
+        operation_id,
+        "create_linear_import"
+            | "list_linear_imports"
+            | "get_linear_import"
+            | "start_linear_import"
+            | "cancel_linear_import"
+    )
+}
+
+fn linear_import_errors(
+    operation_id: &str,
+    responses: &mut BTreeMap<&'static str, Vec<&'static str>>,
+) {
+    add_code(responses, "404", "linear_import_not_found");
+    match operation_id {
+        "create_linear_import" => {
+            add_code(responses, "409", "app_key_missing");
+            add_code(responses, "409", "import_in_progress");
+            add_code(responses, "422", "linear_token_invalid");
+            add_code(responses, "502", "linear_unavailable");
+        }
+        "start_linear_import" => {
+            add_code(responses, "409", "import_in_progress");
+            add_code(responses, "409", "linear_import_state_conflict");
+            add_code(responses, "422", "validation_failed");
+        }
+        "cancel_linear_import" => add_code(responses, "409", "linear_import_state_conflict"),
         _ => {}
     }
 }
