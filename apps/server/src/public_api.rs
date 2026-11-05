@@ -594,6 +594,9 @@ struct TasksQuery {
     label_id: Option<Id>,
     /// `none`, `low`, `medium`, `high` or `urgent`.
     priority: Option<String>,
+    /// Only the direct sub-issues of this task (a UUID or an identifier such as `ENG-12`), which
+    /// must be in an approved project.
+    parent_task_id: Option<String>,
     /// Text in the title or description, or a task identifier; up to 500 characters.
     q: Option<String>,
     /// The `next_cursor` of the previous page. Keep the other parameters the same.
@@ -629,9 +632,8 @@ struct CreateTaskBody {
     #[serde(default)]
     #[schema(value_type = Vec<String>)]
     label_ids: Vec<Id>,
-    /// A task in an approved project.
-    #[schema(value_type = Option<String>)]
-    parent_task_id: Option<Id>,
+    /// A task in an approved project: a UUID or an identifier such as `ENG-12`.
+    parent_task_id: Option<String>,
     /// Needs `due_at` and must not be after it.
     #[schema(value_type = Option<String>, format = DateTime)]
     due_start_at: Option<TimestampMillis>,
@@ -672,6 +674,10 @@ struct UpdateTaskBody {
     #[serde(default, deserialize_with = "present")]
     #[schema(value_type = Option<String>, format = DateTime)]
     due_at: Option<Option<TimestampMillis>>,
+    /// A task in an approved project (a UUID or an identifier such as `ENG-12`) makes this task
+    /// its sub-issue; `null` detaches it.
+    #[serde(default, deserialize_with = "present")]
+    parent_task_id: Option<Option<String>>,
 }
 
 /// A field that is present, `null` included: `null` clears the value, a missing field keeps it.
@@ -950,6 +956,9 @@ async fn list_tasks(
             assignee,
             label_id: query.label_id,
             priority: query.priority,
+            parent_task_id: api
+                .optional_task_id(query.parent_task_id.as_deref())
+                .await?,
             sort: Some((sort, order)),
             cursor: query.cursor,
             limit: query.limit,
@@ -1016,7 +1025,7 @@ async fn create_task(
             priority: body.priority,
             assignee_ids: body.assignee_ids,
             label_ids: body.label_ids,
-            parent_task_id: body.parent_task_id,
+            parent_task_id: api.optional_task_id(body.parent_task_id.as_deref()).await?,
             due_start_at: body.due_start_at,
             due_at: body.due_at,
         })
@@ -1058,6 +1067,10 @@ async fn update_task(
             label_ids: body.label_ids,
             due_start_at: body.due_start_at,
             due_at: body.due_at,
+            parent_task_id: match body.parent_task_id {
+                Some(parent) => Some(api.optional_task_id(parent.as_deref()).await?),
+                None => None,
+            },
         };
         api.update_task(&task, body.expected_version, patch).await
     }

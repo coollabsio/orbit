@@ -1491,6 +1491,78 @@ async fn due_dates_can_be_set_kept_and_cleared() {
 }
 
 #[tokio::test]
+async fn sub_issues_take_a_parent_by_identifier_and_can_move_and_detach() {
+    let f = Fixture::new().await;
+    let (token, _) = f.token(&[ApiTokenScope::TasksWrite], false).await;
+    let status = f.first_status(f.project).await;
+    let (_, parent) = f
+        .call(Some(&token), "GET", &format!("/tasks/{}", f.task), None)
+        .await;
+    let identifier = parent["identifier"].as_str().unwrap().to_lowercase();
+    let (code, child) = f
+        .call(
+            Some(&token),
+            "POST",
+            "/tasks",
+            Some(json!({"project_id": f.project, "status_id": status, "title": "Child", "parent_task_id": identifier})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{child}");
+    assert_eq!(child["parent_task_id"], f.task.to_string());
+    let (code, list) = f
+        .call(
+            Some(&token),
+            "GET",
+            &format!("/tasks?parent_task_id={identifier}"),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK, "{list}");
+    assert_eq!(list["items"].as_array().unwrap().len(), 1);
+    assert_eq!(list["items"][0]["id"], child["id"]);
+    let id = child["id"].as_str().unwrap().to_owned();
+    let (code, cycle) = f
+        .call(
+            Some(&token),
+            "PATCH",
+            &format!("/tasks/{}", f.task),
+            Some(json!({"expected_version": parent["version"], "parent_task_id": id})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY, "{cycle}");
+    assert_eq!(cycle["code"], "parent_cycle");
+    let (code, detached) = f
+        .call(
+            Some(&token),
+            "PATCH",
+            &format!("/tasks/{id}"),
+            Some(json!({"expected_version": child["version"], "parent_task_id": null})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK, "{detached}");
+    assert_eq!(detached["parent_task_id"], Value::Null);
+    let (code, hidden) = f
+        .call(
+            Some(&token),
+            "PATCH",
+            &format!("/tasks/{id}"),
+            Some(json!({"expected_version": detached["version"], "parent_task_id": f.other_task})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::NOT_FOUND, "{hidden}");
+    let (code, attached) = f
+        .call(
+            Some(&token),
+            "PATCH",
+            &format!("/tasks/{id}"),
+            Some(json!({"expected_version": detached["version"], "parent_task_id": identifier})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK, "{attached}");
+    assert_eq!(attached["parent_task_id"], f.task.to_string());
+}
+
+#[tokio::test]
 async fn task_lists_sort_and_find_unassigned_tasks() {
     let f = Fixture::new().await;
     let (token, _) = f.token(&[ApiTokenScope::TasksWrite], false).await;
