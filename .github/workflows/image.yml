@@ -114,13 +114,17 @@ jobs:
           docker rm -v "$container"
           file "$binary" | tee file.txt
           grep -E 'static(-pie|ally) linked' file.txt
+          grep ', stripped' file.txt
           "./$binary" --help > /dev/null
+          mkdir package
+          mv "$binary" package/orbit
+          XZ_OPT=-9 tar -C package -cJf "$binary.tar.xz" orbit
       - name: Keep release binary for the release job
         if: github.event_name == 'release'
         uses: actions/upload-artifact@v7
         with:
           name: orbit-linux-${{ matrix.uname }}
-          path: orbit-linux-${{ matrix.uname }}
+          path: orbit-linux-${{ matrix.uname }}.tar.xz
           if-no-files-found: error
           retention-days: 1
 
@@ -140,7 +144,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.release.tag_name }}
         run: |
-          files=(orbit-linux-x86_64 orbit-linux-aarch64)
+          files=(orbit-linux-x86_64.tar.xz orbit-linux-aarch64.tar.xz)
           sha256sum "${files[@]}" | tee SHA256SUMS
           # --clobber replaces the files when the workflow runs again for the same release.
           gh release upload "$TAG" "${files[@]}" SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
