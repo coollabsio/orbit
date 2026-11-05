@@ -21,9 +21,10 @@ use crate::repositories::api_tokens::{
 };
 use crate::repositories::pages::PageRepository;
 use crate::repositories::tasks::{
-    LabelRecord, ProjectRecord, StatusRecord, TaskError, TaskRepository,
+    CommentRecord, LabelRecord, ProjectRecord, SortOrder, StatusRecord, TaskError, TaskRepository,
+    TaskSort,
 };
-use crate::token_api::{NewTask, TaskPatch, TaskQuery, TokenApi, TokenApiError};
+use crate::token_api::{AssigneeFilter, NewTask, TaskPatch, TaskQuery, TokenApi, TokenApiError};
 
 pub const BASE_PATH: &str = "/api/public/v1";
 
@@ -67,6 +68,7 @@ pub fn router(state: PublicApiState) -> Router {
             "/tasks/{task}",
             get(get_task).patch(update_task).delete(delete_task),
         )
+        .route("/tasks/{task}/comments", get(comments).post(create_comment))
         .route("/docs", get(docs))
         .route("/docs/{page_id}", get(doc));
     let routes = Router::new()
@@ -433,6 +435,33 @@ impl From<LabelRecord> for LabelOut {
     }
 }
 
+#[derive(Serialize)]
+struct CommentOut {
+    id: Id,
+    task_id: Id,
+    author_id: Id,
+    body: String,
+    parent_id: Option<Id>,
+    version: u64,
+    created_at: TimestampMillis,
+    updated_at: TimestampMillis,
+}
+
+impl From<CommentRecord> for CommentOut {
+    fn from(c: CommentRecord) -> Self {
+        Self {
+            id: c.id,
+            task_id: c.task_id,
+            author_id: c.author_id,
+            body: c.body,
+            parent_id: c.parent_id,
+            version: c.version,
+            created_at: c.created_at,
+            updated_at: c.updated_at,
+        }
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PageQuery {
@@ -445,7 +474,10 @@ struct PageQuery {
 struct TasksQuery {
     project_id: Option<Id>,
     status_id: Option<Id>,
-    assignee_id: Option<Id>,
+    /// A member's user ID, or `none` for tasks without an assignee.
+    assignee_id: Option<String>,
+    sort: Option<String>,
+    order: Option<String>,
     label_id: Option<Id>,
     priority: Option<String>,
     q: Option<String>,
@@ -468,6 +500,8 @@ struct CreateTaskBody {
     #[serde(default)]
     label_ids: Vec<Id>,
     parent_task_id: Option<Id>,
+    due_start_at: Option<TimestampMillis>,
+    due_at: Option<TimestampMillis>,
 }
 
 fn default_priority() -> String {
@@ -484,6 +518,23 @@ struct UpdateTaskBody {
     priority: Option<String>,
     assignee_ids: Option<Vec<Id>>,
     label_ids: Option<Vec<Id>>,
+    #[serde(default, deserialize_with = "present")]
+    due_start_at: Option<Option<TimestampMillis>>,
+    #[serde(default, deserialize_with = "present")]
+    due_at: Option<Option<TimestampMillis>>,
+}
+
+/// A field that is present, `null` included: `null` clears the value, a missing field keeps it.
+fn present<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Option<TimestampMillis>>, D::Error> {
+    Option::<TimestampMillis>::deserialize(deserializer).map(Some)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CommentBody {
+    body: String,
 }
 
 #[derive(Deserialize)]
@@ -600,6 +651,30 @@ async fn list_tasks(
     query: Result<Query<TasksQuery>, QueryRejection>,
 ) -> Response {
     let query = input!(ctx, query);
+    let assignee = match query.assignee_id.as_deref() {
+        None => None,
+        Some("none") => Some(AssigneeFilter::Unassigned),
+        Some(id) => match id.parse() {
+            Ok(id) => Some(AssigneeFilter::User(id)),
+            Err(_) => return ctx.invalid("assignee_id must be a user ID or `none`."),
+        },
+    };
+    let sort = match query.sort.as_deref() {
+        None | Some("created_at") => TaskSort::CreatedAt,
+        Some("updated_at") => TaskSort::UpdatedAt,
+        Some("priority") => TaskSort::Priority,
+        Some("due_date") => TaskSort::DueDate,
+        Some("title") => TaskSort::Title,
+        Some(_) => {
+            return ctx
+                .invalid("sort must be created_at, updated_at, priority, due_date or title.");
+        }
+    };
+    let order = match query.order.as_deref() {
+        None | Some("desc") => SortOrder::Desc,
+        Some("asc") => SortOrder::Asc,
+        Some(_) => return ctx.invalid("order must be asc or desc."),
+    };
     let result = async {
         let api = s
             .api
@@ -609,9 +684,10 @@ async fn list_tasks(
             project_id: query.project_id,
             query: query.q,
             status_id: query.status_id,
-            assignee_id: query.assignee_id,
+            assignee,
             label_id: query.label_id,
             priority: query.priority,
+            sort: Some((sort, order)),
             cursor: query.cursor,
             limit: query.limit,
         })
@@ -657,6 +733,8 @@ async fn create_task(
             assignee_ids: body.assignee_ids,
             label_ids: body.label_ids,
             parent_task_id: body.parent_task_id,
+            due_start_at: body.due_start_at,
+            due_at: body.due_at,
         })
         .await
     }
@@ -683,6 +761,8 @@ async fn update_task(
             priority: body.priority,
             assignee_ids: body.assignee_ids,
             label_ids: body.label_ids,
+            due_start_at: body.due_start_at,
+            due_at: body.due_at,
         };
         api.update_task(&task, body.expected_version, patch).await
     }
@@ -741,4 +821,45 @@ async fn doc(
     }
     .await;
     ctx.reply(StatusCode::OK, result)
+}
+
+async fn comments(
+    State(s): State<PublicApiState>,
+    ctx: Ctx,
+    Path((_, task)): Path<(String, String)>,
+    query: Result<Query<PageQuery>, QueryRejection>,
+) -> Response {
+    let query = input!(ctx, query);
+    let result = async {
+        let api = s
+            .api
+            .authorize(&ctx.principal, ApiTokenScope::TasksRead, &ctx.request_id)
+            .await?;
+        let page = api
+            .comments(&task, query.cursor.as_deref(), query.limit)
+            .await?;
+        Ok(list::<_, CommentOut>(page.items, page.next_cursor))
+    }
+    .await;
+    ctx.reply(StatusCode::OK, result)
+}
+
+async fn create_comment(
+    State(s): State<PublicApiState>,
+    ctx: Ctx,
+    Path((_, task)): Path<(String, String)>,
+    body: Result<Json<CommentBody>, JsonRejection>,
+) -> Response {
+    let body = input!(ctx, body);
+    let result = async {
+        let api = s
+            .api
+            .authorize(&ctx.principal, ApiTokenScope::TasksWrite, &ctx.request_id)
+            .await?;
+        api.create_comment(&task, body.body)
+            .await
+            .map(CommentOut::from)
+    }
+    .await;
+    ctx.reply(StatusCode::CREATED, result)
 }

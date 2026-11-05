@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use orbit_platform::{Id, Row, TimestampMillis};
 use serde::Serialize;
-use serde_json::json;
+use serde_json::{Value, json};
 
 use crate::billing::WorkspaceAccess;
 use crate::repositories::api_tokens::{ApiTokenPrincipal, ApiTokenScope};
@@ -20,9 +20,9 @@ use crate::repositories::task_filter::{
     SubIssuesDisplay,
 };
 use crate::repositories::tasks::{
-    CreateTask, LabelRecord, Page, ProjectRecord, SortOrder, StatusRecord, TaskChanges, TaskError,
-    TaskFilter, TaskRecord, TaskRepository, TaskSort, TaskUpdate, TokenActor,
-    parse_task_identifier,
+    CommentContent, CommentRecord, CreateTask, LabelRecord, Page, ProjectRecord, SortOrder,
+    StatusRecord, TaskChanges, TaskError, TaskFilter, TaskRecord, TaskRepository, TaskSort,
+    TaskUpdate, TokenActor, parse_task_identifier,
 };
 use crate::repositories::workspaces::{WorkspaceError, WorkspaceRepository};
 
@@ -176,11 +176,19 @@ pub struct TaskQuery {
     pub project_id: Option<Id>,
     pub query: Option<String>,
     pub status_id: Option<Id>,
-    pub assignee_id: Option<Id>,
+    pub assignee: Option<AssigneeFilter>,
     pub label_id: Option<Id>,
     pub priority: Option<String>,
+    /// Newest first when unset.
+    pub sort: Option<(TaskSort, SortOrder)>,
     pub cursor: Option<String>,
     pub limit: Option<usize>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum AssigneeFilter {
+    User(Id),
+    Unassigned,
 }
 
 #[derive(Debug)]
@@ -193,6 +201,8 @@ pub struct NewTask {
     pub assignee_ids: Vec<Id>,
     pub label_ids: Vec<Id>,
     pub parent_task_id: Option<Id>,
+    pub due_start_at: Option<TimestampMillis>,
+    pub due_at: Option<TimestampMillis>,
 }
 
 #[derive(Debug, Default)]
@@ -203,6 +213,9 @@ pub struct TaskPatch {
     pub priority: Option<String>,
     pub assignee_ids: Option<Vec<Id>>,
     pub label_ids: Option<Vec<Id>>,
+    /// `Some(None)` clears the date.
+    pub due_start_at: Option<Option<TimestampMillis>>,
+    pub due_at: Option<Option<TimestampMillis>>,
 }
 
 #[derive(Clone)]
@@ -482,6 +495,10 @@ impl Authorized<'_> {
 
     pub async fn list_tasks(&self, query: TaskQuery) -> Result<Page<TaskView>> {
         self.need(ApiTokenScope::TasksRead)?;
+        let (sort, order) = query
+            .sort
+            .clone()
+            .unwrap_or((TaskSort::CreatedAt, SortOrder::Desc));
         let limit = query.limit.unwrap_or(50);
         if !(1..=100).contains(&limit)
             || query
@@ -537,12 +554,18 @@ impl Authorized<'_> {
                 json!([id.to_string()]),
             ));
         }
-        if let Some(id) = query.assignee_id {
-            children.push(condition(
+        match query.assignee {
+            Some(AssigneeFilter::User(id)) => children.push(condition(
                 FilterField::Assignee,
                 FilterOperator::Is,
                 json!([id.to_string()]),
-            ));
+            )),
+            Some(AssigneeFilter::Unassigned) => children.push(condition(
+                FilterField::Assignee,
+                FilterOperator::IsEmpty,
+                Value::Null,
+            )),
+            None => {}
         }
         if let Some(id) = query.label_id {
             children.push(condition(
@@ -564,8 +587,8 @@ impl Authorized<'_> {
                 children,
             },
             show_completed: ShowCompleted::All,
-            sort: TaskSort::CreatedAt,
-            order: SortOrder::Desc,
+            sort: sort.clone(),
+            order: order.clone(),
             parent_task_id: None,
             sub_issues: SubIssuesDisplay::Flat,
         };
@@ -643,8 +666,8 @@ impl Authorized<'_> {
                     position: None,
                     assignee_ids: input.assignee_ids,
                     label_ids: input.label_ids,
-                    due_start_at: None,
-                    due_at: None,
+                    due_start_at: input.due_start_at,
+                    due_at: input.due_at,
                     parent_task_id: input.parent_task_id,
                 },
                 self.request_id,
@@ -687,6 +710,8 @@ impl Authorized<'_> {
                         priority: patch.priority,
                         assignee_ids: patch.assignee_ids,
                         label_ids: patch.label_ids,
+                        due_start_at: patch.due_start_at,
+                        due_at: patch.due_at,
                         ..Default::default()
                     },
                 },
@@ -717,6 +742,71 @@ impl Authorized<'_> {
             )
             .await?;
         Ok(())
+    }
+
+    /// A live task in an approved project, by UUID or identifier (`ENG-12`).
+    async fn task(&self, task_ref: &str) -> Result<TaskRecord> {
+        let p = self.principal;
+        let id = self
+            .api
+            .tasks
+            .resolve_task_id(p.workspace_id, task_ref)
+            .await?;
+        let task = self
+            .api
+            .tasks
+            .get_task(p.workspace_id, id, p.creator_id)
+            .await?;
+        if self.approved(task.project_id) {
+            Ok(task)
+        } else {
+            Err(TaskError::NotFound.into())
+        }
+    }
+
+    pub async fn comments(
+        &self,
+        task_ref: &str,
+        cursor: Option<&str>,
+        limit: Option<usize>,
+    ) -> Result<Page<CommentRecord>> {
+        self.need(ApiTokenScope::TasksRead)?;
+        let limit = page_limit(cursor, limit)?;
+        let task = self.task(task_ref).await?;
+        let p = self.principal;
+        Ok(self
+            .api
+            .tasks
+            .comments(p.workspace_id, task.id, p.creator_id, cursor, limit)
+            .await?)
+    }
+
+    pub async fn create_comment(&self, task_ref: &str, body: String) -> Result<CommentRecord> {
+        self.need(ApiTokenScope::TasksWrite)?;
+        if body.trim().is_empty() || body.chars().count() > 100_000 || body.len() > 100_000 {
+            return Err(TokenApiError::Invalid("Invalid comment body"));
+        }
+        let p = self.principal;
+        let id = self
+            .api
+            .tasks
+            .resolve_task_id(p.workspace_id, task_ref)
+            .await?;
+        Ok(self
+            .granted()
+            .create_comment(
+                p.workspace_id,
+                id,
+                p.creator_id,
+                None,
+                CommentContent::Markdown {
+                    body,
+                    mentioned_user_ids: Vec::new(),
+                },
+                self.request_id,
+                TimestampMillis::now(),
+            )
+            .await?)
     }
 
     /// Docs and chat act as the token's creator, so they need a personal token.

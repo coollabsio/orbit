@@ -760,7 +760,6 @@ async fn docs_need_their_scope_and_a_personal_token_and_unserved_paths_are_not_f
     for path in [
         "/conversations".to_owned(),
         format!("/conversations/{}/messages", Id::new_v7()),
-        format!("/tasks/{}/comments", f.task),
     ] {
         let response = f
             .app
@@ -1111,4 +1110,213 @@ async fn labels_and_members_show_only_what_assigning_needs() {
     let (docs_only, _) = f.token(&[ApiTokenScope::DocsRead], false).await;
     let (code, _) = f.call(Some(&docs_only), "GET", "/members", None).await;
     assert_eq!(code, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn comments_follow_the_grant_scopes_and_attribution() {
+    let f = Fixture::new().await;
+    let (writer, writer_id) = f.token(&[ApiTokenScope::TasksWrite], false).await;
+    let (reader, _) = f.token(&[ApiTokenScope::TasksRead], false).await;
+    let (bot, bot_id) = f.token(&[ApiTokenScope::TasksWrite], true).await;
+    let path = format!("/tasks/{}/comments", f.task);
+
+    let (code, empty) = f.call(Some(&reader), "GET", &path, None).await;
+    assert_eq!(code, StatusCode::OK, "{empty}");
+    assert_eq!(empty, json!({"items": [], "next_cursor": null}));
+    let (code, comment) = f
+        .call(
+            Some(&writer),
+            "POST",
+            &path,
+            Some(json!({"body": "Shipped in **512**"})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{comment}");
+    assert_eq!(comment["body"], "Shipped in **512**");
+    assert_eq!(comment["task_id"], f.task.to_string());
+    assert_eq!(comment["author_id"], f.user.to_string());
+    let id = comment["id"].as_str().unwrap().to_owned();
+    let (_, listed) = f.call(Some(&reader), "GET", &path, None).await;
+    assert_eq!(listed["items"][0]["id"], id);
+    let (actor, metadata) = audit_of(&f, &id, "comment.created").await;
+    assert_eq!(actor.as_deref(), Some(f.user.to_string().as_str()));
+    assert_eq!(metadata, json!({"api_token_id": writer_id}));
+
+    let (code, by_bot) = f
+        .call(Some(&bot), "POST", &path, Some(json!({"body": "From CI"})))
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{by_bot}");
+    let (actor, metadata) = audit_of(&f, by_bot["id"].as_str().unwrap(), "comment.created").await;
+    assert_eq!(actor, None);
+    assert_eq!(metadata["api_token_id"], json!(bot_id));
+    assert!(
+        metadata["actor_service_account_name"].is_string(),
+        "{metadata}"
+    );
+
+    let (code, problem) = f
+        .call(Some(&reader), "POST", &path, Some(json!({"body": "no"})))
+        .await;
+    assert_eq!(code, StatusCode::FORBIDDEN);
+    assert_eq!(problem["code"], "insufficient_scope");
+    let (code, _) = f
+        .call(Some(&writer), "POST", &path, Some(json!({"body": "  "})))
+        .await;
+    assert_eq!(code, StatusCode::BAD_REQUEST);
+
+    let secret = format!("/tasks/{}/comments", f.other_task);
+    let (code, _) = f.call(Some(&writer), "GET", &secret, None).await;
+    assert_eq!(code, StatusCode::NOT_FOUND);
+    let (code, _) = f
+        .call(
+            Some(&writer),
+            "POST",
+            &secret,
+            Some(json!({"body": "leak"})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::NOT_FOUND);
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM task_comments WHERE task_id = $1")
+        .bind(f.other_task.to_string())
+        .fetch_one(f.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+}
+
+#[tokio::test]
+async fn due_dates_can_be_set_kept_and_cleared() {
+    let f = Fixture::new().await;
+    let (token, _) = f.token(&[ApiTokenScope::TasksWrite], false).await;
+    let status = f.first_status(f.project).await;
+    let (code, task) = f
+        .call(
+            Some(&token),
+            "POST",
+            "/tasks",
+            Some(
+                json!({"project_id": f.project, "status_id": status, "title": "Due",
+                "due_start_at": "2026-12-01T00:00:00.000Z", "due_at": "2026-12-05T00:00:00.000Z"}),
+            ),
+        )
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{task}");
+    assert_eq!(task["due_start_at"], "2026-12-01T00:00:00.000Z");
+    assert_eq!(task["due_at"], "2026-12-05T00:00:00.000Z");
+    let id = task["id"].as_str().unwrap().to_owned();
+    let (code, kept) = f
+        .call(
+            Some(&token),
+            "PATCH",
+            &format!("/tasks/{id}"),
+            Some(json!({"expected_version": 0, "title": "Due 2"})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK, "{kept}");
+    assert_eq!(kept["due_at"], "2026-12-05T00:00:00.000Z");
+    let (code, cleared) = f
+        .call(
+            Some(&token),
+            "PATCH",
+            &format!("/tasks/{id}"),
+            Some(json!({"expected_version": 1, "due_start_at": null, "due_at": null})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK, "{cleared}");
+    assert_eq!(cleared["due_at"], Value::Null);
+    assert_eq!(cleared["due_start_at"], Value::Null);
+    let (code, _) = f
+        .call(
+            Some(&token),
+            "POST",
+            "/tasks",
+            Some(
+                json!({"project_id": f.project, "status_id": status, "title": "Bad",
+                "due_start_at": "2026-12-09T00:00:00.000Z", "due_at": "2026-12-05T00:00:00.000Z"}),
+            ),
+        )
+        .await;
+    assert_eq!(code, StatusCode::UNPROCESSABLE_ENTITY);
+    let (code, _) = f
+        .call(Some(&token), "POST", "/tasks", Some(json!({"project_id": f.project, "status_id": status, "title": "Bad", "due_at": "tomorrow"})))
+        .await;
+    assert_eq!(code, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn task_lists_sort_and_find_unassigned_tasks() {
+    let f = Fixture::new().await;
+    let (token, _) = f.token(&[ApiTokenScope::TasksWrite], false).await;
+    let status = f.first_status(f.project).await;
+    for (title, assignees) in [("B assigned", json!([f.user])), ("A open", json!([]))] {
+        let (code, _) = f
+            .call(
+                Some(&token),
+                "POST",
+                "/tasks",
+                Some(json!({"project_id": f.project, "status_id": status, "title": title, "assignee_ids": assignees})),
+            )
+            .await;
+        assert_eq!(code, StatusCode::CREATED);
+    }
+    let titles = |page: &Value| {
+        page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|task| task["title"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>()
+    };
+    let (code, page) = f
+        .call(Some(&token), "GET", "/tasks?sort=title&order=asc", None)
+        .await;
+    assert_eq!(code, StatusCode::OK, "{page}");
+    assert_eq!(titles(&page), ["A open", "Approved task", "B assigned"]);
+    let (_, page) = f
+        .call(Some(&token), "GET", "/tasks?sort=title&order=desc", None)
+        .await;
+    assert_eq!(titles(&page), ["B assigned", "Approved task", "A open"]);
+    let (_, page) = f
+        .call(
+            Some(&token),
+            "GET",
+            "/tasks?sort=title&order=asc&limit=1",
+            None,
+        )
+        .await;
+    let cursor = page["next_cursor"].as_str().unwrap().to_owned();
+    let (_, next) = f
+        .call(
+            Some(&token),
+            "GET",
+            &format!("/tasks?sort=title&order=asc&limit=1&cursor={cursor}"),
+            None,
+        )
+        .await;
+    assert_eq!(titles(&next), ["Approved task"]);
+
+    let (_, page) = f
+        .call(
+            Some(&token),
+            "GET",
+            "/tasks?assignee_id=none&sort=title&order=asc",
+            None,
+        )
+        .await;
+    assert_eq!(titles(&page), ["A open", "Approved task"]);
+    let (_, page) = f
+        .call(
+            Some(&token),
+            "GET",
+            &format!("/tasks?assignee_id={}", f.user),
+            None,
+        )
+        .await;
+    assert_eq!(titles(&page), ["B assigned"]);
+    for bad in ["sort=position", "order=up", "assignee_id=nobody"] {
+        let (code, _) = f
+            .call(Some(&token), "GET", &format!("/tasks?{bad}"), None)
+            .await;
+        assert_eq!(code, StatusCode::BAD_REQUEST, "{bad}");
+    }
 }

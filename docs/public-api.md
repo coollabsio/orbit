@@ -37,7 +37,7 @@ that this person is still a member of the workspace and that their account is
 not suspended. A service-account token also needs its service account to be
 active. It can use tasks only, not docs.
 
-The audit log records each task write with the ID of the token
+The audit log records each task and comment write with the ID of the token
 (`api_token_id`). A personal token shows its creator as the actor. A
 service-account token shows the service account as the actor and as the
 creator of the tasks that it makes.
@@ -50,8 +50,8 @@ API tokens and MCP OAuth connections use the same four scopes. In
 
 | Scope | Access in **Settings → API tokens** | Public API endpoints |
 | --- | --- | --- |
-| `tasks:read` | Tasks: **Read** | `GET /projects`, `GET /projects/{id}/statuses`, `GET /tasks`, `GET /tasks/{task}` |
-| `tasks:write` | Tasks: **Write** | `POST /tasks`, `PATCH /tasks/{task}`, `DELETE /tasks/{task}`, `POST /integrations/discord/events` |
+| `tasks:read` | Tasks: **Read** | `GET` projects, statuses, labels, members, tasks and comments |
+| `tasks:write` | Tasks: **Write** | Create, update and delete tasks, add comments, `POST /integrations/discord/events` |
 | `docs:read` | Docs: **Read** | `GET /docs`, `GET /docs/{page_id}` |
 | `chat:read` | Chat: **Read** | None. Chat is available through MCP only. |
 
@@ -168,8 +168,11 @@ A task:
 
 `GET /workspaces/{workspace_id}/tasks`. Scope: `tasks:read`. Tasks in the approved projects, newest first,
 including completed tasks and sub-issues. Optional parameters: `project_id`,
-`status_id`, `assignee_id`, `label_id`, `priority`, `q` (text in the title or
-description, or an identifier), `cursor` and `limit`.
+`status_id`, `assignee_id` (a user ID, or `none` for tasks without an
+assignee), `label_id`, `priority`, `q` (text in the title or description, or an
+identifier), `sort` (`created_at`, `updated_at`, `priority`, `due_date` or
+`title`; default `created_at`), `order` (`desc` or `asc`; default `desc`),
+`cursor` and `limit`. Keep the same parameters when you send `cursor`.
 
 ```bash
 curl -sS -G "$ORBIT_WS/tasks" -H "Authorization: Bearer $ORBIT_TOKEN" \
@@ -185,7 +188,9 @@ curl -sS "$ORBIT_WS/tasks/ENG-12" -H "Authorization: Bearer $ORBIT_TOKEN"
 `POST /workspaces/{workspace_id}/tasks`. Scope: `tasks:write`. Response: `201` with the task. Body:
 `project_id` and `status_id` (required), `title` (required, 1 to 500
 characters), and the optional `description` (Markdown, up to 50,000 bytes),
-`priority` (default `none`), `assignee_ids`, `label_ids` and `parent_task_id`.
+`priority` (default `none`), `assignee_ids`, `label_ids`, `parent_task_id`,
+`due_start_at` and `due_at` (RFC 3339 times; `due_start_at` needs `due_at` and
+must not be after it).
 The assignees must be members of the workspace. The labels and the status must
 be in the task's project. The parent and all the tasks related to it must be in
 approved projects.
@@ -198,8 +203,9 @@ curl -sS "$ORBIT_WS/tasks" -H "Authorization: Bearer $ORBIT_TOKEN" \
 
 `PATCH /workspaces/{workspace_id}/tasks/{task}`. Scope: `tasks:write`. Response: `200` with the task. Body:
 `expected_version` (required, the `version` that you read), and the optional
-`title`, `description`, `status_id`, `priority`, `assignee_ids` and `label_ids`.
-A list replaces the old list. If the task changed after you read it, the
+`title`, `description`, `status_id`, `priority`, `assignee_ids`, `label_ids`,
+`due_start_at` and `due_at`. A list replaces the old list. A missing field keeps
+its value, and `null` clears a due date. If the task changed after you read it, the
 response is `409`. Read the task again, then try again. All the tasks in the
 task's parent and sub-issue tree must be in approved projects.
 
@@ -216,6 +222,26 @@ trash for 30 days.
 ```bash
 curl -sS -X DELETE "$ORBIT_WS/tasks/ENG-12?expected_version=4" \
   -H "Authorization: Bearer $ORBIT_TOKEN"
+```
+
+### Comments
+
+`GET /workspaces/{workspace_id}/tasks/{task}/comments?cursor&limit`. Scope:
+`tasks:read`. Oldest first. Item:
+`{id, task_id, author_id, body, parent_id, version, created_at, updated_at}`.
+`body` is Markdown.
+
+```bash
+curl -sS "$ORBIT_WS/tasks/ENG-12/comments" -H "Authorization: Bearer $ORBIT_TOKEN"
+```
+
+`POST /workspaces/{workspace_id}/tasks/{task}/comments`. Scope: `tasks:write`.
+Body: `{"body": "Markdown"}` (1 to 100,000 characters). Response: `201` with
+the comment. The token's creator is the author.
+
+```bash
+curl -sS "$ORBIT_WS/tasks/ENG-12/comments" -H "Authorization: Bearer $ORBIT_TOKEN" \
+  -H 'Content-Type: application/json' -d '{"body":"Deployed in build 512."}'
 ```
 
 ### Docs

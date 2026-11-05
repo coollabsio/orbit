@@ -383,6 +383,8 @@ impl TaskTools {
                     assignee_ids: vec![],
                     label_ids: vec![],
                     parent_task_id: None,
+                    due_start_at: None,
+                    due_at: None,
                 })
                 .await
                 .map(|task| json!(task.task))
