@@ -164,93 +164,9 @@ impl AsanaAttachment {
 
 pub const ATTACHMENT_FIELDS: &str = "name,resource_subtype,size,view_url,permanent_url";
 
-/// Asana dates are `YYYY-MM-DD`; Orbit due dates are instants. A date becomes 12:00 UTC of that
-/// day, which falls on the same calendar day from UTC-11 to UTC+11.
-#[must_use]
-pub fn parse_date_millis(value: &str) -> Option<i64> {
-    let days = crate::repositories::task_filter::parse_ymd(value)?;
-    Some(days * 86_400_000 + 12 * 3_600_000)
-}
-
-/// An RFC 3339 instant (`2024-05-01T09:30:00.000Z`, or with a `±HH:MM` offset) in epoch
-/// milliseconds.
-#[must_use]
-pub fn parse_instant_millis(value: &str) -> Option<i64> {
-    let value = value.trim();
-    if !value.is_ascii() || value.len() < 20 || value.as_bytes()[10] != b'T' {
-        return None;
-    }
-    let days = crate::repositories::task_filter::parse_ymd(&value[..10])?;
-    let digits = |part: &str| -> Option<i64> {
-        part.bytes()
-            .all(|byte| byte.is_ascii_digit())
-            .then(|| part.parse().ok())
-            .flatten()
-    };
-    let rest = &value[11..];
-    if rest.len() < 9 || &rest[2..3] != ":" || &rest[5..6] != ":" {
-        return None;
-    }
-    let (hour, minute, second) = (
-        digits(&rest[..2])?,
-        digits(&rest[3..5])?,
-        digits(&rest[6..8])?,
-    );
-    if hour > 23 || minute > 59 || second > 60 {
-        return None;
-    }
-    let mut rest = &rest[8..];
-    let mut millis = 0;
-    if let Some(fraction) = rest.strip_prefix('.') {
-        let end = fraction
-            .find(|c: char| !c.is_ascii_digit())
-            .unwrap_or(fraction.len());
-        if end == 0 {
-            return None;
-        }
-        let padded = format!("{:0<3}", &fraction[..end.min(3)]);
-        millis = digits(&padded)?;
-        rest = &fraction[end..];
-    }
-    let offset_minutes = match rest {
-        "Z" | "z" => 0,
-        _ if rest.len() == 6 && &rest[3..4] == ":" => {
-            let sign = match &rest[..1] {
-                "+" => 1,
-                "-" => -1,
-                _ => return None,
-            };
-            sign * (digits(&rest[1..3])? * 60 + digits(&rest[4..6])?)
-        }
-        _ => return None,
-    };
-    Some(
-        days * 86_400_000
-            + (hour * 3_600 + minute * 60 + second - offset_minutes * 60) * 1_000
-            + millis,
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parses_asana_dates_and_instants() {
-        assert_eq!(
-            parse_date_millis("1970-01-02"),
-            Some(86_400_000 + 43_200_000)
-        );
-        assert_eq!(parse_date_millis("2024-02-30"), None);
-        assert_eq!(
-            parse_instant_millis("1970-01-01T00:00:01.250Z"),
-            Some(1_250)
-        );
-        assert_eq!(parse_instant_millis("1970-01-01T01:00:00+01:00"), Some(0));
-        assert_eq!(parse_instant_millis("1970-01-01T00:00:00.5Z"), Some(500));
-        assert_eq!(parse_instant_millis("1970-01-01 00:00:00Z"), None);
-        assert_eq!(parse_instant_millis("1970-01-01T00:00:00"), None);
-    }
 
     #[test]
     fn decodes_compact_tasks() {

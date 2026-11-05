@@ -33,23 +33,26 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
-use tokio_util::sync::CancellationToken;
 use utoipa::ToSchema;
 
 use super::client::{AsanaClient, AsanaClientConfig, AsanaError};
 use super::convert::{bold, bullet, html_to_blocks, link, paragraph, text};
-use super::model::{AsanaAttachment, AsanaTask, parse_date_millis, parse_instant_millis};
+use super::model::{AsanaAttachment, AsanaTask};
 pub use super::scan::{AsanaImportProject, AsanaImportTree, AsanaImportWorkspace};
 use super::scan::{MAX_PROJECTS, build_tree};
-use crate::billing::WorkspaceAccess;
 use crate::notion::files::sanitize_file_name;
 use crate::notion::import::clamp;
 use crate::repositories::attachments::AttachmentRepository;
-use crate::repositories::billing;
 use crate::repositories::membership;
 use crate::repositories::task_relations::NewTaskRelationType;
 use crate::repositories::tasks::{CommentContent, CreateTask, TaskError, TaskRepository};
 use crate::secret_box::{decrypt_secret, encrypt_secret};
+pub use crate::task_import::JobRun;
+use crate::task_import::{
+    Failure, NewProject, display_instant, ensure_project, ensure_writable, find_or_create_label,
+    job_kind, member_emails, parse_date_millis, parse_instant_millis, parse_stored_id,
+    project_key_base, project_statuses, retryable, stopped,
+};
 
 /// Job kind names.
 pub const SCAN_JOB: &str = "asana.scan";
@@ -74,32 +77,15 @@ const LABEL_COLORS: [&str; 6] = [
     "#eb5757", "#f2994a", "#f2c94c", "#4cb782", "#26b5ce", "#bb87fc",
 ];
 
-/// Both job kinds: two at a time on all servers and one per workspace (defaults; Admin can
-/// change them), a few retries for Asana outages. Same as the Notion import.
+/// Both job kinds: [`job_kind`], as for the Notion import.
 #[must_use]
 pub fn scan_job_kind() -> JobKind {
-    asana_job_kind(SCAN_JOB)
+    job_kind(SCAN_JOB)
 }
 
 #[must_use]
 pub fn import_job_kind() -> JobKind {
-    asana_job_kind(IMPORT_JOB)
-}
-
-fn asana_job_kind(name: &str) -> JobKind {
-    JobKind::new(name)
-        .with_concurrency_limit(2)
-        .with_workspace_limit(1)
-        .with_retry_policy(
-            5,
-            vec![
-                Duration::from_secs(30),
-                Duration::from_secs(2 * 60),
-                Duration::from_secs(10 * 60),
-                Duration::from_secs(30 * 60),
-            ],
-        )
-        .with_sensitive_fields(["token"])
+    job_kind(IMPORT_JOB)
 }
 
 /// Registers the `asana.scan` and `asana.import` handlers.
@@ -143,14 +129,6 @@ pub fn register_jobs(
 
 fn payload_import_id(payload: &Value) -> Option<Id> {
     payload.get("import_id")?.as_str()?.parse().ok()
-}
-
-/// One job attempt: `cancel` fires on server shutdown (the job resumes later), and
-/// `last_attempt` turns a transient Asana failure into a failed import instead of a retry.
-#[derive(Clone, Debug, Default)]
-pub struct JobRun {
-    pub cancel: CancellationToken,
-    pub last_attempt: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -348,18 +326,6 @@ struct Item {
     state: String,
 }
 
-/// Why one item could not be imported, and what that means for the import.
-enum Failure {
-    /// Server shutdown: the job is requeued and resumes; never fails the import.
-    Interrupted,
-    /// Record on the item and continue.
-    Item(String),
-    /// Stop the import (revoked token, read-only workspace, task limit).
-    Fatal(String),
-    /// Asana is overloaded or unreachable: retry the job later.
-    Transient(String),
-}
-
 impl From<AsanaError> for Failure {
     fn from(error: AsanaError) -> Self {
         match &error {
@@ -374,28 +340,6 @@ impl From<AsanaError> for Failure {
             }
             AsanaError::Api { status, .. } if *status >= 500 => Self::Transient(error.to_string()),
             _ => Self::Item(error.to_string()),
-        }
-    }
-}
-
-impl From<sqlx::Error> for Failure {
-    fn from(error: sqlx::Error) -> Self {
-        Self::Transient(format!("database error: {error}"))
-    }
-}
-
-impl From<TaskError> for Failure {
-    fn from(error: TaskError) -> Self {
-        match error {
-            TaskError::Unavailable(error) => Self::from(error),
-            TaskError::TrialLimit(reached) => Self::Fatal(format!(
-                "The import stopped at the trial's limit. {}",
-                reached.detail()
-            )),
-            TaskError::NotFound => {
-                Self::Item("The project or task was deleted during the import.".to_owned())
-            }
-            other => Self::Item(format!("Orbit refused the task: {other}.")),
         }
     }
 }
@@ -893,7 +837,7 @@ impl AsanaImportService {
         }
         let workspace_id = parse_stored_id(row.get("workspace_id"))?;
         let user_id = parse_stored_id(row.get("user_id"))?;
-        self.ensure_writable(workspace_id).await?;
+        ensure_writable(self.database(), workspace_id).await?;
         let report: StoredReport = row
             .get::<Option<String>, _>("report_json")
             .and_then(|json| serde_json::from_str(&json).ok())
@@ -909,23 +853,7 @@ impl AsanaImportService {
         .execute(self.database().pool())
         .await?;
 
-        let members = sqlx::query(
-            "SELECT users.id, users.normalized_email FROM memberships \
-             JOIN users ON users.id = memberships.user_id \
-             WHERE memberships.workspace_id = $1 AND users.suspended_at IS NULL",
-        )
-        .bind(workspace_id.to_string())
-        .fetch_all(self.database().pool())
-        .await?
-        .into_iter()
-        .filter_map(|member| {
-            let id = member.get::<String, _>("id").parse().ok()?;
-            Some((
-                member.get::<String, _>("normalized_email").to_lowercase(),
-                id,
-            ))
-        })
-        .collect();
+        let members = member_emails(self.database(), workspace_id).await?;
         let mut run = Run {
             import_id,
             workspace_id,
@@ -1067,7 +995,7 @@ impl AsanaImportService {
     ) -> Result<(), Failure> {
         let project_id = self.ensure_project(run, item, index).await?;
         let sections = run.client.sections(&item.asana_gid).await?;
-        let mut statuses = self.statuses(project_id).await?;
+        let mut statuses = project_statuses(self.database(), project_id).await?;
         let mut mapped = Vec::with_capacity(sections.len());
         for (position, section) in sections.iter().enumerate() {
             let name = section
@@ -1146,60 +1074,21 @@ impl AsanaImportService {
                 id
             }
         };
-        let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM projects WHERE id = $1")
-            .bind(project_id.to_string())
-            .fetch_one(self.database().pool())
-            .await?;
-        if exists == 0 {
-            let name = clamp(item.title.trim(), 200, 200);
-            let name = if name.is_empty() {
-                "Asana project".to_owned()
-            } else {
-                name
-            };
-            let base = project_key_base(&name);
-            let mut created = false;
-            for attempt in 1..=50 {
-                let key = if attempt == 1 {
-                    base.clone()
-                } else {
-                    let suffix = attempt.to_string();
-                    format!("{}{suffix}", &base[..base.len().min(20 - suffix.len())])
-                };
-                match self
-                    .inner
-                    .tasks
-                    .create_project_with_id(
-                        project_id,
-                        run.workspace_id,
-                        run.user_id,
-                        name.clone(),
-                        key,
-                        PROJECT_COLORS[index % PROJECT_COLORS.len()].to_owned(),
-                        &run.request_id,
-                        TimestampMillis::now(),
-                    )
-                    .await
-                {
-                    Ok(_) => {
-                        created = true;
-                        break;
-                    }
-                    Err(TaskError::Conflict) => {}
-                    Err(TaskError::NotFound) => {
-                        return Err(Failure::Fatal(
-                            "The importing member left the workspace.".to_owned(),
-                        ));
-                    }
-                    Err(other) => return Err(Failure::from(other)),
-                }
-            }
-            if !created {
-                return Err(Failure::Item(
-                    "No free project key was found for this project.".to_owned(),
-                ));
-            }
-        }
+        ensure_project(
+            self.database(),
+            &self.inner.tasks,
+            NewProject {
+                id: project_id,
+                workspace_id: run.workspace_id,
+                user_id: run.user_id,
+                name: &item.title,
+                fallback_name: "Asana project",
+                key_base: project_key_base(&clamp(item.title.trim(), 200, 200), "ASANA"),
+                color: PROJECT_COLORS[index % PROJECT_COLORS.len()],
+                request_id: &run.request_id,
+            },
+        )
+        .await?;
         sqlx::query(
             "UPDATE asana_import_items SET state = 'created' WHERE import_id = $1 AND kind = 'project' \
              AND asana_gid = $2 AND state = 'pending'",
@@ -1301,7 +1190,7 @@ impl AsanaImportService {
             .as_deref()
             .and_then(|json| serde_json::from_str(json).ok())
             .unwrap_or_default();
-        let statuses = self.statuses(project_id).await?;
+        let statuses = project_statuses(self.database(), project_id).await?;
         let categories: HashMap<Id, String> = statuses
             .iter()
             .map(|(id, _, category)| (*id, category.clone()))
@@ -1364,25 +1253,6 @@ impl AsanaImportService {
             completed_status,
             labels,
         })
-    }
-
-    /// `(id, name, category)` of the project's statuses in board order.
-    async fn statuses(&self, project_id: Id) -> Result<Vec<(Id, String, String)>, Failure> {
-        Ok(sqlx::query(
-            "SELECT id, name, category FROM task_statuses WHERE project_id = $1 ORDER BY position, id",
-        )
-        .bind(project_id.to_string())
-        .fetch_all(self.database().pool())
-        .await?
-        .into_iter()
-        .filter_map(|row| {
-            Some((
-                row.get::<String, _>("id").parse().ok()?,
-                row.get("name"),
-                row.get("category"),
-            ))
-        })
-        .collect())
     }
 
     /// Phase B for one task: its Orbit task, created silently under the recorded id.
@@ -1664,36 +1534,17 @@ impl AsanaImportService {
         }
         let color = LABEL_COLORS[project.labels.len() % LABEL_COLORS.len()];
         let project_id = project.project_id;
-        let id = match self
-            .inner
-            .tasks
-            .create_label(
-                run.workspace_id,
-                project_id,
-                run.user_id,
-                name.to_owned(),
-                color.to_owned(),
-                &run.request_id,
-                TimestampMillis::now(),
-            )
-            .await
-        {
-            Ok(label) => label.id,
-            // Same name in another case: use that label.
-            Err(TaskError::Conflict) => {
-                let found: Option<String> = sqlx::query_scalar(
-                    "SELECT id FROM labels WHERE project_id = $1 AND lower(name) = lower($2)",
-                )
-                .bind(project_id.to_string())
-                .bind(name)
-                .fetch_optional(self.database().pool())
-                .await?;
-                found.and_then(|id| id.parse().ok()).ok_or_else(|| {
-                    Failure::Item(format!("The label {name} could not be created."))
-                })?
-            }
-            Err(error) => return Err(Failure::from(error)),
-        };
+        let id = find_or_create_label(
+            self.database(),
+            &self.inner.tasks,
+            run.workspace_id,
+            project_id,
+            run.user_id,
+            name,
+            color,
+            &run.request_id,
+        )
+        .await?;
         if let Some(project) = run.projects.get_mut(project_gid) {
             project.labels.insert(key, id);
         }
@@ -1884,25 +1735,13 @@ impl AsanaImportService {
         if run.job.cancel.is_cancelled() {
             return Ok(true);
         }
-        self.ensure_writable(run.workspace_id).await?;
+        ensure_writable(self.database(), run.workspace_id).await?;
         let status: Option<String> =
             sqlx::query_scalar("SELECT status FROM asana_imports WHERE id = $1")
                 .bind(run.import_id.to_string())
                 .fetch_optional(self.database().pool())
                 .await?;
         Ok(status.as_deref() != Some("importing"))
-    }
-
-    /// Orbit Cloud: a read-only workspace (past its trial, no subscription) takes no imports.
-    async fn ensure_writable(&self, workspace_id: Id) -> Result<(), Failure> {
-        match billing::write_access(self.database(), workspace_id).await? {
-            WorkspaceAccess::Full | WorkspaceAccess::Trial => Ok(()),
-            WorkspaceAccess::ReadOnly => Err(Failure::Fatal(
-                "The import stopped because the workspace is read-only: it has no active \
-                 subscription."
-                    .to_owned(),
-            )),
-        }
     }
 
     async fn record_orbit_id(
@@ -2160,25 +1999,6 @@ impl AsanaImportService {
     }
 }
 
-/// Shutdown: leave the job to resume later. Cancelled or failed elsewhere: done.
-fn stopped(job: &JobRun) -> Result<(), Failure> {
-    if job.cancel.is_cancelled() {
-        Err(Failure::Interrupted)
-    } else {
-        Ok(())
-    }
-}
-
-fn retryable(error: impl std::fmt::Display) -> JobError {
-    JobError::Retryable(error.to_string())
-}
-
-fn parse_stored_id(value: String) -> Result<Id, Failure> {
-    value
-        .parse()
-        .map_err(|_| Failure::Fatal("Stored import data is invalid.".to_owned()))
-}
-
 /// The status category of a new status for an Asana section: a done-looking name is
 /// `completed`, the first section `unstarted`, the others `started`.
 fn section_category(name: &str, position: usize) -> &'static str {
@@ -2189,33 +2009,6 @@ fn section_category(name: &str, position: usize) -> &'static str {
         "unstarted"
     } else {
         "started"
-    }
-}
-
-/// A project key from a project name: the initials of a multi-word name, else its first
-/// letters; `ASANA` when nothing usable is left.
-fn project_key_base(name: &str) -> String {
-    let words: Vec<String> = name
-        .split(|c: char| !c.is_ascii_alphanumeric())
-        .filter(|word| !word.is_empty())
-        .map(str::to_ascii_uppercase)
-        .collect();
-    let key: String = if words.len() >= 2 {
-        words
-            .iter()
-            .filter_map(|word| word.chars().next())
-            .take(5)
-            .collect()
-    } else {
-        words
-            .first()
-            .map(|word| word.chars().take(4).collect())
-            .unwrap_or_default()
-    };
-    if key.is_empty() {
-        "ASANA".to_owned()
-    } else {
-        key
     }
 }
 
@@ -2317,27 +2110,13 @@ fn description(task: &AsanaTask, extras: &Extras) -> (String, Option<Vec<Value>>
     }
 }
 
-/// `2024-05-01T09:30:00.000Z` → `2024-05-01 09:30 UTC`.
-fn display_instant(value: &str) -> String {
-    match value.get(..16) {
-        Some(prefix) if value.ends_with('Z') && value.as_bytes().get(10) == Some(&b'T') => {
-            format!("{} UTC", prefix.replacen('T', " ", 1))
-        }
-        _ => value.to_owned(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::asana::model::{CustomField, Named};
 
     #[test]
-    fn derives_keys_categories_and_priorities() {
-        assert_eq!(project_key_base("Marketing launch 2025"), "ML2");
-        assert_eq!(project_key_base("Roadmap"), "ROAD");
-        assert_eq!(project_key_base("Équipe"), "QUIP");
-        assert_eq!(project_key_base("日本"), "ASANA");
+    fn derives_categories_and_priorities() {
         assert_eq!(section_category("Shipped", 3), "completed");
         assert_eq!(section_category("To do", 0), "unstarted");
         assert_eq!(section_category("Doing", 1), "started");
@@ -2356,10 +2135,6 @@ mod tests {
         assert_eq!(priority(&task("Med")), "medium");
         assert_eq!(priority(&task("Someday")), "none");
         assert_eq!(priority(&AsanaTask::default()), "none");
-        assert_eq!(
-            display_instant("2024-05-01T09:30:00.000Z"),
-            "2024-05-01 09:30 UTC"
-        );
     }
 
     #[test]

@@ -14,7 +14,7 @@
 
 use std::collections::HashSet;
 use std::fmt;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use reqwest::header::{self, HeaderMap, HeaderValue};
@@ -22,13 +22,13 @@ use reqwest::{StatusCode, Url};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use thiserror::Error;
-use tokio::time::Instant;
 
 use super::model::{
     ATTACHMENT_FIELDS, AsanaAttachment, AsanaProject, AsanaStory, AsanaTask, AsanaUser,
     AsanaWorkspace, Named, STORY_FIELDS, TASK_FIELDS,
 };
 use crate::notion::files::sanitize_file_name;
+use crate::task_import::{RateLimiter, backoff, is_transient, parse_retry_after};
 
 /// The production API root.
 pub const DEFAULT_BASE_URL: &str = "https://app.asana.com/api/1.0";
@@ -248,18 +248,12 @@ impl AsanaClient {
             .connect_timeout(Duration::from_secs(10))
             .build()
             .map_err(|error| AsanaError::Config(error.to_string()))?;
-        let interval = if config.requests_per_second.is_finite() && config.requests_per_second > 0.0
-        {
-            Duration::from_secs_f64(1.0 / config.requests_per_second)
-        } else {
-            Duration::ZERO
-        };
         Ok(Self {
             inner: Arc::new(Inner {
                 api,
                 files,
                 base_url,
-                limiter: RateLimiter::new(interval),
+                limiter: RateLimiter::per_second(config.requests_per_second),
                 config,
                 file_policy,
             }),
@@ -525,7 +519,7 @@ impl AsanaClient {
                 .headers()
                 .get(header::RETRY_AFTER)
                 .and_then(|value| value.to_str().ok())
-                .and_then(parse_seconds);
+                .and_then(parse_retry_after);
             let bytes = response.bytes().await.unwrap_or_default();
             let message = serde_json::from_slice::<ErrorBody>(&bytes)
                 .ok()
@@ -559,11 +553,7 @@ impl AsanaClient {
 
     fn backoff(&self, attempt: u32) -> Duration {
         let config = &self.inner.config;
-        let factor = 2u32.saturating_pow(attempt.saturating_sub(1).min(16));
-        config
-            .initial_backoff
-            .saturating_mul(factor)
-            .min(config.max_backoff)
+        backoff(config.initial_backoff, config.max_backoff, attempt)
     }
 }
 
@@ -597,45 +587,6 @@ struct ErrorItem {
     message: Option<String>,
 }
 
-/// Spaces requests `interval` apart; `pause` pushes the next slot out for every caller.
-struct RateLimiter {
-    interval: Duration,
-    next: Mutex<Instant>,
-}
-
-impl RateLimiter {
-    fn new(interval: Duration) -> Self {
-        Self {
-            interval,
-            next: Mutex::new(Instant::now()),
-        }
-    }
-
-    async fn acquire(&self) {
-        let slot = {
-            let mut next = self
-                .next
-                .lock()
-                .unwrap_or_else(|poison| poison.into_inner());
-            let slot = (*next).max(Instant::now());
-            *next = slot + self.interval;
-            slot
-        };
-        tokio::time::sleep_until(slot).await;
-    }
-
-    fn pause(&self, wait: Duration) {
-        let mut next = self
-            .next
-            .lock()
-            .unwrap_or_else(|poison| poison.into_inner());
-        let resume = Instant::now() + wait;
-        if *next < resume {
-            *next = resume;
-        }
-    }
-}
-
 /// Asana gids are decimal strings.
 fn checked_gid(raw: &str) -> Result<&str, AsanaError> {
     if !raw.is_empty() && raw.len() <= 32 && raw.bytes().all(|byte| byte.is_ascii_digit()) {
@@ -643,16 +594,6 @@ fn checked_gid(raw: &str) -> Result<&str, AsanaError> {
     } else {
         Err(AsanaError::InvalidGid)
     }
-}
-
-/// Parses a `Retry-After` number of seconds (fractions allowed, HTTP dates ignored).
-fn parse_seconds(raw: &str) -> Option<Duration> {
-    let seconds: f64 = raw.trim().parse().ok()?;
-    (seconds.is_finite() && seconds >= 0.0).then(|| Duration::from_secs_f64(seconds.min(86_400.0)))
-}
-
-fn is_transient(error: &reqwest::Error) -> bool {
-    error.is_timeout() || error.is_connect() || error.is_request()
 }
 
 fn http_error(error: reqwest::Error) -> AsanaError {
@@ -691,12 +632,10 @@ mod tests {
     }
 
     #[test]
-    fn checks_gids_and_retry_after() {
+    fn checks_gids() {
         assert!(checked_gid("1204").is_ok());
         assert!(checked_gid("12/../users").is_err());
         assert!(checked_gid("").is_err());
-        assert_eq!(parse_seconds("2"), Some(Duration::from_secs(2)));
-        assert_eq!(parse_seconds("Wed, 21 Oct 2015 07:28:00 GMT"), None);
     }
 
     #[test]

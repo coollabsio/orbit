@@ -7,6 +7,7 @@ use utoipa::ToSchema;
 
 use super::client::{AsanaClient, AsanaError};
 use crate::notion::import::clamp;
+use crate::task_import::name_or;
 
 /// Most projects one scan lists.
 pub const MAX_PROJECTS: usize = 5_000;
@@ -122,10 +123,4 @@ async fn should_stop(database: &Database, import_id: Id, cancel: &CancellationTo
         // A database hiccup is not a reason to stop; the next check sees it again.
         Err(_) => false,
     }
-}
-
-fn name_or(name: Option<String>, fallback: &str) -> String {
-    name.map(|name| clamp(name.trim(), 200, 800))
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| fallback.to_owned())
 }

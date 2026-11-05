@@ -34,6 +34,7 @@ mod secret_box;
 pub mod sign_in_providers;
 pub mod socket_ticket;
 pub mod static_assets;
+pub mod task_import;
 pub mod task_routes;
 pub mod teamspace_routes;
 pub mod view_routes;
