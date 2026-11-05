@@ -43,6 +43,14 @@ Create the app key once with `openssl rand -base64 32` and keep a copy outside t
 
 The root user configures outgoing email in **Admin → Settings** and S3 storage in **Admin → Storage**, not with variables.
 
+## Upgrade to migration 0066 (API token scopes)
+
+Migration 0066 puts the scopes of each API token in one `scopes` column and removes the old `can_read` and `can_write` columns. The change cannot be undone in place:
+
+- Before it applies migration 0066, Orbit creates a pre-migration backup and verifies it. If the backup or its check fails, Orbit does not migrate. Pre-migration backups stay local, in `ORBIT_BACKUPS_PATH`.
+- Keep that backup. An older version cannot use the migrated database. To go back to an older version, stop Orbit, restore that backup (`orbit backup restore <id>`), then start the older version. Data written after the upgrade is lost.
+- If several servers share one Postgres database, stop all of them before the upgrade. Then start the new servers. An old server that still runs after migration 0066 fails each request with an API token (public API, MCP with an API token, the Discord integration) and the **Settings → API tokens** page.
+
 ## Startup fails before HTTP binds
 
 Orbit deliberately binds last. Read the first error and keep the process stopped.
@@ -180,7 +188,7 @@ A request, a live socket or a co-editing socket can go to any server; sticky ses
 - **Storage:** save a bucket in **Admin → Storage** and turn on attachments and backups in S3 before the second server starts. The local disk of a server then holds only temporary files (upload staging, backup downloads), so it can be an ephemeral volume. While other servers run, Orbit refuses to move attachments back to local disks (409 `storage_shared`), and a server that hears other servers while attachments are local logs a warning.
 - **Load balancer:** check `/health/ready` and remove a server on 503. Keep WebSockets open for a long time (idle timeout of 1 hour or more) for `/api/v1/workspaces/{id}/events`, the live socket (`/api/v1/workspaces/{id}/live`) and the co-editing socket of a page.
 - **Stopping a server:** set `ORBIT_SHUTDOWN_DELAY_SECONDS` (0 to 300, default 0) to a little more than the load balancer's health check interval. After SIGTERM, `/health/ready` reports 503 (`accepting`) at once and the server still serves for that long, then drains for up to 30 s. Give the orchestrator a stop timeout of at least the delay plus 30 s.
-- **Upgrades:** run `orbit migrate run` once (or let the first new server do it; a lock makes the others wait), then replace the servers one at a time. A migration must keep the previous release working until all servers run the new one: old servers stay ready on a newer schema, but an old server cannot start on it.
+- **Upgrades:** run `orbit migrate run` once (or let the first new server do it; a lock makes the others wait), then replace the servers one at a time. A migration must keep the previous release working until all servers run the new one: old servers stay ready on a newer schema, but an old server cannot start on it. Exception: stop every server before the upgrade to migration 0066 (see [Upgrade to migration 0066 (API token scopes)](#upgrade-to-migration-0066-api-token-scopes)).
 - **CLI on a running cluster:** `root`, `recovery-link`, `setup-token`, `migrate status` and `backup create` work while the servers run. They refuse a database that needs migrations (run `orbit migrate run`). `backup restore`, `migrate run --reset`, `db-reset` and `attachments compress` need every server stopped.
 - **Restore:** stop every server before `backup restore` (see [Restore rollback or ownership error](#restore-rollback-or-ownership-error)). This is a full outage; choose the backup schedule for it.
 - **Write throughput:** every write transaction takes one Postgres advisory lock, so writes run one at a time for the whole database. More servers give more read and socket capacity and availability, not more write capacity.
@@ -219,7 +227,7 @@ A job counts against a limit until it ends or its lease expires (5 minutes witho
 
 ### Limits
 
-- **Rate limits** (`ORBIT_RATE_LIMIT_*`, see [Request limits and email caps](#request-limits-and-email-caps)): the authentication, recovery/registration and invitation limits hold for the cluster. The upload, chat and general limits and the co-editing connection limits count on each server: with N servers the effective limit is N times the setting. A database write for each of those requests would put every request of the cluster through the one writer (see **Write throughput**), so they stay in memory. Add a request limit at the load balancer if you need a cluster-wide one. The sign-in lockout and the email caps are shared.
+- **Rate limits** (`ORBIT_RATE_LIMIT_*`, see [Request limits and email caps](#request-limits-and-email-caps)): the authentication, recovery/registration and invitation limits hold for the cluster. The upload, chat, general and public API/MCP limits and the co-editing connection limits count on each server: with N servers the effective limit is N times the setting. A database write for each of those requests would put every request of the cluster through the one writer (see **Write throughput**), so they stay in memory. Add a request limit at the load balancer if you need a cluster-wide one. The sign-in lockout and the email caps are shared.
 - **Event order:** the events of one server's writes keep their commit order. Two writes to the same workspace on two servers in the same moment can reach clients in the other order; the next event or a reload corrects the view.
 - **A server that stops without a beat:** its members show as online for up to 20 s more.
 - **Page lock:** a lock or unlock closes the page's sockets on every server; an edit that another server receives in the same moment can still be saved.
@@ -372,14 +380,14 @@ Set them with `ORBIT_RATE_LIMIT_<KEY>`, the key in upper case (for example `ORBI
 | `recovery_per_minute` | 10 | Password reset and open registration requests. Cluster-wide. |
 | `invitation_per_minute` | 60 | Invitation requests. Cluster-wide. |
 | `upload_per_minute` | 120 | Attachment and chat file uploads. Per server. |
-| `general_per_minute` | 600 | Every other API and MCP request (chat: 3 times this). Per server. |
+| `general_per_minute` | 600 | Every other API request (chat: 3 times this). The public API (`/api/public/…`) and MCP (`/mcp`) have their own budget with this limit, apart from the web app's. Per server. |
 | `workspace_multiplier` | 10 | A workspace may make this many times each limit above. |
 | `account_email_cooldown_seconds` | 60 | Time between two registration, password reset or email change emails to one address. |
 | `account_emails_per_day` | 5 | Registration, password reset and email change emails to one address in 24 hours. |
 | `invitation_emails_per_workspace_per_day` | 100 | Invitation emails of one workspace in 24 hours. |
 | `invitation_emails_per_inviter_per_day` | 50 | Invitation emails one person sends in 24 hours, in all workspaces. |
 
-- **Who a request counts against:** first its client IP address, then its credential (the session cookie or the `Authorization` header: a session, an API token, an MCP token), then, for a request with a credential, the workspace in its path (`/api/v1/workspaces/{id}/…`). The first one over its limit refuses the request with `429 rate_limit_exceeded`, and the ones after it do not count it. So a client without a credential cannot use up a workspace's budget, and one address can use at most its own limit of it.
+- **Who a request counts against:** first its client IP address, then its credential (the session cookie or the `Authorization` header: a session, an API token, an MCP token), then, for a request with a credential, the workspace in its path (`/api/v1/workspaces/{id}/…` or `/api/public/v1/workspaces/{id}/…`). The first one over its limit refuses the request with `429 rate_limit_exceeded`, and the ones after it do not count it. So a client without a credential cannot use up a workspace's budget, and one address can use at most its own limit of it. The workspace is charged only for a response below 400, because an error does not show that the credential was accepted: a made-up cookie or token gets `405` or `400` before it is checked. So a client cannot use up a workspace's budget without a valid credential of the workspace. Each class has its own budgets, so public API and MCP traffic cannot use up the web app's.
 - **Account emails:** registration, password reset and email change links to one address share the cooldown and the daily cap, on every server. Over the cap, Orbit sends nothing and gives the usual `202` answer, so the answer does not tell whether an account exists. Requests for which no email goes out (an unknown address for a reset, an existing account for registration or an email change) do not count. The notice to the old address after an email change has no cap.
 - **Invitation emails:** an email invitation over a cap is taken back and answered with `429 invitation_email_limit` and `Retry-After`. Invitation links (`"delivery": "manual"`) have no cap. The subject is always "You have been invited to Orbit"; the body names the workspace on one line, in quotes, without control or direction characters, and at most 60 characters long. The inviter's name is not in the email.
 - Values: the per-minute limits 1 to 1,000,000; `workspace_multiplier` 1 to 1000; the cooldown 0 to 86,400 seconds; the daily caps 1 to 100,000.

@@ -65,16 +65,23 @@ impl AttachmentState {
         &self,
         shutdown: CancellationToken,
     ) -> Result<(), UploadError> {
-        self.uploads
-            .reconcile(TimestampMillis::now().as_millis())
-            .await?;
         let mut interval = tokio::time::interval(RECONCILE_INTERVAL);
-        interval.tick().await;
         loop {
             tokio::select! {
                 () = shutdown.cancelled() => return Ok(()),
                 _ = interval.tick() => {
-                    self.uploads.reconcile(TimestampMillis::now().as_millis()).await?;
+                    match self.uploads.reconcile(TimestampMillis::now().as_millis()).await {
+                        Ok(_) => {}
+                        Err(UploadError::Database(error))
+                            if orbit_platform::is_transient_lock_error(&error) =>
+                        {
+                            tracing::warn!(
+                                %error,
+                                "attachment reconciliation: the database is busy; retrying on the next round"
+                            );
+                        }
+                        Err(error) => return Err(error),
+                    }
                 }
             }
         }

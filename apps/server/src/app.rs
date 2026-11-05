@@ -14,9 +14,10 @@ use hyper_util::server::conn::auto::Builder as ConnectionBuilder;
 use hyper_util::service::TowerToHyperService;
 use orbit_platform::{
     BackupService, BlobStoreError, Config, Database, DatabaseConfig, HealthCheck, HealthRegistry,
-    HttpLimits, IntegrityService, JobError, JobKind, JobStore, LocalBlobStore, MigrationError,
-    MigrationRunner, ObjectStorage, OriginPolicy, RecurringSchedule, Scheduler, TieredBlobStore,
-    TimestampMillis, UploadLimits, UploadService, Worker, WorkerConfig, run_guarded_migrations,
+    HttpLimits, IntegrityError, IntegrityService, JobError, JobKind, JobStore, LocalBlobStore,
+    MigrationError, MigrationRunner, ObjectStorage, OriginPolicy, RecurringSchedule, ScheduleError,
+    Scheduler, TieredBlobStore, TimestampMillis, UploadLimits, UploadService, Worker, WorkerConfig,
+    run_guarded_migrations,
 };
 use serde_json::json;
 use thiserror::Error;
@@ -336,6 +337,16 @@ impl App {
                     .with_oauth(oauth.clone()),
                     &config.http.public_origin,
                 ),
+                public_api: crate::public_api::router(
+                    crate::public_api::PublicApiState::new(
+                        Arc::new(ApiTokenRepository::new(database.clone())),
+                        Arc::new(TaskRepository::new(database.clone())),
+                        &config.http.public_origin,
+                    )
+                    .with_pages(Arc::new(
+                        crate::repositories::pages::PageRepository::new(database.clone()),
+                    )),
+                ),
                 oauth: crate::oauth::router(oauth),
                 auth: {
                     let auth = auth
@@ -517,7 +528,7 @@ impl App {
                 .map_err(|source| AppError::MetricsBind { address, source })?;
             let router = self.metrics.router();
             let token = service_shutdown.clone();
-            services.spawn(async move {
+            spawn_service(&mut services, "metrics server", async move {
                 serve_http(listener, router, HEADER_READ_TIMEOUT, token)
                     .await
                     .map_err(|error| error.to_string())
@@ -529,7 +540,7 @@ impl App {
         })?;
         let integrity_failure = production.integrity_failure.clone();
         let token = service_shutdown.clone();
-        services.spawn(async move {
+        spawn_service(&mut services, "job worker", async move {
             production
                 .worker
                 .run(token)
@@ -538,21 +549,33 @@ impl App {
         });
         let database = self.database.clone();
         let token = service_shutdown.clone();
-        services.spawn(async move { watch_database_ownership(database, token).await });
+        spawn_service(
+            &mut services,
+            "database ownership watch",
+            watch_database_ownership(database, token),
+        );
         let database = self.database.clone();
         let scheduler = production.scheduler;
         let token = service_shutdown.clone();
-        services.spawn(async move { run_scheduler_service(scheduler, database, token).await });
+        spawn_service(
+            &mut services,
+            "scheduler",
+            run_scheduler_service(scheduler, database, token),
+        );
         // Subscribed before HTTP starts: nothing the first clients do is missed.
         let member = crate::cluster::join(&self.database)
             .await
             .map_err(|error| AppError::Background(error.to_string()))?;
         let token = service_shutdown.clone();
-        services.spawn(async move { member.run(token).await });
+        spawn_service(&mut services, "cluster member", async move {
+            member.run(token).await
+        });
         let push = crate::push::PushService::of(&self.database);
         push.set_origin(&self.config.http.public_origin);
         let token = service_shutdown.clone();
-        services.spawn(async move { push.run_inbox_service(token).await });
+        spawn_service(&mut services, "push inbox", async move {
+            push.run_inbox_service(token).await
+        });
         let mover = crate::object_storage::run_mover(
             self.database.clone(),
             self.attachments.uploads.clone(),
@@ -560,10 +583,10 @@ impl App {
             self.object_storage.clone(),
             service_shutdown.clone(),
         );
-        services.spawn(mover);
+        spawn_service(&mut services, "object storage mover", mover);
         let attachments = self.attachments.clone();
         let token = service_shutdown.clone();
-        services.spawn(async move {
+        spawn_service(&mut services, "attachment reconciliation", async move {
             attachments
                 .run_reconciliation_service(token)
                 .await
@@ -904,9 +927,12 @@ async fn initialize_production_services(
                 let integrity = integrity_service.clone();
                 let failure = integrity_failure.clone();
                 async move {
-                    integrity.full().await.map_err(|error| {
-                        failure.cancel();
-                        JobError::Permanent(error.to_string())
+                    integrity.full().await.map_err(|error| match error {
+                        IntegrityError::Busy { .. } => JobError::Retryable(error.to_string()),
+                        IntegrityError::Failed { .. } => {
+                            failure.cancel();
+                            JobError::Permanent(error.to_string())
+                        }
                     })
                 }
             })
@@ -1033,14 +1059,19 @@ async fn run_scheduler_service(
     shutdown: CancellationToken,
 ) -> Result<(), String> {
     loop {
-        let now = database
-            .database_now()
-            .await
-            .map_err(|error| error.to_string())?;
-        scheduler
-            .materialize_due(now)
-            .await
-            .map_err(|error| error.to_string())?;
+        let materialized = match database.database_now().await {
+            Ok(now) => scheduler.materialize_due(now).await.map(drop),
+            Err(error) => Err(ScheduleError::from(error)),
+        };
+        match materialized {
+            Ok(()) => {}
+            Err(ScheduleError::Database(error))
+                if orbit_platform::is_transient_lock_error(&error) =>
+            {
+                tracing::warn!(%error, "scheduler: the database is busy; retrying on the next round");
+            }
+            Err(error) => return Err(error.to_string()),
+        }
         tokio::select! {
             () = shutdown.cancelled() => return Ok(()),
             () = tokio::time::sleep(Duration::from_secs(60)) => {}
@@ -1064,6 +1095,15 @@ async fn watch_database_ownership(
             .await
             .map_err(|error| error.to_string())?;
     }
+}
+
+/// Runs a background service of [`App::serve`]; its error names it.
+fn spawn_service(
+    services: &mut JoinSet<Result<(), String>>,
+    name: &'static str,
+    service: impl Future<Output = Result<(), String>> + Send + 'static,
+) {
+    services.spawn(async move { service.await.map_err(|error| format!("{name}: {error}")) });
 }
 
 fn joined_service_error(

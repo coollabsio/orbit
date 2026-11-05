@@ -1,42 +1,207 @@
 //! Markdown -> BlockNote blocks, for text that exists only as markdown: task descriptions written
 //! before the rich editor, REST writes that send markdown, and GitHub issue bodies.
 //!
-//! Paragraphs, headings, emphasis, strike, inline code, links, bullet / numbered / check lists
-//! (nested), quotes, fenced code, GFM tables, images and rules map to their blocks. `@Name` becomes a
-//! mention when exactly one member has that display name. Anything else (HTML) stays as its text.
-//! The result has the shape `doc_to_blocks` returns; callers sanitize it.
+//! Paragraphs, headings, emphasis, strike, underline (`<u>`), inline code, links, bullet /
+//! numbered / check lists (nested, with their start number), quotes (the first paragraph is the
+//! quote, the rest its children), fenced code, GFM tables, images (an italic-only paragraph right
+//! after an image is its caption) and rules map to their blocks: what `export::markdown` writes
+//! reads back. `@Name` becomes a mention when exactly one member has that display name. Anything
+//! else (HTML) stays as its text. The result has the shape `doc_to_blocks` returns; callers
+//! sanitize it.
+
+use std::collections::HashMap;
+use std::ops::Range;
 
 use orbit_platform::Id;
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use serde_json::{Map, Value, json};
-use yrs::{Transact, WriteTxn};
 
-use super::blocknote::{FRAGMENT, MAX_BLOCK_DEPTH, doc_to_blocks, new_doc, write_blocks};
+use super::blocknote::{MAX_BLOCK_DEPTH, normalize_blocks};
+use crate::export::markdown::Span;
+
+/// Where the reader saw a block, as a byte range of the input; removed by the Yjs round trip.
+const SOURCE: &str = "__source";
 
 /// Converts markdown into BlockNote blocks; `members` are `(user id, display name)` pairs.
 #[must_use]
 pub fn markdown_to_blocks(markdown: &str, members: &[(Id, String)]) -> Vec<Value> {
+    markdown_to_blocks_with_spans(markdown, members).0
+}
+
+/// [`markdown_to_blocks`] and the lines each block was read from (one [`Span`] per block,
+/// trailing blank lines left out).
+#[must_use]
+pub fn markdown_to_blocks_with_spans(
+    markdown: &str,
+    members: &[(Id, String)],
+) -> (Vec<Value>, Vec<Span>) {
     let options =
         Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
-    let events: Vec<Event<'_>> = Parser::new_ext(markdown, options).collect();
+    let (events, ranges) = Parser::new_ext(markdown, options)
+        .into_offset_iter()
+        .unzip();
     let mut reader = Reader {
         events,
+        ranges,
         index: 0,
         depth: 0,
         members,
     };
-    let blocks = reader.blocks(None);
+    let mut blocks = reader.blocks(None);
     if blocks.is_empty() {
-        return blocks;
+        return (blocks, Vec::new());
     }
+    attach_captions(&mut blocks, 0);
+    let mut sources = HashMap::new();
+    collect_sources(&blocks, &mut sources);
     // A round trip through a Yjs document fills every prop with the schema default.
-    let doc = new_doc(None);
-    {
-        let mut txn = doc.transact_mut();
-        let fragment = txn.get_or_insert_xml_fragment(FRAGMENT);
-        write_blocks(&mut txn, &fragment, &blocks);
+    let blocks = normalize_blocks(&blocks);
+    let lines = Lines::new(markdown);
+    let spans = spans_of(&blocks, &sources, &lines);
+    (blocks, spans)
+}
+
+/// Line starts of the input, to turn byte ranges into line ranges.
+struct Lines<'a> {
+    text: Vec<&'a str>,
+    starts: Vec<usize>,
+}
+
+impl<'a> Lines<'a> {
+    fn new(markdown: &'a str) -> Self {
+        let mut starts = vec![0];
+        starts.extend(markdown.match_indices('\n').map(|(at, _)| at + 1));
+        Self {
+            text: markdown.split('\n').collect(),
+            starts,
+        }
     }
-    doc_to_blocks(&doc)
+
+    fn line(&self, byte: usize) -> usize {
+        self.starts
+            .partition_point(|start| *start <= byte)
+            .saturating_sub(1)
+    }
+
+    /// The lines of `bytes`, without blank lines at the end.
+    fn range(&self, bytes: &Range<usize>) -> Range<usize> {
+        if bytes.is_empty() {
+            let at = self.line(bytes.start);
+            return at..at;
+        }
+        let start = self.line(bytes.start);
+        let mut end = self.line(bytes.end - 1) + 1;
+        while end > start && self.blank(end - 1) {
+            end -= 1;
+        }
+        start..end
+    }
+
+    /// Whether a line is empty but for quote markers and spaces.
+    fn blank(&self, line: usize) -> bool {
+        self.text.get(line).is_none_or(|line| {
+            line.trim_matches(|c: char| c == '>' || c.is_whitespace())
+                .is_empty()
+        })
+    }
+}
+
+/// The byte range each block (by id) was read from.
+fn collect_sources(blocks: &[Value], out: &mut HashMap<String, Range<usize>>) {
+    let mut stack: Vec<&Value> = blocks.iter().collect();
+    while let Some(block) = stack.pop() {
+        if let (Some(id), Some([start, end])) = (
+            block["id"].as_str(),
+            block[SOURCE].as_array().map(Vec::as_slice),
+        ) {
+            let (start, end) = (start.as_u64().unwrap_or(0), end.as_u64().unwrap_or(0));
+            out.insert(id.to_owned(), start as usize..end as usize);
+        }
+        stack.extend(block["children"].as_array().into_iter().flatten());
+    }
+}
+
+/// The spans of `blocks` (as read back from the Yjs document, at most [`MAX_BLOCK_DEPTH`] deep).
+fn spans_of(blocks: &[Value], sources: &HashMap<String, Range<usize>>, lines: &Lines) -> Vec<Span> {
+    blocks
+        .iter()
+        .map(|block| {
+            let full = block["id"]
+                .as_str()
+                .and_then(|id| sources.get(id))
+                .map_or(0..0, |bytes| lines.range(bytes));
+            let children = spans_of(
+                block["children"].as_array().map_or(&[], Vec::as_slice),
+                sources,
+                lines,
+            );
+            let head_end = children
+                .iter()
+                .map(|child| child.full.start)
+                .filter(|start| *start > full.start)
+                .min()
+                .unwrap_or(full.end)
+                .min(full.end);
+            let mut head = full.start..head_end;
+            while head.end > head.start && lines.blank(head.end - 1) {
+                head.end -= 1;
+            }
+            Span {
+                full,
+                head,
+                children,
+            }
+        })
+        .collect()
+}
+
+/// An italic-only paragraph right after an image is the image's caption (as exported).
+fn attach_captions(blocks: &mut Vec<Value>, depth: usize) {
+    if depth > MAX_BLOCK_DEPTH + 1 {
+        return;
+    }
+    let mut index = 0;
+    while index < blocks.len() {
+        if let Some(children) = blocks[index]["children"].as_array_mut() {
+            attach_captions(children, depth + 1);
+        }
+        let caption = blocks
+            .get(index + 1)
+            .filter(|_| blocks[index]["type"] == "image")
+            .and_then(italic_text);
+        if let Some(caption) = caption {
+            let next = blocks.remove(index + 1);
+            let image = &mut blocks[index];
+            image["props"]["caption"] = Value::String(caption);
+            if let (Some(end), Some(source)) =
+                (next[SOURCE].get(1).cloned(), image[SOURCE].as_array_mut())
+                && source.len() == 2
+            {
+                source[1] = end;
+            }
+        }
+        index += 1;
+    }
+}
+
+/// The text of a paragraph whose whole content is italic text (and nothing else).
+fn italic_text(block: &Value) -> Option<String> {
+    if block["type"] != "paragraph" || block["children"].as_array().is_some_and(|c| !c.is_empty()) {
+        return None;
+    }
+    let content = block["content"].as_array()?;
+    let mut text = String::new();
+    for item in content {
+        let italic = item["type"] == "text"
+            && item["styles"].as_object().is_some_and(|styles| {
+                styles.len() == 1 && styles.get("italic") == Some(&json!(true))
+            });
+        if !italic {
+            return None;
+        }
+        text.push_str(item["text"].as_str()?);
+    }
+    (!text.trim().is_empty()).then_some(text)
 }
 
 /// Inline content while reading: text and links, or an image that becomes its own block.
@@ -47,6 +212,8 @@ enum Inline {
 
 struct Reader<'a, 'm> {
     events: Vec<Event<'a>>,
+    /// The byte range of each event.
+    ranges: Vec<Range<usize>>,
     index: usize,
     /// Blocks being read around the current one; see [`Reader::flat`].
     depth: usize,
@@ -85,9 +252,17 @@ impl<'a> Reader<'a, '_> {
             match event {
                 Event::End(tag) if same_end(&tag, end.as_ref()) => break,
                 Event::Start(tag) => self.block(tag, &mut out),
-                Event::Rule => out.push(block("divider", json!({}), Vec::new(), Vec::new())),
+                Event::Rule => {
+                    let mut divider = block("divider", json!({}), Vec::new(), Vec::new());
+                    divider[SOURCE] = self.source();
+                    out.push(divider);
+                }
                 Event::Text(value) | Event::Html(value) | Event::InlineHtml(value) => {
+                    let first = out.len();
                     push_paragraph(&mut out, value.trim_end_matches('\n'));
+                    for paragraph in &mut out[first..] {
+                        paragraph[SOURCE] = self.source();
+                    }
                 }
                 _ => {}
             }
@@ -95,14 +270,32 @@ impl<'a> Reader<'a, '_> {
         out
     }
 
+    /// The byte range of the event just read.
+    fn source(&self) -> Value {
+        let range = self
+            .index
+            .checked_sub(1)
+            .and_then(|index| self.ranges.get(index))
+            .cloned()
+            .unwrap_or(0..0);
+        json!([range.start, range.end])
+    }
+
     fn block(&mut self, tag: Tag<'a>, out: &mut Vec<Value>) {
+        let source = self.source();
+        let first = out.len();
         if self.depth >= MAX_BLOCK_DEPTH {
             self.flat(out);
-            return;
+        } else {
+            self.depth += 1;
+            self.read_block(tag, out);
+            self.depth -= 1;
         }
-        self.depth += 1;
-        self.read_block(tag, out);
-        self.depth -= 1;
+        for block in &mut out[first..] {
+            if block.get(SOURCE).is_none() {
+                block[SOURCE] = source.clone();
+            }
+        }
     }
 
     /// A block nested deeper than [`MAX_BLOCK_DEPTH`] (markdown has no nesting limit), read
@@ -172,13 +365,13 @@ impl<'a> Reader<'a, '_> {
                 self.push_inline("heading", json!({"level": level}), inline, out);
             }
             Tag::BlockQuote(_) => {
-                for inner in self.blocks(Some(TagEnd::BlockQuote(None))) {
-                    if inner["type"] == "paragraph" {
-                        out.push(block("quote", json!({}), content_of(&inner), Vec::new()));
-                    } else {
-                        out.push(inner);
-                    }
-                }
+                // As exported: the first paragraph is the quote's text, the rest its children.
+                let mut inner = self.blocks(Some(TagEnd::BlockQuote(None)));
+                let content = match inner.first() {
+                    Some(first) if first["type"] == "paragraph" => content_of(&inner.remove(0)),
+                    _ => Vec::new(),
+                };
+                out.push(block("quote", json!({}), content, inner));
             }
             Tag::CodeBlock(kind) => {
                 let language = match kind {
@@ -214,11 +407,19 @@ impl<'a> Reader<'a, '_> {
                 } else {
                     "bulletListItem"
                 };
+                let mut first = true;
                 while let Some(event) = self.next() {
                     match event {
                         Event::End(TagEnd::List(_)) => break,
                         Event::Start(Tag::Item) => {
-                            let item = self.item(kind);
+                            let mut item = self.item(kind);
+                            // A list that does not start at 1 keeps its number on its first item.
+                            if let Some(start) = start.filter(|start| *start != 1 && first)
+                                && item["type"] == "numberedListItem"
+                            {
+                                item["props"]["start"] = json!(start);
+                            }
+                            first = false;
                             out.push(item);
                         }
                         _ => {}
@@ -247,6 +448,7 @@ impl<'a> Reader<'a, '_> {
 
     /// One list item: its first text is the item's content, nested blocks are its children.
     fn item(&mut self, kind: &str) -> Value {
+        let source = self.source();
         let mut checked = None;
         let mut inline = Vec::new();
         let mut children = Vec::new();
@@ -263,6 +465,11 @@ impl<'a> Reader<'a, '_> {
                 }
                 Event::Start(Tag::Paragraph) if !has_content && children.is_empty() => {
                     self.index += 1;
+                    // In a loose list the task box is inside the item's paragraph.
+                    if let Some(Event::TaskListMarker(done)) = self.events.get(self.index) {
+                        checked = Some(*done);
+                        self.index += 1;
+                    }
                     inline = self.inline(TagEnd::Paragraph);
                     has_content = true;
                 }
@@ -280,10 +487,12 @@ impl<'a> Reader<'a, '_> {
         }
         let (content, images) = self.split_images(inline);
         children.splice(0..0, images);
-        match checked {
+        let mut item = match checked {
             Some(done) => block("checkListItem", json!({"checked": done}), content, children),
             None => block(kind, json!({}), content, children),
-        }
+        };
+        item[SOURCE] = source;
+        item
     }
 
     fn table(&mut self) -> Value {
@@ -343,9 +552,14 @@ impl<'a> Reader<'a, '_> {
                     }
                     break;
                 }
-                Event::Text(value) | Event::InlineHtml(value) | Event::Html(value) => {
-                    Some(text(&value, &styles))
-                }
+                Event::InlineHtml(value) => match value.trim().to_ascii_lowercase().as_str() {
+                    // What the exporter writes for underline and for line breaks in table cells.
+                    "<u>" => toggle(&mut styles, "underline", true),
+                    "</u>" => toggle(&mut styles, "underline", false),
+                    "<br>" | "<br/>" | "<br />" => Some(text("\n", &styles)),
+                    _ => Some(text(&value, &styles)),
+                },
+                Event::Text(value) | Event::Html(value) => Some(text(&value, &styles)),
                 Event::Code(value) => {
                     let mut code = styles.clone();
                     code.insert("code".to_owned(), Value::Bool(true));
@@ -527,10 +741,12 @@ fn toggle(styles: &mut Map<String, Value>, style: &str, on: bool) -> Option<Valu
     None
 }
 
+/// An image; its alt text is its name (a caption is the paragraph after it, see
+/// [`attach_captions`]).
 fn image(url: String, alt: String) -> Value {
     block(
         "image",
-        json!({"url": url, "caption": alt}),
+        json!({"url": url, "name": alt}),
         Vec::new(),
         Vec::new(),
     )

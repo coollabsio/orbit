@@ -1111,6 +1111,15 @@ fn page_problem(
             request_id,
         ),
         PageError::TrialLimit(reached) => ApiError::trial_limit(reached, instance, request_id),
+        // Only Markdown writes (token API) check it.
+        PageError::TooLarge => ApiError::new(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "request_too_large",
+            "Request too large",
+            "The request exceeds the configured limit.",
+            instance,
+            request_id,
+        ),
         PageError::Corrupt | PageError::Unavailable(_) => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",

@@ -163,7 +163,7 @@ impl Worker {
                 let claim = tokio::select! {
                     biased;
                     () = shutdown.cancelled() => break,
-                    result = self.store.claim_at_database_time(ClaimSelection::Critical) => result?,
+                    result = self.store.claim_at_database_time(ClaimSelection::Critical) => unless_busy(result)?,
                 };
                 if let Some(claim) = claim {
                     tokio::select! {
@@ -175,7 +175,7 @@ impl Worker {
                             &mut active_noncritical,
                             claim,
                             shutdown.clone(),
-                        ) => result?,
+                        ) => unless_busy(result)?,
                     }
                     claimed = true;
                 }
@@ -193,7 +193,7 @@ impl Worker {
                 let claim = tokio::select! {
                     biased;
                     () = shutdown.cancelled() => break,
-                    result = self.store.claim_at_database_time(ClaimSelection::NonCritical) => result?,
+                    result = self.store.claim_at_database_time(ClaimSelection::NonCritical) => unless_busy(result)?,
                 };
                 if let Some(claim) = claim {
                     tokio::select! {
@@ -205,7 +205,7 @@ impl Worker {
                             &mut active_noncritical,
                             claim,
                             shutdown.clone(),
-                        ) => result?,
+                        ) => unless_busy(result)?,
                     }
                     claimed = true;
                 }
@@ -311,7 +311,23 @@ fn handle_join(
             kind: metadata.kind,
         });
     } else if let Some(Err(error)) = task_result {
-        first_error.get_or_insert(WorkerError::Store(error));
+        // The job's claim runs out and the job runs again.
+        if let Err(error) = unless_busy::<()>(Err(error)) {
+            first_error.get_or_insert(WorkerError::Store(error));
+        }
+    }
+}
+
+/// `result`, except that a database busy with another writer (see
+/// [`crate::is_transient_lock_error`]) is logged and gives the default (nothing claimed): the
+/// worker tries again on its next poll instead of stopping.
+fn unless_busy<T: Default>(result: Result<T, JobStoreError>) -> Result<T, JobStoreError> {
+    match result {
+        Err(JobStoreError::Database(error)) if crate::is_transient_lock_error(&error) => {
+            tracing::warn!(%error, "job worker: the database is busy; retrying");
+            Ok(T::default())
+        }
+        result => result,
     }
 }
 
@@ -368,8 +384,11 @@ async fn execute_claim(
             }
             _ = heartbeat.tick() => {
                 let now = store.database_now().await?;
-                if !store.heartbeat(&claim, now).await? {
-                    return Ok(());
+                match store.heartbeat(&claim, now).await {
+                    Ok(true) => {}
+                    Ok(false) => return Ok(()),
+                    // A busy database skips one heartbeat; the lease outlasts several.
+                    Err(error) => unless_busy::<()>(Err(error))?,
                 }
             }
             () = shutdown.cancelled(), if !shutting_down => {
