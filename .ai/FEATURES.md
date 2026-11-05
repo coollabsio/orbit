@@ -299,8 +299,24 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
   `TextRange { start, end }` in UTF-16 code units (JS string indices, end exclusive); the UI renders them as `<strong>`
   text nodes (no HTML). On Postgres, `page_search` is a table with a `tsvector` column in the `orbit_search` text search
   configuration (unaccent + simple), ranked by `ts_rank` with titles weighted 10x.
+- Obsidian import (`pages/ObsidianImportPane.tsx`, `components/ObsidianImportChooser.tsx`, `api/obsidianImports.ts`;
+  server `obsidian/` and `collab::markdown_import::obsidian_to_blocks`, routes `/imports/obsidian`, migration 0072):
+  Documents header "…" → "Import from Obsidian" and Settings → Import open `/docs/import/obsidian`. Upload one `.zip`
+  of a vault (progress, cancel) → `obsidian.scan` checks the archive safely (`obsidian/vault.rs`: no extraction, `..`,
+  absolute paths, symlinks, encryption, entry/size/ratio caps fail it with a message shown on the page; `.obsidian/`,
+  `.trash/`, `__MACOSX/`, dotfiles, canvases, CSV, oversized files and case duplicates are skipped and counted; one
+  top-level folder is stripped) → tree (folders that hold notes become pages; `Folder/Folder.md` is the folder page's
+  content; a folder without one lists its sub-pages) with the Notion import's tree picker and destination fields
+  (`components/ImportTreePicker.tsx`, `ImportDestinationFields.tsx`, `ImportParts.tsx`, `import/*.ts`, shared) →
+  `obsidian.import`: pass 1 creates pages parents first, pass 2 converts each note with wikilinks resolved like
+  Obsidian (relative path, vault path, else unique file name; `Note#Heading` links to the note, unresolved links stay
+  text), linked and embedded files attached as page files (images → image blocks, other files → file blocks, unlinked
+  attachments skipped), `![[Note]]` → link, `> [!type]` callouts → `callout` blocks, `==x==` → yellow background,
+  `%%comments%%` and frontmatter dropped, the Notion page size cap. Same lifecycle rules as the Notion import (private,
+  resumable, cancel keeps filled pages and trashes unfilled ones, trial page limit, read-only stop, 24 h expiry); the
+  archive is deleted in every final state.
 - Notion import (`pages/NotionImportPane.tsx`, `components/NotionImportChooser.tsx`, `api/notionImports.ts`,
-  `notionImport/selection.ts`; server `notion/import.rs`, routes `/imports/notion`): Documents header "…" → "Import from
+  `import/selection.ts`; server `notion/import.rs`, routes `/imports/notion`): Documents header "…" → "Import from
   Notion" opens `/docs/import`, a pane next to the tree like Trash. Steps follow the import's status at
   `/docs/import/:importId`: Connect (password field for a Notion personal access token, sent once, never cached client-side;
   problems map to sentences: invalid token, app key missing, import in progress + link to it, Notion unavailable) →
