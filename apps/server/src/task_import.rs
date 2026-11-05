@@ -1,17 +1,21 @@
-//! Pieces the task importers (Asana, Linear) share: the job kind and its failure model, the
-//! request spacing of their API clients, dates, and the Orbit projects, statuses and labels
-//! they create. Each importer keeps its own tables, SQL and source mapping.
+//! Pieces the task importers (Asana, Linear, Trello) share: the job kind and its failure model,
+//! the request spacing of their API clients, dates, the Orbit projects, statuses, labels and
+//! files they create, and the markdown they write. Each importer keeps its own tables, SQL and
+//! source mapping.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::Duration;
 
 use orbit_platform::{Database, Id, JobError, JobKind, Row, TimestampMillis};
+use pulldown_cmark::{Event, Parser, Tag};
+use sha2::{Digest, Sha256};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 use crate::billing::WorkspaceAccess;
 use crate::notion::import::clamp;
+use crate::repositories::attachments::{AttachmentRepository, TaskFile};
 use crate::repositories::billing;
 use crate::repositories::tasks::{TaskError, TaskRepository};
 
@@ -161,6 +165,75 @@ pub(crate) async fn project_statuses(
     .collect())
 }
 
+/// The status category of a new status for a source column (Asana section, Trello list): a
+/// done-looking name is `completed`, the first column `unstarted`, the others `started`.
+pub(crate) fn column_category(name: &str, position: usize) -> &'static str {
+    let lower = name.trim().to_lowercase();
+    if ["done", "complete", "completed", "closed", "shipped"].contains(&lower.as_str()) {
+        "completed"
+    } else if position == 0 {
+        "unstarted"
+    } else {
+        "started"
+    }
+}
+
+/// The color of a new status in `category`.
+pub(crate) fn category_color(category: &str) -> &'static str {
+    match category {
+        "completed" => "#4cb782",
+        "started" => "#f2c94c",
+        "cancelled" => "#95a2b3",
+        _ => "#8b8f98",
+    }
+}
+
+/// Maps source columns `(id, name)` in board order to the project's statuses: a status with
+/// the same name (any case) is reused, otherwise one is created with [`column_category`].
+/// Returns `(column id, status id)` in column order.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn column_statuses(
+    database: &Database,
+    tasks: &TaskRepository,
+    workspace_id: Id,
+    project_id: Id,
+    user_id: Id,
+    request_id: &str,
+    columns: &[(String, String)],
+) -> Result<Vec<(String, String)>, Failure> {
+    let mut statuses = project_statuses(database, project_id).await?;
+    let mut mapped = Vec::with_capacity(columns.len());
+    for (position, (column_id, name)) in columns.iter().enumerate() {
+        let existing = statuses.iter().find(|(_, existing, category)| {
+            category != "duplicate" && existing.to_lowercase() == name.to_lowercase()
+        });
+        let status_id = match existing {
+            Some((id, _, _)) => *id,
+            None => {
+                let category = column_category(name, position);
+                let status = tasks
+                    .create_status(
+                        workspace_id,
+                        project_id,
+                        user_id,
+                        name.clone(),
+                        String::new(),
+                        category_color(category).to_owned(),
+                        category.to_owned(),
+                        None,
+                        request_id,
+                        TimestampMillis::now(),
+                    )
+                    .await?;
+                statuses.push((status.id, name.clone(), category.to_owned()));
+                status.id
+            }
+        };
+        mapped.push((column_id.clone(), status_id.to_string()));
+    }
+    Ok(mapped)
+}
+
 /// What the importer creates the Orbit project with.
 pub(crate) struct NewProject<'a> {
     pub id: Id,
@@ -304,6 +377,152 @@ pub(crate) fn name_or(name: Option<String>, fallback: &str) -> String {
     name.map(|name| clamp(name.trim(), 200, 800))
         .filter(|name| !name.is_empty())
         .unwrap_or_else(|| fallback.to_owned())
+}
+
+/// What [`attach_once`] did with a file.
+pub(crate) enum Attached {
+    /// The task already had a file with these bytes (an earlier attempt attached it).
+    Existing(Id),
+    Created(Id),
+    /// Orbit refused the file (type, size or storage quota).
+    Refused,
+}
+
+/// Attaches `bytes` as `name` unless a file with the same content is in `attached` (the task's
+/// files, see [`AttachmentRepository::task_files`]); a new file is added to `attached`.
+pub(crate) async fn attach_once(
+    attachments: &AttachmentRepository,
+    attached: &mut Vec<TaskFile>,
+    workspace_id: Id,
+    task_id: Id,
+    user_id: Id,
+    name: &str,
+    bytes: &[u8],
+) -> Attached {
+    let sha256 = format!("{:x}", Sha256::digest(bytes));
+    if let Some(existing) = attached.iter().find(|existing| {
+        existing.sha256 == sha256 && usize::try_from(existing.byte_size).ok() == Some(bytes.len())
+    }) {
+        return Attached::Existing(existing.id);
+    }
+    match attachments
+        .create_from_bytes(workspace_id, task_id, user_id, name, bytes)
+        .await
+    {
+        Ok(created) => {
+            attached.push(TaskFile {
+                id: created.id,
+                sha256,
+                byte_size: i64::try_from(created.byte_size).unwrap_or_default(),
+            });
+            Attached::Created(created.id)
+        }
+        Err(error) => {
+            tracing::debug!(error = %error, "imported file could not be attached");
+            Attached::Refused
+        }
+    }
+}
+
+/// The Orbit URL that replaces a source file URL in imported markdown.
+pub(crate) fn attachment_url(workspace_id: Id, task_id: Id, attachment_id: Id) -> String {
+    format!(
+        "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/attachments/{attachment_id}/download"
+    )
+}
+
+/// Appends what Orbit has no field for under a bold `source` heading (`**Linear**`), then a
+/// `**Links**` section, to `body`.
+pub(crate) fn with_source_details(
+    body: &str,
+    source: &str,
+    fields: &[(&str, String)],
+    links: &[(String, String)],
+) -> String {
+    let mut markdown = body.trim().to_owned();
+    if !fields.is_empty() {
+        if !markdown.is_empty() {
+            markdown.push_str("\n\n");
+        }
+        markdown.push_str(&format!("**{source}**\n"));
+        for (name, value) in fields {
+            markdown.push_str(&format!(
+                "\n- {name}: {}",
+                escape_markdown(&value.replace(['\r', '\n'], " "))
+            ));
+        }
+    }
+    if !links.is_empty() {
+        markdown.push_str("\n\n**Links**\n");
+        for (title, url) in links {
+            markdown.push_str(&format!(
+                "\n- [{}](<{url}>)",
+                escape_markdown(&title.replace(['\r', '\n'], " "))
+            ));
+        }
+    }
+    markdown
+}
+
+/// Escapes the characters that would turn a name into markdown formatting.
+pub(crate) fn escape_markdown(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for c in value.chars() {
+        if matches!(c, '\\' | '*' | '_' | '[' | ']' | '`' | '<' | '>' | '#') {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Link and image destinations in markdown, with the link text or image alt text.
+pub(crate) fn markdown_links(markdown: &str) -> Vec<(String, Option<String>)> {
+    let mut links = Vec::new();
+    let mut open: Option<(String, String)> = None;
+    for event in Parser::new(markdown) {
+        match event {
+            Event::Start(Tag::Link { dest_url, .. } | Tag::Image { dest_url, .. }) => {
+                if let Some((url, text)) = open.take() {
+                    links.push((url, Some(text).filter(|text| !text.is_empty())));
+                }
+                open = Some((dest_url.into_string(), String::new()));
+            }
+            Event::Text(text) | Event::Code(text) => {
+                if let Some((_, label)) = open.as_mut() {
+                    label.push_str(&text);
+                }
+            }
+            Event::End(_) => {
+                if let Some((url, text)) = open.take() {
+                    links.push((url, Some(text).filter(|text| !text.is_empty())));
+                }
+            }
+            _ => {}
+        }
+    }
+    links
+}
+
+/// Replaces each source file URL with its Orbit attachment URL.
+pub(crate) fn rewrite_links(markdown: &str, files: &[(String, String)]) -> String {
+    files.iter().fold(markdown.to_owned(), |text, (from, to)| {
+        text.replace(from, to)
+    })
+}
+
+/// Whether `markdown` contains one of the files' source URLs.
+pub(crate) fn mentions_any(markdown: &str, files: &[(String, String)]) -> bool {
+    files.iter().any(|(url, _)| markdown.contains(url.as_str()))
+}
+
+/// `attachment; filename="a.png"` → `a.png` (the quoted or bare form; not RFC 5987 `filename*`).
+pub(crate) fn disposition_file_name(value: &str) -> Option<String> {
+    value.split(';').find_map(|part| {
+        let name = part.trim().strip_prefix("filename=")?;
+        let name = name.trim().trim_matches('"').trim();
+        (!name.is_empty()).then(|| name.to_owned())
+    })
 }
 
 /// Spaces requests `interval` apart; `pause` pushes the next slot out for every caller.
@@ -475,6 +694,57 @@ mod tests {
         assert_eq!(project_key_base("Roadmap", "ASANA"), "ROAD");
         assert_eq!(project_key_base("Équipe", "ASANA"), "QUIP");
         assert_eq!(project_key_base("日本", "ASANA"), "ASANA");
+    }
+
+    #[test]
+    fn derives_column_categories() {
+        assert_eq!(column_category("Shipped", 3), "completed");
+        assert_eq!(column_category("To do", 0), "unstarted");
+        assert_eq!(column_category("Doing", 1), "started");
+    }
+
+    #[test]
+    fn writes_source_details() {
+        assert_eq!(
+            with_source_details(
+                "Body",
+                "Linear",
+                &[("Cycle", "Sprint *3*".to_owned())],
+                &[("PR #1".into(), "https://github.com/a/b/pull/1".into())]
+            ),
+            "Body\n\n**Linear**\n\n- Cycle: Sprint \\*3\\*\n\n**Links**\n\n- [PR \\#1](<https://github.com/a/b/pull/1>)"
+        );
+        assert_eq!(with_source_details(" Body ", "Trello", &[], &[]), "Body");
+    }
+
+    #[test]
+    fn finds_and_rewrites_file_links() {
+        let markdown = "See ![shot.png](https://uploads.linear.app/o/a/b) and [spec](https://uploads.linear.app/o/c/d), [site](https://example.com).";
+        assert_eq!(
+            markdown_links(markdown),
+            [
+                (
+                    "https://uploads.linear.app/o/a/b".to_owned(),
+                    Some("shot.png".to_owned())
+                ),
+                (
+                    "https://uploads.linear.app/o/c/d".to_owned(),
+                    Some("spec".to_owned())
+                ),
+                ("https://example.com".to_owned(), Some("site".to_owned())),
+            ]
+        );
+        assert_eq!(
+            rewrite_links(
+                markdown,
+                &[("https://uploads.linear.app/o/a/b".into(), "/files/1".into())]
+            ),
+            "See ![shot.png](/files/1) and [spec](https://uploads.linear.app/o/c/d), [site](https://example.com)."
+        );
+        assert_eq!(
+            disposition_file_name("attachment; filename=\"spec v2.pdf\""),
+            Some("spec v2.pdf".to_owned())
+        );
     }
 
     #[test]

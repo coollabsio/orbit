@@ -32,10 +32,8 @@ use orbit_platform::{
     Backend, Database, Flag, Id, Job, JobError, JobKind, JobKindRegistrationError, JobQueue,
     JobStore, TimestampMillis, Worker,
 };
-use pulldown_cmark::{Event, Parser, Tag};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use thiserror::Error;
 use utoipa::ToSchema;
 
@@ -54,9 +52,11 @@ use crate::repositories::tasks::{
 use crate::secret_box::{decrypt_secret, encrypt_secret};
 pub use crate::task_import::JobRun;
 use crate::task_import::{
-    Failure, LABEL_COLORS, NewProject, PROJECT_COLORS, display_instant, ensure_project,
-    ensure_writable, find_or_create_label, job_kind, member_emails, parse_date_millis,
-    parse_instant_millis, parse_stored_id, project_key_base, project_statuses, retryable, stopped,
+    Attached, Failure, LABEL_COLORS, NewProject, PROJECT_COLORS, attach_once, attachment_url,
+    category_color, display_instant, ensure_project, ensure_writable, escape_markdown,
+    find_or_create_label, job_kind, markdown_links, member_emails, mentions_any, parse_date_millis,
+    parse_instant_millis, parse_stored_id, project_key_base, project_statuses, retryable,
+    rewrite_links, stopped, with_source_details,
 };
 
 /// Job kind names.
@@ -1541,7 +1541,7 @@ impl LinearImportService {
             });
             let markdown = description(
                 &issue,
-                &rewrite(body, &files),
+                &rewrite_links(body, &files),
                 unmatched.as_deref(),
                 detached,
                 &links(run.client, &issue),
@@ -1589,7 +1589,7 @@ impl LinearImportService {
             if comment.parent.is_some() {
                 header.push_str(" · reply");
             }
-            let text = rewrite(comment.body.as_deref().unwrap_or_default().trim(), &files);
+            let text = rewrite_links(comment.body.as_deref().unwrap_or_default().trim(), &files);
             let body = if text.is_empty() {
                 header
             } else {
@@ -1648,56 +1648,37 @@ impl LinearImportService {
                     continue;
                 }
             };
-            let sha256 = format!("{:x}", Sha256::digest(&file.bytes));
-            let existing = attached.iter().find(|existing| {
-                existing.sha256 == sha256
-                    && usize::try_from(existing.byte_size).ok() == Some(file.bytes.len())
-            });
-            let attachment_id = match existing {
-                Some(existing) => existing.id,
-                None => {
-                    let name = label
-                        .as_deref()
-                        .map(str::trim)
-                        .filter(|label| label.contains('.'))
-                        .map(sanitize_file_name)
-                        .filter(|name| !name.is_empty())
-                        .unwrap_or(file.file_name.clone());
-                    match self
-                        .inner
-                        .attachments
-                        .create_from_bytes(
-                            run.workspace_id,
-                            task_id,
-                            run.user_id,
-                            &name,
-                            &file.bytes,
-                        )
-                        .await
-                    {
-                        Ok(created) => {
-                            run.report.files_imported += 1;
-                            attached.push(crate::repositories::attachments::TaskFile {
-                                id: created.id,
-                                sha256,
-                                byte_size: i64::try_from(created.byte_size).unwrap_or_default(),
-                            });
-                            created.id
-                        }
-                        Err(error) => {
-                            tracing::debug!(error = %error, "Linear file could not be attached");
-                            run.report.missing_files += 1;
-                            continue;
-                        }
-                    }
+            let name = label
+                .as_deref()
+                .map(str::trim)
+                .filter(|label| label.contains('.'))
+                .map(sanitize_file_name)
+                .filter(|name| !name.is_empty())
+                .unwrap_or(file.file_name.clone());
+            let attachment_id = match attach_once(
+                &self.inner.attachments,
+                &mut attached,
+                run.workspace_id,
+                task_id,
+                run.user_id,
+                &name,
+                &file.bytes,
+            )
+            .await
+            {
+                Attached::Existing(id) => id,
+                Attached::Created(id) => {
+                    run.report.files_imported += 1;
+                    id
+                }
+                Attached::Refused => {
+                    run.report.missing_files += 1;
+                    continue;
                 }
             };
             files.push((
                 url.clone(),
-                format!(
-                    "/api/v1/workspaces/{}/tasks/{task_id}/attachments/{attachment_id}/download",
-                    run.workspace_id
-                ),
+                attachment_url(run.workspace_id, task_id, attachment_id),
             ));
         }
         Ok(files)
@@ -2195,15 +2176,6 @@ fn state_category(kind: Option<&str>) -> &'static str {
     }
 }
 
-fn category_color(category: &str) -> &'static str {
-    match category {
-        "completed" => "#4cb782",
-        "started" => "#f2c94c",
-        "cancelled" => "#95a2b3",
-        _ => "#8b8f98",
-    }
-}
-
 fn is_hex_color(value: &str) -> bool {
     value.len() == 7
         && value.starts_with('#')
@@ -2313,81 +2285,7 @@ fn description(
     if issue.archived_at.is_some() {
         fields.push(("Archived", "yes".to_owned()));
     }
-    let mut markdown = body.trim().to_owned();
-    if !fields.is_empty() {
-        if !markdown.is_empty() {
-            markdown.push_str("\n\n");
-        }
-        markdown.push_str("**Linear**\n");
-        for (name, value) in fields {
-            markdown.push_str(&format!(
-                "\n- {name}: {}",
-                escape_markdown(&value.replace(['\r', '\n'], " "))
-            ));
-        }
-    }
-    if !links.is_empty() {
-        markdown.push_str("\n\n**Links**\n");
-        for (title, url) in links {
-            markdown.push_str(&format!(
-                "\n- [{}](<{url}>)",
-                escape_markdown(&title.replace(['\r', '\n'], " "))
-            ));
-        }
-    }
-    markdown
-}
-
-/// Escapes the characters that would turn a name into markdown formatting.
-fn escape_markdown(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    for c in value.chars() {
-        if matches!(c, '\\' | '*' | '_' | '[' | ']' | '`' | '<' | '>' | '#') {
-            out.push('\\');
-        }
-        out.push(c);
-    }
-    out
-}
-
-/// Link and image destinations in markdown, with the link text or image alt text.
-fn markdown_links(markdown: &str) -> Vec<(String, Option<String>)> {
-    let mut links = Vec::new();
-    let mut open: Option<(String, String)> = None;
-    for event in Parser::new(markdown) {
-        match event {
-            Event::Start(Tag::Link { dest_url, .. } | Tag::Image { dest_url, .. }) => {
-                if let Some((url, text)) = open.take() {
-                    links.push((url, Some(text).filter(|text| !text.is_empty())));
-                }
-                open = Some((dest_url.into_string(), String::new()));
-            }
-            Event::Text(text) | Event::Code(text) => {
-                if let Some((_, label)) = open.as_mut() {
-                    label.push_str(&text);
-                }
-            }
-            Event::End(_) => {
-                if let Some((url, text)) = open.take() {
-                    links.push((url, Some(text).filter(|text| !text.is_empty())));
-                }
-            }
-            _ => {}
-        }
-    }
-    links
-}
-
-/// Replaces each Linear upload URL with its Orbit attachment URL.
-fn rewrite(markdown: &str, files: &[(String, String)]) -> String {
-    files.iter().fold(markdown.to_owned(), |text, (from, to)| {
-        text.replace(from, to)
-    })
-}
-
-/// Whether `markdown` contains one of the files' Linear URLs.
-fn mentions_any(markdown: &str, files: &[(String, String)]) -> bool {
-    files.iter().any(|(url, _)| markdown.contains(url.as_str()))
+    with_source_details(body, "Linear", &fields, links)
 }
 
 #[cfg(test)]
@@ -2494,32 +2392,6 @@ mod tests {
                 &[("PR #1".into(), "https://github.com/a/b/pull/1".into())]
             ),
             "Body\n\n**Linear**\n\n- Issue: ENG-7\n- Assignee: Ghost\n- Parent: ENG-1\n- Project: Launch\n- Cycle: 3 (Sprint \\*3\\*)\n- Estimate: 2\n\n**Links**\n\n- [PR \\#1](<https://github.com/a/b/pull/1>)"
-        );
-    }
-
-    #[test]
-    fn finds_and_rewrites_upload_links() {
-        let markdown = "See ![shot.png](https://uploads.linear.app/o/a/b) and [spec](https://uploads.linear.app/o/c/d), [site](https://example.com).";
-        assert_eq!(
-            markdown_links(markdown),
-            [
-                (
-                    "https://uploads.linear.app/o/a/b".to_owned(),
-                    Some("shot.png".to_owned())
-                ),
-                (
-                    "https://uploads.linear.app/o/c/d".to_owned(),
-                    Some("spec".to_owned())
-                ),
-                ("https://example.com".to_owned(), Some("site".to_owned())),
-            ]
-        );
-        assert_eq!(
-            rewrite(
-                markdown,
-                &[("https://uploads.linear.app/o/a/b".into(), "/files/1".into())]
-            ),
-            "See ![shot.png](/files/1) and [spec](https://uploads.linear.app/o/c/d), [site](https://example.com)."
         );
     }
 }

@@ -31,7 +31,6 @@ use orbit_platform::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sha2::{Digest, Sha256};
 use thiserror::Error;
 use utoipa::ToSchema;
 
@@ -49,9 +48,10 @@ use crate::repositories::tasks::{CommentContent, CreateTask, TaskError, TaskRepo
 use crate::secret_box::{decrypt_secret, encrypt_secret};
 pub use crate::task_import::JobRun;
 use crate::task_import::{
-    Failure, LABEL_COLORS, NewProject, PROJECT_COLORS, display_instant, ensure_project,
-    ensure_writable, find_or_create_label, job_kind, member_emails, parse_date_millis,
-    parse_instant_millis, parse_stored_id, project_key_base, project_statuses, retryable, stopped,
+    Attached, Failure, LABEL_COLORS, NewProject, PROJECT_COLORS, attach_once, column_statuses,
+    display_instant, ensure_project, ensure_writable, find_or_create_label, job_kind,
+    member_emails, parse_date_millis, parse_instant_millis, parse_stored_id, project_key_base,
+    project_statuses, retryable, stopped,
 };
 
 /// Job kind names.
@@ -989,49 +989,28 @@ impl AsanaImportService {
     ) -> Result<(), Failure> {
         let project_id = self.ensure_project(run, item, index).await?;
         let sections = run.client.sections(&item.asana_gid).await?;
-        let mut statuses = project_statuses(self.database(), project_id).await?;
-        let mut mapped = Vec::with_capacity(sections.len());
-        for (position, section) in sections.iter().enumerate() {
-            let name = section
-                .name
-                .as_deref()
-                .map(|name| clamp(name.trim(), 100, 100))
-                .filter(|name| !name.is_empty())
-                .unwrap_or_else(|| "Untitled section".to_owned());
-            let existing = statuses.iter().find(|(_, existing, category)| {
-                category != "duplicate" && existing.to_lowercase() == name.to_lowercase()
-            });
-            let status_id = match existing {
-                Some((id, _, _)) => *id,
-                None => {
-                    let category = section_category(&name, position);
-                    let color = match category {
-                        "completed" => "#4cb782",
-                        "started" => "#f2c94c",
-                        _ => "#8b8f98",
-                    };
-                    let status = self
-                        .inner
-                        .tasks
-                        .create_status(
-                            run.workspace_id,
-                            project_id,
-                            run.user_id,
-                            name.clone(),
-                            String::new(),
-                            color.to_owned(),
-                            category.to_owned(),
-                            None,
-                            &run.request_id,
-                            TimestampMillis::now(),
-                        )
-                        .await?;
-                    statuses.push((status.id, name, category.to_owned()));
-                    status.id
-                }
-            };
-            mapped.push((section.gid.clone(), status_id.to_string()));
-        }
+        let columns: Vec<(String, String)> = sections
+            .iter()
+            .map(|section| {
+                let name = section
+                    .name
+                    .as_deref()
+                    .map(|name| clamp(name.trim(), 100, 100))
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or_else(|| "Untitled section".to_owned());
+                (section.gid.clone(), name)
+            })
+            .collect();
+        let mapped = column_statuses(
+            self.database(),
+            &self.inner.tasks,
+            run.workspace_id,
+            project_id,
+            run.user_id,
+            &run.request_id,
+            &columns,
+        )
+        .await?;
         sqlx::query(
             "UPDATE asana_import_items SET data_json = $1 WHERE import_id = $2 AND kind = 'project' AND asana_gid = $3",
         )
@@ -1616,7 +1595,7 @@ impl AsanaImportService {
 
         // Asana-hosted files. The download URL lives about two minutes, so each attachment
         // is read right before its download.
-        let attached = self
+        let mut attached = self
             .inner
             .attachments
             .task_files(run.workspace_id, task_id)
@@ -1659,13 +1638,6 @@ impl AsanaImportService {
                     continue;
                 }
             };
-            let sha256 = format!("{:x}", Sha256::digest(&bytes.bytes));
-            if attached.iter().any(|file| {
-                file.sha256 == sha256
-                    && usize::try_from(file.byte_size).ok() == Some(bytes.bytes.len())
-            }) {
-                continue;
-            }
             let name = sanitize_file_name(
                 file.name
                     .as_deref()
@@ -1673,17 +1645,20 @@ impl AsanaImportService {
                     .filter(|name| !name.trim().is_empty())
                     .unwrap_or(&bytes.file_name),
             );
-            match self
-                .inner
-                .attachments
-                .create_from_bytes(run.workspace_id, task_id, run.user_id, &name, &bytes.bytes)
-                .await
+            match attach_once(
+                &self.inner.attachments,
+                &mut attached,
+                run.workspace_id,
+                task_id,
+                run.user_id,
+                &name,
+                &bytes.bytes,
+            )
+            .await
             {
-                Ok(_) => run.report.files_imported += 1,
-                Err(error) => {
-                    tracing::debug!(error = %error, "Asana file could not be attached");
-                    run.report.missing_files += 1;
-                }
+                Attached::Existing(_) => {}
+                Attached::Created(_) => run.report.files_imported += 1,
+                Attached::Refused => run.report.missing_files += 1,
             }
         }
 
@@ -1994,19 +1969,6 @@ impl AsanaImportService {
     }
 }
 
-/// The status category of a new status for an Asana section: a done-looking name is
-/// `completed`, the first section `unstarted`, the others `started`.
-fn section_category(name: &str, position: usize) -> &'static str {
-    let lower = name.trim().to_lowercase();
-    if ["done", "complete", "completed", "closed", "shipped"].contains(&lower.as_str()) {
-        "completed"
-    } else if position == 0 {
-        "unstarted"
-    } else {
-        "started"
-    }
-}
-
 fn is_priority_field(name: Option<&str>) -> bool {
     name.is_some_and(|name| name.trim().eq_ignore_ascii_case("priority"))
 }
@@ -2112,9 +2074,6 @@ mod tests {
 
     #[test]
     fn derives_categories_and_priorities() {
-        assert_eq!(section_category("Shipped", 3), "completed");
-        assert_eq!(section_category("To do", 0), "unstarted");
-        assert_eq!(section_category("Doing", 1), "started");
         let task = |value: &str| AsanaTask {
             custom_fields: vec![CustomField {
                 name: Some("priority".into()),

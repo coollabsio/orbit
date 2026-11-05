@@ -33,7 +33,9 @@ use super::model::{
     USER_FIELDS, WorkflowState, issue_fields,
 };
 use crate::notion::files::sanitize_file_name;
-use crate::task_import::{RateLimiter, backoff, is_transient, parse_retry_after};
+use crate::task_import::{
+    RateLimiter, backoff, disposition_file_name, is_transient, parse_retry_after,
+};
 
 /// The production GraphQL endpoint.
 pub const DEFAULT_ENDPOINT: &str = "https://api.linear.app/graphql";
@@ -705,15 +707,6 @@ fn wait_until(reset_millis: i64) -> Duration {
     Duration::from_millis(u64::try_from(reset_millis - now).unwrap_or_default())
 }
 
-/// `attachment; filename="a.png"` → `a.png` (the quoted or bare form; not RFC 5987 `filename*`).
-fn disposition_file_name(value: &str) -> Option<String> {
-    value.split(';').find_map(|part| {
-        let name = part.trim().strip_prefix("filename=")?;
-        let name = name.trim().trim_matches('"').trim();
-        (!name.is_empty()).then(|| name.to_owned())
-    })
-}
-
 fn http_error(error: reqwest::Error) -> LinearError {
     LinearError::Http(error.without_url().to_string())
 }
@@ -775,10 +768,6 @@ mod tests {
             "reset already passed"
         );
         assert_eq!(RateLimits::default().nearly_spent(), None);
-        assert_eq!(
-            disposition_file_name("attachment; filename=\"spec v2.pdf\""),
-            Some("spec v2.pdf".to_owned())
-        );
     }
 
     #[test]
