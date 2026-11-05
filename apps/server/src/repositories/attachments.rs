@@ -635,6 +635,8 @@ impl AttachmentRepository {
                 workspace_id,
                 task_id,
                 author_id: session.user.id,
+                author_service_account_id: None,
+                author_service_account_name: None,
                 parent_id: None,
                 body: String::new(),
                 body_json: None,
@@ -718,18 +720,19 @@ async fn require_comment_editor(
     let actor: Actor = membership::actor(&mut *connection, workspace_id, session.user.id)
         .await?
         .ok_or(AttachmentRepositoryError::NotFound)?;
-    let author_id = sqlx::query_scalar::<_, String>(
-        "SELECT author_id FROM task_comments WHERE id = $1 AND workspace_id = $2 AND task_id = $3",
+    let (author_id, service_account) = sqlx::query_as::<_, (String, Option<String>)>(
+        "SELECT author_id, author_service_account_id FROM task_comments WHERE id = $1 AND workspace_id = $2 AND task_id = $3",
     )
     .bind(comment_id.to_string())
     .bind(workspace_id.to_string())
     .bind(task_id.to_string())
     .fetch_optional(&mut *connection)
     .await?
-    .ok_or(AttachmentRepositoryError::NotFound)?
-    .parse()
-    .map_err(|_| AttachmentRepositoryError::InvalidRecord)?;
-    if actor.can_edit_comment(author_id) {
+    .ok_or(AttachmentRepositoryError::NotFound)?;
+    let author_id: Id = author_id
+        .parse()
+        .map_err(|_| AttachmentRepositoryError::InvalidRecord)?;
+    if actor.can_edit_comment(service_account.is_none().then_some(author_id)) {
         Ok(())
     } else {
         Err(AttachmentRepositoryError::Forbidden)

@@ -1,7 +1,7 @@
 import { useCommand } from '@/shortcuts/useCommand'
 import { Suspense, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { Calendar, ChevronRight, Hierarchy2, Paperclip2 as Paperclip, Tag, User as UserIcon, Xmark as X } from 'reicon-react'
+import { Calendar, ChevronRight, Hierarchy2, Link2, Paperclip2 as Paperclip, Tag, User as UserIcon, Xmark as X } from 'reicon-react'
 import { apiClient } from '@/api/client'
 import { createTaskRelation, updateTask } from '@orbit/api/generated/sdk.gen'
 import { Button } from '@/components/ui/button'
@@ -87,6 +87,7 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
     dueAt: defaults.due_at ?? null,
     dueStartAt: defaults.due_start_at ?? null,
     parent: null as Task | null,
+    sourceUrl: defaults.source_url ?? null,
   }))
   // relations are saved once the task exists
   const [relations, setRelations] = useState<PendingRelation[]>([])
@@ -94,6 +95,7 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
   const [createMore, setCreateMore] = useState(() => window.localStorage.getItem(CREATE_MORE_KEY) === '1')
   const [created, setCreated] = useState<TaskRecord>()
   const [dueDateOpen, setDueDateOpen] = useState(false)
+  const [sourceOpen, setSourceOpen] = useState(false)
   // files wait here and upload once the task exists
   const [files, setFiles] = useState<File[]>([])
   const [uploading, setUploading] = useState(false)
@@ -139,6 +141,7 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
         due_at: draft.dueAt,
         due_start_at: draft.dueStartAt,
         parent_task_id: draft.parent?.id ?? null,
+        ...(draft.sourceUrl ? { source_url: draft.sourceUrl } : {}),
       })
       if (relations.length > 0) {
         const results = await Promise.allSettled(relations.map((relation) => createTaskRelation({ client: apiClient, path: { workspace_id: workspace.id, task_id: task.id }, body: { type: relation.kind, task_id: relation.task.id }, throwOnError: true })))
@@ -495,6 +498,32 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
                 Parent
               </Button>
             )}
+            <Popover open={sourceOpen} onOpenChange={setSourceOpen}>
+              <PopoverTrigger
+                render={
+                  <Button type="button" variant="outline" size="sm" className="max-w-56 font-normal" aria-label={draft.sourceUrl ? `Source: ${draft.sourceUrl}` : 'Source'}>
+                    <Link2 aria-hidden="true" className="text-muted-foreground" />
+                    <span className="truncate">{draft.sourceUrl ? draft.sourceUrl.replace(/^https?:\/\//, '').split('/')[0] : 'Source'}</span>
+                  </Button>
+                }
+              />
+              <PopoverContent align="start" className="w-72 gap-2 p-3">
+                {/* its submit also reaches the task form through the portal, which ignores it */}
+                <form
+                  className="flex flex-col gap-2"
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    const sourceUrl = new FormData(event.currentTarget).get('source_url')?.toString().trim() || null
+                    setDraft((current) => ({ ...current, sourceUrl }))
+                    setSourceOpen(false)
+                  }}
+                >
+                  <label htmlFor="new-task-source-url" className="text-xs font-medium">Source URL</label>
+                  <Input id="new-task-source-url" name="source_url" type="url" placeholder="https://..." defaultValue={draft.sourceUrl ?? ''} />
+                  <Button type="submit" size="sm">Save</Button>
+                </form>
+              </PopoverContent>
+            </Popover>
           </div>
 
           <DialogFooter className="items-center py-2.5 sm:justify-between">

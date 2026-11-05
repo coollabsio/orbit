@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+# Run the development instance of the current checkout, next to the instances of other worktrees.
+#
+# Usage:
+#   ./scripts/dev run        # start `just dev` on this checkout's ports, stop on exit (Jean)
+#   ./scripts/dev urls       # all instances, their ports and whether they run
+#   ./scripts/dev teardown   # forget this worktree's port slot (Jean)
+#
+# Ports: the main checkout keeps web 18888 and API 18080. A worktree gets a slot (1..99) that stays
+# the same for its branch: web 24000 + slot*10, API +1. Slots are kept next to the shared git
+# directory, so every worktree sees the same list.
+#
+# Database: the main checkout uses its .env.local (for example the shared Postgres `orbit_dev`). A
+# worktree uses its own SQLite file in data/ and does not read the main .env.local, so a branch's
+# migrations never change the database of main. A worktree may have its own .env.local.
+#
+# URL: when Tailscale runs, the web port is published with `tailscale serve` over HTTPS on the
+# machine's tailnet name, and Orbit uses that origin. Otherwise the origin is http://127.0.0.1:<web>.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+GIT_COMMON_DIR="$(git rev-parse --path-format=absolute --git-common-dir)"
+SLOTS_DIR="$(dirname "$GIT_COMMON_DIR")/.dev-instances"
+SLOTS_FILE="$SLOTS_DIR/slots"
+
+usage() {
+    sed -n '2,7p' "$0" | sed 's/^# \?//'
+}
+
+is_worktree() {
+    [[ "$(git rev-parse --path-format=absolute --git-dir)" != "$GIT_COMMON_DIR" ]]
+}
+
+instance_name() {
+    local name
+    name="$(git symbolic-ref --quiet --short HEAD || basename "$(pwd -P)")"
+    tr '[:upper:]' '[:lower:]' <<<"$name" | sed -E 's/[^a-z0-9_]+/-/g; s/^-+//; s/-+$//'
+}
+
+# Lowest free slot, stable for each instance name.
+instance_slot() {
+    local name="$1" slot
+    mkdir -p "$SLOTS_DIR"
+    touch "$SLOTS_FILE"
+    exec 9>"$SLOTS_FILE.lock"
+    flock 9
+    slot="$(awk -v n="$name" '$1 == n { print $2 }' "$SLOTS_FILE")"
+    if [[ -z "$slot" ]]; then
+        slot=1
+        while awk -v s="$slot" '$2 == s { found = 1 } END { exit !found }' "$SLOTS_FILE"; do
+            slot=$((slot + 1))
+        done
+        if ((slot > 99)); then
+            echo 'No free dev slot. Run ./scripts/dev teardown in unused worktrees.' >&2
+            exit 1
+        fi
+        echo "$name $slot" >>"$SLOTS_FILE"
+    fi
+    exec 9>&-
+    echo "$slot"
+}
+
+web_port_of() { echo $((24000 + $1 * 10)); }
+
+tailnet_host() {
+    command -v tailscale >/dev/null || return 0
+    tailscale status --json 2>/dev/null |
+        python3 -c 'import json, sys; print(json.load(sys.stdin)["Self"]["DNSName"].rstrip("."))' 2>/dev/null || true
+}
+
+# Prints the directory of the process that listens on the port, and fails when the port is free.
+port_owner() {
+    local pid
+    [[ -n "$(ss -ltnH "sport = :$1" 2>/dev/null)" ]] || return 1
+    pid="$(ss -ltnpH "sport = :$1" 2>/dev/null | grep -oE 'pid=[0-9]+' | head -n1 | cut -d= -f2)"
+    readlink "/proc/${pid:-0}/cwd" 2>/dev/null || echo "an unknown process"
+}
+
+cmd_run() {
+    local web api host origin owner
+    if is_worktree; then
+        web="$(web_port_of "$(instance_slot "$(instance_name)")")"
+        api=$((web + 1))
+    else
+        web=18888
+        api=18080
+    fi
+    for port in "$web" "$api"; do
+        if owner="$(port_owner "$port")"; then
+            echo "Port $port is already used by ${owner}." >&2
+            exit 1
+        fi
+    done
+    host="$(tailnet_host)"
+    if [[ -n "$host" ]]; then
+        origin="https://${host}:${web}"
+        tailscale serve --bg --https="$web" "http://127.0.0.1:${web}" >/dev/null
+        trap 'tailscale serve --https='"$web"' off >/dev/null 2>&1 || true' EXIT
+        trap 'exit 0' INT TERM
+    else
+        origin="http://127.0.0.1:${web}"
+    fi
+    echo "==> Orbit: ${origin} (API 127.0.0.1:${api})"
+    if is_worktree && [[ ! -f .env.local ]]; then
+        echo "==> Database: $(pwd -P)/data/orbit.sqlite"
+    fi
+    ORBIT_PUBLIC_ORIGIN="$origin" ORBIT_DEV_API_PORT="$api" ORBIT_DEV_WEB_PORT="$web" just dev
+}
+
+cmd_urls() {
+    local host name slot web state
+    host="$(tailnet_host)"
+    printf '%-40s %-6s %-6s %-8s %s\n' INSTANCE WEB API STATE URL
+    [[ -f "$SLOTS_FILE" ]] || return 0
+    while read -r name slot; do
+        web="$(web_port_of "$slot")"
+        state=stopped
+        port_owner "$web" >/dev/null && state=running
+        printf '%-40s %-6s %-6s %-8s %s\n' "$name" "$web" $((web + 1)) "$state" \
+            "${host:+https://${host}:${web}}"
+    done <"$SLOTS_FILE"
+}
+
+cmd_teardown() {
+    is_worktree || return 0
+    local name
+    name="$(instance_name)"
+    [[ -f "$SLOTS_FILE" ]] || return 0
+    exec 9>"$SLOTS_FILE.lock"
+    flock 9
+    awk -v n="$name" '$1 != n' "$SLOTS_FILE" >"$SLOTS_FILE.tmp" && mv "$SLOTS_FILE.tmp" "$SLOTS_FILE"
+    exec 9>&-
+    echo "==> Removed the dev slot of ${name}"
+}
+
+case "${1:-}" in
+    run) cmd_run ;;
+    urls) cmd_urls ;;
+    teardown) cmd_teardown ;;
+    *) usage; exit 1 ;;
+esac

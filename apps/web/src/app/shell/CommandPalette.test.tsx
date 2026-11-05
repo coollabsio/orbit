@@ -21,6 +21,7 @@ function Location() {
 }
 
 let pageSearches: string[] = []
+let taskSearches: string[] = []
 let recentPages: unknown[] = []
 
 const ran: string[] = []
@@ -36,6 +37,7 @@ function PageCommands({ target, children }: { target: boolean; children: ReactNo
 
 function setup(onClose = () => {}, target = false) {
   pageSearches = []
+  taskSearches = []
   window.localStorage.clear()
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity } } })
   client.setQueryData(queryKeys.workspaces, [
@@ -64,6 +66,7 @@ function setup(onClose = () => {}, target = false) {
       return Response.json({ items: [{ id: 'teamspace-1', workspace_id: 'workspace-1', name: 'General', icon: null, position: 0, version: 1, is_default: true, created_at: '2026-09-05T10:00:00Z', updated_at: '2026-09-05T10:00:00Z' }] })
     }
     if (url.includes('/tasks')) {
+      taskSearches.push(new URL(url).searchParams.get('search') ?? '')
       return Response.json({
         items: [{
           id: 'task-ship-it',
@@ -174,6 +177,22 @@ test('page search runs only for a non-empty query and opens the page', async () 
   expect(view.getByRole('option', { name: /Onboarding diary/ }).textContent).toContain('Page · Private')
   fireEvent.click(page)
   expect(view.getByTestId('location').textContent).toBe('/docs/page-handbook')
+})
+
+test('typing another key keeps the current hits until the new search answers', async () => {
+  const view = setup()
+  const input = await view.findByPlaceholderText('Search tasks, pages and navigation…')
+  await userEvent.type(input, 'onboard')
+  await view.findByRole('option', { name: /Team handbook/ }, { timeout: 2000 })
+  await view.findByRole('option', { name: /Ship the invite flow/ })
+
+  await userEvent.type(input, 'i')
+  // the debounced searches have not run yet: the last hits stay instead of blinking out
+  expect(view.queryByRole('option', { name: /Team handbook/ })).not.toBeNull()
+  expect(view.queryByRole('option', { name: /Ship the invite flow/ })).not.toBeNull()
+  await waitFor(() => expect(pageSearches).toEqual(['onboard', 'onboardi']))
+  // tasks are searched once per pause too, not once per key
+  expect(taskSearches).toEqual(['onboard', 'onboardi'])
 })
 
 test('page hits show the snippet with the matched words in bold, as text', async () => {

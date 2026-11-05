@@ -12,8 +12,8 @@ workspace without your data leaving your server.
   and Notion import.
 - **Chat**: channels, direct messages, threads, files, and search.
 - **Mail**: shared mail client (in progress, mock data).
-- **AI**: [MCP server](docs/mcp.md) with OAuth. Read and write tasks, read docs
-  and chat. Set it up in **Account settings → Agentic**.
+- **AI**: [MCP server](docs/mcp.md) with OAuth. Read and write tasks and docs,
+  read chat. Set it up in **Account settings → Agentic**.
 - **Admin**: workspaces, members, roles, API tokens, audit log, email, rate
   limits, storage, and workspace export.
 - **Backups**: scheduled, verified backups to S3, with restore of single pages

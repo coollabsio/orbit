@@ -10,3 +10,14 @@ export function appNavigate(to: string) {
   if (navigateFn) navigateFn(to)
   else window.location.assign(to)
 }
+
+/** The in-app path of a link to this app (same origin), or null for any other link. */
+export function internalPath(url: string): string | null {
+  const origin = window.location.origin
+  return url.startsWith(`${origin}/`) ? url.slice(origin.length) : null
+}
+
+/** A plain left click (no modifier asks for a new tab or window). */
+export function isPlainClick(event: { button: number; metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean }): boolean {
+  return event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey
+}

@@ -4,11 +4,14 @@
 //! Content is one opaque JSON block array per page; `content_text` is extracted for search.
 
 use std::collections::HashMap;
+use std::fmt;
+use std::sync::Arc;
 
 use orbit_platform::Row;
 use orbit_platform::{Backend, Database, Flag, Id, TimestampMillis};
 use serde::Serialize;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use sqlx::{Any, Transaction};
 use thiserror::Error;
 use utoipa::ToSchema;
@@ -24,8 +27,10 @@ use super::teamspaces::{default_teamspace, teamspace_exists};
 use super::workspaces::WorkspaceError;
 use crate::audit::{self, AuditOutcome};
 use crate::billing::TrialLimit;
+use crate::collab::markdown_merge::{MAX_BLOCKS, block_count, merge};
 use crate::collab::sanitize::sanitize_blocks_for;
 use crate::collab::{CollabError, CollabHub, CollabLock, DocKey, DocKind, LinkPolicy};
+use crate::export::markdown::LinkResolver;
 
 const TRASH_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
 const SEARCH_LIMIT: i64 = 20;
@@ -332,6 +337,29 @@ pub struct PageChanges {
     pub origin: SaveOrigin,
 }
 
+/// New content of a page as Markdown (the token API's doc writes). It is merged onto the page's
+/// current document (see [`crate::collab::markdown_merge`]): what it leaves unchanged keeps
+/// everything Markdown cannot show, and a live document gets only the changed parts.
+#[derive(Clone)]
+pub struct MarkdownContent {
+    pub markdown: String,
+    /// `(user id, display name)` of the workspace's members, for new `@Name` mentions.
+    pub members: Vec<(Id, String)>,
+    /// How the client's read of the page wrote links (sub-page titles); it must be the same, so
+    /// unchanged blocks are recognized.
+    pub links: Arc<dyn LinkResolver + Send + Sync>,
+}
+
+impl fmt::Debug for MarkdownContent {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MarkdownContent")
+            .field("markdown", &self.markdown)
+            .field("members", &self.members.len())
+            .finish_non_exhaustive()
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum PageError {
     #[error("page was not found")]
@@ -370,6 +398,10 @@ pub enum PageError {
     /// Co-editing is at its memory budget, or another server reset the document: try again.
     #[error("the page's co-editing document is busy")]
     Busy,
+    /// A Markdown write onto a page with more than [`MAX_BLOCKS`] blocks, or that would give it
+    /// more.
+    #[error("page content has too many blocks")]
+    TooLarge,
 }
 
 impl From<CollabError> for PageError {
@@ -494,6 +526,38 @@ impl PageRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<PageRecord, PageError> {
+        self.insert_page(id, workspace_id, actor_id, input, &[], request_id, now)
+            .await
+    }
+
+    /// [`Self::create_page`] with its first content, in the same transaction (one audit event).
+    /// Mentioned members are notified as for an edit.
+    pub async fn create_page_with_content(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        input: CreatePage,
+        content: &[Value],
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<PageRecord, PageError> {
+        let id = Id::new_v7();
+        self.insert_page(id, workspace_id, actor_id, input, content, request_id, now)
+            .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn insert_page(
+        &self,
+        id: Id,
+        workspace_id: Id,
+        actor_id: Id,
+        input: CreatePage,
+        content: &[Value],
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<PageRecord, PageError> {
+        let content = sanitize_page_blocks(content, workspace_id, id);
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         ensure_trial_capacity(&self.database, &mut tx, workspace_id, TrialLimit::Pages, 1).await?;
@@ -511,8 +575,8 @@ impl PageRepository {
         siblings.insert(index, id);
         let position = index as i64;
         sqlx::query(
-            "INSERT INTO pages (id, workspace_id, parent_id, teamspace_id, owner_id, title, icon, position, creator_id, updated_by, version, created_at, updated_at) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 0, $11, $12)",
+            "INSERT INTO pages (id, workspace_id, parent_id, teamspace_id, owner_id, title, icon, position, creator_id, updated_by, version, created_at, updated_at, content_json, content_text) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 0, $11, $12, $13, $14)",
         )
         .bind(id.to_string())
         .bind(workspace_id.to_string())
@@ -526,9 +590,12 @@ impl PageRepository {
         .bind(actor_id.to_string())
         .bind(now.as_millis())
         .bind(now.as_millis())
+        .bind(serde_json::to_string(&content).map_err(|_| PageError::Corrupt)?)
+        .bind(content_text(&content))
         .execute(&mut *tx)
         .await?;
         renumber(&mut tx, &siblings).await?;
+        notify_new_mentions(&mut tx, id, &[], &content, Some(actor_id), request_id, now).await?;
         let collab_epoch = collab_generation(&mut tx).await?;
         let updated_by_user = user_in_tx(&mut tx, actor_id).await?;
         record_mutation(
@@ -553,7 +620,7 @@ impl PageRepository {
             icon: input.icon,
             cover_url: None,
             cover_position: None,
-            content: Vec::new(),
+            content,
             position,
             version: 0,
             creator_id: actor_id,
@@ -631,23 +698,158 @@ impl PageRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<PageRecord, PageError> {
+        self.write_page(
+            workspace_id,
+            page_id,
+            actor_id,
+            Expected::Version(expected_version),
+            changes,
+            None,
+            request_id,
+            now,
+        )
+        .await
+    }
+
+    /// [`Self::update_page`] that checks the page's [`revision`] instead of its version, so it
+    /// also conflicts with co-edits made after the caller's read (the token API's doc writes).
+    /// The check runs after the open document's pending edits are stored.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn update_page_at_revision(
+        &self,
+        workspace_id: Id,
+        page_id: Id,
+        actor_id: Id,
+        expected_revision: u64,
+        changes: PageChanges,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<PageRecord, PageError> {
+        self.write_page(
+            workspace_id,
+            page_id,
+            actor_id,
+            Expected::Revision(expected_revision),
+            changes,
+            None,
+            request_id,
+            now,
+        )
+        .await
+    }
+
+    /// [`Self::update_page_at_revision`] with the content as Markdown, merged onto the page's
+    /// current document after the revision check. A write that changes nothing leaves the
+    /// content and the live document alone.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn update_page_markdown_at_revision(
+        &self,
+        workspace_id: Id,
+        page_id: Id,
+        actor_id: Id,
+        expected_revision: u64,
+        changes: PageChanges,
+        markdown: MarkdownContent,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<PageRecord, PageError> {
+        self.write_page(
+            workspace_id,
+            page_id,
+            actor_id,
+            Expected::Revision(expected_revision),
+            PageChanges {
+                content: None,
+                ..changes
+            },
+            Some(&markdown),
+            request_id,
+            now,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn write_page(
+        &self,
+        workspace_id: Id,
+        page_id: Id,
+        actor_id: Id,
+        expected: Expected,
+        changes: PageChanges,
+        markdown: Option<&MarkdownContent>,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<PageRecord, PageError> {
         let mut changes = changes;
         if let Some(content) = &mut changes.content {
             *content = sanitize_page_blocks(content, workspace_id, page_id);
         }
         // A content write replaces the live collaborative document too: take its room first
         // (never while a transaction is open), after a cheap visibility check.
-        let mut collab = match &changes.content {
-            Some(_) => {
-                self.get_visible(workspace_id, page_id, actor_id).await?;
-                Some(
-                    CollabHub::of(&self.database)
-                        .write(DocKey::page(page_id))
-                        .await?,
-                )
-            }
-            None => None,
+        let mut collab = if changes.content.is_some() || markdown.is_some() {
+            self.get_visible(workspace_id, page_id, actor_id).await?;
+            Some(
+                CollabHub::of(&self.database)
+                    .write(DocKey::page(page_id))
+                    .await?,
+            )
+        } else {
+            None
         };
+        // Markdown is merged (and a live document changed in memory) before the write
+        // transaction, on a blocking thread: it can take a while, and the transaction holds
+        // every writer. The room keeps this server's editors out meanwhile; the transaction
+        // then checks the revision again, and that no other server changed the document.
+        let mut reconciled = false;
+        if let Some(markdown) = markdown
+            && let Some(mut room) = collab.take()
+        {
+            let mut read = self.database.transaction().await?;
+            require_access_tx(&mut read, workspace_id, actor_id).await?;
+            let current = page_in_tx(&mut read, workspace_id, page_id, actor_id, false).await?;
+            read.rollback().await?;
+            if current.locked_at.is_some() {
+                return Err(PageError::Locked);
+            }
+            expected.check(&current)?;
+            let base = match room.current_blocks().await? {
+                Some(blocks) => sanitize_page_blocks(&blocks, workspace_id, page_id),
+                None => current.content,
+            };
+            if block_count(&base) > MAX_BLOCKS {
+                return Err(PageError::TooLarge);
+            }
+            let markdown = markdown.clone();
+            let (room, merged) = tokio::task::spawn_blocking(move || {
+                let merged = merge(
+                    &base,
+                    &markdown.markdown,
+                    &markdown.members,
+                    markdown.links.as_ref(),
+                );
+                let content = sanitize_page_blocks(&merged, workspace_id, page_id);
+                let result = if block_count(&content) > MAX_BLOCKS {
+                    Err(PageError::TooLarge)
+                } else {
+                    room.prepare(&content)
+                        .map_err(PageError::from)
+                        .map(|()| match room.blocks() {
+                            Some(blocks) => {
+                                (sanitize_page_blocks(&blocks, workspace_id, page_id), true)
+                            }
+                            None => (content, false),
+                        })
+                };
+                (room, result)
+            })
+            .await
+            .map_err(|_| PageError::Corrupt)?;
+            collab = Some(room);
+            let (content, live) = merged?;
+            reconciled = live;
+            changes.content = Some(content);
+        }
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let current = page_in_tx(&mut tx, workspace_id, page_id, actor_id, false).await?;
@@ -655,11 +857,18 @@ impl PageRepository {
             || changes.icon.is_some()
             || changes.cover_url.is_some()
             || changes.cover_position.is_some()
-            || changes.content.is_some();
+            || changes.content.is_some()
+            || markdown.is_some();
         if edit && current.locked_at.is_some() {
             return Err(PageError::Locked);
         }
-        check_version(expected_version, current.version, &current)?;
+        expected.check(&current)?;
+        if reconciled
+            && let Some(collab) = collab.as_mut()
+            && !collab.store(&mut tx, actor_id, now).await?
+        {
+            return Err(expected.conflict(&current));
+        }
         if let Some(Some(url)) = &changes.cover_url
             && url.starts_with('/')
         {
@@ -687,15 +896,31 @@ impl PageRepository {
             .content
             .as_ref()
             .is_some_and(|content| *content != current.content);
+        // A token API write that changes nothing keeps the version, so other clients that hold
+        // it can still write; it is not audited either.
+        if matches!(expected, Expected::Revision(_))
+            && !content_changed
+            && title == current.title
+            && icon == current.icon
+            && cover_url == current.cover_url
+            && cover_position == current.cover_position
+            && full_width == current.full_width
+        {
+            tx.commit().await?;
+            if let Some(collab) = collab {
+                collab.commit();
+            }
+            return Ok(current);
+        }
         if changes.origin == SaveOrigin::Edit && (content_changed || title != current.title) {
             snapshot_before_edit(&mut tx, &current, now).await?;
         }
         let (content_json, text) = match &changes.content {
-            Some(content) => (
+            Some(content) if content_changed => (
                 Some(serde_json::to_string(content).map_err(|_| PageError::Corrupt)?),
                 Some(content_text(content)),
             ),
-            None => (None, None),
+            _ => (None, None),
         };
         // A layout-only change (full width) is not an edit: the last editor and time stay.
         let (updated_by, updated_at) = if edit {
@@ -720,11 +945,12 @@ impl PageRepository {
         .bind(updated_at.as_millis())
         .bind(page_id.to_string())
         .bind(workspace_id.to_string())
-        .bind(expected_version as i64)
+        .bind(current.version as i64)
         .execute(&mut *tx)
         .await?;
         if let (Some(collab), Some(content)) = (collab.as_mut(), &changes.content)
             && content_changed
+            && !reconciled
         {
             collab.replace(&mut tx, content, actor_id, now).await?;
         }
@@ -2476,6 +2702,54 @@ pub(super) fn check_version(
         Err(PageError::VersionConflict {
             current: Box::new(serde_json::to_value(record).map_err(|_| PageError::Corrupt)?),
         })
+    }
+}
+
+/// A concurrency token that changes with every change of a record, co-edits included.
+/// Co-edits do not bump `version` (each title save of an open editor would conflict), but every
+/// co-edit that reaches the stored content moves `updated_at` forward (see
+/// `project_collab_content`), so the pair covers both. Below 2^53, so JavaScript reads it exactly.
+#[must_use]
+pub fn revision(version: u64, updated_at: TimestampMillis) -> u64 {
+    let digest = Sha256::digest(format!("{version}:{}", updated_at.as_millis()));
+    let mut first = [0; 8];
+    first.copy_from_slice(&digest[..8]);
+    u64::from_be_bytes(first) >> 11
+}
+
+/// What a write must match to show that its caller saw the current page.
+#[derive(Clone, Copy)]
+enum Expected {
+    Version(u64),
+    /// The page's [`revision`].
+    Revision(u64),
+}
+
+impl Expected {
+    fn check(self, current: &PageRecord) -> Result<(), PageError> {
+        let seen = match self {
+            Self::Version(version) => version == current.version,
+            Self::Revision(expected) => expected == revision(current.version, current.updated_at),
+        };
+        if seen {
+            Ok(())
+        } else {
+            Err(self.conflict(current))
+        }
+    }
+
+    /// The conflict of a write whose caller did not see `current`.
+    fn conflict(self, current: &PageRecord) -> PageError {
+        let Ok(mut record) = serde_json::to_value(current) else {
+            return PageError::Corrupt;
+        };
+        if let Self::Revision(_) = self {
+            // The conflict names the value the caller sends next.
+            record["version"] = json!(revision(current.version, current.updated_at));
+        }
+        PageError::VersionConflict {
+            current: Box::new(record),
+        }
     }
 }
 

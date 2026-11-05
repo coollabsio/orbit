@@ -16,6 +16,7 @@ mod hub;
 mod kind_page;
 pub(crate) mod kind_task;
 pub mod markdown_import;
+pub mod markdown_merge;
 pub mod sanitize;
 pub mod socket;
 

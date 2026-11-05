@@ -99,6 +99,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::workspace_routes::create_api_token,
         crate::workspace_routes::revoke_api_token,
         crate::workspace_routes::list_admin_users,
+        crate::workspace_routes::get_admin_user_summary,
         crate::workspace_routes::get_instance_settings,
         crate::workspace_routes::set_registration,
         crate::workspace_routes::save_smtp,
@@ -127,6 +128,22 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::backup_item_routes::list_backup_workspaces,
         crate::backup_item_routes::list_backup_items,
         crate::backup_item_routes::restore_backup_item,
+        crate::public_api::me,
+        crate::public_api::projects,
+        crate::public_api::statuses,
+        crate::public_api::labels,
+        crate::public_api::members,
+        crate::public_api::list_tasks,
+        crate::public_api::get_task,
+        crate::public_api::create_task,
+        crate::public_api::update_task,
+        crate::public_api::delete_task,
+        crate::public_api::comments,
+        crate::public_api::create_comment,
+        crate::public_api::docs,
+        crate::public_api::doc,
+        crate::public_api::create_doc,
+        crate::public_api::update_doc,
         crate::integration_routes::create_discord_event,
         crate::integration_routes::github_webhook,
         crate::integration_routes::github_manifest_callback,
@@ -365,23 +382,31 @@ impl Modify for ProblemDetails {
             .into_iter()
             .flatten()
             {
-                let schema = problem_schema(route);
                 let operation_id = operation.operation_id.clone().unwrap_or_default();
-                operation.security = Some(if operation_id == "create_discord_event" {
-                    vec![SecurityRequirement::new("bearerAuth", Vec::<String>::new())]
-                } else if public_operation(&operation_id) {
-                    vec![SecurityRequirement::default()]
-                } else if matches!(
-                    operation_id.as_str(),
-                    "accept_invitation" | "start_provider_sign_in" | "exchange_provider_sign_in"
-                ) {
-                    vec![
-                        SecurityRequirement::default(),
-                        SecurityRequirement::new("cookieAuth", Vec::<String>::new()),
-                    ]
+                let public_api = public_api_operation(route, &operation_id);
+                let schema = if public_api {
+                    "Problem"
                 } else {
-                    vec![SecurityRequirement::new("cookieAuth", Vec::<String>::new())]
-                });
+                    problem_schema(route)
+                };
+                operation.security =
+                    Some(if operation_id == "create_discord_event" || public_api {
+                        vec![SecurityRequirement::new("bearerAuth", Vec::<String>::new())]
+                    } else if public_operation(&operation_id) {
+                        vec![SecurityRequirement::default()]
+                    } else if matches!(
+                        operation_id.as_str(),
+                        "accept_invitation"
+                            | "start_provider_sign_in"
+                            | "exchange_provider_sign_in"
+                    ) {
+                        vec![
+                            SecurityRequirement::default(),
+                            SecurityRequirement::new("cookieAuth", Vec::<String>::new()),
+                        ]
+                    } else {
+                        vec![SecurityRequirement::new("cookieAuth", Vec::<String>::new())]
+                    });
                 operation.parameters.get_or_insert_default().push(
                     ParameterBuilder::new()
                         .name("X-Orbit-Contract")
@@ -396,7 +421,12 @@ impl Modify for ProblemDetails {
                         .build(),
                 );
 
-                for (status, description) in problem_responses(&operation_id) {
+                let responses = if public_api {
+                    public_api_responses(&operation_id)
+                } else {
+                    problem_responses(&operation_id)
+                };
+                for (status, description) in responses {
                     operation
                         .responses
                         .responses
@@ -454,6 +484,117 @@ fn public_operation(operation_id: &str) -> bool {
             | "provider_callback"
             | "link_provider_sign_in"
     )
+}
+
+/// The public REST API (`crate::public_api`) under `/api/public/v1`, apart from the Discord
+/// endpoint, which has its own errors.
+fn public_api_operation(route: &str, operation_id: &str) -> bool {
+    route.starts_with("/api/public/v1/") && operation_id != "create_discord_event"
+}
+
+/// The problem codes of the public REST API, as `crate::public_api` writes them.
+fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
+    let mut responses = BTreeMap::<&str, Vec<&str>>::new();
+    // From the HTTP layer in front of every route.
+    add_code(&mut responses, "400", "invalid_proxy_headers");
+    add_code(&mut responses, "409", "contract_mismatch");
+    add_code(&mut responses, "413", "request_too_large");
+    add_code(&mut responses, "429", "rate_limit_exceeded");
+    add_code(&mut responses, "500", "internal_error");
+    add_code(&mut responses, "401", "unauthorized");
+    // `GET /me` needs no scope.
+    if operation_id != "public_get_me" {
+        add_code(&mut responses, "403", "insufficient_scope");
+    }
+    add_code(&mut responses, "404", "not_found");
+    if matches!(
+        operation_id,
+        "public_list_statuses"
+            | "public_list_labels"
+            | "public_list_members"
+            | "public_list_tasks"
+            | "public_get_task"
+            | "public_list_comments"
+    ) {
+        add_code(&mut responses, "400", "invalid_request");
+    }
+    if matches!(
+        operation_id,
+        "public_list_statuses"
+            | "public_list_labels"
+            | "public_list_tasks"
+            | "public_list_comments"
+    ) {
+        add_code(&mut responses, "400", "invalid_cursor");
+    }
+    let write = matches!(
+        operation_id,
+        "public_create_task"
+            | "public_update_task"
+            | "public_delete_task"
+            | "public_create_comment"
+            | "public_create_doc"
+            | "public_update_doc"
+    );
+    if write {
+        add_code(&mut responses, "400", "invalid_request");
+        add_code(&mut responses, "402", "workspace_read_only");
+        add_code(&mut responses, "403", "origin_forbidden");
+        add_code(&mut responses, "503", "service_unavailable");
+    }
+    if matches!(operation_id, "public_create_task" | "public_create_doc") {
+        add_code(&mut responses, "402", "trial_limit_reached");
+    }
+    if matches!(operation_id, "public_create_doc" | "public_update_doc") {
+        add_code(&mut responses, "413", "doc_too_large");
+    }
+    if matches!(
+        operation_id,
+        "public_create_task"
+            | "public_update_task"
+            | "public_create_comment"
+            | "public_create_doc"
+            | "public_update_doc"
+    ) {
+        add_code(&mut responses, "422", "validation_failed");
+    }
+    if matches!(
+        operation_id,
+        "public_update_task" | "public_delete_task" | "public_update_doc"
+    ) {
+        add_code(&mut responses, "409", "conflict");
+    }
+    if matches!(
+        operation_id,
+        "public_create_task"
+            | "public_update_task"
+            | "public_delete_task"
+            | "public_create_comment"
+    ) {
+        add_code(&mut responses, "409", "task_conflict");
+    }
+    match operation_id {
+        "public_create_task" => {
+            add_code(&mut responses, "422", "parent_cycle");
+            add_code(&mut responses, "422", "parent_invalid");
+        }
+        "public_update_task" => {
+            add_code(&mut responses, "409", "github_content_read_only");
+            add_code(&mut responses, "409", "github_linked_move");
+            add_code(&mut responses, "503", "task_busy");
+        }
+        // `permanent=true` without a workspace owner or admin.
+        "public_delete_task" => add_code(&mut responses, "403", "workspace_action_forbidden"),
+        "public_update_doc" => {
+            add_code(&mut responses, "423", "page_locked");
+            add_code(&mut responses, "503", "page_busy");
+        }
+        _ => {}
+    }
+    responses
+        .into_iter()
+        .map(|(status, codes)| (status, codes.join(", ")))
+        .collect()
 }
 
 fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
@@ -774,7 +915,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "422", "invalid_email");
             add_code(&mut responses, "422", "same_email");
         }
-        "list_admin_users" => {
+        "list_admin_users" | "get_admin_user_summary" => {
             add_code(&mut responses, "403", "installation_admin_required");
         }
         "list_global_audit" | "export_global_audit" => {

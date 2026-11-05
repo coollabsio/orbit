@@ -29,7 +29,7 @@ use crate::image_compression::{CompressionStatus, ImageCompressor};
 use crate::mail::{self, Mailer};
 use crate::object_storage::Owner;
 use crate::repositories::api_tokens::{
-    ApiTokenError, ApiTokenRecord, ApiTokenRepository, IssuedApiToken,
+    ApiTokenError, ApiTokenRecord, ApiTokenRepository, ApiTokenScope, IssuedApiToken,
 };
 use crate::repositories::identity::{
     AdminAccountError, AdminUser, AuthenticatedSession, IdentityRepository,
@@ -265,6 +265,7 @@ pub fn workspace_router(state: WorkspaceState) -> Router {
             post(start_image_compression),
         )
         .route("/api/v1/admin/users", get(list_admin_users))
+        .route("/api/v1/admin/users/summary", get(get_admin_user_summary))
         .route(
             "/api/v1/admin/users/{user_id}/suspension",
             post(set_account_suspension),
@@ -632,17 +633,6 @@ async fn put_member_note(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[derive(Clone, Copy, Deserialize, ToSchema)]
-#[serde(rename_all = "lowercase")]
-enum ApiTokenScope {
-    Read,
-    Write,
-    #[serde(rename = "docs:read")]
-    DocsRead,
-    #[serde(rename = "chat:read")]
-    ChatRead,
-}
-
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct CreateApiTokenBody {
@@ -697,43 +687,32 @@ async fn create_api_token(
             project_ids.push(id);
         }
     }
+    // Projects only limit task access, so a token without a task scope stores none.
+    let task_scope = ApiTokenScope::grants_tasks(&body.scopes);
+    if !task_scope {
+        project_ids.clear();
+    }
     if name.is_empty()
         || name.chars().count() > 100
-        || project_ids.is_empty()
+        || (task_scope && project_ids.is_empty())
         || body.scopes.is_empty()
         || (body.service_account
-            && body
-                .scopes
-                .iter()
-                .any(|s| matches!(s, ApiTokenScope::DocsRead | ApiTokenScope::ChatRead)))
+            && body.scopes.iter().any(|s| {
+                matches!(
+                    s,
+                    ApiTokenScope::DocsRead | ApiTokenScope::DocsWrite | ApiTokenScope::ChatRead
+                )
+            }))
     {
         return Err(ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "invalid_api_token",
             "Invalid API token",
-            "Token names must contain 1 to 100 characters, and at least one project and scope are required.",
+            "Token names must contain 1 to 100 characters, at least one scope is required, and a task scope needs at least one project.",
             instance,
             request_id.as_ref(),
         ));
     }
-    let can_read = body
-        .scopes
-        .iter()
-        .any(|scope| matches!(scope, ApiTokenScope::Read));
-    let can_write = body
-        .scopes
-        .iter()
-        .any(|scope| matches!(scope, ApiTokenScope::Write));
-    let mcp_scopes = body
-        .scopes
-        .iter()
-        .filter_map(|s| match s {
-            ApiTokenScope::DocsRead => Some("docs:read"),
-            ApiTokenScope::ChatRead => Some("chat:read"),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join(" ");
     let now = TimestampMillis::now();
     let expires_at = match body.expires_in_days {
         None => None,
@@ -753,18 +732,16 @@ async fn create_api_token(
     };
     let issued = state
         .api_tokens
-        .create_scoped(
+        .create(
             workspace_id,
             session.user.id,
             name.to_owned(),
             project_ids,
-            can_read,
-            can_write,
+            &body.scopes,
             body.service_account,
             expires_at,
             request_id_value(request_id.as_ref()),
             now,
-            &mcp_scopes,
         )
         .await
         .map_err(|error| api_token_problem(error, &instance, request_id.as_ref()))?;
@@ -1464,6 +1441,42 @@ async fn list_admin_users(
             )
         })?;
     Ok(Json(Page { items, next_cursor }))
+}
+
+/// How many accounts and trials this instance has, for the Admin area.
+#[derive(Serialize, ToSchema)]
+struct AdminUserSummary {
+    /// Accounts, deleted accounts excluded.
+    users: i64,
+    /// Workspaces by trial state; `null` on a self-hosted server, which has no trials.
+    trials: Option<crate::repositories::billing::TrialCounts>,
+}
+
+/// The number of accounts and of ongoing and expired trials.
+#[utoipa::path(get, path = "/api/v1/admin/users/summary", responses((status = 200, body = AdminUserSummary)))]
+async fn get_admin_user_summary(
+    State(state): State<WorkspaceState>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<AdminUserSummary>, ApiError> {
+    let instance = "/api/v1/admin/users/summary";
+    let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
+    require_installation_admin(&state, session.user.id, instance, request_id.as_ref()).await?;
+    let internal = || {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            "Internal server error",
+            "An unexpected error occurred. Use the request ID when contacting support.",
+            instance,
+            request_id.as_ref(),
+        )
+    };
+    let users = state.identity.count_users().await.map_err(|_| internal())?;
+    let trials = crate::repositories::billing::trial_counts(state.identity.database())
+        .await
+        .map_err(|_| internal())?;
+    Ok(Json(AdminUserSummary { users, trials }))
 }
 
 #[derive(Deserialize, ToSchema)]

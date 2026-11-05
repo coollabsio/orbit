@@ -99,9 +99,10 @@ function required<T>(data: T | undefined, message: string): T {
   return data
 }
 
-export function useTasks(workspaceId: string, filters: TaskFilters = {}, exhaustive = false) {
+export function useTasks(workspaceId: string, filters: TaskFilters = {}, { exhaustive = false, enabled = true } = {}) {
   return useInfiniteQuery({
     queryKey: queryKeys.tasks.list(workspaceId, { ...filters, exhaustive }),
+    enabled,
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam }) => exhaustive
       ? taskListAllPages(apiClient, workspaceId, filters)

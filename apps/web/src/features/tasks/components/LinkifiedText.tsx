@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { appNavigate, internalPath, isPlainClick } from '@/lib/navigateBridge'
 
 const URL_PATTERN = /https?:\/\/[^\s]+/g
 const TRAILING_PUNCTUATION = /[.,!?;:)}\]]+$/
@@ -12,8 +13,21 @@ export function LinkifiedText({ text }: { text: string }) {
     const rawUrl = match[0]
     const url = rawUrl.replace(TRAILING_PUNCTUATION, '')
     parts.push(text.slice(cursor, start))
+    const path = internalPath(url)
     parts.push(
-      <a key={start} href={url} target="_blank" rel="noreferrer" className="cursor-pointer text-primary underline underline-offset-2" onClick={(event) => event.stopPropagation()}>
+      <a
+        key={start}
+        href={path ?? url}
+        target={path ? undefined : '_blank'}
+        rel={path ? undefined : 'noreferrer'}
+        className="cursor-pointer text-primary underline underline-offset-2"
+        onClick={(event) => {
+          event.stopPropagation()
+          if (!path || !isPlainClick(event)) return
+          event.preventDefault()
+          appNavigate(path)
+        }}
+      >
         {url}
       </a>,
     )

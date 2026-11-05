@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use orbit_server::openapi::{CONTRACT_ID, openapi_json};
 use serde_json::Value;
 
@@ -25,7 +27,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
 
     let document: serde_json::Value = serde_json::from_str(&first).unwrap();
     assert_eq!(document["info"]["version"], CONTRACT_ID);
-    assert_eq!(document["paths"].as_object().unwrap().len(), 222);
+    assert_eq!(document["paths"].as_object().unwrap().len(), 233);
     let operation_count: usize = document["paths"]
         .as_object()
         .unwrap()
@@ -40,7 +42,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
                 .count()
         })
         .sum();
-    assert_eq!(operation_count, 283);
+    assert_eq!(operation_count, 300);
     for path in [
         "/api/v1/setup/status",
         "/api/v1/auth/me",
@@ -50,6 +52,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
         "/api/v1/auth/socket-ticket",
         "/api/v1/admin/backups",
         "/api/v1/admin/users",
+        "/api/v1/admin/users/summary",
         "/api/v1/admin/users/{user_id}/recovery-link",
         "/api/v1/workspaces",
         "/api/v1/workspaces/invitations/preview",
@@ -59,7 +62,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
         "/api/v1/workspaces/{workspace_id}/notifications",
         "/api/v1/workspaces/{workspace_id}/api-tokens",
         "/api/v1/workspaces/{workspace_id}/api-tokens/{token_id}",
-        "/api/v1/integrations/discord/events",
+        "/api/public/v1/integrations/discord/events",
         "/api/v1/integrations/github/manifest/callback",
         "/api/v1/workspaces/{workspace_id}/github",
         "/api/v1/workspaces/{workspace_id}/github/manifest",
@@ -107,7 +110,11 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
         "#/components/schemas/TaskProblem"
     );
 
-    let discord = operation(&document, "/api/v1/integrations/discord/events", "post");
+    let discord = operation(
+        &document,
+        "/api/public/v1/integrations/discord/events",
+        "post",
+    );
     assert_eq!(discord["security"], serde_json::json!([{"bearerAuth": []}]));
     assert!(
         discord["responses"]["401"]["description"]
@@ -1373,4 +1380,168 @@ fn sub_issue_contract_is_documented() {
             );
         }
     }
+}
+
+/// The `(path, method)` pairs of `orbit_server::public_api::router`, read from its source: Axum
+/// cannot list a router's routes.
+fn public_api_router_routes() -> BTreeSet<(String, String)> {
+    let source = include_str!("../src/public_api.rs");
+    let router = source
+        .split_once("pub fn router(")
+        .and_then(|(_, rest)| rest.split_once("\n}\n"))
+        .expect("public_api::router exists")
+        .0;
+    let (workspace, root) = router
+        .split_once("let routes")
+        .expect("the router nests the workspace routes");
+    assert!(root.contains(".nest(\"/workspaces/{workspace_id}\", workspace)"));
+    let mut routes = BTreeSet::new();
+    for (prefix, block) in [
+        ("/api/public/v1/workspaces/{workspace_id}", workspace),
+        ("/api/public/v1", root),
+    ] {
+        for call in block.split(".route(").skip(1) {
+            let mut depth = 1;
+            let end = call
+                .char_indices()
+                .find(|&(_, c)| {
+                    depth += match c {
+                        '(' => 1,
+                        ')' => -1,
+                        _ => 0,
+                    };
+                    depth == 0
+                })
+                .expect("balanced route call")
+                .0;
+            let (path, handlers) = call[..end]
+                .trim()
+                .strip_prefix('"')
+                .and_then(|call| call.split_once('"'))
+                .expect("a route path literal");
+            let methods: Vec<&str> = ["get", "post", "put", "patch", "delete"]
+                .into_iter()
+                .filter(|method| {
+                    handlers
+                        .match_indices(&format!("{method}("))
+                        .any(|(at, _)| {
+                            handlers[..at]
+                                .chars()
+                                .next_back()
+                                .is_some_and(|c| c == '.' || c.is_whitespace())
+                        })
+                })
+                .collect();
+            assert!(!methods.is_empty(), "no method for {path}");
+            for method in methods {
+                routes.insert((format!("{prefix}{path}"), method.to_owned()));
+            }
+        }
+    }
+    routes
+}
+
+#[test]
+fn every_public_api_route_is_documented() {
+    let document: Value = serde_json::from_str(&openapi_json().unwrap()).unwrap();
+    let router = public_api_router_routes();
+    // The Discord endpoint is in another router.
+    let documented: BTreeSet<(String, String)> = document["paths"]
+        .as_object()
+        .unwrap()
+        .iter()
+        .filter(|(path, _)| {
+            path.starts_with("/api/public/v1/") && !path.starts_with("/api/public/v1/integrations/")
+        })
+        .flat_map(|(path, item)| {
+            item.as_object()
+                .unwrap()
+                .keys()
+                .map(move |method| (path.clone(), method.clone()))
+        })
+        .collect();
+    assert_eq!(
+        router, documented,
+        "each route of public_api::router needs #[utoipa::path] and an entry in openapi.rs"
+    );
+
+    for (path, method) in &router {
+        let operation = operation(&document, path, method);
+        assert_eq!(
+            operation["tags"],
+            serde_json::json!(["public-api"]),
+            "{path}"
+        );
+        assert_eq!(
+            operation["security"],
+            serde_json::json!([{"bearerAuth": []}]),
+            "{path}"
+        );
+        assert!(
+            operation["operationId"]
+                .as_str()
+                .unwrap()
+                .starts_with("public_")
+        );
+        assert_eq!(codes(operation, "401"), ["unauthorized"], "{path}");
+        assert!(codes(operation, "429").contains(&"rate_limit_exceeded".to_owned()));
+        assert_eq!(
+            operation["responses"]["404"]["content"]["application/problem+json"]["schema"]["$ref"],
+            "#/components/schemas/Problem"
+        );
+    }
+
+    let tasks = "/api/public/v1/workspaces/{workspace_id}/tasks";
+    assert_eq!(
+        parameter_names(operation(&document, tasks, "get"), "query"),
+        [
+            "project_id",
+            "status_id",
+            "assignee_id",
+            "sort",
+            "order",
+            "label_id",
+            "priority",
+            "q",
+            "cursor",
+            "limit",
+        ]
+    );
+    assert_eq!(
+        operation(&document, tasks, "post")["requestBody"]["content"]["application/json"]["schema"]
+            ["$ref"],
+        "#/components/schemas/PublicCreateTaskBody"
+    );
+    let task = format!("{tasks}/{{task}}");
+    assert_eq!(
+        parameter_names(operation(&document, &task, "delete"), "query"),
+        ["expected_version", "permanent"]
+    );
+    assert!(
+        codes(operation(&document, &task, "delete"), "403")
+            .contains(&"workspace_action_forbidden".to_owned())
+    );
+    assert!(codes(operation(&document, &task, "patch"), "409").contains(&"conflict".to_owned()));
+    assert_eq!(
+        codes(
+            operation(
+                &document,
+                "/api/public/v1/workspaces/{workspace_id}/docs/{page_id}",
+                "patch"
+            ),
+            "423"
+        ),
+        ["page_locked"]
+    );
+    let schemas = &document["components"]["schemas"];
+    assert!(
+        schemas["PublicUpdateTaskBody"]["properties"]["expected_version"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("Compare it for equality only")
+    );
+    assert_eq!(
+        schemas["PublicTokenInfo"]["properties"]["scopes"]["items"]["$ref"],
+        "#/components/schemas/ApiTokenScope"
+    );
 }

@@ -176,3 +176,19 @@ test('the picked parent and relations are saved with the new task', async () => 
   expect(created[0]?.parent_task_id).toBe('task-other')
   expect(relations).toEqual([{ path: '/api/v1/workspaces/workspace-1/tasks/task-0001/relations', body: { type: 'blocks', task_id: 'task-other' } }])
 })
+
+test('the source URL goes with the new task', async () => {
+  const created: unknown[] = []
+  api(created)
+  const view = render(<NewTaskDialog onClose={() => {}} onOpenTask={() => {}} />, { wrapper: Wrapper })
+  await view.findByRole('button', { name: 'Status: Todo' })
+  await userEvent.type(view.getByLabelText('Task title'), 'Fix login')
+  await userEvent.click(view.getByRole('button', { name: 'Source' }))
+  await userEvent.type(await view.findByLabelText('Source URL'), '  https://github.com/acme/app/issues/1  {Enter}')
+  await view.findByRole('button', { name: 'Source: https://github.com/acme/app/issues/1' })
+  // saving the source must not create the task
+  expect(created).toEqual([])
+  await userEvent.click(view.getByRole('button', { name: 'Create task' }))
+  await waitFor(() => expect(created).toHaveLength(1))
+  expect(created[0]).toMatchObject({ title: 'Fix login', source_url: 'https://github.com/acme/app/issues/1' })
+})

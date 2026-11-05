@@ -10,9 +10,11 @@ use orbit_platform::{
 };
 use orbit_server::auth_routes::CookieMode;
 use orbit_server::integration_routes::{IntegrationState, integration_router};
-use orbit_server::repositories::api_tokens::ApiTokenRepository;
+use orbit_server::repositories::api_tokens::{ApiTokenRepository, ApiTokenScope};
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
-use orbit_server::repositories::tasks::TaskRepository;
+use orbit_server::repositories::tasks::{
+    CommentContent, GithubWorkItem, TaskRepository, TokenActor,
+};
 use serde_json::{Value, json};
 use sha2::Sha256;
 use tower::ServiceExt;
@@ -1138,6 +1140,8 @@ fn github_request(event: &str, body: Value, valid_signature: bool) -> Request<Bo
         .header(header::CONTENT_TYPE, "application/json")
         .header("x-github-event", event)
         .header("x-hub-signature-256", signature)
+        .header("x-github-hook-installation-target-type", "integration")
+        .header("x-github-hook-installation-target-id", "77")
         .body(Body::from(body))
         .unwrap()
 }
@@ -1152,8 +1156,7 @@ async fn discord_events_create_one_labeled_task_and_retries_are_idempotent() {
             fixture.user_id,
             "Discord".to_owned(),
             vec![fixture.project_id],
-            true,
-            true,
+            &[ApiTokenScope::TasksRead, ApiTokenScope::TasksWrite],
             true,
             None,
             "create-token",
@@ -1168,8 +1171,7 @@ async fn discord_events_create_one_labeled_task_and_retries_are_idempotent() {
             fixture.user_id,
             "discord".to_owned(),
             vec![fixture.project_id],
-            true,
-            true,
+            &[ApiTokenScope::TasksRead, ApiTokenScope::TasksWrite],
             true,
             None,
             "rotate-token",
@@ -1326,8 +1328,7 @@ async fn discord_events_require_an_active_write_token_and_valid_url() {
             fixture.user_id,
             "Expired".to_owned(),
             vec![fixture.project_id],
-            false,
-            true,
+            &[ApiTokenScope::TasksWrite],
             false,
             Some(now),
             "expired-token",
@@ -1354,8 +1355,7 @@ async fn discord_events_require_an_active_write_token_and_valid_url() {
             fixture.user_id,
             "Read".to_owned(),
             vec![fixture.project_id],
-            true,
-            false,
+            &[ApiTokenScope::TasksRead],
             false,
             None,
             "read-token",
@@ -1382,8 +1382,7 @@ async fn discord_events_require_an_active_write_token_and_valid_url() {
             fixture.user_id,
             "Revoked".to_owned(),
             vec![fixture.project_id],
-            false,
-            true,
+            &[ApiTokenScope::TasksWrite],
             false,
             None,
             "revoked-token",
@@ -1421,8 +1420,7 @@ async fn discord_events_require_an_active_write_token_and_valid_url() {
             fixture.user_id,
             "Write".to_owned(),
             vec![fixture.project_id],
-            false,
-            true,
+            &[ApiTokenScope::TasksWrite],
             false,
             None,
             "write-token",
@@ -1457,8 +1455,7 @@ async fn discord_events_select_one_project_allowed_by_a_multi_project_token() {
             fixture.user_id,
             "Multi-project".to_owned(),
             vec![fixture.project_id, second_project.id],
-            false,
-            true,
+            &[ApiTokenScope::TasksWrite],
             false,
             None,
             "create-token",
@@ -1576,8 +1573,7 @@ async fn integrations_stop_at_the_trial_task_limit_without_failing() {
             fixture.user_id,
             "Discord".to_owned(),
             vec![fixture.project_id],
-            true,
-            true,
+            &[ApiTokenScope::TasksRead, ApiTokenScope::TasksWrite],
             true,
             None,
             "create-token",
@@ -1683,6 +1679,19 @@ async fn github_webhooks_skip_secrets_that_cannot_be_decrypted() {
     let refused = app.clone().oneshot(for_other).await.unwrap();
     assert_eq!(refused.status(), StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(response_json(refused).await["code"], "app_key_invalid");
+
+    // A delivery that names no App is refused before any secret is tried.
+    let mut unnamed = github_request("issues", github_issue(4), true);
+    unnamed
+        .headers_mut()
+        .remove("x-github-hook-installation-target-id");
+    let refused = app.clone().oneshot(unnamed).await.unwrap();
+    assert_eq!(refused.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(
+        response_json(refused).await["code"],
+        "invalid_github_signature"
+    );
+    assert_eq!(live_tasks(&fixture).await, before + 2);
 }
 
 struct Fixture {
@@ -1745,7 +1754,7 @@ fn valid_body(event_id: &str) -> Value {
 fn request(token: Option<&str>, body: Value) -> Request<Body> {
     let mut builder = Request::builder()
         .method("POST")
-        .uri("/api/v1/integrations/discord/events")
+        .uri("/api/public/v1/integrations/discord/events")
         .header(header::CONTENT_TYPE, "application/json");
     if let Some(token) = token {
         builder = builder.header(header::AUTHORIZATION, format!("Bearer {token}"));
@@ -1793,8 +1802,7 @@ async fn integrations_do_not_write_to_a_read_only_cloud_workspace() {
             fixture.user_id,
             "Discord".to_owned(),
             vec![fixture.project_id],
-            true,
-            true,
+            &[ApiTokenScope::TasksRead, ApiTokenScope::TasksWrite],
             true,
             None,
             "create-token",
@@ -1864,4 +1872,312 @@ async fn integrations_do_not_write_to_a_read_only_cloud_workspace() {
         .unwrap();
     assert_eq!(created.status(), StatusCode::CREATED);
     assert_eq!(tasks().await, before + 2);
+}
+
+async fn service_account_state(fixture: &Fixture, id: &str) -> (String, Option<i64>) {
+    sqlx::query_as("SELECT name, disabled_at FROM service_accounts WHERE id = $1")
+        .bind(id)
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap()
+}
+
+async fn audit_count(fixture: &Fixture, action: &str, resource_id: &str) -> i64 {
+    sqlx::query_scalar(
+        "SELECT COUNT(*) FROM audit_events WHERE workspace_id = $1 AND action = $2 AND resource_type = 'service_account' AND resource_id = $3",
+    )
+    .bind(fixture.workspace_id.to_string())
+    .bind(action)
+    .bind(resource_id)
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap()
+}
+
+async fn service_account_token(
+    fixture: &Fixture,
+    name: &str,
+) -> orbit_server::repositories::api_tokens::IssuedApiToken {
+    fixture
+        .tokens
+        .create(
+            fixture.workspace_id,
+            fixture.user_id,
+            name.to_owned(),
+            vec![fixture.project_id],
+            &[ApiTokenScope::TasksRead, ApiTokenScope::TasksWrite],
+            true,
+            None,
+            "create-token",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn revoking_the_last_token_of_a_service_account_disables_it_and_keeps_its_name() {
+    let fixture = fixture().await;
+    let first = service_account_token(&fixture, "Discord").await;
+    let second = service_account_token(&fixture, "discord").await;
+    let account = first.api_token.service_account_id.unwrap();
+    assert_eq!(second.api_token.service_account_id, Some(account));
+    let account_id = account.to_string();
+
+    let created = fixture
+        .app
+        .clone()
+        .oneshot(request(
+            Some(&first.token),
+            json!({"event_id": "evt-1", "message": "From Discord", "message_url": "https://discord.com/channels/1/2/3"}),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let task_id: orbit_platform::Id = response_json(created).await["task"]["id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    TaskRepository::new((*fixture.database).clone())
+        .with_token(TokenActor {
+            token_id: first.api_token.id,
+            service_account: Some((account, "Discord".to_owned())),
+        })
+        .create_comment(
+            fixture.workspace_id,
+            task_id,
+            fixture.user_id,
+            None,
+            CommentContent::Markdown {
+                body: "Done".to_owned(),
+                mentioned_user_ids: Vec::new(),
+            },
+            "comment",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+
+    // Another token of the account is still live, so the account stays enabled.
+    fixture
+        .tokens
+        .revoke(
+            fixture.workspace_id,
+            first.api_token.id,
+            fixture.user_id,
+            "revoke-1",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(service_account_state(&fixture, &account_id).await.1, None);
+    assert_eq!(
+        audit_count(&fixture, "service_account.disable", &account_id).await,
+        0
+    );
+    fixture
+        .tokens
+        .authenticate(
+            &second.token,
+            Some(ApiTokenScope::TasksWrite),
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+
+    // The last token goes, and the account with it.
+    fixture
+        .tokens
+        .revoke(
+            fixture.workspace_id,
+            second.api_token.id,
+            fixture.user_id,
+            "revoke-2",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    assert!(
+        service_account_state(&fixture, &account_id)
+            .await
+            .1
+            .is_some()
+    );
+    assert_eq!(
+        audit_count(&fixture, "service_account.disable", &account_id).await,
+        1
+    );
+
+    // Its past work keeps its name.
+    let tasks = TaskRepository::new((*fixture.database).clone());
+    let task = tasks
+        .get_task(fixture.workspace_id, task_id, fixture.user_id)
+        .await
+        .unwrap();
+    assert_eq!(task.creator_service_account_id, Some(account));
+    assert_eq!(
+        task.creator_service_account_name.as_deref(),
+        Some("Discord")
+    );
+    let comments = tasks
+        .comments(fixture.workspace_id, task_id, fixture.user_id, None, 10)
+        .await
+        .unwrap();
+    assert_eq!(comments.items.len(), 1);
+    assert_eq!(comments.items[0].author_service_account_id, Some(account));
+    assert_eq!(
+        comments.items[0].author_service_account_name.as_deref(),
+        Some("Discord")
+    );
+
+    // A new token with the same name (other case) enables the same account again.
+    let again = service_account_token(&fixture, "DISCORD").await;
+    assert_eq!(again.api_token.service_account_id, Some(account));
+    assert_eq!(
+        again.api_token.service_account_name.as_deref(),
+        Some("Discord")
+    );
+    assert_eq!(
+        service_account_state(&fixture, &account_id).await,
+        ("Discord".to_owned(), None)
+    );
+    assert_eq!(
+        audit_count(&fixture, "service_account.enable", &account_id).await,
+        1
+    );
+    let principal = fixture
+        .tokens
+        .authenticate(
+            &again.token,
+            Some(ApiTokenScope::TasksWrite),
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        principal.service_account.map(|account| account.id),
+        Some(account)
+    );
+}
+
+#[tokio::test]
+async fn an_expired_token_does_not_keep_its_service_account_enabled() {
+    let fixture = fixture().await;
+    let expired = service_account_token(&fixture, "Deploy").await;
+    let live = service_account_token(&fixture, "Deploy").await;
+    let account_id = expired.api_token.service_account_id.unwrap().to_string();
+    // The first token expired without being revoked.
+    sqlx::query("UPDATE api_tokens SET expires_at = $1 WHERE id = $2")
+        .bind(TimestampMillis::now().as_millis() - 1_000)
+        .bind(expired.api_token.id.to_string())
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+
+    fixture
+        .tokens
+        .revoke(
+            fixture.workspace_id,
+            live.api_token.id,
+            fixture.user_id,
+            "revoke-live",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+
+    assert!(
+        service_account_state(&fixture, &account_id)
+            .await
+            .1
+            .is_some(),
+        "the only other token has expired, so the account is unused"
+    );
+    assert_eq!(
+        audit_count(&fixture, "service_account.disable", &account_id).await,
+        1
+    );
+}
+
+#[tokio::test]
+async fn revoking_a_token_of_the_github_account_keeps_the_account_enabled() {
+    let fixture = fixture().await;
+    let tasks = TaskRepository::new((*fixture.database).clone());
+    let item = |number| GithubWorkItem {
+        repository: "acme/repo".to_owned(),
+        number,
+        project_id: fixture.project_id,
+        title: "GitHub task".to_owned(),
+        description: String::new(),
+        kind: "issue",
+        state: "open",
+        state_changed: false,
+    };
+    let task_id = tasks
+        .sync_github_work_item(
+            fixture.workspace_id,
+            fixture.user_id,
+            item(1),
+            "sync-1",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    let account = tasks
+        .get_task(fixture.workspace_id, task_id, fixture.user_id)
+        .await
+        .unwrap()
+        .creator_service_account_id
+        .unwrap();
+
+    // A token named like the integration's account shares it; its revoke must not disable it.
+    let token = service_account_token(&fixture, "github").await;
+    assert_eq!(token.api_token.service_account_id, Some(account));
+    fixture
+        .tokens
+        .revoke(
+            fixture.workspace_id,
+            token.api_token.id,
+            fixture.user_id,
+            "revoke",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        service_account_state(&fixture, &account.to_string()).await,
+        ("GitHub".to_owned(), None)
+    );
+
+    // An account disabled earlier is enabled again by the next sync instead of failing on the
+    // unique name.
+    sqlx::query("UPDATE service_accounts SET disabled_at = $1 WHERE id = $2")
+        .bind(TimestampMillis::now().as_millis())
+        .bind(account.to_string())
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let second = tasks
+        .sync_github_work_item(
+            fixture.workspace_id,
+            fixture.user_id,
+            item(2),
+            "sync-2",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        tasks
+            .get_task(fixture.workspace_id, second, fixture.user_id)
+            .await
+            .unwrap()
+            .creator_service_account_id,
+        Some(account)
+    );
+    assert_eq!(
+        service_account_state(&fixture, &account.to_string()).await,
+        ("GitHub".to_owned(), None)
+    );
 }

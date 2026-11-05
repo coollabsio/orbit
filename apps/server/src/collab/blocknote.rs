@@ -179,14 +179,465 @@ pub fn blocks_to_update(blocks: &[Value], client_id: Option<u64>) -> Vec<u8> {
         .encode_state_as_update_v1(&StateVector::default())
 }
 
-/// Replaces the whole document inside `txn` (restore, import, API content writes on a live
-/// document): connected editors receive it as an ordinary update.
+/// Replaces the whole document inside `txn`: connected editors receive it as an ordinary update.
 pub fn replace_blocks(txn: &mut TransactionMut, fragment: &XmlFragmentRef, blocks: &[Value]) {
     let len = fragment.len(txn);
     if len > 0 {
         fragment.remove_range(txn, 0, len);
     }
     write_blocks(txn, fragment, blocks);
+}
+
+/// Changes the document to `blocks` with small edits (restore, import, API content writes on a
+/// live document), so what stays the same keeps its Yjs items: comment marks, and the place of
+/// concurrent edits. Per sibling group, blocks are matched by id in order; a block that stays
+/// gets only its changed props, and changed text only its changed middle when that lies in one
+/// run of text (else the block's inline content is rewritten). Removed blocks are deleted, new
+/// and moved ones written fresh, a changed table rewritten whole. Marks outside the editor's
+/// styles (comment marks) are ignored when comparing and not given to new text.
+pub fn reconcile_blocks(txn: &mut TransactionMut, fragment: &XmlFragmentRef, blocks: &[Value]) {
+    let group = match fragment.get(txn, 0) {
+        Some(XmlOut::Element(group))
+            if fragment.len(txn) == 1 && group.tag().as_ref() == "blockGroup" =>
+        {
+            group
+        }
+        _ => {
+            replace_blocks(txn, fragment, blocks);
+            return;
+        }
+    };
+    let target = normalize_blocks(blocks);
+    if !shares_ids(txn, &group, &target) {
+        // Nothing stays: a fresh group (inserts into the old one would walk its deleted items).
+        replace_blocks(txn, fragment, &target);
+        return;
+    }
+    reconcile_group(txn, &group, &target, 1);
+}
+
+/// Whether a block of `target` has the id of a block of `group`.
+fn shares_ids<T: ReadTxn>(txn: &T, group: &XmlElementRef, target: &[Value]) -> bool {
+    let ids: std::collections::HashSet<&str> = target
+        .iter()
+        .filter_map(|block| block.get("id").and_then(Value::as_str))
+        .collect();
+    containers(txn, group).any(|container| {
+        attr(txn, &container, "id")
+            .as_ref()
+            .and_then(Value::as_str)
+            .is_some_and(|id| ids.contains(id))
+    })
+}
+
+/// Blocks in the form a document built from them reads back as (props filled in, known types
+/// only; no blocks become one empty paragraph). Built in small documents: appending to a long
+/// sibling list costs yrs a walk over it.
+#[must_use]
+pub fn normalize_blocks(blocks: &[Value]) -> Vec<Value> {
+    let known: Vec<&Value> = blocks.iter().filter(|block| known_type(block)).collect();
+    if known.is_empty() {
+        let doc = new_doc(None);
+        let fragment = doc.get_or_insert_xml_fragment(FRAGMENT);
+        write_blocks(&mut doc.transact_mut(), &fragment, &[]);
+        return doc_to_blocks(&doc);
+    }
+    let mut out = Vec::with_capacity(known.len());
+    for chunk in known.chunks(64) {
+        let doc = new_doc(None);
+        let fragment = doc.get_or_insert_xml_fragment(FRAGMENT);
+        {
+            let mut txn = doc.transact_mut();
+            let group = fragment.push_back(&mut txn, XmlElementPrelim::empty("blockGroup"));
+            for block in chunk {
+                write_container(&mut txn, &group, block);
+            }
+        }
+        out.extend(doc_to_blocks(&doc));
+    }
+    out
+}
+
+/// Removes every child of `element`.
+fn clear(txn: &mut TransactionMut, element: &XmlElementRef) {
+    let len = element.len(txn);
+    if len > 0 {
+        element.remove_range(txn, 0, len);
+    }
+}
+
+fn reconcile_group(
+    txn: &mut TransactionMut,
+    group: &XmlElementRef,
+    target: &[Value],
+    depth: usize,
+) {
+    let containers: Option<Vec<XmlElementRef>> = group
+        .children(txn)
+        .map(|child| match child {
+            XmlOut::Element(element) if element.tag().as_ref() == "blockContainer" => Some(element),
+            _ => None,
+        })
+        .collect();
+    let rewrite = |txn: &mut TransactionMut| {
+        clear(txn, group);
+        for block in target {
+            write_container(txn, group, block);
+        }
+    };
+    let Some(containers) = containers else {
+        rewrite(txn);
+        return;
+    };
+    if depth >= MAX_BLOCK_DEPTH {
+        // Read flat below the depth limit: compare the group as a whole.
+        let current: Vec<Value> = containers
+            .iter()
+            .filter_map(|container| container_to_block(txn, container, depth))
+            .collect();
+        if current != target {
+            rewrite(txn);
+        }
+        return;
+    }
+    let mut positions: HashMap<&str, usize> = HashMap::new();
+    for (index, block) in target.iter().enumerate() {
+        if let Some(id) = block.get("id").and_then(Value::as_str) {
+            positions.entry(id).or_insert(index);
+        }
+    }
+    let mut taken = vec![false; target.len()];
+    let candidates: Vec<(usize, usize)> = containers
+        .iter()
+        .enumerate()
+        .filter_map(|(index, container)| {
+            let id = attr(txn, container, "id")?;
+            let position = *positions.get(id.as_str()?)?;
+            (!std::mem::replace(&mut taken[position], true)).then_some((index, position))
+        })
+        .collect();
+    let kept = increasing_run(&candidates);
+    let mut keep = vec![false; containers.len()];
+    for (index, _) in &kept {
+        keep[*index] = true;
+    }
+    // Removed blocks go in runs, from the end (each removal walks the group to its index).
+    let mut end = containers.len();
+    while end > 0 {
+        if keep[end - 1] {
+            end -= 1;
+            continue;
+        }
+        let mut start = end - 1;
+        while start > 0 && !keep[start - 1] {
+            start -= 1;
+        }
+        group.remove_range(txn, start as u32, (end - start) as u32);
+        end = start;
+    }
+    let mut kept = kept.into_iter().peekable();
+    let mut at = 0_u32;
+    for (position, block) in target.iter().enumerate() {
+        match kept.next_if(|(_, target)| *target == position) {
+            Some((index, _)) => {
+                reconcile_container(txn, group, at, &containers[index], block, depth);
+                at += 1;
+            }
+            None => at += u32::from(write_container_at(txn, group, at, block)),
+        }
+    }
+}
+
+/// The longest run of `(current, target)` pairs (in current order) increasing in `target`.
+fn increasing_run(pairs: &[(usize, usize)]) -> Vec<(usize, usize)> {
+    let mut tails: Vec<usize> = Vec::new();
+    let mut previous: Vec<Option<usize>> = vec![None; pairs.len()];
+    for (index, &(_, target)) in pairs.iter().enumerate() {
+        let at = tails.partition_point(|&tail| pairs[tail].1 < target);
+        previous[index] = at.checked_sub(1).map(|before| tails[before]);
+        if at == tails.len() {
+            tails.push(index);
+        } else {
+            tails[at] = index;
+        }
+    }
+    let mut out = Vec::with_capacity(tails.len());
+    let mut cursor = tails.last().copied();
+    while let Some(index) = cursor {
+        out.push(pairs[index]);
+        cursor = previous[index];
+    }
+    out.reverse();
+    out
+}
+
+/// Brings the `at`-th container of `group` (which has the block's id) to `block`.
+fn reconcile_container(
+    txn: &mut TransactionMut,
+    group: &XmlElementRef,
+    at: u32,
+    container: &XmlElementRef,
+    block: &Value,
+    depth: usize,
+) {
+    let block_type = block.get("type").and_then(Value::as_str).unwrap_or("");
+    let mut parts = container.children(txn);
+    let content = parts.next();
+    let child_group = parts.next();
+    let extra = parts.next().is_some();
+    let (Some(table), Some(XmlOut::Element(content))) = (SCHEMA.blocks.get(block_type), content)
+    else {
+        group.remove_range(txn, at, 1);
+        write_container_at(txn, group, at, block);
+        return;
+    };
+    let child_group = match child_group {
+        None => None,
+        Some(XmlOut::Element(child)) if !extra && child.tag().as_ref() == "blockGroup" => {
+            Some(child)
+        }
+        Some(_) => {
+            group.remove_range(txn, at, 1);
+            write_container_at(txn, group, at, block);
+            return;
+        }
+    };
+    if content.tag().as_ref() == block_type {
+        reconcile_attrs(txn, &content, table, block);
+        match table.content.as_str() {
+            "inline" => reconcile_inline(txn, &content, block.get("content"), false),
+            "plain" => reconcile_inline(txn, &content, block.get("content"), true),
+            "table" => {
+                let wanted = block.get("content").cloned().unwrap_or(Value::Null);
+                if table_content(txn, &content) != wanted {
+                    clear(txn, &content);
+                    write_table(txn, &content, Some(&wanted));
+                }
+            }
+            _ => {}
+        }
+    } else {
+        container.remove_range(txn, 0, 1);
+        write_content_node(txn, container, block_type, table, block);
+    }
+    let children = known_children(block);
+    match (child_group, children.is_empty()) {
+        (Some(_), true) => container.remove_range(txn, 1, 1),
+        (Some(child_group), false) => {
+            let children: Vec<Value> = children.into_iter().cloned().collect();
+            if shares_ids(txn, &child_group, &children) {
+                reconcile_group(txn, &child_group, &children, depth + 1);
+            } else {
+                container.remove_range(txn, 1, 1);
+                let child_group = container.push_back(txn, XmlElementPrelim::empty("blockGroup"));
+                for child in &children {
+                    write_container(txn, &child_group, child);
+                }
+            }
+        }
+        (None, false) => {
+            let child_group = container.push_back(txn, XmlElementPrelim::empty("blockGroup"));
+            for child in children {
+                write_container(txn, &child_group, child);
+            }
+        }
+        (None, true) => {}
+    }
+}
+
+/// Sets the props that differ (attributes the schema does not know are left alone).
+fn reconcile_attrs(
+    txn: &mut TransactionMut,
+    element: &XmlElementRef,
+    table: &BlockTable,
+    block: &Value,
+) {
+    let props = block.get("props").and_then(Value::as_object);
+    for attr_table in &table.attrs {
+        let wanted = props
+            .and_then(|props| props.get(&attr_table.name))
+            .cloned()
+            .unwrap_or_else(|| attr_table.missing.value.clone());
+        let current = attr(txn, element, &attr_table.name);
+        if wanted.is_null() {
+            if current.is_some() {
+                element.remove_attribute(txn, &attr_table.name);
+            }
+        } else if current.as_ref() != Some(&wanted) {
+            element.insert_attribute(txn, attr_table.name.as_str(), any(&wanted));
+        }
+    }
+}
+
+/// One unit of inline content for comparing: a character with its editor marks, a hard break,
+/// an atom (mention) with its props, or something else (never equal).
+#[derive(Debug, PartialEq)]
+enum Piece {
+    Char(char, Value, Option<String>),
+    Break,
+    Atom(String, Vec<(String, Value)>),
+    Other,
+}
+
+/// Where a character of the current content is: its text node and UTF-16 offset and length.
+type Place = Option<(usize, u32, u32)>;
+
+fn reconcile_inline(
+    txn: &mut TransactionMut,
+    element: &XmlElementRef,
+    content: Option<&Value>,
+    plain: bool,
+) {
+    let runs = inline_runs(content, plain);
+    let mut wanted: Vec<(Piece, Option<&yrs::types::Attrs>)> = Vec::new();
+    for run in &runs {
+        match run {
+            Run::Text(text, attrs) => {
+                let (styles, href) = styles_of(Some(attrs));
+                wanted.extend(
+                    text.chars()
+                        .map(|c| (Piece::Char(c, styles.clone(), href.clone()), Some(attrs))),
+                );
+            }
+            Run::Break => wanted.push((Piece::Break, None)),
+            Run::Inline(tag, attrs) => wanted.push((
+                Piece::Atom(
+                    tag.clone(),
+                    attrs
+                        .iter()
+                        .map(|(name, value)| (name.clone(), json(value)))
+                        .collect(),
+                ),
+                None,
+            )),
+        }
+    }
+    let mut texts: Vec<XmlTextRef> = Vec::new();
+    let mut current: Vec<(Piece, Place)> = Vec::new();
+    for child in element.children(txn) {
+        match child {
+            XmlOut::Text(text) => {
+                let node = texts.len();
+                let mut offset = 0_u32;
+                for chunk in text.diff(txn, YChange::identity) {
+                    let Out::Any(Any::String(value)) = chunk.insert else {
+                        current.push((Piece::Other, None));
+                        continue;
+                    };
+                    let (styles, href) = styles_of(chunk.attributes.as_deref());
+                    for c in value.chars() {
+                        let len = c.len_utf16() as u32;
+                        current.push((
+                            Piece::Char(c, styles.clone(), href.clone()),
+                            Some((node, offset, len)),
+                        ));
+                        offset += len;
+                    }
+                }
+                texts.push(text);
+            }
+            XmlOut::Element(child) if child.tag().as_ref() == "hardBreak" && !plain => {
+                current.push((Piece::Break, None));
+            }
+            XmlOut::Element(child) => match SCHEMA.inline.get(child.tag().as_ref()) {
+                Some(table) if table.content == "none" && !plain => {
+                    let attrs = table
+                        .attrs
+                        .iter()
+                        .filter_map(|attr_table| {
+                            let value = attr(txn, &child, &attr_table.name)
+                                .unwrap_or_else(|| attr_table.missing.value.clone());
+                            (!value.is_null()).then(|| (attr_table.name.clone(), value))
+                        })
+                        .collect();
+                    current.push((Piece::Atom(child.tag().to_string(), attrs), None));
+                }
+                _ => current.push((Piece::Other, None)),
+            },
+            XmlOut::Fragment(_) => current.push((Piece::Other, None)),
+        }
+    }
+    // In plain blocks (code) marks do not count.
+    let same = |a: &Piece, b: &Piece| match (a, b) {
+        (Piece::Char(x, _, _), Piece::Char(y, _, _)) if plain => x == y,
+        (Piece::Other, _) | (_, Piece::Other) => false,
+        (a, b) => a == b,
+    };
+    let mut prefix = 0;
+    while prefix < current.len()
+        && prefix < wanted.len()
+        && same(&current[prefix].0, &wanted[prefix].0)
+    {
+        prefix += 1;
+    }
+    if prefix == current.len() && prefix == wanted.len() {
+        return;
+    }
+    let mut suffix = 0;
+    while suffix < current.len() - prefix
+        && suffix < wanted.len() - prefix
+        && same(
+            &current[current.len() - 1 - suffix].0,
+            &wanted[wanted.len() - 1 - suffix].0,
+        )
+    {
+        suffix += 1;
+    }
+    let old_middle = &current[prefix..current.len() - suffix];
+    let new_middle = &wanted[prefix..wanted.len() - suffix];
+    // The changed middle as one edit inside one text node, when it lies in one.
+    let place = if let Some((first, _)) = old_middle.first() {
+        let (node, offset, _) = old_middle[0].1.unwrap_or((usize::MAX, 0, 0));
+        let in_one = !matches!(first, Piece::Other)
+            && old_middle.iter().all(|(piece, place)| {
+                matches!(piece, Piece::Char(..)) && place.is_some_and(|p| p.0 == node)
+            });
+        in_one.then(|| {
+            let len = old_middle
+                .iter()
+                .filter_map(|(_, place)| *place)
+                .map(|p| p.2)
+                .sum();
+            (node, offset, len)
+        })
+    } else if let Some((_, Some((node, offset, len)))) = prefix.checked_sub(1).map(|i| &current[i])
+    {
+        Some((*node, offset + len, 0))
+    } else if let Some((_, Some((node, offset, _)))) = current.get(prefix) {
+        Some((*node, *offset, 0))
+    } else {
+        None
+    };
+    let only_text = new_middle
+        .iter()
+        .all(|(piece, attrs)| matches!(piece, Piece::Char(..)) && attrs.is_some());
+    match place.filter(|_| only_text) {
+        Some((node, offset, len)) => {
+            let text = &texts[node];
+            if len > 0 {
+                text.remove_range(txn, offset, len);
+            }
+            let mut at = offset;
+            let mut index = 0;
+            while index < new_middle.len() {
+                let attrs = new_middle[index].1.expect("text has attributes");
+                let mut run = String::new();
+                while let Some((Piece::Char(c, _, _), Some(next))) = new_middle.get(index)
+                    && *next == attrs
+                {
+                    run.push(*c);
+                    index += 1;
+                }
+                // Explicit attributes: the new text gets no mark of its neighbors (comments).
+                text.insert_with_attributes(txn, at, &run, attrs.clone());
+                at += run.encode_utf16().count() as u32;
+            }
+        }
+        None => {
+            clear(txn, element);
+            write_runs(txn, element, &runs);
+        }
+    }
 }
 
 /// Appends the document to an empty fragment. Unknown block types are skipped; an empty document
@@ -214,21 +665,59 @@ fn new_block_id() -> String {
 }
 
 fn write_container(txn: &mut TransactionMut, parent: &XmlElementRef, block: &Value) {
+    let at = parent.len(txn);
+    write_container_at(txn, parent, at, block);
+}
+
+/// Inserts the block as the `at`-th child of `parent`; `false` for an unknown block type.
+fn write_container_at(
+    txn: &mut TransactionMut,
+    parent: &XmlElementRef,
+    at: u32,
+    block: &Value,
+) -> bool {
     let block_type = block
         .get("type")
         .and_then(Value::as_str)
         .unwrap_or("paragraph");
     let Some(table) = SCHEMA.blocks.get(block_type) else {
-        return;
+        return false;
     };
-    let container = parent.push_back(txn, XmlElementPrelim::empty("blockContainer"));
+    let container = parent.insert(txn, at, XmlElementPrelim::empty("blockContainer"));
     let id = block
         .get("id")
         .and_then(Value::as_str)
         .filter(|id| !id.is_empty())
         .map_or_else(new_block_id, str::to_owned);
     container.insert_attribute(txn, "id", Any::from(id));
-    let content_node = container.push_back(txn, XmlElementPrelim::empty(block_type));
+    write_content_node(txn, &container, block_type, table, block);
+    let children = known_children(block);
+    if !children.is_empty() {
+        let group = container.push_back(txn, XmlElementPrelim::empty("blockGroup"));
+        for child in children {
+            write_container(txn, &group, child);
+        }
+    }
+    true
+}
+
+fn known_children(block: &Value) -> Vec<&Value> {
+    block
+        .get("children")
+        .and_then(Value::as_array)
+        .map(|children| children.iter().filter(|child| known_type(child)).collect())
+        .unwrap_or_default()
+}
+
+/// The block's content element (its type, props and content) as the container's first child.
+fn write_content_node(
+    txn: &mut TransactionMut,
+    container: &XmlElementRef,
+    block_type: &str,
+    table: &BlockTable,
+    block: &Value,
+) {
+    let content_node = container.insert(txn, 0, XmlElementPrelim::empty(block_type));
     let props = block.get("props").and_then(Value::as_object);
     for attr in &table.attrs {
         // ProseMirror fills unspecified attrs with their defaults; y-prosemirror writes every
@@ -252,17 +741,6 @@ fn write_container(txn: &mut TransactionMut, parent: &XmlElementRef, block: &Val
         }
         "table" => write_table(txn, &content_node, block.get("content")),
         _ => {}
-    }
-    let children: Vec<&Value> = block
-        .get("children")
-        .and_then(Value::as_array)
-        .map(|children| children.iter().filter(|child| known_type(child)).collect())
-        .unwrap_or_default();
-    if !children.is_empty() {
-        let group = container.push_back(txn, XmlElementPrelim::empty("blockGroup"));
-        for child in children {
-            write_container(txn, &group, child);
-        }
     }
 }
 

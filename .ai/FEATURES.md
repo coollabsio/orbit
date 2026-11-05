@@ -71,7 +71,7 @@ Core files: `TasksPage.tsx`, `components/TaskList.tsx`, `components/TaskBoard.ts
 - Bulk and reorder requests are one atomic request of at most 100 items. Empty unchanged choices are local no-ops.
 - Task and project trash have server-backed restore flows and 30-day retention.
 - Asana import (`pages/AsanaImportPage.tsx`, `api/asanaImports.ts`; server `asana/`, routes `/imports/asana`, migration
-  0066): "Import from Asana" under "New project" in the Tasks sidebar (and in the header project menu) opens
+  0069): "Import from Asana" under "New project" in the Tasks sidebar (and in the header project menu) opens
   `/tasks-import`. Same states and token rules as the Notion import (scan, choose, import; token encrypted, wiped in every
   final state; private to its creator). Choose lists projects by workspace and team (archived ones unselected). Each
   project becomes a new Orbit project. Sections become statuses: a status with the same name is reused, otherwise
@@ -83,7 +83,7 @@ Core files: `TasksPage.tsx`, `components/TaskList.tsx`, `components/TaskBoard.ts
   auto-close, Asana's `completed_at`. A restart resumes from `asana_import_items` without duplicates. A failed or cancelled
   import keeps what it made.
 - Linear import (`pages/LinearImportPage.tsx`, `api/linearImports.ts`; server `linear/`, routes `/imports/linear`,
-  migration 0067): "Import from Linear" in the header project menu and in Settings → Import opens `/tasks-import/linear`.
+  migration 0070): "Import from Linear" in the header project menu and in Settings → Import opens `/tasks-import/linear`.
   Same states and key rules as the Asana import (personal API key encrypted, wiped in every final state; private to its
   creator). Choose lists teams with issue counts (archived ones unselected). Each team becomes a new Orbit project keyed
   by the team key. Workflow states become statuses: the same name is reused (Canceled matches Cancelled), otherwise
@@ -99,7 +99,7 @@ Core files: `TasksPage.tsx`, `components/TaskList.tsx`, `components/TaskBoard.ts
   write, skipped and counted. Trashed issues are left out. Shared importer code: server `task_import.rs`, web
   `api/importStatus.ts` and `components/ImportLayout.tsx`.
 - Trello import (`pages/TrelloImportPage.tsx`, `api/trelloImports.ts`; server `trello/`, routes `/imports/trello`,
-  migration 0068): "Import from Trello" in the header project menu and in Settings → Import opens `/tasks-import/trello`.
+  migration 0071): "Import from Trello" in the header project menu and in Settings → Import opens `/tasks-import/trello`.
   Same states and rules as the Asana and Linear imports. Connect takes a Power-Up API key and a read-only token (the page
   links Trello's authorization page for the typed key); both are encrypted and wiped in every final state, and a key or
   token Trello rejects shows Trello's reason under its field. Choose lists boards by Trello Workspace with open card counts

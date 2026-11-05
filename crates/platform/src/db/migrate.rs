@@ -459,17 +459,36 @@ impl MigrationRunner {
                 ),
                 Migration::new(
                     66,
-                    include_str!("../../../../apps/server/migrations/0066_asana_imports.sql"),
-                    false,
+                    include_str!("../../../../apps/server/migrations/0066_api_token_scopes.sql"),
+                    true,
                 ),
                 Migration::new(
                     67,
-                    include_str!("../../../../apps/server/migrations/0067_linear_imports.sql"),
+                    include_str!(
+                        "../../../../apps/server/migrations/0067_comment_service_account.sql"
+                    ),
                     false,
                 ),
                 Migration::new(
                     68,
-                    include_str!("../../../../apps/server/migrations/0068_trello_imports.sql"),
+                    include_str!(
+                        "../../../../apps/server/migrations/0068_api_token_optional_project.sql"
+                    ),
+                    false,
+                ),
+                Migration::new(
+                    69,
+                    include_str!("../../../../apps/server/migrations/0069_asana_imports.sql"),
+                    false,
+                ),
+                Migration::new(
+                    70,
+                    include_str!("../../../../apps/server/migrations/0070_linear_imports.sql"),
+                    false,
+                ),
+                Migration::new(
+                    71,
+                    include_str!("../../../../apps/server/migrations/0071_trello_imports.sql"),
                     false,
                 ),
             ],
@@ -591,17 +610,38 @@ impl MigrationRunner {
             ),
             Migration::new(
                 66,
-                include_str!("../../../../apps/server/migrations/postgres/0066_asana_imports.sql"),
-                false,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0066_api_token_scopes.sql"
+                ),
+                true,
             ),
             Migration::new(
                 67,
-                include_str!("../../../../apps/server/migrations/postgres/0067_linear_imports.sql"),
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0067_comment_service_account.sql"
+                ),
                 false,
             ),
             Migration::new(
                 68,
-                include_str!("../../../../apps/server/migrations/postgres/0068_trello_imports.sql"),
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0068_api_token_optional_project.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                69,
+                include_str!("../../../../apps/server/migrations/postgres/0069_asana_imports.sql"),
+                false,
+            ),
+            Migration::new(
+                70,
+                include_str!("../../../../apps/server/migrations/postgres/0070_linear_imports.sql"),
+                false,
+            ),
+            Migration::new(
+                71,
+                include_str!("../../../../apps/server/migrations/postgres/0071_trello_imports.sql"),
                 false,
             ),
         ];

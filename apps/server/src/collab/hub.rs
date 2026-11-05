@@ -507,6 +507,20 @@ impl CollabHub {
         Ok(())
     }
 
+    /// [`Self::catch_up`]; a reset document closes the room.
+    async fn catch_up_or_reset(
+        &self,
+        connection: &mut AnyConnection,
+        room: &Arc<Room>,
+        state: &mut RoomState,
+    ) -> Result<(), CollabError> {
+        let result = self.catch_up(connection, room, state).await;
+        if matches!(result, Err(CollabError::Reset)) {
+            self.close_room(room, state, close::RESET);
+        }
+        result
+    }
+
     /// [`Self::catch_up`] outside a transaction; a reset document closes the room.
     async fn catch_up_logged(&self, room: &Arc<Room>, state: &mut RoomState) {
         let result = match self.inner.pool.acquire().await {
@@ -1692,20 +1706,115 @@ pub struct CollabWrite {
 
 struct Staged {
     deltas: Vec<Vec<u8>>,
+    /// `deltas` merged, as the update log stores them.
+    update: Vec<u8>,
     seq: i64,
-    bytes: usize,
 }
 
 impl CollabWrite {
-    /// Whether the page has a collaborative document (otherwise only `content_json` changes and
-    /// the document is built from it when the page is first opened).
-    #[must_use]
-    pub fn is_live(&self) -> bool {
-        self.state.as_ref().is_some_and(|state| state.initialized)
+    /// The live document's blocks after catching up with what other servers wrote; `None` for a
+    /// page without a collaborative document. Read outside a transaction: [`Self::store`] checks
+    /// that nothing came in since.
+    pub async fn current_blocks(&mut self) -> Result<Option<Vec<Value>>, CollabError> {
+        let Some(state) = self.state.as_mut().filter(|state| state.initialized) else {
+            return Ok(None);
+        };
+        if self.hub.shared() {
+            let mut connection = self.hub.inner.pool.acquire().await?;
+            self.hub
+                .catch_up_or_reset(&mut connection, &self.room, state)
+                .await?;
+        }
+        Ok(Some(blocknote::doc_to_blocks(state.awareness.doc())))
     }
 
-    /// Replaces the document with `blocks` (sanitized) as one transaction and appends it to the
-    /// update log inside `tx`; `content_json` is the caller's to write in the same transaction.
+    /// The blocks of the document as this room holds it (no catching up, so after
+    /// [`Self::prepare`] they are the prepared change); `None` for a page without a
+    /// collaborative document.
+    #[must_use]
+    pub fn blocks(&self) -> Option<Vec<Value>> {
+        let state = self.state.as_ref().filter(|state| state.initialized)?;
+        Some(blocknote::doc_to_blocks(state.awareness.doc()))
+    }
+
+    /// Changes the document in memory to `blocks` (sanitized) as one transaction of small edits
+    /// (see [`blocknote::reconcile_blocks`]), the slow part of a replacement, so it runs before
+    /// the caller's write transaction; [`Self::store`] writes it there. Nothing for a page
+    /// without a collaborative document, or when the document already reads as `blocks`.
+    pub fn prepare(&mut self, blocks: &[Value]) -> Result<(), CollabError> {
+        let Some(state) = self.state.as_mut().filter(|state| state.initialized) else {
+            return Ok(());
+        };
+        let sanitized = sanitize_blocks_for(blocks, &self.room.policy());
+        {
+            let doc = state.awareness.doc();
+            let mut txn = doc.transact_mut();
+            let fragment = txn.get_or_insert_xml_fragment(FRAGMENT);
+            blocknote::reconcile_blocks(&mut txn, &fragment, &sanitized);
+        }
+        let deltas = state.take_captured();
+        if deltas.is_empty() {
+            return Ok(());
+        }
+        // The document is ahead of storage until the caller commits.
+        self.touched = true;
+        let update = yrs::merge_updates_v1(&deltas)
+            .map_err(|error| CollabError::Corrupt(error.to_string()))?;
+        self.staged = Some(Staged {
+            deltas,
+            update,
+            seq: 0,
+        });
+        Ok(())
+    }
+
+    /// Appends what [`Self::prepare`] changed to the update log inside the caller's write
+    /// transaction `tx`. `false`, and nothing written, when other servers changed the document
+    /// since it was read: the change was made to an outdated document (dropping `self` then
+    /// discards the room).
+    pub async fn store(
+        &mut self,
+        tx: &mut Transaction<'_, Any>,
+        actor_id: Id,
+        now: TimestampMillis,
+    ) -> Result<bool, CollabError> {
+        let Some(state) = self.state.as_mut().filter(|state| state.initialized) else {
+            return Ok(true);
+        };
+        let seen = state.last_seq;
+        self.hub.catch_up_or_reset(tx, &self.room, state).await?;
+        if state.last_seq != seen {
+            return Ok(false);
+        }
+        let Some(staged) = self.staged.as_mut() else {
+            return Ok(true);
+        };
+        let workspace_id = *self.room.workspace_id.get().ok_or(CollabError::NotFound)?;
+        let seq = append(
+            tx,
+            self.room.key,
+            workspace_id,
+            &staged.update,
+            Some(actor_id),
+            now,
+        )
+        .await?;
+        sqlx::query(self.room.key.kind.sql(
+            "UPDATE page_collab_docs SET projected_seq = $1, updated_at = $2 WHERE page_id = $3",
+        ))
+        .bind(seq)
+        .bind(now.as_millis())
+        .bind(self.room.key.id.to_string())
+        .execute(&mut **tx)
+        .await?;
+        staged.seq = seq;
+        Ok(true)
+    }
+
+    /// Changes the document to `blocks` inside the caller's write transaction `tx` and appends
+    /// it to the update log ([`Self::prepare`] and [`Self::store`] in one); nothing when the
+    /// document already reads as `blocks`. `content_json` is the caller's to write in the same
+    /// transaction.
     pub async fn replace(
         &mut self,
         tx: &mut Transaction<'_, Any>,
@@ -1750,50 +1859,9 @@ impl CollabWrite {
             return Ok(());
         }
         // The caller's write transaction: the replacement goes after every row it can see.
-        if let Err(error) = self.hub.catch_up(tx, &self.room, state).await {
-            if matches!(error, CollabError::Reset) {
-                self.hub.close_room(&self.room, state, close::RESET);
-            }
-            return Err(error);
-        }
-        let sanitized = sanitize_blocks_for(blocks, &self.room.policy());
-        self.touched = true;
-        {
-            let doc = state.awareness.doc();
-            let mut txn = doc.transact_mut();
-            let fragment = txn.get_or_insert_xml_fragment(FRAGMENT);
-            blocknote::replace_blocks(&mut txn, &fragment, &sanitized);
-        }
-        let deltas = state.take_captured();
-        if deltas.is_empty() {
-            return Ok(());
-        }
-        let merged = yrs::merge_updates_v1(&deltas)
-            .map_err(|error| CollabError::Corrupt(error.to_string()))?;
-        let workspace_id = *self.room.workspace_id.get().ok_or(CollabError::NotFound)?;
-        let seq = append(
-            tx,
-            self.room.key,
-            workspace_id,
-            &merged,
-            Some(actor_id),
-            now,
-        )
-        .await?;
-        sqlx::query(self.room.key.kind.sql(
-            "UPDATE page_collab_docs SET projected_seq = $1, updated_at = $2 WHERE page_id = $3",
-        ))
-        .bind(seq)
-        .bind(now.as_millis())
-        .bind(self.room.key.id.to_string())
-        .execute(&mut **tx)
-        .await?;
-        self.staged = Some(Staged {
-            bytes: merged.len(),
-            deltas,
-            seq,
-        });
-        Ok(())
+        self.hub.catch_up_or_reset(tx, &self.room, state).await?;
+        self.prepare(blocks)?;
+        self.store(tx, actor_id, now).await.map(drop)
     }
 
     /// The transaction committed: broadcast the replacement to every connection.
@@ -1816,7 +1884,7 @@ impl CollabWrite {
             state.last_seq = staged.seq;
             state.projected_seq = staged.seq;
             state.log_updates += 1;
-            state.log_bytes += staged.bytes;
+            state.log_bytes += staged.update.len();
             self.hub.set_bytes(&self.room, &state);
             self.hub.tell(CollabMessage::Logged { key: self.room.key });
         }
