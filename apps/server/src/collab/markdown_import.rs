@@ -8,12 +8,18 @@
 //! reads back. `@Name` becomes a mention when exactly one member has that display name. Anything
 //! else (HTML) stays as its text. The result has the shape `doc_to_blocks` returns; callers
 //! sanitize it.
+//!
+//! [`obsidian_to_blocks`] reads Obsidian notes with the same reader: `[[wikilinks]]` and
+//! `![[embeds]]` (and relative markdown links and images) go through a [`LinkResolver`],
+//! `> [!type] Title` callouts become `callout` blocks, `==highlight==` a yellow background,
+//! `%%comments%%` and YAML frontmatter are dropped.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::ops::Range;
 
 use orbit_platform::Id;
-use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
+use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, LinkType, Options, Parser, Tag, TagEnd};
 use serde_json::{Map, Value, json};
 
 use super::blocknote::{MAX_BLOCK_DEPTH, normalize_blocks};
@@ -21,6 +27,32 @@ use crate::export::markdown::Span;
 
 /// Where the reader saw a block, as a byte range of the input; removed by the Yjs round trip.
 const SOURCE: &str = "__source";
+
+/// Whether a link or embed is written as a link (`[[x]]`, `[t](x)`) or an embed (`![[x]]`,
+/// `![t](x)`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LinkKind {
+    Link,
+    Embed,
+}
+
+/// What a link or embed target of an Obsidian note points to in Orbit.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum LinkTarget {
+    /// An imported page: a link to `href`. An embedded note is a link too (no transclusion).
+    Page { href: String },
+    /// An image file: an image block when embedded, a link otherwise.
+    Image { url: String },
+    /// Any other file: a link named `name`.
+    File { url: String, name: String },
+}
+
+/// Resolves the local targets of an Obsidian note. `target` is a wikilink target as written
+/// (`Note`, `Note#Heading`, `Folder/Note`, `image.png`) or a relative markdown link, percent
+/// decoded (`Folder/My Note.md`). `None` leaves the link as its text.
+pub trait LinkResolver {
+    fn resolve(&self, target: &str, kind: LinkKind) -> Option<LinkTarget>;
+}
 
 /// Converts markdown into BlockNote blocks; `members` are `(user id, display name)` pairs.
 #[must_use]
@@ -35,9 +67,135 @@ pub fn markdown_to_blocks_with_spans(
     markdown: &str,
     members: &[(Id, String)],
 ) -> (Vec<Value>, Vec<Span>) {
+    read(markdown, members, None)
+}
+
+/// Converts an Obsidian note into BlockNote blocks (see the module docs).
+#[must_use]
+pub fn obsidian_to_blocks(markdown: &str, resolver: &dyn LinkResolver) -> Vec<Value> {
+    read(&strip_comments(markdown), &[], Some(resolver)).0
+}
+
+/// The local link and embed targets of an Obsidian note, in order, as [`obsidian_to_blocks`]
+/// passes them to its resolver.
+#[must_use]
+pub fn obsidian_links(markdown: &str) -> Vec<(String, LinkKind)> {
+    let markdown = strip_comments(markdown);
+    Parser::new_ext(&markdown, parser_options(true))
+        .filter_map(|event| match event {
+            Event::Start(Tag::Link {
+                link_type,
+                dest_url,
+                ..
+            }) => local_target(&dest_url, link_type).map(|target| (target, LinkKind::Link)),
+            Event::Start(Tag::Image {
+                link_type,
+                dest_url,
+                ..
+            }) => local_target(&dest_url, link_type).map(|target| (target, LinkKind::Embed)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn parser_options(obsidian: bool) -> Options {
     let options =
         Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS;
-    let (events, ranges) = Parser::new_ext(markdown, options)
+    if obsidian {
+        options | Options::ENABLE_WIKILINKS | Options::ENABLE_YAML_STYLE_METADATA_BLOCKS
+    } else {
+        options
+    }
+}
+
+/// The resolver target of a link: wikilinks as written, relative markdown links percent
+/// decoded. `None` for links that leave the vault (a scheme, `/…`, `#…`).
+fn local_target(url: &str, link_type: LinkType) -> Option<String> {
+    if let LinkType::WikiLink { .. } = link_type {
+        return Some(url.to_owned()).filter(|url| !url.trim().is_empty());
+    }
+    let scheme = url.split_once(':').is_some_and(|(scheme, _)| {
+        scheme
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_alphabetic())
+            && scheme
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+    });
+    if url.is_empty() || scheme || url.starts_with('/') || url.starts_with('#') {
+        return None;
+    }
+    Some(
+        percent_encoding::percent_decode_str(url)
+            .decode_utf8_lossy()
+            .into_owned(),
+    )
+}
+
+/// How Obsidian shows a wikilink without an alias: `Note#Heading` as `Note > Heading`.
+fn wikilink_label(target: &str) -> String {
+    target
+        .split('#')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" > ")
+}
+
+/// Removes `%%comments%%` (inline or across lines) outside code.
+fn strip_comments(markdown: &str) -> Cow<'_, str> {
+    if !markdown.contains("%%") {
+        return Cow::Borrowed(markdown);
+    }
+    let mut out = String::with_capacity(markdown.len());
+    let mut fence: Option<&str> = None;
+    let mut comment = false;
+    for line in markdown.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        if !comment {
+            if let Some(open) = fence {
+                if trimmed.starts_with(open) {
+                    fence = None;
+                }
+                out.push_str(line);
+                continue;
+            }
+            if let Some(open) = ["```", "~~~"]
+                .into_iter()
+                .find(|open| trimmed.starts_with(open))
+            {
+                fence = Some(open);
+                out.push_str(line);
+                continue;
+            }
+        }
+        let mut code = false;
+        let mut rest = line;
+        while !rest.is_empty() {
+            if !comment && rest.starts_with('`') {
+                code = !code;
+            }
+            if !code && rest.starts_with("%%") {
+                comment = !comment;
+                rest = &rest[2..];
+                continue;
+            }
+            let c = rest.chars().next().unwrap_or_default();
+            if !comment {
+                out.push(c);
+            }
+            rest = &rest[c.len_utf8()..];
+        }
+    }
+    Cow::Owned(out)
+}
+
+fn read(
+    markdown: &str,
+    members: &[(Id, String)],
+    obsidian: Option<&dyn LinkResolver>,
+) -> (Vec<Value>, Vec<Span>) {
+    let (events, ranges) = Parser::new_ext(markdown, parser_options(obsidian.is_some()))
         .into_offset_iter()
         .unzip();
     let mut reader = Reader {
@@ -46,6 +204,7 @@ pub fn markdown_to_blocks_with_spans(
         index: 0,
         depth: 0,
         members,
+        obsidian,
     };
     let mut blocks = reader.blocks(None);
     if blocks.is_empty() {
@@ -218,6 +377,16 @@ struct Reader<'a, 'm> {
     /// Blocks being read around the current one; see [`Reader::flat`].
     depth: usize,
     members: &'m [(Id, String)],
+    /// Set for Obsidian notes.
+    obsidian: Option<&'m dyn LinkResolver>,
+}
+
+/// A link being read: `href` is `None` for an unresolved link (its text stays), `label`
+/// replaces its text (a wikilink without alias).
+struct PendingLink {
+    href: Option<String>,
+    label: Option<String>,
+    content: Vec<Value>,
 }
 
 fn block(kind: &str, props: Value, content: Vec<Value>, children: Vec<Value>) -> Value {
@@ -367,6 +536,12 @@ impl<'a> Reader<'a, '_> {
             Tag::BlockQuote(_) => {
                 // As exported: the first paragraph is the quote's text, the rest its children.
                 let mut inner = self.blocks(Some(TagEnd::BlockQuote(None)));
+                if self.obsidian.is_some()
+                    && let Some(callout) = callout(&mut inner)
+                {
+                    out.push(callout);
+                    return;
+                }
                 let content = match inner.first() {
                     Some(first) if first["type"] == "paragraph" => content_of(&inner.remove(0)),
                     _ => Vec::new(),
@@ -427,6 +602,14 @@ impl<'a> Reader<'a, '_> {
                 }
             }
             Tag::Table(_) => out.push(self.table()),
+            // YAML frontmatter (only parsed for Obsidian notes) is not page content.
+            Tag::MetadataBlock(_) => {
+                while let Some(event) = self.next() {
+                    if let Event::End(TagEnd::MetadataBlock(_)) = event {
+                        break;
+                    }
+                }
+            }
             Tag::HtmlBlock => {
                 let mut html = String::new();
                 while let Some(event) = self.next() {
@@ -536,7 +719,7 @@ impl<'a> Reader<'a, '_> {
     fn inline(&mut self, end: TagEnd) -> Vec<Inline> {
         let mut out: Vec<Inline> = Vec::new();
         let mut styles = Map::new();
-        let mut link: Option<(String, Vec<Value>)> = None;
+        let mut link: Option<PendingLink> = None;
         while let Some(event) = self.events.get(self.index).cloned() {
             if end == TagEnd::Item
                 && let Event::Start(tag) = &event
@@ -572,16 +755,43 @@ impl<'a> Reader<'a, '_> {
                 Event::End(TagEnd::Strong) => toggle(&mut styles, "bold", false),
                 Event::Start(Tag::Strikethrough) => toggle(&mut styles, "strike", true),
                 Event::End(TagEnd::Strikethrough) => toggle(&mut styles, "strike", false),
-                Event::Start(Tag::Link { dest_url, .. }) => {
-                    link = Some((dest_url.into_string(), Vec::new()));
+                Event::Start(Tag::Link {
+                    link_type,
+                    dest_url,
+                    ..
+                }) => {
+                    link = Some(self.pending_link(&dest_url, link_type));
                     None
                 }
                 Event::End(TagEnd::Link) => {
-                    if let Some((href, content)) = link.take() {
-                        out.push(Inline::Content(
-                            json!({"type": "link", "href": href, "content": merge(content)}),
-                        ));
+                    if let Some(pending) = link.take() {
+                        let content = match pending.label {
+                            Some(label) => vec![text(&label, &styles)],
+                            None => pending.content,
+                        };
+                        match pending.href {
+                            Some(href) => out.push(Inline::Content(
+                                json!({"type": "link", "href": href, "content": merge(content)}),
+                            )),
+                            None => out.extend(content.into_iter().map(Inline::Content)),
+                        }
                     }
+                    None
+                }
+                Event::Start(Tag::Image {
+                    link_type,
+                    dest_url,
+                    ..
+                }) if self.obsidian.is_some() && local_target(&dest_url, link_type).is_some() => {
+                    let mut alt = String::new();
+                    while let Some(event) = self.next() {
+                        match event {
+                            Event::End(TagEnd::Image) => break,
+                            Event::Text(value) | Event::Code(value) => alt.push_str(&value),
+                            _ => {}
+                        }
+                    }
+                    out.push(self.embed(&dest_url, link_type, alt, &styles));
                     None
                 }
                 Event::Start(Tag::Image { dest_url, .. }) => {
@@ -603,12 +813,76 @@ impl<'a> Reader<'a, '_> {
             };
             if let Some(piece) = piece {
                 match &mut link {
-                    Some((_, content)) => content.push(piece),
+                    Some(pending) => pending.content.push(piece),
                     None => out.push(Inline::Content(piece)),
                 }
             }
         }
         out
+    }
+
+    /// A link as written, or for an Obsidian note with its local target resolved.
+    fn pending_link(&self, url: &str, link_type: LinkType) -> PendingLink {
+        let local = self
+            .obsidian
+            .and_then(|resolver| Some((resolver, local_target(url, link_type)?)));
+        let Some((resolver, target)) = local else {
+            return PendingLink {
+                href: Some(url.to_owned()),
+                label: None,
+                content: Vec::new(),
+            };
+        };
+        PendingLink {
+            href: resolver
+                .resolve(&target, LinkKind::Link)
+                .map(|resolved| match resolved {
+                    LinkTarget::Page { href } => href,
+                    LinkTarget::Image { url } | LinkTarget::File { url, .. } => url,
+                }),
+            label: matches!(link_type, LinkType::WikiLink { has_pothole: false })
+                .then(|| wikilink_label(&target)),
+            content: Vec::new(),
+        }
+    }
+
+    /// An Obsidian embed (`![[x]]`, `![alt](x)`): an image block for an image, a link for a
+    /// note or any other file, its text when it does not resolve.
+    fn embed(
+        &self,
+        url: &str,
+        link_type: LinkType,
+        alt: String,
+        styles: &Map<String, Value>,
+    ) -> Inline {
+        let wiki = matches!(link_type, LinkType::WikiLink { .. });
+        let target = local_target(url, link_type).unwrap_or_default();
+        let name = target
+            .rsplit('/')
+            .next()
+            .unwrap_or(&target)
+            .split('#')
+            .next()
+            .unwrap_or_default()
+            .to_owned();
+        let link = |href: String, label: &str| {
+            Inline::Content(json!({
+                "type": "link", "href": href, "content": [text(label, styles)],
+            }))
+        };
+        match self
+            .obsidian
+            .and_then(|resolver| resolver.resolve(&target, LinkKind::Embed))
+        {
+            Some(LinkTarget::Image { url }) => Inline::Image {
+                url,
+                alt: if wiki || alt.is_empty() { name } else { alt },
+            },
+            Some(LinkTarget::Page { href }) => link(href, &wikilink_label(&target)),
+            Some(LinkTarget::File { url, name }) => link(url, &name),
+            None if wiki => Inline::Content(text(&wikilink_label(&target), styles)),
+            None => Inline::Content(text(if alt.is_empty() { &name } else { &alt }, styles)),
+        }
     }
 
     /// Splits inline content into the block's content and image blocks found inside it.
@@ -621,14 +895,24 @@ impl<'a> Reader<'a, '_> {
                 Inline::Image { url, alt } => images.push(image(url, alt)),
             }
         }
-        (self.mentions(merge(content)), images)
+        (self.finish(content), images)
+    }
+
+    /// Joined text, mentions, and for Obsidian notes `==highlights==`.
+    fn finish(&self, content: Vec<Value>) -> Vec<Value> {
+        let content = self.mentions(merge(content));
+        if self.obsidian.is_some() {
+            highlights(content)
+        } else {
+            content
+        }
     }
 
     /// A paragraph or heading; images inside it become image blocks around it, in order.
     fn push_inline(&self, kind: &str, props: Value, inline: Vec<Inline>, out: &mut Vec<Value>) {
         let mut run = Vec::new();
         let flush = |run: &mut Vec<Value>, out: &mut Vec<Value>| {
-            let content = self.mentions(merge(std::mem::take(run)));
+            let content = self.finish(std::mem::take(run));
             if !content.is_empty() {
                 out.push(block(kind, props.clone(), content, Vec::new()));
             }
@@ -750,6 +1034,158 @@ fn image(url: String, alt: String) -> Value {
         Vec::new(),
         Vec::new(),
     )
+}
+
+/// `==text==` in plain text → a yellow background, across style runs of the same block. An
+/// unpaired `==` stays as text.
+fn highlights(content: Vec<Value>) -> Vec<Value> {
+    let plain = |item: &Value| item["type"] == "text" && item["styles"].get("code").is_none();
+    let markers: usize = content
+        .iter()
+        .filter(|item| plain(item))
+        .filter_map(|item| item["text"].as_str())
+        .map(|value| value.matches("==").count())
+        .sum();
+    let mut toggles = markers - markers % 2;
+    let mut on = false;
+    let mut out = Vec::with_capacity(content.len());
+    for mut item in content {
+        if item["type"] == "link" {
+            let inner = item["content"].as_array().cloned().unwrap_or_default();
+            item["content"] = Value::Array(highlights(inner));
+        }
+        let value = item["text"].as_str().map(str::to_owned);
+        let Some(value) = value.filter(|_| plain(&item) && toggles > 0) else {
+            if on && item["type"] == "text" {
+                item["styles"]["backgroundColor"] = json!("yellow");
+            }
+            out.push(item);
+            continue;
+        };
+        let styles = item["styles"].as_object().cloned().unwrap_or_default();
+        for (index, piece) in value.split("==").enumerate() {
+            let mut piece = Cow::Borrowed(piece);
+            if index > 0 {
+                if toggles > 0 {
+                    toggles -= 1;
+                    on = !on;
+                } else {
+                    piece = Cow::Owned(format!("=={piece}"));
+                }
+            }
+            if piece.is_empty() {
+                continue;
+            }
+            let mut styles = styles.clone();
+            if on {
+                styles.insert("backgroundColor".into(), json!("yellow"));
+            }
+            out.push(text(&piece, &styles));
+        }
+    }
+    merge(out)
+}
+
+/// `(emoji, background color)` of an Obsidian callout type and its aliases.
+fn callout_style(kind: &str) -> (&'static str, &'static str) {
+    match kind {
+        "note" => ("✏️", "blue"),
+        "abstract" | "summary" | "tldr" => ("📋", "blue"),
+        "info" => ("ℹ️", "blue"),
+        "todo" => ("☑️", "blue"),
+        "tip" | "hint" | "important" => ("🔥", "green"),
+        "success" | "check" | "done" => ("✅", "green"),
+        "question" | "help" | "faq" => ("❓", "yellow"),
+        "warning" | "caution" | "attention" => ("⚠️", "orange"),
+        "failure" | "fail" | "missing" => ("❌", "red"),
+        "danger" | "error" => ("⚡", "red"),
+        "bug" => ("🐞", "red"),
+        "example" => ("📝", "purple"),
+        "quote" | "cite" => ("💬", "gray"),
+        _ => ("💡", "gray"),
+    }
+}
+
+/// An Obsidian callout (`> [!type]± Title` on the quote's first line) read from the quote's
+/// blocks: the title (or the type's name) is the callout's text, the rest its children.
+fn callout(inner: &mut Vec<Value>) -> Option<Value> {
+    let first = inner.first().filter(|block| block["type"] == "paragraph")?;
+    let mut content = content_of(first);
+    let head = content.first()?.get("text")?.as_str()?;
+    let marker = head.strip_prefix("[!")?;
+    let close = marker.find(']')?;
+    let kind = marker[..close].trim().to_lowercase();
+    if kind.is_empty()
+        || !kind
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    {
+        return None;
+    }
+    let after = marker[close + 1..]
+        .trim_start_matches(['-', '+'])
+        .trim_start_matches(' ');
+    content[0]["text"] = Value::String(after.to_owned());
+    // The title runs to the first line break; the rest of the paragraph is the body.
+    let mut title = Vec::new();
+    let mut body = Vec::new();
+    let mut in_body = false;
+    for item in content {
+        if in_body {
+            body.push(item);
+            continue;
+        }
+        match item["text"]
+            .as_str()
+            .and_then(|value| value.split_once('\n'))
+        {
+            Some((before, rest)) if item["type"] == "text" => {
+                let mut head = item.clone();
+                head["text"] = Value::String(before.to_owned());
+                title.push(head);
+                let mut tail = item.clone();
+                tail["text"] = Value::String(rest.to_owned());
+                body.push(tail);
+                in_body = true;
+            }
+            _ => title.push(item),
+        }
+    }
+    let keep = |item: &Value| {
+        item["type"] != "text" || item["text"].as_str().is_some_and(|t| !t.is_empty())
+    };
+    title.retain(keep);
+    body.retain(keep);
+    if title
+        .iter()
+        .all(|item| item["text"].as_str().is_some_and(|t| t.trim().is_empty()))
+    {
+        let mut name: Vec<char> = kind.chars().collect();
+        if let Some(first) = name.first_mut() {
+            *first = first.to_ascii_uppercase();
+        }
+        title = vec![text(&name.into_iter().collect::<String>(), &Map::new())];
+    }
+    for item in &mut title {
+        if item["type"] == "text" {
+            item["styles"]["bold"] = Value::Bool(true);
+        }
+    }
+    let first = inner.remove(0);
+    let mut children = Vec::new();
+    if !body.is_empty() {
+        let mut paragraph = block("paragraph", json!({}), merge(body), Vec::new());
+        paragraph[SOURCE] = first[SOURCE].clone();
+        children.push(paragraph);
+    }
+    children.append(inner);
+    let (emoji, color) = callout_style(&kind);
+    Some(block(
+        "callout",
+        json!({"emoji": emoji, "backgroundColor": color}),
+        merge(title),
+        children,
+    ))
 }
 
 fn content_of(block: &Value) -> Vec<Value> {
