@@ -24,6 +24,7 @@ pub mod mcp;
 pub mod metrics;
 pub mod notion;
 pub mod obsidian;
+pub mod obsidian_import_routes;
 pub mod oauth;
 pub mod object_storage;
 pub mod openapi;
