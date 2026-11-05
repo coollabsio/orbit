@@ -95,6 +95,9 @@ pub struct ApiTokenPrincipal {
     pub workspace_id: Id,
     pub project_ids: Vec<Id>,
     pub creator_id: Id,
+    /// The member whose access a request is checked with: the creator of a personal token, the
+    /// workspace owner for a service account (which does not depend on its creator).
+    pub actor_id: Id,
     pub service_account: Option<ServiceAccount>,
     pub scopes: Vec<ApiTokenScope>,
 }
@@ -281,7 +284,7 @@ impl ApiTokenRepository {
             .get::<String, _>("id")
             .parse()
             .map_err(|_| ApiTokenError::InvalidIdentifier)?;
-        let workspace_id = row
+        let workspace_id: Id = row
             .get::<String, _>("workspace_id")
             .parse()
             .map_err(|_| ApiTokenError::InvalidIdentifier)?;
@@ -306,11 +309,24 @@ impl ApiTokenRepository {
                 })
             })
             .transpose()?;
+        let actor_id = match &service_account {
+            None => creator_id,
+            Some(_) => sqlx::query_scalar::<_, String>(
+                "SELECT user_id FROM memberships WHERE workspace_id = $1 AND role = 'owner'",
+            )
+            .bind(workspace_id.to_string())
+            .fetch_optional(self.database.pool())
+            .await?
+            .ok_or(ApiTokenError::NotFound)?
+            .parse()
+            .map_err(|_| ApiTokenError::InvalidIdentifier)?,
+        };
         let principal = ApiTokenPrincipal {
             token_id,
             workspace_id,
             project_ids,
             creator_id,
+            actor_id,
             service_account,
             scopes,
         };

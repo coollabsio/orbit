@@ -1433,3 +1433,131 @@ async fn only_owners_and_admins_manage_tokens_and_tokens_follow_their_creator() 
         assert_eq!(code, StatusCode::UNAUTHORIZED, "{method} {path}");
     }
 }
+
+async fn notifications_for(f: &Fixture, user: Id) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM notifications WHERE recipient_user_id = $1")
+        .bind(user.to_string())
+        .fetch_one(f.database.pool())
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn service_account_tokens_do_not_depend_on_their_creator() {
+    let f = Fixture::new().await;
+    let admin = add_member(&f, "admin@example.com", "admin").await;
+    let member = add_member(&f, "member@example.com", "member").await;
+    let (bot, _) = token_by(&f, admin, true).await.unwrap();
+    let (personal, _) = token_by(&f, admin, false).await.unwrap();
+    remove(&f, admin).await;
+
+    let (code, _) = f.call(Some(&personal), "GET", "/me", None).await;
+    assert_eq!(
+        code,
+        StatusCode::UNAUTHORIZED,
+        "a personal token stops with its creator"
+    );
+    let (code, me) = f.call(Some(&bot), "GET", "/me", None).await;
+    assert_eq!(code, StatusCode::OK, "{me}");
+    assert_eq!(me["user"], Value::Null);
+    let account = me["service_account"].clone();
+    let (code, _) = f.call(Some(&bot), "GET", "/tasks", None).await;
+    assert_eq!(code, StatusCode::OK);
+    let status = f.first_status(f.project).await;
+    let (code, task) = f
+        .call(
+            Some(&bot),
+            "POST",
+            "/tasks",
+            Some(json!({"project_id": f.project, "status_id": status, "title": "From CI", "assignee_ids": [member]})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{task}");
+    let id = task["id"].as_str().unwrap().to_owned();
+    let creator: Option<String> =
+        sqlx::query_scalar("SELECT creator_service_account_id FROM tasks WHERE id = $1")
+            .bind(&id)
+            .fetch_one(f.database.pool())
+            .await
+            .unwrap();
+    assert_eq!(creator.as_deref(), account["id"].as_str());
+    let (code, _) = f
+        .call(
+            Some(&bot),
+            "PATCH",
+            &format!("/tasks/{id}"),
+            Some(json!({"expected_version": 0, "assignee_ids": [member, f.user]})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK);
+    assert_eq!(
+        notifications_for(&f, member).await,
+        0,
+        "no member assigned this task"
+    );
+    assert_eq!(
+        notifications_for(&f, f.user).await,
+        0,
+        "no member assigned this task"
+    );
+
+    let (code, comment) = f
+        .call(
+            Some(&bot),
+            "POST",
+            &format!("/tasks/{id}/comments"),
+            Some(json!({"body": "Built"})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::CREATED, "{comment}");
+    assert_eq!(comment["author_service_account"], account);
+    let (_, listed) = f
+        .call(Some(&bot), "GET", &format!("/tasks/{id}/comments"), None)
+        .await;
+    assert_eq!(listed["items"][0]["author_service_account"], account);
+
+    // In the web app nobody edits the bot's comment as its author; moderators may delete it.
+    let comment_id: Id = comment["id"].as_str().unwrap().parse().unwrap();
+    let task_id: Id = id.parse().unwrap();
+    for (user, can_delete) in [(f.user, true), (member, false)] {
+        let page = f
+            .tasks
+            .comments(f.workspace, task_id, user, None, 10)
+            .await
+            .unwrap();
+        let record = page.items.iter().find(|c| c.id == comment_id).unwrap();
+        assert!(!record.can_edit);
+        assert_eq!(record.can_delete, can_delete);
+        assert_eq!(
+            record.author_service_account_name.as_deref(),
+            account["name"].as_str()
+        );
+    }
+    let (code, _) = f
+        .call(
+            Some(&bot),
+            "DELETE",
+            &format!("/tasks/{id}?expected_version=1"),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::NO_CONTENT);
+}
+
+#[tokio::test]
+async fn personal_token_writes_still_notify() {
+    let f = Fixture::new().await;
+    let member = add_member(&f, "member@example.com", "member").await;
+    let (token, _) = f.token(&[ApiTokenScope::TasksWrite], false).await;
+    let status = f.first_status(f.project).await;
+    let (code, _) = f
+        .call(
+            Some(&token),
+            "POST",
+            "/tasks",
+            Some(json!({"project_id": f.project, "status_id": status, "title": "Assigned", "assignee_ids": [member]})),
+        )
+        .await;
+    assert_eq!(code, StatusCode::CREATED);
+    assert_eq!(notifications_for(&f, member).await, 1);
+}

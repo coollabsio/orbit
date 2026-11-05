@@ -24,7 +24,9 @@ use crate::repositories::tasks::{
     CommentRecord, LabelRecord, ProjectRecord, SortOrder, StatusRecord, TaskError, TaskRepository,
     TaskSort,
 };
-use crate::token_api::{AssigneeFilter, NewTask, TaskPatch, TaskQuery, TokenApi, TokenApiError};
+use crate::token_api::{
+    AssigneeFilter, Named, NewTask, TaskPatch, TaskQuery, TokenApi, TokenApiError,
+};
 
 pub const BASE_PATH: &str = "/api/public/v1";
 
@@ -440,6 +442,8 @@ struct CommentOut {
     id: Id,
     task_id: Id,
     author_id: Id,
+    /// Set when a service account wrote the comment; show it as the author then.
+    author_service_account: Option<Named>,
     body: String,
     parent_id: Option<Id>,
     version: u64,
@@ -453,6 +457,10 @@ impl From<CommentRecord> for CommentOut {
             id: c.id,
             task_id: c.task_id,
             author_id: c.author_id,
+            author_service_account: c.author_service_account_id.map(|id| Named {
+                id,
+                name: c.author_service_account_name.unwrap_or_default(),
+            }),
             body: c.body,
             parent_id: c.parent_id,
             version: c.version,

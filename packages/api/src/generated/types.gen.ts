@@ -876,7 +876,16 @@ export type CommentBody = {
 };
 
 export type CommentRecord = {
+    /**
+     * The member the comment was written as. For a comment from a service account's API token,
+     * the workspace member the write was checked as; show `author_service_account_name` then.
+     */
     author_id: string;
+    /**
+     * Set when a service account wrote the comment through an API token.
+     */
+    author_service_account_id: string | null;
+    author_service_account_name: string | null;
     /**
      * Markdown copy of `body_json`.
      */
@@ -2349,7 +2358,16 @@ export type PageAuditEvent = {
 
 export type PageCommentRecord = {
     items: Array<{
+        /**
+         * The member the comment was written as. For a comment from a service account's API token,
+         * the workspace member the write was checked as; show `author_service_account_name` then.
+         */
         author_id: string;
+        /**
+         * Set when a service account wrote the comment through an API token.
+         */
+        author_service_account_id: string | null;
+        author_service_account_name: string | null;
         /**
          * Markdown copy of `body_json`.
          */

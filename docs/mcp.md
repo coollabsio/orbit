@@ -190,8 +190,9 @@ API tokens remain supported for scripts or clients with custom HTTP headers.
 As a workspace owner or administrator, open **Settings → API tokens**, set
 Tasks to **Read**, select projects, and set an expiry. Configure
 `Authorization: Bearer <token>` on the MCP client. Never put the token in a URL
-or a repository. A service-account token does not bypass the creator's current
-workspace membership check for repository reads.
+or a repository. A personal token stops working when its creator leaves the
+workspace. A service-account token does not depend on its creator: it works until
+it is revoked or its service account is disabled.
 
 The same tokens also work with the public REST API at `/api/public/v1`, for
 scripts, CI jobs and the Orbit CLI. That API serves tasks and docs, not chat. See

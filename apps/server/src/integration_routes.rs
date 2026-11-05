@@ -1400,7 +1400,7 @@ pub(crate) async fn create_discord_event(
         .tasks
         .create_discord_task(
             principal.workspace_id,
-            principal.creator_id,
+            principal.actor_id,
             principal.service_account.as_ref().map(|account| account.id),
             DiscordTask {
                 event_id: event_id.to_owned(),

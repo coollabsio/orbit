@@ -383,7 +383,7 @@ impl Authorized<'_> {
         let keys: std::collections::HashMap<Id, String> = self
             .api
             .tasks
-            .approved_projects(p.workspace_id, p.creator_id, &p.project_ids)
+            .approved_projects(p.workspace_id, p.actor_id, &p.project_ids)
             .await?
             .into_iter()
             .map(|project| (project.id, project.key))
@@ -426,7 +426,7 @@ impl Authorized<'_> {
             .labels(
                 p.workspace_id,
                 Some(project_id),
-                p.creator_id,
+                p.actor_id,
                 cursor,
                 limit,
             )
@@ -446,7 +446,7 @@ impl Authorized<'_> {
             .map_err(|_| TokenApiError::Invalid("Invalid cursor or limit"))?;
         let p = self.principal;
         let (members, next) = WorkspaceRepository::new(self.api.tasks.database().clone())
-            .members(p.workspace_id, p.creator_id, cursor, limit)
+            .members(p.workspace_id, p.actor_id, cursor, limit)
             .await
             .map_err(|error| match error {
                 WorkspaceError::NotFound => TokenApiError::NotAvailable,
@@ -471,7 +471,7 @@ impl Authorized<'_> {
         Ok(self
             .api
             .tasks
-            .approved_projects(p.workspace_id, p.creator_id, &p.project_ids)
+            .approved_projects(p.workspace_id, p.actor_id, &p.project_ids)
             .await?)
     }
 
@@ -489,7 +489,7 @@ impl Authorized<'_> {
         let p = self.principal;
         Ok(self
             .granted()
-            .statuses(p.workspace_id, project_id, p.creator_id, cursor, limit)
+            .statuses(p.workspace_id, project_id, p.actor_id, cursor, limit)
             .await?)
     }
 
@@ -598,7 +598,7 @@ impl Authorized<'_> {
             .tasks
             .tasks(
                 p.workspace_id,
-                p.creator_id,
+                p.actor_id,
                 &filter,
                 query.cursor.as_deref(),
                 limit,
@@ -630,7 +630,7 @@ impl Authorized<'_> {
         let task = self
             .api
             .tasks
-            .get_task(p.workspace_id, id, p.creator_id)
+            .get_task(p.workspace_id, id, p.actor_id)
             .await?;
         if self.approved(task.project_id) {
             self.view(task).await
@@ -654,7 +654,7 @@ impl Authorized<'_> {
             .granted()
             .create_task(
                 p.workspace_id,
-                p.creator_id,
+                p.actor_id,
                 CreateTask {
                     project_id: input.project_id,
                     status_id: input.status_id,
@@ -699,7 +699,7 @@ impl Authorized<'_> {
             .granted()
             .update_task(
                 p.workspace_id,
-                p.creator_id,
+                p.actor_id,
                 &TaskUpdate {
                     id,
                     expected_version,
@@ -735,7 +735,7 @@ impl Authorized<'_> {
             .delete_task(
                 p.workspace_id,
                 id,
-                p.creator_id,
+                p.actor_id,
                 expected_version,
                 self.request_id,
                 TimestampMillis::now(),
@@ -755,7 +755,7 @@ impl Authorized<'_> {
         let task = self
             .api
             .tasks
-            .get_task(p.workspace_id, id, p.creator_id)
+            .get_task(p.workspace_id, id, p.actor_id)
             .await?;
         if self.approved(task.project_id) {
             Ok(task)
@@ -777,7 +777,7 @@ impl Authorized<'_> {
         Ok(self
             .api
             .tasks
-            .comments(p.workspace_id, task.id, p.creator_id, cursor, limit)
+            .comments(p.workspace_id, task.id, p.actor_id, cursor, limit)
             .await?)
     }
 
@@ -797,7 +797,7 @@ impl Authorized<'_> {
             .create_comment(
                 p.workspace_id,
                 id,
-                p.creator_id,
+                p.actor_id,
                 None,
                 CommentContent::Markdown {
                     body,
@@ -826,7 +826,7 @@ impl Authorized<'_> {
         let pages = self.content(ApiTokenScope::DocsRead, &self.api.pages)?;
         let p = self.principal;
         pages
-            .pages(p.workspace_id, p.creator_id)
+            .pages(p.workspace_id, p.actor_id)
             .await
             .map_err(|_| TokenApiError::NotAvailable)
     }
@@ -835,7 +835,7 @@ impl Authorized<'_> {
         let pages = self.content(ApiTokenScope::DocsRead, &self.api.pages)?;
         let p = self.principal;
         pages
-            .get_page(p.workspace_id, page_id, p.creator_id)
+            .get_page(p.workspace_id, page_id, p.actor_id)
             .await
             .map_err(|_| TokenApiError::NotAvailable)
     }
@@ -843,7 +843,7 @@ impl Authorized<'_> {
     pub async fn conversations(&self) -> Result<Vec<ConversationRecord>> {
         let chat = self.content(ApiTokenScope::ChatRead, &self.api.chat)?;
         let p = self.principal;
-        chat.list_conversations(p.workspace_id, p.creator_id)
+        chat.list_conversations(p.workspace_id, p.actor_id)
             .await
             .map_err(|_| TokenApiError::NotAvailable)
     }
@@ -858,7 +858,7 @@ impl Authorized<'_> {
         let p = self.principal;
         chat.list_messages(
             p.workspace_id,
-            p.creator_id,
+            p.actor_id,
             conversation_id,
             message_cursor(before, limit)?,
         )
@@ -876,7 +876,7 @@ impl Authorized<'_> {
         let p = self.principal;
         chat.get_thread(
             p.workspace_id,
-            p.creator_id,
+            p.actor_id,
             message_id,
             message_cursor(before, limit)?,
         )

@@ -168,8 +168,15 @@ pub struct CommentRecord {
     pub workspace_id: Id,
     #[schema(value_type = String)]
     pub task_id: Id,
+    /// The member the comment was written as. For a comment from a service account's API token,
+    /// the workspace member the write was checked as; show `author_service_account_name` then.
     #[schema(value_type = String)]
     pub author_id: Id,
+    /// Set when a service account wrote the comment through an API token.
+    #[schema(value_type = Option<String>, required = true)]
+    pub author_service_account_id: Option<Id>,
+    #[schema(required = true)]
+    pub author_service_account_name: Option<String>,
     #[schema(value_type = Option<String>)]
     pub parent_id: Option<Id>,
     /// Markdown copy of `body_json`.
@@ -470,6 +477,12 @@ impl TaskRepository {
             token: Some(token),
             ..self
         }
+    }
+
+    /// Whether the write notifies members. A service account's write does not: a notification
+    /// names a member as the actor, and no member did it.
+    fn notifies(&self) -> bool {
+        self.service_account().is_none()
     }
 
     fn service_account(&self) -> Option<(Id, &str)> {
@@ -1652,25 +1665,27 @@ impl TaskRepository {
         .execute(&mut *tx)
         .await?;
         replace_assignees(&mut tx, id, &input.assignee_ids).await?;
-        if let Some(blocks) = &blocks {
+        if let Some(blocks) = blocks.as_ref().filter(|_| self.notifies()) {
             // everyone the new description mentions is newly mentioned
             notify_description_mentions(&mut tx, workspace_id, id, &[], blocks, actor_id, now)
                 .await?;
         }
         replace_labels(&mut tx, id, &input.label_ids).await?;
-        notify_users(
-            &mut tx,
-            workspace_id,
-            actor_id,
-            NotificationRequest {
-                kind: "task_assigned",
-                task_id: id,
-                comment_id: None,
-                recipients: &input.assignee_ids,
-            },
-            now,
-        )
-        .await?;
+        if self.notifies() {
+            notify_users(
+                &mut tx,
+                workspace_id,
+                actor_id,
+                NotificationRequest {
+                    kind: "task_assigned",
+                    task_id: id,
+                    comment_id: None,
+                    recipients: &input.assignee_ids,
+                },
+                now,
+            )
+            .await?;
+        }
         self.record_write(
             &mut tx,
             workspace_id,
@@ -2131,7 +2146,16 @@ impl TaskRepository {
         let before = sub_issues::snapshot_in_tx(&mut tx, update.id).await?;
         let task_before = task_in_tx(&mut tx, workspace_id, update.id, false).await?;
         let blocks =
-            update_task_in_tx(&mut tx, workspace_id, actor_id, update, request_id, now).await?;
+            update_task_in_tx(
+                &mut tx,
+                workspace_id,
+                actor_id,
+                update,
+                request_id,
+                now,
+                self.notifies(),
+            )
+            .await?;
         if let (Some(collab), Some(blocks)) = (collab.as_mut(), &blocks) {
             collab.replace(&mut tx, blocks, actor_id, now).await?;
         }
@@ -2231,7 +2255,16 @@ impl TaskRepository {
         for update in updates {
             let before = sub_issues::snapshot_in_tx(&mut tx, update.id).await?;
             let blocks =
-                update_task_in_tx(&mut tx, workspace_id, actor_id, update, request_id, now).await?;
+                update_task_in_tx(
+                    &mut tx,
+                    workspace_id,
+                    actor_id,
+                    update,
+                    request_id,
+                    now,
+                    self.notifies(),
+                )
+                .await?;
             if let (Some(collab), Some(blocks)) = (collabs.get_mut(&update.id), &blocks) {
                 collab.replace(&mut tx, blocks, actor_id, now).await?;
             }
@@ -2538,8 +2571,11 @@ impl TaskRepository {
         let fingerprint = format!("comments:{task_id}");
         let after = cursor_i64_pair(cursor, &fingerprint)?;
         let mut query = SqlBuilder::new(
-            "SELECT id, workspace_id, task_id, author_id, parent_id, body, body_json, version, created_at, updated_at \
-             FROM task_comments WHERE workspace_id = ",
+            "SELECT task_comments.id, task_comments.workspace_id, task_id, author_id, author_service_account_id, \
+             service_accounts.name AS author_service_account_name, parent_id, body, body_json, task_comments.version, \
+             task_comments.created_at, task_comments.updated_at FROM task_comments \
+             LEFT JOIN service_accounts ON service_accounts.id = task_comments.author_service_account_id \
+             WHERE task_comments.workspace_id = ",
         );
         query
             .push_bind(workspace_id.to_string())
@@ -2547,17 +2583,17 @@ impl TaskRepository {
             .push_bind(task_id.to_string());
         if let Some((created_at, id)) = after {
             query
-                .push(" AND (created_at > ")
+                .push(" AND (task_comments.created_at > ")
                 .push_bind(created_at)
-                .push(" OR (created_at = ")
+                .push(" OR (task_comments.created_at = ")
                 .push_bind(created_at)
-                .push(" AND id > ")
+                .push(" AND task_comments.id > ")
                 .push_bind(id.to_string())
                 .push("))");
         }
         let limit = limit.clamp(1, 100);
         query
-            .push(" ORDER BY created_at, id LIMIT ")
+            .push(" ORDER BY task_comments.created_at, task_comments.id LIMIT ")
             .push_bind((limit + 1) as i64);
         let items = query
             .build()
@@ -2587,7 +2623,7 @@ impl TaskRepository {
     ) -> Result<CommentRecord, TaskError> {
         let id = Id::new_v7();
         let mut tx = self.database.immediate_transaction().await?;
-        require_task_tx(&mut tx, workspace_id, task_id, actor_id).await?;
+        let actor = require_task_tx(&mut tx, workspace_id, task_id, actor_id).await?;
         if let Some(grant) = &self.project_grant {
             let project: String = sqlx::query_scalar(
                 "SELECT project_id FROM tasks WHERE id = $1 AND workspace_id = $2",
@@ -2616,21 +2652,24 @@ impl TaskRepository {
                 mentioned_user_ids, ..
             } => mentioned_user_ids,
         };
-        sqlx::query("INSERT INTO task_comments (id, workspace_id, task_id, author_id, parent_id, body, body_json, version, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8, $9)")
-            .bind(id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).bind(actor_id.to_string()).bind(parent_id.map(|id| id.to_string())).bind(&body).bind(Value::Array(blocks.clone()).to_string()).bind(now.as_millis()).bind(now.as_millis()).execute(&mut *tx).await?;
-        notify_users(
-            &mut tx,
-            workspace_id,
-            actor_id,
-            NotificationRequest {
-                kind: "comment_mentioned",
-                task_id,
-                comment_id: Some(id),
-                recipients: &mentioned_user_ids,
-            },
-            now,
-        )
-        .await?;
+        let service_account = self.service_account();
+        sqlx::query("INSERT INTO task_comments (id, workspace_id, task_id, author_id, parent_id, body, body_json, version, created_at, updated_at, author_service_account_id) VALUES ($1, $2, $3, $4, $5, $6, $7, 0, $8, $9, $10)")
+            .bind(id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).bind(actor_id.to_string()).bind(parent_id.map(|id| id.to_string())).bind(&body).bind(Value::Array(blocks.clone()).to_string()).bind(now.as_millis()).bind(now.as_millis()).bind(service_account.map(|(id, _)| id.to_string())).execute(&mut *tx).await?;
+        if self.notifies() {
+            notify_users(
+                &mut tx,
+                workspace_id,
+                actor_id,
+                NotificationRequest {
+                    kind: "comment_mentioned",
+                    task_id,
+                    comment_id: Some(id),
+                    recipients: &mentioned_user_ids,
+                },
+                now,
+            )
+            .await?;
+        }
         self.record_write(
             &mut tx,
             workspace_id,
@@ -2648,11 +2687,13 @@ impl TaskRepository {
             workspace_id,
             task_id,
             author_id: actor_id,
+            author_service_account_id: service_account.map(|(id, _)| id),
+            author_service_account_name: service_account.map(|(_, name)| name.to_owned()),
             parent_id,
             body,
             body_json: Some(blocks),
-            can_edit: true,
-            can_delete: true,
+            can_edit: actor.can_edit_comment(service_account.is_none().then_some(actor_id)),
+            can_delete: actor.can_delete_comment(service_account.is_none().then_some(actor_id)),
             version: 0,
             created_at: now,
             updated_at: now,
@@ -2886,6 +2927,7 @@ pub(super) async fn update_task_in_tx(
     update: &TaskUpdate,
     request_id: &str,
     now: TimestampMillis,
+    notify: bool,
 ) -> Result<Option<Vec<Value>>, TaskError> {
     let current = task_in_tx(tx, workspace_id, update.id, false).await?;
     check_version(update.expected_version, current.version, &current)?;
@@ -3123,19 +3165,21 @@ pub(super) async fn update_task_in_tx(
             .filter(|id| !current.assignee_ids.contains(id))
             .collect();
         replace_assignees(tx, update.id, assignees).await?;
-        notify_users(
-            tx,
-            workspace_id,
-            actor_id,
-            NotificationRequest {
-                kind: "task_assigned",
-                task_id: update.id,
-                comment_id: None,
-                recipients: &added,
-            },
-            now,
-        )
-        .await?;
+        if notify {
+            notify_users(
+                tx,
+                workspace_id,
+                actor_id,
+                NotificationRequest {
+                    kind: "task_assigned",
+                    task_id: update.id,
+                    comment_id: None,
+                    recipients: &added,
+                },
+                now,
+            )
+            .await?;
+        }
     }
     if let Some(labels) = &label_ids {
         replace_labels(tx, update.id, labels).await?;
@@ -3147,8 +3191,10 @@ pub(super) async fn update_task_in_tx(
         Some(blocks) => blocks,
         None => imported_description(tx, workspace_id, &current.description).await?,
     };
-    notify_description_mentions(tx, workspace_id, update.id, &before, &blocks, actor_id, now)
-        .await?;
+    if notify {
+        notify_description_mentions(tx, workspace_id, update.id, &before, &blocks, actor_id, now)
+            .await?;
+    }
     sqlx::query("UPDATE tasks SET description_json = $1 WHERE id = $2")
         .bind(Value::Array(blocks.clone()).to_string())
         .bind(update.id.to_string())
@@ -4147,7 +4193,7 @@ async fn comment_in_tx(
     comment_id: Id,
     actor: Actor,
 ) -> Result<CommentRecord, TaskError> {
-    let row = sqlx::query("SELECT id, workspace_id, task_id, author_id, parent_id, body, body_json, version, created_at, updated_at FROM task_comments WHERE id = $1 AND workspace_id = $2 AND task_id = $3")
+    let row = sqlx::query("SELECT task_comments.id, task_comments.workspace_id, task_id, author_id, author_service_account_id, service_accounts.name AS author_service_account_name, parent_id, body, body_json, task_comments.version, task_comments.created_at, task_comments.updated_at FROM task_comments LEFT JOIN service_accounts ON service_accounts.id = task_comments.author_service_account_id WHERE task_comments.id = $1 AND task_comments.workspace_id = $2 AND task_id = $3")
         .bind(comment_id.to_string()).bind(workspace_id.to_string()).bind(task_id.to_string()).fetch_optional(&mut **tx).await?.ok_or(TaskError::NotFound)?;
     comment_from_row(row, actor)
 }
@@ -4450,13 +4496,20 @@ fn notification_from_row(row: sqlx::any::AnyRow) -> Result<NotificationRecord, T
 
 fn comment_from_row(row: sqlx::any::AnyRow, actor: Actor) -> Result<CommentRecord, TaskError> {
     let author_id = parse_id(row.get("author_id"))?;
+    let author_service_account_id = row
+        .get::<Option<String>, _>("author_service_account_id")
+        .map(parse_id)
+        .transpose()?;
+    let member_author = author_service_account_id.is_none().then_some(author_id);
     Ok(CommentRecord {
         id: parse_id(row.get("id"))?,
         workspace_id: parse_id(row.get("workspace_id"))?,
         task_id: parse_id(row.get("task_id"))?,
         author_id,
-        can_edit: actor.can_edit_comment(author_id),
-        can_delete: actor.can_delete_comment(author_id),
+        author_service_account_id,
+        author_service_account_name: row.get("author_service_account_name"),
+        can_edit: actor.can_edit_comment(member_author),
+        can_delete: actor.can_delete_comment(member_author),
         parent_id: row
             .get::<Option<String>, _>("parent_id")
             .map(parse_id)

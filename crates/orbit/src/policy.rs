@@ -97,15 +97,16 @@ impl Actor {
         Policy::can(self.role, permission)
     }
 
-    /// Only the author rewrites a task comment.
+    /// Only the author rewrites a task comment. `author_id` is `None` for a comment that a
+    /// service account wrote: no member is its author.
     #[must_use]
-    pub fn can_edit_comment(self, author_id: Id) -> bool {
-        self.user_id == author_id
+    pub fn can_edit_comment(self, author_id: Option<Id>) -> bool {
+        author_id == Some(self.user_id)
     }
 
     #[must_use]
-    pub fn can_delete_comment(self, author_id: Id) -> bool {
-        self.user_id == author_id || self.can(Permission::CommentsModerate)
+    pub fn can_delete_comment(self, author_id: Option<Id>) -> bool {
+        author_id == Some(self.user_id) || self.can(Permission::CommentsModerate)
     }
 
     /// `shared` is workspace visibility; a personal view is only ever its owner's.

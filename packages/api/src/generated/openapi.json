@@ -38166,6 +38166,8 @@
           "workspace_id",
           "task_id",
           "author_id",
+          "author_service_account_id",
+          "author_service_account_name",
           "body",
           "body_json",
           "can_edit",
@@ -38176,7 +38178,21 @@
         ],
         "properties": {
           "author_id": {
-            "type": "string"
+            "type": "string",
+            "description": "The member the comment was written as. For a comment from a service account's API token,\nthe workspace member the write was checked as; show `author_service_account_name` then."
+          },
+          "author_service_account_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Set when a service account wrote the comment through an API token."
+          },
+          "author_service_account_name": {
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "body": {
             "type": "string",
@@ -41922,6 +41938,8 @@
                 "workspace_id",
                 "task_id",
                 "author_id",
+                "author_service_account_id",
+                "author_service_account_name",
                 "body",
                 "body_json",
                 "can_edit",
@@ -41932,7 +41950,21 @@
               ],
               "properties": {
                 "author_id": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "The member the comment was written as. For a comment from a service account's API token,\nthe workspace member the write was checked as; show `author_service_account_name` then."
+                },
+                "author_service_account_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Set when a service account wrote the comment through an API token."
+                },
+                "author_service_account_name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "body": {
                   "type": "string",

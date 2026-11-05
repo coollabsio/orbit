@@ -34,13 +34,19 @@ necessary.
 
 A personal token acts as the person who created it. Orbit checks on each request
 that this person is still a member of the workspace and that their account is
-not suspended. A service-account token also needs its service account to be
-active. It can use tasks only, not docs.
+not suspended. If not, the token stops working.
+
+A service-account token does not depend on the person who created it. It keeps
+working when that person leaves the workspace, changes role or is suspended,
+until an owner or administrator revokes it or disables its service account. It
+can use tasks only, not docs. Its writes show the service account as the author:
+as the creator of the tasks that it makes, and as the author of its comments.
+Its writes do not send notifications (assignments and mentions), because no
+member made them.
 
 The audit log records each task and comment write with the ID of the token
 (`api_token_id`). A personal token shows its creator as the actor. A
-service-account token shows the service account as the actor and as the
-creator of the tasks that it makes.
+service-account token shows the service account as the actor.
 
 ## Scopes
 
@@ -228,7 +234,10 @@ curl -sS -X DELETE "$ORBIT_WS/tasks/ENG-12?expected_version=4" \
 
 `GET /workspaces/{workspace_id}/tasks/{task}/comments?cursor&limit`. Scope:
 `tasks:read`. Oldest first. Item:
-`{id, task_id, author_id, body, parent_id, version, created_at, updated_at}`.
+`{id, task_id, author_id, author_service_account, body, parent_id, version,
+created_at, updated_at}`. `author_service_account` is `{id, name}` for a comment
+that a service account wrote, and `null` otherwise. Show it as the author when
+it is set.
 `body` is Markdown.
 
 ```bash
@@ -237,7 +246,8 @@ curl -sS "$ORBIT_WS/tasks/ENG-12/comments" -H "Authorization: Bearer $ORBIT_TOKE
 
 `POST /workspaces/{workspace_id}/tasks/{task}/comments`. Scope: `tasks:write`.
 Body: `{"body": "Markdown"}` (1 to 100,000 characters). Response: `201` with
-the comment. The token's creator is the author.
+the comment. The author is the token's creator, or for a service-account token
+the service account.
 
 ```bash
 curl -sS "$ORBIT_WS/tasks/ENG-12/comments" -H "Authorization: Bearer $ORBIT_TOKEN" \
