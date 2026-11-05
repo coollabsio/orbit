@@ -189,7 +189,7 @@ async fn production_csp_hashes_the_exact_embedded_bootstrap_text() {
     );
 
     assert!(csp.contains(&format!("script-src 'self' '{exact_hash}'")));
-    assert!(csp.contains("style-src 'self'; style-src-attr 'unsafe-inline'"));
+    assert!(csp.contains("style-src 'self' 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='; style-src-attr 'unsafe-inline'"));
 }
 
 #[tokio::test]

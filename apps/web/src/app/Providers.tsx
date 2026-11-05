@@ -13,7 +13,7 @@ function UnauthorizedSessionHandler() {
   const navigate = useNavigate()
 
   useEffect(() => {
-    const unauthorized = () => void clearExpiredSession(queryClient, (path) => navigate(path, { replace: true }))
+    const unauthorized = () => void clearExpiredSession(queryClient, (path) => navigate(path, { replace: true }), `${window.location.pathname}${window.location.search}${window.location.hash}`)
     window.addEventListener(UNAUTHORIZED_EVENT, unauthorized)
     return () => window.removeEventListener(UNAUTHORIZED_EVENT, unauthorized)
   }, [navigate, queryClient])

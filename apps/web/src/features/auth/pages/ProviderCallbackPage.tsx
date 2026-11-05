@@ -7,7 +7,7 @@ import { AuthCard } from '@/features/auth/components/AuthForm'
 import { AuthMessage } from '@/features/auth/components/AuthMessage'
 import { LinkPasswordStep } from '@/features/auth/components/LinkPasswordStep'
 import { TwoFactorStep } from '@/features/auth/components/TwoFactorStep'
-import { oauthLoginDestination } from '@/features/auth/oauth'
+import { loginDestination } from '@/features/auth/returnTo'
 import { clearProviderFlow, parseProviderCallback, PROVIDER_NAMES, storedProviderFlow } from '@/features/auth/providerSignIn'
 
 /** Where a `connect` or `confirm` goes back to: the account page that started it. */
@@ -39,7 +39,7 @@ export function ProviderCallbackPage() {
     if (!handoff || !flow) return
     exchange.mutate({ handoff, code_verifier: flow.verifier }, {
       onSuccess: (result) => {
-        if (result.kind === 'signed_in') void navigate(oauthLoginDestination(returnTo), { replace: true })
+        if (result.kind === 'signed_in') void navigate(loginDestination(returnTo), { replace: true })
         if (result.kind === 'done') {
           toast(flow.intent === 'connect' ? `${PROVIDER_NAMES[flow.provider]} is connected` : `Confirmed with ${PROVIDER_NAMES[flow.provider]}. Try the change again.`)
           void navigate(settingsDestination(returnTo), { replace: true })
@@ -64,7 +64,7 @@ export function ProviderCallbackPage() {
       </AuthCard>
     )
   }
-  const signedIn = () => void navigate(oauthLoginDestination(returnTo), { replace: true })
+  const signedIn = () => void navigate(loginDestination(returnTo), { replace: true })
   const back = (reason: Error | null) => {
     if (reason) setCodeStepError(reason)
     else void navigate('/login', { replace: true })

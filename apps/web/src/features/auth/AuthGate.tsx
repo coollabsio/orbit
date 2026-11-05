@@ -1,14 +1,15 @@
 import { useQuery } from '@tanstack/react-query'
-import { Navigate, Outlet, useSearchParams } from 'react-router'
+import { Navigate, Outlet, useLocation, useSearchParams } from 'react-router'
 import { createApiClient } from '@/api/client'
 import { LoadingScreen } from '@/components/common/LoadingScreen'
 import { firstLoadFailed } from '@/lib/connection'
 import { authGateState } from './authState'
 import { currentUserQueryOptions, useCurrentUser, useSetupStatus } from './api'
-import { oauthLoginDestination } from './oauth'
+import { loginDestination, loginPath } from './returnTo'
 import { OrbitUnavailable } from '@/components/common/OrbitUnavailable'
 
 export function AuthGate() {
+  const location = useLocation()
   const setup = useSetupStatus()
   const user = useCurrentUser(setup.data?.complete === true)
 
@@ -21,7 +22,7 @@ export function AuthGate() {
     return <OrbitUnavailable detail="The server could not verify this session." onRetry={() => { void setup.refetch(); void user.refetch() }} />
   }
   if (state === 'setup') return <Navigate to="/setup" replace />
-  if (state === 'login') return <Navigate to="/login" replace />
+  if (state === 'login') return <Navigate to={loginPath(`${location.pathname}${location.search}${location.hash}`)} replace />
   if (state === 'authenticated') return <Outlet />
   return <LoadingScreen />
 }
@@ -33,7 +34,7 @@ const guestSessionClient = createApiClient()
 export function GuestGate() {
   const [params] = useSearchParams()
   const user = useQuery({ ...currentUserQueryOptions(guestSessionClient), retry: false })
-  if (user.data) return <Navigate to={oauthLoginDestination(params.get('return_to'))} replace />
+  if (user.data) return <Navigate to={loginDestination(params.get('return_to'))} replace />
   if (user.isPending) return <LoadingScreen />
   return <Outlet />
 }

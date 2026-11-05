@@ -278,8 +278,10 @@ pub(crate) fn add_security_headers(
     let script_source = csp_script_hash
         .map(|hash| format!("script-src 'self' '{hash}'; "))
         .unwrap_or_else(|| "script-src 'self'; ".to_owned());
+    // The style-src hash is the empty string's: it allows only an empty `<style>`, which BlockNote's placeholder
+    // plugin creates and then fills through the CSSOM (`insertRule`), which CSP does not restrict.
     let policy = format!(
-        "default-src 'self'; {script_source}style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: https:; frame-src https://www.youtube-nocookie.com; media-src 'self' https://video.twimg.com; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self' https://github.com"
+        "default-src 'self'; {script_source}style-src 'self' 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: https:; frame-src https://www.youtube-nocookie.com; media-src 'self' https://video.twimg.com; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self' https://github.com"
     );
     headers.insert(
         CONTENT_SECURITY_POLICY,
