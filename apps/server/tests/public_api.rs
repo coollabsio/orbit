@@ -8,7 +8,7 @@ use orbit_platform::{
     HttpPlatformLayer, Id, OriginPolicy, PasswordService, TestDatabase, TimestampMillis,
 };
 use orbit_server::public_api::{PublicApiState, router};
-use orbit_server::repositories::api_tokens::{ApiTokenRepository, ApiTokenScope};
+use orbit_server::repositories::api_tokens::{ApiTokenError, ApiTokenRepository, ApiTokenScope};
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
 use orbit_server::repositories::pages::{CreatePage, PageRepository, SpaceRequest};
 use orbit_server::repositories::tasks::{CreateTask, TaskRepository};
@@ -1318,5 +1318,118 @@ async fn task_lists_sort_and_find_unassigned_tasks() {
             .call(Some(&token), "GET", &format!("/tasks?{bad}"), None)
             .await;
         assert_eq!(code, StatusCode::BAD_REQUEST, "{bad}");
+    }
+}
+
+async fn add_member(f: &Fixture, email: &str, role: &str) -> Id {
+    let user = Id::new_v7();
+    let mut tx = f.database.immediate_transaction().await.unwrap();
+    sqlx::query("INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) VALUES ($1, $2, $2, $3, 'x', 1, 1)")
+        .bind(user.to_string()).bind(email).bind(email).execute(&mut *tx).await.unwrap();
+    sqlx::query("INSERT INTO memberships (id, workspace_id, user_id, role, created_at, updated_at) VALUES ($1, $2, $3, $4, 1, 1)")
+        .bind(Id::new_v7().to_string()).bind(f.workspace.to_string()).bind(user.to_string()).bind(role)
+        .execute(&mut *tx).await.unwrap();
+    tx.commit().await.unwrap();
+    user
+}
+
+async fn token_by(
+    f: &Fixture,
+    creator: Id,
+    service_account: bool,
+) -> Result<(String, Id), ApiTokenError> {
+    f.tokens
+        .create(
+            f.workspace,
+            creator,
+            format!("role-{}", Id::new_v7()),
+            vec![f.project],
+            &[ApiTokenScope::TasksWrite],
+            service_account,
+            None,
+            "test",
+            TimestampMillis::now(),
+        )
+        .await
+        .map(|issued| (issued.token, issued.api_token.id))
+}
+
+async fn remove(f: &Fixture, user: Id) {
+    sqlx::query("DELETE FROM memberships WHERE workspace_id = $1 AND user_id = $2")
+        .bind(f.workspace.to_string())
+        .bind(user.to_string())
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn only_owners_and_admins_manage_tokens_and_tokens_follow_their_creator() {
+    let f = Fixture::new().await;
+    let admin = add_member(&f, "admin@example.com", "admin").await;
+    let other_admin = add_member(&f, "admin2@example.com", "admin").await;
+    let member = add_member(&f, "member@example.com", "member").await;
+    let status = f.first_status(f.project).await;
+    let body = json!({"project_id": f.project, "status_id": status, "title": "role check"});
+
+    for user in [f.user, admin] {
+        assert!(token_by(&f, user, false).await.is_ok());
+        assert!(f.tokens.list(f.workspace, user).await.is_ok());
+    }
+    assert!(matches!(
+        token_by(&f, member, false).await,
+        Err(ApiTokenError::Forbidden)
+    ));
+    assert!(matches!(
+        token_by(&f, member, true).await,
+        Err(ApiTokenError::Forbidden)
+    ));
+    assert!(matches!(
+        f.tokens.list(f.workspace, member).await,
+        Err(ApiTokenError::Forbidden)
+    ));
+
+    let (admin_token, admin_token_id) = token_by(&f, admin, false).await.unwrap();
+    assert!(matches!(
+        f.tokens
+            .revoke(
+                f.workspace,
+                admin_token_id,
+                member,
+                "test",
+                TimestampMillis::now()
+            )
+            .await,
+        Err(ApiTokenError::Forbidden)
+    ));
+    let (code, _) = f
+        .call(Some(&admin_token), "POST", "/tasks", Some(body.clone()))
+        .await;
+    assert_eq!(code, StatusCode::CREATED);
+    f.tokens
+        .revoke(
+            f.workspace,
+            admin_token_id,
+            other_admin,
+            "test",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    let (code, _) = f.call(Some(&admin_token), "GET", "/me", None).await;
+    assert_eq!(code, StatusCode::UNAUTHORIZED);
+
+    let (personal, _) = token_by(&f, other_admin, false).await.unwrap();
+    remove(&f, other_admin).await;
+    for (method, path) in [("GET", "/me"), ("GET", "/tasks"), ("POST", "/tasks")] {
+        let (code, _) = f
+            .call(
+                Some(&personal),
+                method,
+                path,
+                (method == "POST").then(|| body.clone()),
+            )
+            .await;
+        assert_eq!(code, StatusCode::UNAUTHORIZED, "{method} {path}");
     }
 }
