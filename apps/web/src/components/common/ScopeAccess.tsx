@@ -73,6 +73,6 @@ export function ProjectPicker({ id, projects, selected, onChange, all, onAllChan
       </Label>)}
     </div> : null}
     {empty ? <p className="text-sm text-muted-foreground">{empty}</p> : null}
-  </div>
     </>}
+  </div>
 }
