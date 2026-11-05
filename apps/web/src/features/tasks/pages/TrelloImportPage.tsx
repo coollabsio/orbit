@@ -102,13 +102,24 @@ function ConnectStep({ workspaceId }: { workspaceId: string }) {
           <form className="flex flex-col gap-4" onSubmit={(event) => void submit(event)} autoComplete="off">
             <div className="grid gap-1.5">
               <Label htmlFor="trello-key">API key</Label>
-              <p className="text-sm text-muted-foreground">
-                Open the{' '}
-                <a className="text-primary underline underline-offset-2" href={POWER_UP_ADMIN_URL} target="_blank" rel="noreferrer noopener">
-                  Trello Power-Up admin page
-                </a>
-                , create or open a Power-Up, and copy the key from its API key tab.
-              </p>
+              <ol className="list-decimal space-y-0.5 pl-5 text-sm text-muted-foreground">
+                <li>
+                  Open the{' '}
+                  <a className="text-primary underline underline-offset-2" href={POWER_UP_ADMIN_URL} target="_blank" rel="noreferrer noopener">
+                    Trello Power-Up admin page
+                  </a>{' '}
+                  and click <span className="font-medium text-foreground">New</span>.
+                </li>
+                <li>
+                  Choose <span className="font-medium text-foreground">My app doesn’t use Power-up capabilities</span>, type a name (for
+                  example “Orbit import”), pick your Trello workspace, fill in your email, and click{' '}
+                  <span className="font-medium text-foreground">Create</span>.
+                </li>
+                <li>
+                  Under <span className="font-medium text-foreground">Authorization</span>, open{' '}
+                  <span className="font-medium text-foreground">Trello Auth</span>, generate an API key if there is none, and copy the key.
+                </li>
+              </ol>
               <PasswordInput
                 id="trello-key"
                 name="trello-key"
