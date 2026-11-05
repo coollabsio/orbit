@@ -1522,6 +1522,67 @@ async fn other_workspaces_of_root_and_workspaces_of_other_users_are_on_a_trial()
     server.stop().await;
 }
 
+#[tokio::test]
+async fn the_admin_user_summary_counts_accounts_and_trials() {
+    let stripe = FakeStripe::default();
+    let server = Server::start_with_root_team(Some(&stripe.start().await)).await;
+    let other_user = server.add_user("other@example.com", false).await;
+    server.add_user("gone@example.com", false).await;
+    sqlx::query("UPDATE users SET deleted_at = $1 WHERE email = 'gone@example.com'")
+        .bind(TimestampMillis::now().as_millis())
+        .execute(server.database.pool())
+        .await
+        .unwrap();
+    let mut workspace_ids = Vec::new();
+    for name in ["Ongoing", "Expired", "Deleted"] {
+        let (status, workspace) = server
+            .call_as(
+                &other_user,
+                "POST",
+                "/api/v1/workspaces",
+                Some(json!({"name": name})),
+            )
+            .await;
+        assert_eq!(status, 201, "{workspace}");
+        workspace_ids.push(workspace["id"].as_str().unwrap().to_owned());
+    }
+    let now = TimestampMillis::now().as_millis();
+    for (query, id) in [
+        (
+            "UPDATE workspaces SET created_at = $1 WHERE id = $2",
+            &workspace_ids[1],
+        ),
+        (
+            "UPDATE workspaces SET deleted_at = $1 WHERE id = $2",
+            &workspace_ids[2],
+        ),
+    ] {
+        sqlx::query(query)
+            .bind(now - 30 * DAY_MILLIS)
+            .bind(id)
+            .execute(server.database.pool())
+            .await
+            .unwrap();
+    }
+
+    let (status, summary) = server
+        .call("GET", "/api/v1/admin/users/summary", None)
+        .await;
+    assert_eq!(status, 200, "{summary}");
+    assert_eq!(
+        summary,
+        json!({"users": 2, "trials": {"ongoing": 1, "expired": 1}})
+    );
+    let (status, problem) = server
+        .call_as(&other_user, "GET", "/api/v1/admin/users/summary", None)
+        .await;
+    assert_eq!(
+        (status, &problem["code"]),
+        (403, &json!("installation_admin_required"))
+    );
+    server.stop().await;
+}
+
 /// Status and problem code of a task created by an anonymous caller, by `stranger` and by `member`.
 async fn write_answers(server: &Server, stranger: &str, member: &str) -> [(u16, Value); 3] {
     let mut answers = Vec::new();
@@ -1560,6 +1621,10 @@ async fn self_hosted_servers_have_no_billing_and_no_guard() {
     assert_eq!(response.status().as_u16(), 404);
     let (_, options) = server.call("GET", "/api/v1/auth/options", None).await;
     assert_eq!(options["billing_enabled"], false);
+    let (_, summary) = server
+        .call("GET", "/api/v1/admin/users/summary", None)
+        .await;
+    assert_eq!(summary["trials"], Value::Null, "{summary}");
     server.stop().await;
 }
 

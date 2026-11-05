@@ -363,7 +363,7 @@ export function MembersPage() {
             actions={
               <>
                 <Tip label={emailEnabled ? 'Email the invitation link' : 'Email delivery is not configured'}>
-                  <Button type="button" variant="outline" disabled={!emailEnabled || createInvitation.isPending} onClick={() => void emailInvitation()}>
+                  <Button type="button" variant="outline" disabled={!emailEnabled || createInvitation.isPending} onClick={(event) => { if (event.currentTarget.form?.reportValidity()) void emailInvitation() }}>
                     <Bell className="size-3.5" />
                     Send email
                   </Button>
@@ -426,7 +426,7 @@ export function MembersPage() {
       {canManage && invitations.isPending ? <SettingsCard title="Pending invitations"><p role="status">Loading invitations…</p></SettingsCard> : null}
       {canManage && invitations.isError ? <SettingsCard title="Pending invitations"><p role="alert">Invitations could not be loaded. <Button variant="ghost" onClick={() => void invitations.refetch()}>Retry</Button></p></SettingsCard> : null}
       {canManage && pendingInvitations.length > 0 ? (
-        <SettingsCard title="Pending invitations" description="Invitation links that have not been accepted." flush>
+        <SettingsCard title="Pending invitations" flush>
           <MemberTable>
             {pendingInvitations.map((invitation) => <MemberRow key={invitation.id}>
               <span className="truncate">{invitation.email}</span><span className="text-xs text-muted-foreground">Expires {new Date(invitation.expires_at).toLocaleDateString()}</span><Badge variant="secondary">{invitation.role}</Badge>

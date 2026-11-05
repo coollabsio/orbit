@@ -27,7 +27,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
 
     let document: serde_json::Value = serde_json::from_str(&first).unwrap();
     assert_eq!(document["info"]["version"], CONTRACT_ID);
-    assert_eq!(document["paths"].as_object().unwrap().len(), 220);
+    assert_eq!(document["paths"].as_object().unwrap().len(), 221);
     let operation_count: usize = document["paths"]
         .as_object()
         .unwrap()
@@ -42,7 +42,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
                 .count()
         })
         .sum();
-    assert_eq!(operation_count, 284);
+    assert_eq!(operation_count, 285);
     for path in [
         "/api/v1/setup/status",
         "/api/v1/auth/me",
@@ -52,6 +52,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
         "/api/v1/auth/socket-ticket",
         "/api/v1/admin/backups",
         "/api/v1/admin/users",
+        "/api/v1/admin/users/summary",
         "/api/v1/admin/users/{user_id}/recovery-link",
         "/api/v1/workspaces",
         "/api/v1/workspaces/invitations/preview",

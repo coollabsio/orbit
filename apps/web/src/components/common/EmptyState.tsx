@@ -10,10 +10,10 @@ interface EmptyStateProps {
   size?: 'sm' | 'base'
 }
 
-/** App empty state: dashed card with an icon tile, title, description, optional actions. */
+/** App empty state: an icon tile, title, description, optional actions. */
 export function EmptyState({ icon: Icon, title, description, action, size = 'base' }: EmptyStateProps) {
   return (
-    <Empty className={cn('border', size === 'sm' ? 'min-h-44 p-4' : 'min-h-80')}>
+    <Empty className={cn(size === 'sm' ? 'min-h-44 p-4' : 'min-h-80')}>
       <EmptyHeader>
         <EmptyMedia variant="icon">
           <Icon className={size === 'sm' ? 'size-4.5' : 'size-5'} />
