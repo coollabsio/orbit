@@ -6,7 +6,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { LoadingScreen } from '@/components/common/LoadingScreen'
-import { AccessPicker, ProjectPicker, type ScopePreset, type ScopeResource } from '@/components/common/ScopeAccess'
+import { AccessPicker, ProjectPicker, type ScopeResource } from '@/components/common/ScopeAccess'
 import { AuthBrand, AuthCard } from '@/features/auth/components/AuthForm'
 import { currentUserQueryOptions } from '@/features/auth/api'
 import { createApiClient } from '@/api/client'
@@ -23,12 +23,6 @@ const RESOURCES: ScopeResource<Scope>[] = [
   { name: 'Tasks', hint: 'In the selected projects', write: 'tasks:write' },
   { name: 'Docs', hint: 'Including private docs', read: 'docs:read', write: 'docs:write' },
   { name: 'Chat', hint: 'Including private channels and direct messages', read: 'chat:read' },
-]
-
-const PRESETS: ScopePreset<Scope>[] = [
-  { id: 'tasks-read', label: 'Tasks read-only', scopes: [] },
-  { id: 'read-all', label: 'Read everything', scopes: ['docs:read', 'chat:read'] },
-  { id: 'all', label: 'Full access', scopes: ['tasks:write', 'docs:read', 'docs:write', 'chat:read'] },
 ]
 
 export function OAuthConsentPage() {
@@ -91,8 +85,7 @@ export function OAuthConsentPage() {
         <SelectTrigger><SelectValue placeholder="Select a workspace">{workspaces.find(([id]) => id === workspace)?.[1] ?? 'Select a workspace'}</SelectValue></SelectTrigger>
         <SelectContent>{workspaces.map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}</SelectContent>
       </Select></Label>
-      <ProjectPicker id="consent-projects" projects={workspaceProjects} selected={selected} onChange={setSelected} empty={workspaces.length ? undefined : 'No active projects are available to your account.'} />
-      <AccessPicker id="consent-access" resources={RESOURCES} presets={PRESETS} scopes={scopes} onChange={setScopes} />
+      <AccessPicker id="consent-access" resources={RESOURCES.map((resource) => resource.name === 'Tasks' ? { ...resource, details: <ProjectPicker id="consent-projects" projects={workspaceProjects} selected={selected} onChange={setSelected} empty={workspaces.length ? undefined : 'No active projects are available to your account.'} /> } : resource)} scopes={scopes} onChange={setScopes} />
       <div className="grid gap-2">
         <Label className="flex items-center gap-2">
           <Checkbox checked={remote} disabled={approve.isPending} onCheckedChange={(checked) => setRemote(Boolean(checked))} />
