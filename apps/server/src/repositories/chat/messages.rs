@@ -5,9 +5,10 @@ use orbit_platform::{Id, TimestampMillis};
 use sqlx::AnyConnection;
 use sqlx::any::AnyRow;
 
+use super::blocks::{self, MessageBlock, fallback_text};
 use super::files::{MAX_MESSAGE_FILES, attach_files, copy_files};
 use super::stickers::load_sticker;
-use super::webhooks::{HookTarget, clean_bot_name, clean_icon_url};
+use super::webhooks::{BotSender, HookTarget, clean_bot_name, clean_icon_url};
 use super::{
     Access, BotRecord, ChatError, ChatEvent, ChatRepository, ConversationKind, Events,
     FollowedThreadRecord, ForwardedRecord, MESSAGE_MAX_CHARS, MESSAGE_SELECT, MentionsRecord,
@@ -31,9 +32,14 @@ const REPLY_AUTHORS: usize = 5;
 /// What an integration posts: Markdown text, and a name and icon for this message only.
 #[derive(Clone, Debug)]
 pub struct BotPost {
+    /// May be empty when `blocks` is set: the body is then the blocks' plain text.
     pub text: String,
+    /// Checked by [`super::parse_blocks`].
+    pub blocks: Option<Vec<MessageBlock>>,
     pub username: Option<String>,
     pub icon_url: Option<String>,
+    /// An emoji name (checked by [`super::emoji_name`]); it takes the place of any icon URL.
+    pub icon_emoji: Option<String>,
 }
 
 /// At most one of `before`, `after` and `around`. Without one: the newest page.
@@ -329,6 +335,7 @@ impl ChatRepository {
                 sticker_id: sticker.as_ref().map(|sticker| sticker.id),
                 sticker,
                 bot: None,
+                blocks: None,
                 now,
             },
         )
@@ -405,18 +412,7 @@ impl ChatRepository {
         target: HookTarget,
         post: BotPost,
     ) -> Result<Written<MessageRecord>, ChatError> {
-        if post.text.trim().is_empty() {
-            return Err(ChatError::Invalid { field: "text" });
-        }
-        let body = clean_body(&post.text, false)?;
-        let name = match post.username.as_deref() {
-            Some(username) => clean_bot_name(username, "username")?,
-            None => target.sender.name,
-        };
-        let icon_url = match post.icon_url.as_deref() {
-            Some(url) => Some(clean_icon_url(url, "icon_url")?),
-            None => target.sender.icon_url,
-        };
+        let (body, bot, blocks) = bot_message_parts(post, &target.sender)?;
         let now = TimestampMillis::now();
         let mut tx = self.database.immediate_transaction().await?;
         let conversation = load_conversation(&mut tx, target.workspace_id, target.conversation_id)
@@ -454,11 +450,8 @@ impl ChatRepository {
                 forwarded: None,
                 sticker_id: None,
                 sticker: None,
-                bot: Some(BotRecord {
-                    webhook_id: target.sender.webhook_id,
-                    name,
-                    icon_url,
-                }),
+                bot: Some(bot),
+                blocks,
                 now,
             },
         )
@@ -577,6 +570,8 @@ impl ChatRepository {
                 sticker_id: source.sticker_id,
                 sticker: source.sticker.clone(),
                 bot: None,
+                // The copy shows the same card.
+                blocks: source.blocks.clone(),
                 now,
             },
         )
@@ -640,80 +635,8 @@ impl ChatRepository {
         }
         access.require_member()?;
         access.require_open()?;
-        let conversation_id = message.conversation_id;
 
-        // Members who gain or lose a mention get their unread mention counters corrected.
-        let before = mention_row_users(&mut tx, message.id).await?;
-        let after = members_among(
-            &mut tx,
-            conversation_id,
-            &mentioned_user_ids(&body),
-            message.author_id,
-        )
-        .await?;
-        let removed: Vec<Id> = before
-            .iter()
-            .copied()
-            .filter(|id| !after.contains(id))
-            .collect();
-        let added: Vec<Id> = after
-            .iter()
-            .copied()
-            .filter(|id| !before.contains(id))
-            .collect();
-        adjust_mentions(&mut tx, &message, &removed, -1).await?;
-        let removed_any = !removed.is_empty();
-        sqlx::query(sqlx::AssertSqlSafe(format!(
-            "DELETE FROM chat_message_mentions WHERE message_id = $1 AND user_id {}",
-            in_ids(&*tx, 2)
-        )))
-        .bind(message.id.to_string())
-        .bind(id_list(removed))
-        .execute(&mut *tx)
-        .await?;
-        insert_mention_rows(&mut tx, &message, &added).await?;
-        adjust_mentions(&mut tx, &message, &added, 1).await?;
-
-        let is_root = message.thread_root_id.is_none();
-        let channel = is_root && body.contains("<!channel>");
-        let here = is_root && body.contains("<!here>");
-        let was_broadcast = message.mentions.channel || message.mentions.here;
-        if was_broadcast != (channel || here) {
-            adjust_broadcast(&mut tx, &message, if was_broadcast { -1 } else { 1 }).await?;
-        }
-        let mut events = Events::default();
-        if removed_any || !added.is_empty() || was_broadcast != (channel || here) {
-            events.counted = message.in_main().then_some(conversation_id);
-            events.replied = message.thread_root_id;
-        }
-        sqlx::query(
-            "UPDATE chat_messages SET body = $1, mention_channel = $2, mention_here = $3, edited_at = $4 \
-             WHERE id = $5",
-        )
-        .bind(&body)
-        .bind(i64::from(channel))
-        .bind(i64::from(here))
-        .bind(now.as_millis())
-        .bind(message.id.to_string())
-        .execute(&mut *tx)
-        .await?;
-
-        let next = load_message(&mut tx, message.id)
-            .await?
-            .ok_or(ChatError::NotFound)?;
-        events.conversation(
-            conversation_id,
-            ChatEvent::MessageUpdated {
-                message: next.clone(),
-            },
-        );
-        // The root shows a preview of its newest reply.
-        if let Some(root_id) = message.thread_root_id
-            && let Some(root) = load_message(&mut tx, root_id).await?
-            && root.last_reply_id == Some(message.id)
-        {
-            events.conversation(conversation_id, ChatEvent::MessageUpdated { message: root });
-        }
+        let (events, next) = rewrite_message(&mut tx, &message, &body, None, Some(now)).await?;
         finish(tx, events, next).await
     }
 
@@ -740,67 +663,7 @@ impl ChatRepository {
                 "Only the author and workspace owners and admins can delete a message.",
             ));
         }
-        let conversation_id = message.conversation_id;
-        let mut events = Events::default();
-        let mentioned = mention_row_users(&mut tx, message.id).await?;
-        adjust_mentions(&mut tx, &message, &mentioned, -1).await?;
-        if message.in_main() {
-            events.counted = Some(conversation_id);
-            uncount_main(&mut tx, &message).await?;
-        }
-        events.replied = message.thread_root_id;
-
-        if message.thread_root_id.is_none() && message.reply_count > 0 {
-            sqlx::query("DELETE FROM notifications WHERE chat_message_id = $1")
-                .bind(message.id.to_string())
-                .execute(&mut *tx)
-                .await?;
-            for table in [
-                "chat_message_mentions",
-                "chat_reactions",
-                "chat_message_files",
-            ] {
-                sqlx::query(sqlx::AssertSqlSafe(format!(
-                    "DELETE FROM {table} WHERE message_id = $1"
-                )))
-                .bind(message.id.to_string())
-                .execute(&mut *tx)
-                .await?;
-            }
-            sqlx::query(
-                "UPDATE chat_messages SET body = '', deleted_at = $1, pinned_at = NULL, pinned_by = NULL, \
-                 mention_channel = 0, mention_here = 0, sticker_id = NULL WHERE id = $2",
-            )
-            .bind(now.as_millis())
-            .bind(message.id.to_string())
-            .execute(&mut *tx)
-            .await?;
-            let next = load_message(&mut tx, message.id)
-                .await?
-                .ok_or(ChatError::NotFound)?;
-            events.conversation(conversation_id, ChatEvent::MessageUpdated { message: next });
-        } else {
-            if message.thread_root_id.is_some() {
-                sqlx::query(
-                    "UPDATE chat_thread_members SET read_reply_count = \
-                     CASE WHEN read_reply_count > 0 THEN read_reply_count - 1 ELSE 0 END \
-                     WHERE root_id = $1 AND (user_id = $2 OR last_read_reply_id >= $3)",
-                )
-                .bind(message.thread_root_id.map(|id| id.to_string()))
-                .bind(message.author_id.to_string())
-                .bind(message.id.to_string())
-                .execute(&mut *tx)
-                .await?;
-            }
-            delete_row(&mut tx, &message, &mut events).await?;
-            if let Some(root_id) = message.thread_root_id {
-                after_reply_removed(&mut tx, root_id, actor_id, &mut events).await?;
-            }
-        }
-        if let Some(state) = current_state(&mut tx, workspace_id, conversation_id, actor_id).await?
-        {
-            events.user(actor_id, ChatEvent::StateChanged { state });
-        }
+        let events = remove_message(&mut tx, workspace_id, actor_id, &message, now).await?;
         finish(tx, events, ()).await
     }
 
@@ -1070,6 +933,198 @@ async fn sent_before(
     }
 }
 
+/// Writes a new body (and, on an integration's message, new blocks) over a message, and corrects
+/// the mention and broadcast counters of the members it gains or loses. `edited_at` marks a
+/// member's edit; an integration's rewrite is not marked. Returns the events and the new record.
+pub(super) async fn rewrite_message(
+    conn: &mut AnyConnection,
+    message: &MessageRecord,
+    body: &str,
+    blocks: Option<&[MessageBlock]>,
+    edited_at: Option<TimestampMillis>,
+) -> Result<(Events, MessageRecord), ChatError> {
+    let conversation_id = message.conversation_id;
+    // Members who gain or lose a mention get their unread mention counters corrected.
+    let before = mention_row_users(&mut *conn, message.id).await?;
+    let after = members_among(
+        &mut *conn,
+        conversation_id,
+        &mentioned_user_ids(body),
+        message.sender_id(),
+    )
+    .await?;
+    let removed: Vec<Id> = before
+        .iter()
+        .copied()
+        .filter(|id| !after.contains(id))
+        .collect();
+    let added: Vec<Id> = after
+        .iter()
+        .copied()
+        .filter(|id| !before.contains(id))
+        .collect();
+    adjust_mentions(&mut *conn, message, &removed, -1).await?;
+    let removed_any = !removed.is_empty();
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "DELETE FROM chat_message_mentions WHERE message_id = $1 AND user_id {}",
+        in_ids(&*conn, 2)
+    )))
+    .bind(message.id.to_string())
+    .bind(id_list(removed))
+    .execute(&mut *conn)
+    .await?;
+    insert_mention_rows(&mut *conn, message, &added).await?;
+    adjust_mentions(&mut *conn, message, &added, 1).await?;
+
+    let is_root = message.thread_root_id.is_none();
+    let channel = is_root && body.contains("<!channel>");
+    let here = is_root && body.contains("<!here>");
+    let was_broadcast = message.mentions.channel || message.mentions.here;
+    if was_broadcast != (channel || here) {
+        adjust_broadcast(&mut *conn, message, if was_broadcast { -1 } else { 1 }).await?;
+    }
+    let mut events = Events::default();
+    if removed_any || !added.is_empty() || was_broadcast != (channel || here) {
+        events.counted = message.in_main().then_some(conversation_id);
+        events.replied = message.thread_root_id;
+    }
+    sqlx::query(
+        "UPDATE chat_messages SET body = $1, mention_channel = $2, mention_here = $3, \
+             edited_at = COALESCE($4, edited_at), blocks = $5 WHERE id = $6",
+    )
+    .bind(body)
+    .bind(i64::from(channel))
+    .bind(i64::from(here))
+    .bind(edited_at.map(TimestampMillis::as_millis))
+    .bind(blocks.map(blocks::to_json))
+    .bind(message.id.to_string())
+    .execute(&mut *conn)
+    .await?;
+
+    let next = load_message(&mut *conn, message.id)
+        .await?
+        .ok_or(ChatError::NotFound)?;
+    events.conversation(
+        conversation_id,
+        ChatEvent::MessageUpdated {
+            message: next.clone(),
+        },
+    );
+    // The root shows a preview of its newest reply.
+    if let Some(root_id) = message.thread_root_id
+        && let Some(root) = load_message(&mut *conn, root_id).await?
+        && root.last_reply_id == Some(message.id)
+    {
+        events.conversation(conversation_id, ChatEvent::MessageUpdated { message: root });
+    }
+    Ok((events, next))
+}
+
+/// Deletes a message the caller may delete, with its counters: a root that has replies stays
+/// empty in the list, every other message is removed. `actor_id` gets its new read state.
+pub(super) async fn remove_message(
+    conn: &mut AnyConnection,
+    workspace_id: Id,
+    actor_id: Id,
+    message: &MessageRecord,
+    now: TimestampMillis,
+) -> Result<Events, ChatError> {
+    let conversation_id = message.conversation_id;
+    let mut events = Events::default();
+    let mentioned = mention_row_users(&mut *conn, message.id).await?;
+    adjust_mentions(&mut *conn, message, &mentioned, -1).await?;
+    if message.in_main() {
+        events.counted = Some(conversation_id);
+        uncount_main(&mut *conn, message).await?;
+    }
+    events.replied = message.thread_root_id;
+
+    if message.thread_root_id.is_none() && message.reply_count > 0 {
+        sqlx::query("DELETE FROM notifications WHERE chat_message_id = $1")
+            .bind(message.id.to_string())
+            .execute(&mut *conn)
+            .await?;
+        for table in [
+            "chat_message_mentions",
+            "chat_reactions",
+            "chat_message_files",
+        ] {
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "DELETE FROM {table} WHERE message_id = $1"
+            )))
+            .bind(message.id.to_string())
+            .execute(&mut *conn)
+            .await?;
+        }
+        sqlx::query(
+                "UPDATE chat_messages SET body = '', deleted_at = $1, pinned_at = NULL, pinned_by = NULL, \
+                 mention_channel = 0, mention_here = 0, sticker_id = NULL WHERE id = $2",
+            )
+            .bind(now.as_millis())
+            .bind(message.id.to_string())
+            .execute(&mut *conn)
+            .await?;
+        let next = load_message(&mut *conn, message.id)
+            .await?
+            .ok_or(ChatError::NotFound)?;
+        events.conversation(conversation_id, ChatEvent::MessageUpdated { message: next });
+    } else {
+        if message.thread_root_id.is_some() {
+            sqlx::query(
+                "UPDATE chat_thread_members SET read_reply_count = \
+                     CASE WHEN read_reply_count > 0 THEN read_reply_count - 1 ELSE 0 END \
+                     WHERE root_id = $1 AND (user_id = $2 OR last_read_reply_id >= $3)",
+            )
+            .bind(message.thread_root_id.map(|id| id.to_string()))
+            .bind(message.author_id.to_string())
+            .bind(message.id.to_string())
+            .execute(&mut *conn)
+            .await?;
+        }
+        delete_row(&mut *conn, message, &mut events).await?;
+        if let Some(root_id) = message.thread_root_id {
+            after_reply_removed(&mut *conn, root_id, actor_id, &mut events).await?;
+        }
+    }
+    if let Some(state) = current_state(&mut *conn, workspace_id, conversation_id, actor_id).await? {
+        events.user(actor_id, ChatEvent::StateChanged { state });
+    }
+    Ok(events)
+}
+
+/// The body, author and blocks of an integration's message: `text`, or without it the blocks'
+/// plain text; the webhook's name and icon unless the post sets its own (an emoji wins over an
+/// icon URL, as in Slack).
+pub(super) fn bot_message_parts(
+    post: BotPost,
+    sender: &BotSender,
+) -> Result<(String, BotRecord, Option<Vec<MessageBlock>>), ChatError> {
+    let text = match &post.blocks {
+        Some(blocks) if post.text.trim().is_empty() => fallback_text(blocks, MESSAGE_MAX_CHARS),
+        _ => post.text,
+    };
+    if text.trim().is_empty() {
+        return Err(ChatError::Invalid { field: "text" });
+    }
+    let body = clean_body(&text, false)?;
+    let name = match post.username.as_deref() {
+        Some(username) => clean_bot_name(username, "username")?,
+        None => sender.name.clone(),
+    };
+    let (icon_url, icon_emoji) = match (post.icon_emoji, post.icon_url.as_deref()) {
+        (Some(emoji), _) => (None, Some(emoji)),
+        (None, Some(url)) => (Some(clean_icon_url(url, "icon_url")?), None),
+        (None, None) => (sender.icon_url.clone(), None),
+    };
+    let bot = BotRecord {
+        webhook_id: sender.webhook_id,
+        name,
+        icon_url,
+        icon_emoji,
+    };
+    Ok((body, bot, post.blocks))
+}
+
 struct NewMessage<'a> {
     conversation_id: Id,
     thread_root_id: Option<Id>,
@@ -1088,6 +1143,7 @@ struct NewMessage<'a> {
     sticker: Option<StickerRecord>,
     /// Set when an integration posts the message.
     bot: Option<BotRecord>,
+    blocks: Option<Vec<MessageBlock>>,
     now: TimestampMillis,
 }
 
@@ -1102,9 +1158,9 @@ async fn insert_message(
         "INSERT INTO chat_messages (id, conversation_id, thread_root_id, kind, author_id, body, \
          mention_channel, mention_here, also_in_channel, nonce, reply_to_id, forward_of_id, \
          forward_conversation_id, forward_author_id, forward_created_at, forward_bot_name, \
-         sticker_id, webhook_id, bot_name, bot_icon_url, created_at) \
+         sticker_id, webhook_id, bot_name, bot_icon_url, bot_icon_emoji, blocks, created_at) \
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, \
-         $19, $20, $21)",
+         $19, $20, $21, $22, $23)",
     )
     .bind(id.to_string())
     .bind(new.conversation_id.to_string())
@@ -1146,6 +1202,8 @@ async fn insert_message(
     .bind(new.bot.as_ref().map(|bot| bot.webhook_id.to_string()))
     .bind(new.bot.as_ref().map(|bot| bot.name.clone()))
     .bind(new.bot.as_ref().and_then(|bot| bot.icon_url.clone()))
+    .bind(new.bot.as_ref().and_then(|bot| bot.icon_emoji.clone()))
+    .bind(new.blocks.as_deref().map(blocks::to_json))
     .bind(new.now.as_millis())
     .execute(&mut *conn)
     .await?;
@@ -1183,6 +1241,7 @@ async fn insert_message(
         sticker_id: new.sticker_id,
         sticker: new.sticker,
         bot: new.bot,
+        blocks: new.blocks,
         last_reply_id: None,
     })
 }
@@ -1213,6 +1272,7 @@ pub(super) async fn add_system_row(
             sticker_id: None,
             sticker: None,
             bot: None,
+            blocks: None,
             now,
         },
     )

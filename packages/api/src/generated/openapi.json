@@ -11308,7 +11308,7 @@
         "tags": [
           "crate::chat_routes::hooks"
         ],
-        "summary": "Posts a message into the webhook's channel as the webhook. No session: the secret in the\npath is the credential. An unknown id, a wrong secret and a deleted webhook all answer 404.",
+        "summary": "Posts a message into the webhook's channel as the webhook, and answers `ok` as Slack does. No\nsession: the secret in the path is the credential. An unknown id, a wrong secret and a\ndeleted webhook all answer 404. The body is JSON, or a form with the JSON in `payload`.",
         "operationId": "post_incoming_webhook",
         "parameters": [
           {
@@ -11349,11 +11349,11 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "`ok`",
             "content": {
-              "application/json": {
+              "text/plain": {
                 "schema": {
-                  "$ref": "#/components/schemas/IncomingWebhookResult"
+                  "type": "string"
                 }
               }
             }
@@ -11429,7 +11429,7 @@
             }
           },
           "422": {
-            "description": "validation_failed, chat_message_too_long",
+            "description": "validation_failed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -39541,6 +39541,32 @@
           }
         }
       },
+      "ActionElement": {
+        "oneOf": [
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ButtonElement"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "button"
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        ],
+        "description": "An interactive element. Only buttons; Slack's menus, date pickers and the like are left out."
+      },
       "AdminEmailBody": {
         "type": "object",
         "required": [
@@ -39718,6 +39744,110 @@
           "chat:read"
         ]
       },
+      "AttachmentBlock": {
+        "type": "object",
+        "description": "A legacy attachment, cleaned: texts are Orbit Markdown, links http(s) and images https.",
+        "properties": {
+          "author_icon": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "author_link": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "author_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "color": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`#rrggbb`."
+          },
+          "fallback": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Plain text for notifications; not shown in the box."
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AttachmentField"
+            }
+          },
+          "footer": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Markdown."
+          },
+          "footer_icon": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "image_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "pretext": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Markdown above the box."
+          },
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Markdown."
+          },
+          "thumb_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Plain text."
+          },
+          "title_link": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ts": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Unix seconds, shown after the footer."
+          }
+        }
+      },
       "AttachmentComment": {
         "type": "object",
         "required": [
@@ -39739,6 +39869,29 @@
       "AttachmentDownload": {
         "type": "string",
         "format": "binary"
+      },
+      "AttachmentField": {
+        "type": "object",
+        "properties": {
+          "short": {
+            "type": "boolean",
+            "description": "Half width: two short fields share a row."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Plain text."
+          },
+          "value": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Markdown."
+          }
+        }
       },
       "AttachmentPage": {
         "type": "object",
@@ -40441,15 +40594,38 @@
           }
         }
       },
+      "BlockText": {
+        "type": "object",
+        "required": [
+          "type",
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/TextKind"
+          }
+        }
+      },
       "BotRecord": {
         "type": "object",
         "description": "The integration that posted a message. `author_id` of such a message is the member who set the\nintegration up; show this name and icon instead.",
         "required": [
           "webhook_id",
           "name",
-          "icon_url"
+          "icon_url",
+          "icon_emoji"
         ],
         "properties": {
+          "icon_emoji": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "An emoji name (`ghost`, without colons) shown as the avatar instead of `icon_url`."
+          },
           "icon_url": {
             "type": [
               "string",
@@ -40464,6 +40640,14 @@
             "type": "string"
           }
         }
+      },
+      "BroadcastRange": {
+        "type": "string",
+        "enum": [
+          "here",
+          "channel",
+          "everyone"
+        ]
       },
       "BulkBody": {
         "type": "object",
@@ -40586,6 +40770,55 @@
           }
         },
         "additionalProperties": false
+      },
+      "ButtonElement": {
+        "type": "object",
+        "description": "A Block Kit button. With `url` it opens the link. Without one it sends `action_id` and `value`\nto the integration, which needs interactivity (not there yet), so Orbit shows it disabled.",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "action_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "style": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ButtonStyle"
+              }
+            ]
+          },
+          "text": {
+            "$ref": "#/components/schemas/BlockText",
+            "description": "`plain_text`, at most 75 characters."
+          },
+          "url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "An http(s) link the button opens."
+          },
+          "value": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ButtonStyle": {
+        "type": "string",
+        "enum": [
+          "primary",
+          "danger"
+        ]
       },
       "CategoryRecord": {
         "type": "object",
@@ -41582,7 +41815,8 @@
               "forwarded",
               "sticker_id",
               "sticker",
-              "bot"
+              "bot",
+              "blocks"
             ],
             "properties": {
               "also_in_channel": {
@@ -41597,6 +41831,16 @@
               },
               "author_id": {
                 "type": "string"
+              },
+              "blocks": {
+                "type": [
+                  "array",
+                  "null"
+                ],
+                "items": {
+                  "$ref": "#/components/schemas/MessageBlock"
+                },
+                "description": "Layout blocks that show as a card in place of `body`; `body` is then their plain text.\nOnly integrations post them."
               },
               "body": {
                 "type": "string",
@@ -42136,6 +42380,68 @@
             "$ref": "#/components/schemas/Provider"
           }
         }
+      },
+      "ContextElement": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "text",
+              "type"
+            ],
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "plain_text"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "text",
+              "type"
+            ],
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "mrkdwn"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "image_url",
+              "alt_text",
+              "type"
+            ],
+            "properties": {
+              "alt_text": {
+                "type": "string"
+              },
+              "image_url": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "image"
+                ]
+              }
+            }
+          }
+        ]
       },
       "ConversationKind": {
         "type": "string",
@@ -43107,43 +43413,60 @@
       },
       "IncomingWebhookPayload": {
         "type": "object",
-        "description": "What a tool posts. Fields that Orbit does not know (Slack's `channel`, `icon_emoji`,\n`attachments`, `blocks` for now) are ignored, so a Slack payload still posts its `text`.",
+        "description": "What a tool posts: the payload of a Slack incoming webhook. Fields that Orbit does not use\n(`channel`, `thread_ts`, `unfurl_links`) are ignored, so a Slack payload posts as it is.",
         "properties": {
+          "attachments": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {},
+            "description": "Slack's legacy attachments: boxes with a colored bar, title, text and fields."
+          },
+          "blocks": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/MessageBlock"
+            },
+            "description": "Block Kit blocks (`header`, `section`, `context`, `image`, `divider`, `markdown`,\n`rich_text`) shown in place of `text`. Other block types are left out."
+          },
+          "icon_emoji": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The avatar of this message only as an emoji (`:ghost:`); it wins over `icon_url`."
+          },
           "icon_url": {
             "type": [
               "string",
               "null"
             ],
-            "description": "The avatar of this message only: an https image."
+            "description": "The avatar of this message only: an https image. Other URLs are ignored."
+          },
+          "mrkdwn": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "`false` shows `text` as it is, without formatting (Slack's `mrkdwn`)."
           },
           "text": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Markdown, at most 4000 characters. Mentions are tokens: `<@user_id>`, `<#channel_id>`,\n`<!channel>`, `<!here>`."
+            "description": "Slack mrkdwn or Markdown; mentions are tokens: `<@user_id>`, `<#channel_id>`,\n`<!channel>`, `<!here>`. Longer than 4000 characters, it is cut. With `blocks` or\n`attachments` it is the plain text for notifications and search, and may be left out."
           },
           "username": {
             "type": [
               "string",
               "null"
             ],
-            "description": "The author name of this message only (1–80 characters)."
-          }
-        }
-      },
-      "IncomingWebhookResult": {
-        "type": "object",
-        "required": [
-          "ok",
-          "message_id"
-        ],
-        "properties": {
-          "message_id": {
-            "type": "string"
-          },
-          "ok": {
-            "type": "boolean"
+            "description": "The author name of this message only (cut to 80 characters)."
           }
         }
       },
@@ -43672,6 +43995,13 @@
           }
         },
         "additionalProperties": false
+      },
+      "ListStyle": {
+        "type": "string",
+        "enum": [
+          "bullet",
+          "ordered"
+        ]
       },
       "List_PageSummary": {
         "type": "object",
@@ -44361,6 +44691,239 @@
           }
         }
       },
+      "MessageBlock": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Large bold plain text.",
+            "required": [
+              "text",
+              "type"
+            ],
+            "properties": {
+              "text": {
+                "$ref": "#/components/schemas/BlockText"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "header"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Text, and up to 10 short fields in two columns. At least one of them.",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "accessory": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/ActionElement",
+                    "description": "A button on the right of the section."
+                  }
+                ]
+              },
+              "block_id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "Names the block in a click payload. Orbit makes one (`b0`, `b1`, …) when it is missing."
+              },
+              "fields": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BlockText"
+                }
+              },
+              "text": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/BlockText"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "section"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A row of up to 25 buttons.",
+            "required": [
+              "elements",
+              "type"
+            ],
+            "properties": {
+              "block_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "elements": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ActionElement"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "actions"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A line of small text and icons.",
+            "required": [
+              "elements",
+              "type"
+            ],
+            "properties": {
+              "elements": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ContextElement"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "context"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "An https image.",
+            "required": [
+              "image_url",
+              "alt_text",
+              "type"
+            ],
+            "properties": {
+              "alt_text": {
+                "type": "string"
+              },
+              "image_url": {
+                "type": "string"
+              },
+              "title": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/components/schemas/BlockText"
+                  }
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "image"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "divider"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Orbit Markdown (Slack's standard Markdown block).",
+            "required": [
+              "text",
+              "type"
+            ],
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "markdown"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Styled text: paragraphs, lists, quotes and code blocks.",
+            "required": [
+              "elements",
+              "type"
+            ],
+            "properties": {
+              "elements": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RichElement"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "rich_text"
+                ]
+              }
+            }
+          },
+          {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AttachmentBlock",
+                "description": "A Slack legacy attachment: a box with a colored bar. Made from a payload's `attachments`\nonly; a payload cannot post it in `blocks`."
+              },
+              {
+                "type": "object",
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "attachment"
+                    ]
+                  }
+                }
+              }
+            ],
+            "description": "A Slack legacy attachment: a box with a colored bar. Made from a payload's `attachments`\nonly; a payload cannot post it in `blocks`."
+          }
+        ]
+      },
       "MessageKind": {
         "type": "string",
         "description": "`pin`, `join` and `leave` are one-line system rows; `author_id` is the member they are about.",
@@ -44427,7 +44990,8 @@
           "forwarded",
           "sticker_id",
           "sticker",
-          "bot"
+          "bot",
+          "blocks"
         ],
         "properties": {
           "also_in_channel": {
@@ -44442,6 +45006,16 @@
           },
           "author_id": {
             "type": "string"
+          },
+          "blocks": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/MessageBlock"
+            },
+            "description": "Layout blocks that show as a card in place of `body`; `body` is then their plain text.\nOnly integrations post them."
           },
           "body": {
             "type": "string",
@@ -48624,6 +49198,260 @@
           }
         }
       },
+      "RichElement": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "elements",
+              "type"
+            ],
+            "properties": {
+              "elements": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RichInline"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "rich_text_section"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "style",
+              "elements",
+              "type"
+            ],
+            "properties": {
+              "elements": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RichListItem"
+                }
+              },
+              "indent": {
+                "type": "integer",
+                "format": "int32",
+                "description": "Nesting level, 0 to 8.",
+                "minimum": 0
+              },
+              "style": {
+                "$ref": "#/components/schemas/ListStyle"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "rich_text_list"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "elements",
+              "type"
+            ],
+            "properties": {
+              "elements": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RichInline"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "rich_text_quote"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "elements",
+              "type"
+            ],
+            "properties": {
+              "elements": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RichInline"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "rich_text_preformatted"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "A paragraph-level part of a `rich_text` block. The names are Slack's wire names."
+      },
+      "RichInline": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "text",
+              "type"
+            ],
+            "properties": {
+              "style": {
+                "$ref": "#/components/schemas/TextStyle"
+              },
+              "text": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "text"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "An http(s) or mailto link; without `text` it shows the URL.",
+            "required": [
+              "url",
+              "type"
+            ],
+            "properties": {
+              "style": {
+                "$ref": "#/components/schemas/TextStyle"
+              },
+              "text": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "link"
+                ]
+              },
+              "url": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "A standard or custom emoji by name, without colons.",
+            "required": [
+              "name",
+              "type"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "emoji"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "An Orbit user id.",
+            "required": [
+              "user_id",
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "user"
+                ]
+              },
+              "user_id": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "An Orbit channel id.",
+            "required": [
+              "channel_id",
+              "type"
+            ],
+            "properties": {
+              "channel_id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "channel"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "range",
+              "type"
+            ],
+            "properties": {
+              "range": {
+                "$ref": "#/components/schemas/BroadcastRange"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "broadcast"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "One run inside a rich text section, quote or code block."
+      },
+      "RichListItem": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "elements",
+              "type"
+            ],
+            "properties": {
+              "elements": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/RichInline"
+                }
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "rich_text_section"
+                ]
+              }
+            }
+          }
+        ],
+        "description": "An item of a rich text list: one section."
+      },
       "RoleBody": {
         "type": "string",
         "enum": [
@@ -50303,6 +51131,14 @@
           }
         }
       },
+      "TextKind": {
+        "type": "string",
+        "description": "`plain_text` shows as it is; `mrkdwn` is Markdown with mention tokens, as a message body.",
+        "enum": [
+          "plain_text",
+          "mrkdwn"
+        ]
+      },
       "TextRange": {
         "type": "object",
         "description": "A span of a string in UTF-16 code units (JavaScript string indices): `start` inclusive, `end`\nexclusive.",
@@ -50320,6 +51156,24 @@
             "type": "integer",
             "format": "int32",
             "minimum": 0
+          }
+        }
+      },
+      "TextStyle": {
+        "type": "object",
+        "description": "The style of a rich text run. Slack's other keys (`highlight`, `underline`, …) are dropped.",
+        "properties": {
+          "bold": {
+            "type": "boolean"
+          },
+          "code": {
+            "type": "boolean"
+          },
+          "italic": {
+            "type": "boolean"
+          },
+          "strike": {
+            "type": "boolean"
           }
         }
       },

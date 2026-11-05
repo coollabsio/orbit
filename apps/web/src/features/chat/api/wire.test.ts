@@ -14,6 +14,7 @@ const message: MessageRecord = {
   sticker_id: null,
   sticker: null,
   bot: null,
+  blocks: null,
   kind: 'message',
   author_id: 'u2',
   body: '<@u1> done',

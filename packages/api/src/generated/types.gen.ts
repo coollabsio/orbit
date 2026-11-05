@@ -18,6 +18,13 @@ export type AcceptanceRecord = {
     workspace_id: string;
 };
 
+/**
+ * An interactive element. Only buttons; Slack's menus, date pickers and the like are left out.
+ */
+export type ActionElement = ButtonElement & {
+    type: 'button';
+};
+
 export type AdminEmailBody = {
     /**
      * The new address.
@@ -93,12 +100,69 @@ export type ApiTokenRecord = {
  */
 export type ApiTokenScope = 'tasks:read' | 'tasks:write' | 'docs:read' | 'docs:write' | 'chat:read';
 
+/**
+ * A legacy attachment, cleaned: texts are Orbit Markdown, links http(s) and images https.
+ */
+export type AttachmentBlock = {
+    author_icon?: string | null;
+    author_link?: string | null;
+    author_name?: string | null;
+    /**
+     * `#rrggbb`.
+     */
+    color?: string | null;
+    /**
+     * Plain text for notifications; not shown in the box.
+     */
+    fallback?: string | null;
+    fields?: Array<AttachmentField>;
+    /**
+     * Markdown.
+     */
+    footer?: string | null;
+    footer_icon?: string | null;
+    image_url?: string | null;
+    /**
+     * Markdown above the box.
+     */
+    pretext?: string | null;
+    /**
+     * Markdown.
+     */
+    text?: string | null;
+    thumb_url?: string | null;
+    /**
+     * Plain text.
+     */
+    title?: string | null;
+    title_link?: string | null;
+    /**
+     * Unix seconds, shown after the footer.
+     */
+    ts?: number | null;
+};
+
 export type AttachmentComment = {
     attachments: Array<AttachmentRecord>;
     comment: CommentRecord;
 };
 
 export type AttachmentDownload = Blob | File;
+
+export type AttachmentField = {
+    /**
+     * Half width: two short fields share a row.
+     */
+    short?: boolean;
+    /**
+     * Plain text.
+     */
+    title?: string | null;
+    /**
+     * Markdown.
+     */
+    value?: string | null;
+};
 
 export type AttachmentPage = {
     items: Array<AttachmentRecord>;
@@ -390,11 +454,20 @@ export type BillingView = {
     trial_days: number;
 };
 
+export type BlockText = {
+    text: string;
+    type: TextKind;
+};
+
 /**
  * The integration that posted a message. `author_id` of such a message is the member who set the
  * integration up; show this name and icon instead.
  */
 export type BotRecord = {
+    /**
+     * An emoji name (`ghost`, without colons) shown as the avatar instead of `icon_url`.
+     */
+    icon_emoji: string | null;
     /**
      * An https image, or null for the default bot avatar.
      */
@@ -402,6 +475,8 @@ export type BotRecord = {
     name: string;
     webhook_id: string;
 };
+
+export type BroadcastRange = 'here' | 'channel' | 'everyone';
 
 export type BulkBody = {
     updates: Array<BulkItem>;
@@ -430,6 +505,26 @@ export type BulkItem = {
     status_id?: string | null;
     title?: string | null;
 };
+
+/**
+ * A Block Kit button. With `url` it opens the link. Without one it sends `action_id` and `value`
+ * to the integration, which needs interactivity (not there yet), so Orbit shows it disabled.
+ */
+export type ButtonElement = {
+    action_id?: string | null;
+    style?: null | ButtonStyle;
+    /**
+     * `plain_text`, at most 75 characters.
+     */
+    text: BlockText;
+    /**
+     * An http(s) link the button opens.
+     */
+    url?: string | null;
+    value?: string | null;
+};
+
+export type ButtonStyle = 'primary' | 'danger';
 
 export type CategoryRecord = {
     id: string;
@@ -809,6 +904,11 @@ export type ChatWriteMessageRecord = {
         attachments: Array<ChatFileRecord>;
         author_id: string;
         /**
+         * Layout blocks that show as a card in place of `body`; `body` is then their plain text.
+         * Only integrations post them.
+         */
+        blocks: Array<MessageBlock> | null;
+        /**
          * Markdown source. Mentions are tokens: `<@user_id>`, `<#conversation_id>`, `<!channel>`,
          * `<!here>`.
          */
@@ -1023,6 +1123,18 @@ export type ConnectedAccount = {
      */
     email?: string | null;
     provider: Provider;
+};
+
+export type ContextElement = {
+    text: string;
+    type: 'plain_text';
+} | {
+    text: string;
+    type: 'mrkdwn';
+} | {
+    alt_text: string;
+    image_url: string;
+    type: 'image';
 };
 
 export type ConversationKind = 'public' | 'private' | 'dm';
@@ -1406,28 +1518,41 @@ export type GroupBy = 'status' | 'assignee' | 'priority' | 'project' | 'label' |
 export type GroupOp = 'and' | 'or';
 
 /**
- * What a tool posts. Fields that Orbit does not know (Slack's `channel`, `icon_emoji`,
- * `attachments`, `blocks` for now) are ignored, so a Slack payload still posts its `text`.
+ * What a tool posts: the payload of a Slack incoming webhook. Fields that Orbit does not use
+ * (`channel`, `thread_ts`, `unfurl_links`) are ignored, so a Slack payload posts as it is.
  */
 export type IncomingWebhookPayload = {
     /**
-     * The avatar of this message only: an https image.
+     * Slack's legacy attachments: boxes with a colored bar, title, text and fields.
+     */
+    attachments?: Array<unknown> | null;
+    /**
+     * Block Kit blocks (`header`, `section`, `context`, `image`, `divider`, `markdown`,
+     * `rich_text`) shown in place of `text`. Other block types are left out.
+     */
+    blocks?: Array<MessageBlock> | null;
+    /**
+     * The avatar of this message only as an emoji (`:ghost:`); it wins over `icon_url`.
+     */
+    icon_emoji?: string | null;
+    /**
+     * The avatar of this message only: an https image. Other URLs are ignored.
      */
     icon_url?: string | null;
     /**
-     * Markdown, at most 4000 characters. Mentions are tokens: `<@user_id>`, `<#channel_id>`,
-     * `<!channel>`, `<!here>`.
+     * `false` shows `text` as it is, without formatting (Slack's `mrkdwn`).
+     */
+    mrkdwn?: boolean | null;
+    /**
+     * Slack mrkdwn or Markdown; mentions are tokens: `<@user_id>`, `<#channel_id>`,
+     * `<!channel>`, `<!here>`. Longer than 4000 characters, it is cut. With `blocks` or
+     * `attachments` it is the plain text for notifications and search, and may be left out.
      */
     text?: string | null;
     /**
-     * The author name of this message only (1–80 characters).
+     * The author name of this message only (cut to 80 characters).
      */
     username?: string | null;
-};
-
-export type IncomingWebhookResult = {
-    message_id: string;
-    ok: boolean;
 };
 
 export type InstanceAdminBody = {
@@ -1593,6 +1718,8 @@ export type LinkProviderBody = {
     password: string;
     password_token: string;
 };
+
+export type ListStyle = 'bullet' | 'ordered';
 
 export type ListPageSummary = {
     items: Array<{
@@ -1835,6 +1962,42 @@ export type MentionsRecord = {
     user_ids: Array<string>;
 };
 
+export type MessageBlock = {
+    text: BlockText;
+    type: 'header';
+} | {
+    accessory?: null | ActionElement;
+    /**
+     * Names the block in a click payload. Orbit makes one (`b0`, `b1`, …) when it is missing.
+     */
+    block_id?: string | null;
+    fields?: Array<BlockText>;
+    text?: null | BlockText;
+    type: 'section';
+} | {
+    block_id?: string | null;
+    elements: Array<ActionElement>;
+    type: 'actions';
+} | {
+    elements: Array<ContextElement>;
+    type: 'context';
+} | {
+    alt_text: string;
+    image_url: string;
+    title?: null | BlockText;
+    type: 'image';
+} | {
+    type: 'divider';
+} | {
+    text: string;
+    type: 'markdown';
+} | {
+    elements: Array<RichElement>;
+    type: 'rich_text';
+} | (AttachmentBlock & {
+    type: 'attachment';
+});
+
 /**
  * `pin`, `join` and `leave` are one-line system rows; `author_id` is the member they are about.
  */
@@ -1856,6 +2019,11 @@ export type MessageRecord = {
     also_in_channel: boolean;
     attachments: Array<ChatFileRecord>;
     author_id: string;
+    /**
+     * Layout blocks that show as a card in place of `body`; `body` is then their plain text.
+     * Only integrations post them.
+     */
+    blocks: Array<MessageBlock> | null;
     /**
      * Markdown source. Mentions are tokens: `<@user_id>`, `<#conversation_id>`, `<!channel>`,
      * `<!here>`.
@@ -3538,6 +3706,62 @@ export type RestoredItem = {
     title: string;
 };
 
+/**
+ * A paragraph-level part of a `rich_text` block. The names are Slack's wire names.
+ */
+export type RichElement = {
+    elements: Array<RichInline>;
+    type: 'rich_text_section';
+} | {
+    elements: Array<RichListItem>;
+    /**
+     * Nesting level, 0 to 8.
+     */
+    indent?: number;
+    style: ListStyle;
+    type: 'rich_text_list';
+} | {
+    elements: Array<RichInline>;
+    type: 'rich_text_quote';
+} | {
+    elements: Array<RichInline>;
+    type: 'rich_text_preformatted';
+};
+
+/**
+ * One run inside a rich text section, quote or code block.
+ */
+export type RichInline = {
+    style?: TextStyle;
+    text: string;
+    type: 'text';
+} | {
+    style?: TextStyle;
+    text?: string | null;
+    type: 'link';
+    url: string;
+} | {
+    name: string;
+    type: 'emoji';
+} | {
+    type: 'user';
+    user_id: string;
+} | {
+    channel_id: string;
+    type: 'channel';
+} | {
+    range: BroadcastRange;
+    type: 'broadcast';
+};
+
+/**
+ * An item of a rich text list: one section.
+ */
+export type RichListItem = {
+    elements: Array<RichInline>;
+    type: 'rich_text_section';
+};
+
 export type RoleBody = 'owner' | 'admin' | 'member';
 
 export type RoleChangeBody = {
@@ -4173,12 +4397,27 @@ export type TestPushResult = {
 };
 
 /**
+ * `plain_text` shows as it is; `mrkdwn` is Markdown with mention tokens, as a message body.
+ */
+export type TextKind = 'plain_text' | 'mrkdwn';
+
+/**
  * A span of a string in UTF-16 code units (JavaScript string indices): `start` inclusive, `end`
  * exclusive.
  */
 export type TextRange = {
     end: number;
     start: number;
+};
+
+/**
+ * The style of a rich text run. Slack's other keys (`highlight`, `underline`, …) are dropped.
+ */
+export type TextStyle = {
+    bold?: boolean;
+    code?: boolean;
+    italic?: boolean;
+    strike?: boolean;
 };
 
 export type ThreadPage = {
@@ -9827,7 +10066,7 @@ export type PostIncomingWebhookErrors = {
      */
     415: TaskProblem;
     /**
-     * validation_failed, chat_message_too_long
+     * validation_failed
      */
     422: TaskProblem;
     /**
@@ -9847,7 +10086,10 @@ export type PostIncomingWebhookErrors = {
 export type PostIncomingWebhookError = PostIncomingWebhookErrors[keyof PostIncomingWebhookErrors];
 
 export type PostIncomingWebhookResponses = {
-    200: IncomingWebhookResult;
+    /**
+     * `ok`
+     */
+    200: string;
 };
 
 export type PostIncomingWebhookResponse = PostIncomingWebhookResponses[keyof PostIncomingWebhookResponses];

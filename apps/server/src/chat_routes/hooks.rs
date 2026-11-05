@@ -5,9 +5,11 @@
 use axum::Json;
 use axum::body::to_bytes;
 use axum::extract::{Path, Request, State};
+use axum::http::HeaderName;
 use axum::http::header::CONTENT_TYPE;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use orbit_platform::Id;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -17,7 +19,9 @@ use crate::billing::guard::READ_ONLY_DETAIL;
 use crate::push::PushService;
 use crate::repositories::billing;
 use crate::repositories::chat::{
-    BotPost, ChatError, WebhookInput, WebhookRecord, WebhookWithSecret,
+    BotPost, ChatError, MESSAGE_MAX_CHARS, MessageBlock, WebhookInput, WebhookRecord,
+    WebhookWithSecret, attachment_blocks, check_message_blocks, cut, emoji_name,
+    mrkdwn_to_markdown, parse_blocks,
 };
 use crate::task_routes::{ApiError, ApiJson};
 
@@ -51,25 +55,34 @@ pub(crate) struct ChatWebhookWithUrl {
     url: String,
 }
 
-/// What a tool posts. Fields that Orbit does not know (Slack's `channel`, `icon_emoji`,
-/// `attachments`, `blocks` for now) are ignored, so a Slack payload still posts its `text`.
+/// What a tool posts: the payload of a Slack incoming webhook. Fields that Orbit does not use
+/// (`channel`, `thread_ts`, `unfurl_links`) are ignored, so a Slack payload posts as it is.
 #[derive(Deserialize, ToSchema)]
 pub(crate) struct IncomingWebhookPayload {
-    /// Markdown, at most 4000 characters. Mentions are tokens: `<@user_id>`, `<#channel_id>`,
-    /// `<!channel>`, `<!here>`.
+    /// Slack mrkdwn or Markdown; mentions are tokens: `<@user_id>`, `<#channel_id>`,
+    /// `<!channel>`, `<!here>`. Longer than 4000 characters, it is cut. With `blocks` or
+    /// `attachments` it is the plain text for notifications and search, and may be left out.
+    #[schema(required = false)]
     text: Option<String>,
-    /// The author name of this message only (1–80 characters).
+    /// `false` shows `text` as it is, without formatting (Slack's `mrkdwn`).
+    #[schema(required = false)]
+    mrkdwn: Option<bool>,
+    /// Block Kit blocks (`header`, `section`, `context`, `image`, `divider`, `markdown`,
+    /// `rich_text`) shown in place of `text`. Other block types are left out.
+    #[schema(value_type = Option<Vec<MessageBlock>>, required = false)]
+    blocks: Option<serde_json::Value>,
+    /// Slack's legacy attachments: boxes with a colored bar, title, text and fields.
+    #[schema(value_type = Option<Vec<serde_json::Value>>, required = false)]
+    attachments: Option<serde_json::Value>,
+    /// The author name of this message only (cut to 80 characters).
     #[schema(required = false)]
     username: Option<String>,
-    /// The avatar of this message only: an https image.
+    /// The avatar of this message only: an https image. Other URLs are ignored.
     #[schema(required = false)]
     icon_url: Option<String>,
-}
-
-#[derive(Serialize, ToSchema)]
-pub(crate) struct IncomingWebhookResult {
-    ok: bool,
-    message_id: String,
+    /// The avatar of this message only as an emoji (`:ghost:`); it wins over `icon_url`.
+    #[schema(required = false)]
+    icon_emoji: Option<String>,
 }
 
 fn with_url(state: &ChatState, created: WebhookWithSecret) -> ChatWebhookWithUrl {
@@ -205,15 +218,174 @@ pub(crate) async fn delete_chat_webhook(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// Posts a message into the webhook's channel as the webhook. No session: the secret in the
-/// path is the credential. An unknown id, a wrong secret and a deleted webhook all answer 404.
-#[utoipa::path(post, path = "/api/v1/hooks/chat/{webhook_id}/{secret}", params(("webhook_id" = String, Path), ("secret" = String, Path)), request_body = IncomingWebhookPayload, responses((status = 200, body = IncomingWebhookResult)))]
+/// Slack's answer to a hook: `200` and the text `ok`.
+type HookOk = (StatusCode, [(HeaderName, &'static str); 1], &'static str);
+
+fn hook_ok() -> HookOk {
+    (
+        StatusCode::OK,
+        [(CONTENT_TYPE, "text/plain; charset=utf-8")],
+        "ok",
+    )
+}
+
+type RequestIdRef<'a> = Option<&'a axum::Extension<orbit_platform::RequestId>>;
+
+/// The JSON of a hook body: a JSON body, or a form with the JSON in `payload` (as Slack takes).
+async fn read_json<T: DeserializeOwned>(
+    request: Request,
+    instance: &str,
+    request_id: RequestIdRef<'_>,
+) -> Result<T, ApiError> {
+    let media_type = request
+        .headers()
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .map(|value| value.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    let form = match media_type.as_str() {
+        "application/json" => false,
+        "application/x-www-form-urlencoded" => true,
+        _ => {
+            return Err(ApiError::new(
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "unsupported_media_type",
+                "Unsupported media type",
+                "Send the message as JSON (Content-Type: application/json), or as a form with the JSON in `payload`.",
+                instance,
+                request_id,
+            ));
+        }
+    };
+    let bytes = to_bytes(request.into_body(), MAX_HOOK_BODY_BYTES)
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "payload_too_large",
+                "Payload too large",
+                "A webhook message can be at most 64 KiB of JSON.",
+                instance,
+                request_id,
+            )
+        })?;
+    let json = if form {
+        url::form_urlencoded::parse(&bytes)
+            .find(|(name, _)| name == "payload")
+            .map(|(_, value)| value.into_owned().into_bytes())
+            .unwrap_or_default()
+    } else {
+        bytes.to_vec()
+    };
+    serde_json::from_slice(&json).map_err(|_| {
+        ApiError::new(
+            StatusCode::BAD_REQUEST,
+            "invalid_json",
+            "Invalid JSON",
+            "The body must be a JSON object with `text`, `blocks` or `attachments`.",
+            instance,
+            request_id,
+        )
+    })
+}
+
+/// A Slack payload as an integration's post: blocks and attachments checked, mrkdwn converted,
+/// what Orbit cannot show cut or left out.
+fn build_post(
+    payload: IncomingWebhookPayload,
+    instance: &str,
+    request_id: RequestIdRef<'_>,
+) -> Result<BotPost, ApiError> {
+    let invalid = |detail: String| {
+        ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "validation_failed",
+            "Validation failed",
+            "blocks",
+            instance,
+            request_id,
+        )
+        .with_detail(detail)
+    };
+    let mut blocks = match payload.blocks.as_ref().filter(|value| !value.is_null()) {
+        Some(value) => parse_blocks(value).map_err(|error| invalid(error.0))?,
+        None => Vec::new(),
+    };
+    let attachments = match payload
+        .attachments
+        .as_ref()
+        .filter(|value| !value.is_null())
+    {
+        Some(value) => attachment_blocks(value).map_err(|error| invalid(error.0))?,
+        None => Vec::new(),
+    };
+    let text = payload
+        .text
+        .filter(|text| !text.trim().is_empty())
+        .map(|text| mrkdwn_to_markdown(&text, payload.mrkdwn != Some(false)));
+    // Without blocks Slack shows `text` above the attachments; blocks take its place.
+    if blocks.is_empty()
+        && !attachments.is_empty()
+        && let Some(text) = &text
+    {
+        blocks.push(MessageBlock::Markdown {
+            text: cut(text, MESSAGE_MAX_CHARS),
+        });
+    }
+    blocks.extend(attachments);
+    check_message_blocks(&blocks).map_err(|error| invalid(error.0))?;
+    Ok(BotPost {
+        text: text
+            .map(|text| cut(&text, MESSAGE_MAX_CHARS))
+            .unwrap_or_default(),
+        blocks: (!blocks.is_empty()).then_some(blocks),
+        // Slack takes any name and icon; Orbit cuts the name and leaves out what it cannot show.
+        username: payload
+            .username
+            .map(|name| cut(name.trim(), 80))
+            .filter(|name| !name.is_empty()),
+        icon_url: payload.icon_url.filter(|url| {
+            url::Url::parse(url.trim()).is_ok_and(|parsed| parsed.scheme() == "https")
+                && url.len() <= 2048
+        }),
+        icon_emoji: payload.icon_emoji.as_deref().and_then(emoji_name),
+    })
+}
+
+/// Refuses writes to a read-only workspace (Orbit Cloud without a subscription).
+async fn require_writable(
+    state: &ChatState,
+    workspace_id: Id,
+    instance: &str,
+    request_id: RequestIdRef<'_>,
+) -> Result<(), ApiError> {
+    let access = billing::write_access(state.identity.database(), workspace_id)
+        .await
+        .map_err(|error| problem(ChatError::Unavailable(error), instance, request_id))?;
+    if access == WorkspaceAccess::ReadOnly {
+        return Err(ApiError::new(
+            StatusCode::PAYMENT_REQUIRED,
+            "workspace_read_only",
+            "Workspace is read-only",
+            READ_ONLY_DETAIL,
+            instance,
+            request_id,
+        ));
+    }
+    Ok(())
+}
+
+/// Posts a message into the webhook's channel as the webhook, and answers `ok` as Slack does. No
+/// session: the secret in the path is the credential. An unknown id, a wrong secret and a
+/// deleted webhook all answer 404. The body is JSON, or a form with the JSON in `payload`.
+#[utoipa::path(post, path = "/api/v1/hooks/chat/{webhook_id}/{secret}", params(("webhook_id" = String, Path), ("secret" = String, Path)), request_body = IncomingWebhookPayload, responses((status = 200, description = "`ok`", content_type = "text/plain", body = String)))]
 pub(crate) async fn post_incoming_webhook(
     State(state): State<ChatState>,
     Path((webhook, secret)): Path<(String, String)>,
     request_id: RequestIdExtension,
     request: Request,
-) -> Result<Json<IncomingWebhookResult>, ApiError> {
+) -> Result<HookOk, ApiError> {
     let instance = format!("/api/v1/hooks/chat/{webhook}");
     let request_id = request_id.as_ref();
     let fail = |error: ChatError| hook_problem(error, &instance, request_id);
@@ -224,83 +396,20 @@ pub(crate) async fn post_incoming_webhook(
         .await
         .map_err(&fail)?
         .ok_or_else(|| fail(ChatError::NotFound))?;
-
-    let json = request
-        .headers()
-        .get(CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| {
-            value
-                .split(';')
-                .next()
-                .is_some_and(|kind| kind.trim().eq_ignore_ascii_case("application/json"))
-        });
-    if !json {
-        return Err(ApiError::new(
-            StatusCode::UNSUPPORTED_MEDIA_TYPE,
-            "unsupported_media_type",
-            "Unsupported media type",
-            "Send the message as JSON with Content-Type: application/json.",
-            &instance,
-            request_id,
-        ));
-    }
-    let bytes = to_bytes(request.into_body(), MAX_HOOK_BODY_BYTES)
-        .await
-        .map_err(|_| {
-            ApiError::new(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                "payload_too_large",
-                "Payload too large",
-                "A webhook message can be at most 64 KiB of JSON.",
-                &instance,
-                request_id,
-            )
-        })?;
-    let payload: IncomingWebhookPayload = serde_json::from_slice(&bytes).map_err(|_| {
-        ApiError::new(
-            StatusCode::BAD_REQUEST,
-            "invalid_json",
-            "Invalid JSON",
-            "The body must be a JSON object with a `text` field.",
-            &instance,
-            request_id,
-        )
-    })?;
-
-    let read_only = billing::write_access(state.identity.database(), target.workspace_id)
-        .await
-        .map_err(|error| fail(ChatError::Unavailable(error)))?
-        == WorkspaceAccess::ReadOnly;
-    if read_only {
-        return Err(ApiError::new(
-            StatusCode::PAYMENT_REQUIRED,
-            "workspace_read_only",
-            "Workspace is read-only",
-            READ_ONLY_DETAIL,
-            &instance,
-            request_id,
-        ));
-    }
+    let payload: IncomingWebhookPayload = read_json(request, &instance, request_id).await?;
+    let post = build_post(payload, &instance, request_id)?;
+    require_writable(&state, target.workspace_id, &instance, request_id).await?;
 
     let workspace_id = target.workspace_id;
     // The webhook is no member, so `publish` refreshes the states of every connected member,
     // the webhook's creator too.
     let actor_id = target.sender.webhook_id;
-    let post = BotPost {
-        text: payload.text.unwrap_or_default(),
-        username: payload.username,
-        icon_url: payload.icon_url,
-    };
     let (written, _) = state
         .publish(workspace_id, actor_id, state.chat.post_as_bot(target, post))
         .await
         .map_err(&fail)?;
     PushService::of(state.identity.database()).chat_message(&written.value);
-    Ok(Json(IncomingWebhookResult {
-        ok: true,
-        message_id: written.value.id.to_string(),
-    }))
+    Ok(hook_ok())
 }
 
 fn hook_problem(

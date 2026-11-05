@@ -465,7 +465,11 @@ turns its routes, navigation and shortcuts off.
   tool (`message.bot`: name, icon, an "App" badge). The channel's creator and owners and admins manage them in
   Edit channel > Integrations; only a hash of the secret is stored, so the URL shows once. `author_id` of such a
   message is the member who made the webhook, but it is unread for them too, makes no Inbox item, and nobody
-  can edit it (`MessageRecord::sender_id`, `lib/bot.ts`). All bot posts go through `ChatRepository::post_as_bot`.
+  can edit it (`MessageRecord::sender_id`, `lib/bot.ts`). All bot posts go through `ChatRepository::post_as_bot`. A webhook may send Slack Block Kit `blocks` (header, section, context, image,
+  divider, markdown, rich_text; `repositories/chat/blocks.rs`, stored in `chat_messages.blocks`): they show in place
+  of the body (`MessageBlocks.tsx`; rich text becomes Markdown in `lib/blocks.ts`), and the body is their plain text. The hook is a drop-in for Slack's (`repositories/chat/slack.rs`): mrkdwn becomes
+  Markdown, legacy `attachments` become `attachment` blocks, form `payload=` works, unknown block types are left out,
+  long text is cut, `icon_emoji` is the avatar (`bot.icon_emoji`), and the answer is plain `ok`.
 - Custom emoji belong to the workspace (Workspace Settings > Emoji, owners and admins): `:name:` stays
   text in the body and in reactions and becomes the image when it is shown.
 - Stickers belong to the workspace too (Workspace Settings > Stickers, owners and admins; 512 KiB, 100 for

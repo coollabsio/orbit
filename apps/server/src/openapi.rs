@@ -720,7 +720,6 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "413", "payload_too_large");
             add_code(&mut responses, "415", "unsupported_media_type");
             add_code(&mut responses, "422", "validation_failed");
-            add_code(&mut responses, "422", "chat_message_too_long");
             add_code(&mut responses, "429", "rate_limit_exceeded");
         }
         "github_webhook" => {

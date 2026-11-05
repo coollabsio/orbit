@@ -11,11 +11,13 @@
 //! Each write returns the chat events it caused, with their audience, for the caller's response
 //! and for the live socket.
 
+mod blocks;
 mod conversations;
 mod emoji;
 mod files;
 mod messages;
 mod search;
+mod slack;
 mod state;
 mod stickers;
 mod webhooks;
@@ -33,11 +35,13 @@ use utoipa::ToSchema;
 use super::membership;
 pub use crate::live::Recipients;
 
+pub use blocks::{BlocksError, MessageBlock, check_message_blocks, parse_blocks};
 pub use conversations::{ChannelCreate, ChannelUpdate};
 pub use emoji::{CustomEmojiImage, CustomEmojiRecord, EMOJI_MAX_BYTES};
 pub use messages::BotPost;
 pub use messages::{ForwardInput, MessageCursor, SendInput};
 pub use search::{SearchHitRecord, SearchInput, SearchPage};
+pub use slack::{attachment_blocks, cut, emoji_name, mrkdwn_to_markdown};
 pub use state::{ConversationCursor, ReadSnapshot, StateUpdate, ThreadCursor};
 pub use stickers::{CustomStickerImage, CustomStickerRecord, STICKER_MAX_BYTES, StickerRecord};
 pub use webhooks::{BotSender, HookTarget, WebhookInput, WebhookRecord, WebhookWithSecret};
@@ -300,6 +304,9 @@ pub struct BotRecord {
     /// An https image, or null for the default bot avatar.
     #[schema(required = true)]
     pub icon_url: Option<String>,
+    /// An emoji name (`ghost`, without colons) shown as the avatar instead of `icon_url`.
+    #[schema(required = true)]
+    pub icon_emoji: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -363,6 +370,10 @@ pub struct MessageRecord {
     /// Set when an integration (an incoming webhook) posted the message. Nobody can edit it.
     #[schema(required = true)]
     pub bot: Option<BotRecord>,
+    /// Layout blocks that show as a card in place of `body`; `body` is then their plain text.
+    /// Only integrations post them.
+    #[schema(required = true)]
+    pub blocks: Option<Vec<MessageBlock>>,
     #[serde(skip)]
     pub(crate) last_reply_id: Option<Id>,
 }
@@ -951,7 +962,8 @@ const MESSAGE_SELECT: &str = "SELECT m.id, m.conversation_id, m.thread_root_id, 
      l.sticker_id IS NOT NULL AS last_sticker, q.sticker_id IS NOT NULL AS quoted_sticker, \
      m.reply_to_id, q.author_id AS quoted_author_id, substr(q.body, 1, 200) AS quoted_body, \
      m.forward_of_id, m.forward_conversation_id, m.forward_author_id, m.forward_created_at, \
-     m.forward_bot_name, q.bot_name AS quoted_bot_name, m.webhook_id, m.bot_name, m.bot_icon_url, \
+     m.forward_bot_name, q.bot_name AS quoted_bot_name, m.webhook_id, m.bot_name, m.bot_icon_url, m.bot_icon_emoji,, \
+     m.blocks, \
      m.sticker_id, s.workspace_id AS sticker_workspace_id, s.name AS sticker_name \
      FROM chat_messages m LEFT JOIN chat_messages l ON l.id = m.last_reply_id \
      LEFT JOIN chat_messages q ON q.id = m.reply_to_id AND q.deleted_at IS NULL \
@@ -1025,7 +1037,13 @@ fn message_from_row(row: &AnyRow) -> Result<MessageRecord, ChatError> {
         webhook_id,
         name: row.get::<Option<String>, _>("bot_name").unwrap_or_default(),
         icon_url: row.get("bot_icon_url"),
+        icon_emoji: row.get("bot_icon_emoji"),
     });
+    let blocks = match row.get::<Option<String>, _>("blocks") {
+        Some(_) if deleted => None,
+        Some(json) => Some(serde_json::from_str(&json).map_err(|_| corrupt("message blocks"))?),
+        None => None,
+    };
     Ok(MessageRecord {
         id: parse_id(row.get("id"))?,
         conversation_id: parse_id(row.get("conversation_id"))?,
@@ -1066,6 +1084,7 @@ fn message_from_row(row: &AnyRow) -> Result<MessageRecord, ChatError> {
         sticker_id,
         sticker,
         bot,
+        blocks,
         last_reply_id: parse_optional_id(row.get("last_reply_id"))?,
     })
 }

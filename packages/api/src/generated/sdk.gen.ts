@@ -1159,8 +1159,9 @@ export const stripeWebhook = <ThrowOnError extends boolean = false>(options: Opt
 });
 
 /**
- * Posts a message into the webhook's channel as the webhook. No session: the secret in the
- * path is the credential. An unknown id, a wrong secret and a deleted webhook all answer 404.
+ * Posts a message into the webhook's channel as the webhook, and answers `ok` as Slack does. No
+ * session: the secret in the path is the credential. An unknown id, a wrong secret and a
+ * deleted webhook all answer 404. The body is JSON, or a form with the JSON in `payload`.
  */
 export const postIncomingWebhook = <ThrowOnError extends boolean = false>(options: Options<PostIncomingWebhookData, ThrowOnError>): RequestResult<PostIncomingWebhookResponses, PostIncomingWebhookErrors, ThrowOnError> => (options.client ?? client).post<PostIncomingWebhookResponses, PostIncomingWebhookErrors, ThrowOnError>({
     url: '/api/v1/hooks/chat/{webhook_id}/{secret}',

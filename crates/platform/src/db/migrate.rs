@@ -481,6 +481,16 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0069_chat_webhooks.sql"),
                     false,
                 ),
+                Migration::new(
+                    70,
+                    include_str!("../../../../apps/server/migrations/0070_chat_message_blocks.sql"),
+                    false,
+                ),
+                Migration::new(
+                    71,
+                    include_str!("../../../../apps/server/migrations/0071_chat_bot_icon_emoji.sql"),
+                    false,
+                ),
             ],
         );
         runner.postgres = vec![
@@ -622,6 +632,20 @@ impl MigrationRunner {
             Migration::new(
                 69,
                 include_str!("../../../../apps/server/migrations/postgres/0069_chat_webhooks.sql"),
+                false,
+            ),
+            Migration::new(
+                70,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0070_chat_message_blocks.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                71,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0071_chat_bot_icon_emoji.sql"
+                ),
                 false,
             ),
         ];

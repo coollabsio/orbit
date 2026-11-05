@@ -143,7 +143,8 @@ export function toMessage(record: MessageRecord): Message {
       sticker: record.last_reply.sticker,
       createdAt: millis(record.last_reply.created_at),
     },
-    bot: record.bot && { webhookId: record.bot.webhook_id, name: record.bot.name, iconUrl: record.bot.icon_url },
+    bot: record.bot && { webhookId: record.bot.webhook_id, name: record.bot.name, iconUrl: record.bot.icon_url, iconEmoji: record.bot.icon_emoji },
+    blocks: record.blocks,
   }
 }
 

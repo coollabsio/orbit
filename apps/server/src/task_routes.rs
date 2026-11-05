@@ -2473,6 +2473,12 @@ pub(crate) struct ApiError {
 }
 
 impl ApiError {
+    /// The same problem with a detail made at run time, such as the position of an invalid value.
+    pub(crate) fn with_detail(mut self, detail: String) -> Self {
+        self.body.detail = detail.into();
+        self
+    }
+
     pub(crate) fn new(
         status: StatusCode,
         code: &'static str,

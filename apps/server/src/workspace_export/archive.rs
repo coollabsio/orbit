@@ -830,7 +830,7 @@ async fn chat(
         let mut roots: HashMap<String, usize> = HashMap::new();
         for row in fetch(
             "SELECT id, thread_root_id, kind, author_id, body, reply_to_id, forward_of_id, pinned_at, \
-             edited_at, deleted_at, created_at, bot_name FROM chat_messages WHERE conversation_id = $1 \
+             edited_at, deleted_at, created_at, bot_name, blocks FROM chat_messages WHERE conversation_id = $1 \
              ORDER BY id",
         )
         .await?
@@ -858,6 +858,12 @@ async fn chat(
             // Set when an integration (an incoming webhook) posted it; `author` set the webhook up.
             if let Some(bot_name) = row.get::<Option<String>, _>("bot_name") {
                 message.insert("bot_name".to_owned(), json!(bot_name));
+            }
+            // An integration's card, as it was posted (`body` is its plain text).
+            if let Some(blocks) = row.get::<Option<String>, _>("blocks")
+                && let Ok(blocks) = serde_json::from_str::<Value>(&blocks)
+            {
+                message.insert("blocks".to_owned(), blocks);
             }
             message.insert("body".to_owned(), json!(row.get::<String, _>("body")));
             message.insert("created_at".to_owned(), time(row.get("created_at")));

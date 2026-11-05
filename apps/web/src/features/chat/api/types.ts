@@ -1,3 +1,4 @@
+import type { MessageBlock } from '@orbit/api/generated/types.gen'
 import type { PresenceEntry } from '@/features/realtime/presence'
 
 /** Ids are opaque strings; message ids sort by creation time. Times are integer milliseconds. */
@@ -129,6 +130,8 @@ export interface MessageBot {
   name: string
   /** An https image; `null` shows the default bot avatar. */
   iconUrl: string | null
+  /** An emoji name (`ghost`) shown as the avatar in place of `iconUrl`. Missing on a row cached before it existed. */
+  iconEmoji?: string | null
 }
 
 /** An incoming webhook of a channel. Its URL (with the secret) is only in the answer that made or rotated it. */
@@ -142,6 +145,7 @@ export interface ChannelWebhook {
   rotatedAt: number | null
   lastUsedAt: number | null
 }
+
 
 /** The sticker of a message: a custom image of the workspace, shown large. `url` is the image, served by Orbit. */
 export interface MessageSticker {
@@ -191,6 +195,11 @@ export interface Message {
   lastReply: ReplyPreview | null
   /** Set when an integration posted the message. Missing on a row cached before integrations existed. */
   bot?: MessageBot | null
+  /**
+   * Layout blocks of an integration's message (Slack Block Kit shape), shown in place of `body`; `body` is then their
+   * plain text for previews, quotes and search. Missing on a row cached before blocks existed.
+   */
+  blocks?: MessageBlock[] | null
   /** Client only: set on a message that the server has not confirmed. */
   sendState?: 'sending' | 'failed'
 }
@@ -286,6 +295,7 @@ export type ChatEvent =
   | { type: 'emoji.changed' }
   /** A sticker of the workspace was added or deleted: fetch the list again. */
   | { type: 'stickers.changed' }
+
   | { type: 'connection'; status: ConnectionStatus }
   /** The client missed events: refetch every chat query. */
   | { type: 'resync' }
