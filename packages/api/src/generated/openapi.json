@@ -38767,9 +38767,14 @@
           },
           "expires_at": {
             "type": [
+          "all_projects",
               "string",
               "null"
             ],
+          "all_projects": {
+            "type": "boolean",
+            "description": "Whether the task scope covers every live project of the workspace, including projects\ncreated later. `project_ids` then lists the projects of today."
+          },
             "format": "date-time"
           },
           "id": {
@@ -41311,6 +41316,10 @@
             "minimum": 0
           },
           "name": {
+          "all_projects": {
+            "type": "boolean",
+            "description": "Cover every live project of the workspace, including projects created later, instead of\n`project_ids`."
+          },
             "type": "string"
           },
           "project_id": {

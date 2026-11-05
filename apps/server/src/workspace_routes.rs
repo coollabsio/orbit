@@ -29,7 +29,7 @@ use crate::image_compression::{CompressionStatus, ImageCompressor};
 use crate::mail::{self, Mailer};
 use crate::object_storage::Owner;
 use crate::repositories::api_tokens::{
-    ApiTokenError, ApiTokenRecord, ApiTokenRepository, ApiTokenScope, IssuedApiToken,
+    ApiTokenError, ApiTokenRecord, ApiTokenRepository, ApiTokenScope, IssuedApiToken, TokenProjects,
 };
 use crate::repositories::identity::{
     AdminAccountError, AdminUser, AuthenticatedSession, IdentityRepository,
@@ -643,6 +643,10 @@ struct CreateApiTokenBody {
     #[serde(default)]
     project_ids: Vec<String>,
     project_id: Option<String>,
+    /// Cover every live project of the workspace, including projects created later, instead of
+    /// `project_ids`.
+    #[serde(default)]
+    all_projects: bool,
     scopes: Vec<ApiTokenScope>,
 }
 
@@ -689,12 +693,12 @@ async fn create_api_token(
     }
     // Projects only limit task access, so a token without a task scope stores none.
     let task_scope = ApiTokenScope::grants_tasks(&body.scopes);
-    if !task_scope {
+    if !task_scope || body.all_projects {
         project_ids.clear();
     }
     if name.is_empty()
         || name.chars().count() > 100
-        || (task_scope && project_ids.is_empty())
+        || (task_scope && !body.all_projects && project_ids.is_empty())
         || body.scopes.is_empty()
         || (body.service_account
             && body.scopes.iter().any(|s| {
@@ -708,7 +712,7 @@ async fn create_api_token(
             StatusCode::UNPROCESSABLE_ENTITY,
             "invalid_api_token",
             "Invalid API token",
-            "Token names must contain 1 to 100 characters, at least one scope is required, and a task scope needs at least one project.",
+            "Token names must contain 1 to 100 characters, at least one scope is required, and a task scope needs at least one project or all projects.",
             instance,
             request_id.as_ref(),
         ));
@@ -736,7 +740,11 @@ async fn create_api_token(
             workspace_id,
             session.user.id,
             name.to_owned(),
-            project_ids,
+            if body.all_projects {
+                TokenProjects::All
+            } else {
+                TokenProjects::Only(project_ids)
+            },
             &body.scopes,
             body.service_account,
             expires_at,

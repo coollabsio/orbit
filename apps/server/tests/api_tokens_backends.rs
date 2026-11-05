@@ -2,7 +2,9 @@
 //! `ORBIT_TEST_POSTGRES_URL` is set (see `TestDatabase`).
 
 use orbit_platform::{Database, Id, TestDatabase, TimestampMillis};
-use orbit_server::repositories::api_tokens::{ApiTokenError, ApiTokenRepository, ApiTokenScope};
+use orbit_server::repositories::api_tokens::{
+    ApiTokenError, ApiTokenRepository, ApiTokenScope, TokenProjects,
+};
 
 struct Seed {
     owner: Id,
@@ -430,4 +432,91 @@ async fn only_a_task_scope_needs_a_project() {
         Err(ApiTokenError::NotFound)
     ));
     tokens.authenticate(&docs.token, None, now).await.unwrap();
+}
+
+#[tokio::test]
+async fn all_projects_tokens_follow_the_live_projects_of_their_workspace() {
+    let database = TestDatabase::new().await.unwrap();
+    let now = TimestampMillis::now();
+    let seed = seed(&database, now.as_millis()).await;
+    let tokens = ApiTokenRepository::new(database.clone());
+    let create = |name: &str, projects: TokenProjects| {
+        let tokens = tokens.clone();
+        let name = name.to_owned();
+        async move {
+            tokens
+                .create(
+                    seed.workspace,
+                    seed.owner,
+                    name,
+                    projects,
+                    &[ApiTokenScope::TasksRead],
+                    false,
+                    None,
+                    "test",
+                    now,
+                )
+                .await
+                .unwrap()
+        }
+    };
+    let all = create("All", TokenProjects::All).await;
+    let fixed = create("Fixed", TokenProjects::Only(vec![seed.projects[0]])).await;
+    assert!(all.api_token.all_projects);
+    assert_eq!(all.api_token.project_ids, seed.projects.to_vec());
+    assert!(!fixed.api_token.all_projects);
+    let project_ids = |token: String| {
+        let tokens = tokens.clone();
+        async move {
+            tokens
+                .authenticate(&token, Some(ApiTokenScope::TasksRead), now)
+                .await
+                .map(|principal| principal.project_ids)
+        }
+    };
+
+    // A project created after the token is covered; the other workspace's project never is.
+    let later = Id::new_v7();
+    sqlx::query("INSERT INTO projects (id, workspace_id, name, project_key, color, created_at, updated_at) VALUES ($1, $2, 'Later', 'LAT', '#ff0000', $3, $3)")
+        .bind(later.to_string())
+        .bind(seed.workspace.to_string())
+        .bind(now.as_millis() + 10)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        project_ids(all.token.clone()).await.unwrap(),
+        vec![seed.projects[0], seed.projects[1], later]
+    );
+    assert_eq!(
+        project_ids(fixed.token.clone()).await.unwrap(),
+        vec![seed.projects[0]]
+    );
+
+    // A deleted project is not covered. The fixed token loses its only project and stops
+    // working; the all-projects token stays valid even with no project left.
+    sqlx::query("UPDATE projects SET deleted_at = $1 WHERE workspace_id = $2")
+        .bind(now.as_millis())
+        .bind(seed.workspace.to_string())
+        .execute(database.pool())
+        .await
+        .unwrap();
+    assert!(matches!(
+        project_ids(fixed.token.clone()).await,
+        Err(ApiTokenError::NotFound)
+    ));
+    assert_eq!(
+        project_ids(all.token.clone()).await.unwrap(),
+        Vec::<Id>::new()
+    );
+    assert_eq!(
+        database
+            .scalar::<i64>(&format!(
+                "SELECT COUNT(*) FROM api_token_projects WHERE token_id = '{}'",
+                all.api_token.id
+            ))
+            .await
+            .unwrap(),
+        0
+    );
 }

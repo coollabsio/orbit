@@ -52,10 +52,15 @@ export function AccessPicker<S extends string>({ id, resources, scopes, onChange
   </div>
 }
 
-/** The project checklist under the Tasks access row, with "Select all" above two or more projects. Its title is for screen readers only. */
-export function ProjectPicker({ id, projects, selected, onChange, empty }: { id: string; projects: { id: string; name: string }[]; selected: string[]; onChange: (ids: string[]) => void; empty?: string }) {
+/** The project checklist under the Tasks access row, with "Select all" above two or more projects. `all` covers every project, including future ones, and hides the list. Its title is for screen readers only. */
+export function ProjectPicker({ id, projects, selected, onChange, all, onAllChange, empty }: { id: string; projects: { id: string; name: string }[]; selected: string[]; onChange: (ids: string[]) => void; all: boolean; onAllChange: (all: boolean) => void; empty?: string }) {
   return <div role="group" aria-labelledby={id} className="grid gap-3">
     <span id={id} className="sr-only">Projects</span>
+    <Label className="flex items-center gap-2">
+      <Checkbox checked={all} onCheckedChange={(checked) => onAllChange(Boolean(checked))} />
+      All projects, including future ones
+    </Label>
+    {all ? null : <>
     {projects.length > 1 ? <Label className="flex items-center gap-2 text-sm font-normal text-muted-foreground">
       <Checkbox checked={selected.length === projects.length} indeterminate={selected.length > 0 && selected.length < projects.length} onCheckedChange={(checked) => onChange(checked ? projects.map((project) => project.id) : [])} />
       Select all
@@ -68,4 +73,5 @@ export function ProjectPicker({ id, projects, selected, onChange, empty }: { id:
     </div> : null}
     {empty ? <p className="text-sm text-muted-foreground">{empty}</p> : null}
   </div>
+    </>}
 }

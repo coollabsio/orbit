@@ -51,6 +51,7 @@ export function ApiTokensPage() {
   const revokeToken = useRevokeApiToken(workspace.id)
   const [name, setName] = useState('')
   const [projectIds, setProjectIds] = useState<string[]>([])
+  const [allProjects, setAllProjects] = useState(false)
   const projectNames = new Map(projects.map((project) => [project.id, project.name]))
   const [scopes, setScopes] = useState<ApiTokenScope[]>(['tasks:read'])
   const [serviceAccount, setServiceAccount] = useState(false)
@@ -60,7 +61,7 @@ export function ApiTokensPage() {
 
   // Projects only limit task access, so a token without a task scope needs none.
   const taskScope = scopes.some((scope) => scope.startsWith('tasks:'))
-  const ready = name.trim() !== '' && scopes.length > 0 && (!taskScope || projectIds.length > 0)
+  const ready = name.trim() !== '' && scopes.length > 0 && (!taskScope || allProjects || projectIds.length > 0)
 
   if (!canManage) return <SettingsCard title="API tokens"><p className="m-0 text-muted-foreground">Only workspace owners and administrators can manage API tokens.</p></SettingsCard>
 
@@ -75,7 +76,7 @@ export function ApiTokensPage() {
   async function submit(event: FormEvent) {
     event.preventDefault()
     if (!ready) return
-    const issued = await createToken.mutateAsync({ name: name.trim(), projectIds: taskScope ? projectIds : [], scopes, serviceAccount, expiresInDays: expiration === 'never' ? null : Number(expiration) })
+    const issued = await createToken.mutateAsync({ name: name.trim(), projectIds: taskScope && !allProjects ? projectIds : [], allProjects: taskScope && allProjects, scopes, serviceAccount, expiresInDays: expiration === 'never' ? null : Number(expiration) })
     setIssuedToken(issued.token)
     setName('')
     setCopied(false)
@@ -109,7 +110,7 @@ export function ApiTokensPage() {
           </Field>
         </FieldLabel>
         <div className="min-[900px]:col-span-2">
-          <AccessPicker id="api-token-access" resources={tokenResources(serviceAccount, taskScope ? <ProjectPicker id="api-token-projects" projects={projects} selected={projectIds} onChange={setProjectIds} empty={projectsQuery.isPending ? 'Loading projects…' : projects.length ? undefined : 'This workspace has no active projects.'} /> : null)} scopes={scopes} onChange={setScopes} />
+          <AccessPicker id="api-token-access" resources={tokenResources(serviceAccount, taskScope ? <ProjectPicker id="api-token-projects" projects={projects} selected={projectIds} onChange={setProjectIds} all={allProjects} onAllChange={setAllProjects} empty={projectsQuery.isPending ? 'Loading projects…' : projects.length ? undefined : 'This workspace has no active projects.'} /> : null)} scopes={scopes} onChange={setScopes} />
         </div>
         <Button className="justify-self-start" type="submit" disabled={createToken.isPending || !ready}>Create token</Button>
         {createToken.isError ? <p className="text-destructive" role="alert">The API token could not be created.</p> : null}
@@ -124,7 +125,7 @@ export function ApiTokensPage() {
         {tokens.data?.length === 0 ? <SettingsRow>No active API tokens.</SettingsRow> : null}
         {tokens.data?.map((token) => <SettingsRow className="flex-nowrap" key={token.id}>
           <RowIcon><Key /></RowIcon>
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5"><span className="flex items-center gap-2 text-[13px] font-medium text-foreground">{token.name}{isExpired(token.expires_at) ? <Badge variant="destructive">Expired</Badge> : null}</span><span className="text-xs text-muted-foreground/70">{token.service_account_name ? `Service account: ${token.service_account_name}` : 'Personal token'} · <code>{token.token_prefix}…</code> · {token.project_ids.length ? `${token.project_ids.map((id) => projectNames.get(id) ?? 'Unavailable project').join(', ')} · ` : null}{token.expires_at ? `${isExpired(token.expires_at) ? 'expired' : 'expires'} ${shortDate(token.expires_at)}` : 'never expires'} · created {relativeTime(token.created_at)}</span></div>
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5"><span className="flex items-center gap-2 text-[13px] font-medium text-foreground">{token.name}{isExpired(token.expires_at) ? <Badge variant="destructive">Expired</Badge> : null}</span><span className="text-xs text-muted-foreground/70">{token.service_account_name ? `Service account: ${token.service_account_name}` : 'Personal token'} · <code>{token.token_prefix}…</code> · {token.all_projects ? 'All projects · ' : token.project_ids.length ? `${token.project_ids.map((id) => projectNames.get(id) ?? 'Unavailable project').join(', ')} · ` : null}{token.expires_at ? `${isExpired(token.expires_at) ? 'expired' : 'expires'} ${shortDate(token.expires_at)}` : 'never expires'} · created {relativeTime(token.created_at)}</span></div>
           <span className="flex gap-1">{token.scopes.map((scope) => <Badge variant="secondary" key={scope}>{scope}</Badge>)}</span>
           <Button variant="ghost" type="button" disabled={revokeToken.isPending} onClick={async () => { if (await confirmAction({ title: `Revoke ${token.name}?`, description: 'The integration will lose access immediately.', confirmLabel: 'Revoke', danger: true })) revokeToken.mutate(token.id) }}>Revoke</Button>
         </SettingsRow>)}

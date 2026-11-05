@@ -14,8 +14,10 @@ scripts.
 1. As a workspace owner or administrator, open **Settings → API tokens**.
 2. Select the projects, the permissions and an expiry. Then create the token.
    `project_ids` is required, with at least one project, when `scopes` includes
-   `tasks:read` or `tasks:write`. Without a task scope, projects have no effect:
-   the token stores none (`project_ids: []`).
+   `tasks:read` or `tasks:write`. Alternatively, set `all_projects: true` (the
+   **All projects, including future ones** box): the token then covers every
+   live project of the workspace, also projects created later. Without a task
+   scope, projects have no effect: the token stores none (`project_ids: []`).
 3. Copy the token (`orb_…`). Orbit shows it one time only.
 4. Send the token in the `Authorization` header of each request:
 
@@ -29,7 +31,8 @@ curl -sS "$ORBIT_URL/api/public/v1/me" -H "Authorization: Bearer $ORBIT_TOKEN"
 
 Do not put the token in a URL, in a repository, or in a shared shell history.
 
-Each token belongs to one workspace and to the projects that you selected.
+Each token belongs to one workspace and to the projects that you selected, or to
+all live projects of the workspace when you selected all projects.
 Task and doc paths contain the workspace ID:
 `/api/public/v1/workspaces/{workspace_id}/…`. Get the ID from `GET /me`. A
 path with another workspace ID returns `404`. The API does not use cookies, sessions or CSRF tokens. Requests

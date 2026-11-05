@@ -476,6 +476,11 @@ impl MigrationRunner {
                     ),
                     false,
                 ),
+                Migration::new(
+                    69,
+                    include_str!("../../../../apps/server/migrations/0069_all_projects.sql"),
+                    false,
+                ),
             ],
         );
         runner.postgres = vec![
@@ -612,6 +617,11 @@ impl MigrationRunner {
                 include_str!(
                     "../../../../apps/server/migrations/postgres/0068_api_token_optional_project.sql"
                 ),
+                false,
+            ),
+            Migration::new(
+                69,
+                include_str!("../../../../apps/server/migrations/postgres/0069_all_projects.sql"),
                 false,
             ),
         ];
