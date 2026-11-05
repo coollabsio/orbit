@@ -271,7 +271,10 @@ curl -sS "$ORBIT_WS/docs" -H "Authorization: Bearer $ORBIT_TOKEN"
 ```
 
 `GET /workspaces/{workspace_id}/docs/{page_id}`. Scope: `docs:read`. The document record, as the MCP
-`get_doc` tool returns it.
+`get_doc` tool returns it. `content` is the editor's BlockNote JSON, and
+`markdown` is the same content as GitHub-flavored Markdown, the format that doc
+writes take. `POST` and `PATCH` return the same record. Links to other docs show
+as `[Untitled](/docs/{page_id})`.
 
 ```bash
 curl -sS "$ORBIT_WS/docs/$PAGE_ID" -H "Authorization: Bearer $ORBIT_TOKEN"

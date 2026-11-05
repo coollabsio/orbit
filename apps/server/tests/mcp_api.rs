@@ -977,6 +977,9 @@ async fn docs_and_chat_require_explicit_scopes_and_doc_writes_need_docs_write() 
         .await;
     let text = &updated["result"]["structuredContent"]["content"][0]["content"][0]["text"];
     assert_eq!(text, "Rewritten.", "{updated}");
+    let read = f.tool("get_doc", json!({"page_id": doc["id"]})).await;
+    let markdown = &read["result"]["structuredContent"]["markdown"];
+    assert_eq!(markdown, "Rewritten.\n", "{read}");
     let stale = f
         .tool(
             "update_doc",

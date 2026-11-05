@@ -300,7 +300,8 @@ change related tasks. Task tools return a projection that excludes references ou
 Doc create takes optional `title`, Markdown `markdown`, and a place: `parent_id`, or for a
 root doc `teamspace_id` or `private: true` (omitted: the default teamspace). Doc update takes
 `page_id`, `expected_version`, and optional `title` or `markdown`. Markdown replaces the whole
-content, also in open editors. Doc writes act as the connected person and fail on a locked doc.
+content, also in open editors. `get_doc`, `create_doc` and `update_doc` return the doc with
+`markdown` (its content as Markdown) next to the BlockNote `content`. Doc writes act as the connected person and fail on a locked doc.
 Chat message and thread tools accept `before` and `limit` (1–100) for pagination.
 `search_messages` takes `query` (up to 500 characters; every word must match, the last one as a
 prefix) and optional `conversation_id`, `author_id`, `has_file` and `cursor` filters. It returns

@@ -837,6 +837,9 @@ async fn docs_write_creates_and_updates_docs_from_markdown() {
         .await;
     assert_eq!(code, StatusCode::OK, "{read}");
     assert_eq!(read["content"], doc["content"]);
+    // Reads also give the content as Markdown, the format that writes take.
+    assert_eq!(read["markdown"], "# Steps\n\nShip **it**.\n", "{read}");
+    assert_eq!(doc["markdown"], read["markdown"]);
 
     let (code, child) = f
         .call(
@@ -849,6 +852,7 @@ async fn docs_write_creates_and_updates_docs_from_markdown() {
     assert_eq!(code, StatusCode::CREATED, "{child}");
     assert_eq!(child["parent_id"], id.as_str());
     assert_eq!(child["content"], json!([]));
+    assert_eq!(child["markdown"], "");
 
     let path = format!("/docs/{id}");
     let (code, updated) = f
@@ -864,6 +868,7 @@ async fn docs_write_creates_and_updates_docs_from_markdown() {
     assert_eq!(updated["icon"], "🚀");
     assert_eq!(updated["content"][0]["type"], "bulletListItem", "{updated}");
     assert_eq!(updated["version"], version + 1);
+    assert_eq!(updated["markdown"], "- one\n- two\n", "{updated}");
 
     let (code, problem) = f
         .call(

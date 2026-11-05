@@ -11,6 +11,7 @@ use serde_json::{Value, json};
 use crate::billing::WorkspaceAccess;
 use crate::collab::kind_task::members;
 use crate::collab::markdown_import::markdown_to_blocks;
+use crate::export::markdown::{KeepLinks, blocks_to_markdown};
 use crate::repositories::api_tokens::{ApiTokenPrincipal, ApiTokenScope};
 use crate::repositories::billing::write_access;
 use crate::repositories::chat::{
@@ -218,6 +219,21 @@ pub struct NewTask {
     pub parent_task_id: Option<Id>,
     pub due_start_at: Option<TimestampMillis>,
     pub due_at: Option<TimestampMillis>,
+}
+
+/// A doc with its content also as Markdown, the format that doc writes take.
+#[derive(Clone, Debug, Serialize)]
+pub struct DocView {
+    #[serde(flatten)]
+    pub page: PageRecord,
+    pub markdown: String,
+}
+
+impl From<PageRecord> for DocView {
+    fn from(page: PageRecord) -> Self {
+        let markdown = blocks_to_markdown(&page.content, &KeepLinks);
+        Self { page, markdown }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -862,16 +878,17 @@ impl Authorized<'_> {
             .map_err(|_| TokenApiError::NotAvailable)
     }
 
-    pub async fn get_doc(&self, page_id: Id) -> Result<PageRecord> {
+    pub async fn get_doc(&self, page_id: Id) -> Result<DocView> {
         let pages = self.content(ApiTokenScope::DocsRead, &self.api.pages)?;
         let p = self.principal;
         pages
             .get_page(p.workspace_id, page_id, p.actor_id)
             .await
+            .map(DocView::from)
             .map_err(|_| TokenApiError::NotAvailable)
     }
 
-    pub async fn create_doc(&self, input: NewDoc) -> Result<PageRecord> {
+    pub async fn create_doc(&self, input: NewDoc) -> Result<DocView> {
         let pages = self.content(ApiTokenScope::DocsWrite, &self.api.pages)?;
         validate_doc_input(
             Some(&input.title),
@@ -899,7 +916,7 @@ impl Authorized<'_> {
             )
             .await?;
         if input.markdown.trim().is_empty() {
-            return Ok(page);
+            return Ok(page.into());
         }
         let changes = PageChanges {
             content: Some(self.blocks(&input.markdown).await?),
@@ -915,7 +932,8 @@ impl Authorized<'_> {
                 self.request_id,
                 now,
             )
-            .await?)
+            .await?
+            .into())
     }
 
     pub async fn update_doc(
@@ -923,7 +941,7 @@ impl Authorized<'_> {
         page_id: Id,
         expected_version: u64,
         patch: DocPatch,
-    ) -> Result<PageRecord> {
+    ) -> Result<DocView> {
         let pages = self.content(ApiTokenScope::DocsWrite, &self.api.pages)?;
         validate_doc_input(
             patch.title.as_deref(),
@@ -950,7 +968,8 @@ impl Authorized<'_> {
                 self.request_id,
                 TimestampMillis::now(),
             )
-            .await?)
+            .await?
+            .into())
     }
 
     /// Doc blocks from Markdown; `@Name` mentions of workspace members become mentions.
