@@ -15,6 +15,7 @@ pub mod export_routes;
 pub mod image_compression;
 pub mod import_routes;
 pub mod integration_routes;
+pub mod linear;
 pub mod link_preview;
 pub mod live;
 pub mod mail;
