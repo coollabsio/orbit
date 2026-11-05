@@ -113,29 +113,32 @@ fn markdown_links_resolve_relative_targets_only() {
 }
 
 #[test]
-fn embeds_become_images_or_links() {
-    let blocks =
-        import("![[img.png]]\n\n![[Note]] ![[doc.pdf]] ![[nothing.png]]\n\n![alt](assets/img.png)");
-    assert_eq!(blocks[0]["type"], "image");
+fn embeds_become_image_file_blocks_or_links() {
+    let blocks = import(
+        "![[img.png]]\n\n![[Note]] and ![[nothing.png]]\n\n![[doc.pdf]]\n\n![alt](assets/img.png)\n\nRead [the spec](doc.pdf).",
+    );
+    let types: Vec<&str> = blocks.iter().map(|b| b["type"].as_str().unwrap()).collect();
+    assert_eq!(
+        types,
+        ["image", "paragraph", "file", "image", "paragraph", "file"]
+    );
     assert_eq!(blocks[0]["props"]["url"], "/files/img");
     assert_eq!(blocks[0]["props"]["name"], "img.png");
     assert_eq!(
         inline(&blocks[1]),
         [
             ("link:/docs/page-1".to_owned(), "Note".to_owned(), json!({})),
-            ("text".to_owned(), " ".to_owned(), json!({})),
-            (
-                "link:/files/pdf".to_owned(),
-                "doc.pdf".to_owned(),
-                json!({})
-            ),
-            ("text".to_owned(), " nothing.png".to_owned(), json!({})),
+            ("text".to_owned(), " and nothing.png".to_owned(), json!({})),
         ]
     );
-    assert_eq!(blocks[2]["type"], "image");
-    assert_eq!(blocks[2]["props"]["url"], "/files/img");
-    assert_eq!(blocks[2]["props"]["name"], "alt");
-    assert_eq!(blocks.len(), 3);
+    assert_eq!(blocks[2]["props"]["url"], "/files/pdf");
+    assert_eq!(blocks[2]["props"]["name"], "doc.pdf");
+    assert_eq!(blocks[3]["props"]["name"], "alt");
+    assert_eq!(
+        inline(&blocks[4]),
+        [("text".to_owned(), "Read the spec.".to_owned(), json!({}))]
+    );
+    assert_eq!(blocks[5]["props"]["url"], "/files/pdf");
 }
 
 #[test]

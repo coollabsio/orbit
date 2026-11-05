@@ -41,9 +41,9 @@ pub enum LinkKind {
 pub enum LinkTarget {
     /// An imported page: a link to `href`. An embedded note is a link too (no transclusion).
     Page { href: String },
-    /// An image file: an image block when embedded, a link otherwise.
+    /// An image file: an image block (after the link's text, for a link).
     Image { url: String },
-    /// Any other file: a link named `name`.
+    /// Any other file: a file block named `name` (after the link's text, for a link).
     File { url: String, name: String },
 }
 
@@ -366,7 +366,10 @@ fn italic_text(block: &Value) -> Option<String> {
 /// Inline content while reading: text and links, or an image that becomes its own block.
 enum Inline {
     Content(Value),
-    Image { url: String, alt: String },
+    /// An image (or an Obsidian file) block lifted out of the text.
+    Block(Value),
+    /// The file block of an Obsidian link to a file, placed after the paragraph.
+    After(Value),
 }
 
 struct Reader<'a, 'm> {
@@ -381,11 +384,13 @@ struct Reader<'a, 'm> {
     obsidian: Option<&'m dyn LinkResolver>,
 }
 
-/// A link being read: `href` is `None` for an unresolved link (its text stays), `label`
-/// replaces its text (a wikilink without alias).
+/// A link being read: `href` is `None` for an unresolved link or a link to a file (its text
+/// stays), `label` replaces its text (a wikilink without alias), `block` is the image or file
+/// block a link to a file adds after the text.
 struct PendingLink {
     href: Option<String>,
     label: Option<String>,
+    block: Option<Value>,
     content: Vec<Value>,
 }
 
@@ -775,6 +780,7 @@ impl<'a> Reader<'a, '_> {
                             )),
                             None => out.extend(content.into_iter().map(Inline::Content)),
                         }
+                        out.extend(pending.block.map(Inline::After));
                     }
                     None
                 }
@@ -803,10 +809,7 @@ impl<'a> Reader<'a, '_> {
                             _ => {}
                         }
                     }
-                    out.push(Inline::Image {
-                        url: dest_url.into_string(),
-                        alt,
-                    });
+                    out.push(Inline::Block(image(dest_url.into_string(), alt)));
                     None
                 }
                 _ => None,
@@ -830,24 +833,27 @@ impl<'a> Reader<'a, '_> {
             return PendingLink {
                 href: Some(url.to_owned()),
                 label: None,
+                block: None,
                 content: Vec::new(),
             };
         };
+        let (href, block) = match resolver.resolve(&target, LinkKind::Link) {
+            Some(LinkTarget::Page { href }) => (Some(href), None),
+            Some(LinkTarget::Image { url }) => (None, Some(image(url, file_name(&target)))),
+            Some(LinkTarget::File { url, name }) => (None, Some(file(url, name))),
+            None => (None, None),
+        };
         PendingLink {
-            href: resolver
-                .resolve(&target, LinkKind::Link)
-                .map(|resolved| match resolved {
-                    LinkTarget::Page { href } => href,
-                    LinkTarget::Image { url } | LinkTarget::File { url, .. } => url,
-                }),
+            href,
             label: matches!(link_type, LinkType::WikiLink { has_pothole: false })
                 .then(|| wikilink_label(&target)),
+            block,
             content: Vec::new(),
         }
     }
 
-    /// An Obsidian embed (`![[x]]`, `![alt](x)`): an image block for an image, a link for a
-    /// note or any other file, its text when it does not resolve.
+    /// An Obsidian embed (`![[x]]`, `![alt](x)`): an image or file block for a file, a link for
+    /// a note, its text when it does not resolve.
     fn embed(
         &self,
         url: &str,
@@ -857,29 +863,19 @@ impl<'a> Reader<'a, '_> {
     ) -> Inline {
         let wiki = matches!(link_type, LinkType::WikiLink { .. });
         let target = local_target(url, link_type).unwrap_or_default();
-        let name = target
-            .rsplit('/')
-            .next()
-            .unwrap_or(&target)
-            .split('#')
-            .next()
-            .unwrap_or_default()
-            .to_owned();
-        let link = |href: String, label: &str| {
-            Inline::Content(json!({
-                "type": "link", "href": href, "content": [text(label, styles)],
-            }))
-        };
+        let name = file_name(&target);
         match self
             .obsidian
             .and_then(|resolver| resolver.resolve(&target, LinkKind::Embed))
         {
-            Some(LinkTarget::Image { url }) => Inline::Image {
-                url,
-                alt: if wiki || alt.is_empty() { name } else { alt },
-            },
-            Some(LinkTarget::Page { href }) => link(href, &wikilink_label(&target)),
-            Some(LinkTarget::File { url, name }) => link(url, &name),
+            Some(LinkTarget::Image { url }) => {
+                Inline::Block(image(url, if wiki || alt.is_empty() { name } else { alt }))
+            }
+            Some(LinkTarget::File { url, name }) => Inline::Block(file(url, name)),
+            Some(LinkTarget::Page { href }) => Inline::Content(json!({
+                "type": "link", "href": href,
+                "content": [text(&wikilink_label(&target), styles)],
+            })),
             None if wiki => Inline::Content(text(&wikilink_label(&target), styles)),
             None => Inline::Content(text(if alt.is_empty() { &name } else { &alt }, styles)),
         }
@@ -892,7 +888,7 @@ impl<'a> Reader<'a, '_> {
         for piece in inline {
             match piece {
                 Inline::Content(value) => content.push(value),
-                Inline::Image { url, alt } => images.push(image(url, alt)),
+                Inline::Block(block) | Inline::After(block) => images.push(block),
             }
         }
         (self.finish(content), images)
@@ -917,16 +913,19 @@ impl<'a> Reader<'a, '_> {
                 out.push(block(kind, props.clone(), content, Vec::new()));
             }
         };
+        let mut after = Vec::new();
         for piece in inline {
             match piece {
                 Inline::Content(value) => run.push(value),
-                Inline::Image { url, alt } => {
+                Inline::Block(block) => {
                     flush(&mut run, out);
-                    out.push(image(url, alt));
+                    out.push(block);
                 }
+                Inline::After(block) => after.push(block),
             }
         }
         flush(&mut run, out);
+        out.append(&mut after);
     }
 
     /// Turns `@Name` in plain text into a mention when exactly one member has that name.
@@ -1186,6 +1185,22 @@ fn callout(inner: &mut Vec<Value>) -> Option<Value> {
         merge(title),
         children,
     ))
+}
+
+/// A file (any type but an image) attached to the page.
+fn file(url: String, name: String) -> Value {
+    block(
+        "file",
+        json!({"url": url, "name": name}),
+        Vec::new(),
+        Vec::new(),
+    )
+}
+
+/// The file name of a link target, without folders and `#heading`.
+fn file_name(target: &str) -> String {
+    let path = target.split('#').next().unwrap_or_default();
+    path.rsplit('/').next().unwrap_or(path).to_owned()
 }
 
 fn content_of(block: &Value) -> Vec<Value> {
