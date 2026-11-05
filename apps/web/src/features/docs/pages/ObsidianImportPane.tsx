@@ -82,6 +82,12 @@ function UploadStep({ workspaceId }: { workspaceId: string }) {
               Images and files that notes link to or embed are attached to those pages.
             </p>
             <p className="text-sm text-muted-foreground">
+              To find the vault folder, open the vault switcher in Obsidian (bottom left) and choose{' '}
+              <span className="font-medium text-foreground">Reveal vault in system explorer</span>. Then right-click the folder
+              and choose <span className="font-medium text-foreground">Compress</span> (macOS) or{' '}
+              <span className="font-medium text-foreground">Compress to ZIP file</span> (Windows).
+            </p>
+            <p className="text-sm text-muted-foreground">
               The <code className="text-[13px]">.obsidian/</code> settings folder, canvases and CSV files are skipped. You
               choose which notes to import after the upload.
             </p>
