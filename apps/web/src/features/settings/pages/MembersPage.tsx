@@ -363,7 +363,7 @@ export function MembersPage() {
             actions={
               <>
                 <Tip label={emailEnabled ? 'Email the invitation link' : 'Email delivery is not configured'}>
-                  <Button type="button" variant="outline" disabled={!emailEnabled || createInvitation.isPending} onClick={() => void emailInvitation()}>
+                  <Button type="button" variant="outline" disabled={!emailEnabled || createInvitation.isPending} onClick={(event) => { if (event.currentTarget.form?.reportValidity()) void emailInvitation() }}>
                     <Bell className="size-3.5" />
                     Send email
                   </Button>
