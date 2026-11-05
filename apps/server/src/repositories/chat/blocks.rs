@@ -844,6 +844,35 @@ fn name_actions(block: &mut MessageBlock, index: usize) {
     }
 }
 
+/// The button of a stored message that a click names. A click carries only these two ids; the
+/// rest (`value`, `text`) comes from here, so a member cannot change what the integration gets.
+pub fn find_button<'a>(
+    blocks: &'a [MessageBlock],
+    block_id: &str,
+    action_id: &str,
+) -> Option<&'a ButtonElement> {
+    blocks.iter().find_map(|block| {
+        let (id, mut buttons): (&Option<String>, Box<dyn Iterator<Item = &ActionElement>>) =
+            match block {
+                MessageBlock::Section {
+                    accessory,
+                    block_id,
+                    ..
+                } => (block_id, Box::new(accessory.iter())),
+                MessageBlock::Actions { elements, block_id } => {
+                    (block_id, Box::new(elements.iter()))
+                }
+                _ => return None,
+            };
+        if id.as_deref() != Some(block_id) {
+            return None;
+        }
+        buttons.find_map(|ActionElement::Button(button)| {
+            (button.action_id.as_deref() == Some(action_id)).then_some(button)
+        })
+    })
+}
+
 /// All the blocks of one message, from `blocks` and `attachments` together.
 pub fn check_message_blocks(blocks: &[MessageBlock]) -> Result<(), BlocksError> {
     if blocks.len() > MAX_MESSAGE_BLOCKS {

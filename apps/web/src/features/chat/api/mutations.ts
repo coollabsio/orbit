@@ -397,3 +397,30 @@ export function useRotateWebhook() {
 export function useDeleteWebhook() {
   return useWebhookMutation((client, input: { conversationId: string; webhookId: string }) => client.deleteWebhook(input.conversationId, input.webhookId))
 }
+
+export function useSetWebhookInteractivity() {
+  return useWebhookMutation((client, input: { conversationId: string; webhookId: string; requestUrl: string | null }) =>
+    client.setWebhookInteractivity(input.conversationId, input.webhookId, input.requestUrl))
+}
+
+/** Reveals (`rotate: false`) or rotates the signing secret of a webhook. */
+export function useWebhookSigningSecret() {
+  return useChatMutation((client, input: { conversationId: string; webhookId: string; rotate: boolean }) =>
+    client.webhookSigningSecret(input.conversationId, input.webhookId, input.rotate))
+}
+
+/** A click on an integration's button. The integration answers later, through the live socket. */
+export function useClickAction() {
+  return useChatMutation((client, input: { messageId: string; blockId: string; actionId: string }) =>
+    client.clickAction(input.messageId, input.blockId, input.actionId))
+}
+
+/** Hides an integration's reply that only the user sees. */
+export function useDismissEphemeral() {
+  const { workspaceId } = useChatContext()
+  const queryClient = useQueryClient()
+  return (message: Message) =>
+    queryClient.setQueryData<Message[]>(chatKeys.ephemeral(workspaceId, message.conversationId), (old = []) =>
+      old.filter((item) => item.id !== message.id),
+    )
+}

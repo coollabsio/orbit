@@ -1,6 +1,10 @@
 import type { ActionElement, AttachmentBlock, ContextElement, MessageBlock } from '@orbit/api/generated/types.gen'
 import { createContext, useContext, useEffect, useState } from 'react'
+import { toast } from 'sonner'
 import { buttonVariants } from '@/components/ui/button'
+import { Spinner } from '@/components/ui/spinner'
+import { useClickAction } from '../../api/mutations'
+import { ChatError } from '../../api/types'
 import { Separator } from '@/components/ui/separator'
 import { renderMarkdownBlocks } from '@/lib/markdown'
 import { blockTextMarkdown, escapeMarkdown, richTextMarkdown } from '../../lib/blocks'
@@ -136,11 +140,21 @@ function AttachmentBox({ attachment, id }: { attachment: AttachmentBlock; id: st
   )
 }
 
+/** What the buttons of one message need: whether they send clicks, and which click is on its way. */
+interface ButtonsState {
+  interactive: boolean
+  pending: string | null
+  click: (blockId: string, actionId: string) => void
+}
+
+const ButtonsContext = createContext<ButtonsState>({ interactive: false, pending: null, click: () => {} })
+
 /**
- * A Block Kit button. With a `url` it opens the link. Without one it would send its action to the integration, which
- * Orbit cannot do yet: it shows disabled and says so.
+ * A Block Kit button. With a `url` it opens the link. Without one it sends a click to the integration, which answers
+ * through the live socket (a new card, a reply). It is disabled when the integration takes no clicks.
  */
-function BlockButton({ element }: { element: ActionElement }) {
+function BlockButton({ element, blockId }: { element: ActionElement; blockId: string | null | undefined }) {
+  const { interactive, pending, click } = useContext(ButtonsContext)
   const variant = element.style === 'danger' ? 'destructive' : element.style === 'primary' ? 'default' : 'outline'
   const className = buttonVariants({ variant, size: 'sm', className: 'max-w-full' })
   const label = <span className="truncate">{element.text.text}</span>
@@ -151,12 +165,30 @@ function BlockButton({ element }: { element: ActionElement }) {
       </a>
     )
   }
+  const actionId = element.action_id
+  if (!interactive || !blockId || !actionId) {
+    return (
+      <span title="This integration does not take clicks." className="inline-flex max-w-full">
+        <button data-slot="message-block-button" type="button" disabled className={className}>
+          {label}
+        </button>
+      </span>
+    )
+  }
+  const sending = pending === `${blockId}/${actionId}`
   return (
-    <span title="This button sends an action to the integration. Orbit does not support that yet." className="inline-flex max-w-full">
-      <button data-slot="message-block-button" type="button" disabled className={className}>
-        {label}
-      </button>
-    </span>
+    <button
+      data-slot="message-block-button"
+      type="button"
+      // One click at a time for each message: an integration must not get Approve and Reject at once.
+      disabled={pending !== null}
+      aria-busy={sending || undefined}
+      className={className}
+      onClick={() => click(blockId, actionId)}
+    >
+      {sending ? <Spinner data-icon="inline-start" /> : null}
+      {label}
+    </button>
   )
 }
 
@@ -181,14 +213,14 @@ function Block({ block, id }: { block: MessageBlock; id: string }) {
               </div>
             ) : null}
           </div>
-          {block.accessory ? <BlockButton element={block.accessory} /> : null}
+          {block.accessory ? <BlockButton element={block.accessory} blockId={block.block_id} /> : null}
         </div>
       )
     case 'actions':
       return (
         <div data-slot="message-block-actions" className="flex flex-wrap gap-2">
           {block.elements.map((element, index) => (
-            <BlockButton key={index} element={element} />
+            <BlockButton key={index} element={element} blockId={block.block_id} />
           ))}
         </div>
       )
@@ -223,19 +255,33 @@ function Block({ block, id }: { block: MessageBlock; id: string }) {
 }
 
 /** An integration's layout blocks, as Slack shows them: stacked in the message, in place of its text. */
-export function MessageBlocks({ blocks, messageId }: { blocks: MessageBlock[]; messageId: string }) {
+export function MessageBlocks({ blocks, messageId, interactive = false }: { blocks: MessageBlock[]; messageId: string; interactive?: boolean }) {
   const [emojiIndex, setEmojiIndex] = useState<readonly EmojiShortcode[] | null>(null)
+  const [pending, setPending] = useState<string | null>(null)
+  const clickAction = useClickAction()
   const usesNames = /:[a-z0-9_+-]+:/.test(JSON.stringify(blocks))
   useEffect(() => {
     if (usesNames) void loadEmojiIndex().then(setEmojiIndex, () => {})
   }, [usesNames])
+  const click = (blockId: string, actionId: string) => {
+    setPending(`${blockId}/${actionId}`)
+    clickAction.mutate(
+      { messageId, blockId, actionId },
+      {
+        onError: (error) => toast.error(error instanceof ChatError && error.message ? error.message : 'The integration did not take the click.'),
+        onSettled: () => setPending(null),
+      },
+    )
+  }
   return (
     <EmojiIndexContext value={emojiIndex}>
-      <div data-slot="message-blocks" className="grid max-w-[600px] min-w-0 gap-2">
-        {blocks.map((block, index) => (
-          <Block key={index} block={block} id={`${messageId}-b${index}`} />
-        ))}
-      </div>
+      <ButtonsContext value={{ interactive, pending, click }}>
+        <div data-slot="message-blocks" className="grid max-w-[600px] min-w-0 gap-2">
+          {blocks.map((block, index) => (
+            <Block key={index} block={block} id={`${messageId}-b${index}`} />
+          ))}
+        </div>
+      </ButtonsContext>
     </EmojiIndexContext>
   )
 }

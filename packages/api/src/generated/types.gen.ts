@@ -25,6 +25,26 @@ export type ActionElement = ButtonElement & {
     type: 'button';
 };
 
+/**
+ * What an integration sends to a click's `response_url`: a message as for the incoming hook, and
+ * what to do with it (Slack's fields).
+ */
+export type ActionResponsePayload = IncomingWebhookPayload & {
+    /**
+     * Deletes the message with the button; the rest of the payload is not used.
+     */
+    delete_original?: boolean;
+    /**
+     * Replaces the message with the button.
+     */
+    replace_original?: boolean;
+    /**
+     * `ephemeral` (default): only the member who clicked sees the reply, until they reload.
+     * `in_channel`: a new message in the channel.
+     */
+    response_type?: string | null;
+};
+
 export type AdminEmailBody = {
     /**
      * The new address.
@@ -472,6 +492,10 @@ export type BotRecord = {
      * An https image, or null for the default bot avatar.
      */
     icon_url: string | null;
+    /**
+     * Its buttons without a `url` send clicks: the webhook is live and has a request URL.
+     */
+    interactive: boolean;
     name: string;
     webhook_id: string;
 };
@@ -550,6 +574,21 @@ export type ChangePasswordBody = {
      */
     current_password?: string | null;
     new_password: string;
+};
+
+export type ChatActionBody = {
+    /**
+     * The button's `action_id`.
+     */
+    action_id: string;
+    /**
+     * The `block_id` of the block with the button.
+     */
+    block_id: string;
+};
+
+export type ChatActionResult = {
+    ok: boolean;
 };
 
 export type ChatCategoryBody = {
@@ -640,6 +679,9 @@ export type ChatEvent = {
     type: 'emoji.changed';
 } | {
     type: 'stickers.changed';
+} | {
+    message: MessageRecord;
+    type: 'message.ephemeral';
 };
 
 /**
@@ -696,6 +738,13 @@ export type ChatForwardBody = {
      * returns the first copy.
      */
     nonce: string;
+};
+
+export type ChatInteractivityBody = {
+    /**
+     * Where clicks go: https (http and local hosts in development). Null turns clicks off.
+     */
+    request_url?: string | null;
 };
 
 export type ChatLinkPreview = {
@@ -765,6 +814,13 @@ export type ChatSendBody = {
      * The root message, for a thread reply.
      */
     thread_root_id?: string | null;
+};
+
+export type ChatSigningSecret = {
+    /**
+     * Checks the `X-Slack-Signature` of each click.
+     */
+    signing_secret: string;
 };
 
 export type ChatStateBody = {
@@ -1331,6 +1387,24 @@ export type DeleteAccountBody = {
 };
 
 export type DeliveryBody = 'manual' | 'smtp';
+
+/**
+ * One click that Orbit sent to a webhook's request URL.
+ */
+export type DeliveryRecord = {
+    action_id: string;
+    created_at: string;
+    duration_ms: number;
+    /**
+     * Why there was no good answer: `timeout`, `refused`, `blocked_address`, …
+     */
+    error: string | null;
+    id: string;
+    /**
+     * The HTTP status of the answer; null when there was none.
+     */
+    status: number | null;
+};
 
 export type DiscordEventBody = {
     event_id: string;
@@ -4658,6 +4732,10 @@ export type WebhookRecord = {
      * The author name of its messages, unless a message sets `username`.
      */
     name: string;
+    /**
+     * Where clicks on its buttons go; null when its buttons are not interactive.
+     */
+    request_url: string | null;
     rotated_at: string | null;
 };
 
@@ -10020,6 +10098,80 @@ export type StripeWebhookResponses = {
     200: unknown;
 };
 
+export type PostActionResponseData = {
+    body: ActionResponsePayload;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        webhook_id: string;
+        token: string;
+    };
+    query?: never;
+    url: '/api/v1/hooks/chat/{webhook_id}/responses/{token}';
+};
+
+export type PostActionResponseErrors = {
+    /**
+     * invalid_proxy_headers, invalid_json
+     */
+    400: TaskProblem;
+    /**
+     * workspace_read_only
+     */
+    402: TaskProblem;
+    /**
+     * chat_channel_archived
+     */
+    403: TaskProblem;
+    /**
+     * response_url_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large, payload_too_large
+     */
+    413: TaskProblem;
+    /**
+     * unsupported_media_type
+     */
+    415: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type PostActionResponseError = PostActionResponseErrors[keyof PostActionResponseErrors];
+
+export type PostActionResponseResponses = {
+    /**
+     * `ok`
+     */
+    200: string;
+};
+
+export type PostActionResponseResponse = PostActionResponseResponses[keyof PostActionResponseResponses];
+
 export type PostIncomingWebhookData = {
     body: IncomingWebhookPayload;
     headers?: {
@@ -13072,6 +13224,142 @@ export type UpdateChatWebhookResponses = {
 
 export type UpdateChatWebhookResponse = UpdateChatWebhookResponses[keyof UpdateChatWebhookResponses];
 
+export type ListChatWebhookDeliveriesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        conversation_id: string;
+        webhook_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/webhooks/{webhook_id}/deliveries';
+};
+
+export type ListChatWebhookDeliveriesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, chat_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * app_key_missing
+     */
+    503: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListChatWebhookDeliveriesError = ListChatWebhookDeliveriesErrors[keyof ListChatWebhookDeliveriesErrors];
+
+export type ListChatWebhookDeliveriesResponses = {
+    200: Array<DeliveryRecord>;
+};
+
+export type ListChatWebhookDeliveriesResponse = ListChatWebhookDeliveriesResponses[keyof ListChatWebhookDeliveriesResponses];
+
+export type SetChatWebhookInteractivityData = {
+    body: ChatInteractivityBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        conversation_id: string;
+        webhook_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/webhooks/{webhook_id}/interactivity';
+};
+
+export type SetChatWebhookInteractivityErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, chat_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * app_key_missing
+     */
+    503: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type SetChatWebhookInteractivityError = SetChatWebhookInteractivityErrors[keyof SetChatWebhookInteractivityErrors];
+
+export type SetChatWebhookInteractivityResponses = {
+    200: WebhookRecord;
+};
+
+export type SetChatWebhookInteractivityResponse = SetChatWebhookInteractivityResponses[keyof SetChatWebhookInteractivityResponses];
+
 export type RotateChatWebhookData = {
     body?: never;
     headers?: {
@@ -13131,6 +13419,142 @@ export type RotateChatWebhookResponses = {
 };
 
 export type RotateChatWebhookResponse = RotateChatWebhookResponses[keyof RotateChatWebhookResponses];
+
+export type GetChatWebhookSigningSecretData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        conversation_id: string;
+        webhook_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/webhooks/{webhook_id}/signing-secret';
+};
+
+export type GetChatWebhookSigningSecretErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, chat_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * app_key_missing
+     */
+    503: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetChatWebhookSigningSecretError = GetChatWebhookSigningSecretErrors[keyof GetChatWebhookSigningSecretErrors];
+
+export type GetChatWebhookSigningSecretResponses = {
+    200: ChatSigningSecret;
+};
+
+export type GetChatWebhookSigningSecretResponse = GetChatWebhookSigningSecretResponses[keyof GetChatWebhookSigningSecretResponses];
+
+export type RotateChatWebhookSigningSecretData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        conversation_id: string;
+        webhook_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/webhooks/{webhook_id}/signing-secret/rotate';
+};
+
+export type RotateChatWebhookSigningSecretErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, chat_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * app_key_missing
+     */
+    503: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type RotateChatWebhookSigningSecretError = RotateChatWebhookSigningSecretErrors[keyof RotateChatWebhookSigningSecretErrors];
+
+export type RotateChatWebhookSigningSecretResponses = {
+    200: ChatSigningSecret;
+};
+
+export type RotateChatWebhookSigningSecretResponse = RotateChatWebhookSigningSecretResponses[keyof RotateChatWebhookSigningSecretResponses];
 
 export type OpenChatDmData = {
     body: ChatUserIdsBody;
@@ -13737,6 +14161,77 @@ export type EditChatMessageResponses = {
 };
 
 export type EditChatMessageResponse = EditChatMessageResponses[keyof EditChatMessageResponses];
+
+export type ClickChatActionData = {
+    body: ChatActionBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        message_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/messages/{message_id}/actions';
+};
+
+export type ClickChatActionErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, chat_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * integration_failed
+     */
+    502: TaskProblem;
+    /**
+     * app_key_missing
+     */
+    503: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ClickChatActionError = ClickChatActionErrors[keyof ClickChatActionErrors];
+
+export type ClickChatActionResponses = {
+    200: ChatActionResult;
+};
+
+export type ClickChatActionResponse = ClickChatActionResponses[keyof ClickChatActionResponses];
 
 export type ForwardChatMessageData = {
     body: ChatForwardBody;

@@ -5,7 +5,12 @@ import {
   archiveChatChannel,
   createChatCategory,
   createChatChannel,
+  clickChatAction,
   createChatWebhook,
+  getChatWebhookSigningSecret,
+  listChatWebhookDeliveries,
+  rotateChatWebhookSigningSecret,
+  setChatWebhookInteractivity,
   deleteChatWebhook,
   listChatWebhooks,
   rotateChatWebhook,
@@ -63,6 +68,7 @@ import {
   toState,
   toThreadPage,
   toThreadState,
+  toDelivery,
   toWebhook,
 } from './wire'
 
@@ -333,6 +339,20 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
       } catch (error) {
         throw toChatError(error)
       }
+    },
+    async setWebhookInteractivity(conversationId, webhookId, requestUrl) {
+      const body = { request_url: requestUrl }
+      return toWebhook(await call(setChatWebhookInteractivity({ ...at({ conversation_id: conversationId, webhook_id: webhookId }), body })))
+    },
+    async webhookSigningSecret(conversationId, webhookId, rotate) {
+      const ids = at({ conversation_id: conversationId, webhook_id: webhookId })
+      return (await call(rotate ? rotateChatWebhookSigningSecret(ids) : getChatWebhookSigningSecret(ids))).signing_secret
+    },
+    async listWebhookDeliveries(conversationId, webhookId) {
+      return (await call(listChatWebhookDeliveries(at({ conversation_id: conversationId, webhook_id: webhookId })))).map(toDelivery)
+    },
+    async clickAction(messageId, blockId, actionId) {
+      await call(clickChatAction({ ...at({ message_id: messageId }), body: { block_id: blockId, action_id: actionId } }))
     },
     async deleteMessage(messageId) {
       await write(deleteChatMessage(at({ message_id: messageId })))

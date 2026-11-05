@@ -469,7 +469,11 @@ turns its routes, navigation and shortcuts off.
   divider, markdown, rich_text; `repositories/chat/blocks.rs`, stored in `chat_messages.blocks`): they show in place
   of the body (`MessageBlocks.tsx`; rich text becomes Markdown in `lib/blocks.ts`), and the body is their plain text. The hook is a drop-in for Slack's (`repositories/chat/slack.rs`): mrkdwn becomes
   Markdown, legacy `attachments` become `attachment` blocks, form `payload=` works, unknown block types are left out,
-  long text is cut, `icon_emoji` is the avatar (`bot.icon_emoji`), and the answer is plain `ok`.
+  long text is cut, `icon_emoji` is the avatar (`bot.icon_emoji`), and the answer is plain `ok`. Buttons without a URL are interactive when the webhook has a request URL
+  (Integrations > Interactivity): `chat_routes/interactions.rs` sends a Slack-signed `block_actions` payload (3 s, no
+  redirects, public addresses only outside development), and the integration answers through
+  `/api/v1/hooks/chat/{id}/responses/{token}` (5 uses, 30 min): replace, delete, `in_channel`, or an ephemeral reply
+  (live-only `message.ephemeral` event, `EphemeralMessages.tsx`). The signing secret is encrypted with the app key.
 - Custom emoji belong to the workspace (Workspace Settings > Emoji, owners and admins): `:name:` stays
   text in the body and in reactions and becomes the image when it is shown.
 - Stickers belong to the workspace too (Workspace Settings > Stickers, owners and admins; 512 KiB, 100 for

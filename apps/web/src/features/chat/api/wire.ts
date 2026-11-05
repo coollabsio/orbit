@@ -3,6 +3,7 @@ import type {
   ChatFileRecord,
   ConversationRecord,
   ConversationStateRecord,
+  DeliveryRecord,
   FollowedThreadRecord,
   LinkPreview as WireLinkPreview,
   MessagePage as WireMessagePage,
@@ -15,6 +16,7 @@ import { ApiProblem } from '@orbit/api/problem'
 import {
   type Attachment,
   type ChannelWebhook,
+  type WebhookDelivery,
   ChatError,
   type ChatErrorCode,
   type ChatEvent,
@@ -97,6 +99,18 @@ export function toWebhook(record: WebhookRecord): ChannelWebhook {
     createdAt: millis(record.created_at),
     rotatedAt: record.rotated_at === null ? null : millis(record.rotated_at),
     lastUsedAt: record.last_used_at === null ? null : millis(record.last_used_at),
+    requestUrl: record.request_url,
+  }
+}
+
+export function toDelivery(record: DeliveryRecord): WebhookDelivery {
+  return {
+    id: record.id,
+    actionId: record.action_id,
+    status: record.status,
+    error: record.error,
+    durationMs: record.duration_ms,
+    createdAt: millis(record.created_at),
   }
 }
 
@@ -143,7 +157,7 @@ export function toMessage(record: MessageRecord): Message {
       sticker: record.last_reply.sticker,
       createdAt: millis(record.last_reply.created_at),
     },
-    bot: record.bot && { webhookId: record.bot.webhook_id, name: record.bot.name, iconUrl: record.bot.icon_url, iconEmoji: record.bot.icon_emoji },
+    bot: record.bot && { webhookId: record.bot.webhook_id, name: record.bot.name, iconUrl: record.bot.icon_url, iconEmoji: record.bot.icon_emoji, interactive: record.bot.interactive },
     blocks: record.blocks,
   }
 }
@@ -191,6 +205,7 @@ export function toEvent(event: WireEvent, currentUserId: string): ChatEvent {
   switch (event.type) {
     case 'message.created':
     case 'message.updated':
+    case 'message.ephemeral':
       return { type: event.type, message: toMessage(event.message) }
     case 'message.deleted':
       return { type: event.type, conversationId: event.conversation_id, messageId: event.message_id, threadRootId: event.thread_root_id }

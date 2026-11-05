@@ -412,6 +412,103 @@ pub(crate) async fn post_incoming_webhook(
     Ok(hook_ok())
 }
 
+/// What an integration sends to a click's `response_url`: a message as for the incoming hook, and
+/// what to do with it (Slack's fields).
+#[derive(Deserialize, ToSchema)]
+pub(crate) struct ActionResponsePayload {
+    #[serde(flatten)]
+    message: IncomingWebhookPayload,
+    /// Replaces the message with the button.
+    #[serde(default)]
+    #[schema(required = false)]
+    replace_original: bool,
+    /// Deletes the message with the button; the rest of the payload is not used.
+    #[serde(default)]
+    #[schema(required = false)]
+    delete_original: bool,
+    /// `ephemeral` (default): only the member who clicked sees the reply, until they reload.
+    /// `in_channel`: a new message in the channel.
+    #[schema(required = false)]
+    response_type: Option<String>,
+}
+
+/// An integration's answer to a click. The token in the path is valid for 30 minutes and 5
+/// answers; any other token answers 404.
+#[utoipa::path(post, path = "/api/v1/hooks/chat/{webhook_id}/responses/{token}", params(("webhook_id" = String, Path), ("token" = String, Path)), request_body = ActionResponsePayload, responses((status = 200, description = "`ok`", content_type = "text/plain", body = String)))]
+pub(crate) async fn post_action_response(
+    State(state): State<ChatState>,
+    Path((webhook, token)): Path<(String, String)>,
+    request_id: RequestIdExtension,
+    request: Request,
+) -> Result<HookOk, ApiError> {
+    let instance = format!("/api/v1/hooks/chat/{webhook}/responses");
+    let request_id = request_id.as_ref();
+    let fail = |error: ChatError| match error {
+        ChatError::NotFound => ApiError::new(
+            StatusCode::NOT_FOUND,
+            "response_url_not_found",
+            "Response URL not found",
+            "This response URL is not valid: it was used 5 times, it is older than 30 minutes, or its message is gone.",
+            &instance,
+            request_id,
+        ),
+        error => hook_problem(error, &instance, request_id),
+    };
+    let webhook_id: Id = webhook.parse().map_err(|_| fail(ChatError::NotFound))?;
+    let response = state
+        .chat
+        .use_response_token(webhook_id, &token)
+        .await
+        .map_err(&fail)?
+        .ok_or_else(|| fail(ChatError::NotFound))?;
+    let payload: ActionResponsePayload = read_json(request, &instance, request_id).await?;
+    require_writable(&state, response.target.workspace_id, &instance, request_id).await?;
+    let workspace_id = response.target.workspace_id;
+    let actor_id = response.target.sender.webhook_id;
+    if payload.delete_original {
+        state
+            .publish(
+                workspace_id,
+                actor_id,
+                state.chat.delete_bot_message(&response),
+            )
+            .await
+            .map_err(&fail)?;
+        return Ok(hook_ok());
+    }
+    let post = build_post(payload.message, &instance, request_id)?;
+    if payload.replace_original {
+        state
+            .publish(
+                workspace_id,
+                actor_id,
+                state.chat.replace_bot_message(&response, post),
+            )
+            .await
+            .map_err(&fail)?;
+    } else if payload.response_type.as_deref() == Some("in_channel") {
+        let (written, _) = state
+            .publish(
+                workspace_id,
+                actor_id,
+                state.chat.post_as_bot(response.target.clone(), post),
+            )
+            .await
+            .map_err(&fail)?;
+        PushService::of(state.identity.database()).chat_message(&written.value);
+    } else {
+        state
+            .publish(
+                workspace_id,
+                actor_id,
+                state.chat.ephemeral_bot_message(&response, post),
+            )
+            .await
+            .map_err(&fail)?;
+    }
+    Ok(hook_ok())
+}
+
 fn hook_problem(
     error: ChatError,
     instance: &str,

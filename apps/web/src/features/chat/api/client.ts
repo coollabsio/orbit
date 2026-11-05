@@ -3,6 +3,7 @@ import type {
   Attachment,
   Category,
   ChannelWebhook,
+  WebhookDelivery,
   ChatEvent,
   Conversation,
   ConversationKind,
@@ -142,6 +143,13 @@ export interface ChatClient {
   /** A new URL; the old one stops working at once. */
   rotateWebhook(conversationId: string, webhookId: string): Promise<CreatedWebhook>
   deleteWebhook(conversationId: string, webhookId: string): Promise<void>
+  /** Where clicks on its buttons go; `null` turns clicks off. */
+  setWebhookInteractivity(conversationId: string, webhookId: string, requestUrl: string | null): Promise<ChannelWebhook>
+  /** The secret that signs its clicks; `rotate` makes a new one first. */
+  webhookSigningSecret(conversationId: string, webhookId: string, rotate: boolean): Promise<string>
+  listWebhookDeliveries(conversationId: string, webhookId: string): Promise<WebhookDelivery[]>
+  /** Sends a click on an integration's button. Rejects when the integration did not take it. */
+  clickAction(messageId: string, blockId: string, actionId: string): Promise<void>
 
   createCategory(name: string): Promise<Category>
   renameCategory(categoryId: string, name: string): Promise<Category>

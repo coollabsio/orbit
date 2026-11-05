@@ -17,8 +17,9 @@ const MAX_WEBHOOKS_PER_CHANNEL: i64 = 10;
 const NAME_MAX_CHARS: usize = 80;
 const ICON_URL_MAX_CHARS: usize = 2048;
 
-const WEBHOOK_COLUMNS: &str =
-    "id, conversation_id, name, icon_url, created_by, created_at, rotated_at, last_used_at";
+const WEBHOOK_COLUMNS: &str = "id, conversation_id, name, icon_url, created_by, created_at, rotated_at, last_used_at, request_url";
+/// Deliveries kept for each webhook.
+const MAX_DELIVERIES: i64 = 20;
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct WebhookRecord {
@@ -39,6 +40,26 @@ pub struct WebhookRecord {
     pub rotated_at: Option<TimestampMillis>,
     #[schema(value_type = Option<String>, format = DateTime, required = true)]
     pub last_used_at: Option<TimestampMillis>,
+    /// Where clicks on its buttons go; null when its buttons are not interactive.
+    #[schema(required = true)]
+    pub request_url: Option<String>,
+}
+
+/// One click that Orbit sent to a webhook's request URL.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct DeliveryRecord {
+    #[schema(value_type = String)]
+    pub id: Id,
+    pub action_id: String,
+    /// The HTTP status of the answer; null when there was none.
+    #[schema(required = true)]
+    pub status: Option<i64>,
+    /// Why there was no good answer: `timeout`, `refused`, `blocked_address`, …
+    #[schema(required = true)]
+    pub error: Option<String>,
+    pub duration_ms: i64,
+    #[schema(value_type = String, format = DateTime)]
+    pub created_at: TimestampMillis,
 }
 
 /// A webhook and the secret of its URL, which no later read returns.
@@ -127,6 +148,53 @@ fn webhook_from_row(row: &AnyRow) -> Result<WebhookRecord, ChatError> {
         created_at: TimestampMillis::from_millis(row.get("created_at")),
         rotated_at: time("rotated_at"),
         last_used_at: time("last_used_at"),
+        request_url: row.get("request_url"),
+    })
+}
+
+/// A request URL Orbit may send clicks to: https on a public host. `development` also takes http
+/// and local hosts, so a receiver on the developer's machine can be tested. The address of a name
+/// is checked again for each click (`PublicResolver`).
+fn clean_request_url(url: &str, development: bool) -> Result<String, ChatError> {
+    let invalid = ChatError::Invalid {
+        field: "request_url",
+    };
+    let url = url.trim();
+    if url.chars().count() > 2048 {
+        return Err(invalid);
+    }
+    let parsed = url::Url::parse(url).map_err(|_| ChatError::Invalid {
+        field: "request_url",
+    })?;
+    let scheme_ok = parsed.scheme() == "https" || (development && parsed.scheme() == "http");
+    let public = match parsed.host() {
+        Some(url::Host::Ipv4(ip)) => orbit_platform::is_public_ip(ip.into()),
+        Some(url::Host::Ipv6(ip)) => orbit_platform::is_public_ip(ip.into()),
+        Some(url::Host::Domain(name)) => {
+            let name = name.to_ascii_lowercase();
+            name.contains('.')
+                && ![".localhost", ".local", ".internal", ".lan", ".home.arpa"]
+                    .iter()
+                    .any(|suffix| name.ends_with(suffix))
+        }
+        None => false,
+    };
+    if !scheme_ok || parsed.host().is_none() || !(public || development) {
+        return Err(invalid);
+    }
+    Ok(url.to_owned())
+}
+
+fn encrypt(key: &[u8; 32], secret: &str) -> Result<Vec<u8>, ChatError> {
+    crate::secret_box::encrypt_secret(key, secret)
+        .map_err(|()| ChatError::Conflict("The signing secret could not be stored."))
+}
+
+pub(super) fn decrypt(key: &[u8; 32], stored: &[u8]) -> Result<String, ChatError> {
+    crate::secret_box::decrypt_secret(key, stored).map_err(|()| {
+        ChatError::Conflict(
+            "The signing secret cannot be read with this server's app key. Rotate it.",
+        )
     })
 }
 
@@ -267,6 +335,156 @@ impl ChatRepository {
         let webhook = load_webhook(&mut tx, conversation_id, webhook_id).await?;
         tx.commit().await?;
         Ok(WebhookWithSecret { webhook, secret })
+    }
+
+    /// Sets where clicks on the webhook's buttons go (`None` turns clicks off). The first URL makes
+    /// the signing secret, which stays when the URL changes.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn set_request_url(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        conversation_id: Id,
+        webhook_id: Id,
+        url: Option<&str>,
+        key: &[u8; 32],
+        development: bool,
+    ) -> Result<WebhookRecord, ChatError> {
+        let url = url
+            .filter(|url| !url.trim().is_empty())
+            .map(|url| clean_request_url(url, development))
+            .transpose()?;
+        let mut tx = self.database.immediate_transaction().await?;
+        let access = load_access(&mut tx, workspace_id, actor_id, conversation_id).await?;
+        access.require_manage()?;
+        load_webhook(&mut tx, conversation_id, webhook_id).await?;
+        let has_secret: Option<Vec<u8>> =
+            sqlx::query_scalar("SELECT signing_secret FROM chat_webhooks WHERE id = $1")
+                .bind(webhook_id.to_string())
+                .fetch_one(&mut *tx)
+                .await?;
+        let secret = match has_secret {
+            Some(stored) => stored,
+            None => encrypt(key, &generate_opaque_token())?,
+        };
+        sqlx::query("UPDATE chat_webhooks SET request_url = $1, signing_secret = $2 WHERE id = $3")
+            .bind(url.as_deref())
+            .bind(secret)
+            .bind(webhook_id.to_string())
+            .execute(&mut *tx)
+            .await?;
+        let webhook = load_webhook(&mut tx, conversation_id, webhook_id).await?;
+        tx.commit().await?;
+        Ok(webhook)
+    }
+
+    /// The signing secret of a webhook, for its managers. `rotate` makes a new one first: the
+    /// integration must then check clicks with the new secret.
+    pub async fn signing_secret(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        conversation_id: Id,
+        webhook_id: Id,
+        key: &[u8; 32],
+        rotate: bool,
+    ) -> Result<String, ChatError> {
+        let mut tx = self.database.immediate_transaction().await?;
+        let access = load_access(&mut tx, workspace_id, actor_id, conversation_id).await?;
+        access.require_manage()?;
+        load_webhook(&mut tx, conversation_id, webhook_id).await?;
+        let stored: Option<Vec<u8>> =
+            sqlx::query_scalar("SELECT signing_secret FROM chat_webhooks WHERE id = $1")
+                .bind(webhook_id.to_string())
+                .fetch_one(&mut *tx)
+                .await?;
+        let secret = match stored {
+            Some(stored) if !rotate => decrypt(key, &stored)?,
+            None if !rotate => {
+                return Err(ChatError::Conflict("Set a request URL first."));
+            }
+            _ => {
+                let secret = generate_opaque_token();
+                sqlx::query("UPDATE chat_webhooks SET signing_secret = $1 WHERE id = $2")
+                    .bind(encrypt(key, &secret)?)
+                    .bind(webhook_id.to_string())
+                    .execute(&mut *tx)
+                    .await?;
+                secret
+            }
+        };
+        tx.commit().await?;
+        Ok(secret)
+    }
+
+    /// The newest clicks sent to a webhook, newest first.
+    pub async fn list_deliveries(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        conversation_id: Id,
+        webhook_id: Id,
+    ) -> Result<Vec<DeliveryRecord>, ChatError> {
+        let mut conn = self.database.pool().acquire().await?;
+        let access = load_access(&mut conn, workspace_id, actor_id, conversation_id).await?;
+        access.require_manage()?;
+        load_webhook(&mut conn, conversation_id, webhook_id).await?;
+        sqlx::query(
+            "SELECT id, action_id, status, error, duration_ms, created_at FROM chat_webhook_deliveries \
+             WHERE webhook_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2",
+        )
+        .bind(webhook_id.to_string())
+        .bind(MAX_DELIVERIES)
+        .fetch_all(&mut *conn)
+        .await?
+        .iter()
+        .map(|row| {
+            Ok(DeliveryRecord {
+                id: parse_id(row.get("id"))?,
+                action_id: row.get("action_id"),
+                status: row.get("status"),
+                error: row.get("error"),
+                duration_ms: row.get("duration_ms"),
+                created_at: TimestampMillis::from_millis(row.get("created_at")),
+            })
+        })
+        .collect()
+    }
+
+    /// Keeps the result of one click for the webhook's list, and drops the ones past the newest 20.
+    pub async fn record_delivery(
+        &self,
+        webhook_id: Id,
+        action_id: &str,
+        status: Option<u16>,
+        error: Option<&str>,
+        duration_ms: i64,
+    ) -> Result<(), ChatError> {
+        let mut tx = self.database.immediate_transaction().await?;
+        sqlx::query(
+            "INSERT INTO chat_webhook_deliveries (id, webhook_id, action_id, status, error, duration_ms, \
+             created_at) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        )
+        .bind(Id::new_v7().to_string())
+        .bind(webhook_id.to_string())
+        .bind(action_id)
+        .bind(status.map(i64::from))
+        .bind(error)
+        .bind(duration_ms)
+        .bind(TimestampMillis::now().as_millis())
+        .execute(&mut *tx)
+        .await?;
+        sqlx::query(
+            "DELETE FROM chat_webhook_deliveries WHERE webhook_id = $1 AND id NOT IN \
+             (SELECT id FROM chat_webhook_deliveries WHERE webhook_id = $1 \
+             ORDER BY created_at DESC, id DESC LIMIT $2)",
+        )
+        .bind(webhook_id.to_string())
+        .bind(MAX_DELIVERIES)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
     }
 
     /// Deletes a webhook for good. The messages it posted stay.

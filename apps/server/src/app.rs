@@ -423,7 +423,11 @@ impl App {
                     attachment_state.uploads.clone(),
                     cookie_mode,
                 )
-                .with_public_origin(&config.http.public_origin),
+                .with_public_origin(&config.http.public_origin)
+                .with_interactivity(
+                    app_key,
+                    config.environment == orbit_platform::EnvironmentMode::Development,
+                ),
             },
             health,
             assets,

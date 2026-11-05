@@ -1,7 +1,7 @@
 //! Messages, thread replies, reactions and pins, and the lists that read them.
 
 use orbit_platform::Row;
-use orbit_platform::{Id, TimestampMillis};
+use orbit_platform::{Flag, Id, TimestampMillis};
 use sqlx::AnyConnection;
 use sqlx::any::AnyRow;
 
@@ -434,6 +434,10 @@ impl ChatRepository {
             return Err(ChatError::NotFound);
         }
         let conversation_id = conversation.id;
+        let bot = BotRecord {
+            interactive: webhook_interactive(&mut tx, bot.webhook_id).await?,
+            ..bot
+        };
         let message = insert_message(
             &mut tx,
             NewMessage {
@@ -1121,8 +1125,23 @@ pub(super) fn bot_message_parts(
         name,
         icon_url,
         icon_emoji,
+        interactive: false,
     };
     Ok((body, bot, post.blocks))
+}
+
+/// Whether a webhook's buttons send clicks now.
+pub(super) async fn webhook_interactive(
+    conn: &mut AnyConnection,
+    webhook_id: Id,
+) -> Result<bool, ChatError> {
+    let interactive: Option<Flag> = sqlx::query_scalar(
+        "SELECT request_url IS NOT NULL AND revoked_at IS NULL FROM chat_webhooks WHERE id = $1",
+    )
+    .bind(webhook_id.to_string())
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(interactive.is_some_and(|flag| flag.0))
 }
 
 struct NewMessage<'a> {

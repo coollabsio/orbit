@@ -58,7 +58,7 @@ export function MessageBody({ message }: { message: Message }) {
   if (message.blocks && message.blocks.length > 0) {
     return (
       <div data-slot="message-body" className="min-w-0">
-        <MessageBlocks blocks={message.blocks} messageId={message.id} />
+        <MessageBlocks blocks={message.blocks} messageId={message.id} interactive={message.bot?.interactive === true} />
       </div>
     )
   }

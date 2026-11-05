@@ -132,6 +132,8 @@ export interface MessageBot {
   iconUrl: string | null
   /** An emoji name (`ghost`) shown as the avatar in place of `iconUrl`. Missing on a row cached before it existed. */
   iconEmoji?: string | null
+  /** Its buttons without a URL send clicks to the integration. Missing on a row cached before it existed. */
+  interactive?: boolean
 }
 
 /** An incoming webhook of a channel. Its URL (with the secret) is only in the answer that made or rotated it. */
@@ -144,8 +146,21 @@ export interface ChannelWebhook {
   createdAt: number
   rotatedAt: number | null
   lastUsedAt: number | null
+  /** Where clicks on its buttons go; `null` when they are off. */
+  requestUrl: string | null
 }
 
+/** One click that Orbit sent to a webhook's request URL. */
+export interface WebhookDelivery {
+  id: string
+  actionId: string
+  /** The HTTP status of the answer; `null` when there was none. */
+  status: number | null
+  /** Why there was no good answer: `timeout`, `unreachable`, `blocked_address`, … */
+  error: string | null
+  durationMs: number
+  createdAt: number
+}
 
 /** The sticker of a message: a custom image of the workspace, shown large. `url` is the image, served by Orbit. */
 export interface MessageSticker {
@@ -295,7 +310,8 @@ export type ChatEvent =
   | { type: 'emoji.changed' }
   /** A sticker of the workspace was added or deleted: fetch the list again. */
   | { type: 'stickers.changed' }
-
+  /** An integration's reply that only the current user sees, until the page reloads. It is not stored. */
+  | { type: 'message.ephemeral'; message: Message }
   | { type: 'connection'; status: ConnectionStatus }
   /** The client missed events: refetch every chat query. */
   | { type: 'resync' }

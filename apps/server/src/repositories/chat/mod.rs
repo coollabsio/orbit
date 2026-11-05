@@ -15,6 +15,7 @@ mod blocks;
 mod conversations;
 mod emoji;
 mod files;
+mod interactions;
 mod messages;
 mod search;
 mod slack;
@@ -38,13 +39,16 @@ pub use crate::live::Recipients;
 pub use blocks::{BlocksError, MessageBlock, check_message_blocks, parse_blocks};
 pub use conversations::{ChannelCreate, ChannelUpdate};
 pub use emoji::{CustomEmojiImage, CustomEmojiRecord, EMOJI_MAX_BYTES};
+pub use interactions::{Click, ResponseTarget};
 pub use messages::BotPost;
 pub use messages::{ForwardInput, MessageCursor, SendInput};
 pub use search::{SearchHitRecord, SearchInput, SearchPage};
 pub use slack::{attachment_blocks, cut, emoji_name, mrkdwn_to_markdown};
 pub use state::{ConversationCursor, ReadSnapshot, StateUpdate, ThreadCursor};
 pub use stickers::{CustomStickerImage, CustomStickerRecord, STICKER_MAX_BYTES, StickerRecord};
-pub use webhooks::{BotSender, HookTarget, WebhookInput, WebhookRecord, WebhookWithSecret};
+pub use webhooks::{
+    BotSender, DeliveryRecord, HookTarget, WebhookInput, WebhookRecord, WebhookWithSecret,
+};
 
 /// Characters in one message body.
 pub const MESSAGE_MAX_CHARS: usize = 4000;
@@ -307,6 +311,8 @@ pub struct BotRecord {
     /// An emoji name (`ghost`, without colons) shown as the avatar instead of `icon_url`.
     #[schema(required = true)]
     pub icon_emoji: Option<String>,
+    /// Its buttons without a `url` send clicks: the webhook is live and has a request URL.
+    pub interactive: bool,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -494,6 +500,9 @@ pub enum ChatEvent {
     /// A custom sticker was added or deleted: read the list again.
     #[serde(rename = "stickers.changed")]
     StickersChanged,
+    /// An integration's reply that only this member sees, live; it is not stored.
+    #[serde(rename = "message.ephemeral")]
+    MessageEphemeral { message: MessageRecord },
 }
 
 /// Who an event is for, as the write that made it sees it.
@@ -962,12 +971,15 @@ const MESSAGE_SELECT: &str = "SELECT m.id, m.conversation_id, m.thread_root_id, 
      l.sticker_id IS NOT NULL AS last_sticker, q.sticker_id IS NOT NULL AS quoted_sticker, \
      m.reply_to_id, q.author_id AS quoted_author_id, substr(q.body, 1, 200) AS quoted_body, \
      m.forward_of_id, m.forward_conversation_id, m.forward_author_id, m.forward_created_at, \
-     m.forward_bot_name, q.bot_name AS quoted_bot_name, m.webhook_id, m.bot_name, m.bot_icon_url, m.bot_icon_emoji,, \
+     m.forward_bot_name, q.bot_name AS quoted_bot_name, m.webhook_id, m.bot_name, m.bot_icon_url, m.bot_icon_emoji, \
+     CAST(CASE WHEN wh.request_url IS NOT NULL AND wh.revoked_at IS NULL THEN 1 ELSE 0 END AS BIGINT) \
+     AS bot_interactive, \
      m.blocks, \
      m.sticker_id, s.workspace_id AS sticker_workspace_id, s.name AS sticker_name \
      FROM chat_messages m LEFT JOIN chat_messages l ON l.id = m.last_reply_id \
      LEFT JOIN chat_messages q ON q.id = m.reply_to_id AND q.deleted_at IS NULL \
-     LEFT JOIN custom_stickers s ON s.id = m.sticker_id";
+     LEFT JOIN custom_stickers s ON s.id = m.sticker_id \
+     LEFT JOIN chat_webhooks wh ON wh.id = m.webhook_id";
 
 fn message_from_row(row: &AnyRow) -> Result<MessageRecord, ChatError> {
     let body: String = row.get("body");
@@ -1038,6 +1050,7 @@ fn message_from_row(row: &AnyRow) -> Result<MessageRecord, ChatError> {
         name: row.get::<Option<String>, _>("bot_name").unwrap_or_default(),
         icon_url: row.get("bot_icon_url"),
         icon_emoji: row.get("bot_icon_emoji"),
+        interactive: row.get("bot_interactive"),
     });
     let blocks = match row.get::<Option<String>, _>("blocks") {
         Some(_) if deleted => None,

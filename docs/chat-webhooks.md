@@ -78,9 +78,10 @@ Rich text runs are `text` (with `style`: `bold`, `italic`, `strike`, `code`), `l
 `everyone`) and `date` (shown as its `fallback`).
 
 A button has `text` (`plain_text`, at most 75 characters) and an optional `style` (`primary` or
-`danger`). A button with a `url` (http or https) opens the link. A button without a `url` sends its
-`action_id` and `value` to the integration in Slack; Orbit does not support that yet, so it shows
-the button disabled.
+`danger`). A button with a `url` (http or https) opens the link. A button without a `url` sends a
+click to the integration (see [Interactivity](#interactivity)); it is disabled while the webhook has
+no request URL. Give the block a `block_id` and each button an `action_id`; Orbit makes them
+(`b0`, `a0`, …) when they are missing.
 
 Orbit leaves out what it cannot show, as a Slack client does with what it does not know: other block
 types (`input`, `video`, …), interactive elements that are not buttons (menus, date pickers,
@@ -125,12 +126,97 @@ curl -X POST -H 'Content-Type: application/json' -d '{
 }' 'https://orbit.example.com/api/v1/hooks/chat/<webhook_id>/<secret>'
 ```
 
+## Interactivity
+
+A click on a button without a `url` is sent to the webhook's **request URL**, as Slack sends it, and
+the integration answers through a `response_url`. Code that handles Slack interactivity (for
+example Bolt) works with Orbit after you change its URLs and signing secret.
+
+### Set it up
+
+1. Open **⋯ > Edit channel > Integrations**, then select **⋯ > Interactivity** on the webhook.
+2. Type the request URL (`https://…`) and select **Save**. Orbit makes a signing secret.
+3. Select **Reveal** and copy the signing secret into your integration.
+
+The request URL must be https on a public address. (A development server, `ORBIT_ENV=development`,
+also takes `http` and local addresses.) **Make new secret** changes the secret at once. **Turn off**
+disables the buttons again. **Last clicks** shows the answers of the last 20 clicks.
+
+### The click
+
+Orbit sends `POST <request URL>` with `Content-Type: application/x-www-form-urlencoded` and the
+JSON in the `payload` field, within 3 seconds, one time, without redirects:
+
+```json
+{
+  "type": "block_actions",
+  "api_app_id": "<webhook id>",
+  "team": {"id": "<workspace id>", "domain": "<workspace name>"},
+  "user": {"id": "<user id>", "username": "Ana", "name": "Ana", "team_id": "<workspace id>"},
+  "channel": {"id": "<channel id>", "name": "deploys"},
+  "container": {"type": "message", "message_ts": "<message id>", "channel_id": "<channel id>", "is_ephemeral": false},
+  "message": {"type": "message", "ts": "<message id>", "text": "…", "blocks": […]},
+  "response_url": "https://orbit.example.com/api/v1/hooks/chat/<webhook id>/responses/<token>",
+  "actions": [{"type": "button", "action_id": "approve", "block_id": "review", "value": "48",
+               "text": {"type": "plain_text", "text": "Approve"}, "style": "primary", "action_ts": "1793917200.123"}]
+}
+```
+
+Ids are Orbit ids: `message_ts` and `ts` are the message id, not a Slack timestamp. Orbit reads
+`value` from the stored message, so a member cannot change it.
+
+Each request is signed as Slack signs it, in `X-Slack-Request-Timestamp` and `X-Slack-Signature`
+(also sent as `X-Orbit-Request-Timestamp` and `X-Orbit-Signature`): `v0=` and the hex HMAC-SHA256 of
+`v0:{timestamp}:{raw body}` with the signing secret. Check it in constant time, and refuse requests
+older than 5 minutes.
+
+Answer `200` within 3 seconds; Orbit does not use the body. Any other answer, or none, shows the
+member an error, and the click is not sent again.
+
+### Answer through `response_url`
+
+POST JSON to the `response_url` — a message as for the webhook (`text`, `blocks`, `attachments`,
+`username`, `icon_url`, `icon_emoji`), and what to do with it:
+
+| Field | Effect |
+|---|---|
+| `replace_original: true` | Replaces the message with the button (not marked as edited). |
+| `delete_original: true` | Deletes the message with the button. |
+| `response_type: "in_channel"` | Posts a new message in the channel. |
+| `response_type: "ephemeral"` (default) | Shows a reply only to the member who clicked, until they reload or dismiss it. |
+
+A `response_url` works 5 times in 30 minutes. Orbit answers `200 ok`, or `404 response_url_not_found`.
+
+```python
+# A minimal receiver (Python standard library).
+import hashlib, hmac, json, time, urllib.parse, urllib.request
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+SECRET = b"<signing secret>"
+
+class Handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        raw = self.rfile.read(int(self.headers["Content-Length"]))
+        ts = self.headers["X-Slack-Request-Timestamp"]
+        expected = "v0=" + hmac.new(SECRET, b"v0:" + ts.encode() + b":" + raw, hashlib.sha256).hexdigest()
+        if abs(time.time() - int(ts)) > 300 or not hmac.compare_digest(expected, self.headers["X-Slack-Signature"]):
+            self.send_response(401); self.end_headers(); return
+        self.send_response(200); self.end_headers()
+        payload = json.loads(urllib.parse.parse_qs(raw.decode())["payload"][0])
+        answer = {"replace_original": True,
+                  "text": f"{payload['actions'][0]['text']['text']} by <@{payload['user']['id']}>"}
+        urllib.request.urlopen(urllib.request.Request(payload["response_url"], json.dumps(answer).encode(),
+                                                      {"Content-Type": "application/json"}))
+
+HTTPServer(("0.0.0.0", 3000), Handler).serve_forever()
+```
+
 ## Slack compatibility
 
 What does not carry over from Slack:
 
-- Buttons without a `url` show disabled: Orbit does not send interaction payloads yet. Menus,
-  date pickers and other interactive elements are left out.
+- Only buttons are interactive. Menus, date pickers and other interactive elements are left out,
+  and there are no modals (`trigger_id` is sent but cannot open anything).
 - Slack user, user group and channel ids name nobody in Orbit. Use Orbit ids.
 - `thread_ts` (replies in a thread) and `channel` (another channel) are ignored: a webhook posts to
   its own channel.
@@ -152,6 +238,7 @@ Errors are `application/problem+json`. The `instance` field never contains the s
 | 402 | `workspace_read_only` | The workspace has no active subscription (Orbit Cloud). |
 | 403 | `chat_channel_archived` | The channel is archived. |
 | 404 | `webhook_not_found` | Unknown id, wrong secret, or a deleted or rotated webhook. |
+| 404 | `response_url_not_found` | A `response_url` used 5 times, older than 30 minutes, or whose message is gone. |
 | 413 | `payload_too_large` | The body is larger than 64 KiB. |
 | 415 | `unsupported_media_type` | The body is not JSON or a form. |
 | 422 | `validation_failed` | Nothing to show (no text, and no blocks or attachments that Orbit can show), or a block or attachment breaks its rules. The `detail` names the place. |
