@@ -6,6 +6,6 @@ test('shows one general loading indicator without staged loading copy', () => {
   const { container, getByRole } = render(<LoadingScreen />)
 
   const indicator = getByRole('status', { name: 'Loading' })
-  expect(indicator.getAttribute('data-slot')).toBe('spinner')
+  expect(indicator.querySelector('[data-slot="orbit-loader"]')).not.toBeNull()
   expect(container.textContent).toBe('')
 })
