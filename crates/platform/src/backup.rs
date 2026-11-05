@@ -33,7 +33,7 @@ const DOWNLOADS: &str = "downloads";
 const DOWNLOAD_CACHE_MILLIS: u128 = 60 * 60 * 1000;
 /// [`BackupService::verified_snapshot`] checks a snapshot's hashes again after this long.
 const VERIFIED_FOR: std::time::Duration = std::time::Duration::from_secs(10 * 60);
-const SUPPORTED_SCHEMA_VERSION: i64 = 66;
+const SUPPORTED_SCHEMA_VERSION: i64 = 67;
 /// Retention keeps up to this many snapshots from the last day, so a manual or hourly backup does not replace an
 /// earlier one from the same day.
 const RECENT_SNAPSHOTS: usize = 24;

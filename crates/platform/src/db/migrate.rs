@@ -462,6 +462,11 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0066_asana_imports.sql"),
                     false,
                 ),
+                Migration::new(
+                    67,
+                    include_str!("../../../../apps/server/migrations/0067_linear_imports.sql"),
+                    false,
+                ),
             ],
         );
         runner.postgres = vec![
@@ -582,6 +587,11 @@ impl MigrationRunner {
             Migration::new(
                 66,
                 include_str!("../../../../apps/server/migrations/postgres/0066_asana_imports.sql"),
+                false,
+            ),
+            Migration::new(
+                67,
+                include_str!("../../../../apps/server/migrations/postgres/0067_linear_imports.sql"),
                 false,
             ),
         ];
