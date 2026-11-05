@@ -40,7 +40,7 @@ export function AppearancePage() {
 
   return (
     <>
-      <SettingsCard title="Layout" description="Choose the classic layout or the new UI.">
+      <SettingsCard title="Layout">
         <div className="grid gap-3 sm:grid-cols-2">
           {LAYOUTS.map((option) => {
             const contextual = option.value === 'new'

@@ -28,6 +28,7 @@ import { GithubPage } from '@/features/settings/pages/GithubPage'
 import { EmojiPage } from '@/features/settings/pages/EmojiPage'
 import { DangerZonePage } from '@/features/settings/pages/DangerZonePage'
 import { ExportPage } from '@/features/settings/pages/ExportPage'
+import { ImportPage } from '@/features/settings/pages/ImportPage'
 import { BillingPage } from '@/features/settings/pages/BillingPage'
 import { MembersPage } from '@/features/settings/pages/MembersPage'
 import { SecurityPage } from '@/features/settings/pages/SecurityPage'
@@ -150,6 +151,7 @@ export default function App() {
                 <Route path="github" element={<GithubPage />} />
                 <Route path="agentic" element={<AgenticPage />} />
                 <Route path="billing" element={<BillingPage />} />
+                <Route path="import" element={<ImportPage />} />
                 <Route path="export" element={<ExportPage />} />
                 <Route path="danger-zone" element={<DangerZonePage />} />
                 <Route path="members" element={<MembersPage />} />

@@ -33,7 +33,7 @@ export function GeneralPage() {
 
   return (
     <>
-      {canRename ? <SettingsCard title="Workspace" description="Rename this workspace.">
+      {canRename ? <SettingsCard title="Workspace">
         <form ref={formRef} onSubmit={(event) => { event.preventDefault(); saveWorkspace() }}>
           <FieldGrid>
             <Field><FieldLabel htmlFor="workspace-name">Name</FieldLabel><Input id="workspace-name" required disabled={renameSlow} value={name} onChange={(event) => setNameDraft({ workspaceId: workspace.id, value: event.target.value })} /></Field>
