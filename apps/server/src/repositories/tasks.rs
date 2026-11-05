@@ -2145,17 +2145,16 @@ impl TaskRepository {
             .await?;
         let before = sub_issues::snapshot_in_tx(&mut tx, update.id).await?;
         let task_before = task_in_tx(&mut tx, workspace_id, update.id, false).await?;
-        let blocks =
-            update_task_in_tx(
-                &mut tx,
-                workspace_id,
-                actor_id,
-                update,
-                request_id,
-                now,
-                self.notifies(),
-            )
-            .await?;
+        let blocks = update_task_in_tx(
+            &mut tx,
+            workspace_id,
+            actor_id,
+            update,
+            request_id,
+            now,
+            self.notifies(),
+        )
+        .await?;
         if let (Some(collab), Some(blocks)) = (collab.as_mut(), &blocks) {
             collab.replace(&mut tx, blocks, actor_id, now).await?;
         }
@@ -2254,17 +2253,16 @@ impl TaskRepository {
         let mut snapshots = Vec::with_capacity(updates.len());
         for update in updates {
             let before = sub_issues::snapshot_in_tx(&mut tx, update.id).await?;
-            let blocks =
-                update_task_in_tx(
-                    &mut tx,
-                    workspace_id,
-                    actor_id,
-                    update,
-                    request_id,
-                    now,
-                    self.notifies(),
-                )
-                .await?;
+            let blocks = update_task_in_tx(
+                &mut tx,
+                workspace_id,
+                actor_id,
+                update,
+                request_id,
+                now,
+                self.notifies(),
+            )
+            .await?;
             if let (Some(collab), Some(blocks)) = (collabs.get_mut(&update.id), &blocks) {
                 collab.replace(&mut tx, blocks, actor_id, now).await?;
             }
