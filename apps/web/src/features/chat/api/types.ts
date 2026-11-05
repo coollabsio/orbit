@@ -105,6 +105,8 @@ export interface ReplyQuote {
   body: string
   /** The quoted message has a sticker. Missing on a row cached before stickers existed. */
   sticker?: boolean
+  /** Set when an integration posted the quoted message: shown as its author. */
+  botName?: string | null
 }
 
 /** Where a forwarded message was copied from. The original may be gone, or in a conversation the reader cannot open. */
@@ -114,6 +116,31 @@ export interface ForwardOrigin {
   authorId: string
   /** When the original message was sent. */
   createdAt: number
+  /** Set when an integration posted the original: shown as its author. */
+  botName?: string | null
+}
+
+/**
+ * The integration (an incoming webhook) that posted a message. `authorId` of such a message is the member who set the
+ * integration up; the message shows this name and icon, is never that member's own, and cannot be edited.
+ */
+export interface MessageBot {
+  webhookId: string
+  name: string
+  /** An https image; `null` shows the default bot avatar. */
+  iconUrl: string | null
+}
+
+/** An incoming webhook of a channel. Its URL (with the secret) is only in the answer that made or rotated it. */
+export interface ChannelWebhook {
+  id: string
+  conversationId: string
+  name: string
+  iconUrl: string | null
+  createdBy: string
+  createdAt: number
+  rotatedAt: number | null
+  lastUsedAt: number | null
 }
 
 /** The sticker of a message: a custom image of the workspace, shown large. `url` is the image, served by Orbit. */
@@ -162,6 +189,8 @@ export interface Message {
   lastReplyAt: number | null
   replyUserIds: string[]
   lastReply: ReplyPreview | null
+  /** Set when an integration posted the message. Missing on a row cached before integrations existed. */
+  bot?: MessageBot | null
   /** Client only: set on a message that the server has not confirmed. */
   sendState?: 'sending' | 'failed'
 }

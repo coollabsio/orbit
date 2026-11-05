@@ -551,7 +551,7 @@ pub(super) fn unread_count_sql(bounded: bool) -> String {
         "SELECT COUNT(*) AS unread, CAST(COALESCE(SUM(CASE WHEN m.mention_channel <> 0 OR m.mention_here <> 0 THEN 1 ELSE 0 END), 0) AS BIGINT) AS broadcasts \
          FROM chat_messages m WHERE m.conversation_id = $1 \
          AND (m.thread_root_id IS NULL OR m.also_in_channel = 1) AND m.kind = 'message' \
-         AND m.deleted_at IS NULL AND m.author_id <> $2 {after}"
+         AND m.deleted_at IS NULL AND (m.author_id <> $2 OR m.webhook_id IS NOT NULL) {after}"
     )
 }
 

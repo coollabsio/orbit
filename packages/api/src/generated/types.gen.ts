@@ -390,6 +390,19 @@ export type BillingView = {
     trial_days: number;
 };
 
+/**
+ * The integration that posted a message. `author_id` of such a message is the member who set the
+ * integration up; show this name and icon instead.
+ */
+export type BotRecord = {
+    /**
+     * An https image, or null for the default bot avatar.
+     */
+    icon_url: string | null;
+    name: string;
+    webhook_id: string;
+};
+
 export type BulkBody = {
     updates: Array<BulkItem>;
 };
@@ -682,6 +695,25 @@ export type ChatUserIdsBody = {
     user_ids: Array<string>;
 };
 
+export type ChatWebhookBody = {
+    /**
+     * An https image for the avatar of its messages.
+     */
+    icon_url?: string | null;
+    /**
+     * The author name of its messages: 1–80 characters.
+     */
+    name: string;
+};
+
+/**
+ * A webhook with its URL. The URL holds the secret and is returned only here.
+ */
+export type ChatWebhookWithUrl = {
+    url: string;
+    webhook: WebhookRecord;
+};
+
 /**
  * The changed record and the chat events that this write caused for the caller. The events
  * are the same records that the live socket sends; `seq` is the socket's number of the last
@@ -781,6 +813,7 @@ export type ChatWriteMessageRecord = {
          * `<!here>`.
          */
         body: string;
+        bot: null | BotRecord;
         conversation_id: string;
         created_at: string;
         /**
@@ -1310,6 +1343,10 @@ export type FollowedThreadRecord = {
  */
 export type ForwardedRecord = {
     author_id: string;
+    /**
+     * Set when an integration posted the original: show it as the author.
+     */
+    bot_name: string | null;
     conversation_id: string;
     /**
      * When the original message was sent.
@@ -1367,6 +1404,31 @@ export type GithubWorkspaceSettings = {
 export type GroupBy = 'status' | 'assignee' | 'priority' | 'project' | 'label' | 'none';
 
 export type GroupOp = 'and' | 'or';
+
+/**
+ * What a tool posts. Fields that Orbit does not know (Slack's `channel`, `icon_emoji`,
+ * `attachments`, `blocks` for now) are ignored, so a Slack payload still posts its `text`.
+ */
+export type IncomingWebhookPayload = {
+    /**
+     * The avatar of this message only: an https image.
+     */
+    icon_url?: string | null;
+    /**
+     * Markdown, at most 4000 characters. Mentions are tokens: `<@user_id>`, `<#channel_id>`,
+     * `<!channel>`, `<!here>`.
+     */
+    text?: string | null;
+    /**
+     * The author name of this message only (1–80 characters).
+     */
+    username?: string | null;
+};
+
+export type IncomingWebhookResult = {
+    message_id: string;
+    ok: boolean;
+};
 
 export type InstanceAdminBody = {
     admin: boolean;
@@ -1799,6 +1861,7 @@ export type MessageRecord = {
      * `<!here>`.
      */
     body: string;
+    bot: null | BotRecord;
     conversation_id: string;
     created_at: string;
     /**
@@ -3428,6 +3491,10 @@ export type ReplyToRecord = {
      * The first 200 characters of the quoted body.
      */
     body: string;
+    /**
+     * Set when an integration posted the quoted message: show it as the author.
+     */
+    bot_name: string | null;
     id: string;
     /**
      * The quoted message has a sticker: a quote with no text says so.
@@ -4337,6 +4404,23 @@ export type ViewUpdateBody = {
 };
 
 export type Visibility = 'personal' | 'workspace';
+
+export type WebhookRecord = {
+    conversation_id: string;
+    created_at: string;
+    created_by: string;
+    /**
+     * An https image for the avatar of its messages; null for the default one.
+     */
+    icon_url: string | null;
+    id: string;
+    last_used_at: string | null;
+    /**
+     * The author name of its messages, unless a message sets `username`.
+     */
+    name: string;
+    rotated_at: string | null;
+};
 
 /**
  * What members of a workspace may do.
@@ -9697,6 +9781,77 @@ export type StripeWebhookResponses = {
     200: unknown;
 };
 
+export type PostIncomingWebhookData = {
+    body: IncomingWebhookPayload;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        webhook_id: string;
+        secret: string;
+    };
+    query?: never;
+    url: '/api/v1/hooks/chat/{webhook_id}/{secret}';
+};
+
+export type PostIncomingWebhookErrors = {
+    /**
+     * invalid_proxy_headers, invalid_json
+     */
+    400: TaskProblem;
+    /**
+     * workspace_read_only
+     */
+    402: TaskProblem;
+    /**
+     * chat_channel_archived
+     */
+    403: TaskProblem;
+    /**
+     * webhook_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large, payload_too_large
+     */
+    413: TaskProblem;
+    /**
+     * unsupported_media_type
+     */
+    415: TaskProblem;
+    /**
+     * validation_failed, chat_message_too_long
+     */
+    422: TaskProblem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type PostIncomingWebhookError = PostIncomingWebhookErrors[keyof PostIncomingWebhookErrors];
+
+export type PostIncomingWebhookResponses = {
+    200: IncomingWebhookResult;
+};
+
+export type PostIncomingWebhookResponse = PostIncomingWebhookResponses[keyof PostIncomingWebhookResponses];
+
 export type GithubManifestCallbackData = {
     body?: never;
     headers?: {
@@ -12428,6 +12583,312 @@ export type ListChatThreadsResponses = {
 };
 
 export type ListChatThreadsResponse = ListChatThreadsResponses[keyof ListChatThreadsResponses];
+
+export type ListChatWebhooksData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        conversation_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/webhooks';
+};
+
+export type ListChatWebhooksErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListChatWebhooksError = ListChatWebhooksErrors[keyof ListChatWebhooksErrors];
+
+export type ListChatWebhooksResponses = {
+    200: Array<WebhookRecord>;
+};
+
+export type ListChatWebhooksResponse = ListChatWebhooksResponses[keyof ListChatWebhooksResponses];
+
+export type CreateChatWebhookData = {
+    body: ChatWebhookBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        conversation_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/webhooks';
+};
+
+export type CreateChatWebhookErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, chat_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateChatWebhookError = CreateChatWebhookErrors[keyof CreateChatWebhookErrors];
+
+export type CreateChatWebhookResponses = {
+    201: ChatWebhookWithUrl;
+};
+
+export type CreateChatWebhookResponse = CreateChatWebhookResponses[keyof CreateChatWebhookResponses];
+
+export type DeleteChatWebhookData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        conversation_id: string;
+        webhook_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/webhooks/{webhook_id}';
+};
+
+export type DeleteChatWebhookErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type DeleteChatWebhookError = DeleteChatWebhookErrors[keyof DeleteChatWebhookErrors];
+
+export type DeleteChatWebhookResponses = {
+    204: void;
+};
+
+export type DeleteChatWebhookResponse = DeleteChatWebhookResponses[keyof DeleteChatWebhookResponses];
+
+export type UpdateChatWebhookData = {
+    body: ChatWebhookBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        conversation_id: string;
+        webhook_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/webhooks/{webhook_id}';
+};
+
+export type UpdateChatWebhookErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type UpdateChatWebhookError = UpdateChatWebhookErrors[keyof UpdateChatWebhookErrors];
+
+export type UpdateChatWebhookResponses = {
+    200: WebhookRecord;
+};
+
+export type UpdateChatWebhookResponse = UpdateChatWebhookResponses[keyof UpdateChatWebhookResponses];
+
+export type RotateChatWebhookData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        conversation_id: string;
+        webhook_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/webhooks/{webhook_id}/rotate';
+};
+
+export type RotateChatWebhookErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, chat_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * chat_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type RotateChatWebhookError = RotateChatWebhookErrors[keyof RotateChatWebhookErrors];
+
+export type RotateChatWebhookResponses = {
+    200: ChatWebhookWithUrl;
+};
+
+export type RotateChatWebhookResponse = RotateChatWebhookResponses[keyof RotateChatWebhookResponses];
 
 export type OpenChatDmData = {
     body: ChatUserIdsBody;

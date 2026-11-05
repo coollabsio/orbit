@@ -3,7 +3,9 @@ import { PinTack } from 'reicon-react'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { Button } from '@/components/ui/button'
 import type { Message } from '../../api/types'
+import { isOwnMessage } from '../../lib/bot'
 import { fullTimestamp, gutterTime, messageTime } from '../../lib/time'
+import { BotAvatar, BotBadge } from './BotAvatar'
 import { isCoarsePointer, useDelayed } from './environment'
 import { MessageBody } from './MessageBody'
 import { MessageEditor } from './MessageEditor'
@@ -58,8 +60,9 @@ interface MessageItemProps {
 export function MessageItem({ message, groupStart, editing, active, tone, menuOpen }: MessageItemProps) {
   const { currentUserId, inThread, phone, people, openThread, openMenu, openSheet } = useMessageList()
   const press = useRef<{ timer: ReturnType<typeof setTimeout>; x: number; y: number } | null>(null)
+  const bot = message.bot ?? null
   const author = people.byId.get(message.authorId)
-  const own = message.authorId === currentUserId
+  const own = isOwnMessage(message, currentUserId)
   const mentioned =
     !message.deleted &&
     !own &&
@@ -128,7 +131,11 @@ export function MessageItem({ message, groupStart, editing, active, tone, menuOp
       {/* The measure: at most 90 characters of text beside the avatar column. */}
       <div className="relative flex max-w-[calc(90ch+3rem)] gap-3 text-[15px] max-[899px]:gap-2 max-[899px]:text-sm">
         <div className="flex w-9 shrink-0 justify-center max-[899px]:w-[30px]">
-          {groupStart ? (
+          {groupStart && bot ? (
+            <span className="mt-0.5 flex self-start">
+              <BotAvatar bot={bot} size={phone ? 30 : 36} />
+            </span>
+          ) : groupStart ? (
             <ProfileTrigger userId={author?.id} name={author?.name ?? 'Unknown'} kind="avatar" tabIndex={-1} className="mt-0.5 flex self-start">
               <UserAvatar user={author} name="?" size={phone ? 30 : 36} />
             </ProfileTrigger>
@@ -145,10 +152,19 @@ export function MessageItem({ message, groupStart, editing, active, tone, menuOp
         <div className="min-w-0 flex-1">
           {groupStart ? (
             <div className="flex items-baseline gap-2">
-              {/* `Tab` reaches one message row (the arrow keys move between rows), so only its name is a tab stop */}
-              <ProfileTrigger userId={author?.id} name={author?.name ?? 'Unknown'} tabIndex={active ? 0 : -1} className="truncate font-medium text-foreground">
-                <span data-slot="message-author">{author?.name ?? 'Unknown'}</span>
-              </ProfileTrigger>
+              {bot ? (
+                <>
+                  <span data-slot="message-author" className="truncate font-medium text-foreground">
+                    {bot.name}
+                  </span>
+                  <BotBadge />
+                </>
+              ) : (
+                // `Tab` reaches one message row (the arrow keys move between rows), so only its name is a tab stop
+                <ProfileTrigger userId={author?.id} name={author?.name ?? 'Unknown'} tabIndex={active ? 0 : -1} className="truncate font-medium text-foreground">
+                  <span data-slot="message-author">{author?.name ?? 'Unknown'}</span>
+                </ProfileTrigger>
+              )}
               <time dateTime={iso} title={fullTimestamp(message.createdAt)} className="shrink-0 text-xs text-muted-foreground">
                 {messageTime(message.createdAt)}
               </time>

@@ -115,7 +115,11 @@ impl ChatRepository {
             sql.push_str(&format!(" AND m.conversation_id = {}", param()));
         }
         if input.author_id.is_some() {
-            sql.push_str(&format!(" AND m.author_id = {}", param()));
+            // A member's integrations are not the member.
+            sql.push_str(&format!(
+                " AND m.author_id = {} AND m.webhook_id IS NULL",
+                param()
+            ));
         }
         if input.has_file {
             sql.push_str(" AND EXISTS (SELECT 1 FROM chat_message_files WHERE message_id = m.id)");

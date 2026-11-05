@@ -34,6 +34,9 @@ pub(super) enum EndpointClass {
     /// Chat has its own budget, so a busy conversation cannot use up the requests of the
     /// other apps (and they cannot use up chat's).
     Chat,
+    /// Incoming chat webhooks (`/api/v1/hooks/…`): the general limit per client address, and
+    /// [`WEBHOOK_PER_MINUTE`] for each webhook.
+    Webhook,
     General,
     /// The APIs of integrations: the public REST API (`/api/public/…`) and MCP. Their own budget,
     /// with the general limit, so busy tokens cannot use up the web app's requests.
@@ -48,6 +51,7 @@ impl EndpointClass {
             Self::Invitation => "invitation",
             Self::Upload => "upload",
             Self::Chat => "chat",
+            Self::Webhook => "webhook",
             Self::General => "general",
             Self::TokenApi => "token_api",
         }
@@ -66,6 +70,9 @@ impl EndpointClass {
 /// that is looked at), so its budget is this many times the general one.
 const CHAT_RATE_FACTOR: u32 = 3;
 
+/// Accepted messages of one incoming webhook in a minute (Slack allows about one a second).
+const WEBHOOK_PER_MINUTE: u32 = 60;
+
 /// Who a request is counted against. Credentials and workspaces are kept as digests, so the
 /// memory of an entry is fixed and no token is kept.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -73,6 +80,7 @@ enum Subject {
     Ip(IpAddr),
     Credential([u8; 16]),
     Workspace([u8; 16]),
+    Webhook([u8; 16]),
 }
 
 impl Subject {
@@ -82,6 +90,7 @@ impl Subject {
             Self::Ip(ip) => format!("{class}:ip:{ip}"),
             Self::Credential(digest) => format!("{class}:credential:{}", hex(&digest)),
             Self::Workspace(digest) => format!("{class}:workspace:{}", hex(&digest)),
+            Self::Webhook(digest) => format!("{class}:webhook:{}", hex(&digest)),
         }
     }
 }
@@ -185,6 +194,22 @@ impl RateLimiter {
                 return Err(refused);
             }
         }
+        // Like a workspace, a webhook is charged only once its secret was accepted, so requests
+        // with a wrong secret cannot use up its budget.
+        if class == EndpointClass::Webhook {
+            let Some(webhook) = webhook_in(path) else {
+                return Ok(None);
+            };
+            let subject = Subject::Webhook(digest(webhook.as_bytes()));
+            if self.hits(subject, class, minute).await >= WEBHOOK_PER_MINUTE {
+                return Err(refused);
+            }
+            return Ok(Some(WorkspaceCharge {
+                subject,
+                class,
+                minute,
+            }));
+        }
         let Some(workspace) = workspace_in(path).filter(|_| credential.is_some()) else {
             return Ok(None);
         };
@@ -242,7 +267,9 @@ impl RateLimiter {
                 .config
                 .general_per_minute
                 .saturating_mul(CHAT_RATE_FACTOR),
-            EndpointClass::General | EndpointClass::TokenApi => self.config.general_per_minute,
+            EndpointClass::Webhook | EndpointClass::General | EndpointClass::TokenApi => {
+                self.config.general_per_minute
+            }
         }
     }
 
@@ -359,6 +386,14 @@ fn workspace_in(path: &str) -> Option<&str> {
         .filter(|id| !id.is_empty())
 }
 
+/// The webhook ID of a `/api/v1/hooks/chat/{id}/{secret}` path.
+fn webhook_in(path: &str) -> Option<&str> {
+    path.strip_prefix("/api/v1/hooks/chat/")?
+        .split('/')
+        .next()
+        .filter(|id| !id.is_empty())
+}
+
 pub(super) fn endpoint_class(method: &Method, path: &str) -> Option<EndpointClass> {
     if matches!(
         path,
@@ -376,6 +411,9 @@ pub(super) fn endpoint_class(method: &Method, path: &str) -> Option<EndpointClas
     }
     if path != "/api" && !path.starts_with("/api/") {
         return None;
+    }
+    if path.starts_with("/api/v1/hooks/") {
+        return Some(EndpointClass::Webhook);
     }
     // The provider callback is a GET that calls out to Google or GitHub; the generic rules below miss it.
     if path.starts_with("/api/v1/auth/providers/") {

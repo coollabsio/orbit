@@ -830,7 +830,8 @@ async fn chat(
         let mut roots: HashMap<String, usize> = HashMap::new();
         for row in fetch(
             "SELECT id, thread_root_id, kind, author_id, body, reply_to_id, forward_of_id, pinned_at, \
-             edited_at, deleted_at, created_at FROM chat_messages WHERE conversation_id = $1 ORDER BY id",
+             edited_at, deleted_at, created_at, bot_name FROM chat_messages WHERE conversation_id = $1 \
+             ORDER BY id",
         )
         .await?
         {
@@ -854,6 +855,10 @@ async fn chat(
             message.insert("id".to_owned(), json!(message_id));
             message.insert("kind".to_owned(), json!(row.get::<String, _>("kind")));
             message.insert("author".to_owned(), people.of(row.get("author_id")));
+            // Set when an integration (an incoming webhook) posted it; `author` set the webhook up.
+            if let Some(bot_name) = row.get::<Option<String>, _>("bot_name") {
+                message.insert("bot_name".to_owned(), json!(bot_name));
+            }
             message.insert("body".to_owned(), json!(row.get::<String, _>("body")));
             message.insert("created_at".to_owned(), time(row.get("created_at")));
             message.insert("edited_at".to_owned(), optional_time(row.get("edited_at")));

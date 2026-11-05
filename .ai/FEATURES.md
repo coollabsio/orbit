@@ -460,6 +460,12 @@ turns its routes, navigation and shortcuts off.
   edited. Emoticons (`:D`) become emoji, a typed task ID (`GEN-1`) of a real project shows as a chip
   and a card, a message of only emoji (1 to 30) shows them large, and `<https://…>` is a link with no
   card. A backslash keeps `\:D`, `\:name:` and `\GEN-1` as text.
+- Incoming webhooks (`docs/chat-webhooks.md`): a tool posts JSON to a secret URL
+  (`POST /api/v1/hooks/chat/{id}/{secret}`, `chat_routes/hooks.rs`) and a message shows in one channel as that
+  tool (`message.bot`: name, icon, an "App" badge). The channel's creator and owners and admins manage them in
+  Edit channel > Integrations; only a hash of the secret is stored, so the URL shows once. `author_id` of such a
+  message is the member who made the webhook, but it is unread for them too, makes no Inbox item, and nobody
+  can edit it (`MessageRecord::sender_id`, `lib/bot.ts`). All bot posts go through `ChatRepository::post_as_bot`.
 - Custom emoji belong to the workspace (Workspace Settings > Emoji, owners and admins): `:name:` stays
   text in the body and in reactions and becomes the image when it is shown.
 - Stickers belong to the workspace too (Workspace Settings > Stickers, owners and admins; 512 KiB, 100 for

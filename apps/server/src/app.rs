@@ -422,7 +422,8 @@ impl App {
                     Arc::clone(&identity),
                     attachment_state.uploads.clone(),
                     cookie_mode,
-                ),
+                )
+                .with_public_origin(&config.http.public_origin),
             },
             health,
             assets,

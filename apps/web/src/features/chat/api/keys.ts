@@ -25,6 +25,8 @@ export const chatKeys = {
   search: (workspaceId: string, input: Omit<SearchInput, 'cursor'>) => ['chat', workspaceId, 'search', input] as const,
   /** Outside the `all` prefix: a resync must not read every page again. */
   linkPreview: (workspaceId: string, url: string) => ['chat-link-preview', workspaceId, url] as const,
+  /** Outside the `all` prefix: not kept on the device, and read again each time the settings open. */
+  webhooks: (workspaceId: string, conversationId: string) => ['chat-webhooks', workspaceId, conversationId] as const,
   /** Outside the `all` prefix: a resync must not touch the messages that only this tab has. */
   outbox: (workspaceId: string) => ['chat-outbox', workspaceId] as const,
 }

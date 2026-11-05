@@ -9,10 +9,11 @@ const message: MessageRecord = {
   conversation_id: 'c1',
   thread_root_id: 'm1',
   reply_to_id: 'm0',
-  reply_to: { id: 'm0', author_id: 'u1', body: 'Is it <@u2>?', sticker: false },
+  reply_to: { id: 'm0', author_id: 'u1', body: 'Is it <@u2>?', sticker: false, bot_name: null },
   forwarded: null,
   sticker_id: null,
   sticker: null,
+  bot: null,
   kind: 'message',
   author_id: 'u2',
   body: '<@u1> done',
@@ -129,7 +130,7 @@ test('a reply whose message was deleted keeps the id and has no quote', () => {
 })
 
 test('a forward carries where the original came from', () => {
-  const forwarded = { message_id: 'm0', conversation_id: 'c9', author_id: 'u3', created_at: '2026-10-01T09:30:00.000Z' }
+  const forwarded = { message_id: 'm0', conversation_id: 'c9', author_id: 'u3', created_at: '2026-10-01T09:30:00.000Z', bot_name: null }
   const event = toEvent({ type: 'message.created', message: { ...message, forwarded } }, 'u1')
   expect(event).toMatchObject({
     message: { forwarded: { messageId: 'm0', conversationId: 'c9', authorId: 'u3', createdAt: Date.UTC(2026, 9, 1, 9, 30) } },

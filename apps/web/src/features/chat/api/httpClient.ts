@@ -5,6 +5,11 @@ import {
   archiveChatChannel,
   createChatCategory,
   createChatChannel,
+  createChatWebhook,
+  deleteChatWebhook,
+  listChatWebhooks,
+  rotateChatWebhook,
+  updateChatWebhook,
   deleteChatCategory,
   deleteChatMessage,
   editChatMessage,
@@ -58,6 +63,7 @@ import {
   toState,
   toThreadPage,
   toThreadState,
+  toWebhook,
 } from './wire'
 
 type ApiClient = ReturnType<typeof createApiClient>
@@ -304,6 +310,29 @@ export function createHttpChatClient(options: HttpChatClientOptions): ChatClient
     },
     async editMessage(messageId, body) {
       return toMessage((await write(editChatMessage({ ...at({ message_id: messageId }), body: { body } }))).result)
+    },
+    async listWebhooks(conversationId) {
+      return (await call(listChatWebhooks(at({ conversation_id: conversationId })))).map(toWebhook)
+    },
+    async createWebhook(conversationId, input) {
+      const body = { name: input.name, icon_url: input.iconUrl || null }
+      const created = await call(createChatWebhook({ ...at({ conversation_id: conversationId }), body }))
+      return { webhook: toWebhook(created.webhook), url: created.url }
+    },
+    async updateWebhook(conversationId, webhookId, input) {
+      const body = { name: input.name, icon_url: input.iconUrl || null }
+      return toWebhook(await call(updateChatWebhook({ ...at({ conversation_id: conversationId, webhook_id: webhookId }), body })))
+    },
+    async rotateWebhook(conversationId, webhookId) {
+      const rotated = await call(rotateChatWebhook(at({ conversation_id: conversationId, webhook_id: webhookId })))
+      return { webhook: toWebhook(rotated.webhook), url: rotated.url }
+    },
+    async deleteWebhook(conversationId, webhookId) {
+      try {
+        await deleteChatWebhook(at({ conversation_id: conversationId, webhook_id: webhookId }))
+      } catch (error) {
+        throw toChatError(error)
+      }
     },
     async deleteMessage(messageId) {
       await write(deleteChatMessage(at({ message_id: messageId })))

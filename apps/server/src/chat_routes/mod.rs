@@ -4,6 +4,7 @@
 pub(crate) mod conversations;
 pub(crate) mod emoji;
 pub(crate) mod files;
+pub(crate) mod hooks;
 mod images;
 pub(crate) mod links;
 pub(crate) mod messages;
@@ -37,6 +38,8 @@ pub struct ChatState {
     pub(crate) hub: LiveHub,
     pub(crate) cookie_mode: CookieMode,
     pub(crate) link_previews: Arc<LinkPreviewer>,
+    /// The origin of the webhook URLs that Orbit shows (`ORBIT_PUBLIC_ORIGIN`).
+    pub(crate) public_origin: Arc<str>,
 }
 
 impl ChatState {
@@ -52,7 +55,15 @@ impl ChatState {
             identity,
             cookie_mode,
             link_previews: Arc::new(LinkPreviewer::default()),
+            public_origin: Arc::from(""),
         }
+    }
+
+    /// Builds webhook URLs on `origin`.
+    #[must_use]
+    pub fn with_public_origin(mut self, origin: &str) -> Self {
+        self.public_origin = Arc::from(origin);
+        self
     }
 
     /// Reads link previews with `previewer` (tests name local services).
@@ -224,6 +235,22 @@ fn json_router(state: ChatState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/chat/messages/{message_id}/pin",
             put(messages::pin_chat_message),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/webhooks",
+            get(hooks::list_chat_webhooks).post(hooks::create_chat_webhook),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/webhooks/{webhook_id}",
+            patch(hooks::update_chat_webhook).delete(hooks::delete_chat_webhook),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/webhooks/{webhook_id}/rotate",
+            post(hooks::rotate_chat_webhook),
+        )
+        .route(
+            "/api/v1/hooks/chat/{webhook_id}/{secret}",
+            post(hooks::post_incoming_webhook),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/pins",

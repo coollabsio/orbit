@@ -2,6 +2,7 @@ import type { PresenceMap } from '@/features/realtime/presence'
 import type {
   Attachment,
   Category,
+  ChannelWebhook,
   ChatEvent,
   Conversation,
   ConversationKind,
@@ -56,6 +57,18 @@ export interface SearchInput {
   authorId?: string
   hasFile?: boolean
   cursor?: string
+}
+
+export interface WebhookInput {
+  name: string
+  /** An https image; empty or `null` for the default bot avatar. */
+  iconUrl: string | null
+}
+
+/** A webhook and its URL. The URL holds the secret: no later read returns it. */
+export interface CreatedWebhook {
+  webhook: ChannelWebhook
+  url: string
 }
 
 export interface UploadOptions {
@@ -121,6 +134,14 @@ export interface ChatClient {
   removeMember(conversationId: string, userId: string): Promise<Conversation>
   /** Returns the existing DM for this exact set of members (plus the current user), or makes one. */
   openDm(userIds: string[]): Promise<Conversation>
+
+  /** Incoming webhooks of a channel. Only its creator and workspace owners and admins. */
+  listWebhooks(conversationId: string): Promise<ChannelWebhook[]>
+  createWebhook(conversationId: string, input: WebhookInput): Promise<CreatedWebhook>
+  updateWebhook(conversationId: string, webhookId: string, input: WebhookInput): Promise<ChannelWebhook>
+  /** A new URL; the old one stops working at once. */
+  rotateWebhook(conversationId: string, webhookId: string): Promise<CreatedWebhook>
+  deleteWebhook(conversationId: string, webhookId: string): Promise<void>
 
   createCategory(name: string): Promise<Category>
   renameCategory(categoryId: string, name: string): Promise<Category>

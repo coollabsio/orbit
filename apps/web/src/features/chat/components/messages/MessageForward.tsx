@@ -5,7 +5,7 @@ import type { ForwardOrigin, Message } from '../../api/types'
 import { fullTimestamp } from '../../lib/time'
 import { MessageBody } from './MessageBody'
 import { useMessageList } from './messageListContext'
-import { conversationTitle } from './people'
+import { authorName, conversationTitle } from './people'
 
 /**
  * What a forward says: "Forwarded", the copied message behind a quote bar, and under it who wrote the original and
@@ -31,7 +31,7 @@ export function MessageForward({ message, origin, active }: { message: Message; 
         <MessageBody message={message} />
       </div>
       <div data-slot="message-forward-origin" className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-        <span className="truncate">{people.byId.get(origin.authorId)?.name ?? 'Unknown'}</span>
+        <span className="truncate">{authorName(people, origin.authorId, origin.botName)}</span>
         {conversation ? (
           <button
             type="button"

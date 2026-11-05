@@ -7,12 +7,14 @@ use sqlx::any::AnyRow;
 
 use super::files::{MAX_MESSAGE_FILES, attach_files, copy_files};
 use super::stickers::load_sticker;
+use super::webhooks::{HookTarget, clean_bot_name, clean_icon_url};
 use super::{
-    Access, ChatError, ChatEvent, ChatRepository, ConversationKind, Events, FollowedThreadRecord,
-    ForwardedRecord, MESSAGE_MAX_CHARS, MESSAGE_SELECT, MentionsRecord, MessageKind, MessagePage,
-    MessageRecord, ReplyToRecord, StickerRecord, ThreadMember, ThreadPage, Written, current_state,
-    finish, hydrate, id_list, in_ids, json_values, load_access, load_actor, load_message,
-    load_message_access, load_thread_member, mentioned_user_ids, parse_id, parse_optional_id,
+    Access, BotRecord, ChatError, ChatEvent, ChatRepository, ConversationKind, Events,
+    FollowedThreadRecord, ForwardedRecord, MESSAGE_MAX_CHARS, MESSAGE_SELECT, MentionsRecord,
+    MessageKind, MessagePage, MessageRecord, ReplyToRecord, StickerRecord, ThreadMember,
+    ThreadPage, Written, current_state, finish, hydrate, id_list, in_ids, json_values, load_access,
+    load_actor, load_conversation, load_message, load_message_access, load_thread_member,
+    mentioned_user_ids, parse_id, parse_optional_id,
 };
 
 const DEFAULT_PAGE: usize = 50;
@@ -25,6 +27,14 @@ const NONCE_MAX_BYTES: usize = 64;
 const EMOJI_MAX_BYTES: usize = 64;
 /// Reply authors kept on the root for the summary row's avatars.
 const REPLY_AUTHORS: usize = 5;
+
+/// What an integration posts: Markdown text, and a name and icon for this message only.
+#[derive(Clone, Debug)]
+pub struct BotPost {
+    pub text: String,
+    pub username: Option<String>,
+    pub icon_url: Option<String>,
+}
 
 /// At most one of `before`, `after` and `around`. Without one: the newest page.
 #[derive(Clone, Copy, Debug, Default)]
@@ -318,6 +328,7 @@ impl ChatRepository {
                 forwarded: None,
                 sticker_id: sticker.as_ref().map(|sticker| sticker.id),
                 sticker,
+                bot: None,
                 now,
             },
         )
@@ -385,6 +396,106 @@ impl ChatRepository {
         finish(tx, events, message).await
     }
 
+    /// Posts a root message as an integration into a channel. The caller has checked the
+    /// integration's secret; the channel's membership is not checked. The message is unread for
+    /// every member and makes no inbox notification. Incoming webhooks post through here; a later
+    /// API token scope that writes chat must too.
+    pub async fn post_as_bot(
+        &self,
+        target: HookTarget,
+        post: BotPost,
+    ) -> Result<Written<MessageRecord>, ChatError> {
+        if post.text.trim().is_empty() {
+            return Err(ChatError::Invalid { field: "text" });
+        }
+        let body = clean_body(&post.text, false)?;
+        let name = match post.username.as_deref() {
+            Some(username) => clean_bot_name(username, "username")?,
+            None => target.sender.name,
+        };
+        let icon_url = match post.icon_url.as_deref() {
+            Some(url) => Some(clean_icon_url(url, "icon_url")?),
+            None => target.sender.icon_url,
+        };
+        let now = TimestampMillis::now();
+        let mut tx = self.database.immediate_transaction().await?;
+        let conversation = load_conversation(&mut tx, target.workspace_id, target.conversation_id)
+            .await?
+            .filter(|conversation| conversation.kind != ConversationKind::Dm)
+            .ok_or(ChatError::NotFound)?;
+        if conversation.archived_at.is_some() {
+            return Err(ChatError::Forbidden("This channel is archived."));
+        }
+        // The webhook may have been revoked since its secret was checked.
+        let live = sqlx::query(
+            "UPDATE chat_webhooks SET last_used_at = $1 WHERE id = $2 AND revoked_at IS NULL",
+        )
+        .bind(now.as_millis())
+        .bind(target.sender.webhook_id.to_string())
+        .execute(&mut *tx)
+        .await?;
+        if live.rows_affected() == 0 {
+            return Err(ChatError::NotFound);
+        }
+        let conversation_id = conversation.id;
+        let message = insert_message(
+            &mut tx,
+            NewMessage {
+                conversation_id,
+                thread_root_id: None,
+                kind: MessageKind::Message,
+                author_id: target.sender.created_by,
+                body: &body,
+                mention_channel: body.contains("<!channel>"),
+                mention_here: body.contains("<!here>"),
+                also_in_channel: false,
+                nonce: None,
+                reply_to: None,
+                forwarded: None,
+                sticker_id: None,
+                sticker: None,
+                bot: Some(BotRecord {
+                    webhook_id: target.sender.webhook_id,
+                    name,
+                    icon_url,
+                }),
+                now,
+            },
+        )
+        .await?;
+        let mentioned = members_among(
+            &mut tx,
+            conversation_id,
+            &message.mentions.user_ids,
+            message.sender_id(),
+        )
+        .await?;
+        insert_mention_rows(&mut tx, &message, &mentioned).await?;
+        adjust_mentions(&mut tx, &message, &mentioned, 1).await?;
+        sqlx::query(
+            "UPDATE chat_conversations SET message_count = message_count + 1, last_message_at = $1 \
+             WHERE id = $2",
+        )
+        .bind(now.as_millis())
+        .bind(conversation_id.to_string())
+        .execute(&mut *tx)
+        .await?;
+        if message.mentions.channel || message.mentions.here {
+            adjust_broadcast(&mut tx, &message, 1).await?;
+        }
+        let mut events = Events {
+            counted: Some(conversation_id),
+            ..Events::default()
+        };
+        events.conversation(
+            conversation_id,
+            ChatEvent::MessageCreated {
+                message: message.clone(),
+            },
+        );
+        finish(tx, events, message).await
+    }
+
     /// Copies a message the caller can read into the main list of a conversation the caller can
     /// write to. The copy is the caller's message: it has the body and the files of the original
     /// as they are now, and says where they came from. It mentions nobody. Tried again with the
@@ -417,11 +528,12 @@ impl ChatRepository {
             };
         // A forward of a forward names the first original, not the copy.
         let origin = source.as_ref().map(|source| {
-            source.forwarded.unwrap_or(ForwardedRecord {
+            source.forwarded.clone().unwrap_or_else(|| ForwardedRecord {
                 message_id: source.id,
                 conversation_id: source.conversation_id,
                 author_id: source.author_id,
                 created_at: source.created_at,
+                bot_name: source.bot.as_ref().map(|bot| bot.name.clone()),
             })
         });
         if let Some(message) = earlier {
@@ -464,6 +576,7 @@ impl ChatRepository {
                 // The id of a deleted sticker is copied too.
                 sticker_id: source.sticker_id,
                 sticker: source.sticker.clone(),
+                bot: None,
                 now,
             },
         )
@@ -511,6 +624,11 @@ impl ChatRepository {
             load_message_access(&mut tx, workspace_id, actor_id, message_id).await?;
         if message.deleted || message.kind != MessageKind::Message {
             return Err(ChatError::NotFound);
+        }
+        if message.bot.is_some() {
+            return Err(ChatError::Forbidden(
+                "Messages from integrations cannot be edited.",
+            ));
         }
         if !access.actor.can_edit_chat_message(message.author_id) {
             return Err(ChatError::Forbidden("Only the author can edit a message."));
@@ -614,7 +732,10 @@ impl ChatRepository {
         if message.deleted || message.kind != MessageKind::Message {
             return Err(ChatError::NotFound);
         }
-        if !access.actor.can_delete_chat_message(message.author_id) {
+        // An integration's message belongs to the channel, not to the member who set it up.
+        if message.bot.is_some() {
+            access.require_manage()?;
+        } else if !access.actor.can_delete_chat_message(message.author_id) {
             return Err(ChatError::Forbidden(
                 "Only the author and workspace owners and admins can delete a message.",
             ));
@@ -965,6 +1086,8 @@ struct NewMessage<'a> {
     /// The id alone on a forward of a message whose sticker is deleted.
     sticker_id: Option<Id>,
     sticker: Option<StickerRecord>,
+    /// Set when an integration posts the message.
+    bot: Option<BotRecord>,
     now: TimestampMillis,
 }
 
@@ -978,8 +1101,10 @@ async fn insert_message(
     sqlx::query(
         "INSERT INTO chat_messages (id, conversation_id, thread_root_id, kind, author_id, body, \
          mention_channel, mention_here, also_in_channel, nonce, reply_to_id, forward_of_id, \
-         forward_conversation_id, forward_author_id, forward_created_at, sticker_id, created_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)",
+         forward_conversation_id, forward_author_id, forward_created_at, forward_bot_name, \
+         sticker_id, webhook_id, bot_name, bot_icon_url, created_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, \
+         $19, $20, $21)",
     )
     .bind(id.to_string())
     .bind(new.conversation_id.to_string())
@@ -992,14 +1117,35 @@ async fn insert_message(
     .bind(i64::from(new.also_in_channel))
     .bind(new.nonce)
     .bind(new.reply_to.as_ref().map(|target| target.id.to_string()))
-    .bind(new.forwarded.map(|origin| origin.message_id.to_string()))
     .bind(
         new.forwarded
+            .as_ref()
+            .map(|origin| origin.message_id.to_string()),
+    )
+    .bind(
+        new.forwarded
+            .as_ref()
             .map(|origin| origin.conversation_id.to_string()),
     )
-    .bind(new.forwarded.map(|origin| origin.author_id.to_string()))
-    .bind(new.forwarded.map(|origin| origin.created_at.as_millis()))
+    .bind(
+        new.forwarded
+            .as_ref()
+            .map(|origin| origin.author_id.to_string()),
+    )
+    .bind(
+        new.forwarded
+            .as_ref()
+            .map(|origin| origin.created_at.as_millis()),
+    )
+    .bind(
+        new.forwarded
+            .as_ref()
+            .and_then(|origin| origin.bot_name.clone()),
+    )
     .bind(new.sticker_id.map(|id| id.to_string()))
+    .bind(new.bot.as_ref().map(|bot| bot.webhook_id.to_string()))
+    .bind(new.bot.as_ref().map(|bot| bot.name.clone()))
+    .bind(new.bot.as_ref().and_then(|bot| bot.icon_url.clone()))
     .bind(new.now.as_millis())
     .execute(&mut *conn)
     .await?;
@@ -1036,6 +1182,7 @@ async fn insert_message(
         forwarded: new.forwarded,
         sticker_id: new.sticker_id,
         sticker: new.sticker,
+        bot: new.bot,
         last_reply_id: None,
     })
 }
@@ -1065,6 +1212,7 @@ pub(super) async fn add_system_row(
             forwarded: None,
             sticker_id: None,
             sticker: None,
+            bot: None,
             now,
         },
     )
@@ -1290,7 +1438,7 @@ async fn adjust_broadcast(
     )
     .bind(delta)
     .bind(message.conversation_id.to_string())
-    .bind(message.author_id.to_string())
+    .bind(message.sender_id().to_string())
     .bind(message.id.to_string())
     .execute(&mut *conn)
     .await?;
@@ -1312,7 +1460,7 @@ async fn uncount_main(conn: &mut AnyConnection, message: &MessageRecord) -> Resu
          WHERE conversation_id = $1 AND (user_id = $2 OR last_read_message_id >= $3)",
     )
     .bind(message.conversation_id.to_string())
-    .bind(message.author_id.to_string())
+    .bind(message.sender_id().to_string())
     .bind(message.id.to_string())
     .execute(&mut *conn)
     .await?;
@@ -1385,7 +1533,8 @@ async fn after_reply(
     // Members who start to follow with this reply: mentioned in it, or (if they have no
     // thread state yet) the root's author, members the root mentions, and both sides of a
     // 1:1 DM. The reply is their first unread one.
-    let mut automatic = vec![root.author_id];
+    // An integration's root makes nobody follow: its author only set the integration up.
+    let mut automatic = vec![root.sender_id()];
     automatic.extend(mention_row_users(conn, root.id).await?);
     if conversation.kind == ConversationKind::Dm {
         let members = super::member_ids(conn, conversation.id).await?;

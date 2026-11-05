@@ -9,10 +9,12 @@ import type {
   MessageRecord,
   ThreadPage as WireThreadPage,
   ThreadStateRecord,
+  WebhookRecord,
 } from '@orbit/api/generated/types.gen'
 import { ApiProblem } from '@orbit/api/problem'
 import {
   type Attachment,
+  type ChannelWebhook,
   ChatError,
   type ChatErrorCode,
   type ChatEvent,
@@ -85,18 +87,38 @@ export function toLinkPreview(record: WireLinkPreview): LinkPreview {
   }
 }
 
+export function toWebhook(record: WebhookRecord): ChannelWebhook {
+  return {
+    id: record.id,
+    conversationId: record.conversation_id,
+    name: record.name,
+    iconUrl: record.icon_url,
+    createdBy: record.created_by,
+    createdAt: millis(record.created_at),
+    rotatedAt: record.rotated_at === null ? null : millis(record.rotated_at),
+    lastUsedAt: record.last_used_at === null ? null : millis(record.last_used_at),
+  }
+}
+
 export function toMessage(record: MessageRecord): Message {
   return {
     id: record.id,
     conversationId: record.conversation_id,
     threadRootId: record.thread_root_id,
     replyToId: record.reply_to_id,
-    replyTo: record.reply_to && { id: record.reply_to.id, authorId: record.reply_to.author_id, body: record.reply_to.body, sticker: record.reply_to.sticker },
+    replyTo: record.reply_to && {
+      id: record.reply_to.id,
+      authorId: record.reply_to.author_id,
+      body: record.reply_to.body,
+      sticker: record.reply_to.sticker,
+      botName: record.reply_to.bot_name,
+    },
     forwarded: record.forwarded && {
       messageId: record.forwarded.message_id,
       conversationId: record.forwarded.conversation_id,
       authorId: record.forwarded.author_id,
       createdAt: millis(record.forwarded.created_at),
+      botName: record.forwarded.bot_name,
     },
     stickerId: record.sticker_id,
     sticker: record.sticker && { id: record.sticker.id, name: record.sticker.name, url: record.sticker.url },
@@ -121,6 +143,7 @@ export function toMessage(record: MessageRecord): Message {
       sticker: record.last_reply.sticker,
       createdAt: millis(record.last_reply.created_at),
     },
+    bot: record.bot && { webhookId: record.bot.webhook_id, name: record.bot.name, iconUrl: record.bot.icon_url },
   }
 }
 

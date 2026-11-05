@@ -307,6 +307,12 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::chat_routes::stickers::create_chat_sticker,
         crate::chat_routes::stickers::delete_chat_sticker,
         crate::chat_routes::stickers::get_chat_sticker_image,
+        crate::chat_routes::hooks::list_chat_webhooks,
+        crate::chat_routes::hooks::create_chat_webhook,
+        crate::chat_routes::hooks::update_chat_webhook,
+        crate::chat_routes::hooks::rotate_chat_webhook,
+        crate::chat_routes::hooks::delete_chat_webhook,
+        crate::chat_routes::hooks::post_incoming_webhook,
     )
 )]
 struct ApiDocument;
@@ -464,6 +470,7 @@ fn public_operation(operation_id: &str) -> bool {
             | "registration_complete"
             | "preview_invitation"
             | "github_webhook"
+            | "post_incoming_webhook"
             | "github_manifest_callback"
             | "stripe_webhook"
             | "provider_callback"
@@ -591,7 +598,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
     if unsafe_operation(operation_id)
         && !matches!(
             operation_id,
-            "create_discord_event" | "github_webhook" | "stripe_webhook"
+            "create_discord_event" | "github_webhook" | "stripe_webhook" | "post_incoming_webhook"
         )
     {
         add_code(&mut responses, "403", "origin_forbidden");
@@ -704,6 +711,17 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "409", "integration_event_conflict");
             add_code(&mut responses, "422", "validation_failed");
             add_code(&mut responses, "422", "integration_project_unavailable");
+        }
+        "post_incoming_webhook" => {
+            add_code(&mut responses, "400", "invalid_json");
+            add_code(&mut responses, "402", "workspace_read_only");
+            add_code(&mut responses, "403", "chat_channel_archived");
+            add_code(&mut responses, "404", "webhook_not_found");
+            add_code(&mut responses, "413", "payload_too_large");
+            add_code(&mut responses, "415", "unsupported_media_type");
+            add_code(&mut responses, "422", "validation_failed");
+            add_code(&mut responses, "422", "chat_message_too_long");
+            add_code(&mut responses, "429", "rate_limit_exceeded");
         }
         "github_webhook" => {
             add_code(&mut responses, "401", "invalid_github_signature");
@@ -1507,6 +1525,16 @@ fn chat_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
     }
     if matches!(operation_id, "delete_chat_emoji" | "delete_chat_sticker") {
         add_code(responses, "403", "chat_forbidden");
+        return;
+    }
+    if operation_id.ends_with("_chat_webhook") || operation_id == "list_chat_webhooks" {
+        add_code(responses, "403", "chat_forbidden");
+        if matches!(operation_id, "create_chat_webhook" | "update_chat_webhook") {
+            add_code(responses, "422", "validation_failed");
+        }
+        if operation_id == "create_chat_webhook" {
+            add_code(responses, "409", "chat_conflict");
+        }
         return;
     }
     if !operation_id.starts_with("list_") {

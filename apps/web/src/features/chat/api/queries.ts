@@ -70,6 +70,16 @@ export function useCategories() {
   })
 }
 
+/** The incoming webhooks of a channel, for its managers. Read again each time the settings open. */
+export function useWebhooks(conversationId: string) {
+  const { client, workspaceId } = useChatContext()
+  return useQuery({
+    queryKey: chatKeys.webhooks(workspaceId, conversationId),
+    queryFn: () => requireClient(client).listWebhooks(conversationId),
+    enabled: client !== null,
+  })
+}
+
 /** The user's read cursor, counts, notification setting and favorite flag for each joined conversation. */
 export function useConversationStates() {
   const { client, workspaceId } = useChatContext()
