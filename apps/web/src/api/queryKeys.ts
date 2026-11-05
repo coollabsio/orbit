@@ -18,6 +18,7 @@ export const queryKeys = {
   notificationPreferences: ['notification-preferences'] as const,
   backups: ['admin', 'backups'] as const,
   adminUsers: ['admin', 'users'] as const,
+  adminUserSummary: ['admin', 'user-summary'] as const,
   adminSettings: ['admin', 'settings'] as const,
   adminJobLimits: ['admin', 'job-limits'] as const,
   /** Public: what the sign-in pages offer (open registration, email). */

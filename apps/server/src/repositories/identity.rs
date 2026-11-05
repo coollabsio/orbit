@@ -868,6 +868,15 @@ impl IdentityRepository {
         Ok(RootAccount { user_id, session })
     }
 
+    /// Accounts on this instance, deleted (anonymized) accounts excluded.
+    pub async fn count_users(&self) -> Result<i64, IdentityError> {
+        Ok(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM users WHERE deleted_at IS NULL")
+                .fetch_one(self.database.pool())
+                .await?,
+        )
+    }
+
     /// One page of accounts on this instance: the root user, then instance admins, then everyone else, oldest
     /// first. `search` matches part of the display name or email, ignoring case. The cursor is the last user ID
     /// of the previous page.

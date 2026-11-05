@@ -23,6 +23,7 @@ import type * as Y from 'yjs'
 import { ImageViewer } from '@/components/common/ImageViewer'
 import { Spinner } from '@/components/ui/spinner'
 import type { Attachment } from '@/lib/attachmentLib'
+import { appNavigate, internalPath } from '@/lib/navigateBridge'
 import { useTheme } from '@/lib/themeContext'
 import { cn } from 'cn'
 import { collabBlockPresence } from '../collab/blockPresence'
@@ -255,7 +256,7 @@ function PageEditorInner({
         const anchor = linkAnchor(event.target)
         const href = anchor?.getAttribute('href')
         if (!href || !isSafeLinkHref(href)) return true
-        if (internalPageLinkId(href) && !opensNewTab(event)) return true
+        if ((internalPageLinkId(href) || internalPath(href)) && !opensNewTab(event)) return true
         window.open(href, '_blank', 'noopener,noreferrer')
         return true
       },
@@ -389,14 +390,24 @@ function PageEditorInner({
     },
   }
 
-  /** `/docs/<uuid>` links navigate in the app (no reload, no new tab) unless a modifier asks for a new tab. */
+  /**
+   * `/docs/<uuid>` links and links to this app (same origin) navigate in the app (no reload, no new tab) unless a
+   * modifier asks for a new tab.
+   */
   const onClickCapture = (event: MouseEvent<HTMLDivElement>) => {
-    const anchor = linkAnchor(event.target)
-    const pageId = internalPageLinkId(anchor?.getAttribute('href'))
+    const href = linkAnchor(event.target)?.getAttribute('href')
+    if (!href || event.button !== 0 || opensNewTab(event.nativeEvent)) return
+    const pageId = internalPageLinkId(href)
     const openPage = openPageRef.current
-    if (!pageId || !openPage || event.button !== 0 || opensNewTab(event.nativeEvent)) return
+    if (pageId && openPage) {
+      event.preventDefault()
+      openPage(pageId)
+      return
+    }
+    const path = internalPath(href)
+    if (!path) return
     event.preventDefault()
-    openPage(pageId)
+    appNavigate(path)
   }
 
   /** Cmd/Ctrl+Enter and Escape for fields that submit or cancel (comments, the new task dialog). */

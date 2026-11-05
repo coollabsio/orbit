@@ -99,6 +99,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::workspace_routes::create_api_token,
         crate::workspace_routes::revoke_api_token,
         crate::workspace_routes::list_admin_users,
+        crate::workspace_routes::get_admin_user_summary,
         crate::workspace_routes::get_instance_settings,
         crate::workspace_routes::set_registration,
         crate::workspace_routes::save_smtp,
@@ -761,7 +762,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "422", "invalid_email");
             add_code(&mut responses, "422", "same_email");
         }
-        "list_admin_users" => {
+        "list_admin_users" | "get_admin_user_summary" => {
             add_code(&mut responses, "403", "installation_admin_required");
         }
         "list_global_audit" | "export_global_audit" => {

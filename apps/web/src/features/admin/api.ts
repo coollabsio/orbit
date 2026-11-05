@@ -1,21 +1,30 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
-import { changeUserEmail, createBackup, createRecoveryLink, deleteBackup, getInstanceSettings, getJobLimits, saveJobLimits, listAdminUsers, listBackupItems, listBackups, listBackupWorkspaces, restoreBackupItem, listGlobalAudit, removeS3, removeSignInProvider, removeSmtp, resetTwoFactor, saveLimits, saveS3, saveSignInProvider, saveStorageOptions, setInstanceAdmin, startImageCompression, saveSmtp, sendTestEmail, setAccountSuspension, setRegistration } from '@orbit/api/generated/sdk.gen'
+import { changeUserEmail, getAdminUserSummary, createBackup, createRecoveryLink, deleteBackup, getInstanceSettings, getJobLimits, saveJobLimits, listAdminUsers, listBackupItems, listBackups, listBackupWorkspaces, restoreBackupItem, listGlobalAudit, removeS3, removeSignInProvider, removeSmtp, resetTwoFactor, saveLimits, saveS3, saveSignInProvider, saveStorageOptions, setInstanceAdmin, startImageCompression, saveSmtp, sendTestEmail, setAccountSuspension, setRegistration } from '@orbit/api/generated/sdk.gen'
 import type { BackupItemKind, InstanceSettingsView, JobLimitsBody, LimitsView, Provider, S3Body, SignInProviderBody, SmtpBody, StorageOptionsBody } from '@orbit/api/generated/types.gen'
 
-/** Accounts on this instance in cursor pages; `search` matches part of the name or email. Admins only. */
+/** How many results the user search shows; more matches ask for a longer search. */
+export const ADMIN_USER_RESULTS = 20
+
+/** The first accounts whose name or email contains `search`, and whether more match. Asks nothing while `search` is empty. Admins only. */
 export function useAdminUsers(search: string) {
-  return useInfiniteQuery({
+  return useQuery({
     queryKey: [...queryKeys.adminUsers, search],
-    initialPageParam: undefined as string | undefined,
-    queryFn: async ({ pageParam }) => {
-      const { data } = await listAdminUsers({ client: apiClient, throwOnError: true, query: { q: search || undefined, cursor: pageParam } })
-      return data
+    queryFn: async () => {
+      const { data } = await listAdminUsers({ client: apiClient, throwOnError: true, query: { q: search, limit: ADMIN_USER_RESULTS } })
+      return { users: data.items, more: data.next_cursor != null }
     },
-    getNextPageParam: (last) => last.next_cursor ?? undefined,
-    select: (data) => data.pages.flatMap((page) => page.items),
+    enabled: search !== '',
     placeholderData: keepPreviousData,
+  })
+}
+
+/** The number of accounts and, on Orbit Cloud, of ongoing and expired trials. Admins only. */
+export function useAdminUserSummary() {
+  return useQuery({
+    queryKey: queryKeys.adminUserSummary,
+    queryFn: async () => (await getAdminUserSummary({ client: apiClient, throwOnError: true })).data,
   })
 }
 

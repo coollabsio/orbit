@@ -1,8 +1,9 @@
-import { expect, test } from 'bun:test'
+import { expect, mock, test } from 'bun:test'
 import { fireEvent, render } from '@testing-library/react'
 import { CustomEmojiContext } from './customEmojiContext'
 import { InternalLinkContext } from './internalLinkContext'
 import { renderMarkdownBlocks } from './markdown'
+import { setAppNavigate } from './navigateBridge'
 
 function preview(source: string) {
   return render(<div>{renderMarkdownBlocks(source, 'test')}</div>)
@@ -110,6 +111,18 @@ test('a link to this app in angle brackets is a plain link, also when the host d
 
   expect(view.getAllByRole('link').map((link) => [link.textContent, link.getAttribute('href')])).toEqual([[url, '/tasks/ENG-1']])
   expect(view.container.querySelectorAll('[data-slot="chip"]')).toHaveLength(1)
+})
+
+test('a labeled markdown link to this app navigates in the app, other labeled links open a new tab', () => {
+  const navigate = mock((_to: string) => {})
+  setAppNavigate(navigate)
+  const view = preview(`[Task](${window.location.origin}/tasks/ENG-1) [Docs](https://example.com/x)`)
+  const [task, docs] = view.getAllByRole('link')
+
+  expect([task.getAttribute('href'), task.getAttribute('target')]).toEqual(['/tasks/ENG-1', null])
+  expect(docs.getAttribute('target')).toBe('_blank')
+  fireEvent.click(task)
+  expect(navigate.mock.calls).toEqual([['/tasks/ENG-1']])
 })
 
 test('in chat ||text|| is a spoiler with inline markdown inside; escaped or in code it stays text', () => {

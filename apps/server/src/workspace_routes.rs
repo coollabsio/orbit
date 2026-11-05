@@ -265,6 +265,7 @@ pub fn workspace_router(state: WorkspaceState) -> Router {
             post(start_image_compression),
         )
         .route("/api/v1/admin/users", get(list_admin_users))
+        .route("/api/v1/admin/users/summary", get(get_admin_user_summary))
         .route(
             "/api/v1/admin/users/{user_id}/suspension",
             post(set_account_suspension),
@@ -1484,6 +1485,42 @@ async fn list_admin_users(
             )
         })?;
     Ok(Json(Page { items, next_cursor }))
+}
+
+/// How many accounts and trials this instance has, for the Admin area.
+#[derive(Serialize, ToSchema)]
+struct AdminUserSummary {
+    /// Accounts, deleted accounts excluded.
+    users: i64,
+    /// Workspaces by trial state; `null` on a self-hosted server, which has no trials.
+    trials: Option<crate::repositories::billing::TrialCounts>,
+}
+
+/// The number of accounts and of ongoing and expired trials.
+#[utoipa::path(get, path = "/api/v1/admin/users/summary", responses((status = 200, body = AdminUserSummary)))]
+async fn get_admin_user_summary(
+    State(state): State<WorkspaceState>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<AdminUserSummary>, ApiError> {
+    let instance = "/api/v1/admin/users/summary";
+    let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
+    require_installation_admin(&state, session.user.id, instance, request_id.as_ref()).await?;
+    let internal = || {
+        ApiError::new(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "internal_error",
+            "Internal server error",
+            "An unexpected error occurred. Use the request ID when contacting support.",
+            instance,
+            request_id.as_ref(),
+        )
+    };
+    let users = state.identity.count_users().await.map_err(|_| internal())?;
+    let trials = crate::repositories::billing::trial_counts(state.identity.database())
+        .await
+        .map_err(|_| internal())?;
+    Ok(Json(AdminUserSummary { users, trials }))
 }
 
 #[derive(Deserialize, ToSchema)]

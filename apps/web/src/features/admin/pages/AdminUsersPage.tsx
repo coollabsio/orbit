@@ -13,7 +13,7 @@ import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, Di
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Field, FieldDescription, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { useAdminUsers, useChangeUserEmail, useCreateRecoveryLink, useResetTwoFactor, useSetInstanceAdmin, useSetSuspension } from '@/features/admin/api'
+import { ADMIN_USER_RESULTS, useAdminUsers, useAdminUserSummary, useChangeUserEmail, useCreateRecoveryLink, useResetTwoFactor, useSetInstanceAdmin, useSetSuspension } from '@/features/admin/api'
 import { useAuthOptions, useCurrentUser } from '@/features/auth/api'
 import { useIsRoot } from '@/features/workspaces/permissions'
 import { SettingsRow } from '@/features/settings/components/SettingsParts'
@@ -30,8 +30,32 @@ function MenuItemReason({ children }: { children: string }) {
   return <span className="block text-xs text-muted-foreground">{children}</span>
 }
 
+/** The number of accounts and, on Orbit Cloud, of workspaces on a trial and with an expired trial. */
+function SummaryCard() {
+  const summary = useAdminUserSummary().data
+  const stats = [
+    { label: 'Users', value: summary?.users },
+    ...(summary?.trials ? [
+      { label: 'Trials ongoing', value: summary.trials.ongoing },
+      { label: 'Trials expired', value: summary.trials.expired },
+    ] : []),
+  ]
+  return (
+    <SettingsCard title="Overview" description="Deleted accounts and deleted workspaces are not counted. A trial belongs to a workspace." flush>
+      <dl className="grid grid-flow-col auto-cols-fr divide-x">
+        {stats.map((stat) => (
+          <div key={stat.label} className="flex flex-col gap-1 px-4 py-3">
+            <dt className="text-xs text-muted-foreground">{stat.label}</dt>
+            <dd className="text-xl font-semibold text-foreground tabular-nums">{stat.value ?? '–'}</dd>
+          </div>
+        ))}
+      </dl>
+    </SettingsCard>
+  )
+}
+
 /**
- * Accounts on the instance, searched and paged on the server. Nobody manages the root account, their own account or
+ * Accounts on the instance, found by a search on the server; the page lists nobody until you search. Nobody manages the root account, their own account or
  * a deleted one here, except that an admin may change their own email; only the root user manages instance admins
  * (the server enforces the same rules).
  */
@@ -114,16 +138,18 @@ export function AdminUsersPage() {
 
   return (
     <>
+      <SummaryCard />
       <SettingsCard
         title="Users"
         actions={<Input type="search" aria-label="Search users" placeholder="Search by name or email…" value={query} onChange={(event) => setQuery(event.target.value)} className="h-8 w-60 max-sm:w-40" />}
         flush
       >
         <div className="flex flex-col divide-y text-[13px]">
-          {users.isPending ? <SettingsRow role="status">Loading users…</SettingsRow> : null}
+          {!search ? <SettingsRow role="status" className="text-muted-foreground">Search by name or email to find a user.</SettingsRow> : null}
+          {search && users.isPending ? <SettingsRow role="status">Searching…</SettingsRow> : null}
           {users.isError ? <SettingsRow role="alert">Users could not be loaded. <Button variant="ghost" onClick={() => void users.refetch()}>Retry</Button></SettingsRow> : null}
-          {search && users.data?.length === 0 ? <SettingsRow role="status">No user matches "{search}".</SettingsRow> : null}
-          {users.data?.map((user) => (
+          {search && users.data?.users.length === 0 ? <SettingsRow role="status">No user matches "{search}".</SettingsRow> : null}
+          {search ? users.data?.users.map((user) => (
             <SettingsRow key={user.id} className="flex-nowrap" data-admin-user={user.id}>
               <Avatar size="sm" className="size-8">
                 <AvatarFallback className="rounded-lg text-[11px] font-semibold">{(user.display_name || user.email).charAt(0).toUpperCase()}</AvatarFallback>
@@ -189,13 +215,9 @@ export function AdminUsersPage() {
                 )}
               </div>
             </SettingsRow>
-          ))}
-          {users.hasNextPage ? (
-            <SettingsRow className="justify-center">
-              <Button variant="ghost" disabled={users.isFetchingNextPage} onClick={() => void users.fetchNextPage()}>
-                {users.isFetchingNextPage ? 'Loading…' : 'Load more users'}
-              </Button>
-            </SettingsRow>
+          )) : null}
+          {search && users.data?.more ? (
+            <SettingsRow role="status" className="text-muted-foreground">Showing the first {ADMIN_USER_RESULTS} matches. Type more of the name or email to narrow the search.</SettingsRow>
           ) : null}
         </div>
       </SettingsCard>
