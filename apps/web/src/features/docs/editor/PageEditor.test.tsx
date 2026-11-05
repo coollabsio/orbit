@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, mock, test } from 'bun:test'
 import { act, fireEvent, render } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createRef } from 'react'
+import { setAppNavigate } from '@/lib/navigateBridge'
 import { emojibaseResponse } from '@/test/emojibase'
 import { PageEditor, type PageEditorHandle, type PageEditorProps, type PageRef } from './PageEditor'
 
@@ -135,6 +136,36 @@ describe('PageEditor', () => {
     })
     document.removeEventListener('click', stop)
     expect(props.onOpenPage).toHaveBeenCalledTimes(1)
+  })
+
+  test('links to this app (same origin) navigate in the app on click, other links do not', async () => {
+    const navigate = mock((_to: string) => {})
+    setAppNavigate(navigate)
+    const url = `${window.location.origin}/tasks/ENG-1`
+    const { view } = await renderEditor({
+      editable: false,
+      initialContent: [
+        {
+          id: 'b',
+          type: 'paragraph',
+          content: [
+            { type: 'link', href: url, content: [{ type: 'text', text: 'Task', styles: {} }] },
+            { type: 'link', href: 'https://elsewhere.example/tasks/ENG-1', content: [{ type: 'text', text: 'Outside', styles: {} }] },
+          ],
+        },
+      ],
+    })
+    // stops happy-dom from navigating for the clicks the editor lets through
+    const stop = (event: Event) => event.preventDefault()
+    document.addEventListener('click', stop)
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })
+    act(() => {
+      view.getByText('Task').closest('a')!.dispatchEvent(click)
+      view.getByText('Task').closest('a')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, ctrlKey: true }))
+      view.getByText('Outside').closest('a')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }))
+    })
+    document.removeEventListener('click', stop)
+    expect(navigate.mock.calls).toEqual([['/tasks/ENG-1']])
   })
 
   test('renders uploaded images from their page file URL and blanks unsafe media URLs', async () => {
