@@ -20,9 +20,11 @@ use crate::repositories::task_filter::{
     SubIssuesDisplay,
 };
 use crate::repositories::tasks::{
-    CreateTask, Page, ProjectRecord, SortOrder, StatusRecord, TaskChanges, TaskError, TaskFilter,
-    TaskRecord, TaskRepository, TaskSort, TaskUpdate, TokenActor, parse_task_identifier,
+    CreateTask, LabelRecord, Page, ProjectRecord, SortOrder, StatusRecord, TaskChanges, TaskError,
+    TaskFilter, TaskRecord, TaskRepository, TaskSort, TaskUpdate, TokenActor,
+    parse_task_identifier,
 };
+use crate::repositories::workspaces::{WorkspaceError, WorkspaceRepository};
 
 const PRIORITIES: [&str; 5] = ["none", "low", "medium", "high", "urgent"];
 
@@ -75,16 +77,24 @@ pub struct ReadTask {
     pub version: u64,
 }
 
-/// [`ReadTask`] plus the parent's id while the parent is visible and in an approved project.
+/// [`ReadTask`] plus the parent's id while the parent is visible and in an approved project, the
+/// identifier (`ENG-12`) and the task's page in the web app.
 #[derive(Clone, Debug, Serialize)]
 pub struct TaskView {
     #[serde(flatten)]
     pub task: ReadTask,
     pub parent_task_id: Option<Id>,
+    pub identifier: String,
+    pub url: String,
 }
 
 impl TaskView {
-    fn new(task: TaskRecord, grant: &[Id]) -> Self {
+    fn new(task: TaskRecord, grant: &[Id], key: &str, web_origin: &str) -> Self {
+        let identifier = format!("{key}-{}", task.number);
+        let url = format!(
+            "{web_origin}/tasks/{}?workspace={}",
+            task.id, task.workspace_id
+        );
         let parent_task_id = task
             .parent
             .as_ref()
@@ -108,8 +118,17 @@ impl TaskView {
                 version: task.version,
             },
             parent_task_id,
+            identifier,
+            url,
         }
     }
+}
+
+/// A workspace member as the public API shows it: no email or role.
+#[derive(Clone, Debug, Serialize)]
+pub struct MemberView {
+    pub user_id: Id,
+    pub display_name: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -191,6 +210,7 @@ pub struct TokenApi {
     tasks: Arc<TaskRepository>,
     pages: Option<Arc<PageRepository>>,
     chat: Option<Arc<ChatRepository>>,
+    web_origin: String,
 }
 
 impl TokenApi {
@@ -200,7 +220,15 @@ impl TokenApi {
             tasks,
             pages: None,
             chat: None,
+            web_origin: String::new(),
         }
+    }
+
+    /// The origin of the web app, for the `url` of each task.
+    #[must_use]
+    pub fn with_web_origin(mut self, origin: &str) -> Self {
+        self.web_origin = origin.trim_end_matches('/').to_owned();
+        self
     }
 
     #[must_use]
@@ -336,8 +364,91 @@ impl Authorized<'_> {
             })
     }
 
-    fn view(&self, task: TaskRecord) -> TaskView {
-        TaskView::new(task, &self.principal.project_ids)
+    /// The public form of `tasks`, with the identifiers built from the approved projects' keys.
+    async fn views(&self, tasks: Vec<TaskRecord>) -> Result<Vec<TaskView>> {
+        let p = self.principal;
+        let keys: std::collections::HashMap<Id, String> = self
+            .api
+            .tasks
+            .approved_projects(p.workspace_id, p.creator_id, &p.project_ids)
+            .await?
+            .into_iter()
+            .map(|project| (project.id, project.key))
+            .collect();
+        tasks
+            .into_iter()
+            .map(|task| {
+                let key = keys
+                    .get(&task.project_id)
+                    .ok_or(TokenApiError::NotAvailable)?;
+                Ok(TaskView::new(
+                    task,
+                    &p.project_ids,
+                    key,
+                    &self.api.web_origin,
+                ))
+            })
+            .collect()
+    }
+
+    async fn view(&self, task: TaskRecord) -> Result<TaskView> {
+        Ok(self.views(vec![task]).await?.remove(0))
+    }
+
+    pub async fn labels(
+        &self,
+        project_id: Id,
+        cursor: Option<&str>,
+        limit: Option<usize>,
+    ) -> Result<Page<LabelRecord>> {
+        self.need(ApiTokenScope::TasksRead)?;
+        let limit = page_limit(cursor, limit)?;
+        if !self.approved(project_id) {
+            return Err(TokenApiError::NotAvailable);
+        }
+        let p = self.principal;
+        Ok(self
+            .api
+            .tasks
+            .labels(
+                p.workspace_id,
+                Some(project_id),
+                p.creator_id,
+                cursor,
+                limit,
+            )
+            .await?)
+    }
+
+    pub async fn members(
+        &self,
+        cursor: Option<&str>,
+        limit: Option<usize>,
+    ) -> Result<Page<MemberView>> {
+        self.need(ApiTokenScope::TasksRead)?;
+        let limit = page_limit(cursor, limit)?;
+        let cursor = cursor
+            .map(str::parse)
+            .transpose()
+            .map_err(|_| TokenApiError::Invalid("Invalid cursor or limit"))?;
+        let p = self.principal;
+        let (members, next) = WorkspaceRepository::new(self.api.tasks.database().clone())
+            .members(p.workspace_id, p.creator_id, cursor, limit)
+            .await
+            .map_err(|error| match error {
+                WorkspaceError::NotFound => TokenApiError::NotAvailable,
+                _ => TokenApiError::Internal,
+            })?;
+        Ok(Page {
+            items: members
+                .into_iter()
+                .map(|member| MemberView {
+                    user_id: member.user_id,
+                    display_name: member.display_name,
+                })
+                .collect(),
+            next_cursor: next.map(|id| id.to_string()),
+        })
     }
 
     pub async fn projects(&self) -> Result<Vec<ProjectRecord>> {
@@ -472,7 +583,7 @@ impl Authorized<'_> {
             )
             .await?;
         Ok(Page {
-            items: page.items.into_iter().map(|task| self.view(task)).collect(),
+            items: self.views(page.items).await?,
             next_cursor: page.next_cursor,
         })
     }
@@ -499,7 +610,7 @@ impl Authorized<'_> {
             .get_task(p.workspace_id, id, p.creator_id)
             .await?;
         if self.approved(task.project_id) {
-            Ok(self.view(task))
+            self.view(task).await
         } else {
             Err(TaskError::NotFound.into())
         }
@@ -540,7 +651,7 @@ impl Authorized<'_> {
                 TimestampMillis::now(),
             )
             .await?;
-        Ok(self.view(outcome.task))
+        self.view(outcome.task).await
     }
 
     pub async fn update_task(
@@ -583,7 +694,7 @@ impl Authorized<'_> {
                 TimestampMillis::now(),
             )
             .await?;
-        Ok(self.view(outcome.task))
+        self.view(outcome.task).await
     }
 
     /// Moves the task and its sub-issues to the trash.

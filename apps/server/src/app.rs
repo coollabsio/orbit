@@ -340,6 +340,7 @@ impl App {
                     crate::public_api::PublicApiState::new(
                         Arc::new(ApiTokenRepository::new(database.clone())),
                         Arc::new(TaskRepository::new(database.clone())),
+                        &config.http.public_origin,
                     )
                     .with_pages(Arc::new(
                         crate::repositories::pages::PageRepository::new(database.clone()),

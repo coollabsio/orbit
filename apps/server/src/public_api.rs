@@ -20,7 +20,9 @@ use crate::repositories::api_tokens::{
     ApiTokenError, ApiTokenPrincipal, ApiTokenRepository, ApiTokenScope,
 };
 use crate::repositories::pages::PageRepository;
-use crate::repositories::tasks::{ProjectRecord, StatusRecord, TaskError, TaskRepository};
+use crate::repositories::tasks::{
+    LabelRecord, ProjectRecord, StatusRecord, TaskError, TaskRepository,
+};
 use crate::token_api::{NewTask, TaskPatch, TaskQuery, TokenApi, TokenApiError};
 
 pub const BASE_PATH: &str = "/api/public/v1";
@@ -33,10 +35,15 @@ pub struct PublicApiState {
 
 impl PublicApiState {
     #[must_use]
-    pub fn new(tokens: Arc<ApiTokenRepository>, tasks: Arc<TaskRepository>) -> Self {
+    /// `web_origin` is the public origin of the web app, for the `url` of each task.
+    pub fn new(
+        tokens: Arc<ApiTokenRepository>,
+        tasks: Arc<TaskRepository>,
+        web_origin: &str,
+    ) -> Self {
         Self {
             tokens,
-            api: TokenApi::new(tasks),
+            api: TokenApi::new(tasks).with_web_origin(web_origin),
         }
     }
 
@@ -53,6 +60,8 @@ pub fn router(state: PublicApiState) -> Router {
     let workspace = Router::new()
         .route("/projects", get(projects))
         .route("/projects/{project_id}/statuses", get(statuses))
+        .route("/projects/{project_id}/labels", get(labels))
+        .route("/members", get(members))
         .route("/tasks", get(list_tasks).post(create_task))
         .route(
             "/tasks/{task}",
@@ -403,6 +412,27 @@ impl From<StatusRecord> for StatusOut {
     }
 }
 
+#[derive(Serialize)]
+struct LabelOut {
+    id: Id,
+    project_id: Id,
+    name: String,
+    color: String,
+    version: u64,
+}
+
+impl From<LabelRecord> for LabelOut {
+    fn from(l: LabelRecord) -> Self {
+        Self {
+            id: l.id,
+            project_id: l.project_id,
+            name: l.name,
+            color: l.color,
+            version: l.version,
+        }
+    }
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct PageQuery {
@@ -520,6 +550,45 @@ async fn statuses(
             .statuses(project, query.cursor.as_deref(), query.limit)
             .await?;
         Ok(list::<_, StatusOut>(page.items, page.next_cursor))
+    }
+    .await;
+    ctx.reply(StatusCode::OK, result)
+}
+
+async fn labels(
+    State(s): State<PublicApiState>,
+    ctx: Ctx,
+    Path((_, project)): Path<(String, String)>,
+    query: Result<Query<PageQuery>, QueryRejection>,
+) -> Response {
+    let project = path_id!(ctx, project);
+    let query = input!(ctx, query);
+    let result = async {
+        let api = s
+            .api
+            .authorize(&ctx.principal, ApiTokenScope::TasksRead, &ctx.request_id)
+            .await?;
+        let page = api
+            .labels(project, query.cursor.as_deref(), query.limit)
+            .await?;
+        Ok(list::<_, LabelOut>(page.items, page.next_cursor))
+    }
+    .await;
+    ctx.reply(StatusCode::OK, result)
+}
+
+async fn members(
+    State(s): State<PublicApiState>,
+    ctx: Ctx,
+    query: Result<Query<PageQuery>, QueryRejection>,
+) -> Response {
+    let query = input!(ctx, query);
+    let result = async {
+        let api = s
+            .api
+            .authorize(&ctx.principal, ApiTokenScope::TasksRead, &ctx.request_id)
+            .await?;
+        api.members(query.cursor.as_deref(), query.limit).await
     }
     .await;
     ctx.reply(StatusCode::OK, result)

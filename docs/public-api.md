@@ -109,7 +109,7 @@ In the examples below, set the workspace first:
 export ORBIT_WS="$ORBIT_URL/api/public/v1/workspaces/$WORKSPACE_ID"
 ```
 
-### Projects and statuses
+### Projects, statuses, labels and members
 
 `GET /workspaces/{workspace_id}/projects`. Scope: `tasks:read`. The approved live projects. Item:
 `{id, name, key, color, version, created_at, updated_at}`.
@@ -127,6 +127,23 @@ curl -sS "$ORBIT_WS/projects/$PROJECT_ID/statuses" \
   -H "Authorization: Bearer $ORBIT_TOKEN"
 ```
 
+`GET /workspaces/{workspace_id}/projects/{project_id}/labels?cursor&limit`.
+Scope: `tasks:read`. Item: `{id, project_id, name, color, version}`. Use the
+IDs in `label_ids`.
+
+```bash
+curl -sS "$ORBIT_WS/projects/$PROJECT_ID/labels" \
+  -H "Authorization: Bearer $ORBIT_TOKEN"
+```
+
+`GET /workspaces/{workspace_id}/members?cursor&limit`. Scope: `tasks:read`. The
+workspace members, to find assignee IDs. Item: `{user_id, display_name}`. The
+API does not show email addresses or roles.
+
+```bash
+curl -sS "$ORBIT_WS/members" -H "Authorization: Bearer $ORBIT_TOKEN"
+```
+
 ### Tasks
 
 A task:
@@ -138,9 +155,14 @@ A task:
   "assignee_ids": ["…"], "label_ids": ["…"],
   "due_start_at": null, "due_at": null,
   "created_at": "…", "updated_at": "…", "version": 3,
-  "parent_task_id": null
+  "parent_task_id": null,
+  "identifier": "ENG-12",
+  "url": "https://orbit.example.com/tasks/…?workspace=…"
 }
 ```
+
+`identifier` is the project key and the task number. Use it in `{task}` paths.
+`url` is the task's page in the Orbit web app.
 
 `priority` is `none`, `low`, `medium`, `high` or `urgent`.
 
@@ -257,7 +279,7 @@ Errors are RFC 9457 problem documents (`Content-Type: application/problem+json`)
 | 409 | `conflict` | `expected_version` is old. `conflict.current_version` has the current version. |
 | 409 | `task_conflict`, `github_content_read_only`, `github_linked_move` | The change conflicts with the task's current state. |
 | 422 | `validation_failed`, `parent_cycle`, `parent_invalid` | A value is not valid for the workspace or project, for example an unknown assignee or label. `errors` names the field. |
-| 429 | `rate_limit_exceeded` | Too many requests. Wait for the number of seconds in `Retry-After`. |
+| 429 | `rate_limit_exceeded` | Too many requests. Wait as the `Retry-After` header tells (RFC 9110). Orbit sends a number of seconds. |
 | 503 | `task_busy`, `service_unavailable` | Try again later. |
 
 Orbit returns `404`, not `403`, for a resource in a project that the token

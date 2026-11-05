@@ -93,8 +93,12 @@ impl Fixture {
         let pages = Arc::new(PageRepository::new((*database).clone()));
         let tokens = ApiTokenRepository::new((*database).clone());
         let app = router(
-            PublicApiState::new(Arc::new(tokens.clone()), Arc::new(tasks.clone()))
-                .with_pages(Arc::clone(&pages)),
+            PublicApiState::new(
+                Arc::new(tokens.clone()),
+                Arc::new(tasks.clone()),
+                "https://orbit.test",
+            )
+            .with_pages(Arc::clone(&pages)),
         )
         .layer(HttpPlatformLayer::new(OriginPolicy::new(
             "https://orbit.test",
@@ -358,6 +362,7 @@ async fn read_endpoints_return_public_fields_of_approved_projects_only() {
             "due_at",
             "due_start_at",
             "id",
+            "identifier",
             "label_ids",
             "number",
             "parent_task_id",
@@ -366,8 +371,17 @@ async fn read_endpoints_return_public_fields_of_approved_projects_only() {
             "status_id",
             "title",
             "updated_at",
+            "url",
             "version"
         ]
+    );
+    assert_eq!(task["identifier"], format!("{key}-{number}"));
+    assert_eq!(
+        task["url"],
+        format!(
+            "https://orbit.test/tasks/{}?workspace={}",
+            f.task, f.workspace
+        )
     );
     let (status, by_identifier) = f
         .call(
@@ -746,8 +760,6 @@ async fn docs_need_their_scope_and_a_personal_token_and_unserved_paths_are_not_f
     for path in [
         "/conversations".to_owned(),
         format!("/conversations/{}/messages", Id::new_v7()),
-        "/members".to_owned(),
-        format!("/projects/{}/labels", f.project),
         format!("/tasks/{}/comments", f.task),
     ] {
         let response = f
@@ -755,7 +767,7 @@ async fn docs_need_their_scope_and_a_personal_token_and_unserved_paths_are_not_f
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri(format!("/api/public/v1{path}"))
+                    .uri(format!("/api/public/v1/workspaces/{}{path}", f.workspace))
                     .header(header::AUTHORIZATION, format!("Bearer {token}"))
                     .body(Body::empty())
                     .unwrap(),
@@ -1034,4 +1046,69 @@ async fn paths_name_the_token_s_workspace() {
             .unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND, "{path}");
     }
+}
+
+#[tokio::test]
+async fn labels_and_members_show_only_what_assigning_needs() {
+    let f = Fixture::new().await;
+    let label = f
+        .tasks
+        .create_label(
+            f.workspace,
+            f.project,
+            f.user,
+            "bug".into(),
+            "#00ff00".into(),
+            "test",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    f.tasks
+        .create_label(
+            f.workspace,
+            f.other_project,
+            f.user,
+            "secret-label".into(),
+            "#00ff00".into(),
+            "test",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    let (token, _) = f.token(&[ApiTokenScope::TasksRead], false).await;
+    let (code, labels) = f
+        .call(
+            Some(&token),
+            "GET",
+            &format!("/projects/{}/labels", f.project),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::OK, "{labels}");
+    assert_eq!(
+        labels,
+        json!({"items": [{"id": label.id, "project_id": f.project, "name": "bug", "color": "#00ff00", "version": 0}], "next_cursor": null})
+    );
+    let (code, problem) = f
+        .call(
+            Some(&token),
+            "GET",
+            &format!("/projects/{}/labels", f.other_project),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::NOT_FOUND);
+    assert!(!problem.to_string().contains("secret-label"));
+
+    let (code, members) = f.call(Some(&token), "GET", "/members", None).await;
+    assert_eq!(code, StatusCode::OK, "{members}");
+    assert_eq!(
+        members,
+        json!({"items": [{"user_id": f.user, "display_name": "Owner"}], "next_cursor": null})
+    );
+
+    let (docs_only, _) = f.token(&[ApiTokenScope::DocsRead], false).await;
+    let (code, _) = f.call(Some(&docs_only), "GET", "/members", None).await;
+    assert_eq!(code, StatusCode::FORBIDDEN);
 }
