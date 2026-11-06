@@ -1456,6 +1456,8 @@ async fn list_admin_users(
 struct AdminUserSummary {
     /// Accounts, deleted accounts excluded.
     users: i64,
+    /// Accounts active in the last day, week and month.
+    active: crate::repositories::identity::ActiveUserCounts,
     /// Workspaces by trial state; `null` on a self-hosted server, which has no trials.
     trials: Option<crate::repositories::billing::TrialCounts>,
 }
@@ -1481,10 +1483,19 @@ async fn get_admin_user_summary(
         )
     };
     let users = state.identity.count_users().await.map_err(|_| internal())?;
+    let active = state
+        .identity
+        .active_user_counts()
+        .await
+        .map_err(|_| internal())?;
     let trials = crate::repositories::billing::trial_counts(state.identity.database())
         .await
         .map_err(|_| internal())?;
-    Ok(Json(AdminUserSummary { users, trials }))
+    Ok(Json(AdminUserSummary {
+        users,
+        active,
+        trials,
+    }))
 }
 
 #[derive(Deserialize, ToSchema)]

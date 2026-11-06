@@ -43355,6 +43355,32 @@
         ],
         "description": "What an integration sends to a click's `response_url`: a message as for the incoming hook, and\nwhat to do with it (Slack's fields)."
       },
+      "ActiveUserCounts": {
+        "type": "object",
+        "description": "Accounts with a signed-in session used in a rolling window, for the Admin area. API tokens do not count.",
+        "required": [
+          "daily",
+          "weekly",
+          "monthly"
+        ],
+        "properties": {
+          "daily": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Used Orbit in the last 24 hours."
+          },
+          "monthly": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Used Orbit in the last 30 days."
+          },
+          "weekly": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Used Orbit in the last 7 days."
+          }
+        }
+      },
       "AdminEmailBody": {
         "type": "object",
         "required": [
@@ -43435,9 +43461,14 @@
         "type": "object",
         "description": "How many accounts and trials this instance has, for the Admin area.",
         "required": [
-          "users"
+          "users",
+          "active"
         ],
         "properties": {
+          "active": {
+            "$ref": "#/components/schemas/ActiveUserCounts",
+            "description": "Accounts active in the last day, week and month."
+          },
           "trials": {
             "oneOf": [
               {

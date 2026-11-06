@@ -42,7 +42,7 @@ function renderPage(requests: string[] = [], viewer: { id: string; root: boolean
         ? Response.json({ sent_to: 'ada@orbit.test', expires_at: '2026-10-08T10:30:00.000Z' }, { status: 202 })
         : Response.json({ url: 'https://orbit.test/recovery?token=secret', expires_at: '2026-10-08T10:30:00.000Z' }, { status: 201 })
     }
-    if (url.pathname.endsWith('/summary')) return Response.json({ users: 4, trials: options.billing_enabled ? { ongoing: 3, expired: 1 } : null })
+    if (url.pathname.endsWith('/summary')) return Response.json({ users: 4, active: { daily: 1, weekly: 2, monthly: 3 }, trials: options.billing_enabled ? { ongoing: 3, expired: 1 } : null })
     const q = url.searchParams.get('q')?.toLowerCase() ?? ''
     const items = USERS.filter((user) => `${user.display_name} ${user.email}`.toLowerCase().includes(q))
     return Response.json({ items, next_cursor: q === 'more' ? 'user-9' : null })

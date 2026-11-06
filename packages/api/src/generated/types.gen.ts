@@ -45,6 +45,24 @@ export type ActionResponsePayload = IncomingWebhookPayload & {
     response_type?: string | null;
 };
 
+/**
+ * Accounts with a signed-in session used in a rolling window, for the Admin area. API tokens do not count.
+ */
+export type ActiveUserCounts = {
+    /**
+     * Used Orbit in the last 24 hours.
+     */
+    daily: number;
+    /**
+     * Used Orbit in the last 30 days.
+     */
+    monthly: number;
+    /**
+     * Used Orbit in the last 7 days.
+     */
+    weekly: number;
+};
+
 export type AdminEmailBody = {
     /**
      * The new address.
@@ -91,6 +109,10 @@ export type AdminUser = {
  * How many accounts and trials this instance has, for the Admin area.
  */
 export type AdminUserSummary = {
+    /**
+     * Accounts active in the last day, week and month.
+     */
+    active: ActiveUserCounts;
     trials?: null | TrialCounts;
     /**
      * Accounts, deleted accounts excluded.

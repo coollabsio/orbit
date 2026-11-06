@@ -1565,13 +1565,27 @@ async fn the_admin_user_summary_counts_accounts_and_trials() {
             .unwrap();
     }
 
+    // The root user is active today; `other_user` was last active 10 days ago; the deleted account is not counted.
+    sqlx::query(
+        "UPDATE sessions SET last_activity_at = $1 \
+         WHERE user_id = (SELECT id FROM users WHERE email = 'other@example.com')",
+    )
+    .bind(now - 10 * DAY_MILLIS)
+    .execute(server.database.pool())
+    .await
+    .unwrap();
+
     let (status, summary) = server
         .call("GET", "/api/v1/admin/users/summary", None)
         .await;
     assert_eq!(status, 200, "{summary}");
     assert_eq!(
         summary,
-        json!({"users": 2, "trials": {"ongoing": 1, "expired": 1}})
+        json!({
+            "users": 2,
+            "active": {"daily": 1, "weekly": 1, "monthly": 2},
+            "trials": {"ongoing": 1, "expired": 1}
+        })
     );
     let (status, problem) = server
         .call_as(&other_user, "GET", "/api/v1/admin/users/summary", None)

@@ -30,27 +30,49 @@ function MenuItemReason({ children }: { children: string }) {
   return <span className="block text-xs text-muted-foreground">{children}</span>
 }
 
-/** The number of accounts and, on Orbit Cloud, of workspaces on a trial and with an expired trial. */
+/** A row of labelled numbers; `–` until the value loads. */
+function StatGrid({ stats }: { stats: { label: string; value: number | undefined }[] }) {
+  return (
+    <dl className="grid grid-flow-col auto-cols-fr divide-x">
+      {stats.map((stat) => (
+        <div key={stat.label} className="flex flex-col gap-1 px-4 py-3">
+          <dt className="text-xs text-muted-foreground">{stat.label}</dt>
+          <dd className="text-xl font-semibold text-foreground tabular-nums">{stat.value ?? '–'}</dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+/**
+ * The number of accounts and, on Orbit Cloud, of workspaces on a trial and with an expired trial; then the daily,
+ * weekly and monthly active users.
+ */
 function SummaryCard() {
   const summary = useAdminUserSummary().data
-  const stats = [
-    { label: 'Users', value: summary?.users },
-    ...(summary?.trials ? [
-      { label: 'Trials ongoing', value: summary.trials.ongoing },
-      { label: 'Trials expired', value: summary.trials.expired },
-    ] : []),
-  ]
   return (
-    <SettingsCard title="Overview" description="Deleted accounts and deleted workspaces are not counted. A trial belongs to a workspace." flush>
-      <dl className="grid grid-flow-col auto-cols-fr divide-x">
-        {stats.map((stat) => (
-          <div key={stat.label} className="flex flex-col gap-1 px-4 py-3">
-            <dt className="text-xs text-muted-foreground">{stat.label}</dt>
-            <dd className="text-xl font-semibold text-foreground tabular-nums">{stat.value ?? '–'}</dd>
-          </div>
-        ))}
-      </dl>
-    </SettingsCard>
+    <>
+      <SettingsCard title="Overview" description="Deleted accounts and deleted workspaces are not counted. A trial belongs to a workspace." flush>
+        <StatGrid
+          stats={[
+            { label: 'Users', value: summary?.users },
+            ...(summary?.trials ? [
+              { label: 'Trials ongoing', value: summary.trials.ongoing },
+              { label: 'Trials expired', value: summary.trials.expired },
+            ] : []),
+          ]}
+        />
+      </SettingsCard>
+      <SettingsCard title="Active users" description="Accounts that used Orbit while signed in during the last 24 hours, 7 days and 30 days. API tokens do not count." flush>
+        <StatGrid
+          stats={[
+            { label: 'Daily', value: summary?.active.daily },
+            { label: 'Weekly', value: summary?.active.weekly },
+            { label: 'Monthly', value: summary?.active.monthly },
+          ]}
+        />
+      </SettingsCard>
+    </>
   )
 }
 

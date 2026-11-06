@@ -246,6 +246,17 @@ pub enum AdminAccountError {
     Unavailable(#[from] sqlx::Error),
 }
 
+/// Accounts with a signed-in session used in a rolling window, for the Admin area. API tokens do not count.
+#[derive(Clone, Copy, Debug, Serialize, ToSchema)]
+pub struct ActiveUserCounts {
+    /// Used Orbit in the last 24 hours.
+    pub daily: i64,
+    /// Used Orbit in the last 7 days.
+    pub weekly: i64,
+    /// Used Orbit in the last 30 days.
+    pub monthly: i64,
+}
+
 /// One account as the root user's Admin area lists it.
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct AdminUser {
@@ -875,6 +886,32 @@ impl IdentityRepository {
                 .fetch_one(self.database.pool())
                 .await?,
         )
+    }
+
+    /// Accounts, deleted accounts excluded, with a signed-in session used in the last 24 hours, 7 days and 30 days.
+    /// A session stays for 30 idle days, so every session used in the last 30 days is still in the table.
+    pub async fn active_user_counts(&self) -> Result<ActiveUserCounts, IdentityError> {
+        const DAY: i64 = 24 * 60 * 60 * 1_000;
+        let now = self.database.database_now().await?.as_millis();
+        let row = sqlx::query(
+            "SELECT \
+               COUNT(CASE WHEN active.last_active_at >= $1 THEN 1 END) AS daily, \
+               COUNT(CASE WHEN active.last_active_at >= $2 THEN 1 END) AS weekly, \
+               COUNT(CASE WHEN active.last_active_at >= $3 THEN 1 END) AS monthly \
+             FROM (SELECT MAX(sessions.last_activity_at) AS last_active_at \
+               FROM sessions JOIN users ON users.id = sessions.user_id \
+               WHERE users.deleted_at IS NULL GROUP BY sessions.user_id) AS active",
+        )
+        .bind(now - DAY)
+        .bind(now - 7 * DAY)
+        .bind(now - 30 * DAY)
+        .fetch_one(self.database.pool())
+        .await?;
+        Ok(ActiveUserCounts {
+            daily: row.get("daily"),
+            weekly: row.get("weekly"),
+            monthly: row.get("monthly"),
+        })
     }
 
     /// One page of accounts on this instance: the root user, then instance admins, then everyone else, oldest
