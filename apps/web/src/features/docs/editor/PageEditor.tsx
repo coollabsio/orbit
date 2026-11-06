@@ -35,6 +35,7 @@ import { insertPageBlock } from './pageBlockCommands'
 import { PageEditorContext, type PageEditorContextValue, type PageRef } from './pageEditorContext'
 import { watchDeletedFiles } from '@orbit/editor/deletedFiles'
 import type { PageEditorInstance } from '@orbit/editor/schema'
+import { selectBlockExtension } from '@orbit/editor/selectBlock'
 import { EDITOR_BLOCK_TYPES, markdownToTaskBlocks, pageEditorSchema, TASK_EDITOR_BLOCK_TYPES, taskEditorSchema } from './schema'
 import { getPageSlashMenuItems, getTaskSlashMenuItems } from './slashMenu'
 import { PageMentionMenu } from './MentionMenu'
@@ -278,6 +279,7 @@ function PageEditorInner({
     // Tiptap would inject its base stylesheet as a <style> tag, which the production CSP (`style-src 'self'`)
     // blocks. The same rules ship statically at the end of src/index.css instead.
     _tiptapOptions: { injectCSS: false },
+    extensions: [selectBlockExtension()],
     domAttributes: ariaLabel ? { editor: { 'aria-label': ariaLabel } } : undefined,
     dictionary,
   }
@@ -295,6 +297,7 @@ function PageEditorInner({
         withCollaboration({
           ...options,
           extensions: [
+            ...options.extensions,
             // Task documents carry no comment marks, so they need no comments extension.
             ...(task ? [] : [commentsExtension]),
             ...(collab.provider.awareness ? [collabBlockPresence({ awareness: collab.provider.awareness, selfId: collab.user.id })] : []),
