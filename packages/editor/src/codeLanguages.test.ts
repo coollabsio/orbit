@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { CODE_LANGUAGES, codeLines, detectLanguage, languageId } from './codeLanguages'
+import { CODE_LANGUAGES, codeLines, detectLanguage, languageId, MATH_LANGUAGE } from './codeLanguages'
 
 const text = (lines: ReturnType<typeof codeLines>) => lines.map((line) => line.map((token) => token.value).join('')).join('\n')
 const types = (lines: ReturnType<typeof codeLines>, value: string) => lines.flat().find((token) => token.value === value)?.type
@@ -11,6 +11,10 @@ describe('languageId', () => {
     expect(languageId(' bash ')).toBe('shell')
     expect(languageId('rs')).toBe('rust')
     expect(languageId('Mermaid')).toBe('mermaid')
+    expect(languageId('LaTeX')).toBe(MATH_LANGUAGE)
+    expect(languageId('tex')).toBe(MATH_LANGUAGE)
+    expect(languageId('math')).toBe(MATH_LANGUAGE)
+    expect(languageId('katex')).toBe(MATH_LANGUAGE)
     expect(languageId('')).toBe('text')
     expect(languageId('plaintext')).toBe('text')
     expect(languageId('brainfuck')).toBe('text')
@@ -69,5 +73,6 @@ describe('codeLines', () => {
   test('plain text and Mermaid have no tokens', () => {
     expect(codeLines('const a = 1\nb', 'text')).toEqual([[{ type: 'identifier', value: 'const a = 1' }], [{ type: 'identifier', value: 'b' }]])
     expect(codeLines('graph TD', 'mermaid')).toEqual([[{ type: 'identifier', value: 'graph TD' }]])
+    expect(codeLines('e^{i\\pi} + 1 = 0', 'latex')).toEqual([[{ type: 'identifier', value: 'e^{i\\pi} + 1 = 0' }]])
   })
 })

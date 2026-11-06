@@ -9,6 +9,7 @@ function editor() {
     page: { render: () => null },
     callout: { render: () => null },
     mention: { render: () => null },
+    math: { render: () => null },
     codeBlock: { tokenClass: () => undefined },
   })
   return BlockNoteEditor.create({ schema: pageEditorSchema, _tiptapOptions: { injectCSS: false } })

@@ -30,6 +30,7 @@
     "cn": "^0.2.6",
     "date-fns": "^4.4.0",
     "frimousse": "0.4.0",
+    "katex": "0.18.10",
     "mediabunny": "^1.65.1",
     "mermaid": "^12.2.0",
     "react": "19.3.0",

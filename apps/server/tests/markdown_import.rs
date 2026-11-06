@@ -101,6 +101,29 @@ fn quote_code_mermaid() {
 }
 
 #[test]
+fn inline_math_stays_in_the_sentence_and_display_math_is_a_formula_block() {
+    let blocks = import("Energy is $E=mc^2$ and costs $5 and $10. A \\$5 note.");
+    assert_eq!(blocks.len(), 1);
+    let content = blocks[0]["content"].as_array().unwrap();
+    assert_eq!(content[0]["text"], "Energy is ");
+    assert_eq!(content[1]["type"], "math");
+    assert_eq!(content[1]["props"]["latex"], "E=mc^2");
+    assert_eq!(content[2]["text"], " and costs $5 and $10. A $5 note.");
+
+    let blocks = import("$$e=mc^2$$");
+    assert_eq!(blocks[0]["type"], "codeBlock");
+    assert_eq!(blocks[0]["props"]["language"], "latex");
+    assert_eq!(blocks[0]["content"][0]["text"], "e=mc^2");
+
+    let blocks = import("Use `$a$` in code.");
+    assert!(
+        texts(&blocks[0]).contains(&("$a$".into(), json!({"code": true}))),
+        "{blocks:?}"
+    );
+    assert_eq!(round_trip("Energy is $E=mc^2$."), "Energy is $E=mc^2$.\n");
+}
+
+#[test]
 fn gfm_table() {
     let blocks = import("| a | b |\n| - | - |\n| 1 | 2 |");
     assert_eq!(blocks.len(), 1);

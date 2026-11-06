@@ -12,6 +12,7 @@ describe('createEditorSchemas', () => {
       page: { render: () => null },
       callout: { render: () => null },
       mention: { render: () => null },
+      math: { render: () => null },
       codeBlock: { tokenClass: () => undefined },
     })
     expect(JSON.parse(JSON.stringify(schemaTable(pageEditorSchema)))).toEqual(JSON.parse(readFileSync(SERVER_SCHEMA, 'utf8')))

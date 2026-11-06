@@ -2,6 +2,8 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/noto-sans";
+/* KaTeX draws a Math code block. The rules stay in this file so production CSP (style-src 'self') keeps them. */
+@import "katex/dist/katex.min.css";
 
 /* BlockNote's shadcn menus use Tailwind classes from its compiled bundle; scan it so they get generated. */
 @source "../node_modules/@blocknote/shadcn";

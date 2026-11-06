@@ -19,6 +19,10 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+.orbit-page-editor .orbit-math {
+  color: var(--orbit-foreground);
+}
+
 .orbit-page-editor .bn-container {
   --bn-font-family: inherit;
   --bn-border-radius: 6px;

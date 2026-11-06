@@ -185,10 +185,29 @@ impl Styles {
     }
 }
 
-/// One piece of inline content after merging: styled text or a link.
+/// One piece of inline content after merging: styled text, a link, or a formula.
 enum Inline {
     Text(String, Styles),
     Link(String, Vec<(String, Styles)>),
+    /// LaTeX source. Written as `$...$` without the text escaper, so `\pi` stays one backslash.
+    Math(String),
+}
+
+/// `$...$` for a formula. A `\` or `$` in the source is written so Markdown gives it back:
+/// `\\` becomes `\`, and `\\$` becomes `\$`, which the importer reads as `$`.
+fn math_markdown(latex: &str, mode: Mode) -> String {
+    let mut out = String::from("$");
+    for character in latex.chars() {
+        match character {
+            '\n' | '\r' => out.push(' '),
+            '\\' => out.push_str("\\\\"),
+            '$' => out.push_str("\\\\$"),
+            '|' if mode == Mode::Cell => out.push_str("\\|"),
+            _ => out.push(character),
+        }
+    }
+    out.push('$');
+    out
 }
 
 struct Converter<'a> {
@@ -693,6 +712,16 @@ impl Converter<'_> {
                         Value::String(text) => {
                             items.push(Inline::Text(text.clone(), Styles::default()));
                         }
+                        value if value.get("type").and_then(Value::as_str) == Some("math") => {
+                            let latex = value
+                                .get("props")
+                                .and_then(|props| props.get("latex"))
+                                .and_then(Value::as_str)
+                                .unwrap_or("");
+                            if !latex.trim().is_empty() {
+                                items.push(Inline::Math(latex.to_owned()));
+                            }
+                        }
                         value if value.get("type").and_then(Value::as_str) == Some("mention") => {
                             items.push(Inline::Text(
                                 format!("@{}", self.mention_name(value)),
@@ -728,6 +757,11 @@ impl Converter<'_> {
         for item in items {
             match item {
                 Inline::Text(text, styles) => push_run(&mut runs, &text, styles),
+                Inline::Math(latex) => {
+                    out.push_str(&runs_markdown(&runs, mode));
+                    runs.clear();
+                    out.push_str(&math_markdown(&latex, mode));
+                }
                 Inline::Link(href, label) => {
                     out.push_str(&runs_markdown(&runs, mode));
                     runs.clear();

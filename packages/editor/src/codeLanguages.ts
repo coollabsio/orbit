@@ -7,6 +7,8 @@ export type { TokenType }
 
 /** A block with this language shows its diagram. */
 export const MERMAID_LANGUAGE = 'mermaid'
+/** A block with this language shows its formula. Fence names `tex`, `math` and `katex` are the same language. */
+export const MATH_LANGUAGE = 'latex'
 export const PLAIN_LANGUAGE = 'text'
 
 const NAMES: Record<string, string> = {
@@ -46,10 +48,11 @@ const configs = new Map<string, ParseOptions | undefined>(languages.map((languag
 // The Rust preset has no comments; they are those of C.
 configs.set('rust', { ...configs.get('rust'), onCommentStart: configs.get('c')?.onCommentStart, onCommentEnd: configs.get('c')?.onCommentEnd })
 
-/** The languages a person can select, plain text and Mermaid first. */
+/** The languages a person can select, plain text, Mermaid and Math first. */
 export const CODE_LANGUAGES: readonly { value: string; label: string }[] = [
   { value: PLAIN_LANGUAGE, label: 'Plain text' },
   { value: MERMAID_LANGUAGE, label: 'Mermaid' },
+  { value: MATH_LANGUAGE, label: 'Math' },
   ...Object.entries(NAMES)
     .map(([value, label]) => ({ value, label }))
     .sort((a, b) => a.label.localeCompare(b.label)),
@@ -59,6 +62,7 @@ export const CODE_LANGUAGES: readonly { value: string; label: string }[] = [
 export function languageId(name: string): string {
   const normalized = name.trim().toLowerCase()
   if (normalized === MERMAID_LANGUAGE) return MERMAID_LANGUAGE
+  if (normalized === MATH_LANGUAGE || normalized === 'tex' || normalized === 'math' || normalized === 'katex') return MATH_LANGUAGE
   const id = lang(normalized)
   return id && id in NAMES ? id : PLAIN_LANGUAGE
 }

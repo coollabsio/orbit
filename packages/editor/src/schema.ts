@@ -79,15 +79,26 @@ const mentionConfig = {
   content: 'none',
 } as const
 
+/** A formula inside a sentence. `latex` is the source; the host draws it. */
+const mathConfig = {
+  type: 'math',
+  propSchema: {
+    latex: { default: '' },
+  },
+  content: 'none',
+} as const
+
 type PageBlockImplementation = ReactCustomBlockImplementation<typeof pageBlockConfig>
 type CalloutImplementation = ReactCustomBlockImplementation<typeof calloutBlockConfig>
 type MentionImplementation = ReactInlineContentImplementation<typeof mentionConfig, StyleSchemaFromSpecs<typeof defaultStyleSpecs>>
+type MathImplementation = ReactInlineContentImplementation<typeof mathConfig, StyleSchemaFromSpecs<typeof defaultStyleSpecs>>
 
 /** How a host draws the custom blocks. Views never change the schema, so every host edits the same documents. */
 export interface EditorViews {
   page: { render: PageBlockImplementation['render']; toExternalHTML?: PageBlockImplementation['toExternalHTML'] }
   callout: { render: CalloutImplementation['render']; toExternalHTML?: CalloutImplementation['toExternalHTML'] }
   mention: { render: MentionImplementation['render'] }
+  math: { render: MathImplementation['render'] }
   codeBlock: CodeBlockOptions
 }
 
@@ -95,6 +106,7 @@ export function createEditorSchemas(views: EditorViews) {
   const codeBlock = codeBlockSpec(views.codeBlock)
   const callout = createReactBlockSpec(calloutBlockConfig, views.callout)
   const mention = createReactInlineContentSpec(mentionConfig, views.mention)
+  const math = createReactInlineContentSpec(mathConfig, views.math)
 
   const pageEditorSchema = BlockNoteSchema.create({
     blockSpecs: {
@@ -105,7 +117,7 @@ export function createEditorSchemas(views: EditorViews) {
       page: createReactBlockSpec(pageBlockConfig, views.page)(),
       callout: callout(),
     },
-    inlineContentSpecs: { ...defaultInlineContentSpecs, mention },
+    inlineContentSpecs: { ...defaultInlineContentSpecs, mention, math },
   })
 
   /**
@@ -120,7 +132,7 @@ export function createEditorSchemas(views: EditorViews) {
       codeBlock,
       callout: callout(),
     },
-    inlineContentSpecs: { ...defaultInlineContentSpecs, mention },
+    inlineContentSpecs: { ...defaultInlineContentSpecs, mention, math },
   })
 
   return { pageEditorSchema, taskEditorSchema }

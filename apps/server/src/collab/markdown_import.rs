@@ -5,7 +5,9 @@
 //! numbered / check lists (nested, with their start number), quotes (the first paragraph is the
 //! quote, the rest its children), fenced code, GFM tables, images (an italic-only paragraph right
 //! after an image is its caption) and rules map to their blocks: what `export::markdown` writes
-//! reads back. `@Name` becomes a mention when exactly one member has that display name. Anything
+//! reads back. `@Name` becomes a mention when exactly one member has that display name.
+//! `$...$` becomes an inline formula, and a paragraph that is only `$$...$$` becomes a Math code
+//! block. Anything
 //! else (HTML) stays as its text. The result has the shape `doc_to_blocks` returns; callers
 //! sanitize it.
 //!
@@ -406,6 +408,98 @@ fn block(kind: &str, props: Value, content: Vec<Value>, children: Vec<Value>) ->
 
 fn text(value: &str, styles: &Map<String, Value>) -> Value {
     json!({"type": "text", "text": value, "styles": styles})
+}
+
+/// A paragraph whose only text is `$$...$$` (the display formula, without the dollars).
+fn display_formula(run: &[Value]) -> Option<String> {
+    if run.len() != 1 {
+        return None;
+    }
+    let item = &run[0];
+    if item["type"] != "text" || item["styles"].get("code").is_some() {
+        return None;
+    }
+    let value = item["text"].as_str()?.trim();
+    let latex = value.strip_prefix("$$")?.strip_suffix("$$")?.trim();
+    if latex.is_empty() || latex.contains("$$") {
+        return None;
+    }
+    Some(latex.to_owned())
+}
+
+/// Splits `$...$` out of plain text. A dollar with a space beside it, or no closer, stays text.
+/// `\$` is a dollar sign.
+fn inline_math(content: Vec<Value>) -> Vec<Value> {
+    let mut out = Vec::with_capacity(content.len());
+    for item in content {
+        let plain = item["type"] == "text" && item["styles"].get("code").is_none();
+        let Some(value) = item["text"].as_str().filter(|_| plain) else {
+            out.push(item);
+            continue;
+        };
+        let styles = item["styles"].as_object().cloned().unwrap_or_default();
+        out.extend(split_math(value, &styles));
+    }
+    out
+}
+
+fn split_math(value: &str, styles: &Map<String, Value>) -> Vec<Value> {
+    let chars: Vec<char> = value.chars().collect();
+    let mut out = Vec::new();
+    let mut plain = String::new();
+    let mut index = 0;
+    while index < chars.len() {
+        if chars[index] == '\\' && chars.get(index + 1) == Some(&'$') {
+            plain.push('$');
+            index += 2;
+            continue;
+        }
+        if chars[index] == '$'
+            && let Some((latex, next)) = read_formula(&chars, index)
+        {
+            if !plain.is_empty() {
+                out.push(text(&plain, styles));
+                plain.clear();
+            }
+            out.push(json!({"type": "math", "props": {"latex": latex}}));
+            index = next;
+            continue;
+        }
+        plain.push(chars[index]);
+        index += 1;
+    }
+    if !plain.is_empty() {
+        out.push(text(&plain, styles));
+    }
+    out
+}
+
+/// The formula that starts at `start` (`$`), and the index after its closing `$`.
+fn read_formula(chars: &[char], start: usize) -> Option<(String, usize)> {
+    let mut index = start + 1;
+    if chars.get(index).is_none_or(|char| char.is_whitespace()) {
+        return None;
+    }
+    let mut latex = String::new();
+    while index < chars.len() {
+        if chars[index] == '\n' {
+            return None;
+        }
+        if chars[index] == '\\' && chars.get(index + 1) == Some(&'$') {
+            latex.push('$');
+            index += 2;
+            continue;
+        }
+        if chars[index] == '$' {
+            if latex.is_empty() || latex.chars().last().is_some_and(char::is_whitespace) {
+                return None;
+            }
+            return Some((latex, index + 1));
+        }
+        latex.push(chars[index]);
+        index += 1;
+    }
+    None
 }
 
 fn same_end(tag: &TagEnd, end: Option<&TagEnd>) -> bool {
@@ -896,7 +990,7 @@ impl<'a> Reader<'a, '_> {
 
     /// Joined text, mentions, and for Obsidian notes `==highlights==`.
     fn finish(&self, content: Vec<Value>) -> Vec<Value> {
-        let content = self.mentions(merge(content));
+        let content = inline_math(self.mentions(merge(content)));
         if self.obsidian.is_some() {
             highlights(content)
         } else {
@@ -908,6 +1002,17 @@ impl<'a> Reader<'a, '_> {
     fn push_inline(&self, kind: &str, props: Value, inline: Vec<Inline>, out: &mut Vec<Value>) {
         let mut run = Vec::new();
         let flush = |run: &mut Vec<Value>, out: &mut Vec<Value>| {
+            if kind == "paragraph"
+                && let Some(latex) = display_formula(run)
+            {
+                out.push(block(
+                    "codeBlock",
+                    json!({"language": "latex"}),
+                    vec![text(&latex, &Map::new())],
+                    Vec::new(),
+                ));
+                return;
+            }
             let content = self.finish(std::mem::take(run));
             if !content.is_empty() {
                 out.push(block(kind, props.clone(), content, Vec::new()));

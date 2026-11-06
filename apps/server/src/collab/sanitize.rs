@@ -4,6 +4,7 @@
 //! collaborative document, and to the document itself (a member can send raw Yjs updates).
 //! Mentions keep only `userId` (a UUID, lowercased) and `name` (a string of at most
 //! [`MENTION_NAME_MAX_CHARS`] characters); a mention without a valid `userId` becomes its `@name` text.
+//! Inline math keeps only `latex` (a string of at most [`MATH_LATEX_MAX_CHARS`] characters).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -23,6 +24,12 @@ const MENTION: &str = "mention";
 
 /// A mention's stored name is a display snapshot; longer names are cut.
 pub const MENTION_NAME_MAX_CHARS: usize = 100;
+
+/// The `math` inline content (`{ latex }`).
+const MATH: &str = "math";
+
+/// A formula source is display text; longer sources are cut.
+pub const MATH_LATEX_MAX_CHARS: usize = 2000;
 
 /// Characters browsers strip from URLs before they parse the scheme.
 fn is_url_noise(c: char) -> bool {
@@ -210,10 +217,49 @@ fn sanitize_blocks_in(blocks: &[Value], policy: Option<&LinkPolicy>) -> Vec<Valu
     let Value::Array(mentioned) = sanitize_mentions(&Value::Array(linked)) else {
         return Vec::new();
     };
-    mentioned
+    let Value::Array(formulas) = sanitize_math(&Value::Array(mentioned)) else {
+        return Vec::new();
+    };
+    formulas
         .into_iter()
         .map(|block| sanitize_file_block(block, policy))
         .collect()
+}
+
+fn latex_text(value: Option<&Value>) -> String {
+    value
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .chars()
+        .take(MATH_LATEX_MAX_CHARS)
+        .collect()
+}
+
+/// Inline math keeps a string `latex` only. An empty source stays, so the editor can still open it.
+fn sanitize_math(value: &Value) -> Value {
+    match value {
+        Value::Array(items) => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                if item.get("type").and_then(Value::as_str) == Some(MATH) && item.is_object() {
+                    let latex = latex_text(item.get("props").and_then(|props| props.get("latex")));
+                    out.push(serde_json::json!({
+                        "type": MATH,
+                        "props": { "latex": latex },
+                    }));
+                    continue;
+                }
+                out.push(sanitize_math(item));
+            }
+            Value::Array(out)
+        }
+        Value::Object(map) => Value::Object(
+            map.iter()
+                .map(|(key, child)| (key.clone(), sanitize_math(child)))
+                .collect(),
+        ),
+        other => other.clone(),
+    }
 }
 
 fn mention_name(value: Option<&Value>) -> String {
@@ -383,6 +429,7 @@ fn repair_document_in(
         collect(txn, child, &mut elements, &mut texts);
     }
     let mut changed = repair_mentions(txn, &elements);
+    changed |= repair_math(txn, &elements);
     if !links {
         return changed;
     }
@@ -502,6 +549,48 @@ fn repair_mentions(txn: &mut TransactionMut, elements: &[XmlElementRef]) -> bool
             };
             if let Some(name) = name {
                 child.insert_attribute(txn, "name", Any::from(name));
+                changed = true;
+            }
+        }
+    }
+    changed
+}
+
+/// Inline math in a live document: unknown attributes go, and a non-string or too long `latex` is fixed.
+fn repair_math(txn: &mut TransactionMut, elements: &[XmlElementRef]) -> bool {
+    let mut changed = false;
+    for element in elements {
+        let formulas: Vec<XmlElementRef> = element
+            .children(txn)
+            .filter_map(|child| match child {
+                XmlOut::Element(child) if child.tag().as_ref() == MATH => Some(child),
+                _ => None,
+            })
+            .collect();
+        for child in formulas {
+            let unknown: Vec<String> = child
+                .attributes(txn)
+                .map(|(name, _)| name.to_owned())
+                .filter(|name| name != "latex")
+                .collect();
+            for name in unknown {
+                child.remove_attribute(txn, &name);
+                changed = true;
+            }
+            let latex = match child.get_attribute(txn, "latex") {
+                None | Some(Out::Any(Any::Undefined)) => None,
+                Some(Out::Any(Any::String(latex)))
+                    if latex.chars().count() <= MATH_LATEX_MAX_CHARS =>
+                {
+                    None
+                }
+                Some(Out::Any(Any::String(latex))) => {
+                    Some(latex.chars().take(MATH_LATEX_MAX_CHARS).collect::<String>())
+                }
+                Some(_) => Some(String::new()),
+            };
+            if let Some(latex) = latex {
+                child.insert_attribute(txn, "latex", Any::from(latex));
                 changed = true;
             }
         }
@@ -679,6 +768,100 @@ mod tests {
                 .count(),
             MENTION_NAME_MAX_CHARS
         );
+    }
+
+    #[test]
+    fn math_keeps_a_capped_latex_string_only() {
+        let long = "x".repeat(MATH_LATEX_MAX_CHARS + 40);
+        let blocks = [json!({"type": "paragraph", "content": [
+            {"type": "math", "props": {"latex": "E=mc^2", "extra": 1}, "content": "x"},
+            {"type": "math", "props": {"latex": 7}},
+            {"type": "math"},
+            {"type": "math", "props": {"latex": long}}
+        ]})];
+        let sanitized = sanitize_blocks(&blocks);
+        let content = sanitized[0]["content"].as_array().unwrap();
+        assert_eq!(content.len(), 4);
+        assert_eq!(
+            content[0],
+            json!({"type": "math", "props": {"latex": "E=mc^2"}})
+        );
+        assert_eq!(content[1], json!({"type": "math", "props": {"latex": ""}}));
+        assert_eq!(content[2], json!({"type": "math", "props": {"latex": ""}}));
+        assert_eq!(
+            content[3]["props"]["latex"]
+                .as_str()
+                .unwrap()
+                .chars()
+                .count(),
+            MATH_LATEX_MAX_CHARS
+        );
+    }
+
+    #[test]
+    fn live_math_drops_unknown_attributes_and_cuts_a_long_source() {
+        use yrs::{Transact, WriteTxn};
+
+        use crate::collab::blocknote::{FRAGMENT, doc_to_blocks, new_doc, write_blocks};
+
+        let long = "y".repeat(MATH_LATEX_MAX_CHARS + 8);
+        let doc = new_doc(None);
+        {
+            let mut txn = doc.transact_mut();
+            let fragment = txn.get_or_insert_xml_fragment(FRAGMENT);
+            write_blocks(
+                &mut txn,
+                &fragment,
+                &[json!({"id": "p", "type": "paragraph", "content": [
+                    {"type": "math", "props": {"latex": long}}
+                ]})],
+            );
+            let math = first_math(&txn, &fragment).expect("math node");
+            math.insert_attribute(&mut txn, "extra", Any::from("no"));
+        }
+        let repaired = {
+            let mut txn = doc.transact_mut();
+            let fragment = txn.get_or_insert_xml_fragment(FRAGMENT);
+            repair_document(&mut txn, &fragment)
+        };
+        assert!(repaired);
+        let blocks = doc_to_blocks(&doc);
+        let latex = blocks[0]["content"][0]["props"]["latex"].as_str().unwrap();
+        assert_eq!(latex.chars().count(), MATH_LATEX_MAX_CHARS);
+        assert!(blocks[0]["content"][0]["props"].get("extra").is_none());
+        let again = {
+            let mut txn = doc.transact_mut();
+            let fragment = txn.get_or_insert_xml_fragment(FRAGMENT);
+            repair_document(&mut txn, &fragment)
+        };
+        assert!(!again);
+    }
+
+    fn first_math(
+        txn: &impl yrs::ReadTxn,
+        fragment: &yrs::XmlFragmentRef,
+    ) -> Option<XmlElementRef> {
+        fn walk(txn: &impl yrs::ReadTxn, element: &XmlElementRef) -> Option<XmlElementRef> {
+            if element.tag().as_ref() == MATH {
+                return Some(element.clone());
+            }
+            for child in element.children(txn) {
+                if let XmlOut::Element(child) = child
+                    && let Some(found) = walk(txn, &child)
+                {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        for child in fragment.children(txn) {
+            if let XmlOut::Element(child) = child
+                && let Some(found) = walk(txn, &child)
+            {
+                return Some(found);
+            }
+        }
+        None
     }
 
     fn task_policy() -> LinkPolicy {

@@ -131,6 +131,26 @@ fn lists_nest_number_and_check() {
 }
 
 #[test]
+fn inline_math_exports_as_dollars() {
+    let text = md(json!([
+        {"type": "paragraph", "content": [
+            {"type": "text", "text": "Energy is ", "styles": {}},
+            {"type": "math", "props": {"latex": "E=mc^2"}},
+            {"type": "text", "text": " and ", "styles": {}},
+            {"type": "math", "props": {"latex": "a$b"}},
+            {"type": "text", "text": " ", "styles": {}},
+            {"type": "math", "props": {"latex": "\\pi"}},
+            {"type": "math", "props": {"latex": "  "}},
+        ]},
+    ]));
+    assert_eq!(text, "Energy is $E=mc^2$ and $a\\\\$b$ $\\\\pi$\n");
+    let blocks = orbit_server::collab::markdown_import::markdown_to_blocks(&text, &[]);
+    assert_eq!(blocks[0]["content"][1]["props"]["latex"], "E=mc^2");
+    assert_eq!(blocks[0]["content"][3]["props"]["latex"], "a$b");
+    assert_eq!(blocks[0]["content"][5]["props"]["latex"], "\\pi");
+}
+
+#[test]
 fn quotes_callouts_code_and_dividers() {
     let text = md(json!([
         {"type": "quote", "content": "said\nand more", "children": [

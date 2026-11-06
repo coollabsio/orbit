@@ -4,6 +4,7 @@
 // socket, so it co-edits the same document as the web. It runs in a web view; the screen around it is native and
 // talks to it through props, native actions (async functions) and `run` (the toolbar's commands).
 import '@blocknote/react/style.css'
+import 'katex/dist/katex.min.css'
 import './PageEditor.css'
 
 import { withCollaboration } from '@blocknote/core/yjs'
@@ -16,6 +17,7 @@ import { watchDeletedFiles } from '@orbit/editor/deletedFiles'
 import { isSafeLinkHref } from '@orbit/editor/links'
 import { CALLOUT_DEFAULT_EMOJI, createEditorSchemas, type PageEditorInstance } from '@orbit/editor/schema'
 import { type DOMImperativeFactory, useDOMImperativeHandle } from 'expo/dom'
+import katex from 'katex'
 import { createContext, type CSSProperties, type Ref, use, useEffect, useRef, useState } from 'react'
 import { WebsocketProvider } from 'y-websocket'
 import * as Y from 'yjs'
@@ -124,6 +126,17 @@ function Callout({ block, contentRef }: { block: { props: { emoji: string } }; c
   )
 }
 
+function InlineMath({ inlineContent }: { inlineContent: { props: { latex: string } } }) {
+  const latex = inlineContent.props.latex.trim()
+  if (!latex.trim()) return <span className="orbit-math">formula</span>
+  try {
+    const html = katex.renderToString(latex, { displayMode: false, throwOnError: true, trust: false, strict: 'ignore' })
+    return <span className="orbit-math" dangerouslySetInnerHTML={{ __html: html }} />
+  } catch {
+    return <span className="orbit-math">{latex}</span>
+  }
+}
+
 function Mention({ inlineContent }: { inlineContent: { props: { userId: string; name: string } } }) {
   const { members } = use(LookupsContext)
   const name = members[inlineContent.props.userId] ?? (inlineContent.props.name || 'Unknown user')
@@ -140,6 +153,7 @@ const { pageEditorSchema } = createEditorSchemas({
   page: { render: PageCard },
   callout: { render: Callout },
   mention: { render: Mention },
+  math: { render: InlineMath },
   codeBlock: { tokenClass: (type) => (COLORED_TOKENS.has(type) ? `orbit-token-${type}` : undefined) },
 })
 

@@ -1,12 +1,19 @@
 import type { CodeBlockOptions } from '@orbit/editor/codeHighlight'
-import { CODE_LANGUAGES, languageId, MERMAID_LANGUAGE } from '@orbit/editor/codeLanguages'
+import { CODE_LANGUAGES, languageId, MATH_LANGUAGE, MERMAID_LANGUAGE } from '@orbit/editor/codeLanguages'
 import { useState, useSyncExternalStore } from 'react'
 import { createRoot } from 'react-dom/client'
 import { codeTokenVariants } from '@/components/common/codeToken'
 import { CopyCodeButton } from '@/components/common/CopyCodeButton'
+import { MathFormula } from '@/components/common/MathFormula'
 import { MermaidDiagram } from '@/components/common/MermaidDiagram'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+
+/** A language whose block shows a picture of the source: a diagram or a formula. */
+function previewLanguage(language: string) {
+  const id = languageId(language)
+  return id === MERMAID_LANGUAGE || id === MATH_LANGUAGE ? id : null
+}
 
 /** The part of the editor that a code block uses. */
 interface CodeBlockEditor {
@@ -38,14 +45,14 @@ function cursorInBlock(editor: CodeBlockEditor, id: string) {
 }
 
 /**
- * The block that a person has just changed to `mermaid` with the language selector. The change makes a new node view,
- * and the focus is in the selector then, so this is how the new view knows to start in "Edit".
+ * The block that a person has just changed to Mermaid or Math with the language selector. The change makes a new node
+ * view, and the focus is in the selector then, so this is how the new view knows to start in "Edit".
  */
 let editNext: string | undefined
 
 /**
  * The controls in the top-right corner of a code block, shown on hover: the language (a change of it makes a new node
- * view), the tabs of a `mermaid` block, and the copy button.
+ * view), the tabs of a Mermaid or Math block, and the copy button.
  */
 function CodeTools({ editor, id, language, children }: { editor: CodeBlockEditor; id: string; language: string; children?: React.ReactNode }) {
   return (
@@ -57,7 +64,7 @@ function CodeTools({ editor, id, language, children }: { editor: CodeBlockEditor
           onValueChange={(value) => {
             // The page can lock while it is open; the node view is not made again for that.
             if (!editor.isEditable) return
-            if (value === MERMAID_LANGUAGE) editNext = id
+            if (previewLanguage(value as string)) editNext = id
             editor.updateBlock(id, { props: { language: value as string } })
           }}
         >
@@ -84,11 +91,11 @@ function CodeTools({ editor, id, language, children }: { editor: CodeBlockEditor
 }
 
 /**
- * A `mermaid` code block. "View" shows only the diagram; "Edit" shows the code with the diagram below it, and the
- * diagram follows the code while the person types. A block that the person has just inserted, or changed to `mermaid`,
- * starts in "Edit".
+ * A Mermaid or Math code block. "View" shows only the picture; "Edit" shows the code with the picture below it, and
+ * the picture follows the code while the person types. A block that the person has just inserted, or changed to one
+ * of these languages, starts in "Edit".
  */
-function MermaidBlock({ editor, id }: { editor: CodeBlockEditor; id: string }) {
+function SourcePreview({ editor, id, language }: { editor: CodeBlockEditor; id: string; language: string }) {
   const text = useSyncExternalStore(
     (onChange) => editor.onChange(onChange),
     () => blockText(editor, id),
@@ -101,8 +108,8 @@ function MermaidBlock({ editor, id }: { editor: CodeBlockEditor; id: string }) {
   const mode = editor.isEditable ? chosen : 'view'
 
   return (
-    <div data-slot="mermaid-block" data-mode={mode} className="group/mermaid">
-      <CodeTools editor={editor} id={id} language={MERMAID_LANGUAGE}>
+    <div data-slot="source-preview" data-kind={language} data-mode={mode} className="group/preview">
+      <CodeTools editor={editor} id={id} language={language}>
         {editor.isEditable ? (
           <Tabs
             value={mode}
@@ -121,8 +128,8 @@ function MermaidBlock({ editor, id }: { editor: CodeBlockEditor; id: string }) {
         ) : null}
       </CodeTools>
       {/* the page surface: the code surface is dark in both themes */}
-      <div className="bg-background p-4 group-data-[mode=edit]/mermaid:rounded-b-lg group-data-[mode=edit]/mermaid:border-t group-data-[mode=view]/mermaid:rounded-lg group-data-[mode=view]/mermaid:border group-data-[mode=view]/mermaid:pt-11">
-        <MermaidDiagram code={text} />
+      <div className="bg-background p-4 group-data-[mode=edit]/preview:rounded-b-lg group-data-[mode=edit]/preview:border-t group-data-[mode=view]/preview:rounded-lg group-data-[mode=view]/preview:border group-data-[mode=view]/preview:pt-11">
+        {language === MATH_LANGUAGE ? <MathFormula code={text} /> : <MermaidDiagram code={text} />}
       </div>
     </div>
   )
@@ -130,29 +137,29 @@ function MermaidBlock({ editor, id }: { editor: CodeBlockEditor; id: string }) {
 
 /**
  * The code block of the page editor: syntax colors (the same tokens and colors as a code block in a task or a chat
- * message) and, in its top-right corner, a language selector and a copy button. A `mermaid` block also has its diagram
- * and the "Edit" / "View" tabs. These are a small React root outside the block's content DOM, so ProseMirror must
- * ignore its DOM changes and events.
+ * message) and, in its top-right corner, a language selector and a copy button. A Mermaid or Math block also has its
+ * picture and the "Edit" / "View" tabs. These are a small React root outside the block's content DOM, so ProseMirror
+ * must ignore its DOM changes and events.
  */
 export const codeBlockOptions: CodeBlockOptions = {
   tokenClass: (type) => codeTokenVariants({ type }) || undefined,
   decorate(view, block, editor) {
     if (!(view.dom instanceof HTMLElement) || !view.contentDOM) return view
 
-    const mermaid = languageId(block.props.language) === MERMAID_LANGUAGE
+    const preview = previewLanguage(block.props.language)
     const container = document.createElement('div')
     container.contentEditable = 'false'
     // The block content is a flex row (BlockNote) and `position: relative`: the controls pin to its top-right corner.
-    // Only the diagram of a `mermaid` block takes a line of its own; else the container must not take width from the code.
-    if (mermaid) container.className = 'basis-full'
+    // Only the picture of a Mermaid or Math block takes a line of its own; else the container must not take width from the code.
+    if (preview) container.className = 'basis-full'
     // The code surface is dark in both themes, so the token colors are the dark ones.
     view.contentDOM.parentElement?.classList.add('dark')
     view.dom.classList.add('group')
-    // The diagram wraps to a line of its own. In "View" the code is hidden and the block has no code surface.
-    if (mermaid) view.dom.classList.add('flex-wrap', 'has-data-[mode=view]:bg-transparent!', 'has-data-[mode=view]:p-0!', 'has-data-[mode=view]:[&>pre]:hidden!')
+    // The picture wraps to a line of its own. In "View" the code is hidden and the block has no code surface.
+    if (preview) view.dom.classList.add('flex-wrap', 'has-data-[mode=view]:bg-transparent!', 'has-data-[mode=view]:p-0!', 'has-data-[mode=view]:[&>pre]:hidden!')
     view.dom.appendChild(container)
     const root = createRoot(container)
-    root.render(mermaid ? <MermaidBlock editor={editor} id={block.id} /> : <CodeTools editor={editor} id={block.id} language={block.props.language} />)
+    root.render(preview ? <SourcePreview editor={editor} id={block.id} language={preview} /> : <CodeTools editor={editor} id={block.id} language={block.props.language} />)
 
     const ours = (target: EventTarget | null) => target instanceof Node && container.contains(target)
     const destroy = view.destroy
