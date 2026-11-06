@@ -452,8 +452,8 @@ function PageEditorInner({
             // The callout's placeholder sits next to the emoji (BlockNote's would follow the whole row).
             "[&>.bn-editor[contenteditable=true]_.bn-block-content[data-content-type=callout]:has(.ProseMirror-trailingBreak:only-child)]:after:content-['Callout']!",
             '[&>.bn-editor[contenteditable=true]_.bn-block-content[data-content-type=callout]:has(.ProseMirror-trailingBreak:only-child)]:after:absolute [&>.bn-editor[contenteditable=true]_.bn-block-content[data-content-type=callout]:has(.ProseMirror-trailingBreak:only-child)]:after:top-px [&>.bn-editor[contenteditable=true]_.bn-block-content[data-content-type=callout]:has(.ProseMirror-trailingBreak:only-child)]:after:left-8',
-            // Headings scale with their text: the app's global `h1 { leading-7 }` is a fixed 28px, too short for a 3em
-            // heading, so its text ran into the next block.
+            // Headings scale with their text: the app's global `h1 { leading-7 }` is a fixed 28px, too short for these
+            // headings, so the text ran into the next block. Sizes live in index.css.
             '[&_.bn-editor_:is(h1,h2,h3,h4,h5,h6)]:leading-[1.3]',
             // Inline links use the app's link style instead of the browser's blue.
             '[&_.bn-editor_a[data-inline-content-type=link]]:text-primary! [&_.bn-editor_a[data-inline-content-type=link]]:underline! [&_.bn-editor_a[data-inline-content-type=link]]:underline-offset-2!',

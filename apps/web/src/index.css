@@ -460,6 +460,31 @@
 }
 
 /*
+ * Doc headings. BlockNote's defaults are 3em / 2em / 1.3em (48px / 32px / 21px on the 16px editor).
+ * Notion's page headings are about 30px / 24px / 20px, so h1 and h2 come down to that scale and h3 moves a little.
+ * h4 stays at 1em (16px): it is already the same size as the text. --prev-level is the size BlockNote
+ * animates from when a heading level changes. The page-editor slot outranks BlockNote's stylesheet.
+ */
+[data-slot='page-editor'] [data-content-type='heading'] {
+  --level: 1.875em;
+}
+[data-slot='page-editor'] [data-content-type='heading'][data-level='2'] {
+  --level: 1.5em;
+}
+[data-slot='page-editor'] [data-content-type='heading'][data-level='3'] {
+  --level: 1.25em;
+}
+[data-slot='page-editor'] [data-prev-level='1'] {
+  --prev-level: 1.875em;
+}
+[data-slot='page-editor'] [data-prev-level='2'] {
+  --prev-level: 1.5em;
+}
+[data-slot='page-editor'] [data-prev-level='3'] {
+  --prev-level: 1.25em;
+}
+
+/*
  * Co-editing. Carets (collab/cursor.ts): BlockNote's flag, made a little larger and rounder; it shows while the person
  * types or moves and on hover. Block markers (collab/blockPresence.ts): initials in the right margin of the block each
  * other person is in, in their cursor color. The page scroller pads the text column by only 24px, so the marker hangs
