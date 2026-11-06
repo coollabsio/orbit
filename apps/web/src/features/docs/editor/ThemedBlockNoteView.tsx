@@ -27,11 +27,22 @@ export function ThemedBlockNoteView<B extends BlockSchema, I extends InlineConte
         '[--bn-colors-side-menu:var(--muted-foreground)]!',
         // BlockNote draws a 1px indent line on each nested block. It sits in the margin beside a table and inside a callout.
         '[&_.bn-block-group_.bn-block:not(:has(.bn-toggle-wrapper))_.bn-block-group_.bn-block-outer:not([data-prev-depth-changed])]:before:border-l-0!',
-        // BlockNote's unlayered `.bn-shadcn svg { width: revert }` beats the shadcn `size-4` icon rule, so the side-menu
-        // icons and the menu chevrons and checkmarks fall back to their 24px size attribute. The same rule makes the
-        // open/close mark 1em (it grows with a heading). Keep that mark at 16px. The empty-toggle "add" line was
-        // indented for an 18px mark; 20px lines it up with the text after the smaller mark.
-        "[&_.bn-side-menu_.bn-button_svg]:size-4! [&_[data-slot^=dropdown-menu-]_svg:not([class*='size-'])]:size-4!",
+        // BlockNote's unlayered `.bn-shadcn svg { width: revert }` beats the shadcn `size-4` icon rule, so menu
+        // chevrons fall back to their 24px size attribute. The same rule makes the open/close mark 1em (it grows
+        // with a heading). Keep that mark at 16px. The empty-toggle "add" line was indented for an 18px mark;
+        // 20px lines it up with the text after the smaller mark.
+        // The block-handle grip is a dropdown trigger. Leave its icon to the handle rules below.
+        "[&_[data-slot^=dropdown-menu-]:not(.bn-button)_svg:not([class*='size-'])]:size-4!",
+        // Block handle, matched to a Notion screenshot (144 dpi, so 1 CSS px = 2 image px).
+        // Plus glyph sits inside a 16px icon (the icon pads the stroke). Grip icon stays 18px, in an
+        // 18×24 rounded button with no fill until hover. 3px between the buttons reads as a 6px gap
+        // after the plus pad. 19px of menu padding is the gap from the grip to the text: it is inside
+        // the menu box, so the menu stays that far from the block.
+        '[&_.bn-side-menu]:gap-[3px]! [&_.bn-side-menu]:pr-[19px]!',
+        '[&_.bn-side-menu_.bn-button]:h-6! [&_.bn-side-menu_.bn-button]:w-[18px]! [&_.bn-side-menu_.bn-button]:min-w-0! [&_.bn-side-menu_.bn-button]:rounded-[4px]! [&_.bn-side-menu_.bn-button]:p-0! [&_.bn-side-menu_.bn-button]:text-muted-foreground!',
+        '[&_.bn-side-menu_.bn-button:has([data-test=dragHandleAdd])]:bg-transparent! [&_.bn-side-menu_.bn-button:has([data-test=dragHandleAdd])]:hover:bg-foreground/6!',
+        '[&_.bn-side-menu_.bn-button:has([data-test=dragHandle])]:bg-transparent! [&_.bn-side-menu_.bn-button:has([data-test=dragHandle])]:aria-expanded:bg-transparent! [&_.bn-side-menu_.bn-button:has([data-test=dragHandle])]:hover:bg-foreground/6!',
+        '[&_.bn-side-menu_.bn-button_svg]:size-[18px]! [&_.bn-side-menu_.bn-button:has([data-test=dragHandleAdd])_svg]:size-4!',
         '[&_.bn-toggle-button>svg]:size-4! [&_.bn-toggle-add-block-button]:ml-5!',
         // The open state turns the mark 90°. Animate that turn. Reduced motion: no turn.
         '[&_.bn-toggle-button]:transition-transform! [&_.bn-toggle-button]:duration-150! [&_.bn-toggle-button]:ease-[cubic-bezier(0.23,1,0.32,1)]! motion-reduce:[&_.bn-toggle-button]:transition-none!',

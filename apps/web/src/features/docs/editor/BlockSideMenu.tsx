@@ -113,9 +113,24 @@ export function BlockSideMenu(props: SideMenuProps) {
 /** BlockNote's side menu is 30px tall (`.bn-side-menu`). */
 const HANDLE_HEIGHT = 30
 
+/** Taller than this is a card, an image, or a table, not one line of text. */
+const ONE_LINE = 48
+
+/** The top row: a heading, a file name, a picture, a page chip, or the first text line. */
+function firstRow(reference: Element): Element {
+  return (
+    reference.querySelector('h1, h2, h3, h4, h5, h6') ??
+    reference.querySelector('.bn-file-name-with-icon, .bn-add-file-button') ??
+    reference.querySelector('.bn-visual-media') ??
+    reference.querySelector('[data-page-id]') ??
+    reference.querySelector('.bn-inline-content') ??
+    reference
+  )
+}
+
 /**
- * BlockNote's built-in shift assumes its own heading sizes. Ours are smaller, so that shift
- * drops the handle below the line. Measure the first line and center the 30px handle on it.
+ * BlockNote's built-in shift assumes its own heading sizes. Measure the top row instead.
+ * One line: center the 30px handle on it. A taller block: keep the handle on that top row.
  */
 function handleShift(editor: ReturnType<typeof useBlockNoteEditor>, blockId: string): number {
   if (!editor.prosemirrorView) return 0
@@ -127,18 +142,15 @@ function handleShift(editor: ReturnType<typeof useBlockNoteEditor>, blockId: str
     reference = node instanceof Element ? node : node.parentElement
   })
   if (!reference) return 0
-  const line =
-    reference.querySelector('h1, h2, h3, h4, h5, h6') ??
-    reference.querySelector('[data-page-id]') ??
-    reference.querySelector('.bn-inline-content') ??
-    reference
+  const line = firstRow(reference)
   const box = line.getClientRects()[0] ?? line.getBoundingClientRect()
   if (box.height === 0) return 0
   const refTop = reference.getBoundingClientRect().top
-  return Math.round(box.top + box.height / 2 - refTop - HANDLE_HEIGHT / 2)
+  const top = box.height > ONE_LINE ? box.top : box.top + box.height / 2 - HANDLE_HEIGHT / 2
+  return Math.round(top - refTop)
 }
 
-/** Block handle, centered on the block's first line. */
+/** Block handle, on the block's first line. */
 export function BlockSideMenuController() {
   const editor = useBlockNoteEditor()
   const blockId = useExtensionState(SideMenuExtension, {
