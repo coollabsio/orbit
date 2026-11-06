@@ -206,9 +206,15 @@ pub(crate) fn inspect_request(
                 .find(|ip| !policy.is_trusted_ip(*ip))
                 .unwrap_or(first);
         }
-        if let Some(value) = consistent_header(headers, X_REQUEST_ID)? {
-            request_id =
-                RequestId::from_trusted_header(value.to_str().map_err(|_| ())?).ok_or(())?;
+        // Proxies pass the client's `X-Request-Id` on unchanged, so it is untrusted input: a value
+        // Orbit cannot use gets a server-generated ID instead of failing the request (issue #52).
+        if let Some(forwarded) = consistent_header(headers, X_REQUEST_ID)
+            .ok()
+            .flatten()
+            .and_then(|value| value.to_str().ok())
+            .and_then(RequestId::from_trusted_header)
+        {
+            request_id = forwarded;
         }
         if let Some(forwarded_transport) = forwarded_transport(headers)? {
             transport = forwarded_transport;

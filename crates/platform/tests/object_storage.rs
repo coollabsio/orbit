@@ -264,6 +264,60 @@ async fn a_workspace_bucket_takes_the_workspace_files_and_gives_them_back_when_r
     assert_eq!(fixture.read(&after).await, b"after the bucket");
 }
 
+/// Moving the files of a workspace bucket that is the installation's bucket deleted them (issue #54).
+#[tokio::test]
+async fn a_workspace_bucket_at_the_installation_location_keeps_the_files() {
+    let fixture = Fixture::new(true).await;
+    let workspace = Id::new_v7();
+    let key = fixture.upload_to(workspace, b"only copy").await;
+    let own = S3Bucket::new(fixture.bucket.config().clone()).unwrap();
+
+    fixture
+        .storage
+        .configure(with_workspace_bucket(&fixture, workspace, &own, true));
+    fixture.store.move_blobs().await.unwrap();
+    assert!(fixture.in_bucket(&key).await);
+    assert_eq!(fixture.read(&key).await, b"only copy");
+    let status = fixture
+        .store
+        .workspace_status(&workspace.to_string())
+        .unwrap();
+    assert_eq!(status.remaining, 0);
+
+    fixture
+        .storage
+        .configure(with_workspace_bucket(&fixture, workspace, &own, false));
+    fixture.store.move_blobs().await.unwrap();
+    assert!(fixture.in_bucket(&key).await, "the installation keeps it");
+    assert!(fixture.local.blobs().await.unwrap().is_empty());
+    let status = fixture
+        .store
+        .workspace_status(&workspace.to_string())
+        .unwrap();
+    assert_eq!(status.remaining, 0);
+}
+
+/// Two endpoint names for one bucket pass the location check; the mover still keeps the file.
+#[tokio::test]
+async fn a_workspace_bucket_under_another_endpoint_name_keeps_the_files() {
+    let fixture = Fixture::new(true).await;
+    let workspace = Id::new_v7();
+    let key = fixture.upload_to(workspace, b"only copy").await;
+    let config = fixture.bucket.config().clone();
+    let own = S3Bucket::new(S3Config {
+        endpoint: config.endpoint.replace("127.0.0.1", "localhost"),
+        ..config
+    })
+    .unwrap();
+
+    fixture
+        .storage
+        .configure(with_workspace_bucket(&fixture, workspace, &own, true));
+    fixture.store.move_blobs().await.unwrap();
+    assert!(holds(&own, &key).await);
+    assert_eq!(fixture.read(&key).await, b"only copy");
+}
+
 #[tokio::test]
 async fn existing_files_on_this_server_move_to_a_workspace_bucket_and_back() {
     let fixture = Fixture::new(false).await;

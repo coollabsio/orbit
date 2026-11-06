@@ -18,6 +18,9 @@ pub struct ApiTokenRecord {
     /// The projects whose tasks the token may use; empty when it has no task scope.
     #[schema(value_type = Vec<String>)]
     pub project_ids: Vec<Id>,
+    /// Whether the task scope covers every live project of the workspace, including projects
+    /// created later. `project_ids` then lists the projects of today.
+    pub all_projects: bool,
     #[schema(value_type = Option<String>)]
     pub service_account_id: Option<Id>,
     pub service_account_name: Option<String>,
@@ -100,10 +103,26 @@ impl ApiTokenScope {
     }
 }
 
+/// The projects whose tasks a new token may use.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TokenProjects {
+    /// Every live project of the workspace, including projects created later.
+    All,
+    Only(Vec<Id>),
+}
+
+impl From<Vec<Id>> for TokenProjects {
+    fn from(ids: Vec<Id>) -> Self {
+        Self::Only(ids)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ApiTokenPrincipal {
     pub token_id: Id,
     pub workspace_id: Id,
+    /// The approved projects, read again on each request, so an all-projects credential also
+    /// covers projects created after it.
     pub project_ids: Vec<Id>,
     pub creator_id: Id,
     /// The member whose access a request is checked with: the creator of a personal token, the
@@ -161,13 +180,17 @@ impl ApiTokenRepository {
         actor_id: Id,
     ) -> Result<Vec<ApiTokenRecord>, ApiTokenError> {
         self.require_manager(workspace_id, actor_id).await?;
-        let rows = sqlx::query("SELECT api_tokens.id, api_tokens.name, api_tokens.token_prefix, api_tokens.scopes, api_tokens.created_at, api_tokens.last_used_at, api_tokens.expires_at, api_tokens.service_account_id, service_accounts.name AS service_account_name FROM api_tokens LEFT JOIN service_accounts ON service_accounts.id = api_tokens.service_account_id WHERE api_tokens.workspace_id = $1 AND api_tokens.revoked_at IS NULL ORDER BY api_tokens.created_at DESC, api_tokens.id DESC")
+        let rows = sqlx::query("SELECT api_tokens.id, api_tokens.name, api_tokens.token_prefix, api_tokens.scopes, api_tokens.all_projects, api_tokens.created_at, api_tokens.last_used_at, api_tokens.expires_at, api_tokens.service_account_id, service_accounts.name AS service_account_name FROM api_tokens LEFT JOIN service_accounts ON service_accounts.id = api_tokens.service_account_id WHERE api_tokens.workspace_id = $1 AND api_tokens.revoked_at IS NULL ORDER BY api_tokens.created_at DESC, api_tokens.id DESC")
             .bind(workspace_id.to_string()).fetch_all(self.database.pool()).await?;
         let mut records = Vec::with_capacity(rows.len());
         for row in rows {
             let id = parse_id(&row, "id")?;
             let scopes = ApiTokenScope::parse_list(&row.get::<String, _>("scopes"));
-            records.push(decode(row, self.project_ids(id, &scopes).await?)?);
+            let all_projects: bool = row.get("all_projects");
+            let project_ids = self
+                .project_ids(workspace_id, id, &scopes, all_projects)
+                .await?;
+            records.push(decode(row, project_ids)?);
         }
         Ok(records)
     }
@@ -178,7 +201,7 @@ impl ApiTokenRepository {
         workspace_id: Id,
         actor_id: Id,
         name: String,
-        mut project_ids: Vec<Id>,
+        projects: impl Into<TokenProjects>,
         scopes: &[ApiTokenScope],
         service_account: bool,
         expires_at: Option<TimestampMillis>,
@@ -193,17 +216,20 @@ impl ApiTokenRepository {
                 ApiTokenScope::DocsRead | ApiTokenScope::DocsWrite | ApiTokenScope::ChatRead
             )
         });
-        // Projects only limit task access, so a token without a task scope stores none.
+        // Projects only limit task access, so a token without a task scope stores none, and an
+        // all-projects token reads them on each request instead.
         let grants_tasks = ApiTokenScope::grants_tasks(&scopes);
-        if !grants_tasks {
-            project_ids.clear();
-        }
+        let (all_projects, mut project_ids) = match projects.into() {
+            _ if !grants_tasks => (false, Vec::new()),
+            TokenProjects::All => (true, Vec::new()),
+            TokenProjects::Only(ids) => (false, ids),
+        };
         if scopes.is_empty() || (service_account && content_scope) {
             return Err(ApiTokenError::NotFound);
         }
         let mut transaction = self.database.immediate_transaction().await?;
         require_manager_in(&mut transaction, workspace_id, actor_id).await?;
-        if grants_tasks && project_ids.is_empty() {
+        if grants_tasks && !all_projects && project_ids.is_empty() {
             return Err(ApiTokenError::NotFound);
         }
         for project_id in &project_ids {
@@ -260,10 +286,10 @@ impl ApiTokenRepository {
         let token = format!("orb_{}", generate_opaque_token());
         let hash: [u8; 32] = Sha256::digest(token.as_bytes()).into();
         let prefix: String = token.chars().take(12).collect();
-        sqlx::query("INSERT INTO api_tokens (id, workspace_id, project_id, name, token_hash, token_prefix, scopes, created_by, created_at, service_account_id, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)")
+        sqlx::query("INSERT INTO api_tokens (id, workspace_id, project_id, name, token_hash, token_prefix, scopes, created_by, created_at, service_account_id, expires_at, all_projects) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)")
             .bind(id.to_string()).bind(workspace_id.to_string()).bind(project_ids.first().map(Id::to_string)).bind(&name).bind(hash.to_vec()).bind(&prefix)
             .bind(ApiTokenScope::format_list(&scopes)).bind(actor_id.to_string()).bind(now.as_millis()).bind(service_account_id.map(|id| id.to_string())).bind(expires_at.map(TimestampMillis::as_millis))
-            .execute(&mut *transaction).await?;
+            .bind(i64::from(all_projects)).execute(&mut *transaction).await?;
         for project_id in &project_ids {
             sqlx::query("INSERT INTO api_token_projects (token_id, project_id) VALUES ($1, $2)")
                 .bind(id.to_string())
@@ -280,10 +306,13 @@ impl ApiTokenRepository {
             "api_token",
             Some(id),
             request_id,
-            serde_json::json!({"scopes": scopes, "project_ids": project_ids}),
+            serde_json::json!({"scopes": scopes, "project_ids": project_ids, "all_projects": all_projects}),
             now,
         )
         .await?;
+        if all_projects {
+            project_ids = live_projects(&mut *transaction, workspace_id).await?;
+        }
         transaction.commit().await?;
         Ok(IssuedApiToken {
             api_token: ApiTokenRecord {
@@ -292,6 +321,7 @@ impl ApiTokenRepository {
                 token_prefix: prefix,
                 scopes,
                 project_ids,
+                all_projects,
                 service_account_id,
                 service_account_name,
                 expires_at,
@@ -310,7 +340,7 @@ impl ApiTokenRepository {
     ) -> Result<ApiTokenPrincipal, ApiTokenError> {
         let hash: [u8; 32] = Sha256::digest(token.as_bytes()).into();
         let row = sqlx::query(
-            "SELECT api_tokens.id, api_tokens.workspace_id, api_tokens.created_by, api_tokens.service_account_id, service_accounts.name AS service_account_name, api_tokens.scopes \
+            "SELECT api_tokens.id, api_tokens.workspace_id, api_tokens.created_by, api_tokens.service_account_id, service_accounts.name AS service_account_name, api_tokens.scopes, api_tokens.all_projects \
              FROM api_tokens JOIN workspaces ON workspaces.id = api_tokens.workspace_id \
              LEFT JOIN users ON users.id = api_tokens.created_by AND users.suspended_at IS NULL \
              LEFT JOIN memberships ON memberships.workspace_id = api_tokens.workspace_id AND memberships.user_id = api_tokens.created_by \
@@ -337,9 +367,13 @@ impl ApiTokenRepository {
             .get::<String, _>("workspace_id")
             .parse()
             .map_err(|_| ApiTokenError::InvalidIdentifier)?;
-        let project_ids = self.project_ids(token_id, &scopes).await?;
-        // A task token whose projects were all deleted no longer works at all.
-        if ApiTokenScope::grants_tasks(&scopes) && project_ids.is_empty() {
+        let all_projects: bool = row.get("all_projects");
+        let project_ids = self
+            .project_ids(workspace_id, token_id, &scopes, all_projects)
+            .await?;
+        // A task token whose chosen projects were all deleted no longer works at all. An
+        // all-projects token stays valid in a workspace without projects.
+        if ApiTokenScope::grants_tasks(&scopes) && !all_projects && project_ids.is_empty() {
             return Err(ApiTokenError::NotFound);
         }
         let creator_id = row
@@ -391,15 +425,21 @@ impl ApiTokenRepository {
         Ok(principal)
     }
 
-    /// The live projects of a token with a task scope. Older tokens without one may still have
-    /// stored projects, which give them nothing.
+    /// The live projects of a token with a task scope: every project of the workspace for an
+    /// all-projects token. Older tokens without a task scope may still have stored projects,
+    /// which give them nothing.
     async fn project_ids(
         &self,
+        workspace_id: Id,
         token_id: Id,
         scopes: &[ApiTokenScope],
+        all_projects: bool,
     ) -> Result<Vec<Id>, ApiTokenError> {
         if !ApiTokenScope::grants_tasks(scopes) {
             return Ok(Vec::new());
+        }
+        if all_projects {
+            return live_projects(self.database.pool(), workspace_id).await;
         }
         let values = sqlx::query_scalar::<_, String>(
             "SELECT api_token_projects.project_id FROM api_token_projects JOIN projects ON projects.id = api_token_projects.project_id WHERE api_token_projects.token_id = $1 AND projects.deleted_at IS NULL ORDER BY projects.created_at, projects.id",
@@ -548,6 +588,26 @@ async fn require_active_project(
     }
 }
 
+/// Every live project of a workspace, in creation order. An all-projects token or OAuth grant
+/// uses these, so a project created later is covered and a deleted one is not.
+pub(crate) async fn live_projects<'e, E>(
+    executor: E,
+    workspace_id: Id,
+) -> Result<Vec<Id>, ApiTokenError>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Any>,
+{
+    sqlx::query_scalar::<_, String>(
+        "SELECT id FROM projects WHERE workspace_id = $1 AND deleted_at IS NULL ORDER BY created_at, id",
+    )
+    .bind(workspace_id.to_string())
+    .fetch_all(executor)
+    .await?
+    .into_iter()
+    .map(|value| value.parse().map_err(|_| ApiTokenError::InvalidIdentifier))
+    .collect()
+}
+
 fn parse_id(row: &sqlx::any::AnyRow, column: &str) -> Result<Id, ApiTokenError> {
     row.get::<String, _>(column)
         .parse()
@@ -562,6 +622,7 @@ fn decode(row: sqlx::any::AnyRow, project_ids: Vec<Id>) -> Result<ApiTokenRecord
         token_prefix: row.get("token_prefix"),
         scopes: ApiTokenScope::parse_list(&row.get::<String, _>("scopes")),
         project_ids,
+        all_projects: row.get("all_projects"),
         service_account_id: row
             .get::<Option<String>, _>("service_account_id")
             .map(|value| value.parse().map_err(|_| ApiTokenError::InvalidIdentifier))

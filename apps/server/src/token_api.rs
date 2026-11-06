@@ -251,6 +251,8 @@ pub struct TaskQuery {
     pub assignee: Option<AssigneeFilter>,
     pub label_id: Option<Id>,
     pub priority: Option<String>,
+    /// Only the direct sub-issues of this task, which must be in an approved project.
+    pub parent_task_id: Option<Id>,
     /// Newest first when unset.
     pub sort: Option<(TaskSort, SortOrder)>,
     pub cursor: Option<String>,
@@ -356,6 +358,8 @@ pub struct TaskPatch {
     /// `Some(None)` clears the date.
     pub due_start_at: Option<Option<TimestampMillis>>,
     pub due_at: Option<Option<TimestampMillis>>,
+    /// `Some(None)` detaches the task from its parent.
+    pub parent_task_id: Option<Option<Id>>,
 }
 
 #[derive(Clone)]
@@ -658,6 +662,9 @@ impl Authorized<'_> {
             Some(id) => vec![id],
             None => self.principal.project_ids.clone(),
         };
+        if let Some(parent) = query.parent_task_id {
+            self.task(&parent.to_string()).await?;
+        }
         let condition = |field, operator, value| {
             FilterNode::Condition(Condition {
                 field,
@@ -724,7 +731,7 @@ impl Authorized<'_> {
             show_completed: ShowCompleted::All,
             sort: sort.clone(),
             order: order.clone(),
-            parent_task_id: None,
+            parent_task_id: query.parent_task_id,
             sub_issues: SubIssuesDisplay::Flat,
         };
         let p = self.principal;
@@ -821,6 +828,7 @@ impl Authorized<'_> {
                         label_ids: patch.label_ids,
                         due_start_at: patch.due_start_at,
                         due_at: patch.due_at,
+                        parent_task_id: patch.parent_task_id,
                         ..Default::default()
                     },
                 },
@@ -884,6 +892,14 @@ impl Authorized<'_> {
                 Err(TokenApiError::Invalid("Invalid identifier"))
             }
             result => Ok(result?),
+        }
+    }
+
+    /// [`Self::task_id`] of an optional reference, such as a `parent_task_id` field.
+    pub async fn optional_task_id(&self, task_ref: Option<&str>) -> Result<Option<Id>> {
+        match task_ref {
+            Some(task_ref) => self.task_id(task_ref).await.map(Some),
+            None => Ok(None),
         }
     }
 

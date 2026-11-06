@@ -52,20 +52,27 @@ export function AccessPicker<S extends string>({ id, resources, scopes, onChange
   </div>
 }
 
-/** The project checklist under the Tasks access row, with "Select all" above two or more projects. Its title is for screen readers only. */
-export function ProjectPicker({ id, projects, selected, onChange, empty }: { id: string; projects: { id: string; name: string }[]; selected: string[]; onChange: (ids: string[]) => void; empty?: string }) {
+/** The project checklist under the Tasks access row, with "Select all" above two or more projects. `all` covers every project, including future ones, and hides the list. Its title is for screen readers only. */
+export function ProjectPicker({ id, projects, selected, onChange, all, onAllChange, empty }: { id: string; projects: { id: string; name: string }[]; selected: string[]; onChange: (ids: string[]) => void; all: boolean; onAllChange: (all: boolean) => void; empty?: string }) {
   return <div role="group" aria-labelledby={id} className="grid gap-3">
     <span id={id} className="sr-only">Projects</span>
+    <Label className="flex items-center gap-2">
+      <Checkbox checked={all} onCheckedChange={(checked) => onAllChange(Boolean(checked))} />
+      All projects, including future ones
+    </Label>
+    {all ? null : <>
     {projects.length > 1 ? <Label className="flex items-center gap-2 text-sm font-normal text-muted-foreground">
       <Checkbox checked={selected.length === projects.length} indeterminate={selected.length > 0 && selected.length < projects.length} onCheckedChange={(checked) => onChange(checked ? projects.map((project) => project.id) : [])} />
       Select all
     </Label> : null}
-    {projects.length ? <div className="-m-1 grid max-h-64 gap-3 overflow-y-auto p-1">
+    {/* py-2 holds the checkbox's 8px tap area, so a short list does not scroll and catch the page's wheel. */}
+    {projects.length ? <div className="-mx-1 -my-2 grid max-h-64 gap-3 overflow-y-auto px-1 py-2">
       {projects.map((project) => <Label key={project.id} className="flex items-center gap-2">
         <Checkbox checked={selected.includes(project.id)} onCheckedChange={(checked) => onChange(checked ? [...selected, project.id] : selected.filter((other) => other !== project.id))} />
         {project.name}
       </Label>)}
     </div> : null}
     {empty ? <p className="text-sm text-muted-foreground">{empty}</p> : null}
+    </>}
   </div>
 }

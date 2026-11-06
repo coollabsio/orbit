@@ -791,6 +791,108 @@ async fn task_writes_require_scope_and_versions_and_stay_in_granted_projects() {
 }
 
 #[tokio::test]
+async fn sub_issues_can_be_created_listed_moved_and_detached_within_the_grant() {
+    let f = Fixture::new().await;
+    sqlx::query("UPDATE api_tokens SET scopes = 'tasks:read tasks:write' WHERE id = $1")
+        .bind(f.token_id.to_string())
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    let parent = f.tasks.get_task(f.workspace, f.task, f.user).await.unwrap();
+    let identifier: String =
+        sqlx::query_scalar("SELECT projects.project_key FROM projects WHERE id = $1")
+            .bind(f.project.to_string())
+            .fetch_one(f.database.pool())
+            .await
+            .unwrap();
+    let identifier = format!("{identifier}-{}", parent.number);
+    let created = f
+        .tool(
+            "create_task",
+            json!({"project_id": f.project, "status_id": parent.status_id, "title": "Child", "parent_task_id": identifier}),
+        )
+        .await;
+    let child = &created["result"]["structuredContent"];
+    assert_eq!(child["parent_task_id"], f.task.to_string(), "{created}");
+    assert_eq!(child["identifier"], identifier);
+    assert!(
+        child["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("https://orbit.test/tasks/")
+    );
+    let child_id: Id = child["id"].as_str().unwrap().parse().unwrap();
+    let children = f
+        .tool("list_tasks", json!({"parent_task_id": f.task}))
+        .await;
+    let items = children["result"]["structuredContent"]["items"]
+        .as_array()
+        .unwrap();
+    assert_eq!(items.len(), 1, "{children}");
+    assert_eq!(items[0]["id"], child_id.to_string());
+    // A parent outside the grant is neither listed nor usable.
+    let hidden = f
+        .tool("list_tasks", json!({"parent_task_id": f.other_task}))
+        .await;
+    assert_eq!(hidden["result"]["isError"], true, "{hidden}");
+    let hidden = f
+        .tool(
+            "create_task",
+            json!({"project_id": f.project, "status_id": parent.status_id, "title": "Hidden child", "parent_task_id": f.other_task}),
+        )
+        .await;
+    assert_eq!(hidden["result"]["isError"], true, "{hidden}");
+    // A task cannot move under its own sub-issue.
+    let cycle = f
+        .tool(
+            "update_task",
+            json!({"task_id": f.task, "expected_version": token_version(&parent), "parent_task_id": child_id}),
+        )
+        .await;
+    assert_eq!(cycle["result"]["isError"], true, "{cycle}");
+    assert!(cycle.to_string().contains("its own sub-issues"), "{cycle}");
+    let current = f
+        .tasks
+        .get_task(f.workspace, child_id, f.user)
+        .await
+        .unwrap();
+    let moved = f
+        .tool(
+            "update_task",
+            json!({"task_id": child_id, "expected_version": token_version(&current), "parent_task_id": f.other_task}),
+        )
+        .await;
+    assert_eq!(moved["result"]["isError"], true, "{moved}");
+    let detached = f
+        .tool(
+            "update_task",
+            json!({"task_id": child_id, "expected_version": token_version(&current), "parent_task_id": null}),
+        )
+        .await;
+    assert!(
+        detached["result"]["structuredContent"]["parent_task_id"].is_null(),
+        "{detached}"
+    );
+    let current = f
+        .tasks
+        .get_task(f.workspace, child_id, f.user)
+        .await
+        .unwrap();
+    assert!(current.parent.is_none());
+    let attached = f
+        .tool(
+            "update_task",
+            json!({"task_id": child_id, "expected_version": token_version(&current), "parent_task_id": f.task}),
+        )
+        .await;
+    assert_eq!(
+        attached["result"]["structuredContent"]["parent_task_id"],
+        f.task.to_string(),
+        "{attached}"
+    );
+}
+
+#[tokio::test]
 async fn docs_and_chat_require_explicit_scopes_and_doc_writes_need_docs_write() {
     use orbit_platform::{
         AttachmentMutationCoordinator, LocalBlobStore, UploadLimits, UploadService,

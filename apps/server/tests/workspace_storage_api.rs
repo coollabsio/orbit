@@ -84,9 +84,19 @@ impl Fixture {
     }
 
     async fn call(&self, method: &str, cookie: &str, body: Option<Value>) -> (StatusCode, Value) {
+        self.call_at(&self.uri(), method, cookie, body).await
+    }
+
+    async fn call_at(
+        &self,
+        uri: &str,
+        method: &str,
+        cookie: &str,
+        body: Option<Value>,
+    ) -> (StatusCode, Value) {
         let request = Request::builder()
             .method(method)
-            .uri(self.uri())
+            .uri(uri)
             .header(header::COOKIE, cookie);
         let request = match body {
             Some(body) => request
@@ -272,4 +282,146 @@ async fn a_removed_bucket_stays_until_its_files_moved_back() {
         .await
         .unwrap();
     assert_eq!(audited, 4);
+}
+
+fn saved_s3(
+    endpoint: &str,
+    bucket: &str,
+    prefix: &str,
+) -> orbit_server::repositories::instance_settings::S3Settings {
+    orbit_server::repositories::instance_settings::S3Settings {
+        endpoint: endpoint.to_owned(),
+        region: "us-east-1".to_owned(),
+        bucket: bucket.to_owned(),
+        prefix: prefix.to_owned(),
+        access_key_id: "key".to_owned(),
+        secret_access_key: b"sealed".to_vec(),
+        path_style: true,
+    }
+}
+
+fn located(endpoint: &str, bucket: &str, prefix: &str) -> Value {
+    json!({
+        "endpoint": endpoint, "region": "", "bucket": bucket, "prefix": prefix,
+        "access_key_id": "key", "secret_access_key": "secret", "path_style": true
+    })
+}
+
+impl Fixture {
+    async fn owner_id(&self) -> Id {
+        self.database
+            .scalar::<String>("SELECT id FROM users WHERE email = 'root@example.com'")
+            .await
+            .unwrap()
+            .parse()
+            .unwrap()
+    }
+}
+
+/// The mover would treat one object as two and delete the only copy (issue #54).
+#[tokio::test]
+async fn the_installation_bucket_cannot_overlap_a_workspace_bucket() {
+    use orbit_server::repositories::workspace_storage::WorkspaceStorageRepository;
+
+    let fixture = fixture().await;
+    let repository = WorkspaceStorageRepository::new((*fixture.database).clone());
+    let owner_id = fixture.owner_id().await;
+    // Nothing listens on port 9: a save that passes the checks fails at the probe.
+    let endpoint = "http://127.0.0.1:9";
+    repository
+        .save(
+            fixture.workspace_id,
+            owner_id,
+            &saved_s3(endpoint, "team-files", "orbit"),
+            "r1",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+    let save = |body| {
+        fixture.call_at(
+            "/api/v1/admin/settings/s3",
+            "PUT",
+            &fixture.owner,
+            Some(body),
+        )
+    };
+
+    for (endpoint, prefix) in [
+        (endpoint, "orbit"),
+        ("http://127.0.0.1:9/", "/orbit/"),
+        (endpoint, ""),
+        (endpoint, "orbit/inner"),
+    ] {
+        let (status, problem) = save(located(endpoint, "team-files", prefix)).await;
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{prefix:?} {problem}"
+        );
+        assert_eq!(problem["code"], "invalid_storage_settings");
+    }
+    for (bucket, prefix) in [("team-files", "orbit-2"), ("other-files", "orbit")] {
+        let (status, problem) = save(located(endpoint, bucket, prefix)).await;
+        assert_eq!(
+            status,
+            StatusCode::BAD_GATEWAY,
+            "{bucket} {prefix:?} {problem}"
+        );
+        assert_eq!(problem["code"], "storage_unreachable");
+    }
+
+    // A removed bucket whose files still move back counts too.
+    repository
+        .remove(fixture.workspace_id, owner_id, "r2", TimestampMillis::now())
+        .await
+        .unwrap();
+    let (status, problem) = save(located(endpoint, "team-files", "")).await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
+}
+
+#[tokio::test]
+async fn a_workspace_bucket_cannot_overlap_the_installation_bucket() {
+    use orbit_server::repositories::instance_settings::InstanceSettingsRepository;
+
+    let fixture = fixture().await;
+    InstanceSettingsRepository::new((*fixture.database).clone())
+        .save_s3(
+            fixture.owner_id().await,
+            &saved_s3("https://localhost", "team-files", ""),
+            "r1",
+            TimestampMillis::now(),
+        )
+        .await
+        .unwrap();
+
+    for (endpoint, prefix) in [
+        ("https://localhost", ""),
+        ("https://LOCALHOST:443/", "orbit"),
+        ("https://localhost", "orbit/inner"),
+    ] {
+        let (status, problem) = fixture
+            .call(
+                "PUT",
+                &fixture.owner,
+                Some(located(endpoint, "team-files", prefix)),
+            )
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{endpoint} {prefix:?} {problem}"
+        );
+        assert_eq!(problem["code"], "invalid_storage_settings");
+    }
+    // Another bucket passes the check; `localhost` then fails the public-address check at the probe.
+    let (status, problem) = fixture
+        .call(
+            "PUT",
+            &fixture.owner,
+            Some(located("https://localhost", "other-files", "")),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_GATEWAY, "{problem}");
+    assert_eq!(problem["code"], "storage_unreachable");
 }

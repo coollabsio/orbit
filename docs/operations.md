@@ -328,7 +328,7 @@ To get back one page or one task, you do not need to stop the server or restore 
 Workspace owners and admins can connect their own bucket in **Settings → File storage** (permission `storage.manage`). The workspace's attachment files (`blobs/{workspace_id}/…` under the bucket's prefix) then go to that bucket, whatever Admin → Storage says. Backups stay with the installation.
 
 - The endpoint must be `https` on a public internet address. Orbit refuses local and private addresses, also when a host name resolves to one, so a workspace cannot make the server reach its own network. A team with a MinIO on a private network cannot use it here; the root user can use it in Admin → Storage instead.
-- Orbit tests the bucket like the installation's bucket. It cannot use the installation's bucket and prefix.
+- Orbit tests the bucket like the installation's bucket. The installation's bucket and a workspace's bucket must not overlap: on the same endpoint and bucket, neither prefix can be equal to the other or inside it (`orbit` and `orbit/files` overlap, and the empty prefix overlaps every prefix). Orbit refuses such a save in both places (422 `invalid_storage_settings`), also against a removed bucket whose files still move back. Orbit compares the endpoint host and port, so it cannot see two names for one server (for example, `localhost` and `127.0.0.1`). Do not use two names for one bucket.
 - After the save, existing files move from this server's disk and the installation's bucket to the workspace's bucket in the background, as when the root user turns on attachments in S3. The page says "Checking which files to move…" until the first pass counted them, then shows how many are left. Files stay readable during the move.
 - **Remove** sends new files to the installation's storage again. The files in the workspace's bucket move back and are deleted from it. When none are left, the bucket disappears from the settings. To change the endpoint, bucket or prefix, remove the bucket first and wait for that.
 - As with the installation's bucket, Orbit keeps an unused file in the workspace's bucket for 40 days. If the bucket fails (for example, revoked keys), other workspaces are not affected: reads try the other tiers, and cleanup skips that bucket until it works again.
@@ -363,6 +363,8 @@ If the root user lost their own password, use (on SQLite, after you stop Orbit) 
 - An HTTPS request through a trusted proxy must receive HSTS.
 - A login response must use `__Host-orbit_session` with `Secure`, `HttpOnly`, `SameSite=Lax`, and no `Domain`.
 - Requests from untrusted peers cannot supply trusted request IDs or forwarded transport.
+- A trusted proxy's `X-Request-Id` is used only when it is 1–128 characters of `A-Z a-z 0-9 - . _ : /`. Orbit
+  generates a new ID for any other value; it does not reject the request.
 - Unsafe API calls with a missing or different `Origin` must return `origin_forbidden`.
 - Unknown `/api/*` paths must return `application/problem+json`, never SPA HTML.
 - `/api` itself and wrong methods on known API routes must return Problem Details.

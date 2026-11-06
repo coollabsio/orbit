@@ -34,6 +34,7 @@ export function OAuthConsentPage() {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [workspace, setWorkspace] = useState('')
   const [selected, setSelected] = useState<string[]>([])
+  const [allProjects, setAllProjects] = useState(false)
   const [scopes, setScopes] = useState<Scope[]>([])
   const consent = useQuery({
     queryKey: ['oauth-consent', request, user.data?.id],
@@ -46,7 +47,7 @@ export function OAuthConsentPage() {
     mutationFn: async (approved: boolean) => {
       const result = await oauthRequest<{ redirect_uri: string }>(`/api/v1/oauth/consent/${encodeURIComponent(request)}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ csrf_token: consent.data?.csrf_token, approved, workspace_id: workspace || null, project_ids: selected, scopes }),
+        body: JSON.stringify({ csrf_token: consent.data?.csrf_token, approved, workspace_id: workspace || null, project_ids: allProjects ? [] : selected, all_projects: allProjects, scopes }),
       })
       if (remote) setCallback({ url: result.redirect_uri, approved })
       else window.location.assign(result.redirect_uri)
@@ -85,7 +86,7 @@ export function OAuthConsentPage() {
         <SelectTrigger><SelectValue placeholder="Select a workspace">{workspaces.find(([id]) => id === workspace)?.[1] ?? 'Select a workspace'}</SelectValue></SelectTrigger>
         <SelectContent>{workspaces.map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}</SelectContent>
       </Select></Label>
-      <AccessPicker id="consent-access" resources={RESOURCES.map((resource) => resource.name === 'Tasks' ? { ...resource, details: <ProjectPicker id="consent-projects" projects={workspaceProjects} selected={selected} onChange={setSelected} empty={workspaces.length ? undefined : 'No active projects are available to your account.'} /> } : resource)} scopes={scopes} onChange={setScopes} />
+      <AccessPicker id="consent-access" resources={RESOURCES.map((resource) => resource.name === 'Tasks' ? { ...resource, details: <ProjectPicker id="consent-projects" projects={workspaceProjects} selected={selected} onChange={setSelected} all={allProjects} onAllChange={setAllProjects} empty={workspaces.length ? undefined : 'No active projects are available to your account.'} /> } : resource)} scopes={scopes} onChange={setScopes} />
       <div className="grid gap-2">
         <Label className="flex items-center gap-2">
           <Checkbox checked={remote} disabled={approve.isPending} onCheckedChange={(checked) => setRemote(Boolean(checked))} />
@@ -96,7 +97,7 @@ export function OAuthConsentPage() {
       {approve.isError ? <p role="alert" className="text-sm text-destructive">{approve.error.message}</p> : null}
       <div className="flex gap-3">
         <Button variant="outline" disabled={approve.isPending} onClick={() => approve.mutate(false)}>Deny</Button>
-        <Button disabled={!workspace || !selected.length || selected.length > 100 || approve.isPending} onClick={() => approve.mutate(true)}>{scopes.length ? 'Allow selected access' : 'Allow read access'}</Button>
+        <Button disabled={!workspace || (!allProjects && (!selected.length || selected.length > 100)) || approve.isPending} onClick={() => approve.mutate(true)}>{scopes.length ? 'Allow selected access' : 'Allow read access'}</Button>
       </div>
       <p className="text-xs text-muted-foreground">Allowing will redirect to <strong className="break-words font-medium text-foreground">{consent.data.redirect_to}</strong>.</p>
     </> : <p>Loading connection…</p>}

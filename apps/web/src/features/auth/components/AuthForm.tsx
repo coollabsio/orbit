@@ -15,7 +15,8 @@ export function AuthInput({ label, value, onChange, type = 'text', required = tr
 /** The centred card every auth screen sits in, under a soft accent glow. */
 export function AuthCard({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
-    <main className="grid min-h-screen place-items-center bg-background bg-[radial-gradient(ellipse_60%_45%_at_50%_0%,color-mix(in_oklch,var(--primary)_14%,transparent),transparent)] p-6">
+    // body hides overflow (the app shell scrolls its own panes), so a card taller than the window scrolls here.
+    <main className="grid h-full place-items-center overflow-y-auto bg-background bg-[radial-gradient(ellipse_60%_45%_at_50%_0%,color-mix(in_oklch,var(--primary)_14%,transparent),transparent)] p-6">
       <section data-slot="auth-card" className={cn('w-[min(100%,460px)] rounded-xl border bg-card p-6 shadow-lg', className)}>{children}</section>
     </main>
   )

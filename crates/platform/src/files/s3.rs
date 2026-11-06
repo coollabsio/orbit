@@ -60,6 +60,48 @@ impl std::fmt::Debug for S3Config {
     }
 }
 
+impl S3Config {
+    /// Whether both configs store their objects under the same keys: the same bucket and prefix on the same
+    /// endpoint host. Two names for one server (`localhost` and `127.0.0.1`) are not found.
+    #[must_use]
+    pub fn same_location(&self, other: &Self) -> bool {
+        self.location() == other.location()
+    }
+
+    /// Whether the two configs can address the same objects: the same bucket on the same endpoint host, and one
+    /// prefix equal to or inside the other.
+    #[must_use]
+    pub fn overlaps(&self, other: &Self) -> bool {
+        fn inside(inner: &str, outer: &str) -> bool {
+            outer.is_empty()
+                || inner
+                    .strip_prefix(outer)
+                    .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+        }
+        let ((server, bucket, left), (other_server, other_bucket, right)) =
+            (self.location(), other.location());
+        server == other_server
+            && bucket == other_bucket
+            && (inside(left, right) || inside(right, left))
+    }
+
+    /// The endpoint's `host[:port]` (lowercase, without a default port), the bucket and the prefix.
+    fn location(&self) -> (String, &str, &str) {
+        let endpoint = self.endpoint.trim();
+        let server = Url::parse(endpoint)
+            .ok()
+            .and_then(|url| {
+                let host = url.host_str()?.to_owned();
+                Some(match url.port() {
+                    Some(port) => format!("{host}:{port}"),
+                    None => host,
+                })
+            })
+            .unwrap_or_else(|| endpoint.to_ascii_lowercase());
+        (server, self.bucket.trim(), self.prefix.trim_matches('/'))
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum S3Error {
     #[error("invalid object storage settings: {0}")]
@@ -799,6 +841,38 @@ mod tests {
         .unwrap();
         let target = bucket.target("");
         assert_eq!(target.url, "https://orbit.s3.eu-central-1.amazonaws.com/");
+    }
+
+    #[test]
+    fn configs_overlap_on_one_bucket_with_nested_prefixes() {
+        let config = |endpoint: &str, bucket: &str, prefix: &str| S3Config {
+            endpoint: endpoint.to_owned(),
+            region: String::new(),
+            bucket: bucket.to_owned(),
+            prefix: prefix.to_owned(),
+            access_key_id: "key".to_owned(),
+            secret_access_key: "secret".to_owned(),
+            path_style: true,
+        };
+        let root = config("https://s3.example.com", "orbit", "");
+        for (other, overlaps) in [
+            (config("https://S3.example.com:443/", "orbit", ""), true),
+            (config("http://s3.example.com", "orbit", "/"), true),
+            (config("https://s3.example.com", "orbit", "x"), true),
+            (config("https://s3.example.com", "other", ""), false),
+            (config("https://s3.example.com:9000", "orbit", ""), false),
+            (config("https://r2.example.com", "orbit", ""), false),
+        ] {
+            assert_eq!(root.overlaps(&other), overlaps, "{other:?}");
+            assert_eq!(other.overlaps(&root), overlaps, "{other:?}");
+        }
+        let nested = config("https://s3.example.com", "orbit", "x/y/");
+        assert!(nested.overlaps(&config("https://s3.example.com", "orbit", "x")));
+        assert!(nested.overlaps(&config("https://s3.example.com", "orbit", "x/y")));
+        assert!(!nested.overlaps(&config("https://s3.example.com", "orbit", "x/yz")));
+        assert!(!nested.overlaps(&config("https://s3.example.com", "orbit", "z")));
+        assert!(nested.same_location(&config("http://S3.example.com", "orbit", "/x/y")));
+        assert!(!nested.same_location(&config("https://s3.example.com", "orbit", "x")));
     }
 
     #[test]

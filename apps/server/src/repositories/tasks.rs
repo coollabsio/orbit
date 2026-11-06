@@ -2176,6 +2176,11 @@ impl TaskRepository {
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         self.check_project_grant(&mut tx, workspace_id, update.id)
             .await?;
+        // A new parent joins its tree to the task's tree.
+        if let Some(Some(parent_id)) = update.changes.parent_task_id {
+            self.check_project_grant(&mut tx, workspace_id, parent_id)
+                .await?;
+        }
         let before = sub_issues::snapshot_in_tx(&mut tx, update.id).await?;
         let task_before = task_in_tx(&mut tx, workspace_id, update.id, false).await?;
         // Read after the description's pending co-edits were stored (the room lock above).

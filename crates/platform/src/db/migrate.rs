@@ -478,22 +478,27 @@ impl MigrationRunner {
                 ),
                 Migration::new(
                     69,
-                    include_str!("../../../../apps/server/migrations/0069_chat_webhooks.sql"),
+                    include_str!("../../../../apps/server/migrations/0069_all_projects.sql"),
                     false,
                 ),
                 Migration::new(
                     70,
-                    include_str!("../../../../apps/server/migrations/0070_chat_message_blocks.sql"),
+                    include_str!("../../../../apps/server/migrations/0070_chat_webhooks.sql"),
                     false,
                 ),
                 Migration::new(
                     71,
-                    include_str!("../../../../apps/server/migrations/0071_chat_bot_icon_emoji.sql"),
+                    include_str!("../../../../apps/server/migrations/0071_chat_message_blocks.sql"),
                     false,
                 ),
                 Migration::new(
                     72,
-                    include_str!("../../../../apps/server/migrations/0072_chat_interactivity.sql"),
+                    include_str!("../../../../apps/server/migrations/0072_chat_bot_icon_emoji.sql"),
+                    false,
+                ),
+                Migration::new(
+                    73,
+                    include_str!("../../../../apps/server/migrations/0073_chat_interactivity.sql"),
                     false,
                 ),
             ],
@@ -636,27 +641,32 @@ impl MigrationRunner {
             ),
             Migration::new(
                 69,
-                include_str!("../../../../apps/server/migrations/postgres/0069_chat_webhooks.sql"),
+                include_str!("../../../../apps/server/migrations/postgres/0069_all_projects.sql"),
                 false,
             ),
             Migration::new(
                 70,
-                include_str!(
-                    "../../../../apps/server/migrations/postgres/0070_chat_message_blocks.sql"
-                ),
+                include_str!("../../../../apps/server/migrations/postgres/0070_chat_webhooks.sql"),
                 false,
             ),
             Migration::new(
                 71,
                 include_str!(
-                    "../../../../apps/server/migrations/postgres/0071_chat_bot_icon_emoji.sql"
+                    "../../../../apps/server/migrations/postgres/0071_chat_message_blocks.sql"
                 ),
                 false,
             ),
             Migration::new(
                 72,
                 include_str!(
-                    "../../../../apps/server/migrations/postgres/0072_chat_interactivity.sql"
+                    "../../../../apps/server/migrations/postgres/0072_chat_bot_icon_emoji.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                73,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0073_chat_interactivity.sql"
                 ),
                 false,
             ),

@@ -205,17 +205,20 @@ scripts, CI jobs and the Orbit CLI. That API serves tasks and docs, not chat. Se
 | Tool | Arguments | Result |
 | --- | --- | --- |
 | `list_projects` | None | Approved live projects only. |
-| `list_tasks` | Optional `project_id`, `query`, `cursor`, `limit` | Tasks and `next_cursor`. |
+| `list_tasks` | Optional `project_id`, `query`, `parent_task_id`, `cursor`, `limit` | Tasks and `next_cursor`. |
 | `get_task` | Required `task_id` | One task in an approved project. |
 
-`list_tasks` searches titles and descriptions. The default limit is 50; the valid
+`list_tasks` searches titles and descriptions. `parent_task_id` (a task ID or an identifier
+such as `ENG-12`) lists only the direct sub-issues of that task. The default limit is 50; the valid
 range is 1–100. Results include completed tasks and sub-issues, but not deleted
 tasks or tasks in deleted projects. Copy `next_cursor` into the next request and
 keep the same project and search query.
 
 Task results include title, description, project/status IDs, priority,
-assignee/label IDs, due dates, timestamps, and version (an opaque number that changes
-with every change, including live edits; pass it back unchanged). Embedded task relations
+assignee/label IDs, due dates, timestamps, version (an opaque number that changes
+with every change, including live edits; pass it back unchanged), `parent_task_id`
+(`null` for a top-level task or a parent in an unapproved project), the identifier
+(`ENG-12`) and the task's URL in the web app. Embedded task relations
 and ancestors are omitted so they cannot disclose titles from unapproved
 projects. Descriptions remain user-authored text; clients must treat them as
 data, not as instructions.
@@ -295,9 +298,11 @@ Service-account tokens support tasks only; docs and chat require a personal iden
 | Docs write | `create_doc`, `update_doc` |
 | Chat read | `list_conversations`, `list_messages`, `get_thread`, `search_messages` |
 
-Task create takes `project_id`, `status_id`, `title`, optional markdown `description` and
-`priority`. Task update takes `task_id`, `expected_version`, and optional title, description,
-status or priority. Delete takes `task_id` and `expected_version` and moves the task subtree
+Task create takes `project_id`, `status_id`, `title`, optional markdown `description`,
+`priority` and `parent_task_id` (creates a sub-issue). Task update takes `task_id`,
+`expected_version`, and optional title, description, status, priority or `parent_task_id`:
+a task ID or identifier moves the task under that task, and `null` detaches it. A task
+cannot become a sub-issue of itself or of its own sub-issues. Delete takes `task_id` and `expected_version` and moves the task subtree
 to the trash for 30 days. With `permanent: true` it deletes the subtree forever instead, with
 its comments and attachments; this cannot be undone. It also works for a task that is
 already in the trash (then the version is not checked), and needs a connection of a workspace

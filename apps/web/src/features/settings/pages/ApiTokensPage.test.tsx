@@ -58,7 +58,7 @@ test('admins can create a token and see its secret once', async () => {
   await waitFor(() => expect(view.getByText('orb_123456789-secret')).toBeTruthy())
   const request = requests.find((item) => item.method === 'POST')
   expect(request).toBeTruthy()
-  expect(await request!.json()).toEqual({ name: 'Discord bot', project_ids: ['project-1', 'project-2'], scopes: ['tasks:read'], service_account: true, expires_in_days: 30 })
+  expect(await request!.json()).toEqual({ name: 'Discord bot', project_ids: ['project-1', 'project-2'], all_projects: false, scopes: ['tasks:read'], service_account: true, expires_in_days: 30 })
   expect(view.getByText('Copy this token now. You cannot see it again.')).toBeTruthy()
 
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
@@ -99,7 +99,7 @@ test('a token without task access needs no project', async () => {
   await userEvent.click(view.getByRole('button', { name: 'Create token' }))
   await waitFor(() => expect(view.getByText('orb_123456789-secret')).toBeTruthy())
   const request = requests.find((item) => item.method === 'POST')
-  expect(await request!.json()).toEqual({ name: 'Docs bot', project_ids: [], scopes: ['docs:read'], service_account: false, expires_in_days: null })
+  expect(await request!.json()).toEqual({ name: 'Docs bot', project_ids: [], all_projects: false, scopes: ['docs:read'], service_account: false, expires_in_days: null })
 })
 
 test('an expired token is marked as expired', async () => {
