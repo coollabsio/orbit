@@ -25,6 +25,8 @@ export function ThemedBlockNoteView<B extends BlockSchema, I extends InlineConte
         '[--bn-colors-disabled-background:var(--muted)]! [--bn-colors-disabled-text:var(--muted-foreground)]!',
         '[--bn-colors-border:var(--border)]! [--bn-colors-shadow:color-mix(in_oklab,var(--foreground)_12%,transparent)]!',
         '[--bn-colors-side-menu:var(--muted-foreground)]!',
+        // BlockNote draws a 1px indent line on each nested block. It sits in the margin beside a table and inside a callout.
+        '[&_.bn-block-group_.bn-block:not(:has(.bn-toggle-wrapper))_.bn-block-group_.bn-block-outer:not([data-prev-depth-changed])]:before:border-l-0!',
         // BlockNote's unlayered `.bn-shadcn svg { width: revert }` beats the shadcn `size-4` icon rule, so the side-menu
         // icons and the menu chevrons and checkmarks fall back to their 24px size attribute.
         "[&_.bn-side-menu_.bn-button_svg]:size-4! [&_[data-slot^=dropdown-menu-]_svg:not([class*='size-'])]:size-4!",

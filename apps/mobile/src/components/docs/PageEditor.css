@@ -90,6 +90,10 @@ body {
 .orbit-page-editor .bn-block:has(> [data-content-type='callout'], > * > [data-content-type='callout']) > .bn-block-group {
   margin-left: 32px !important;
 }
+/* BlockNote draws a 1px indent line on each nested block. It sits in the margin beside a table and inside a callout. */
+.orbit-page-editor .bn-block-group .bn-block:not(:has(.bn-toggle-wrapper)) .bn-block-group .bn-block-outer:not([data-prev-depth-changed])::before {
+  border-left: none;
+}
 .orbit-callout {
   display: flex;
   width: 100%;
