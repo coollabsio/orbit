@@ -1607,6 +1607,15 @@
             }
           },
           {
+            "name": "parent_task_id",
+            "in": "query",
+            "description": "Only the direct sub-issues of this task (a UUID or an identifier such as `ENG-12`), which\nmust be in an approved project.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "q",
             "in": "query",
             "description": "Text in the title or description, or a task identifier; up to 500 characters.",
@@ -41508,9 +41517,14 @@
           "token_prefix",
           "scopes",
           "project_ids",
+          "all_projects",
           "created_at"
         ],
         "properties": {
+          "all_projects": {
+            "type": "boolean",
+            "description": "Whether the task scope covers every live project of the workspace, including projects\ncreated later. `project_ids` then lists the projects of today."
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"
@@ -44358,6 +44372,10 @@
           "scopes"
         ],
         "properties": {
+          "all_projects": {
+            "type": "boolean",
+            "description": "Cover every live project of the workspace, including projects created later, instead of\n`project_ids`."
+          },
           "expires_in_days": {
             "type": [
               "integer",
@@ -50368,7 +50386,7 @@
               "string",
               "null"
             ],
-            "description": "A task in an approved project."
+            "description": "A task in an approved project: a UUID or an identifier such as `ENG-12`."
           },
           "priority": {
             "type": "string",
@@ -50844,6 +50862,13 @@
               "type": "string"
             },
             "description": "Replaces the labels."
+          },
+          "parent_task_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A task in an approved project (a UUID or an identifier such as `ENG-12`) makes this task\nits sub-issue; `null` detaches it."
           },
           "priority": {
             "type": [

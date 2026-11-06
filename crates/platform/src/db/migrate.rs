@@ -478,22 +478,27 @@ impl MigrationRunner {
                 ),
                 Migration::new(
                     69,
-                    include_str!("../../../../apps/server/migrations/0069_asana_imports.sql"),
+                    include_str!("../../../../apps/server/migrations/0069_all_projects.sql"),
                     false,
                 ),
                 Migration::new(
                     70,
-                    include_str!("../../../../apps/server/migrations/0070_linear_imports.sql"),
+                    include_str!("../../../../apps/server/migrations/0070_asana_imports.sql"),
                     false,
                 ),
                 Migration::new(
                     71,
-                    include_str!("../../../../apps/server/migrations/0071_trello_imports.sql"),
+                    include_str!("../../../../apps/server/migrations/0071_linear_imports.sql"),
                     false,
                 ),
                 Migration::new(
                     72,
-                    include_str!("../../../../apps/server/migrations/0072_obsidian_imports.sql"),
+                    include_str!("../../../../apps/server/migrations/0072_trello_imports.sql"),
+                    false,
+                ),
+                Migration::new(
+                    73,
+                    include_str!("../../../../apps/server/migrations/0073_obsidian_imports.sql"),
                     false,
                 ),
             ],
@@ -636,23 +641,28 @@ impl MigrationRunner {
             ),
             Migration::new(
                 69,
-                include_str!("../../../../apps/server/migrations/postgres/0069_asana_imports.sql"),
+                include_str!("../../../../apps/server/migrations/postgres/0069_all_projects.sql"),
                 false,
             ),
             Migration::new(
                 70,
-                include_str!("../../../../apps/server/migrations/postgres/0070_linear_imports.sql"),
+                include_str!("../../../../apps/server/migrations/postgres/0070_asana_imports.sql"),
                 false,
             ),
             Migration::new(
                 71,
-                include_str!("../../../../apps/server/migrations/postgres/0071_trello_imports.sql"),
+                include_str!("../../../../apps/server/migrations/postgres/0071_linear_imports.sql"),
                 false,
             ),
             Migration::new(
                 72,
+                include_str!("../../../../apps/server/migrations/postgres/0072_trello_imports.sql"),
+                false,
+            ),
+            Migration::new(
+                73,
                 include_str!(
-                    "../../../../apps/server/migrations/postgres/0072_obsidian_imports.sql"
+                    "../../../../apps/server/migrations/postgres/0073_obsidian_imports.sql"
                 ),
                 false,
             ),

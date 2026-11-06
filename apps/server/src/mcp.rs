@@ -73,7 +73,7 @@ pub fn router(state: McpState, public_origin: &str) -> Router {
         .with_allowed_origins([public_origin])
         .enforce_origin_validation()
         .with_max_request_body_bytes(64 * 1024);
-    let api = state.api.clone();
+    let api = state.api.clone().with_web_origin(public_origin);
     let service = StreamableHttpService::new(
         move || Ok(TaskTools { api: api.clone() }),
         Arc::new(LocalSessionManager::default()),
@@ -156,6 +156,8 @@ struct ListTasksArgs {
     project_id: Option<String>,
     /// Match task title or description, or a task identifier such as ENG-12.
     query: Option<String>,
+    /// Only the direct sub-issues of this task: its id, or its identifier such as ENG-12.
+    parent_task_id: Option<String>,
     /// Continue from the next_cursor of the previous response.
     cursor: Option<String>,
     /// Maximum number of tasks, from 1 to 100. Default: 50.
@@ -193,6 +195,8 @@ struct CreateArgs {
     description: String,
     #[serde(default = "default_priority")]
     priority: String,
+    /// Creates the task as a sub-issue of this task: its id, or its identifier such as ENG-12.
+    parent_task_id: Option<String>,
 }
 fn default_priority() -> String {
     "none".into()
@@ -206,6 +210,16 @@ struct UpdateArgs {
     description: Option<String>,
     status_id: Option<String>,
     priority: Option<String>,
+    /// Makes the task a sub-issue of this task (its id, or its identifier such as ENG-12).
+    /// `null` detaches the task from its parent.
+    #[serde(default, deserialize_with = "present")]
+    parent_task_id: Option<Option<String>>,
+}
+/// A field that is present, `null` included: `null` clears the value, a missing field keeps it.
+fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
+    deserializer: D,
+) -> Result<Option<Option<T>>, D::Error> {
+    Option::<T>::deserialize(deserializer).map(Some)
 }
 #[derive(Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -314,12 +328,12 @@ fn tools() -> Vec<Tool> {
     vec![
         write_definition::<CreateArgs>(
             "create_task",
-            "Create a task in an approved project.",
+            "Create a task in an approved project. With parent_task_id, the task is a sub-issue of that task.",
             false,
         ),
         write_definition::<UpdateArgs>(
             "update_task",
-            "Update a task using its current version. Related task projects must also be approved.",
+            "Update a task using its current version. parent_task_id moves the task under another task; null detaches it. Related task projects must also be approved.",
             true,
         ),
         write_definition::<DeleteArgs>(
@@ -358,7 +372,7 @@ fn tools() -> Vec<Tool> {
         ),
         definition::<ListTasksArgs>(
             "list_tasks",
-            "Search and list live tasks in approved projects. Includes completed tasks and sub-issues.",
+            "Search and list live tasks in approved projects. Includes completed tasks and sub-issues; parent_task_id lists the sub-issues of one task.",
         ),
         definition::<TaskArgs>("get_task", "Read one live task from an approved project."),
     ]
@@ -437,33 +451,46 @@ impl TaskTools {
         let result = match request.name.as_ref() {
             "create_task" => {
                 let a: CreateArgs = arguments(&request)?;
-                api.create_task(NewTask {
-                    project_id: parse_id(&a.project_id)?,
-                    status_id: parse_id(&a.status_id)?,
-                    title: a.title,
-                    description: a.description,
-                    priority: a.priority,
-                    assignee_ids: vec![],
-                    label_ids: vec![],
-                    parent_task_id: None,
-                    due_start_at: None,
-                    due_at: None,
-                })
+                let (project_id, status_id) = (parse_id(&a.project_id)?, parse_id(&a.status_id)?);
+                async {
+                    let parent_task_id = api.optional_task_id(a.parent_task_id.as_deref()).await?;
+                    api.create_task(NewTask {
+                        project_id,
+                        status_id,
+                        title: a.title,
+                        description: a.description,
+                        priority: a.priority,
+                        assignee_ids: vec![],
+                        label_ids: vec![],
+                        parent_task_id,
+                        due_start_at: None,
+                        due_at: None,
+                    })
+                    .await
+                }
                 .await
-                .map(|task| json!(task.task))
+                .map(|task| json!(task))
             }
             "update_task" => {
                 let a: UpdateArgs = arguments(&request)?;
-                let patch = TaskPatch {
-                    title: a.title,
-                    description: a.description,
-                    status_id: a.status_id.as_deref().map(parse_id).transpose()?,
-                    priority: a.priority,
-                    ..Default::default()
-                };
-                api.update_task(&a.task_id, a.expected_version, patch)
-                    .await
-                    .map(|task| json!(task.task))
+                let status_id = a.status_id.as_deref().map(parse_id).transpose()?;
+                async {
+                    let parent_task_id = match a.parent_task_id {
+                        Some(parent) => Some(api.optional_task_id(parent.as_deref()).await?),
+                        None => None,
+                    };
+                    let patch = TaskPatch {
+                        title: a.title,
+                        description: a.description,
+                        status_id,
+                        priority: a.priority,
+                        parent_task_id,
+                        ..Default::default()
+                    };
+                    api.update_task(&a.task_id, a.expected_version, patch).await
+                }
+                .await
+                .map(|task| json!(task))
             }
             "delete_task" => {
                 let a: DeleteArgs = arguments(&request)?;
@@ -547,24 +574,24 @@ impl TaskTools {
             }
             "list_tasks" => {
                 let a: ListTasksArgs = arguments(&request)?;
-                api.list_tasks(TaskQuery {
-                    project_id: a.project_id.as_deref().map(parse_id).transpose()?,
-                    query: a.query,
-                    cursor: a.cursor,
-                    limit: a.limit,
-                    ..Default::default()
-                })
-                .await
-                .map(|page| {
-                    json!({
-                        "items": page.items.into_iter().map(|task| task.task).collect::<Vec<_>>(),
-                        "next_cursor": page.next_cursor,
+                let project_id = a.project_id.as_deref().map(parse_id).transpose()?;
+                async {
+                    api.list_tasks(TaskQuery {
+                        project_id,
+                        query: a.query,
+                        parent_task_id: api.optional_task_id(a.parent_task_id.as_deref()).await?,
+                        cursor: a.cursor,
+                        limit: a.limit,
+                        ..Default::default()
                     })
-                })
+                    .await
+                }
+                .await
+                .map(|page| json!({"items": page.items, "next_cursor": page.next_cursor}))
             }
             "get_task" => {
                 let a: TaskArgs = arguments(&request)?;
-                api.get_task(&a.task_id).await.map(|task| json!(task.task))
+                api.get_task(&a.task_id).await.map(|task| json!(task))
             }
             _ => return Err(ErrorData::invalid_params("Unknown tool", None)),
         };
@@ -600,6 +627,10 @@ fn tool_error(error: TokenApiError) -> Result<CallToolResult, ErrorData> {
             TaskError::VersionConflict { .. } => {
                 "Task version changed; read the task again before retrying"
             }
+            TaskError::ParentCycle => {
+                "A task cannot be its own parent or a sub-issue of its own sub-issues"
+            }
+            TaskError::ParentInvalid => "The parent task does not exist or is in the trash",
             _ => "Task service is unavailable",
         }),
         TokenApiError::Page(PageError::TrialLimit(reached)) => text(&reached.detail()),

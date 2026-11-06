@@ -267,6 +267,18 @@ impl TieredBlobStore {
                 status.remaining = remaining;
             });
         };
+        // The installation's bucket at the same location holds the same objects: they are in place already, and
+        // moving them onto themselves would delete them.
+        let shared = state
+            .bucket
+            .as_ref()
+            .is_some_and(|bucket| bucket.config().same_location(own.bucket.config()));
+        let installation = state.bucket.as_ref().filter(|_| !shared);
+        if !own.active && shared {
+            // The installation's pass moves them.
+            set_remaining(0);
+            return Ok(0);
+        }
         if !own.active {
             let objects = own.bucket.list(&prefix).await?;
             set_remaining(objects.len());
@@ -282,7 +294,7 @@ impl TieredBlobStore {
             .iter()
             .filter(|object| object.storage_key.starts_with(&prefix))
             .collect();
-        let remote = match &state.bucket {
+        let remote = match installation {
             Some(bucket) => bucket.list(&prefix).await?,
             None => Vec::new(),
         };
@@ -290,52 +302,42 @@ impl TieredBlobStore {
         set_remaining(total);
         for (index, object) in local.iter().enumerate() {
             let _mutation = self.mutations.begin().await;
-            if own
-                .bucket
-                .last_modified(&object.storage_key)
-                .await?
-                .is_none()
-            {
-                match own.bucket.put_file(&object.storage_key, &object.path).await {
-                    // Deleted by reconcile meanwhile.
-                    Err(super::S3Error::Io { source, .. })
-                        if source.kind() == std::io::ErrorKind::NotFound => {}
-                    result => result?,
-                }
-            }
-            self.local.delete(&object.storage_key).await?;
+            self.upload_local(&own.bucket, &object.storage_key, &object.path)
+                .await?;
             set_remaining(total - index - 1);
         }
-        if let Some(bucket) = &state.bucket {
+        if let Some(bucket) = installation {
             for (index, object) in remote.iter().enumerate() {
                 let _mutation = self.mutations.begin().await;
-                if own.bucket.last_modified(&object.key).await?.is_none() {
-                    self.copy_object(bucket, &own.bucket, &object.key).await?;
-                }
+                // Through this server's disk, a tier that reads find: two endpoint names for one bucket make the
+                // source and the target one object, and the delete from the source removes it from the target too.
+                self.download(bucket, &object.key).await?;
                 bucket.delete(&object.key).await?;
+                let path = self.local.path(&object.key)?;
+                self.upload_local(&own.bucket, &object.key, &path).await?;
                 set_remaining(remote.len() - index - 1);
             }
         }
         Ok(total)
     }
 
-    /// Copies an object through a temporary file on this server (the buckets can be on different servers).
-    async fn copy_object(
+    /// Puts a blob from this server's disk into `bucket` (unless it is there already), then deletes it from the
+    /// disk.
+    async fn upload_local(
         &self,
-        from: &S3Bucket,
-        to: &S3Bucket,
+        bucket: &S3Bucket,
         storage_key: &str,
+        path: &Path,
     ) -> Result<(), BlobStoreError> {
-        let temporary = self.local.create_temporary()?;
-        let result = async {
-            if from.get_to_file(storage_key, &temporary).await? {
-                to.put_file(storage_key, &temporary).await?;
+        if bucket.last_modified(storage_key).await?.is_none() {
+            match bucket.put_file(storage_key, path).await {
+                // Deleted by reconcile meanwhile.
+                Err(super::S3Error::Io { source, .. })
+                    if source.kind() == std::io::ErrorKind::NotFound => {}
+                result => result?,
             }
-            Ok(())
         }
-        .await;
-        let _ = tokio::fs::remove_file(&temporary).await;
-        result
+        self.local.delete(storage_key).await
     }
 
     /// The installation's own move: blobs of workspaces with an active bucket are left to their pass.
@@ -351,15 +353,8 @@ impl TieredBlobStore {
             self.set_remaining(objects.len());
             for (index, object) in objects.iter().enumerate() {
                 let _mutation = self.mutations.begin().await;
-                if bucket.last_modified(&object.storage_key).await?.is_none() {
-                    match bucket.put_file(&object.storage_key, &object.path).await {
-                        // Deleted by reconcile meanwhile.
-                        Err(super::S3Error::Io { source, .. })
-                            if source.kind() == std::io::ErrorKind::NotFound => {}
-                        result => result?,
-                    }
-                }
-                self.local.delete(&object.storage_key).await?;
+                self.upload_local(bucket, &object.storage_key, &object.path)
+                    .await?;
                 self.set_remaining(objects.len() - index - 1);
             }
             Ok(objects.len())

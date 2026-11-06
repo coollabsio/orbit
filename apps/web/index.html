@@ -29,7 +29,33 @@
     </script>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- The first-load loader until the app starts (React replaces it with LoadingScreen, which looks the same and
+           keeps the same clock). SVG animation and style attributes only: the CSP allows no other inline script and
+           no <style> element. -->
+      <div role="status" aria-label="Loading" style="position: fixed; inset: 0; display: grid; place-items: center">
+        <svg viewBox="0 0 11 11" shape-rendering="crispEdges" aria-hidden="true" width="66" height="66" opacity="0">
+          <animate attributeName="opacity" from="0" to="1" begin="0.4s" dur="0.2s" fill="freeze" />
+          <path fill="#742f4d" d="M1 3h2v6H1zM3 1h6v2H3zM9 3h2v6H9zM3 9h6v2H3z" />
+          <path fill="#f2458f" d="M2 0h6v2H2z" opacity="0.3">
+            <animate attributeName="opacity" values="0.3;1;0.3;0.3" keyTimes="0;0.2;0.6;1" calcMode="spline"
+              keySplines="0.42 0 0.58 1;0.42 0 0.58 1;0 0 1 1" dur="1.6s" begin="0s" repeatCount="indefinite" />
+          </path>
+          <path fill="#f2458f" d="M8 2h2v6H8z" opacity="0.3">
+            <animate attributeName="opacity" values="0.3;1;0.3;0.3" keyTimes="0;0.2;0.6;1" calcMode="spline"
+              keySplines="0.42 0 0.58 1;0.42 0 0.58 1;0 0 1 1" dur="1.6s" begin="0.4s" repeatCount="indefinite" />
+          </path>
+          <path fill="#f2458f" d="M2 8h6v2H2z" opacity="0.3">
+            <animate attributeName="opacity" values="0.3;1;0.3;0.3" keyTimes="0;0.2;0.6;1" calcMode="spline"
+              keySplines="0.42 0 0.58 1;0.42 0 0.58 1;0 0 1 1" dur="1.6s" begin="0.8s" repeatCount="indefinite" />
+          </path>
+          <path fill="#f2458f" d="M0 2h2v6H0z" opacity="0.3">
+            <animate attributeName="opacity" values="0.3;1;0.3;0.3" keyTimes="0;0.2;0.6;1" calcMode="spline"
+              keySplines="0.42 0 0.58 1;0.42 0 0.58 1;0 0 1 1" dur="1.6s" begin="1.2s" repeatCount="indefinite" />
+          </path>
+        </svg>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

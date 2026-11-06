@@ -6,13 +6,16 @@ import { Button } from '@/components/ui/button'
  * the mark. Sizes are multiples of 11px so the pixels stay crisp.
  */
 export function OrbitLoader() {
+  // The chase runs on the page's clock, so a new loader (the next loading stage) goes on where the last one was.
+  const [phase] = useState(() => -(performance.now() % 1600))
+  const side = (index: number) => ({ animationDelay: `${phase + index * 400}ms` })
   return (
     <svg data-slot="orbit-loader" viewBox="0 0 11 11" shapeRendering="crispEdges" aria-hidden="true" className="size-[66px]">
       <path fill="#742f4d" d="M1 3h2v6H1zM3 1h6v2H3zM9 3h2v6H9zM3 9h6v2H3z" />
-      <path fill="#f2458f" d="M2 0h6v2H2z" className="animate-orbit-chase motion-reduce:animate-none" />
-      <path fill="#f2458f" d="M8 2h2v6H8z" className="animate-orbit-chase [animation-delay:400ms] motion-reduce:animate-none" />
-      <path fill="#f2458f" d="M2 8h6v2H2z" className="animate-orbit-chase [animation-delay:800ms] motion-reduce:animate-none" />
-      <path fill="#f2458f" d="M0 2h2v6H0z" className="animate-orbit-chase [animation-delay:1200ms] motion-reduce:animate-none" />
+      <path fill="#f2458f" d="M2 0h6v2H2z" style={side(0)} className="animate-orbit-chase motion-reduce:animate-none" />
+      <path fill="#f2458f" d="M8 2h2v6H8z" style={side(1)} className="animate-orbit-chase motion-reduce:animate-none" />
+      <path fill="#f2458f" d="M2 8h6v2H2z" style={side(2)} className="animate-orbit-chase motion-reduce:animate-none" />
+      <path fill="#f2458f" d="M0 2h2v6H0z" style={side(3)} className="animate-orbit-chase motion-reduce:animate-none" />
     </svg>
   )
 }

@@ -14,8 +14,10 @@ scripts.
 1. As a workspace owner or administrator, open **Settings → API tokens**.
 2. Select the projects, the permissions and an expiry. Then create the token.
    `project_ids` is required, with at least one project, when `scopes` includes
-   `tasks:read` or `tasks:write`. Without a task scope, projects have no effect:
-   the token stores none (`project_ids: []`).
+   `tasks:read` or `tasks:write`. Alternatively, set `all_projects: true` (the
+   **All projects, including future ones** box): the token then covers every
+   live project of the workspace, also projects created later. Without a task
+   scope, projects have no effect: the token stores none (`project_ids: []`).
 3. Copy the token (`orb_…`). Orbit shows it one time only.
 4. Send the token in the `Authorization` header of each request:
 
@@ -29,7 +31,8 @@ curl -sS "$ORBIT_URL/api/public/v1/me" -H "Authorization: Bearer $ORBIT_TOKEN"
 
 Do not put the token in a URL, in a repository, or in a shared shell history.
 
-Each token belongs to one workspace and to the projects that you selected.
+Each token belongs to one workspace and to the projects that you selected, or to
+all live projects of the workspace when you selected all projects.
 Task and doc paths contain the workspace ID:
 `/api/public/v1/workspaces/{workspace_id}/…`. Get the ID from `GET /me`. A
 path with another workspace ID returns `404`. The API does not use cookies, sessions or CSRF tokens. Requests
@@ -193,7 +196,8 @@ A task:
 `GET /workspaces/{workspace_id}/tasks`. Scope: `tasks:read`. Tasks in the approved projects, newest first,
 including completed tasks and sub-issues. Optional parameters: `project_id`,
 `status_id`, `assignee_id` (a user ID, or `none` for tasks without an
-assignee), `label_id`, `priority`, `q` (text in the title or description, or an
+assignee), `label_id`, `priority`, `parent_task_id` (only the direct sub-issues
+of this task, as a UUID or an identifier such as `ENG-12`; the task must be in an approved project), `q` (text in the title or description, or an
 identifier), `sort` (`created_at`, `updated_at`, `priority`, `due_date` or
 `title`; default `created_at`), `order` (`desc` or `asc`; default `desc`),
 `cursor` and `limit`. Keep the same parameters when you send `cursor`.
@@ -217,7 +221,7 @@ characters), and the optional `description` (Markdown, up to 50,000 bytes),
 must not be after it).
 The assignees must be members of the workspace. The labels and the status must
 be in the task's project. The parent and all the tasks related to it must be in
-approved projects.
+approved projects. `parent_task_id` takes a task UUID or an identifier such as `ENG-12`.
 
 ```bash
 curl -sS "$ORBIT_WS/tasks" -H "Authorization: Bearer $ORBIT_TOKEN" \
@@ -228,8 +232,9 @@ curl -sS "$ORBIT_WS/tasks" -H "Authorization: Bearer $ORBIT_TOKEN" \
 `PATCH /workspaces/{workspace_id}/tasks/{task}`. Scope: `tasks:write`. Response: `200` with the task. Body:
 `expected_version` (required, the `version` that you read), and the optional
 `title`, `description`, `status_id`, `priority`, `assignee_ids`, `label_ids`,
-`due_start_at` and `due_at`. A list replaces the old list. A missing field keeps
-its value, and `null` clears a due date. If the task changed after you read it, the
+`due_start_at`, `due_at` and `parent_task_id`. A list replaces the old list. A missing field keeps
+its value, `null` clears a due date, and `parent_task_id: null` detaches the task from its
+parent (a new parent is a task UUID or an identifier such as `ENG-12`). A new parent and all the tasks related to it must be in approved projects. If the task changed after you read it, the
 response is `409`. This includes edits that people make to the description in
 the editor. Read the task again, then try again. All the tasks in the
 task's parent and sub-issue tree must be in approved projects.

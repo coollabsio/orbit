@@ -1,5 +1,6 @@
-import { useContext, useState } from 'react'
+import { useContext, useEffect, useState } from 'react'
 import { cn } from 'cn'
+import { loadEmojiNames, loadedEmojiNames } from '@/features/chat/lib/emojiSearch'
 import { customEmojiName } from '@/lib/customEmoji'
 import { CustomEmojiContext } from '@/lib/customEmojiContext'
 import { splitEmoji, twemojiUrl } from '@/lib/twemoji'
@@ -35,6 +36,21 @@ export function Emoji({ value, className }: { value: string; className?: string 
   if (custom) return <EmojiImage emoji={value} url={custom.url} title={value} className={cn('object-contain', className)} />
   const url = twemojiUrl(value)
   return url ? <EmojiImage emoji={value} url={url} className={className} /> : <>{value}</>
+}
+
+/**
+ * `:name:` in rendered markdown: the workspace's custom emoji of that name, else the standard one (`:rocket:` → 🚀, the
+ * names of the `:name` list in the composer), else the text. The standard names load the first time one is shown.
+ */
+export function EmojiShortcode({ value }: { value: string }) {
+  const custom = useContext(CustomEmojiContext).has(customEmojiName(value) ?? '')
+  const [names, setNames] = useState(loadedEmojiNames)
+  useEffect(() => {
+    if (!custom && !names) void loadEmojiNames().then(setNames, () => {})
+  }, [custom, names])
+  if (custom) return <Emoji value={value} />
+  const emoji = names?.get(value.slice(1, -1))
+  return emoji ? <Emoji value={emoji} /> : <>{value}</>
 }
 
 /** Text with its emoji as Twemoji images. */

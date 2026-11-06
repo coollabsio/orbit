@@ -6,11 +6,12 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { LoadingScreen } from '@/components/common/LoadingScreen'
-import { AccessPicker, ProjectPicker, type ScopePreset, type ScopeResource } from '@/components/common/ScopeAccess'
+import { AccessPicker, ProjectPicker, type ScopeResource } from '@/components/common/ScopeAccess'
 import { AuthBrand, AuthCard } from '@/features/auth/components/AuthForm'
 import { currentUserQueryOptions } from '@/features/auth/api'
 import { createApiClient } from '@/api/client'
 import { oauthRequest, type OAuthConsent } from '@/features/auth/oauth'
+import { loginPath } from '@/features/auth/returnTo'
 
 // Anonymous consent sessions must not trigger the app-wide /login redirect.
 const consentClient = createApiClient()
@@ -24,12 +25,6 @@ const RESOURCES: ScopeResource<Scope>[] = [
   { name: 'Chat', hint: 'Including private channels and direct messages', read: 'chat:read' },
 ]
 
-const PRESETS: ScopePreset<Scope>[] = [
-  { id: 'tasks-read', label: 'Tasks read-only', scopes: [] },
-  { id: 'read-all', label: 'Read everything', scopes: ['docs:read', 'chat:read'] },
-  { id: 'all', label: 'Full access', scopes: ['tasks:write', 'docs:read', 'docs:write', 'chat:read'] },
-]
-
 export function OAuthConsentPage() {
   const [params] = useSearchParams()
   const request = params.get('request') ?? ''
@@ -39,6 +34,7 @@ export function OAuthConsentPage() {
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
   const [workspace, setWorkspace] = useState('')
   const [selected, setSelected] = useState<string[]>([])
+  const [allProjects, setAllProjects] = useState(false)
   const [scopes, setScopes] = useState<Scope[]>([])
   const consent = useQuery({
     queryKey: ['oauth-consent', request, user.data?.id],
@@ -51,7 +47,7 @@ export function OAuthConsentPage() {
     mutationFn: async (approved: boolean) => {
       const result = await oauthRequest<{ redirect_uri: string }>(`/api/v1/oauth/consent/${encodeURIComponent(request)}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ csrf_token: consent.data?.csrf_token, approved, workspace_id: workspace || null, project_ids: selected, scopes }),
+        body: JSON.stringify({ csrf_token: consent.data?.csrf_token, approved, workspace_id: workspace || null, project_ids: allProjects ? [] : selected, all_projects: allProjects, scopes }),
       })
       if (remote) setCallback({ url: result.redirect_uri, approved })
       else window.location.assign(result.redirect_uri)
@@ -77,7 +73,7 @@ export function OAuthConsentPage() {
     <p role="status" className="text-sm text-muted-foreground">{copyState === 'copied' ? 'Callback URL copied.' : copyState === 'failed' ? 'Could not copy. Select the URL above and copy it manually.' : 'Keep this page open until the terminal confirms the result.'}</p>
   </div></AuthCard>
   if (user.isPending) return <LoadingScreen />
-  if (user.data === null) return <Navigate to={`/login?return_to=${encodeURIComponent(`/oauth/consent?request=${request}`)}`} replace />
+  if (user.data === null) return <Navigate to={loginPath(`/oauth/consent?request=${request}`)} replace />
   const workspaceProjects = consent.data?.projects.filter((project) => project.workspace_id === workspace) ?? []
   const workspaces = [...new Map(consent.data?.projects.map((project) => [project.workspace_id, project.workspace_name])).entries()]
   return <AuthCard><div className="grid gap-5">
@@ -90,8 +86,7 @@ export function OAuthConsentPage() {
         <SelectTrigger><SelectValue placeholder="Select a workspace">{workspaces.find(([id]) => id === workspace)?.[1] ?? 'Select a workspace'}</SelectValue></SelectTrigger>
         <SelectContent>{workspaces.map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}</SelectContent>
       </Select></Label>
-      <ProjectPicker id="consent-projects" projects={workspaceProjects} selected={selected} onChange={setSelected} empty={workspaces.length ? undefined : 'No active projects are available to your account.'} />
-      <AccessPicker id="consent-access" resources={RESOURCES} presets={PRESETS} scopes={scopes} onChange={setScopes} />
+      <AccessPicker id="consent-access" resources={RESOURCES.map((resource) => resource.name === 'Tasks' ? { ...resource, details: <ProjectPicker id="consent-projects" projects={workspaceProjects} selected={selected} onChange={setSelected} all={allProjects} onAllChange={setAllProjects} empty={workspaces.length ? undefined : 'No active projects are available to your account.'} /> } : resource)} scopes={scopes} onChange={setScopes} />
       <div className="grid gap-2">
         <Label className="flex items-center gap-2">
           <Checkbox checked={remote} disabled={approve.isPending} onCheckedChange={(checked) => setRemote(Boolean(checked))} />
@@ -102,7 +97,7 @@ export function OAuthConsentPage() {
       {approve.isError ? <p role="alert" className="text-sm text-destructive">{approve.error.message}</p> : null}
       <div className="flex gap-3">
         <Button variant="outline" disabled={approve.isPending} onClick={() => approve.mutate(false)}>Deny</Button>
-        <Button disabled={!workspace || !selected.length || selected.length > 100 || approve.isPending} onClick={() => approve.mutate(true)}>{scopes.length ? 'Allow selected access' : 'Allow read access'}</Button>
+        <Button disabled={!workspace || (!allProjects && (!selected.length || selected.length > 100)) || approve.isPending} onClick={() => approve.mutate(true)}>{scopes.length ? 'Allow selected access' : 'Allow read access'}</Button>
       </div>
       <p className="text-xs text-muted-foreground">Allowing will redirect to <strong className="break-words font-medium text-foreground">{consent.data.redirect_to}</strong>.</p>
     </> : <p>Loading connection…</p>}

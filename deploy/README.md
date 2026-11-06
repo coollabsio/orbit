@@ -28,6 +28,19 @@ For Tailscale-only hosting, use an existing Tailscale HTTPS proxy instead of the
 
 The image contains a statically linked Linux executable with all frontend assets embedded. It needs no Node, Bun, Rust installation, or separate web directory at runtime.
 
+Each GitHub release has this executable for `x86_64` and `aarch64` as a `.tar.xz` file (about 15 MB), and a `SHA256SUMS` file. Download the file for your architecture, check it and unpack it:
+
+```sh
+version=0.1.0 arch=$(uname -m)  # x86_64 or aarch64
+base=https://github.com/coollabsio/orbit/releases/download/v$version
+curl -fLO "$base/orbit-linux-$arch.tar.xz" -fLO "$base/SHA256SUMS"
+sha256sum --check --ignore-missing SHA256SUMS
+tar -xJf "orbit-linux-$arch.tar.xz"  # extracts ./orbit
+./orbit --help
+```
+
+To build the executable yourself, copy it out of a local image:
+
 ```sh
 docker build -t orbit:local .
 container=$(docker create orbit:local)
@@ -62,7 +75,7 @@ Run under an unprivileged service account and an HTTPS reverse proxy. The binary
 2. Commit both files and push them to `main`.
 3. On GitHub, publish a release with the tag `v0.2.0`.
 
-The image workflow then publishes `ghcr.io/<owner>/<repository>:0.2.0`, `:0.2` and `:latest`. A pre-release gets only its exact tag (for example `:0.3.0-rc.1`). If the tag is not `v` plus the version in `Cargo.toml`, the workflow stops before it builds. The workflow does not attach downloadable binaries to the release. Run `just version` to print the current version.
+The image workflow then publishes `ghcr.io/<owner>/<repository>:0.2.0`, `:0.2` and `:latest`. A pre-release gets only its exact tag (for example `:0.3.0-rc.1`). If the tag is not `v` plus the version in `Cargo.toml`, the workflow stops before it builds. The workflow also attaches the smoke-tested executables (`orbit-linux-x86_64.tar.xz`, `orbit-linux-aarch64.tar.xz`) and `SHA256SUMS` to the release. It stops if an executable is not statically linked. Run `just version` to print the current version.
 
 ## Backups and upgrades
 

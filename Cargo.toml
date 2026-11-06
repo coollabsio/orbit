@@ -6,3 +6,7 @@ resolver = "3"
 edition = "2024"
 version = "0.1.1"
 license = "Apache-2.0"
+
+# Removes the symbol table (about 13 MB). Panic backtraces then show addresses, not function names.
+[profile.release]
+strip = true
