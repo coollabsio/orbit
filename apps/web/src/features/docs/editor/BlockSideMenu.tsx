@@ -1,4 +1,4 @@
-import { getNodeById } from '@blocknote/core'
+import { getNodeById, type BlockNoteEditor } from '@blocknote/core'
 import { SideMenuExtension } from '@blocknote/core/extensions'
 import {
   BlockColorsItem,
@@ -132,14 +132,14 @@ function firstRow(reference: Element): Element {
  * BlockNote's built-in shift assumes its own heading sizes. Measure the top row instead.
  * One line: center the 30px handle on it. A taller block: keep the handle on that top row.
  */
-function handleShift(editor: ReturnType<typeof useBlockNoteEditor>, blockId: string): number {
-  if (!editor.prosemirrorView) return 0
-  let reference: Element | null = null
-  editor.transact((tr) => {
+function handleShift(editor: BlockNoteEditor<any, any, any>, blockId: string): number {
+  const view = editor.prosemirrorView
+  if (!view) return 0
+  const reference = editor.transact((tr) => {
     const info = getNodeById(blockId, tr.doc)
-    if (!info) return
-    const { node } = editor.prosemirrorView.domAtPos(info.posBeforeNode + 1)
-    reference = node instanceof Element ? node : node.parentElement
+    if (!info) return null
+    const { node } = view.domAtPos(info.posBeforeNode + 1)
+    return node instanceof Element ? node : node.parentElement
   })
   if (!reference) return 0
   const line = firstRow(reference)
