@@ -80,6 +80,14 @@ impl AttachmentState {
                                 "attachment reconciliation: the database is busy; retrying on the next round"
                             );
                         }
+                        // Wrong or rotated S3 credentials, or an unreachable bucket, must not stop the
+                        // server: the admin fixes them in Admin → Storage while Orbit keeps serving.
+                        Err(UploadError::BlobStore(BlobStoreError::ObjectStorage(error))) => {
+                            tracing::warn!(
+                                %error,
+                                "attachment reconciliation could not reach object storage; retrying on the next round"
+                            );
+                        }
                         Err(error) => return Err(error),
                     }
                 }

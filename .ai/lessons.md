@@ -19,7 +19,7 @@
 
 ## Write transactions and background services
 - Do slow CPU work (Markdown merges, Yjs reconciles of big docs) before `immediate_transaction()`, on `spawn_blocking`, and only check and persist inside it: the transaction holds every writer of the database, and a CPU-bound task also stalls the other tasks of its tokio worker. Markdown doc writes do this under the collab room lock and check the revision and the log again in the transaction (2026-11-05).
-- A background loop (job worker, scheduler, attachment reconciliation, integrity job) must treat `orbit_platform::is_transient_lock_error` as "retry on the next round", never as fatal: any service error stops the whole server (`AppError::Background`), and SQLite returns "database is locked" after the 5 s busy timeout (2026-11-05).
+- A background loop (job worker, scheduler, attachment reconciliation, integrity job) must treat `orbit_platform::is_transient_lock_error` and S3 errors (`BlobStoreError::ObjectStorage`) as "retry on the next round", never as fatal: any service error stops the whole server (`AppError::Background`), SQLite returns "database is locked" after the 5 s busy timeout (2026-11-05), and a rotated S3 secret put the server in a restart loop that the admin could not fix from the UI (#69, 2026-11-06).
 
 ## Jean run environments: one port block per worktree
 - `jean.json` runs `./scripts/dev run`. The main checkout keeps web 18888 / API 18080; each worktree gets a stable slot with web `24000 + slot*10` and API +1, its own SQLite in `data/`, and a `tailscale serve` HTTPS URL (2026-11-05). `jean.json` has no fixed `ports`, so Jean shows the ports that really listen; confirm the owner with `ss -ltnp` and `readlink /proc/<pid>/cwd` before you trust a page.
