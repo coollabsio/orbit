@@ -13,9 +13,17 @@ export function useAdminUsers(search: string) {
     queryFn: ({ pageParam }) => admin.adminUsers(client, search, pageParam),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.next ?? undefined,
+    // like the web, nobody is listed until a search
+    enabled: search !== '',
     // the list stays while the next search loads
     placeholderData: keepPreviousData,
   })
+}
+
+/** The Overview card's counts: accounts and, on Orbit Cloud, ongoing and expired trials. */
+export function useAdminUserSummary() {
+  const { client } = useOrbit()
+  return useQuery({ queryKey: admin.adminKeys.userSummary, queryFn: () => admin.adminUserSummary(client) })
 }
 
 export function useAuditEvents() {

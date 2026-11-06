@@ -7,6 +7,7 @@ import { keys } from './data/keys'
 import { chatResyncKeys, LiveCursor, parseLiveFrame, parseWorkspaceEvent, socketUrl, workspaceEventKeys } from './data/live'
 import { reconnectingSocket, type SocketLike } from './data/socket'
 import { applyChatEvents } from './chat-cache'
+import { readPresenceFrame, resetPresence } from './data/chat-presence'
 import { useOrbit } from './orbit-context'
 
 
@@ -55,6 +56,8 @@ export function useLiveUpdates() {
       onEnded: ended,
       silenceMs: 45_000,
       onMessage: (raw) => {
+        // who is online: the first `hello` frame lists everyone, `presence` events change one person
+        readPresenceFrame(raw)
         const frame = parseLiveFrame(raw)
         if (!frame) return
         cursor.read(frame)
@@ -78,6 +81,7 @@ export function useLiveUpdates() {
       appState.remove()
       events.close()
       live.close()
+      resetPresence()
     }
   }, [queryClient, session, workspaceId])
 }

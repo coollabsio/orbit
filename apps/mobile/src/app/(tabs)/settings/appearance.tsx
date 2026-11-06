@@ -54,7 +54,7 @@ export default function AppearanceScreen() {
 
   return (
     <SettingsShell title="Account settings" nav={ACCOUNT_NAV}>
-      <SettingsCard title="Layout" description="Choose the classic layout or the new UI.">
+      <SettingsCard title="Layout">
         <View className="gap-3">
           {LAYOUTS.map((option) => (
             <AppearanceOption key={option.value} label={option.label} description={option.description} selected={layout === option.value} onPress={() => setLayout(option.value)}>
@@ -65,34 +65,32 @@ export default function AppearanceScreen() {
       </SettingsCard>
 
       <SettingsCard title="Color theme" description="Choose the color scheme used on this device.">
-        <View className="flex-row flex-wrap -m-1.5">
+        {/* the web's `grid gap-3`: one column at phone width */}
+        <View className="gap-3">
           {THEMES.map((option) => (
-            <View key={option.value} className="w-[50%] p-1.5">
-              <AppearanceOption
-                label={option.label}
-                description={option.description}
-                selected={!(newUi && customTheme) && schemePreference === option.value}
-                onPress={() => {
-                  if (newUi) setCustomTheme(null)
-                  setSchemePreference(option.value === 'system' ? null : option.value)
-                }}
-              >
-                <SchemePreview scheme={option.value} />
-              </AppearanceOption>
-            </View>
+            <AppearanceOption
+              key={option.value}
+              label={option.label}
+              description={option.description}
+              selected={!(newUi && customTheme) && schemePreference === option.value}
+              onPress={() => {
+                if (newUi) setCustomTheme(null)
+                setSchemePreference(option.value === 'system' ? null : option.value)
+              }}
+            >
+              <SchemePreview scheme={option.value} />
+            </AppearanceOption>
           ))}
           {/* the custom theme opens its editor. New UI: it is a theme of its own, and picking one above turns it off.
               Classic: it colours chat on top of the theme above, so it is never the chosen one */}
-          <View className="w-[50%] p-1.5">
-            <AppearanceOption
-              label={customTheme ? `Custom · ${customThemeName}` : 'Custom'}
-              description={newUi ? 'Your own colors for the whole app. Pick a preset or your own.' : 'Your own chat colors. Pick a preset or your own.'}
-              selected={newUi ? Boolean(customTheme) : undefined}
-              onPress={() => setCustomThemeOpen(true)}
-            >
-              <CustomThemeSwatch theme={customTheme} className="h-12 w-[70%]" />
-            </AppearanceOption>
-          </View>
+          <AppearanceOption
+            label={customTheme ? `Custom · ${customThemeName}` : 'Custom'}
+            description={newUi ? 'Your own colors for the whole app. Pick a preset or your own.' : 'Your own chat colors. Pick a preset or your own.'}
+            selected={newUi ? Boolean(customTheme) : undefined}
+            onPress={() => setCustomThemeOpen(true)}
+          >
+            <CustomThemeSwatch theme={customTheme} className="h-12 w-[70%]" />
+          </AppearanceOption>
         </View>
       </SettingsCard>
 

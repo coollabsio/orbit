@@ -119,6 +119,7 @@ export const inMainList = (message: MessageRecord) => message.thread_root_id ===
 
 export type MessageRow =
   | { type: 'day'; key: string; at: string }
+  | { type: 'new'; key: 'new' }
   | { type: 'message'; key: string; message: MessageRecord; groupStart: boolean }
 
 const CONTINUE_WITHIN = 5 * 60_000
@@ -128,20 +129,33 @@ const groupable = (message: MessageRecord) => message.kind === 'message' && !mes
 const localDay = (iso: string) => new Date(iso).toDateString()
 
 /**
- * Messages (oldest first) to rows, like the web: a day separator before the first message of each local day, and for
- * each message whether it starts a group (avatar, name, time) or continues the one above. A reply always starts one.
+ * The web's `buildMessageRows`: messages (ascending) to rows, with a day chip before the first message of each local
+ * day, the "New" line before the first unread message of another member (`lastReadMessageId`: `undefined` for none,
+ * `null` when nothing is read yet), and whether each message starts a group. `sameDayAs` leaves out the chip of that
+ * day (a thread shows it in its root).
  */
-export function buildMessageRows(messages: readonly MessageRecord[]): MessageRow[] {
+export function buildMessageRows(
+  messages: readonly MessageRecord[],
+  options: { lastReadMessageId?: string | null; userId?: string; sameDayAs?: string } = {},
+): MessageRow[] {
+  const { lastReadMessageId, userId, sameDayAs } = options
   const rows: MessageRow[] = []
   let previous: MessageRecord | null = null
   let groupStartedAt = 0
+  let newLinePlaced = lastReadMessageId === undefined
   for (const message of messages) {
     const at = Date.parse(message.created_at)
     const dayChanged = !previous || localDay(previous.created_at) !== localDay(message.created_at)
-    if (dayChanged) rows.push({ type: 'day', key: `day-${message.created_at}`, at: message.created_at })
+    if (dayChanged && !(!previous && sameDayAs && localDay(sameDayAs) === localDay(message.created_at))) rows.push({ type: 'day', key: `day-${message.created_at}`, at: message.created_at })
+    const isNew = !newLinePlaced && message.kind === 'message' && message.author_id !== userId && (lastReadMessageId === null || message.id > (lastReadMessageId ?? ''))
+    if (isNew) {
+      rows.push({ type: 'new', key: 'new' })
+      newLinePlaced = true
+    }
     const continues =
       previous !== null &&
       !dayChanged &&
+      !isNew &&
       groupable(previous) &&
       groupable(message) &&
       !message.reply_to_id &&
@@ -190,6 +204,27 @@ export function upsertState(states: readonly ConversationStateRecord[], state: C
 
 /** Ties a sent message to its echo, so sending twice (a retry) stores it once. Hermes has no `crypto.randomUUID`. */
 export const newNonce = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`
+
+export interface MemberGroup<T> {
+  label: string
+  online: boolean
+  people: T[]
+}
+
+/**
+ * The web `memberGroups`: people who are online (idle and do not disturb too) under their role (Owner, Admin, then
+ * everybody else as "Online"), everybody offline together at the end. Names sort inside a group; empty groups go.
+ */
+export function memberGroups<T extends Pick<MemberRecord, 'display_name' | 'role'>>(people: readonly T[], online: (person: T) => boolean): MemberGroup<T>[] {
+  const sorted = [...people].sort((a, b) => a.display_name.localeCompare(b.display_name))
+  const here = sorted.filter(online)
+  return [
+    { label: 'Owner', online: true, people: here.filter((person) => person.role === 'owner') },
+    { label: 'Admin', online: true, people: here.filter((person) => person.role === 'admin') },
+    { label: 'Online', online: true, people: here.filter((person) => person.role !== 'owner' && person.role !== 'admin') },
+    { label: 'Offline', online: false, people: sorted.filter((person) => !online(person)) },
+  ].filter((group) => group.people.length > 0)
+}
 
 // ---- who may do what
 
@@ -522,3 +557,30 @@ const BUILT_IN = '😀 😃 😄 😁 😆 😅 😂 🙂 😉 😊 😇 😍 �
 
 /** The picker's set when the server's emoji data cannot load. */
 export const BUILT_IN_EMOJI: EmojiGroup[] = [{ key: 'common', title: 'Common', emojis: BUILT_IN.split(' ').map((emoji) => ({ emoji, names: [] })) }]
+
+/** The standard emoji by GitHub shortcode (`rocket` → 🚀), as the web's `loadEmojiNames`: data order, first emoji of a name wins. */
+export function emojiNames(data: EmojibaseData): ReadonlyMap<string, string> {
+  const names = new Map<string, string>()
+  for (const entry of data.emojis) {
+    if (entry.version > EMOJI_VERSION) continue
+    const codes = data.shortcodes[entry.hexcode]
+    for (const name of Array.isArray(codes) ? codes : codes ? [codes] : []) if (!names.has(name)) names.set(name, entry.emoji)
+  }
+  return names
+}
+
+const SHORTCODE = /:([a-z0-9_+-]+):/g
+
+/** Whether a body has a `:name:` that `withEmoji` might replace. */
+export const hasShortcode = (text: string): boolean => /:[a-z0-9_+-]+:/.test(text)
+
+/** The web's `withEmoji`: each `:name:` of a standard emoji becomes the emoji; other names (custom, unknown) stay text. */
+export function withEmoji(text: string, names: ReadonlyMap<string, string> | null): string {
+  return names ? text.replace(SHORTCODE, (code, name: string) => names.get(name) ?? code) : text
+}
+
+/** The web's `firstLine`: the first line with text, cut to `max` characters with an ellipsis. */
+export function firstLine(text: string, max = 80): string {
+  const line = text.split('\n').find((candidate) => candidate.trim() !== '')?.trim() ?? ''
+  return line.length > max ? `${line.slice(0, max - 1).trimEnd()}…` : line
+}

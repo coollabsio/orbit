@@ -14,14 +14,16 @@ type Step = { name: 'credentials' } | { name: 'two_factor'; server: string; twoF
 
 // Orbit Cloud, so cloud users only type their email and password; self-hosted users replace it
 const DEFAULT_SERVER = process.env.EXPO_PUBLIC_ORBIT_SERVER || 'https://app.orbit.so'
+// The development seed user (`just seed`), as on the web sign-in page.
+const DEV_USER = __DEV__ ? { email: 'test@example.com', password: 'password' } : { email: '', password: '' }
 
 export default function SignInScreen() {
   const { state, signIn } = useSession()
   const { colors } = useTheme()
   const [step, setStep] = useState<Step>({ name: 'credentials' })
   const [server, setServer] = useState(DEFAULT_SERVER)
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
+  const [email, setEmail] = useState(DEV_USER.email)
+  const [password, setPassword] = useState(DEV_USER.password)
   const [code, setCode] = useState('')
   const [linkPassword, setLinkPassword] = useState('')
   const [busy, setBusy] = useState<'password' | Provider | null>(null)

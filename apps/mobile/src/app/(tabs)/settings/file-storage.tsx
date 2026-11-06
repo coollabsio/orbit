@@ -31,8 +31,7 @@ export default function FileStorageScreen() {
     <SettingsShell
       title="Settings"
       nav={WORKSPACE_NAV}
-      refreshing={storage.isRefetching || bucket.isRefetching}
-      onRefresh={() => { void storage.refetch(); if (allowed) void bucket.refetch() }}
+      onRefresh={() => Promise.all([storage.refetch(), allowed ? bucket.refetch() : null])}
     >
       {!allowed ? null : bucket.data ? (
         <BucketCard key={workspace.id} view={bucket.data} />
@@ -66,6 +65,8 @@ function BucketCard({ view }: { view: WorkspaceBucketView }) {
   const s3 = view.s3 ?? null
   const [draft, setDraft] = useState(() => s3Draft(s3))
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null)
+  // like the web form, Save is always on; a press with an empty required field says so instead of saving
+  const [tried, setTried] = useState(false)
   const edit = (change: Partial<typeof draft>) => {
     save.reset()
     setDraft((current) => ({ ...current, ...change }))
@@ -104,17 +105,16 @@ function BucketCard({ view }: { view: WorkspaceBucketView }) {
           value={draft.secret_access_key}
           onChangeText={set('secret_access_key')}
         />
-        <View className="flex-row items-center gap-3">
-          <View className="flex-1 min-w-0">
-            <FieldLabel>Path-style URLs</FieldLabel>
-            <OptionHint>MinIO and some other S3-compatible services.</OptionHint>
-          </View>
+        {/* the web's switch with its label after it */}
+        <View className="flex-row items-center gap-2">
           <Toggle label="Path-style URLs" value={draft.path_style} onChange={(path_style) => edit({ path_style })} />
+          <Text className="flex-1 text-[13px] leading-[18px] text-foreground">Path-style URLs (MinIO and some other S3-compatible services)</Text>
         </View>
         {save.isError ? <Note error>{errorMessage(save.error)}</Note> : null}
         {remove.isError ? <Note error>{errorMessage(remove.error)}</Note> : null}
         {save.isSuccess ? <Note>Bucket saved.</Note> : null}
-        <View className="flex-row flex-wrap justify-end gap-2">
+        {tried && !ready ? <Note error>Fill in the required fields.</Note> : null}
+        <View className="flex-row flex-wrap gap-2">
           {s3 && !view.removing ? (
             <Button
               label="Remove"
@@ -131,7 +131,7 @@ function BucketCard({ view }: { view: WorkspaceBucketView }) {
               }
             />
           ) : null}
-          <Button label={save.isPending ? 'Testing bucket…' : 'Save bucket'} disabled={save.isPending || !ready} onPress={() => save.mutate(s3Body(draft), stored)} />
+          <Button label={save.isPending ? 'Testing bucket…' : 'Save bucket'} disabled={save.isPending} onPress={() => (ready ? save.mutate(s3Body(draft), stored) : setTried(true))} />
         </View>
       </View>
       <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />

@@ -42,7 +42,7 @@ export default function ProfileScreen() {
 
   return (
     <SettingsShell title="Account settings" nav={ACCOUNT_NAV}>
-      <SettingsCard title="Profile details" description="Your picture, name and what the people in your workspaces see of you.">
+      <SettingsCard title="Profile details">
         <PictureField />
         <View className="mt-4 gap-4">
           <Input label="Name" required value={form.name} onChangeText={(name) => set({ name })} autoComplete="name" />
@@ -94,14 +94,15 @@ function PictureField() {
   }
   const error = pickError ?? (setPicture.isError ? errorMessage(setPicture.error) : null)
   return (
-    <View className="flex-row items-center gap-4 flex-wrap">
+    // the web's row wraps at phone width: the picture above the button and its hint
+    <View className="items-start gap-4">
       <ProfilePicture id={user.id} name={user.display_name} url={user.avatar_url} size={64} />
-      <View className="flex-1 min-w-45 gap-2">
+      <View className="min-w-0 gap-2">
         <View className="flex-row gap-2">
           <Button label={setPicture.isPending ? 'Saving…' : user.avatar_url ? 'Change picture' : 'Upload picture'} variant="outline" disabled={setPicture.isPending} onPress={choose} />
           {user.avatar_url ? <Button label="Remove" variant="ghost" disabled={setPicture.isPending} onPress={() => setPicture.mutate(null)} /> : null}
         </View>
-        <Note error={error !== null}>{error ?? 'Cropped to a square. People in your workspaces see it.'}</Note>
+        <Text className={`text-[12px] leading-[16px] ${error ? 'text-destructive' : 'text-muted-foreground'}`}>{error ?? 'Cropped to a square. People in your workspaces see it.'}</Text>
       </View>
     </View>
   )
@@ -157,8 +158,8 @@ function EmailField() {
         value={user.email}
         editable={false}
         description={options.data && !emailEnabled ? 'This Orbit cannot send email, so the email cannot be changed. Ask an administrator.' : undefined}
+        accessory={emailEnabled ? <Button label="Change" variant="outline" onPress={() => setChanging(true)} /> : undefined}
       />
-      {emailEnabled ? <View className="items-start"><Button label="Change" variant="outline" onPress={() => setChanging(true)} /></View> : null}
       <SignInMethods />
       {changing ? <EmailChangeDialog onClose={() => setChanging(false)} /> : null}
     </View>
@@ -172,8 +173,11 @@ function SignInMethods() {
   const methods = signInMethods(user.has_password, connected.data ?? [])
   if (methods.length === 0) return null
   return (
-    <Text accessibilityRole="link" onPress={() => router.push('/settings/security')} className="text-[13px] leading-[19.5px] text-muted-foreground">
-      {`Sign-in methods: ${methods.join(' · ')}`}
+    <Text className="text-[14px] leading-[21px] text-muted-foreground">
+      {`Sign-in methods: ${methods.join(' · ')}. `}
+      <Text accessibilityRole="link" onPress={() => router.push('/settings/security')} className="font-noto-medium text-[14px] leading-[21px] text-foreground underline">
+        Manage
+      </Text>
     </Text>
   )
 }
@@ -242,9 +246,9 @@ function EmailChangeDialog({ onClose }: { onClose: () => void }) {
 function DeleteAccountCard() {
   const { user } = useOrbit()
   const [open, setOpen] = useState(false)
-  if (user.root) return <SettingsCard title="Delete account" description="The root account cannot be deleted." />
+  if (user.root) return <SettingsCard title="Delete account" description="The root account cannot be deleted." danger>{null}</SettingsCard>
   return (
-    <SettingsCard title="Delete account" description={'Delete your account for good. What you wrote stays, without your name.'}>
+    <SettingsCard title="Delete account" description={'Delete your account for good. What you wrote stays, without your name.'} danger>
       <View className="items-start">
         <Button label="Delete account" variant="destructive" onPress={() => setOpen(true)} />
       </View>

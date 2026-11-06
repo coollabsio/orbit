@@ -9,6 +9,9 @@ import {
   changePassword as changePasswordRequest,
   createInvitation,
   deleteAccount as deleteAccountRequest,
+  deletePasskey as deletePasskeyRequest,
+  deletePushSubscription,
+  deleteWorkspace as deleteWorkspaceRequest,
   deleteStorageFile as deleteStorageFileRequest,
   disableTwoFactor,
   enableTotp,
@@ -17,6 +20,8 @@ import {
   getWorkspaceBucket,
   getWorkspaceStorage,
   listInvitations,
+  listPasskeys,
+  listPushSubscriptions,
   listSessions,
   putStatus,
   putNotificationPreferences,
@@ -39,6 +44,8 @@ import type {
   OwnedWorkspace,
   InvitationRecord,
   NotificationPrefs,
+  PasskeyRecord,
+  PushSubscriptionRecord,
   S3Body,
   SessionRecord,
   TotpSetup,
@@ -54,13 +61,16 @@ import { ApiProblem } from '@orbit/api/problem'
 import type { MemberRecord, OrbitClient, User, WorkspaceRecord } from './orbit'
 import type { OAuthConnection } from '@orbit/api/mcp'
 import { STORAGE_FILES_PAGE } from '@orbit/api/storage'
+import { relativeTime } from './format'
 
-export type { InvitationRecord, NotificationPrefs, OwnedWorkspace, SessionRecord, TotpSetup, TwoFactorStatus, WorkspaceBucketView, WorkspaceStorage }
+export type { InvitationRecord, NotificationPrefs, OwnedWorkspace, PasskeyRecord, PushSubscriptionRecord, SessionRecord, TotpSetup, TwoFactorStatus, WorkspaceBucketView, WorkspaceStorage }
 
 /** Query keys of the account (not per workspace) and of the workspace settings. */
 export const accountKeys = {
   notificationPrefs: ['account', 'notification-prefs'] as const,
   sessions: ['account', 'sessions'] as const,
+  passkeys: ['account', 'passkeys'] as const,
+  pushDevices: ['account', 'push-devices'] as const,
   twoFactor: ['account', 'two-factor'] as const,
   connectedAccounts: ['account', 'connected-accounts'] as const,
   oauthConnections: ['account', 'oauth-connections'] as const,
@@ -185,6 +195,32 @@ export async function revokeSession(client: OrbitClient, id: string): Promise<vo
   await revokeSessionRequest({ client, path: { id }, throwOnError: true })
 }
 
+// ---- passkeys and push devices (the app lists and removes them; adding needs a browser)
+
+export async function passkeys(client: OrbitClient): Promise<PasskeyRecord[]> {
+  return (await listPasskeys({ client, throwOnError: true })).data
+}
+
+export async function deletePasskey(client: OrbitClient, id: string): Promise<void> {
+  await deletePasskeyRequest({ client, path: { id }, throwOnError: true })
+}
+
+/** The browsers that get push notifications. */
+export async function pushDevices(client: OrbitClient): Promise<PushSubscriptionRecord[]> {
+  return (await listPushSubscriptions({ client, throwOnError: true })).data
+}
+
+export async function removePushDevice(client: OrbitClient, id: string): Promise<void> {
+  await deletePushSubscription({ client, path: { id }, throwOnError: true })
+}
+
+/** The web's `ago`: `just now`, `5m ago`, then `on Sep 4`. */
+export function passkeyAgo(iso: string, now: Date = new Date()): string {
+  const relative = relativeTime(iso, now)
+  if (relative === 'now') return 'just now'
+  return /^\d+[mhd]$/.test(relative) ? `${relative} ago` : `on ${relative}`
+}
+
 /** The MCP clients this person approved. The OAuth routes are not in the OpenAPI contract, so they have no SDK function. */
 export async function oauthConnections(client: OrbitClient): Promise<OAuthConnection[]> {
   return (await client.get<{ 200: { items: OAuthConnection[] } }, unknown, true>({ url: '/api/v1/oauth/grants', throwOnError: true })).data.items
@@ -224,6 +260,11 @@ export const NOTIFICATION_CHOICES: readonly { field: keyof NotificationPrefs; la
 
 export async function renameWorkspace(client: OrbitClient, workspace: Pick<WorkspaceRecord, 'id' | 'version'>, name: string): Promise<WorkspaceRecord> {
   return (await renameWorkspaceRequest({ client, path: { workspace_id: workspace.id }, body: { name, expected_version: workspace.version }, throwOnError: true })).data
+}
+
+/** Moves the workspace to the trash (the owner can restore it for 30 days). */
+export async function deleteWorkspace(client: OrbitClient, workspace: Pick<WorkspaceRecord, 'id' | 'version'>): Promise<void> {
+  await deleteWorkspaceRequest({ client, path: { workspace_id: workspace.id }, query: { expected_version: workspace.version }, throwOnError: true })
 }
 
 /** Admins also get one page of the largest files, from `offset`. */

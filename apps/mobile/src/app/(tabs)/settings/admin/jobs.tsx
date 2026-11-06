@@ -14,7 +14,7 @@ const DESCRIPTION =
 export default function AdminJobsScreen() {
   const limits = useJobLimits()
   return (
-    <AdminShell refreshing={limits.isRefetching} onRefresh={() => void limits.refetch()}>
+    <AdminShell onRefresh={() => limits.refetch()}>
       {limits.isPending ? <SettingsCard title="Background jobs"><Note>Loading limits…</Note></SettingsCard> : null}
       {limits.isError ? (
         <SettingsCard title="Background jobs">
@@ -42,7 +42,17 @@ function JobLimitsForm({ kinds }: { kinds: JobLimitView[] }) {
     <SettingsCard
       title="Background jobs"
       description={DESCRIPTION}
-      actions={<Button label="Reset to defaults" variant="ghost" size="sm" onPress={() => edit(jobDraft(kinds, true))} />}
+      actions={
+        <>
+          <Button label="Reset to defaults" variant="ghost" onPress={() => edit(jobDraft(kinds, true))} />
+          <Button
+            label={save.isPending ? 'Saving…' : 'Save limits'}
+            disabled={save.isPending}
+            // the form then shows what the server stored
+            onPress={() => save.mutate(jobLimitsBody(kinds, draft), { onSuccess: (stored) => setDraft(jobDraft(stored)) })}
+          />
+        </>
+      }
       flush
     >
       {kinds.map((kind, index) => {
@@ -75,18 +85,11 @@ function JobLimitsForm({ kinds }: { kinds: JobLimitView[] }) {
           </View>
         )
       })}
-      <View className="gap-3 border-t border-border px-4 py-3">
-        {save.isError ? <Note error>{errorMessage(save.error)}</Note> : null}
-        {save.isSuccess ? <Note>Job limits saved.</Note> : null}
-        <View className="flex-row justify-end">
-          <Button
-            label={save.isPending ? 'Saving…' : 'Save limits'}
-            disabled={save.isPending}
-            // the form then shows what the server stored
-            onPress={() => save.mutate(jobLimitsBody(kinds, draft), { onSuccess: (stored) => setDraft(jobDraft(stored)) })}
-          />
+      {save.isError || save.isSuccess ? (
+        <View className="border-t border-border px-4 py-3">
+          {save.isError ? <Note error>{errorMessage(save.error)}</Note> : <Note>Job limits saved.</Note>}
         </View>
-      </View>
+      ) : null}
     </SettingsCard>
   )
 }

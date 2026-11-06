@@ -9,7 +9,7 @@ import { Button } from '../../../../ui'
 export default function AdminGeneralScreen() {
   const settings = useInstanceSettings()
   return (
-    <AdminShell refreshing={settings.isRefetching} onRefresh={() => void settings.refetch()}>
+    <AdminShell onRefresh={() => settings.refetch()}>
       {settings.isPending ? <SettingsCard title="General"><Note>Loading settings…</Note></SettingsCard> : null}
       {settings.isError ? (
         <SettingsCard title="General">

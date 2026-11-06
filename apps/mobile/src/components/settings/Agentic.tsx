@@ -1,7 +1,9 @@
 import { mcpClientCommands, mcpUrl } from '@orbit/api/mcp'
+import * as Clipboard from 'expo-clipboard'
+import { useEffect, useState } from 'react'
 import { View } from 'react-native'
 
-import { Note, RowIcon, RowText, SettingsCard, SettingsRow, SettingsShell, type SettingsNavItem } from './Shell'
+import { Note, RowIcon, RowText, SettingsCard, SettingsRow, SettingsShell, type SettingsNavItem, SmallOutlineButton } from './Shell'
 import { useDisconnectOAuth, useOAuthConnections } from '../../hooks/account'
 import { useOrbit } from '../../orbit-context'
 import { errorMessage } from '../../session-context'
@@ -9,8 +11,7 @@ import { Button, Text } from '../../ui'
 
 /**
  * The web's Agentic page: the MCP server address, the command that adds it to each client, and the connected clients.
- * The commands run on a computer, so a long press selects them; the app has no clipboard module. It sits in both the
- * workspace and the account settings, as on the web.
+ * Each block has the web's Copy button. It sits in both the workspace and the account settings, as on the web.
  */
 export function AgenticScreen({ title, nav }: { title: string; nav: readonly SettingsNavItem[] }) {
   const { session } = useOrbit()
@@ -20,7 +21,7 @@ export function AgenticScreen({ title, nav }: { title: string; nav: readonly Set
   const list = connections.data ?? []
 
   return (
-    <SettingsShell title={title} nav={nav} refreshing={connections.isRefetching} onRefresh={() => void connections.refetch()}>
+    <SettingsShell title={title} nav={nav} onRefresh={() => connections.refetch()}>
       <SettingsCard title="MCP server" description="AI clients such as Claude, Codex and Grok can use tasks and read docs and chat through this address. Sign in with your Orbit account and select the workspace, projects and permissions.">
         <Code text={url} />
       </SettingsCard>
@@ -58,10 +59,21 @@ export function AgenticScreen({ title, nav }: { title: string; nav: readonly Set
 
 const connectedAt = (millis: number) => new Date(millis).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })
 
+/** The web's `CodeBlock`: the text on the faint muted fill, room on the right for the Copy button in the corner. */
 function Code({ text }: { text: string }) {
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  useEffect(() => {
+    if (state === 'idle') return
+    const timer = setTimeout(() => setState('idle'), 1600)
+    return () => clearTimeout(timer)
+  }, [state])
+  const copy = () => Clipboard.setStringAsync(text).then((done) => setState(done ? 'copied' : 'failed'), () => setState('failed'))
   return (
-    <View className="rounded-md bg-muted px-3 py-2.5">
-      <Text selectable className="font-mono text-xs leading-5">{text}</Text>
+    <View className="rounded-md bg-muted/50 py-2.5 pr-20 pl-3">
+      <Text selectable className="font-mono text-xs leading-5 text-foreground">{text}</Text>
+      <View className="absolute top-1.5 right-1.5">
+        <SmallOutlineButton label={state === 'copied' ? 'Copied' : state === 'failed' ? 'Failed' : 'Copy'} accessibilityLabel="Copy code" icon="copy" muted state={state} onPress={() => void copy()} />
+      </View>
     </View>
   )
 }

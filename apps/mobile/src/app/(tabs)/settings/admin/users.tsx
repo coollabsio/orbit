@@ -3,19 +3,32 @@ import { Share, View } from 'react-native'
 import { TextInput } from '../../../../ui/scaled'
 
 import { ActionSheet, ConfirmDialog, type ConfirmRequest, Dialog, type SheetAction } from '../../../../components/settings/Dialog'
-import { AdminShell, Badge, type BadgeTone, Note, RowText, SettingsCard, SettingsRow } from '../../../../components/settings/Shell'
+import { AdminShell, Badge, type BadgeTone, InitialAvatar, Note, RowText, SettingsCard, SettingsRow, SmallOutlineButton } from '../../../../components/settings/Shell'
 import { type AdminAction, adminActionBlocked, adminActions, adminBadges, type AdminUser } from '../../../../data/admin-api'
-import { shortDate } from '../../../../data/format'
 import { useAuthOptions } from '../../../../hooks/account'
-import { useAdminUserWrites, useAdminUsers } from '../../../../hooks/admin'
+import { useAdminUserSummary, useAdminUserWrites, useAdminUsers } from '../../../../hooks/admin'
 import { useOrbit } from '../../../../orbit-context'
 import { errorMessage } from '../../../../session-context'
-import { alpha, useTheme } from '../../../../theme'
-import { Avatar, Button, Icon, Input } from '../../../../ui'
+import { useTheme } from '../../../../theme'
+import { Button, Input, Text } from '../../../../ui'
 
 const BADGE_TONE: Record<string, BadgeTone> = { Root: 'primary', Admin: 'secondary', '2FA': 'outline', Suspended: 'destructive', Deleted: 'secondary' }
 
-/** The web's Admin → Users: every account on the instance, searched on the server, with the Manage menu. */
+/** A row of labelled numbers; `–` until the value loads (the web's `StatGrid`). */
+function StatRow({ stats }: { stats: { label: string; value: number | undefined }[] }) {
+  return (
+    <View className="flex-row">
+      {stats.map((stat, index) => (
+        <View key={stat.label} className={`flex-1 gap-1 px-4 py-3 border-border ${index === 0 ? '' : 'border-l'}`}>
+          <Text className="text-[12px] leading-[16px] text-muted-foreground">{stat.label}</Text>
+          <Text className="font-noto-semibold text-[20px] leading-[28px] text-foreground" style={{ fontVariant: ['tabular-nums'] }}>{stat.value ?? '–'}</Text>
+        </View>
+      ))}
+    </View>
+  )
+}
+
+/** The web's Admin → Users: the Overview and Active users counts, then the accounts a search on the server finds, with the Manage menu. */
 export default function AdminUsersScreen() {
   const { user: viewer, setUser } = useOrbit()
   const { colors } = useTheme()
@@ -27,6 +40,19 @@ export default function AdminUsersScreen() {
     return () => clearTimeout(timer)
   }, [query])
   const users = useAdminUsers(search)
+  const summary = useAdminUserSummary()
+  const stats = [
+    { label: 'Users', value: summary.data?.users },
+    ...(summary.data?.trials ? [
+      { label: 'Trials ongoing', value: summary.data.trials.ongoing },
+      { label: 'Trials expired', value: summary.data.trials.expired },
+    ] : []),
+  ]
+  const active = [
+    { label: 'Daily', value: summary.data?.active.daily },
+    { label: 'Weekly', value: summary.data?.active.weekly },
+    { label: 'Monthly', value: summary.data?.active.monthly },
+  ]
   const writes = useAdminUserWrites()
   const options = useAuthOptions().data
   const cloud = options?.billing_enabled === true
@@ -114,11 +140,18 @@ export default function AdminUsersScreen() {
     : []
 
   return (
-    <AdminShell refreshing={users.isRefetching} onRefresh={() => void users.refetch()}>
-      <SettingsCard title="Users" description="Every account on this Orbit instance." flush>
-        <View className="p-3 border-b border-border">
-          <View className="h-8 flex-row items-center gap-2 px-2.5 rounded-lg border border-input">
-            <Icon name="search" size={14} color={alpha(colors.mutedForeground, 0.7)} />
+    <AdminShell onRefresh={() => Promise.all([summary.refetch(), users.refetch()])}>
+      <SettingsCard title="Overview" description="Deleted accounts and deleted workspaces are not counted. A trial belongs to a workspace." flush>
+        <StatRow stats={stats} />
+      </SettingsCard>
+      <SettingsCard title="Active users" description="Accounts that used Orbit while signed in during the last 24 hours, 7 days and 30 days. API tokens do not count." flush>
+        <StatRow stats={active} />
+      </SettingsCard>
+      <SettingsCard
+        title="Users"
+        actions={
+          // the web's `h-8 w-40` search field in the title strip
+          <View className="h-8 w-40 flex-row items-center gap-1.5 px-2.5 rounded-lg border border-input dark:bg-input/30">
             <TextInput
               accessibilityLabel="Search users"
               placeholder="Search by name or email…"
@@ -127,31 +160,36 @@ export default function AdminUsersScreen() {
               onChangeText={setQuery}
               autoCapitalize="none"
               autoCorrect={false}
-              className="font-noto text-[14px] leading-[1.45] flex-1 py-0 text-foreground"
+              className="font-noto text-[16px] leading-[1.45] flex-1 min-w-0 py-0 text-foreground"
             />
           </View>
-        </View>
-        {users.isPending ? <View className="p-4"><Note>Loading users…</Note></View> : null}
+        }
+        flush
+      >
+        {!search ? <View className="px-4 py-3"><Note>Search by name or email to find a user.</Note></View> : null}
+        {search && users.isPending ? <View className="px-4 py-3"><Note>Searching…</Note></View> : null}
         {users.isError ? (
-          <View className="p-4 flex-row items-center gap-2">
+          <View className="px-4 py-3 flex-row items-center gap-2">
             <Note error>Users could not be loaded.</Note>
             <Button label="Retry" variant="ghost" onPress={() => void users.refetch()} />
           </View>
         ) : null}
-        {search && users.data && list.length === 0 ? <View className="p-4"><Note>No user matches "{search}".</Note></View> : null}
-        {list.map((user, index) => (
+        {search && users.data && list.length === 0 ? <View className="px-4 py-3"><Note>No user matches "{search}".</Note></View> : null}
+        {search ? list.map((user, index) => (
           <SettingsRow key={user.id} first={index === 0}>
-            <Avatar id={user.id} name={user.display_name || user.email} size={32} />
+            <InitialAvatar name={user.display_name || user.email} size={32} />
             <RowText
               title={user.display_name}
-              // a deleted account's email is a placeholder that frees the address
-              subtitle={`${user.deleted ? 'Anonymized. It can never sign in again.' : user.email}\n${user.workspace_count} ${user.workspace_count === 1 ? 'workspace' : 'workspaces'} · ${user.last_active_at ? `Active ${shortDate(user.last_active_at)}` : 'Never signed in'}`}
+              // a deleted account's email is a placeholder that frees the address; the web hides the workspace count and last activity below 900px
+              subtitle={user.deleted ? 'Anonymized. It can never sign in again.' : user.email}
               badges={adminBadges(user).map((badge) => <Badge key={badge} label={badge} tone={BADGE_TONE[badge]} />)}
             />
-            {adminActions(user, viewer).length > 0 ? <Button label="Manage" size="sm" variant="outline" onPress={() => setManaging(user)} /> : null}
+            <View className="w-24 flex-row justify-end">
+              {adminActions(user, viewer).length > 0 ? <SmallOutlineButton label="Manage" accessibilityLabel={`Manage ${user.display_name}`} onPress={() => setManaging(user)} /> : null}
+            </View>
           </SettingsRow>
-        ))}
-        {users.hasNextPage ? (
+        )) : null}
+        {search && users.hasNextPage ? (
           <View className="p-2 items-center border-t border-border">
             <Button label={users.isFetchingNextPage ? 'Loading…' : 'Load more users'} variant="ghost" disabled={users.isFetchingNextPage} onPress={() => void users.fetchNextPage()} />
           </View>

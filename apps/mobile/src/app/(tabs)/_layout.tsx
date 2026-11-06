@@ -4,6 +4,7 @@ import { BillingBanner } from '../../components/BillingBanner'
 import { Dock } from '../../components/Dock'
 import { DrawerProvider } from '../../components/Drawer'
 import { MailServerBanner } from '../../components/MailServerBanner'
+import { TopBar } from '../../components/TopBar'
 import { useLiveUpdates } from '../../live'
 import { useTheme } from '../../theme'
 
@@ -12,6 +13,7 @@ export default function TabsLayout() {
   useLiveUpdates()
   return (
     <DrawerProvider>
+      <TopBar />
       <Tabs tabBar={(props) => (
           <>
             <MailServerBanner />

@@ -8,6 +8,7 @@ import {
   createBackup as createBackupRequest,
   createRecoveryLink,
   deleteBackup as deleteBackupRequest,
+  getAdminUserSummary,
   getInstanceSettings,
   getJobLimits,
   listAdminUsers,
@@ -32,6 +33,7 @@ import {
 } from '@orbit/api/generated/sdk.gen'
 import type {
   AdminUser,
+  AdminUserSummary,
   AuthOptions,
   BackupCreated,
   BackupItem,
@@ -60,7 +62,7 @@ import type {
 import { formatBytes } from './account-api'
 import type { OrbitClient } from './orbit'
 
-export type { AdminUser, BackupItem, BackupItemKind, BackupSchedule, BackupSummary, BackupWorkspace, CompressionStatus, InstanceSettingsView, JobLimitView, LimitsView, RecoveryLink, RestoredItem, S3View, SmtpSecurity, SmtpView, StorageView }
+export type { AdminUser, AdminUserSummary, BackupItem, BackupItemKind, BackupSchedule, BackupSummary, BackupWorkspace, CompressionStatus, InstanceSettingsView, JobLimitView, LimitsView, RecoveryLink, RestoredItem, S3View, SmtpSecurity, SmtpView, StorageView }
 export type AuditEvent = PageAuditEvent['items'][number]
 
 export interface Page<T> {
@@ -70,6 +72,7 @@ export interface Page<T> {
 
 export const adminKeys = {
   users: (search: string) => ['admin', 'users', search] as const,
+  userSummary: ['admin', 'users-summary'] as const,
   audit: ['admin', 'audit'] as const,
   backups: ['admin', 'backups'] as const,
   backupWorkspaces: (backupId: string) => ['admin', 'backups', backupId, 'workspaces'] as const,
@@ -86,6 +89,11 @@ export async function adminUsers(client: OrbitClient, search: string, cursor?: s
   return { items: data.items, next: data.next_cursor ?? null }
 }
 
+/** The number of accounts and, on Orbit Cloud, of ongoing and expired trials (the web's Overview card). */
+export async function adminUserSummary(client: OrbitClient): Promise<AdminUserSummary> {
+  return (await getAdminUserSummary({ client, throwOnError: true })).data
+}
+
 export async function auditEvents(client: OrbitClient, cursor?: string): Promise<Page<AuditEvent>> {
   const { data } = await listGlobalAudit({ client, query: { cursor, limit: 50 }, throwOnError: true })
   return { items: data.items, next: data.next_cursor ?? null }
@@ -93,6 +101,14 @@ export async function auditEvents(client: OrbitClient, cursor?: string): Promise
 
 export async function backups(client: OrbitClient): Promise<BackupSummary[]> {
   return (await listBackups({ client, throwOnError: true })).data.items
+}
+
+/** The web's backup size (`formatSize`): 1024-based, one decimal (`8.0 KB`, `38.8 MB`). */
+export function backupSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
 }
 
 /** The workspaces in a backup. The first open of a backup in S3 downloads it, which can take a while. */
@@ -252,7 +268,19 @@ export function adminBadges(user: AdminUser): string[] {
 export const auditActor = (event: Pick<AuditEvent, 'actor_id' | 'actor_name'>) => (event.actor_id ? (event.actor_name ?? 'Unknown account') : 'System')
 
 /** The web's job names; an unknown kind shows as it is. */
-const JOB_LABELS: Record<string, string> = { 'notion.scan': 'Notion scans', 'notion.import': 'Notion imports' }
+const JOB_LABELS: Record<string, string> = {
+  'notion.scan': 'Notion scans',
+  'notion.import': 'Notion imports',
+  'obsidian.scan': 'Obsidian scans',
+  'obsidian.import': 'Obsidian imports',
+  'asana.scan': 'Asana scans',
+  'asana.import': 'Asana imports',
+  'linear.scan': 'Linear scans',
+  'linear.import': 'Linear imports',
+  'trello.scan': 'Trello scans',
+  'trello.import': 'Trello imports',
+  'workspace.export': 'Workspace exports',
+}
 export const jobLabel = (kind: string) => JOB_LABELS[kind] ?? kind
 export const limitText = (limit: number | null | undefined) => (limit == null ? 'no limit' : String(limit))
 

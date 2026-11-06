@@ -1,63 +1,95 @@
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useMemo, useState } from 'react'
-import { Pressable, RefreshControl, SectionList, View } from 'react-native'
+import { Pressable, SectionList, useWindowDimensions, View } from 'react-native'
 import { TextInput } from '../../../ui/scaled'
 
-import { MenuButton } from '../../../components/Drawer'
 import { NewTaskDialog, type NewTaskDefaults } from '../../../components/NewTaskDialog'
 import { TaskRow } from '../../../components/TaskRow'
+import { FilterBar } from '../../../components/tasks/FilterBar'
+import { keys } from '../../../data/keys'
 import { groupTasksByStatus, type StatusGroup } from '../../../data/tasks'
+import {
+  countConditions,
+  DEFAULT_DISPLAY,
+  effectiveFilter,
+  emptyFilter,
+  isTaskPreset,
+  pageKeyFor,
+  PRESET_LABEL,
+  queryAllTasks,
+  saveViewPreference,
+  taskQueryBody,
+  viewPreference,
+  type FilterGroup,
+  type FilterOptions,
+  type ViewState,
+} from '../../../data/tasks-filter'
 import { useOrbit } from '../../../orbit-context'
-import { usePeople, useProjects, useStatuses, useTasks } from '../../../queries'
+import { useLabels, usePeople, useProjects, useStatuses } from '../../../queries'
 import { useTheme } from '../../../theme'
-import { EmptyState, ErrorView, HeaderTitle, Icon, IconButton, LoadingView, PaneHeader, PickerSheet, SafeAreaView, StatusIcon, Text } from '../../../ui'
+import { EmptyState, ErrorView, HeaderTitle, Icon, IconButton, LoadingView, PaneHeader, PullRefresh, PickerSheet, SafeAreaView, StatusIcon, Text } from '../../../ui'
 
-/** The server's task views the drawer links to, with the web page titles. */
-const PRESET_TITLE: Record<string, string> = {
-  mine: 'My tasks',
-  overdue: 'Overdue',
-  due_soon: 'Due soon',
-  current_week: 'This week',
-  my_week: 'My week',
-}
-
-type Sheet = 'project' | 'filter' | 'display'
+type Sheet = 'project' | 'display'
 type Grouping = 'status' | 'none'
 
 export default function TasksScreen() {
   const { view: viewParam, search: searchParam, project: projectParam } = useLocalSearchParams<{ view?: string; search?: string; project?: string }>()
-  const view = viewParam && viewParam in PRESET_TITLE ? viewParam : undefined
-  const { user } = useOrbit()
+  const preset = isTaskPreset(viewParam) ? viewParam : undefined
+  const { client, workspaceId, user } = useOrbit()
   const { colors } = useTheme()
-  const tasks = useTasks(view)
+  const { width: windowWidth } = useWindowDimensions()
+  const queryClient = useQueryClient()
   const statuses = useStatuses()
   const projects = useProjects()
+  const labels = useLabels()
   const people = usePeople()
   // in the URL, so the drawer's project links can pick it
   const projectId = projectParam || null
   const setProjectId = (id: string | null) => router.setParams({ project: id ?? undefined })
-  const [assignedToMe, setAssignedToMe] = useState(false)
-  const [grouping, setGrouping] = useState<Grouping>('status')
+  // the filter and display are stored per page on the server, as the web stores them, so both apps show the same filter
+  const pageKey = pageKeyFor(preset, projectId)
+  const preferenceKey = ['view-preference', workspaceId, pageKey] as const
+  const preference = useQuery({ queryKey: preferenceKey, queryFn: () => viewPreference(client, workspaceId, pageKey) })
+  const state: ViewState = preference.data ?? { filter: emptyFilter(), display: DEFAULT_DISPLAY }
+  const saveState = (next: ViewState) => {
+    queryClient.setQueryData(preferenceKey, next)
+    saveViewPreference(client, workspaceId, pageKey, next).catch(() => void queryClient.invalidateQueries({ queryKey: preferenceKey }))
+  }
+  const setFilter = (filter: FilterGroup) => saveState({ ...state, filter })
+  const body = taskQueryBody(effectiveFilter(state.filter, preset, projectId), state.display)
+  const tasks = useQuery({
+    queryKey: [...keys.tasks(workspaceId), 'query', body],
+    queryFn: () => queryAllTasks(client, workspaceId, body),
+    enabled: preference.isSuccess,
+    placeholderData: keepPreviousData,
+  })
+  const grouping: Grouping = state.display.group_by === 'none' ? 'none' : 'status'
+  const [adding, setAdding] = useState(false)
   const [search, setSearch] = useState('')
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set())
   const [sheet, setSheet] = useState<Sheet | null>(null)
   const [creating, setCreating] = useState<NewTaskDefaults | null>(null)
   const project = projects.data?.find((item) => item.id === projectId)
+  const filterCount = countConditions(state.filter)
+  const filterOptions: FilterOptions = {
+    statuses: projectId ? (statuses.data ?? []).filter((status) => status.project_id === projectId) : (statuses.data ?? []),
+    members: people,
+    labels: labels.data ?? [],
+    projectId,
+    projects: projectId ? (projects.data ?? []).filter((item) => item.id === projectId) : (projects.data ?? []),
+    currentUserId: user.id,
+  }
 
   const sections = useMemo(() => {
     if (!tasks.data || !statuses.data) return []
     const needle = search.trim().toLowerCase()
-    const visible = tasks.data.filter(
-      (task) =>
-        (!projectId || task.project_id === projectId) &&
-        (!assignedToMe || task.assignee_ids.includes(user.id)) &&
-        (!needle || task.title.toLowerCase().includes(needle)),
-    )
+    const visible = needle ? tasks.data.filter((task) => task.title.toLowerCase().includes(needle)) : tasks.data
     const groups: StatusGroup[] = grouping === 'status' ? groupTasksByStatus(visible, statuses.data) : [{ key: 'all', name: 'All', status: undefined, tasks: visible }]
     return groups.filter((group) => group.tasks.length > 0).map((group) => ({ ...group, data: collapsed.has(group.key) ? [] : group.tasks }))
-  }, [assignedToMe, collapsed, grouping, projectId, search, statuses.data, tasks.data, user.id])
+  }, [collapsed, grouping, search, statuses.data, tasks.data])
 
-  const refresh = () => Promise.all([tasks.refetch(), statuses.refetch(), projects.refetch()])
+  const refresh = () => Promise.all([preference.refetch(), tasks.refetch(), statuses.refetch(), projects.refetch()])
   const toggle = (key: string) =>
     setCollapsed((current) => {
       const next = new Set(current)
@@ -70,12 +102,13 @@ export default function TasksScreen() {
   const header = (
     <>
       <PaneHeader className="flex-wrap">
-        <MenuButton />
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Select project"
           onPress={() => setSheet('project')}
-          className="h-8 max-w-[30%] flex-row items-center gap-[7px] px-[7px] rounded-lg active:bg-muted"
+          className="h-8 flex-row items-center gap-[7px] px-[7px] rounded-lg active:bg-muted"
+          // the web's max-w-[30vw]: a share of the window, not of the padded header
+          style={{ maxWidth: windowWidth * 0.3 }}
         >
           {project ? <View className="size-2 rounded-full" style={{ backgroundColor: project.color }} /> : null}
           <Text numberOfLines={1} className="text-[14px] leading-[20px] shrink text-muted-foreground">
@@ -84,9 +117,24 @@ export default function TasksScreen() {
           <Icon name="chevronDown" size={14} color={colors.mutedForeground} />
         </Pressable>
         <View className="flex-1 min-w-0">
-          <HeaderTitle>{view ? PRESET_TITLE[view] : 'All tasks'}</HeaderTitle>
+          <HeaderTitle>{preset ? PRESET_LABEL[preset] : 'All tasks'}</HeaderTitle>
         </View>
-        <IconButton icon="filter" label="Filter" size={32} onPress={() => setSheet('filter')} color={assignedToMe ? colors.primary : undefined} />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Filter tasks"
+          onPress={() => setAdding(true)}
+          // as on the web, the count sits beside the icon and the pair centers on the 32px button
+          className={`size-8 flex-row items-center justify-center gap-1.5 rounded-lg ${filterCount > 0 ? 'bg-primary/10' : 'active:bg-muted'}`}
+        >
+          <View className="shrink-0">
+            <Icon name="filter" size={16} color={filterCount > 0 ? colors.primary : colors.foreground} />
+          </View>
+          {filterCount > 0 ? (
+            <View className="h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-primary px-1">
+              <Text className="font-noto-medium text-[10px] leading-[12px] text-primary-foreground">{filterCount}</Text>
+            </View>
+          ) : null}
+        </Pressable>
         <IconButton icon="display" label="Display" size={32} onPress={() => setSheet('display')} />
         <IconButton icon="plus" label="New task" size={32} variant="primary" onPress={() => newTask()} />
         <View
@@ -108,17 +156,18 @@ export default function TasksScreen() {
           />
         </View>
       </PaneHeader>
+      <FilterBar filter={state.filter} options={filterOptions} onChange={setFilter} presetLabel={preset ? PRESET_LABEL[preset] : null} adding={adding} onAddingChange={setAdding} />
     </>
   )
 
   const projectOptions = [{ key: 'all', label: 'All projects', selected: projectId === null }, ...(projects.data ?? []).map((item) => ({ key: item.id, label: item.name, selected: item.id === projectId, leading: <View className="size-2 rounded-full" style={{ backgroundColor: item.color }} /> }))]
 
   return (
-    <SafeAreaView edges={['top', 'left', 'right']} className="flex-1 bg-background">
+    <SafeAreaView edges={['left', 'right']} className="flex-1 bg-background">
       {header}
       {!tasks.data || !statuses.data ? (
-        tasks.error || statuses.error ? (
-          <ErrorView error={tasks.error ?? statuses.error} onRetry={() => void refresh()} />
+        preference.error || tasks.error || statuses.error ? (
+          <ErrorView error={preference.error ?? tasks.error ?? statuses.error} onRetry={() => void refresh()} />
         ) : (
           <LoadingView />
         )
@@ -129,8 +178,8 @@ export default function TasksScreen() {
           stickySectionHeadersEnabled={false}
           keyboardShouldPersistTaps="handled"
           contentContainerClassName={sections.length === 0 ? 'grow' : 'pb-6'}
-          refreshControl={<RefreshControl refreshing={tasks.isRefetching} onRefresh={() => void refresh()} tintColor={colors.mutedForeground} />}
-          ListEmptyComponent={<EmptyState icon="tasks" title="No tasks" description={search || assignedToMe || projectId ? 'No task matches the filter.' : 'Tap + to create the first task.'} />}
+          refreshControl={<PullRefresh onRefresh={() => refresh()} />}
+          ListEmptyComponent={<EmptyState icon="tasks" title="No tasks found" description="No tasks match the current filters. Try clearing a filter or create a new task." />}
           renderSectionHeader={({ section }) =>
             grouping === 'none' ? null : (
               <GroupHeader group={section} count={section.tasks.length} collapsed={collapsed.has(section.key)} onToggle={() => toggle(section.key)} onAdd={() => newTask(section.status?.id)} />
@@ -158,19 +207,6 @@ export default function TasksScreen() {
         onClose={() => setSheet(null)}
       />
       <PickerSheet
-        visible={sheet === 'filter'}
-        title="Filter"
-        options={[
-          { key: 'everyone', label: 'All tasks', selected: !assignedToMe },
-          { key: 'me', label: 'Assigned to me', selected: assignedToMe },
-        ]}
-        onSelect={(key) => {
-          setSheet(null)
-          setAssignedToMe(key === 'me')
-        }}
-        onClose={() => setSheet(null)}
-      />
-      <PickerSheet
         visible={sheet === 'display'}
         title="Grouping"
         options={[
@@ -179,7 +215,7 @@ export default function TasksScreen() {
         ]}
         onSelect={(key) => {
           setSheet(null)
-          setGrouping(key === 'none' ? 'none' : 'status')
+          saveState({ ...state, display: { ...state.display, group_by: key === 'none' ? 'none' : 'status' } })
         }}
         onClose={() => setSheet(null)}
       />

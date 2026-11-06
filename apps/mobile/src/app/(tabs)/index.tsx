@@ -1,9 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { type Href, router } from 'expo-router'
 import type { ReactNode } from 'react'
-import { Pressable, RefreshControl, ScrollView, View } from 'react-native'
+import { Pressable, ScrollView, View } from 'react-native'
 
-import { MenuButton } from '../../components/Drawer'
 import { relativeTime } from '../../data/format'
 import { notificationCopy, notificationTarget } from '../../data/inbox'
 import { keys } from '../../data/keys'
@@ -12,7 +11,7 @@ import { dueLabel, identifier } from '../../data/tasks'
 import { useOrbit } from '../../orbit-context'
 import { usePages, usePeople, useProjects, useStatuses, useUnreadNotifications } from '../../queries'
 import { alpha, useTheme } from '../../theme'
-import { HeaderTitle, Icon, IconButton, PaneHeader, SafeAreaView, StatusIcon, Text } from '../../ui'
+import { Icon, PullRefresh, SafeAreaView, StatusIcon, Text } from '../../ui'
 
 /** Most rows a card shows: Home is a short brief, the full lists live in Tasks, Activity and Docs. */
 const CARD_LIMIT = 7
@@ -65,16 +64,10 @@ export default function HomeScreen() {
   }
 
   return (
-    <SafeAreaView edges={['top', 'left', 'right']} className="flex-1 bg-background">
-      <PaneHeader>
-        <MenuButton />
-        <HeaderTitle size={14}>Home</HeaderTitle>
-        <View className="flex-1" />
-        <IconButton icon="search" label="Search" onPress={() => router.navigate('/tasks?search=1')} />
-      </PaneHeader>
+    <SafeAreaView edges={['left', 'right']} className="flex-1 bg-background">
       <ScrollView
         contentContainerClassName="px-4 pt-8 pb-6 gap-6"
-        refreshControl={<RefreshControl refreshing={queries.some((query) => query.isRefetching)} onRefresh={() => void refresh()} tintColor={colors.mutedForeground} />}
+        refreshControl={<PullRefresh onRefresh={() => refresh()} />}
       >
         <View>
           <Text className="font-noto-semibold text-[24px] leading-[28px] tracking-[-0.6px] mb-1.5">
