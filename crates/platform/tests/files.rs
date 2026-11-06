@@ -1,7 +1,7 @@
 use std::io;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use orbit_platform::{
@@ -130,15 +130,13 @@ async fn stage_sniffs_bytes_and_never_uses_a_client_path_as_a_filesystem_path() 
     assert_eq!(png.detected_media_type, "image/png");
     assert_eq!(png.display_name, "picture.png");
     assert_eq!(png.sha256.len(), 64);
-    assert!(
-        fixture
-            .store
-            .temporary_files()
-            .await
-            .unwrap()
-            .iter()
-            .all(|file| file.path.starts_with(fixture.store.root()))
-    );
+    assert!(fixture
+        .store
+        .temporary_files()
+        .await
+        .unwrap()
+        .iter()
+        .all(|file| file.path.starts_with(fixture.store.root())));
 
     let svg = fixture
         .service
@@ -172,13 +170,11 @@ async fn finalize_deduplicates_only_inside_a_workspace_and_atomically_installs_t
         .await
         .unwrap();
     assert!(!first_temp.exists());
-    assert!(
-        fixture
-            .store
-            .path(&first_blob.storage_key)
-            .unwrap()
-            .exists()
-    );
+    assert!(fixture
+        .store
+        .path(&first_blob.storage_key)
+        .unwrap()
+        .exists());
 
     let duplicate = fixture
         .service
@@ -410,13 +406,11 @@ async fn failed_deduplicated_finalization_restarts_the_orphan_quarantine() {
         .await
         .unwrap();
     assert_eq!(result.deleted_blobs, 0);
-    assert!(
-        fixture
-            .store
-            .path(&orphan_blob.storage_key)
-            .unwrap()
-            .exists()
-    );
+    assert!(fixture
+        .store
+        .path(&orphan_blob.storage_key)
+        .unwrap()
+        .exists());
 }
 
 #[tokio::test]
@@ -877,13 +871,11 @@ async fn reconciliation_rechecks_quarantine_after_a_concurrent_failed_deduplicat
     let result = reconcile.await.unwrap().unwrap();
 
     assert_eq!(result.deleted_blobs, 0);
-    assert!(
-        fixture
-            .store
-            .path(&orphan_blob.storage_key)
-            .unwrap()
-            .exists()
-    );
+    assert!(fixture
+        .store
+        .path(&orphan_blob.storage_key)
+        .unwrap()
+        .exists());
 }
 
 #[tokio::test]

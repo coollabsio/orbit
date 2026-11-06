@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::net::{IpAddr, Ipv4Addr};
 
 use axum::http::header::{
-    CONTENT_SECURITY_POLICY, HeaderName, HeaderValue, REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS,
+    HeaderName, HeaderValue, CONTENT_SECURITY_POLICY, REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS,
     X_FRAME_OPTIONS,
 };
 use axum::http::{HeaderMap, Method, Uri};
@@ -343,7 +343,7 @@ mod tests {
     use axum::http::header::{AUTHORIZATION, COOKIE, ORIGIN, UPGRADE};
     use axum::http::{HeaderMap, Method, Uri};
 
-    use super::{OriginPolicy, add_security_headers, bearer_token};
+    use super::{add_security_headers, bearer_token, OriginPolicy};
 
     #[test]
     fn responses_refuse_framing_and_isolate_the_opener() {

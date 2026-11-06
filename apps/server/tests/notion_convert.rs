@@ -1001,7 +1001,7 @@ fn child_database_block() -> BlockNode {
 fn inline_database_shows_its_table_in_the_parent_page() {
     let (page, _) = load("lists");
     let blocks = vec![child_database_block()];
-    for (inline, expected) in [(true, vec!["page", "table"]), (false, vec!["page"])] {
+    for (inline, expected) in [(true, vec!["heading", "table"]), (false, vec!["page"])] {
         let mut resolver = resolver();
         resolver.databases.insert(
             MAPPED_DB.to_owned(),
@@ -1013,7 +1013,31 @@ fn inline_database_shows_its_table_in_the_parent_page() {
         let mut ctx = ConvertContext::new(&resolver);
         let converted = convert_page(&page, &blocks, &mut ctx);
         assert_eq!(types(&converted.content), expected, "inline: {inline}");
+        if inline {
+            let heading = &converted.content[0];
+            assert_eq!(heading["props"]["level"], 2);
+            assert_eq!(
+                heading["content"][0]["href"],
+                "/docs/01900000-0000-7000-8000-000000000003"
+            );
+            assert_eq!(heading["content"][0]["content"][0]["text"], "Projects");
+        }
     }
+    let mut resolver = resolver();
+    resolver.databases.insert(
+        MAPPED_DB.to_owned(),
+        DatabaseRows {
+            inline: true,
+            rows: Vec::new(),
+        },
+    );
+    let mut ctx = ConvertContext::new(&resolver);
+    let converted = convert_page(&page, &blocks, &mut ctx);
+    assert_eq!(
+        types(&converted.content),
+        ["page"],
+        "an inline database with no rows stays a page card"
+    );
 }
 
 #[test]

@@ -489,6 +489,24 @@
 }
 
 /*
+ * Images keep their real size, and shrink only when they are wider than the column.
+ * BlockNote sets `width: 100%` on the picture, so a 1px image becomes a column-wide square.
+ * A width the user set is `previewWidth` (`width: Npx` on the wrapper); that picture still fills its box.
+ * The page-editor slot outranks BlockNote's stylesheet, which loads later.
+ */
+[data-slot='page-editor'] [data-content-type='image'] .bn-file-block-content-wrapper {
+  max-width: 100%;
+}
+[data-slot='page-editor'] [data-content-type='image'] .bn-visual-media {
+  width: auto;
+  max-width: 100%;
+  height: auto;
+}
+[data-slot='page-editor'] [data-content-type='image'] .bn-file-block-content-wrapper[style*='px'] .bn-visual-media {
+  width: 100%;
+}
+
+/*
  * Co-editing. Carets (collab/cursor.ts): BlockNote's flag, made a little larger and rounder; it shows while the person
  * types or moves and on hover. Block markers (collab/blockPresence.ts): initials in the right margin of the block each
  * other person is in, in their cursor color. The page scroller pads the text column by only 24px, so the marker hangs

@@ -493,15 +493,18 @@ fn convert_node(node: &BlockNode, ctx: &mut ConvertContext<'_>, out: &mut Vec<Va
         }
         "child_database" => {
             let title = str_at(data, &["title"]).unwrap_or_default().to_owned();
-            page_reference(&block.id, &title, ctx, out);
-            // An inline database shows its rows in the page, as in Notion.
+            // An inline database with rows is a heading plus the table. Its own page already holds that table.
+            // A full-page database, or an inline database with no rows, stays a page card.
             let resolver = ctx.resolver;
             let rows = normalize_id(&block.id)
                 .and_then(|id| resolver.database(&id))
                 .filter(|database| database.inline)
                 .map(|database| database.rows.as_slice());
             if let Some(table) = rows.and_then(|rows| database_table(rows, ctx)) {
+                database_heading(&block.id, &title, ctx, out);
                 out.push(table);
+            } else {
+                page_reference(&block.id, &title, ctx, out);
             }
         }
         "link_to_page" => {
@@ -913,6 +916,24 @@ fn link_paragraph(url: &str, data: &Value, ctx: &mut ConvertContext<'_>, out: &m
         items(content),
         Vec::new(),
     ));
+}
+
+/// The database name above an inline table. The name links to the database page when that page exists.
+fn database_heading(
+    notion_id: &str,
+    title: &str,
+    ctx: &mut ConvertContext<'_>,
+    out: &mut Vec<Value>,
+) {
+    let label = non_empty_title(title);
+    let content = match normalize_id(notion_id).and_then(|id| ctx.resolver.page_link(&id)) {
+        Some(page) => vec![rich_text::link(format!("/docs/{page}"), vec![plain(label)])],
+        None => vec![plain(label)],
+    };
+    let mut props = default_props(&Value::Null);
+    props.insert("level".into(), json!(2));
+    props.insert("isToggleable".into(), json!(false));
+    out.push(make_block(ctx, "heading", props, items(content), Vec::new()));
 }
 
 /// child_page/child_database/link_to_page → `page` block when imported, else a link paragraph.

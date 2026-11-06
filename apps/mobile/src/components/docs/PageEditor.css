@@ -42,6 +42,19 @@ body {
   line-height: 1.3;
 }
 
+/* Same image rule as the web page editor: real size, never wider than the column, unless the user set a width. */
+.orbit-page-editor [data-content-type='image'] .bn-file-block-content-wrapper {
+  max-width: 100%;
+}
+.orbit-page-editor [data-content-type='image'] .bn-visual-media {
+  width: auto;
+  max-width: 100%;
+  height: auto;
+}
+.orbit-page-editor [data-content-type='image'] .bn-file-block-content-wrapper[style*='px'] .bn-visual-media {
+  width: 100%;
+}
+
 /* Same heading scale as the web page editor (apps/web/src/index.css). BlockNote defaults are 3em / 2em / 1.3em. */
 .orbit-page-editor [data-content-type='heading'] {
   --level: 1.875em;

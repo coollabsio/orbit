@@ -20,6 +20,12 @@ export function ThemedBlockNoteView<B extends BlockSchema, I extends InlineConte
         '[--bn-colors-editor-background:transparent]! [--bn-colors-editor-text:var(--foreground)]!',
         '[--bn-colors-menu-background:var(--popover)]! [--bn-colors-menu-text:var(--popover-foreground)]!',
         '[--bn-colors-tooltip-background:var(--popover)]! [--bn-colors-tooltip-text:var(--popover-foreground)]!',
+        // Toolbar tips use `bg-foreground` and `text-background`. Those utilities are not generated, so the
+        // tip is transparent white text. It also portals into a 0px anchor, so `w-fit` wraps to one word
+        // ("Rename" / "file") and lands on the caption above. Force one line on the popover surface.
+        '[&_[data-slot=tooltip-content]]:border! [&_[data-slot=tooltip-content]]:bg-popover! [&_[data-slot=tooltip-content]]:text-popover-foreground! [&_[data-slot=tooltip-content]]:shadow-md! [&_[data-slot=tooltip-content]]:whitespace-nowrap! [&_[data-slot=tooltip-content]]:[width:max-content]!',
+        // The arrow is a rotated square. Hide it.
+        '[&_[data-slot=tooltip-content]>[aria-hidden=true]]:hidden!',
         '[--bn-colors-hovered-background:var(--accent)]! [--bn-colors-hovered-text:var(--accent-foreground)]!',
         '[--bn-colors-selected-background:var(--primary)]! [--bn-colors-selected-text:var(--primary-foreground)]!',
         '[--bn-colors-disabled-background:var(--muted)]! [--bn-colors-disabled-text:var(--muted-foreground)]!',
