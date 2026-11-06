@@ -4,7 +4,9 @@
 pub(crate) mod conversations;
 pub(crate) mod emoji;
 pub(crate) mod files;
+pub(crate) mod hooks;
 mod images;
+pub(crate) mod interactions;
 pub(crate) mod links;
 pub(crate) mod messages;
 pub(crate) mod state;
@@ -37,6 +39,11 @@ pub struct ChatState {
     pub(crate) hub: LiveHub,
     pub(crate) cookie_mode: CookieMode,
     pub(crate) link_previews: Arc<LinkPreviewer>,
+    /// The origin of the webhook URLs that Orbit shows (`ORBIT_PUBLIC_ORIGIN`).
+    pub(crate) public_origin: Arc<str>,
+    /// Encrypts the signing secrets of interactive webhooks; `None` turns interactivity off.
+    pub(crate) app_key: Option<[u8; 32]>,
+    pub(crate) clicks: Arc<interactions::ClickSender>,
 }
 
 impl ChatState {
@@ -52,7 +59,26 @@ impl ChatState {
             identity,
             cookie_mode,
             link_previews: Arc::new(LinkPreviewer::default()),
+            public_origin: Arc::from(""),
+            app_key: None,
+            clicks: Arc::new(interactions::ClickSender::new(false)),
         }
+    }
+
+    /// Lets buttons send clicks: `app_key` encrypts the signing secrets, and `development` lets
+    /// request URLs be http and local, for a receiver on the developer's machine.
+    #[must_use]
+    pub fn with_interactivity(mut self, app_key: Option<[u8; 32]>, development: bool) -> Self {
+        self.app_key = app_key;
+        self.clicks = Arc::new(interactions::ClickSender::new(development));
+        self
+    }
+
+    /// Builds webhook URLs on `origin`.
+    #[must_use]
+    pub fn with_public_origin(mut self, origin: &str) -> Self {
+        self.public_origin = Arc::from(origin);
+        self
     }
 
     /// Reads link previews with `previewer` (tests name local services).
@@ -224,6 +250,46 @@ fn json_router(state: ChatState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/chat/messages/{message_id}/pin",
             put(messages::pin_chat_message),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/webhooks",
+            get(hooks::list_chat_webhooks).post(hooks::create_chat_webhook),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/webhooks/{webhook_id}",
+            patch(hooks::update_chat_webhook).delete(hooks::delete_chat_webhook),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/webhooks/{webhook_id}/rotate",
+            post(hooks::rotate_chat_webhook),
+        )
+        .route(
+            "/api/v1/hooks/chat/{webhook_id}/{secret}",
+            post(hooks::post_incoming_webhook),
+        )
+        .route(
+            "/api/v1/hooks/chat/{webhook_id}/responses/{token}",
+            post(hooks::post_action_response),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/chat/messages/{message_id}/actions",
+            post(interactions::click_chat_action),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/webhooks/{webhook_id}/interactivity",
+            put(interactions::set_chat_webhook_interactivity),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/webhooks/{webhook_id}/signing-secret",
+            get(interactions::get_chat_webhook_signing_secret),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/webhooks/{webhook_id}/signing-secret/rotate",
+            post(interactions::rotate_chat_webhook_signing_secret),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/webhooks/{webhook_id}/deliveries",
+            get(interactions::list_chat_webhook_deliveries),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/chat/conversations/{conversation_id}/pins",

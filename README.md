@@ -43,6 +43,7 @@ just dev   # http://127.0.0.1:8888
 - [Deployment and operations](docs/operations.md)
 - [MCP server and client setup](docs/mcp.md)
 - [GitHub integration](docs/github.md)
+- [Chat incoming webhooks](docs/chat-webhooks.md)
 
 ## License
 

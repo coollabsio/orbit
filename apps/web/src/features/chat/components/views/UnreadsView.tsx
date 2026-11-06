@@ -11,6 +11,7 @@ import { conversationPath } from '@/features/chat/chatRoutes'
 import { ChatBackLink } from '@/features/chat/components/sidebar/ChatRow'
 import { ConversationIcon } from '@/features/chat/components/sidebar/ConversationIcon'
 import { conversationTitle, type UnreadConversation } from '@/features/chat/lib/sidebar'
+import { isOwnMessage } from '@/features/chat/lib/bot'
 import { useMembers } from '@/features/workspaces/api'
 import type { User } from '@/features/workspaces/models'
 import { Shortcut } from '@/shortcuts/Shortcut'
@@ -28,7 +29,7 @@ function UnreadGroup({ conversation, state, people }: UnreadConversation & { peo
   const title = conversationTitle(conversation, people, currentUserId ?? '')
   // message ids sort by time, so everything after the read cursor is unread
   const unread = flattenMessages(messages.data).filter(
-    (message) => message.kind === 'message' && !message.deleted && message.authorId !== currentUserId && (state.lastReadMessageId === null || message.id > state.lastReadMessageId),
+    (message) => message.kind === 'message' && !message.deleted && !isOwnMessage(message, currentUserId) && (state.lastReadMessageId === null || message.id > state.lastReadMessageId),
   )
   const shown = unread.slice(-PREVIEW_LIMIT)
   const more = Math.max(0, state.unreadCount - shown.length)

@@ -670,7 +670,10 @@ impl PushService {
             return Ok(());
         };
         let dm = conversation.get::<String, _>("kind") == "dm";
-        let author: String = conversation.get("author");
+        // An integration's message names the integration, and its creator gets the push too.
+        let bot = message.bot.as_ref();
+        let author: String = bot.map_or_else(|| conversation.get("author"), |bot| bot.name.clone());
+        let sender = bot.map_or(message.author_id, |bot| bot.webhook_id);
         let workspace_id: String = conversation.get("workspace_id");
         let thread_only = message.thread_root_id.is_some() && !message.also_in_channel;
         let members = sqlx::query(
@@ -685,7 +688,7 @@ impl PushService {
         .bind(message.id.to_string())
         .bind(message.thread_root_id.map(|id| id.to_string()))
         .bind(message.conversation_id.to_string())
-        .bind(message.author_id.to_string())
+        .bind(sender.to_string())
         .fetch_all(self.database.pool())
         .await?;
         if members.is_empty() {
@@ -710,7 +713,11 @@ impl PushService {
             url: url.clone(),
             tag: format!("chat:{}", message.conversation_id),
             sound: kind.sound(),
-            icon: avatar_url(message.author_id, conversation.get("avatar_updated_at")),
+            icon: if bot.is_some() {
+                None
+            } else {
+                avatar_url(message.author_id, conversation.get("avatar_updated_at"))
+            },
         };
         let body = self.readable(message, &workspace_id).await?;
         let mut notices = Vec::new();

@@ -501,6 +501,26 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0073_obsidian_imports.sql"),
                     false,
                 ),
+                Migration::new(
+                    74,
+                    include_str!("../../../../apps/server/migrations/0074_chat_webhooks.sql"),
+                    false,
+                ),
+                Migration::new(
+                    75,
+                    include_str!("../../../../apps/server/migrations/0075_chat_message_blocks.sql"),
+                    false,
+                ),
+                Migration::new(
+                    76,
+                    include_str!("../../../../apps/server/migrations/0076_chat_bot_icon_emoji.sql"),
+                    false,
+                ),
+                Migration::new(
+                    77,
+                    include_str!("../../../../apps/server/migrations/0077_chat_interactivity.sql"),
+                    false,
+                ),
             ],
         );
         runner.postgres = vec![
@@ -663,6 +683,32 @@ impl MigrationRunner {
                 73,
                 include_str!(
                     "../../../../apps/server/migrations/postgres/0073_obsidian_imports.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                74,
+                include_str!("../../../../apps/server/migrations/postgres/0074_chat_webhooks.sql"),
+                false,
+            ),
+            Migration::new(
+                75,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0075_chat_message_blocks.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                76,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0076_chat_bot_icon_emoji.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                77,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0077_chat_interactivity.sql"
                 ),
                 false,
             ),

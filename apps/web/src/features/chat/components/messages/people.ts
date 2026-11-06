@@ -48,6 +48,11 @@ export function useChatPeople(): ChatPeople {
   return people
 }
 
+/** The author name to show: the integration's name when one posted the message, else the member's. */
+export function authorName(people: ChatPeople, authorId: string, botName?: string | null, fallback = 'Unknown'): string {
+  return botName ?? people.byId.get(authorId)?.name ?? fallback
+}
+
 /** The title of a conversation: `#name` for a channel, the other members' names for a DM. */
 export function conversationTitle(conversation: Conversation, people: ChatPeople, currentUserId: string | null): string {
   if (conversation.kind !== 'dm') return `#${conversation.name}`

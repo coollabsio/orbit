@@ -31,7 +31,7 @@ import { MessageListContext, type MessageListContextValue } from './messageListC
 import { MessageActionSheet, MessageMenu } from './MessageMenu'
 import { DayChip, NewLine, RepliesDivider, SystemRow } from './MessageRows'
 import { firstLine, messagesAfter, quickReactions } from './messageText'
-import { useChatPeople } from './people'
+import { authorName, useChatPeople } from './people'
 import { useMessageActions, type MenuAnchor } from './useMessageActions'
 
 /** Closer to the end than this counts as "at the bottom". */
@@ -443,7 +443,7 @@ export function MessageList({
       const newest = arrived[arrived.length - 1]
       if (announce && newest) {
         const text = firstLine(decodeMentions(newest.body, people.members, people.channels), 200)
-        setAnnouncement(`${people.byId.get(newest.authorId)?.name ?? 'Someone'}: ${text || wordlessPreview(Boolean(newest.stickerId)).toLowerCase()}`)
+        setAnnouncement(`${authorName(people, newest.authorId, newest.bot?.name, 'Someone')}: ${text || wordlessPreview(Boolean(newest.stickerId)).toLowerCase()}`)
       }
     }
     state.lastKey = lastKey

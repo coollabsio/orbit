@@ -519,6 +519,20 @@ turns its routes, navigation and shortcuts off.
   edited. Emoticons (`:D`) become emoji, a typed task ID (`GEN-1`) of a real project shows as a chip
   and a card, a message of only emoji (1 to 30) shows them large, and `<https://…>` is a link with no
   card. A backslash keeps `\:D`, `\:name:` and `\GEN-1` as text.
+- Incoming webhooks (`docs/chat-webhooks.md`): a tool posts JSON to a secret URL
+  (`POST /api/v1/hooks/chat/{id}/{secret}`, `chat_routes/hooks.rs`) and a message shows in one channel as that
+  tool (`message.bot`: name, icon, an "App" badge). The channel's creator and owners and admins manage them in
+  Edit channel > Integrations; only a hash of the secret is stored, so the URL shows once. `author_id` of such a
+  message is the member who made the webhook, but it is unread for them too, makes no Inbox item, and nobody
+  can edit it (`MessageRecord::sender_id`, `lib/bot.ts`). All bot posts go through `ChatRepository::post_as_bot`. A webhook may send Slack Block Kit `blocks` (header, section, context, image,
+  divider, markdown, rich_text; `repositories/chat/blocks.rs`, stored in `chat_messages.blocks`): they show in place
+  of the body (`MessageBlocks.tsx`; rich text becomes Markdown in `lib/blocks.ts`), and the body is their plain text. The hook is a drop-in for Slack's (`repositories/chat/slack.rs`): mrkdwn becomes
+  Markdown, legacy `attachments` become `attachment` blocks, form `payload=` works, unknown block types are left out,
+  long text is cut, `icon_emoji` is the avatar (`bot.icon_emoji`), and the answer is plain `ok`. Buttons without a URL are interactive when the webhook has a request URL
+  (Integrations > Interactivity): `chat_routes/interactions.rs` sends a Slack-signed `block_actions` payload (3 s, no
+  redirects, public addresses only outside development), and the integration answers through
+  `/api/v1/hooks/chat/{id}/responses/{token}` (5 uses, 30 min): replace, delete, `in_channel`, or an ephemeral reply
+  (live-only `message.ephemeral` event, `EphemeralMessages.tsx`). The signing secret is encrypted with the app key.
 - Custom emoji belong to the workspace (Workspace Settings > Emoji, owners and admins): `:name:` stays
   text in the body and in reactions and becomes the image when it is shown.
 - Stickers belong to the workspace too (Workspace Settings > Stickers, owners and admins; 512 KiB, 100 for

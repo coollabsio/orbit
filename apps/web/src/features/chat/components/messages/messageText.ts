@@ -1,5 +1,6 @@
 import { splitEmoji } from '@/lib/twemoji'
 import type { Message } from '../../api/types'
+import { isOwnMessage } from '../../lib/bot'
 
 /** A message longer than this many lines collapses behind "Show more". */
 export const COLLAPSE_AFTER_LINES = 20
@@ -121,5 +122,5 @@ export function messagesAfter(
   if (lastKey === null) return []
   const index = messages.findIndex((message) => keyOf(message) === lastKey)
   if (index === -1) return []
-  return messages.slice(index + 1).filter((message) => message.kind === 'message' && message.authorId !== currentUserId)
+  return messages.slice(index + 1).filter((message) => message.kind === 'message' && !isOwnMessage(message, currentUserId))
 }
