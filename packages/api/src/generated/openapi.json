@@ -21994,6 +21994,1386 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/imports/asana": {
+      "get": {
+        "tags": [
+          "crate::asana_import_routes"
+        ],
+        "summary": "The caller's 20 most recent Asana imports in this workspace (without trees).",
+        "operationId": "list_asana_imports",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AsanaImportList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "asana_import_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "crate::asana_import_routes"
+        ],
+        "summary": "Validates the token with Asana, stores it encrypted and starts the scan.",
+        "operationId": "create_asana_import",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAsanaImportBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AsanaImport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "asana_import_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, app_key_missing, import_in_progress",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "asana_token_invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "asana_unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/imports/asana/{import_id}": {
+      "get": {
+        "tags": [
+          "crate::asana_import_routes"
+        ],
+        "summary": "One of the caller's Asana imports: status, progress and report. The scan tree (once\nscanned) only with `?include=tree`.",
+        "operationId": "get_asana_import",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "import_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include",
+            "in": "query",
+            "description": "`tree` adds the scan tree; without it `tree` is `null`.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Optional parts of an import detail response.",
+              "enum": [
+                "tree"
+              ]
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AsanaImport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "asana_import_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/imports/asana/{import_id}/cancel": {
+      "post": {
+        "tags": [
+          "crate::asana_import_routes"
+        ],
+        "summary": "Cancels a scan or import and deletes its token; what was already imported stays.",
+        "operationId": "cancel_asana_import",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "import_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AsanaImport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "asana_import_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, asana_import_state_conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/imports/asana/{import_id}/start": {
+      "post": {
+        "tags": [
+          "crate::asana_import_routes"
+        ],
+        "summary": "Starts a scanned import with the projects to import.",
+        "operationId": "start_asana_import",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "import_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartAsanaImportBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AsanaImport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "asana_import_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, import_in_progress, asana_import_state_conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/imports/linear": {
+      "get": {
+        "tags": [
+          "crate::linear_import_routes"
+        ],
+        "summary": "The caller's 20 most recent Linear imports in this workspace (without trees).",
+        "operationId": "list_linear_imports",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinearImportList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "linear_import_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "crate::linear_import_routes"
+        ],
+        "summary": "Validates the API key with Linear, stores it encrypted and starts the scan.",
+        "operationId": "create_linear_import",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateLinearImportBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinearImport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "linear_import_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, app_key_missing, import_in_progress",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "linear_token_invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "linear_unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/imports/linear/{import_id}": {
+      "get": {
+        "tags": [
+          "crate::linear_import_routes"
+        ],
+        "summary": "One of the caller's Linear imports: status, progress and report. The scan tree (once\nscanned) only with `?include=tree`.",
+        "operationId": "get_linear_import",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "import_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include",
+            "in": "query",
+            "description": "`tree` adds the scan tree; without it `tree` is `null`.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Optional parts of an import detail response.",
+              "enum": [
+                "tree"
+              ]
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinearImport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "linear_import_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/imports/linear/{import_id}/cancel": {
+      "post": {
+        "tags": [
+          "crate::linear_import_routes"
+        ],
+        "summary": "Cancels a scan or import and deletes its API key; what was already imported stays.",
+        "operationId": "cancel_linear_import",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "import_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinearImport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "linear_import_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, linear_import_state_conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/imports/linear/{import_id}/start": {
+      "post": {
+        "tags": [
+          "crate::linear_import_routes"
+        ],
+        "summary": "Starts a scanned import with the teams to import.",
+        "operationId": "start_linear_import",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "import_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartLinearImportBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinearImport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "linear_import_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, import_in_progress, linear_import_state_conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/imports/notion": {
       "get": {
         "tags": [
@@ -22648,6 +24028,1376 @@
           },
           "422": {
             "description": "validation_failed, notion_import_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/imports/obsidian": {
+      "get": {
+        "tags": [
+          "crate::obsidian_import_routes"
+        ],
+        "summary": "The caller's 20 most recent imports in this workspace (without trees).",
+        "operationId": "list_obsidian_imports",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObsidianImportList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "obsidian_import_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "crate::obsidian_import_routes"
+        ],
+        "summary": "Uploads a vault (multipart, one `.zip` in `file`), stores it and starts the scan.",
+        "operationId": "create_obsidian_import",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/ObsidianImportUploadBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObsidianImport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "obsidian_import_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, import_in_progress",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large, obsidian_archive_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "obsidian_archive_invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/imports/obsidian/{import_id}": {
+      "get": {
+        "tags": [
+          "crate::obsidian_import_routes"
+        ],
+        "summary": "One of the caller's imports: status, progress and report. The scan tree (once scanned) only\nwith `?include=tree`.",
+        "operationId": "get_obsidian_import",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "import_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include",
+            "in": "query",
+            "description": "`tree` adds the scan tree; without it `tree` is `null`.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Optional parts of an import detail response.",
+              "enum": [
+                "tree"
+              ]
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObsidianImport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "obsidian_import_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/imports/obsidian/{import_id}/cancel": {
+      "post": {
+        "tags": [
+          "crate::obsidian_import_routes"
+        ],
+        "summary": "Cancels a scan or import and deletes the uploaded archive; pages already imported stay.",
+        "operationId": "cancel_obsidian_import",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "import_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObsidianImport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "obsidian_import_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, obsidian_import_state_conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/imports/obsidian/{import_id}/start": {
+      "post": {
+        "tags": [
+          "crate::obsidian_import_routes"
+        ],
+        "summary": "Starts a scanned import with a selection and a destination.",
+        "operationId": "start_obsidian_import",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "import_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartObsidianImportBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObsidianImport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "obsidian_import_not_found, page_not_found, teamspace_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, import_in_progress, obsidian_import_state_conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed, obsidian_import_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/imports/trello": {
+      "get": {
+        "tags": [
+          "crate::trello_import_routes"
+        ],
+        "summary": "The caller's 20 most recent Trello imports in this workspace (without trees).",
+        "operationId": "list_trello_imports",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrelloImportList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "trello_import_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "crate::trello_import_routes"
+        ],
+        "summary": "Validates the API key and token with Trello, stores both encrypted and starts the scan.",
+        "operationId": "create_trello_import",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateTrelloImportBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrelloImport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "trello_import_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, app_key_missing, import_in_progress",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "trello_key_invalid, trello_token_invalid",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "trello_unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/imports/trello/{import_id}": {
+      "get": {
+        "tags": [
+          "crate::trello_import_routes"
+        ],
+        "summary": "One of the caller's Trello imports: status, progress and report. The scan tree (once\nscanned) only with `?include=tree`.",
+        "operationId": "get_trello_import",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "import_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "include",
+            "in": "query",
+            "description": "`tree` adds the scan tree; without it `tree` is `null`.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Optional parts of an import detail response.",
+              "enum": [
+                "tree"
+              ]
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrelloImport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "trello_import_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/imports/trello/{import_id}/cancel": {
+      "post": {
+        "tags": [
+          "crate::trello_import_routes"
+        ],
+        "summary": "Cancels a scan or import and deletes its API key and token; what was already imported stays.",
+        "operationId": "cancel_trello_import",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "import_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrelloImport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "trello_import_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, trello_import_state_conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/imports/trello/{import_id}/start": {
+      "post": {
+        "tags": [
+          "crate::trello_import_routes"
+        ],
+        "summary": "Starts a scanned import with the boards to import.",
+        "operationId": "start_trello_import",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "import_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartTrelloImportBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrelloImport"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "trello_import_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, import_in_progress, trello_import_state_conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -38840,6 +41590,312 @@
           "chat:read"
         ]
       },
+      "AsanaImport": {
+        "type": "object",
+        "description": "An Asana import. Never contains the token.",
+        "required": [
+          "id",
+          "workspace_id",
+          "status",
+          "asana_user_name",
+          "progress",
+          "error",
+          "tree",
+          "report",
+          "project_ids",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "asana_user_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The Asana user the token belongs to."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the import failed or expired."
+          },
+          "id": {
+            "type": "string"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/AsanaImportProgress"
+          },
+          "project_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The Orbit projects the import created that still exist, in selection order."
+          },
+          "report": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AsanaImportReport",
+                "description": "Set once the import was started."
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/AsanaImportStatus"
+          },
+          "tree": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/AsanaImportTree",
+                "description": "The scan result, once ready. Only in `GET …/imports/asana/{id}?include=tree`; `null`\neverywhere else, so polling stays light."
+              }
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        }
+      },
+      "AsanaImportFailure": {
+        "type": "object",
+        "description": "A project or task the import could not create or fill.",
+        "required": [
+          "asana_gid",
+          "kind",
+          "title",
+          "error"
+        ],
+        "properties": {
+          "asana_gid": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "description": "`project` or `task`."
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
+      "AsanaImportList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AsanaImport"
+            }
+          }
+        }
+      },
+      "AsanaImportProgress": {
+        "type": "object",
+        "required": [
+          "total",
+          "done",
+          "failed"
+        ],
+        "properties": {
+          "done": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Tasks imported with their comments, files and dependencies.",
+            "minimum": 0
+          },
+          "failed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Tasks and projects that could not be imported.",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Tasks found so far (subtasks included); grows while projects are listed.",
+            "minimum": 0
+          }
+        }
+      },
+      "AsanaImportProject": {
+        "type": "object",
+        "description": "An Asana project in the scan tree.",
+        "required": [
+          "gid",
+          "name",
+          "archived",
+          "team_gid",
+          "team_name"
+        ],
+        "properties": {
+          "archived": {
+            "type": "boolean"
+          },
+          "gid": {
+            "type": "string",
+            "description": "Use it in `project_gids` to import this project."
+          },
+          "name": {
+            "type": "string"
+          },
+          "team_gid": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`null` in workspaces without teams (Asana teams exist only in organizations)."
+          },
+          "team_name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "AsanaImportReport": {
+        "type": "object",
+        "description": "What the import carried over besides the tasks themselves.",
+        "required": [
+          "comments_imported",
+          "files_imported",
+          "missing_files",
+          "links_added",
+          "dependencies_linked",
+          "unmatched_assignees",
+          "skipped_subtasks",
+          "failures"
+        ],
+        "properties": {
+          "comments_imported": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "dependencies_linked": {
+            "type": "integer",
+            "format": "int32",
+            "description": "\"Blocked by\" relations between imported tasks.",
+            "minimum": 0
+          },
+          "failures": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AsanaImportFailure"
+            },
+            "description": "The first 200 failures."
+          },
+          "files_imported": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Asana-hosted files downloaded and attached to the tasks.",
+            "minimum": 0
+          },
+          "links_added": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Google Drive, Dropbox and other linked attachments, added to the descriptions as links.",
+            "minimum": 0
+          },
+          "missing_files": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Asana-hosted files that could not be downloaded (too large, gone, refused).",
+            "minimum": 0
+          },
+          "skipped_subtasks": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Subtasks deeper than five levels, not imported.",
+            "minimum": 0
+          },
+          "unmatched_assignees": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Tasks whose Asana assignee has no Orbit member with the same email (left unassigned).",
+            "minimum": 0
+          }
+        }
+      },
+      "AsanaImportStatus": {
+        "type": "string",
+        "description": "`asana_imports.status`.",
+        "enum": [
+          "scanning",
+          "ready",
+          "queued",
+          "importing",
+          "completed",
+          "failed",
+          "cancelled",
+          "expired"
+        ]
+      },
+      "AsanaImportTree": {
+        "type": "object",
+        "description": "What the token can see.",
+        "required": [
+          "workspaces",
+          "truncated"
+        ],
+        "properties": {
+          "truncated": {
+            "type": "boolean",
+            "description": "The token sees more than 5,000 projects; only the first 5,000 are listed."
+          },
+          "workspaces": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AsanaImportWorkspace"
+            }
+          }
+        }
+      },
+      "AsanaImportWorkspace": {
+        "type": "object",
+        "required": [
+          "gid",
+          "name",
+          "projects"
+        ],
+        "properties": {
+          "gid": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "projects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AsanaImportProject"
+            },
+            "description": "Sorted by team, then by name."
+          }
+        }
+      },
       "AttachmentComment": {
         "type": "object",
         "required": [
@@ -41355,6 +44411,32 @@
         },
         "additionalProperties": false
       },
+      "CreateAsanaImportBody": {
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "An Asana personal access token. Validated with Asana, stored encrypted, and deleted\nwhen the import ends."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateLinearImportBody": {
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "A Linear personal API key (`lin_api_…`). Validated with Linear, stored encrypted, and\ndeleted when the import ends."
+          }
+        },
+        "additionalProperties": false
+      },
       "CreateNotionImportBody": {
         "type": "object",
         "required": [
@@ -41531,6 +44613,24 @@
           "name": {
             "type": "string",
             "description": "1 to 100 characters after trimming."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateTrelloImportBody": {
+        "type": "object",
+        "required": [
+          "key",
+          "token"
+        ],
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "The API key of a Trello Power-Up (its Trello Auth tab in the Power-Up admin portal)."
+          },
+          "token": {
+            "type": "string",
+            "description": "A user token authorized for that key (`scope=read`). Both are validated with Trello,\nstored encrypted, and deleted when the import ends."
           }
         },
         "additionalProperties": false
@@ -42521,6 +45621,299 @@
           }
         },
         "additionalProperties": false
+      },
+      "LinearImport": {
+        "type": "object",
+        "description": "A Linear import. Never contains the key.",
+        "required": [
+          "id",
+          "workspace_id",
+          "status",
+          "linear_user_name",
+          "progress",
+          "error",
+          "tree",
+          "report",
+          "project_ids",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the import failed or expired."
+          },
+          "id": {
+            "type": "string"
+          },
+          "linear_user_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The Linear user the key belongs to."
+          },
+          "progress": {
+            "$ref": "#/components/schemas/LinearImportProgress"
+          },
+          "project_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The Orbit projects the import created that still exist, in selection order."
+          },
+          "report": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LinearImportReport",
+                "description": "Set once the import was started."
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/LinearImportStatus"
+          },
+          "tree": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/LinearImportTree",
+                "description": "The scan result, once ready. Only in `GET …/imports/linear/{id}?include=tree`; `null`\neverywhere else, so polling stays light."
+              }
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        }
+      },
+      "LinearImportFailure": {
+        "type": "object",
+        "description": "A team, issue or relation the import could not create or fill.",
+        "required": [
+          "linear_id",
+          "kind",
+          "title",
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "description": "`team`, `issue` or `relation`."
+          },
+          "linear_id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
+      "LinearImportList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LinearImport"
+            }
+          }
+        }
+      },
+      "LinearImportProgress": {
+        "type": "object",
+        "required": [
+          "total",
+          "done",
+          "failed"
+        ],
+        "properties": {
+          "done": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Issues imported with their files and comments.",
+            "minimum": 0
+          },
+          "failed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Issues, teams and relations that could not be imported.",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Issues found so far (sub-issues included); grows while teams are listed.",
+            "minimum": 0
+          }
+        }
+      },
+      "LinearImportReport": {
+        "type": "object",
+        "description": "What the import carried over besides the issues themselves.",
+        "required": [
+          "comments_imported",
+          "files_imported",
+          "missing_files",
+          "links_added",
+          "relations_linked",
+          "relations_skipped",
+          "unmatched_assignees",
+          "detached_sub_issues",
+          "failures"
+        ],
+        "properties": {
+          "comments_imported": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "detached_sub_issues": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Sub-issues imported at the top level: more than five levels deep, or with a parent in\nanother team.",
+            "minimum": 0
+          },
+          "failures": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LinearImportFailure"
+            },
+            "description": "The first 200 failures."
+          },
+          "files_imported": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Files uploaded to Linear, downloaded and attached to the tasks.",
+            "minimum": 0
+          },
+          "links_added": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Linked attachments (pull requests, Slack threads, URLs), added to the descriptions.",
+            "minimum": 0
+          },
+          "missing_files": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Uploaded files that could not be downloaded (too large, gone, refused).",
+            "minimum": 0
+          },
+          "relations_linked": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Blocks, related and duplicate relations between imported issues.",
+            "minimum": 0
+          },
+          "relations_skipped": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Relations Orbit cannot hold: a second relation between the same two tasks, a second\nduplicate of one task, or a duplicate of a duplicate.",
+            "minimum": 0
+          },
+          "unmatched_assignees": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Issues whose Linear assignee has no Orbit member with the same email (left unassigned).",
+            "minimum": 0
+          }
+        }
+      },
+      "LinearImportStatus": {
+        "type": "string",
+        "description": "`linear_imports.status`.",
+        "enum": [
+          "scanning",
+          "ready",
+          "queued",
+          "importing",
+          "completed",
+          "failed",
+          "cancelled",
+          "expired"
+        ]
+      },
+      "LinearImportTeam": {
+        "type": "object",
+        "description": "A Linear team in the scan tree; importing it makes one Orbit project.",
+        "required": [
+          "id",
+          "key",
+          "name",
+          "issue_count",
+          "archived"
+        ],
+        "properties": {
+          "archived": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "description": "Use it in `team_ids` to import this team."
+          },
+          "issue_count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Issues in the team, archived ones included.",
+            "minimum": 0
+          },
+          "key": {
+            "type": "string",
+            "description": "The team's issue key prefix, e.g. `ENG`."
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "LinearImportTree": {
+        "type": "object",
+        "description": "What the key can see.",
+        "required": [
+          "organization",
+          "teams",
+          "truncated"
+        ],
+        "properties": {
+          "organization": {
+            "type": "string",
+            "description": "The Linear workspace (organization) name."
+          },
+          "teams": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LinearImportTeam"
+            },
+            "description": "Sorted by name; archived teams last."
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "The key sees more than 1,000 teams; only the first 1,000 are listed."
+          }
+        }
       },
       "LinkPreview": {
         "type": "object",
@@ -44200,6 +47593,457 @@
           "truncated": {
             "type": "boolean",
             "description": "The token sees more than 5,000 pages; only the first 5,000 are listed."
+          }
+        }
+      },
+      "ObsidianImport": {
+        "type": "object",
+        "description": "An Obsidian import.",
+        "required": [
+          "id",
+          "workspace_id",
+          "status",
+          "file_name",
+          "archive_bytes",
+          "progress",
+          "error",
+          "destination",
+          "tree",
+          "report",
+          "root_page_ids",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "archive_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The uploaded file's size.",
+            "minimum": 0
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "destination": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ObsidianImportDestination",
+                "description": "Set once the import was started."
+              }
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the archive was refused, or why the import failed or expired."
+          },
+          "file_name": {
+            "type": "string",
+            "description": "The uploaded file's name."
+          },
+          "id": {
+            "type": "string"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/ObsidianImportProgress"
+          },
+          "report": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ObsidianImportReport",
+                "description": "Import summary, once the import started."
+              }
+            ]
+          },
+          "root_page_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The imported top-level pages that still exist, in order (for \"Open imported pages\")."
+          },
+          "status": {
+            "$ref": "#/components/schemas/ObsidianImportStatus"
+          },
+          "tree": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/ObsidianImportTree",
+                "description": "The scan result, once ready. Only in `GET …/imports/obsidian/{id}?include=tree`; `null`\neverywhere else, so polling stays light."
+              }
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        }
+      },
+      "ObsidianImportDestination": {
+        "type": "object",
+        "description": "Where the import puts its top-level pages.",
+        "required": [
+          "teamspace_id",
+          "private",
+          "parent_page_id"
+        ],
+        "properties": {
+          "parent_page_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The page the imported top-level pages go under, if any."
+          },
+          "private": {
+            "type": "boolean"
+          },
+          "teamspace_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`null` for the importer's private space."
+          }
+        }
+      },
+      "ObsidianImportDestinationBody": {
+        "type": "object",
+        "description": "Where the imported top-level pages go. With `parent_page_id` they become its sub-pages\n(and join its space); otherwise they go to the root of `teamspace_id`, of the caller's\nprivate space (`private: true`), or of the default teamspace.",
+        "properties": {
+          "parent_page_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "private": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "teamspace_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "ObsidianImportFailure": {
+        "type": "object",
+        "description": "A page the import could not create or fill.",
+        "required": [
+          "path",
+          "title",
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
+      "ObsidianImportList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ObsidianImport"
+            }
+          }
+        }
+      },
+      "ObsidianImportNode": {
+        "type": "object",
+        "description": "One node of the scan tree.",
+        "required": [
+          "path",
+          "kind",
+          "title",
+          "note_path",
+          "parent_path",
+          "child_count"
+        ],
+        "properties": {
+          "child_count": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ObsidianImportNodeKind"
+          },
+          "note_path": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The note with the page's content: the note itself, or a folder's folder note\n(`Folder/Folder.md`); `null` for a folder without one."
+          },
+          "parent_path": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The parent folder's `path`; `null` at the top of the vault."
+          },
+          "path": {
+            "type": "string",
+            "description": "The vault path (`Folder/Sub` or `Folder/Note.md`); use it in `selection.paths`."
+          },
+          "title": {
+            "type": "string",
+            "description": "The folder name, or the note's file name without `.md`."
+          }
+        }
+      },
+      "ObsidianImportNodeKind": {
+        "type": "string",
+        "description": "A folder or a note in the scan tree.",
+        "enum": [
+          "folder",
+          "note"
+        ]
+      },
+      "ObsidianImportProgress": {
+        "type": "object",
+        "required": [
+          "total",
+          "done",
+          "failed"
+        ],
+        "properties": {
+          "done": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "failed": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Pages to import (folders and notes).",
+            "minimum": 0
+          }
+        }
+      },
+      "ObsidianImportReport": {
+        "type": "object",
+        "description": "What the import carried over and what it left out.",
+        "required": [
+          "files_imported",
+          "missing_files",
+          "unresolved_links",
+          "truncated_blocks",
+          "skipped_files",
+          "unfilled_pages_trashed",
+          "failures"
+        ],
+        "properties": {
+          "failures": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ObsidianImportFailure"
+            },
+            "description": "The first 200 failed pages."
+          },
+          "files_imported": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Files attached to the new pages.",
+            "minimum": 0
+          },
+          "missing_files": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Linked or embedded files that could not be attached (for example a type page files do\nnot accept).",
+            "minimum": 0
+          },
+          "skipped_files": {
+            "$ref": "#/components/schemas/ObsidianSkippedFiles",
+            "description": "Files of the archive that were not imported, by reason."
+          },
+          "truncated_blocks": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Top-level blocks cut from notes larger than the page size limit.",
+            "minimum": 0
+          },
+          "unfilled_pages_trashed": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Pages the import created but never filled because it failed or was cancelled; they\nwere moved to the trash (a restored page no longer counts).",
+            "minimum": 0
+          },
+          "unresolved_links": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Links whose target is not an imported page or file; they stayed as text.",
+            "minimum": 0
+          }
+        }
+      },
+      "ObsidianImportSelectionBody": {
+        "type": "object",
+        "description": "`{ \"all\": true }` for the whole vault, or `{ \"paths\": [...] }` for these folders and notes\n(a folder brings everything in it).",
+        "properties": {
+          "all": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          },
+          "paths": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "ObsidianImportStatus": {
+        "type": "string",
+        "description": "`obsidian_imports.status`.",
+        "enum": [
+          "scanning",
+          "ready",
+          "queued",
+          "importing",
+          "completed",
+          "failed",
+          "cancelled",
+          "expired"
+        ]
+      },
+      "ObsidianImportTree": {
+        "type": "object",
+        "description": "What the archive holds. `nodes` are in tree order: every folder before its children,\nfolders before notes, each by name.",
+        "required": [
+          "nodes",
+          "attachments",
+          "unresolved_links",
+          "skipped"
+        ],
+        "properties": {
+          "attachments": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Files (images, PDFs, …) that notes link to or embed; they are attached to those pages.",
+            "minimum": 0
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ObsidianImportNode"
+            }
+          },
+          "skipped": {
+            "$ref": "#/components/schemas/ObsidianSkippedFiles"
+          },
+          "unresolved_links": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Links and embeds whose target is not in the vault; they stay as text.",
+            "minimum": 0
+          }
+        }
+      },
+      "ObsidianImportUploadBody": {
+        "type": "object",
+        "description": "The vault as one `.zip` file in the `file` field.",
+        "required": [
+          "file"
+        ],
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary"
+          }
+        }
+      },
+      "ObsidianSkippedFiles": {
+        "type": "object",
+        "description": "Files the scan skipped, by reason.",
+        "required": [
+          "system",
+          "canvas",
+          "csv",
+          "unreferenced",
+          "too_large",
+          "duplicates"
+        ],
+        "properties": {
+          "canvas": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Obsidian canvases (`.canvas`).",
+            "minimum": 0
+          },
+          "csv": {
+            "type": "integer",
+            "format": "int32",
+            "description": "CSV files.",
+            "minimum": 0
+          },
+          "duplicates": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Files whose path differs from another file's only in letter case.",
+            "minimum": 0
+          },
+          "system": {
+            "type": "integer",
+            "format": "int32",
+            "description": "`.obsidian/`, `.trash/`, `__MACOSX/` and dotfiles.",
+            "minimum": 0
+          },
+          "too_large": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Files over the upload size limit.",
+            "minimum": 0
+          },
+          "unreferenced": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Files no note links to or embeds.",
+            "minimum": 0
           }
         }
       },
@@ -48197,6 +52041,38 @@
           }
         }
       },
+      "StartAsanaImportBody": {
+        "type": "object",
+        "required": [
+          "project_gids"
+        ],
+        "properties": {
+          "project_gids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Projects of the scan tree to import (each becomes a new Orbit project)."
+          }
+        },
+        "additionalProperties": false
+      },
+      "StartLinearImportBody": {
+        "type": "object",
+        "required": [
+          "team_ids"
+        ],
+        "properties": {
+          "team_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Teams of the scan tree to import (each becomes a new Orbit project)."
+          }
+        },
+        "additionalProperties": false
+      },
       "StartNotionImportBody": {
         "type": "object",
         "required": [
@@ -48208,6 +52084,21 @@
           },
           "selection": {
             "$ref": "#/components/schemas/NotionImportSelectionBody"
+          }
+        },
+        "additionalProperties": false
+      },
+      "StartObsidianImportBody": {
+        "type": "object",
+        "required": [
+          "selection"
+        ],
+        "properties": {
+          "destination": {
+            "$ref": "#/components/schemas/ObsidianImportDestinationBody"
+          },
+          "selection": {
+            "$ref": "#/components/schemas/ObsidianImportSelectionBody"
           }
         },
         "additionalProperties": false
@@ -48272,6 +52163,22 @@
             "description": "Open it in the browser (web: the same tab; mobile: an auth session)."
           }
         }
+      },
+      "StartTrelloImportBody": {
+        "type": "object",
+        "required": [
+          "board_ids"
+        ],
+        "properties": {
+          "board_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Boards of the scan tree to import (each becomes a new Orbit project)."
+          }
+        },
+        "additionalProperties": false
       },
       "StatusBody": {
         "type": "object",
@@ -49507,6 +53414,327 @@
             "type": "integer",
             "format": "int64",
             "minimum": 0
+          }
+        }
+      },
+      "TrelloImport": {
+        "type": "object",
+        "description": "A Trello import. Never contains the key or token.",
+        "required": [
+          "id",
+          "workspace_id",
+          "status",
+          "trello_user_name",
+          "progress",
+          "error",
+          "tree",
+          "report",
+          "project_ids",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Why the import failed or expired."
+          },
+          "id": {
+            "type": "string"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/TrelloImportProgress"
+          },
+          "project_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The Orbit projects the import created that still exist, in selection order."
+          },
+          "report": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TrelloImportReport",
+                "description": "Set once the import was started."
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/TrelloImportStatus"
+          },
+          "tree": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/TrelloImportTree",
+                "description": "The scan result, once ready. Only in `GET …/imports/trello/{id}?include=tree`; `null`\neverywhere else, so polling stays light."
+              }
+            ]
+          },
+          "trello_user_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The Trello member the token belongs to."
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "workspace_id": {
+            "type": "string"
+          }
+        }
+      },
+      "TrelloImportBoard": {
+        "type": "object",
+        "description": "A Trello board in the scan tree; importing it makes one Orbit project.",
+        "required": [
+          "id",
+          "name",
+          "archived",
+          "card_count"
+        ],
+        "properties": {
+          "archived": {
+            "type": "boolean",
+            "description": "The board is closed (archived in Trello)."
+          },
+          "card_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Open cards on open lists; `null` when Trello did not let the token count them.",
+            "minimum": 0
+          },
+          "id": {
+            "type": "string",
+            "description": "Use it in `board_ids` to import this board."
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "TrelloImportFailure": {
+        "type": "object",
+        "description": "A board or card the import could not create or fill.",
+        "required": [
+          "trello_id",
+          "kind",
+          "title",
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "description": "`board` or `card`."
+          },
+          "title": {
+            "type": "string"
+          },
+          "trello_id": {
+            "type": "string"
+          }
+        }
+      },
+      "TrelloImportList": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrelloImport"
+            }
+          }
+        }
+      },
+      "TrelloImportProgress": {
+        "type": "object",
+        "required": [
+          "total",
+          "done",
+          "failed"
+        ],
+        "properties": {
+          "done": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Cards imported with their files and comments.",
+            "minimum": 0
+          },
+          "failed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Boards and cards that could not be imported.",
+            "minimum": 0
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Cards found so far; grows while boards are listed.",
+            "minimum": 0
+          }
+        }
+      },
+      "TrelloImportReport": {
+        "type": "object",
+        "description": "What the import carried over besides the cards themselves, and what it left out.",
+        "required": [
+          "comments_imported",
+          "files_imported",
+          "missing_files",
+          "refused_files",
+          "links_added",
+          "checklists_added",
+          "unmatched_members",
+          "archived_lists_skipped",
+          "archived_cards_skipped",
+          "failures"
+        ],
+        "properties": {
+          "archived_cards_skipped": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Archived cards, and open cards on archived lists, left out.",
+            "minimum": 0
+          },
+          "archived_lists_skipped": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Archived lists, left out with their cards.",
+            "minimum": 0
+          },
+          "checklists_added": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Checklists written into the descriptions.",
+            "minimum": 0
+          },
+          "comments_imported": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "failures": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrelloImportFailure"
+            },
+            "description": "The first 200 failures."
+          },
+          "files_imported": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Files uploaded to Trello, downloaded and attached to the tasks.",
+            "minimum": 0
+          },
+          "links_added": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Link attachments, added to the descriptions.",
+            "minimum": 0
+          },
+          "missing_files": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Uploaded files that could not be downloaded or attached (too large, gone).",
+            "minimum": 0
+          },
+          "refused_files": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Uploaded files Trello refused to hand out (401 or 403; some Enterprise workspaces block\ndownloads through the API).",
+            "minimum": 0
+          },
+          "unmatched_members": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Card members with no single Orbit member of the same full name (named in the\ndescription instead).",
+            "minimum": 0
+          }
+        }
+      },
+      "TrelloImportStatus": {
+        "type": "string",
+        "description": "`trello_imports.status`.",
+        "enum": [
+          "scanning",
+          "ready",
+          "queued",
+          "importing",
+          "completed",
+          "failed",
+          "cancelled",
+          "expired"
+        ]
+      },
+      "TrelloImportTree": {
+        "type": "object",
+        "description": "What the key and token can see.",
+        "required": [
+          "workspaces",
+          "truncated"
+        ],
+        "properties": {
+          "truncated": {
+            "type": "boolean",
+            "description": "The member sees more than 1,000 boards; only the first 1,000 are listed."
+          },
+          "workspaces": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrelloImportWorkspace"
+            },
+            "description": "Sorted by name; the boards outside a Workspace last."
+          }
+        }
+      },
+      "TrelloImportWorkspace": {
+        "type": "object",
+        "description": "A Trello Workspace, or the member's boards outside any Workspace they belong to (`id`\n`null`).",
+        "required": [
+          "id",
+          "name",
+          "boards"
+        ],
+        "properties": {
+          "boards": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TrelloImportBoard"
+            },
+            "description": "Sorted by name; archived boards last."
+          },
+          "id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
           }
         }
       },

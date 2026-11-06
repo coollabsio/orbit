@@ -98,6 +98,141 @@ export type ApiTokenRecord = {
  */
 export type ApiTokenScope = 'tasks:read' | 'tasks:write' | 'docs:read' | 'docs:write' | 'chat:read';
 
+/**
+ * An Asana import. Never contains the token.
+ */
+export type AsanaImport = {
+    /**
+     * The Asana user the token belongs to.
+     */
+    asana_user_name: string | null;
+    created_at: string;
+    /**
+     * Why the import failed or expired.
+     */
+    error: string | null;
+    id: string;
+    progress: AsanaImportProgress;
+    /**
+     * The Orbit projects the import created that still exist, in selection order.
+     */
+    project_ids: Array<string>;
+    report: null | AsanaImportReport;
+    status: AsanaImportStatus;
+    tree: null | AsanaImportTree;
+    updated_at: string;
+    workspace_id: string;
+};
+
+/**
+ * A project or task the import could not create or fill.
+ */
+export type AsanaImportFailure = {
+    asana_gid: string;
+    error: string;
+    /**
+     * `project` or `task`.
+     */
+    kind: string;
+    title: string;
+};
+
+export type AsanaImportList = {
+    items: Array<AsanaImport>;
+};
+
+export type AsanaImportProgress = {
+    /**
+     * Tasks imported with their comments, files and dependencies.
+     */
+    done: number;
+    /**
+     * Tasks and projects that could not be imported.
+     */
+    failed: number;
+    /**
+     * Tasks found so far (subtasks included); grows while projects are listed.
+     */
+    total: number;
+};
+
+/**
+ * An Asana project in the scan tree.
+ */
+export type AsanaImportProject = {
+    archived: boolean;
+    /**
+     * Use it in `project_gids` to import this project.
+     */
+    gid: string;
+    name: string;
+    /**
+     * `null` in workspaces without teams (Asana teams exist only in organizations).
+     */
+    team_gid: string | null;
+    team_name: string | null;
+};
+
+/**
+ * What the import carried over besides the tasks themselves.
+ */
+export type AsanaImportReport = {
+    comments_imported: number;
+    /**
+     * "Blocked by" relations between imported tasks.
+     */
+    dependencies_linked: number;
+    /**
+     * The first 200 failures.
+     */
+    failures: Array<AsanaImportFailure>;
+    /**
+     * Asana-hosted files downloaded and attached to the tasks.
+     */
+    files_imported: number;
+    /**
+     * Google Drive, Dropbox and other linked attachments, added to the descriptions as links.
+     */
+    links_added: number;
+    /**
+     * Asana-hosted files that could not be downloaded (too large, gone, refused).
+     */
+    missing_files: number;
+    /**
+     * Subtasks deeper than five levels, not imported.
+     */
+    skipped_subtasks: number;
+    /**
+     * Tasks whose Asana assignee has no Orbit member with the same email (left unassigned).
+     */
+    unmatched_assignees: number;
+};
+
+/**
+ * `asana_imports.status`.
+ */
+export type AsanaImportStatus = 'scanning' | 'ready' | 'queued' | 'importing' | 'completed' | 'failed' | 'cancelled' | 'expired';
+
+/**
+ * What the token can see.
+ */
+export type AsanaImportTree = {
+    /**
+     * The token sees more than 5,000 projects; only the first 5,000 are listed.
+     */
+    truncated: boolean;
+    workspaces: Array<AsanaImportWorkspace>;
+};
+
+export type AsanaImportWorkspace = {
+    gid: string;
+    name: string;
+    /**
+     * Sorted by team, then by name.
+     */
+    projects: Array<AsanaImportProject>;
+};
+
 export type AttachmentComment = {
     attachments: Array<AttachmentRecord>;
     comment: CommentRecord;
@@ -1060,6 +1195,22 @@ export type CreateApiTokenBody = {
     service_account?: boolean;
 };
 
+export type CreateAsanaImportBody = {
+    /**
+     * An Asana personal access token. Validated with Asana, stored encrypted, and deleted
+     * when the import ends.
+     */
+    token: string;
+};
+
+export type CreateLinearImportBody = {
+    /**
+     * A Linear personal API key (`lin_api_…`). Validated with Linear, stored encrypted, and
+     * deleted when the import ends.
+     */
+    token: string;
+};
+
 export type CreateNotionImportBody = {
     /**
      * A Notion personal access token (recommended) or internal connection token. Validated
@@ -1141,6 +1292,18 @@ export type CreateTeamspaceBody = {
      * 1 to 100 characters after trimming.
      */
     name: string;
+};
+
+export type CreateTrelloImportBody = {
+    /**
+     * The API key of a Trello Power-Up (its Trello Auth tab in the Power-Up admin portal).
+     */
+    key: string;
+    /**
+     * A user token authorized for that key (`scope=read`). Both are validated with Trello,
+     * stored encrypted, and deleted when the import ends.
+     */
+    token: string;
 };
 
 export type CreateWorkspaceBody = {
@@ -1499,6 +1662,148 @@ export type LimitsView = {
      * counted once per workspace, however often it is attached.
      */
     workspace_storage_quota_bytes?: number | null;
+};
+
+/**
+ * A Linear import. Never contains the key.
+ */
+export type LinearImport = {
+    created_at: string;
+    /**
+     * Why the import failed or expired.
+     */
+    error: string | null;
+    id: string;
+    /**
+     * The Linear user the key belongs to.
+     */
+    linear_user_name: string | null;
+    progress: LinearImportProgress;
+    /**
+     * The Orbit projects the import created that still exist, in selection order.
+     */
+    project_ids: Array<string>;
+    report: null | LinearImportReport;
+    status: LinearImportStatus;
+    tree: null | LinearImportTree;
+    updated_at: string;
+    workspace_id: string;
+};
+
+/**
+ * A team, issue or relation the import could not create or fill.
+ */
+export type LinearImportFailure = {
+    error: string;
+    /**
+     * `team`, `issue` or `relation`.
+     */
+    kind: string;
+    linear_id: string;
+    title: string;
+};
+
+export type LinearImportList = {
+    items: Array<LinearImport>;
+};
+
+export type LinearImportProgress = {
+    /**
+     * Issues imported with their files and comments.
+     */
+    done: number;
+    /**
+     * Issues, teams and relations that could not be imported.
+     */
+    failed: number;
+    /**
+     * Issues found so far (sub-issues included); grows while teams are listed.
+     */
+    total: number;
+};
+
+/**
+ * What the import carried over besides the issues themselves.
+ */
+export type LinearImportReport = {
+    comments_imported: number;
+    /**
+     * Sub-issues imported at the top level: more than five levels deep, or with a parent in
+     * another team.
+     */
+    detached_sub_issues: number;
+    /**
+     * The first 200 failures.
+     */
+    failures: Array<LinearImportFailure>;
+    /**
+     * Files uploaded to Linear, downloaded and attached to the tasks.
+     */
+    files_imported: number;
+    /**
+     * Linked attachments (pull requests, Slack threads, URLs), added to the descriptions.
+     */
+    links_added: number;
+    /**
+     * Uploaded files that could not be downloaded (too large, gone, refused).
+     */
+    missing_files: number;
+    /**
+     * Blocks, related and duplicate relations between imported issues.
+     */
+    relations_linked: number;
+    /**
+     * Relations Orbit cannot hold: a second relation between the same two tasks, a second
+     * duplicate of one task, or a duplicate of a duplicate.
+     */
+    relations_skipped: number;
+    /**
+     * Issues whose Linear assignee has no Orbit member with the same email (left unassigned).
+     */
+    unmatched_assignees: number;
+};
+
+/**
+ * `linear_imports.status`.
+ */
+export type LinearImportStatus = 'scanning' | 'ready' | 'queued' | 'importing' | 'completed' | 'failed' | 'cancelled' | 'expired';
+
+/**
+ * A Linear team in the scan tree; importing it makes one Orbit project.
+ */
+export type LinearImportTeam = {
+    archived: boolean;
+    /**
+     * Use it in `team_ids` to import this team.
+     */
+    id: string;
+    /**
+     * Issues in the team, archived ones included.
+     */
+    issue_count: number;
+    /**
+     * The team's issue key prefix, e.g. `ENG`.
+     */
+    key: string;
+    name: string;
+};
+
+/**
+ * What the key can see.
+ */
+export type LinearImportTree = {
+    /**
+     * The Linear workspace (organization) name.
+     */
+    organization: string;
+    /**
+     * Sorted by name; archived teams last.
+     */
+    teams: Array<LinearImportTeam>;
+    /**
+     * The key sees more than 1,000 teams; only the first 1,000 are listed.
+     */
+    truncated: boolean;
 };
 
 /**
@@ -2137,6 +2442,219 @@ export type NotionImportTree = {
      * The token sees more than 5,000 pages; only the first 5,000 are listed.
      */
     truncated: boolean;
+};
+
+/**
+ * An Obsidian import.
+ */
+export type ObsidianImport = {
+    /**
+     * The uploaded file's size.
+     */
+    archive_bytes: number;
+    created_at: string;
+    destination: null | ObsidianImportDestination;
+    /**
+     * Why the archive was refused, or why the import failed or expired.
+     */
+    error: string | null;
+    /**
+     * The uploaded file's name.
+     */
+    file_name: string;
+    id: string;
+    progress: ObsidianImportProgress;
+    report: null | ObsidianImportReport;
+    /**
+     * The imported top-level pages that still exist, in order (for "Open imported pages").
+     */
+    root_page_ids: Array<string>;
+    status: ObsidianImportStatus;
+    tree: null | ObsidianImportTree;
+    updated_at: string;
+    workspace_id: string;
+};
+
+/**
+ * Where the import puts its top-level pages.
+ */
+export type ObsidianImportDestination = {
+    /**
+     * The page the imported top-level pages go under, if any.
+     */
+    parent_page_id: string | null;
+    private: boolean;
+    /**
+     * `null` for the importer's private space.
+     */
+    teamspace_id: string | null;
+};
+
+/**
+ * Where the imported top-level pages go. With `parent_page_id` they become its sub-pages
+ * (and join its space); otherwise they go to the root of `teamspace_id`, of the caller's
+ * private space (`private: true`), or of the default teamspace.
+ */
+export type ObsidianImportDestinationBody = {
+    parent_page_id?: string | null;
+    private?: boolean | null;
+    teamspace_id?: string | null;
+};
+
+/**
+ * A page the import could not create or fill.
+ */
+export type ObsidianImportFailure = {
+    error: string;
+    path: string;
+    title: string;
+};
+
+export type ObsidianImportList = {
+    items: Array<ObsidianImport>;
+};
+
+/**
+ * One node of the scan tree.
+ */
+export type ObsidianImportNode = {
+    child_count: number;
+    kind: ObsidianImportNodeKind;
+    /**
+     * The note with the page's content: the note itself, or a folder's folder note
+     * (`Folder/Folder.md`); `null` for a folder without one.
+     */
+    note_path: string | null;
+    /**
+     * The parent folder's `path`; `null` at the top of the vault.
+     */
+    parent_path: string | null;
+    /**
+     * The vault path (`Folder/Sub` or `Folder/Note.md`); use it in `selection.paths`.
+     */
+    path: string;
+    /**
+     * The folder name, or the note's file name without `.md`.
+     */
+    title: string;
+};
+
+/**
+ * A folder or a note in the scan tree.
+ */
+export type ObsidianImportNodeKind = 'folder' | 'note';
+
+export type ObsidianImportProgress = {
+    done: number;
+    failed: number;
+    /**
+     * Pages to import (folders and notes).
+     */
+    total: number;
+};
+
+/**
+ * What the import carried over and what it left out.
+ */
+export type ObsidianImportReport = {
+    /**
+     * The first 200 failed pages.
+     */
+    failures: Array<ObsidianImportFailure>;
+    /**
+     * Files attached to the new pages.
+     */
+    files_imported: number;
+    /**
+     * Linked or embedded files that could not be attached (for example a type page files do
+     * not accept).
+     */
+    missing_files: number;
+    /**
+     * Files of the archive that were not imported, by reason.
+     */
+    skipped_files: ObsidianSkippedFiles;
+    /**
+     * Top-level blocks cut from notes larger than the page size limit.
+     */
+    truncated_blocks: number;
+    /**
+     * Pages the import created but never filled because it failed or was cancelled; they
+     * were moved to the trash (a restored page no longer counts).
+     */
+    unfilled_pages_trashed: number;
+    /**
+     * Links whose target is not an imported page or file; they stayed as text.
+     */
+    unresolved_links: number;
+};
+
+/**
+ * `{ "all": true }` for the whole vault, or `{ "paths": [...] }` for these folders and notes
+ * (a folder brings everything in it).
+ */
+export type ObsidianImportSelectionBody = {
+    all?: boolean | null;
+    paths?: Array<string> | null;
+};
+
+/**
+ * `obsidian_imports.status`.
+ */
+export type ObsidianImportStatus = 'scanning' | 'ready' | 'queued' | 'importing' | 'completed' | 'failed' | 'cancelled' | 'expired';
+
+/**
+ * What the archive holds. `nodes` are in tree order: every folder before its children,
+ * folders before notes, each by name.
+ */
+export type ObsidianImportTree = {
+    /**
+     * Files (images, PDFs, …) that notes link to or embed; they are attached to those pages.
+     */
+    attachments: number;
+    nodes: Array<ObsidianImportNode>;
+    skipped: ObsidianSkippedFiles;
+    /**
+     * Links and embeds whose target is not in the vault; they stay as text.
+     */
+    unresolved_links: number;
+};
+
+/**
+ * The vault as one `.zip` file in the `file` field.
+ */
+export type ObsidianImportUploadBody = {
+    file: Blob | File;
+};
+
+/**
+ * Files the scan skipped, by reason.
+ */
+export type ObsidianSkippedFiles = {
+    /**
+     * Obsidian canvases (`.canvas`).
+     */
+    canvas: number;
+    /**
+     * CSV files.
+     */
+    csv: number;
+    /**
+     * Files whose path differs from another file's only in letter case.
+     */
+    duplicates: number;
+    /**
+     * `.obsidian/`, `.trash/`, `__MACOSX/` and dotfiles.
+     */
+    system: number;
+    /**
+     * Files over the upload size limit.
+     */
+    too_large: number;
+    /**
+     * Files no note links to or embeds.
+     */
+    unreferenced: number;
 };
 
 export type OrderBy = 'manual' | 'priority' | 'created' | 'updated' | 'title' | 'due_date';
@@ -3714,9 +4232,28 @@ export type SocketTicketResponse = {
     ticket: string;
 };
 
+export type StartAsanaImportBody = {
+    /**
+     * Projects of the scan tree to import (each becomes a new Orbit project).
+     */
+    project_gids: Array<string>;
+};
+
+export type StartLinearImportBody = {
+    /**
+     * Teams of the scan tree to import (each becomes a new Orbit project).
+     */
+    team_ids: Array<string>;
+};
+
 export type StartNotionImportBody = {
     destination?: NotionImportDestinationBody;
     selection: NotionImportSelectionBody;
+};
+
+export type StartObsidianImportBody = {
+    destination?: ObsidianImportDestinationBody;
+    selection: ObsidianImportSelectionBody;
 };
 
 export type StartPasskeyRegistrationBody = {
@@ -3755,6 +4292,13 @@ export type StartProviderResponse = {
      * Open it in the browser (web: the same tab; mobile: an auth session).
      */
     authorize_url: string;
+};
+
+export type StartTrelloImportBody = {
+    /**
+     * Boards of the scan tree to import (each becomes a new Orbit project).
+     */
+    board_ids: Array<string>;
 };
 
 export type StatusBody = {
@@ -4194,6 +4738,160 @@ export type TrashedPage = {
     title: string;
     updated_at: string;
     version: number;
+};
+
+/**
+ * A Trello import. Never contains the key or token.
+ */
+export type TrelloImport = {
+    created_at: string;
+    /**
+     * Why the import failed or expired.
+     */
+    error: string | null;
+    id: string;
+    progress: TrelloImportProgress;
+    /**
+     * The Orbit projects the import created that still exist, in selection order.
+     */
+    project_ids: Array<string>;
+    report: null | TrelloImportReport;
+    status: TrelloImportStatus;
+    tree: null | TrelloImportTree;
+    /**
+     * The Trello member the token belongs to.
+     */
+    trello_user_name: string | null;
+    updated_at: string;
+    workspace_id: string;
+};
+
+/**
+ * A Trello board in the scan tree; importing it makes one Orbit project.
+ */
+export type TrelloImportBoard = {
+    /**
+     * The board is closed (archived in Trello).
+     */
+    archived: boolean;
+    /**
+     * Open cards on open lists; `null` when Trello did not let the token count them.
+     */
+    card_count: number | null;
+    /**
+     * Use it in `board_ids` to import this board.
+     */
+    id: string;
+    name: string;
+};
+
+/**
+ * A board or card the import could not create or fill.
+ */
+export type TrelloImportFailure = {
+    error: string;
+    /**
+     * `board` or `card`.
+     */
+    kind: string;
+    title: string;
+    trello_id: string;
+};
+
+export type TrelloImportList = {
+    items: Array<TrelloImport>;
+};
+
+export type TrelloImportProgress = {
+    /**
+     * Cards imported with their files and comments.
+     */
+    done: number;
+    /**
+     * Boards and cards that could not be imported.
+     */
+    failed: number;
+    /**
+     * Cards found so far; grows while boards are listed.
+     */
+    total: number;
+};
+
+/**
+ * What the import carried over besides the cards themselves, and what it left out.
+ */
+export type TrelloImportReport = {
+    /**
+     * Archived cards, and open cards on archived lists, left out.
+     */
+    archived_cards_skipped: number;
+    /**
+     * Archived lists, left out with their cards.
+     */
+    archived_lists_skipped: number;
+    /**
+     * Checklists written into the descriptions.
+     */
+    checklists_added: number;
+    comments_imported: number;
+    /**
+     * The first 200 failures.
+     */
+    failures: Array<TrelloImportFailure>;
+    /**
+     * Files uploaded to Trello, downloaded and attached to the tasks.
+     */
+    files_imported: number;
+    /**
+     * Link attachments, added to the descriptions.
+     */
+    links_added: number;
+    /**
+     * Uploaded files that could not be downloaded or attached (too large, gone).
+     */
+    missing_files: number;
+    /**
+     * Uploaded files Trello refused to hand out (401 or 403; some Enterprise workspaces block
+     * downloads through the API).
+     */
+    refused_files: number;
+    /**
+     * Card members with no single Orbit member of the same full name (named in the
+     * description instead).
+     */
+    unmatched_members: number;
+};
+
+/**
+ * `trello_imports.status`.
+ */
+export type TrelloImportStatus = 'scanning' | 'ready' | 'queued' | 'importing' | 'completed' | 'failed' | 'cancelled' | 'expired';
+
+/**
+ * What the key and token can see.
+ */
+export type TrelloImportTree = {
+    /**
+     * The member sees more than 1,000 boards; only the first 1,000 are listed.
+     */
+    truncated: boolean;
+    /**
+     * Sorted by name; the boards outside a Workspace last.
+     */
+    workspaces: Array<TrelloImportWorkspace>;
+};
+
+/**
+ * A Trello Workspace, or the member's boards outside any Workspace they belong to (`id`
+ * `null`).
+ */
+export type TrelloImportWorkspace = {
+    /**
+     * Sorted by name; archived boards last.
+     */
+    boards: Array<TrelloImportBoard>;
+    id: string | null;
+    name: string;
 };
 
 /**
@@ -14477,6 +15175,610 @@ export type StartGithubManifestResponses = {
 
 export type StartGithubManifestResponse = StartGithubManifestResponses[keyof StartGithubManifestResponses];
 
+export type ListAsanaImportsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/asana';
+};
+
+export type ListAsanaImportsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * asana_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListAsanaImportsError = ListAsanaImportsErrors[keyof ListAsanaImportsErrors];
+
+export type ListAsanaImportsResponses = {
+    200: AsanaImportList;
+};
+
+export type ListAsanaImportsResponse = ListAsanaImportsResponses[keyof ListAsanaImportsResponses];
+
+export type CreateAsanaImportData = {
+    body: CreateAsanaImportBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/asana';
+};
+
+export type CreateAsanaImportErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * asana_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, app_key_missing, import_in_progress
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * asana_token_invalid
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * asana_unavailable
+     */
+    502: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateAsanaImportError = CreateAsanaImportErrors[keyof CreateAsanaImportErrors];
+
+export type CreateAsanaImportResponses = {
+    201: AsanaImport;
+};
+
+export type CreateAsanaImportResponse = CreateAsanaImportResponses[keyof CreateAsanaImportResponses];
+
+export type GetAsanaImportData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        import_id: string;
+    };
+    query?: {
+        /**
+         * Optional parts of an import detail response.
+         */
+        include?: 'tree';
+    };
+    url: '/api/v1/workspaces/{workspace_id}/imports/asana/{import_id}';
+};
+
+export type GetAsanaImportErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * asana_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetAsanaImportError = GetAsanaImportErrors[keyof GetAsanaImportErrors];
+
+export type GetAsanaImportResponses = {
+    200: AsanaImport;
+};
+
+export type GetAsanaImportResponse = GetAsanaImportResponses[keyof GetAsanaImportResponses];
+
+export type CancelAsanaImportData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        import_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/asana/{import_id}/cancel';
+};
+
+export type CancelAsanaImportErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * asana_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, asana_import_state_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CancelAsanaImportError = CancelAsanaImportErrors[keyof CancelAsanaImportErrors];
+
+export type CancelAsanaImportResponses = {
+    200: AsanaImport;
+};
+
+export type CancelAsanaImportResponse = CancelAsanaImportResponses[keyof CancelAsanaImportResponses];
+
+export type StartAsanaImportData = {
+    body: StartAsanaImportBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        import_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/asana/{import_id}/start';
+};
+
+export type StartAsanaImportErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * asana_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, import_in_progress, asana_import_state_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type StartAsanaImportError = StartAsanaImportErrors[keyof StartAsanaImportErrors];
+
+export type StartAsanaImportResponses = {
+    200: AsanaImport;
+};
+
+export type StartAsanaImportResponse = StartAsanaImportResponses[keyof StartAsanaImportResponses];
+
+export type ListLinearImportsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/linear';
+};
+
+export type ListLinearImportsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * linear_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListLinearImportsError = ListLinearImportsErrors[keyof ListLinearImportsErrors];
+
+export type ListLinearImportsResponses = {
+    200: LinearImportList;
+};
+
+export type ListLinearImportsResponse = ListLinearImportsResponses[keyof ListLinearImportsResponses];
+
+export type CreateLinearImportData = {
+    body: CreateLinearImportBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/linear';
+};
+
+export type CreateLinearImportErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * linear_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, app_key_missing, import_in_progress
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * linear_token_invalid
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * linear_unavailable
+     */
+    502: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateLinearImportError = CreateLinearImportErrors[keyof CreateLinearImportErrors];
+
+export type CreateLinearImportResponses = {
+    201: LinearImport;
+};
+
+export type CreateLinearImportResponse = CreateLinearImportResponses[keyof CreateLinearImportResponses];
+
+export type GetLinearImportData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        import_id: string;
+    };
+    query?: {
+        /**
+         * Optional parts of an import detail response.
+         */
+        include?: 'tree';
+    };
+    url: '/api/v1/workspaces/{workspace_id}/imports/linear/{import_id}';
+};
+
+export type GetLinearImportErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * linear_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetLinearImportError = GetLinearImportErrors[keyof GetLinearImportErrors];
+
+export type GetLinearImportResponses = {
+    200: LinearImport;
+};
+
+export type GetLinearImportResponse = GetLinearImportResponses[keyof GetLinearImportResponses];
+
+export type CancelLinearImportData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        import_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/linear/{import_id}/cancel';
+};
+
+export type CancelLinearImportErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * linear_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, linear_import_state_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CancelLinearImportError = CancelLinearImportErrors[keyof CancelLinearImportErrors];
+
+export type CancelLinearImportResponses = {
+    200: LinearImport;
+};
+
+export type CancelLinearImportResponse = CancelLinearImportResponses[keyof CancelLinearImportResponses];
+
+export type StartLinearImportData = {
+    body: StartLinearImportBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        import_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/linear/{import_id}/start';
+};
+
+export type StartLinearImportErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * linear_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, import_in_progress, linear_import_state_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type StartLinearImportError = StartLinearImportErrors[keyof StartLinearImportErrors];
+
+export type StartLinearImportResponses = {
+    200: LinearImport;
+};
+
+export type StartLinearImportResponse = StartLinearImportResponses[keyof StartLinearImportResponses];
+
 export type ListNotionImportsData = {
     body?: never;
     headers?: {
@@ -14778,6 +16080,606 @@ export type StartNotionImportResponses = {
 };
 
 export type StartNotionImportResponse = StartNotionImportResponses[keyof StartNotionImportResponses];
+
+export type ListObsidianImportsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/obsidian';
+};
+
+export type ListObsidianImportsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * obsidian_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListObsidianImportsError = ListObsidianImportsErrors[keyof ListObsidianImportsErrors];
+
+export type ListObsidianImportsResponses = {
+    200: ObsidianImportList;
+};
+
+export type ListObsidianImportsResponse = ListObsidianImportsResponses[keyof ListObsidianImportsResponses];
+
+export type CreateObsidianImportData = {
+    body: ObsidianImportUploadBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/obsidian';
+};
+
+export type CreateObsidianImportErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * obsidian_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, import_in_progress
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large, obsidian_archive_too_large
+     */
+    413: TaskProblem;
+    /**
+     * obsidian_archive_invalid
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateObsidianImportError = CreateObsidianImportErrors[keyof CreateObsidianImportErrors];
+
+export type CreateObsidianImportResponses = {
+    201: ObsidianImport;
+};
+
+export type CreateObsidianImportResponse = CreateObsidianImportResponses[keyof CreateObsidianImportResponses];
+
+export type GetObsidianImportData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        import_id: string;
+    };
+    query?: {
+        /**
+         * Optional parts of an import detail response.
+         */
+        include?: 'tree';
+    };
+    url: '/api/v1/workspaces/{workspace_id}/imports/obsidian/{import_id}';
+};
+
+export type GetObsidianImportErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * obsidian_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetObsidianImportError = GetObsidianImportErrors[keyof GetObsidianImportErrors];
+
+export type GetObsidianImportResponses = {
+    200: ObsidianImport;
+};
+
+export type GetObsidianImportResponse = GetObsidianImportResponses[keyof GetObsidianImportResponses];
+
+export type CancelObsidianImportData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        import_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/obsidian/{import_id}/cancel';
+};
+
+export type CancelObsidianImportErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * obsidian_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, obsidian_import_state_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CancelObsidianImportError = CancelObsidianImportErrors[keyof CancelObsidianImportErrors];
+
+export type CancelObsidianImportResponses = {
+    200: ObsidianImport;
+};
+
+export type CancelObsidianImportResponse = CancelObsidianImportResponses[keyof CancelObsidianImportResponses];
+
+export type StartObsidianImportData = {
+    body: StartObsidianImportBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        import_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/obsidian/{import_id}/start';
+};
+
+export type StartObsidianImportErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * obsidian_import_not_found, page_not_found, teamspace_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, import_in_progress, obsidian_import_state_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed, obsidian_import_too_large
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type StartObsidianImportError = StartObsidianImportErrors[keyof StartObsidianImportErrors];
+
+export type StartObsidianImportResponses = {
+    200: ObsidianImport;
+};
+
+export type StartObsidianImportResponse = StartObsidianImportResponses[keyof StartObsidianImportResponses];
+
+export type ListTrelloImportsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/trello';
+};
+
+export type ListTrelloImportsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * trello_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListTrelloImportsError = ListTrelloImportsErrors[keyof ListTrelloImportsErrors];
+
+export type ListTrelloImportsResponses = {
+    200: TrelloImportList;
+};
+
+export type ListTrelloImportsResponse = ListTrelloImportsResponses[keyof ListTrelloImportsResponses];
+
+export type CreateTrelloImportData = {
+    body: CreateTrelloImportBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/trello';
+};
+
+export type CreateTrelloImportErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * trello_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, app_key_missing, import_in_progress
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * trello_key_invalid, trello_token_invalid
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * trello_unavailable
+     */
+    502: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateTrelloImportError = CreateTrelloImportErrors[keyof CreateTrelloImportErrors];
+
+export type CreateTrelloImportResponses = {
+    201: TrelloImport;
+};
+
+export type CreateTrelloImportResponse = CreateTrelloImportResponses[keyof CreateTrelloImportResponses];
+
+export type GetTrelloImportData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        import_id: string;
+    };
+    query?: {
+        /**
+         * Optional parts of an import detail response.
+         */
+        include?: 'tree';
+    };
+    url: '/api/v1/workspaces/{workspace_id}/imports/trello/{import_id}';
+};
+
+export type GetTrelloImportErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * trello_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetTrelloImportError = GetTrelloImportErrors[keyof GetTrelloImportErrors];
+
+export type GetTrelloImportResponses = {
+    200: TrelloImport;
+};
+
+export type GetTrelloImportResponse = GetTrelloImportResponses[keyof GetTrelloImportResponses];
+
+export type CancelTrelloImportData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        import_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/trello/{import_id}/cancel';
+};
+
+export type CancelTrelloImportErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * trello_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, trello_import_state_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CancelTrelloImportError = CancelTrelloImportErrors[keyof CancelTrelloImportErrors];
+
+export type CancelTrelloImportResponses = {
+    200: TrelloImport;
+};
+
+export type CancelTrelloImportResponse = CancelTrelloImportResponses[keyof CancelTrelloImportResponses];
+
+export type StartTrelloImportData = {
+    body: StartTrelloImportBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        import_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/imports/trello/{import_id}/start';
+};
+
+export type StartTrelloImportErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * trello_import_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, import_in_progress, trello_import_state_conflict
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type StartTrelloImportError = StartTrelloImportErrors[keyof StartTrelloImportErrors];
+
+export type StartTrelloImportResponses = {
+    200: TrelloImport;
+};
+
+export type StartTrelloImportResponse = StartTrelloImportResponses[keyof StartTrelloImportResponses];
 
 export type ListInvitationsData = {
     body?: never;

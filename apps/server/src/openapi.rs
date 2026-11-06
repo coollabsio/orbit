@@ -259,6 +259,26 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::import_routes::get_notion_import,
         crate::import_routes::start_notion_import,
         crate::import_routes::cancel_notion_import,
+        crate::asana_import_routes::create_asana_import,
+        crate::asana_import_routes::list_asana_imports,
+        crate::asana_import_routes::get_asana_import,
+        crate::asana_import_routes::start_asana_import,
+        crate::asana_import_routes::cancel_asana_import,
+        crate::linear_import_routes::create_linear_import,
+        crate::linear_import_routes::list_linear_imports,
+        crate::linear_import_routes::get_linear_import,
+        crate::linear_import_routes::start_linear_import,
+        crate::linear_import_routes::cancel_linear_import,
+        crate::trello_import_routes::create_trello_import,
+        crate::trello_import_routes::list_trello_imports,
+        crate::trello_import_routes::get_trello_import,
+        crate::trello_import_routes::start_trello_import,
+        crate::trello_import_routes::cancel_trello_import,
+        crate::obsidian_import_routes::create_obsidian_import,
+        crate::obsidian_import_routes::list_obsidian_imports,
+        crate::obsidian_import_routes::get_obsidian_import,
+        crate::obsidian_import_routes::start_obsidian_import,
+        crate::obsidian_import_routes::cancel_obsidian_import,
         crate::chat_routes::conversations::list_chat_conversations,
         crate::chat_routes::conversations::create_chat_channel,
         crate::chat_routes::conversations::update_chat_channel,
@@ -971,6 +991,10 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "413", "export_too_large");
         }
         id if notion_import_operation(id) => notion_import_errors(id, &mut responses),
+        id if asana_import_operation(id) => asana_import_errors(id, &mut responses),
+        id if linear_import_operation(id) => linear_import_errors(id, &mut responses),
+        id if trello_import_operation(id) => trello_import_errors(id, &mut responses),
+        id if obsidian_import_operation(id) => obsidian_import_errors(id, &mut responses),
         id if task_operation(id) => task_errors(id, &mut responses),
         id if page_comment_operation(id) => page_comment_errors(id, &mut responses),
         id if page_operation(id) => page_errors(id, &mut responses),
@@ -1127,6 +1151,17 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "create_notion_import"
             | "get_notion_import"
             | "start_notion_import"
+            | "create_asana_import"
+            | "get_asana_import"
+            | "start_asana_import"
+            | "create_linear_import"
+            | "get_linear_import"
+            | "start_linear_import"
+            | "create_trello_import"
+            | "get_trello_import"
+            | "start_trello_import"
+            | "get_obsidian_import"
+            | "start_obsidian_import"
     )
 }
 
@@ -1162,6 +1197,141 @@ fn notion_import_errors(
             add_code(responses, "422", "notion_import_too_large");
         }
         "cancel_notion_import" => add_code(responses, "409", "notion_import_state_conflict"),
+        _ => {}
+    }
+}
+
+fn asana_import_operation(operation_id: &str) -> bool {
+    matches!(
+        operation_id,
+        "create_asana_import"
+            | "list_asana_imports"
+            | "get_asana_import"
+            | "start_asana_import"
+            | "cancel_asana_import"
+    )
+}
+
+fn asana_import_errors(
+    operation_id: &str,
+    responses: &mut BTreeMap<&'static str, Vec<&'static str>>,
+) {
+    add_code(responses, "404", "asana_import_not_found");
+    match operation_id {
+        "create_asana_import" => {
+            add_code(responses, "409", "app_key_missing");
+            add_code(responses, "409", "import_in_progress");
+            add_code(responses, "422", "asana_token_invalid");
+            add_code(responses, "502", "asana_unavailable");
+        }
+        "start_asana_import" => {
+            add_code(responses, "409", "import_in_progress");
+            add_code(responses, "409", "asana_import_state_conflict");
+            add_code(responses, "422", "validation_failed");
+        }
+        "cancel_asana_import" => add_code(responses, "409", "asana_import_state_conflict"),
+        _ => {}
+    }
+}
+
+fn linear_import_operation(operation_id: &str) -> bool {
+    matches!(
+        operation_id,
+        "create_linear_import"
+            | "list_linear_imports"
+            | "get_linear_import"
+            | "start_linear_import"
+            | "cancel_linear_import"
+    )
+}
+
+fn linear_import_errors(
+    operation_id: &str,
+    responses: &mut BTreeMap<&'static str, Vec<&'static str>>,
+) {
+    add_code(responses, "404", "linear_import_not_found");
+    match operation_id {
+        "create_linear_import" => {
+            add_code(responses, "409", "app_key_missing");
+            add_code(responses, "409", "import_in_progress");
+            add_code(responses, "422", "linear_token_invalid");
+            add_code(responses, "502", "linear_unavailable");
+        }
+        "start_linear_import" => {
+            add_code(responses, "409", "import_in_progress");
+            add_code(responses, "409", "linear_import_state_conflict");
+            add_code(responses, "422", "validation_failed");
+        }
+        "cancel_linear_import" => add_code(responses, "409", "linear_import_state_conflict"),
+        _ => {}
+    }
+}
+
+fn obsidian_import_operation(operation_id: &str) -> bool {
+    matches!(
+        operation_id,
+        "create_obsidian_import"
+            | "list_obsidian_imports"
+            | "get_obsidian_import"
+            | "start_obsidian_import"
+            | "cancel_obsidian_import"
+    )
+}
+
+fn obsidian_import_errors(
+    operation_id: &str,
+    responses: &mut BTreeMap<&'static str, Vec<&'static str>>,
+) {
+    add_code(responses, "404", "obsidian_import_not_found");
+    match operation_id {
+        "create_obsidian_import" => {
+            add_code(responses, "409", "import_in_progress");
+            add_code(responses, "413", "obsidian_archive_too_large");
+            add_code(responses, "422", "obsidian_archive_invalid");
+        }
+        "start_obsidian_import" => {
+            add_code(responses, "404", "page_not_found");
+            add_code(responses, "404", "teamspace_not_found");
+            add_code(responses, "409", "import_in_progress");
+            add_code(responses, "409", "obsidian_import_state_conflict");
+            add_code(responses, "422", "validation_failed");
+            add_code(responses, "422", "obsidian_import_too_large");
+        }
+        "cancel_obsidian_import" => add_code(responses, "409", "obsidian_import_state_conflict"),
+        _ => {}
+    }
+}
+
+fn trello_import_operation(operation_id: &str) -> bool {
+    matches!(
+        operation_id,
+        "create_trello_import"
+            | "list_trello_imports"
+            | "get_trello_import"
+            | "start_trello_import"
+            | "cancel_trello_import"
+    )
+}
+
+fn trello_import_errors(
+    operation_id: &str,
+    responses: &mut BTreeMap<&'static str, Vec<&'static str>>,
+) {
+    add_code(responses, "404", "trello_import_not_found");
+    match operation_id {
+        "create_trello_import" => {
+            add_code(responses, "409", "app_key_missing");
+            add_code(responses, "409", "import_in_progress");
+            add_code(responses, "422", "trello_key_invalid");
+            add_code(responses, "422", "trello_token_invalid");
+            add_code(responses, "502", "trello_unavailable");
+        }
+        "start_trello_import" => {
+            add_code(responses, "409", "import_in_progress");
+            add_code(responses, "409", "trello_import_state_conflict");
+            add_code(responses, "422", "validation_failed");
+        }
+        "cancel_trello_import" => add_code(responses, "409", "trello_import_state_conflict"),
         _ => {}
     }
 }

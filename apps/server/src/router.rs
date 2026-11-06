@@ -9,6 +9,7 @@ use orbit_platform::{
     RequestId,
 };
 
+use crate::asana_import_routes::{AsanaImportState, asana_import_router};
 use crate::attachment_routes::{AttachmentState, attachment_router};
 use crate::auth_routes::{AuthState, auth_router};
 use crate::backup_item_routes::{BackupItemState, backup_item_router};
@@ -16,12 +17,15 @@ use crate::chat_routes::{ChatState, chat_router};
 use crate::export_routes::{ExportState, export_router};
 use crate::import_routes::{ImportState, import_router};
 use crate::integration_routes::{IntegrationState, integration_router};
+use crate::linear_import_routes::{LinearImportState, linear_import_router};
 use crate::page_comment_routes::{PageCommentState, page_comment_router};
 use crate::page_file_routes::{PageFileState, page_file_router};
 use crate::page_routes::{PageState, page_router};
 use crate::static_assets::StaticAssets;
 use crate::task_routes::{TaskState, task_router};
 use crate::teamspace_routes::{TeamspaceState, teamspace_router};
+use crate::obsidian_import_routes::{ObsidianImportState, obsidian_import_router};
+use crate::trello_import_routes::{TrelloImportState, trello_import_router};
 use crate::view_routes::view_router;
 use crate::workspace_export_routes::{WorkspaceExportState, workspace_export_router};
 use crate::workspace_routes::{WorkspaceState, workspace_router};
@@ -46,6 +50,10 @@ pub struct ApiRoutes {
     pub attachments: AttachmentState,
     pub integrations: IntegrationState,
     pub imports: ImportState,
+    pub asana_imports: AsanaImportState,
+    pub linear_imports: LinearImportState,
+    pub trello_imports: TrelloImportState,
+    pub obsidian_imports: ObsidianImportState,
     pub chat: ChatState,
 }
 
@@ -83,6 +91,10 @@ pub fn production_router(
         .merge(attachment_router(api.attachments))
         .merge(integration_router(api.integrations))
         .merge(import_router(api.imports))
+        .merge(asana_import_router(api.asana_imports))
+        .merge(linear_import_router(api.linear_imports))
+        .merge(trello_import_router(api.trello_imports))
+        .merge(obsidian_import_router(api.obsidian_imports))
         .merge(crate::live::socket::live_router(api.chat.clone()))
         .merge(chat_router(api.chat))
         .merge(

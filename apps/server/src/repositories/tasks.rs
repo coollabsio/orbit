@@ -263,6 +263,16 @@ pub struct CreateTask {
     pub parent_task_id: Option<Id>,
 }
 
+/// How `insert_task` creates a task: as a person does (notifications, sub-issue automation), or
+/// silently for an import.
+#[derive(Clone, Copy)]
+enum CreateMode {
+    Interactive,
+    Import {
+        completed_at: Option<TimestampMillis>,
+    },
+}
+
 #[derive(Clone, Debug)]
 pub struct DiscordTask {
     pub source_url: String,
@@ -757,7 +767,32 @@ impl TaskRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<ProjectRecord, TaskError> {
-        let project_id = Id::new_v7();
+        self.create_project_with_id(
+            Id::new_v7(),
+            workspace_id,
+            actor_id,
+            name,
+            key,
+            color,
+            request_id,
+            now,
+        )
+        .await
+    }
+
+    /// `create_project` under a caller-chosen id (an import records it before creating).
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_project_with_id(
+        &self,
+        project_id: Id,
+        workspace_id: Id,
+        actor_id: Id,
+        name: String,
+        key: String,
+        color: String,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<ProjectRecord, TaskError> {
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let inserted = sqlx::query(
@@ -1608,7 +1643,59 @@ impl TaskRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<TaskUpdateOutcome, TaskError> {
-        let id = Id::new_v7();
+        self.insert_task(
+            Id::new_v7(),
+            workspace_id,
+            actor_id,
+            input,
+            CreateMode::Interactive,
+            request_id,
+            now,
+        )
+        .await
+    }
+
+    /// Creates a task copied from another tool under a caller-chosen `id` (recorded before the
+    /// call, so a restarted import can tell whether it already exists). Unlike `create_task` it
+    /// notifies nobody (assignees, mentions) and runs no sub-issue automation: the source
+    /// already decided each task's state. `completed_at` is kept when the status is closed.
+    /// The audit record is written as usual.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn import_task(
+        &self,
+        id: Id,
+        workspace_id: Id,
+        actor_id: Id,
+        input: CreateTask,
+        completed_at: Option<TimestampMillis>,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<TaskRecord, TaskError> {
+        self.insert_task(
+            id,
+            workspace_id,
+            actor_id,
+            input,
+            CreateMode::Import { completed_at },
+            request_id,
+            now,
+        )
+        .await
+        .map(|outcome| outcome.task)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn insert_task(
+        &self,
+        id: Id,
+        workspace_id: Id,
+        actor_id: Id,
+        input: CreateTask,
+        mode: CreateMode,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<TaskUpdateOutcome, TaskError> {
+        let interactive = matches!(mode, CreateMode::Interactive);
         if input
             .due_start_at
             .is_some_and(|start| input.due_at.is_none_or(|end| start > end))
@@ -1674,9 +1761,14 @@ impl TaskRepository {
         let description_json = blocks
             .as_ref()
             .map(|blocks| Value::Array(blocks.clone()).to_string());
+        let completed_at = match mode {
+            CreateMode::Import { completed_at } => completed_at,
+            CreateMode::Interactive => None,
+        };
         sqlx::query(
-            "INSERT INTO tasks (id, workspace_id, project_id, status_id, title, description, source_url, priority, position, creator_id, due_start_at, due_at, parent_task_id, version, created_at, updated_at, description_json, creator_service_account_id) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 0, $14, $15, $16, $17)",
+            "INSERT INTO tasks (id, workspace_id, project_id, status_id, title, description, source_url, priority, position, creator_id, due_start_at, due_at, parent_task_id, version, created_at, updated_at, description_json, creator_service_account_id, completed_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 0, $14, $15, $16, $17, \
+             CASE WHEN EXISTS (SELECT 1 FROM task_statuses WHERE id = $18 AND category IN ('completed', 'cancelled')) THEN $19 END)",
         )
         .bind(id.to_string())
         .bind(workspace_id.to_string())
@@ -1695,16 +1787,19 @@ impl TaskRepository {
         .bind(now.as_millis())
         .bind(description_json)
         .bind(self.service_account().map(|(id, _)| id.to_string()))
+        .bind(input.status_id.to_string())
+        .bind(completed_at.map(TimestampMillis::as_millis))
         .execute(&mut *tx)
         .await?;
         replace_assignees(&mut tx, id, &input.assignee_ids).await?;
-        if let Some(blocks) = blocks.as_ref().filter(|_| self.notifies()) {
+        let notifies = interactive && self.notifies();
+        if let Some(blocks) = blocks.as_ref().filter(|_| notifies) {
             // everyone the new description mentions is newly mentioned
             notify_description_mentions(&mut tx, workspace_id, id, &[], blocks, actor_id, now)
                 .await?;
         }
         replace_labels(&mut tx, id, &input.label_ids).await?;
-        if self.notifies() {
+        if notifies {
             notify_users(
                 &mut tx,
                 workspace_id,
@@ -1732,7 +1827,7 @@ impl TaskRepository {
         .await?;
         // Rule A: a sub-issue created closed can complete its parent (an open one never does).
         let mut auto_closed = Vec::new();
-        if let Some(parent_id) = input.parent_task_id {
+        if interactive && let Some(parent_id) = input.parent_task_id {
             let actor = sub_issues::AutomationActor {
                 workspace_id,
                 actor_id,

@@ -595,11 +595,11 @@ pub(crate) async fn stage_single_file(
     Ok(staged_uploads)
 }
 
-fn multipart_too_large(error: &axum::extract::multipart::MultipartError) -> bool {
+pub(crate) fn multipart_too_large(error: &axum::extract::multipart::MultipartError) -> bool {
     error.status() == StatusCode::PAYLOAD_TOO_LARGE || has_length_limit(error)
 }
 
-fn has_length_limit(error: &(dyn StdError + 'static)) -> bool {
+pub(crate) fn has_length_limit(error: &(dyn StdError + 'static)) -> bool {
     let mut source = Some(error);
     while let Some(error) = source {
         if error.is::<http_body_util::LengthLimitError>() {
