@@ -1325,7 +1325,8 @@ pub(crate) async fn create_discord_event(
     State(state): State<IntegrationState>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
-    ApiJson(body): ApiJson<DiscordEventBody>,
+    // Read after the token check, so a bad token or scope gets 401/403 whatever the body is.
+    body: Result<ApiJson<DiscordEventBody>, ApiError>,
 ) -> Result<Response, ApiError> {
     let token = bearer_token(&headers).ok_or_else(|| {
         ApiError::new(
@@ -1345,6 +1346,7 @@ pub(crate) async fn create_discord_event(
         )
         .await
         .map_err(|error| token_problem(error, request_id.as_ref().map(|value| &value.0)))?;
+    let ApiJson(body) = body?;
     let project_id = match body.project_id.as_deref() {
         Some(value) => value
             .parse()

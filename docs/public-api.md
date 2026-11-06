@@ -199,7 +199,8 @@ including completed tasks and sub-issues. Optional parameters: `project_id`,
 assignee), `label_id`, `priority`, `parent_task_id` (only the direct sub-issues
 of this task, as a UUID or an identifier such as `ENG-12`; the task must be in an approved project), `q` (text in the title or description, or an
 identifier), `sort` (`created_at`, `updated_at`, `priority`, `due_date` or
-`title`; default `created_at`), `order` (`desc` or `asc`; default `desc`),
+`title`; default `created_at`), `order` (`desc` or `asc`; default `desc`; with
+`sort=priority`, `desc` gives `urgent` first and `none` last),
 `cursor` and `limit`. Keep the same parameters when you send `cursor`.
 
 ```bash
@@ -416,7 +417,7 @@ Errors are RFC 9457 problem documents (`Content-Type: application/problem+json`)
 
 | Status | `code` | Cause |
 | --- | --- | --- |
-| 400 | `invalid_request`, `invalid_cursor` | A parameter or the body is not correct. |
+| 400 | `invalid_request`, `invalid_cursor` | A parameter or the body is not correct. Orbit checks the token and its scope first, so a token without the scope gets `403`, also with an incorrect body. |
 | 401 | `unauthorized` | No token, or the token is not correct, expired or revoked. The response has `WWW-Authenticate: Bearer realm="orbit"`. |
 | 402 | `workspace_read_only`, `trial_limit_reached` | Orbit Cloud: the workspace has no active subscription, or the trial limit is reached. |
 | 403 | `insufficient_scope` | The token does not have the scope of the endpoint. |

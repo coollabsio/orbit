@@ -1640,6 +1640,85 @@ async fn task_lists_sort_and_find_unassigned_tasks() {
     }
 }
 
+#[tokio::test]
+async fn priority_sort_desc_lists_the_highest_priority_first() {
+    let f = Fixture::new().await;
+    let (token, _) = f.token(&[ApiTokenScope::TasksWrite], false).await;
+    let status = f.first_status(f.project).await;
+    for (title, priority) in [("Low", "low"), ("Urgent", "urgent"), ("High", "high")] {
+        let (code, _) = f
+            .call(
+                Some(&token),
+                "POST",
+                "/tasks",
+                Some(json!({"project_id": f.project, "status_id": status, "title": title, "priority": priority})),
+            )
+            .await;
+        assert_eq!(code, StatusCode::CREATED);
+    }
+    let priorities = |page: &Value| {
+        page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|task| task["priority"].as_str().unwrap().to_owned())
+            .filter(|priority| priority != "none")
+            .collect::<Vec<_>>()
+    };
+    for (query, expected) in [
+        ("sort=priority", ["urgent", "high", "low"]),
+        ("sort=priority&order=desc", ["urgent", "high", "low"]),
+        ("sort=priority&order=asc", ["low", "high", "urgent"]),
+    ] {
+        let (code, page) = f
+            .call(Some(&token), "GET", &format!("/tasks?{query}"), None)
+            .await;
+        assert_eq!(code, StatusCode::OK, "{page}");
+        assert_eq!(priorities(&page), expected, "{query}");
+    }
+    // The cursor keeps the public direction.
+    let (_, page) = f
+        .call(Some(&token), "GET", "/tasks?sort=priority&limit=1", None)
+        .await;
+    assert_eq!(priorities(&page), ["urgent"]);
+    let cursor = page["next_cursor"].as_str().unwrap().to_owned();
+    let (_, next) = f
+        .call(
+            Some(&token),
+            "GET",
+            &format!("/tasks?sort=priority&limit=1&cursor={cursor}"),
+            None,
+        )
+        .await;
+    assert_eq!(priorities(&next), ["high"]);
+}
+
+#[tokio::test]
+async fn a_token_without_the_scope_gets_403_also_for_an_invalid_body() {
+    let f = Fixture::new().await;
+    let (read_only, _) = f.token(&[ApiTokenScope::TasksRead], false).await;
+    for (method, path) in [
+        ("POST", "/tasks".to_owned()),
+        ("PATCH", format!("/tasks/{}", f.task)),
+        ("POST", format!("/tasks/{}/comments", f.task)),
+    ] {
+        let (code, problem) = f
+            .call(Some(&read_only), method, &path, Some(json!({})))
+            .await;
+        assert_eq!(code, StatusCode::FORBIDDEN, "{method} {path}: {problem}");
+        assert_eq!(problem["code"], "insufficient_scope");
+    }
+    let (code, problem) = f
+        .call(
+            Some(&read_only),
+            "DELETE",
+            &format!("/tasks/{}?bogus=1", f.task),
+            None,
+        )
+        .await;
+    assert_eq!(code, StatusCode::FORBIDDEN, "{problem}");
+}
+
 async fn add_member(f: &Fixture, email: &str, role: &str) -> Id {
     let user = Id::new_v7();
     let mut tx = f.database.immediate_transaction().await.unwrap();

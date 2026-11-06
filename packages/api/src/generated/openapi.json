@@ -1583,7 +1583,7 @@
           {
             "name": "order",
             "in": "query",
-            "description": "`desc` (default) or `asc`.",
+            "description": "`desc` (default) or `asc`. With `sort=priority`, `desc` lists `urgent` first.",
             "required": false,
             "schema": {
               "type": "string"

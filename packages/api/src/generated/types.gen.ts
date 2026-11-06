@@ -6317,7 +6317,7 @@ export type PublicListTasksData = {
          */
         sort?: string;
         /**
-         * `desc` (default) or `asc`.
+         * `desc` (default) or `asc`. With `sort=priority`, `desc` lists `urgent` first.
          */
         order?: string;
         label_id?: string;

@@ -1374,6 +1374,24 @@ async fn discord_events_require_an_active_write_token_and_valid_url() {
         response_json(forbidden).await["code"],
         "api_token_scope_forbidden"
     );
+    // The token is checked before the body: a bad body does not hide 401 or 403.
+    for (token, status, code) in [
+        (None, StatusCode::UNAUTHORIZED, "api_token_required"),
+        (
+            Some(read_only.token.as_str()),
+            StatusCode::FORBIDDEN,
+            "api_token_scope_forbidden",
+        ),
+    ] {
+        let response = fixture
+            .app
+            .clone()
+            .oneshot(request(token, json!({})))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), status);
+        assert_eq!(response_json(response).await["code"], code);
+    }
 
     let revoked = fixture
         .tokens
