@@ -39,6 +39,7 @@ import { EDITOR_BLOCK_TYPES, markdownToTaskBlocks, pageEditorSchema, TASK_EDITOR
 import { getPageSlashMenuItems, getTaskSlashMenuItems } from './slashMenu'
 import { PageMentionMenu } from './MentionMenu'
 import { PageMentionNamesContext, type PageMentionOptions } from './pageMentions'
+import { BlockSideMenuController } from './BlockSideMenu'
 import { ThemedBlockNoteView } from './ThemedBlockNoteView'
 import { commentsApi, threadsQueryOptions } from '../comments/api'
 import { commentComponents } from '../comments/components'
@@ -501,12 +502,13 @@ function PageEditorInner({
               "[&>.bn-editor[contenteditable=true]_.bn-block-content[data-is-only-empty-block]:has(.ProseMirror-trailingBreak:only-child)]:after:content-['Leave_a_reply…']!",
             className,
           )}
-          sideMenu={sideMenu}
+          sideMenu={false}
           slashMenu={false}
           formattingToolbar={false}
           comments={false}
           onChange={onChange ? (changed) => onChange(toStoredContent(changed.document, fileScope)) : undefined}
         >
+          {sideMenu ? <BlockSideMenuController /> : null}
           <SuggestionMenuController
             triggerCharacter="/"
             getItems={async (query) => (task ? getTaskSlashMenuItems(editor, query) : getPageSlashMenuItems(editor, slashActions, query))}
