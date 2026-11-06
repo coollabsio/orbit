@@ -35,7 +35,8 @@ const BLOB_REFERENCE_TABLES: [&str; 6] = [
     "custom_emoji",
     "custom_stickers",
 ];
-/// Raster image types that are served inline; everything else downloads as an attachment.
+/// Raster image types that are served inline. Video, audio and plain text are inline too
+/// (`serves_inline`). SVG, HTML and PDF stay attachments: a same-origin viewer could run their content.
 pub const INLINE_IMAGE_TYPES: [&str; 5] = [
     "image/jpeg",
     "image/png",
@@ -941,7 +942,11 @@ impl UploadService {
     }
 
     pub fn download_metadata(media_type: &str, display_name: &str) -> DownloadMetadata {
-        let disposition = if INLINE_IMAGE_TYPES.contains(&media_type) {
+        // Sniffing keeps unknown bytes as `application/octet-stream`, and `nosniff` then stops a
+        // `<video>` or `<audio>` from playing. The stored name's extension picks a player type.
+        // PDF stays `application/pdf` and an attachment: the editor shows it from a blob, not this URL.
+        let content_type = presented_media_type(media_type, display_name);
+        let disposition = if serves_inline(&content_type) {
             ContentDisposition::Inline
         } else {
             ContentDisposition::Attachment
@@ -952,7 +957,7 @@ impl UploadService {
             ContentDisposition::Attachment => "attachment",
         };
         DownloadMetadata {
-            content_type: media_type.to_owned(),
+            content_type,
             disposition,
             content_disposition: format!("{kind}; filename=\"{filename}\""),
             x_content_type_options: "nosniff",
@@ -1023,6 +1028,53 @@ fn header_filename(value: &str) -> String {
             _ => '_',
         })
         .collect()
+}
+
+/// `octet-stream` plus a known extension becomes a player type. Any other stored type is kept
+/// (a sniffed `text/html` must not become `text/plain` because the name says `.txt`).
+fn presented_media_type(media_type: &str, display_name: &str) -> String {
+    if media_type != "application/octet-stream" {
+        return media_type.to_owned();
+    }
+    let Some(extension) = file_extension(display_name) else {
+        return media_type.to_owned();
+    };
+    match extension.as_str() {
+        "mp4" | "m4v" => "video/mp4",
+        "webm" => "video/webm",
+        "mov" => "video/quicktime",
+        "ogv" => "video/ogg",
+        "mp3" => "audio/mpeg",
+        "wav" => "audio/wav",
+        "ogg" | "oga" => "audio/ogg",
+        "m4a" | "aac" => "audio/mp4",
+        "flac" => "audio/flac",
+        "opus" => "audio/opus",
+        "txt" | "md" | "markdown" | "csv" | "json" | "log" | "yaml" | "yml" | "tsv" | "xml" => {
+            "text/plain; charset=utf-8"
+        }
+        _ => return media_type.to_owned(),
+    }
+    .to_owned()
+}
+
+fn file_extension(name: &str) -> Option<String> {
+    let extension = name.rsplit_once('.')?.1;
+    if extension.is_empty()
+        || extension.len() > 8
+        || !extension.bytes().all(|byte| byte.is_ascii_alphanumeric())
+    {
+        return None;
+    }
+    Some(extension.to_ascii_lowercase())
+}
+
+/// Images, video, audio and plain text can be shown in the page. HTML, SVG and PDF cannot.
+fn serves_inline(media_type: &str) -> bool {
+    INLINE_IMAGE_TYPES.contains(&media_type)
+        || media_type.starts_with("video/")
+        || media_type.starts_with("audio/")
+        || media_type.starts_with("text/plain")
 }
 
 pub(super) fn detect_media_type(bytes: &[u8]) -> &'static str {

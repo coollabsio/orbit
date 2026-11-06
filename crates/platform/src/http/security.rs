@@ -286,8 +286,10 @@ pub(crate) fn add_security_headers(
         .unwrap_or_else(|| "script-src 'self'; ".to_owned());
     // The style-src hash is the empty string's: it allows only an empty `<style>`, which BlockNote's placeholder
     // plugin creates and then fills through the CSSOM (`insertRule`), which CSP does not restrict.
+    // `frame-src` `blob:` is the PDF preview (the file URL itself cannot be framed). Vimeo joins YouTube.
+    // `media-src` `https:` lets a document play an audio or video file the page links to.
     let policy = format!(
-        "default-src 'self'; {script_source}style-src 'self' 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: https:; frame-src https://www.youtube-nocookie.com; media-src 'self' https://video.twimg.com; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self' https://github.com"
+        "default-src 'self'; {script_source}style-src 'self' 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: https:; frame-src blob: https://www.youtube-nocookie.com https://player.vimeo.com; media-src 'self' https:; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self' https://github.com"
     );
     headers.insert(
         CONTENT_SECURITY_POLICY,

@@ -5,6 +5,8 @@
 
 /* BlockNote's shadcn menus use Tailwind classes from its compiled bundle; scan it so they get generated. */
 @source "../node_modules/@blocknote/shadcn";
+/* File players live in packages/editor (text, PDF, audio, video). */
+@source "../../../packages/editor/src";
 
 /* `.light` inside `.dark` (the custom theme on a light sidebar) switches the dark styles off again */
 @custom-variant dark (&:is(.dark *):not(:where(.light *)));
