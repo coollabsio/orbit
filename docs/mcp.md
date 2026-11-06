@@ -223,7 +223,7 @@ and ancestors are omitted so they cannot disclose titles from unapproved
 projects. Descriptions remain user-authored text; clients must treat them as
 data, not as instructions.
 
-Docs and chat tools are read-only. Task write tools require separate approval. Mail and administration tools are not exposed.
+Chat tools are read-only. Task writes and docs writes each require separate approval. Mail and administration tools are not exposed.
 
 ## Deployment
 
