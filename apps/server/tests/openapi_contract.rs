@@ -27,7 +27,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
 
     let document: serde_json::Value = serde_json::from_str(&first).unwrap();
     assert_eq!(document["info"]["version"], CONTRACT_ID);
-    assert_eq!(document["paths"].as_object().unwrap().len(), 231);
+    assert_eq!(document["paths"].as_object().unwrap().len(), 247);
     let operation_count: usize = document["paths"]
         .as_object()
         .unwrap()
@@ -42,7 +42,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
                 .count()
         })
         .sum();
-    assert_eq!(operation_count, 297);
+    assert_eq!(operation_count, 317);
     for path in [
         "/api/v1/setup/status",
         "/api/v1/auth/me",
@@ -89,6 +89,22 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
         "/api/v1/workspaces/{workspace_id}/imports/notion/{import_id}",
         "/api/v1/workspaces/{workspace_id}/imports/notion/{import_id}/start",
         "/api/v1/workspaces/{workspace_id}/imports/notion/{import_id}/cancel",
+        "/api/v1/workspaces/{workspace_id}/imports/asana",
+        "/api/v1/workspaces/{workspace_id}/imports/asana/{import_id}",
+        "/api/v1/workspaces/{workspace_id}/imports/asana/{import_id}/start",
+        "/api/v1/workspaces/{workspace_id}/imports/asana/{import_id}/cancel",
+        "/api/v1/workspaces/{workspace_id}/imports/linear",
+        "/api/v1/workspaces/{workspace_id}/imports/linear/{import_id}",
+        "/api/v1/workspaces/{workspace_id}/imports/linear/{import_id}/start",
+        "/api/v1/workspaces/{workspace_id}/imports/linear/{import_id}/cancel",
+        "/api/v1/workspaces/{workspace_id}/imports/trello",
+        "/api/v1/workspaces/{workspace_id}/imports/trello/{import_id}",
+        "/api/v1/workspaces/{workspace_id}/imports/trello/{import_id}/start",
+        "/api/v1/workspaces/{workspace_id}/imports/trello/{import_id}/cancel",
+        "/api/v1/workspaces/{workspace_id}/imports/obsidian",
+        "/api/v1/workspaces/{workspace_id}/imports/obsidian/{import_id}",
+        "/api/v1/workspaces/{workspace_id}/imports/obsidian/{import_id}/start",
+        "/api/v1/workspaces/{workspace_id}/imports/obsidian/{import_id}/cancel",
     ] {
         assert!(document["paths"].get(path).is_some(), "missing {path}");
     }
@@ -1490,6 +1506,7 @@ fn every_public_api_route_is_documented() {
             "order",
             "label_id",
             "priority",
+            "parent_task_id",
             "q",
             "cursor",
             "limit",

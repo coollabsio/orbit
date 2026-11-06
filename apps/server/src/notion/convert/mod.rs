@@ -1003,7 +1003,7 @@ fn non_empty_title(title: &str) -> String {
     }
 }
 
-const TRUNCATION_NOTE: &str =
+pub(crate) const TRUNCATION_NOTE: &str =
     "The rest of this page was not imported because it is larger than Orbit's page size limit.";
 
 /// Keeps whole top-level blocks while the serialized content fits `max_content_bytes`.
@@ -1011,12 +1011,27 @@ fn truncate(content: &mut Vec<Value>, ctx: &mut ConvertContext<'_>) {
     let Some(max) = ctx.options.max_content_bytes else {
         return;
     };
+    let cut = cut_to_size(content, max);
+    if cut == 0 {
+        return;
+    }
+    ctx.report.truncated_blocks += u32::try_from(cut).unwrap_or(u32::MAX);
+    let mut styles = Map::new();
+    styles.insert("italic".into(), Value::Bool(true));
+    let note = items(vec![text(TRUNCATION_NOTE, styles)]);
+    let props = default_props(&Value::Null);
+    content.push(make_block(ctx, "paragraph", props, note, Vec::new()));
+}
+
+/// Drops top-level blocks from the end until the serialized content fits `max` bytes with room
+/// (1 KB) for a note; returns how many were dropped (0 when it already fits).
+pub(crate) fn cut_to_size(content: &mut Vec<Value>, max: usize) -> usize {
     let sizes: Vec<usize> = content
         .iter()
         .map(|block| serde_json::to_vec(block).map_or(0, |bytes| bytes.len() + 1))
         .collect();
     if sizes.iter().sum::<usize>() + 2 <= max {
-        return;
+        return 0;
     }
     let budget = max.saturating_sub(1024);
     let mut total = 2;
@@ -1028,13 +1043,9 @@ fn truncate(content: &mut Vec<Value>, ctx: &mut ConvertContext<'_>) {
         total += size;
         keep += 1;
     }
-    ctx.report.truncated_blocks += u32::try_from(content.len() - keep).unwrap_or(u32::MAX);
+    let cut = content.len() - keep;
     content.truncate(keep);
-    let mut styles = Map::new();
-    styles.insert("italic".into(), Value::Bool(true));
-    let note = items(vec![text(TRUNCATION_NOTE, styles)]);
-    let props = default_props(&Value::Null);
-    content.push(make_block(ctx, "paragraph", props, note, Vec::new()));
+    cut
 }
 
 #[cfg(test)]

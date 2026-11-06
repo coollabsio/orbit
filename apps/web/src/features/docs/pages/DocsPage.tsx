@@ -29,6 +29,7 @@ import { preloadPageEditor } from '@/features/docs/editor/loadPageEditor'
 import { DocTree } from '@/features/docs/components/DocTree'
 import { DocPageActionsContext, type DocPageActions } from '@/features/docs/pageActions'
 import { NotionImportPane } from './NotionImportPane'
+import { ObsidianImportPane } from './ObsidianImportPane'
 import { PageTrashPane } from './PageTrashPane'
 
 /** The docs page's main pane (hidden on phones while the page list shows). */
@@ -41,7 +42,7 @@ function landsOnFirstPage() {
   return typeof window.matchMedia !== 'function' || window.matchMedia('(min-width: 900px)').matches
 }
 
-export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import' }) {
+export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import' | 'obsidian-import' }) {
   const { pageId, importId } = useParams()
   const navigate = useNavigate()
   const location = useLocation()
@@ -182,6 +183,8 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
     content = <PageTrashPane workspaceId={workspace.id} />
   } else if (view === 'import') {
     content = <NotionImportPane key={importId ?? 'new'} workspaceId={workspace.id} importId={importId} />
+  } else if (view === 'obsidian-import') {
+    content = <ObsidianImportPane key={importId ?? 'new'} workspaceId={workspace.id} importId={importId} />
   } else if (!pageId) {
     // The landing order needs the default teamspace; a failed teamspace list falls back to private / any page.
     const spacesKnown = !teamspaces.isPending

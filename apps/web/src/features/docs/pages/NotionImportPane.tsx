@@ -1,21 +1,18 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { toast } from 'sonner'
-import { ArrowLeft, DocumentText as FileText, Import, TickCircle, Warning } from 'reicon-react'
+import { Import, TickCircle, Warning } from 'reicon-react'
 import type { NotionImport } from '@orbit/api/generated/types.gen'
 import { apiClient } from '@/api/client'
 import { cn } from 'cn'
-import { Badge } from '@/components/ui/badge'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { PasswordInput } from '@/components/ui/password-input'
 import { Label } from '@/components/ui/label'
 import { Spinner } from '@/components/ui/spinner'
 import { EmptyState } from '@/components/common/EmptyState'
-import { Pane, PaneTitle } from '@/components/common/Pane'
+import { Pane } from '@/components/common/Pane'
 import { confirmAction } from '@/components/common/confirmAction'
-import { relativeTime } from '@/lib/format'
 import {
-  NOTION_IMPORT_STATUS_LABELS,
   createNotionImportRequest,
   isActiveImport,
   isFinalImport,
@@ -29,49 +26,12 @@ import {
 } from '@/features/docs/api/notionImports'
 import { isPageNotFound, usePageTree } from '@/features/docs/api/pages'
 import { useTeamspaces } from '@/features/docs/api/teamspaces'
-import { pageTitle } from '@/features/docs/pageTree'
 import { NotionImportChooser } from '@/features/docs/components/NotionImportChooser'
-import { destinationLabel } from '@/features/docs/notionImport/destination'
+import { ImportBody, ImportHeader, ImportedPages, ProgressBar, RecentImports, Stat } from '@/features/docs/components/ImportParts'
+import { destinationLabel } from '@/features/docs/import/destination'
 import { useQueryClient } from '@tanstack/react-query'
 
 const TOKEN_URL = 'https://www.notion.so/developers/tokens'
-
-function ImportHeader({ title, detail, actions }: { title: string; detail?: string | null; actions?: ReactNode }) {
-  const navigate = useNavigate()
-  return (
-    <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3">
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        className="hidden text-muted-foreground/70 max-[899px]:inline-flex"
-        aria-label="Back to docs"
-        onClick={() => navigate('/docs')}
-      >
-        <ArrowLeft className="size-4" />
-      </Button>
-      <PaneTitle render={<h1 />}>{title}</PaneTitle>
-      {detail ? <span className="truncate text-[13px] text-muted-foreground">{detail}</span> : null}
-      <span className="flex-1" />
-      {actions}
-    </div>
-  )
-}
-
-function Body({ children }: { children: ReactNode }) {
-  return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-6 max-[899px]:p-4">{children}</div>
-    </div>
-  )
-}
-
-function statusVariant(status: NotionImport['status']): 'default' | 'secondary' | 'destructive' | 'outline' {
-  if (status === 'failed') return 'destructive'
-  if (status === 'completed') return 'secondary'
-  if (isActiveImport(status) || status === 'ready') return 'default'
-  return 'outline'
-}
 
 /** Step 1: paste a token. Also lists the member's recent imports. */
 function ConnectStep({ workspaceId }: { workspaceId: string }) {
@@ -105,7 +65,7 @@ function ConnectStep({ workspaceId }: { workspaceId: string }) {
   return (
     <>
       <ImportHeader title="Import from Notion" />
-      <Body>
+      <ImportBody>
         <section className="flex flex-col gap-4 rounded-lg border border-border p-5">
           <div className="flex flex-col gap-1">
             <h2 className="text-sm font-semibold text-foreground">Connect Notion</h2>
@@ -150,55 +110,14 @@ function ConnectStep({ workspaceId }: { workspaceId: string }) {
             </div>
           </form>
         </section>
-        <RecentImports imports={imports.data} isPending={imports.isPending} />
-      </Body>
+        <RecentImports
+          imports={imports.data}
+          isPending={imports.isPending}
+          name={(item) => item.notion_workspace_name || 'Notion'}
+          href={(item) => `/docs/import/${item.id}`}
+        />
+      </ImportBody>
     </>
-  )
-}
-
-function RecentImports({ imports, isPending }: { imports: NotionImport[] | undefined; isPending: boolean }) {
-  if (isPending) return null
-  if (!imports?.length) return null
-  return (
-    <section className="flex flex-col gap-2" aria-label="Recent imports">
-      <h2 className="text-xs font-medium text-muted-foreground">Recent imports</h2>
-      <div className="flex flex-col border-t border-border">
-        {imports.map((item) => (
-          <Link
-            key={item.id}
-            to={`/docs/import/${item.id}`}
-            className="flex min-h-10 min-w-0 items-center gap-3 border-b border-border px-1 py-1.5 text-[13px] transition-colors duration-150 ease-out hover:bg-sidebar-accent/50"
-          >
-            <span className="min-w-0 flex-1 truncate text-foreground">{item.notion_workspace_name || 'Notion'}</span>
-            {item.progress.total > 0 ? (
-              <span className="shrink-0 text-xs text-muted-foreground">
-                {item.progress.done} of {item.progress.total} pages
-              </span>
-            ) : null}
-            <Badge variant={statusVariant(item.status)}>{NOTION_IMPORT_STATUS_LABELS[item.status]}</Badge>
-            <span className="w-12 shrink-0 text-right text-xs text-muted-foreground" title={new Date(item.created_at).toLocaleString()}>
-              {relativeTime(item.created_at)}
-            </span>
-          </Link>
-        ))}
-      </div>
-    </section>
-  )
-}
-
-function ProgressBar({ done, total, label }: { done: number; total: number; label: string }) {
-  const percent = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0
-  return (
-    <div
-      role="progressbar"
-      aria-label={label}
-      aria-valuemin={0}
-      aria-valuemax={total}
-      aria-valuenow={done}
-      className="h-2 w-full overflow-hidden rounded-full bg-muted"
-    >
-      <div className="h-full rounded-full bg-primary transition-[width] duration-500" style={{ width: `${percent}%` }} />
-    </div>
   )
 }
 
@@ -229,7 +148,7 @@ function ScanningStep({ workspaceId, item }: { workspaceId: string; item: Notion
   return (
     <>
       <ImportHeader title="Import from Notion" detail={item.notion_workspace_name} />
-      <Body>
+      <ImportBody>
         <div className="flex flex-col items-center gap-3 py-16 text-center" role="status">
           <Spinner className="size-6 text-muted-foreground" />
           <p className="text-sm font-medium text-foreground">
@@ -240,7 +159,7 @@ function ScanningStep({ workspaceId, item }: { workspaceId: string; item: Notion
             Cancel
           </Button>
         </div>
-      </Body>
+      </ImportBody>
     </>
   )
 }
@@ -252,7 +171,7 @@ function ImportingStep({ workspaceId, item }: { workspaceId: string; item: Notio
   return (
     <>
       <ImportHeader title="Import from Notion" detail={item.notion_workspace_name} />
-      <Body>
+      <ImportBody>
         <section className="flex flex-col gap-4 py-10" role="status" aria-live="polite">
           <div className="flex items-center gap-2">
             <Spinner className="size-4 text-muted-foreground" />
@@ -275,7 +194,7 @@ function ImportingStep({ workspaceId, item }: { workspaceId: string; item: Notio
             You can leave this page; the import continues on the server and new pages appear in the sidebar as they are created.
           </p>
         </section>
-      </Body>
+      </ImportBody>
     </>
   )
 }
@@ -286,23 +205,11 @@ function countEntries(map: Record<string, number>): [string, number][] {
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="flex flex-col gap-0.5 rounded-lg border border-border px-3 py-2">
-      <span className="text-lg font-semibold text-foreground tabular-nums">{value}</span>
-      <span className="text-xs text-muted-foreground">{label}</span>
-    </div>
-  )
-}
-
 /** Step 5: completed, failed, cancelled or expired. */
 function ResultStep({ workspaceId, item }: { workspaceId: string; item: NotionImport }) {
-  const navigate = useNavigate()
   const tree = usePageTree(workspaceId)
   const teamspaces = useTeamspaces(workspaceId)
   const report = item.report
-  const roots = item.root_page_ids
-  const titles = new Map((tree.data ?? []).map((page) => [page.id, page]))
   const destination = destinationLabel(item.destination, teamspaces.data, tree.data)
   const headline =
     item.status === 'completed'
@@ -329,7 +236,7 @@ function ResultStep({ workspaceId, item }: { workspaceId: string; item: NotionIm
   return (
     <>
       <ImportHeader title="Import from Notion" detail={item.notion_workspace_name} />
-      <Body>
+      <ImportBody>
         <section className="flex flex-col gap-3">
           <div className="flex items-center gap-2">
             {item.status === 'completed' ? (
@@ -349,28 +256,7 @@ function ResultStep({ workspaceId, item }: { workspaceId: string; item: NotionIm
             <Stat label="Pages failed" value={item.progress.failed} />
           </div>
         ) : null}
-        {roots.length > 0 ? (
-          <section className="flex flex-col gap-2" aria-label="Imported pages">
-            <div className="flex items-center gap-2">
-              <h3 className="text-xs font-medium text-muted-foreground">Imported pages</h3>
-              <span className="flex-1" />
-              <Button type="button" size="sm" onClick={() => navigate(`/docs/${roots[0]}`)}>
-                Open imported pages
-              </Button>
-            </div>
-            <ul className="flex flex-col border-t border-border">
-              {roots.slice(0, 50).map((id) => (
-                <li key={id} className="border-b border-border">
-                  <Link to={`/docs/${id}`} className="flex h-9 items-center gap-2 px-1 text-[13px] text-foreground transition-colors duration-150 ease-out hover:bg-sidebar-accent/50">
-                    <FileText className="size-[15px] shrink-0 text-muted-foreground/70" />
-                    <span className="truncate">{titles.has(id) ? pageTitle(titles.get(id)) : 'Imported page'}</span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-            {roots.length > 50 ? <p className="text-xs text-muted-foreground">and {roots.length - 50} more</p> : null}
-          </section>
-        ) : null}
+        <ImportedPages rootIds={item.root_page_ids} pages={tree.data} />
         {notes.length > 0 || skipped.length > 0 || lossy.length > 0 ? (
           <section className="flex flex-col gap-2" aria-label="Conversion notes">
             <h3 className="text-xs font-medium text-muted-foreground">Conversion notes</h3>
@@ -412,7 +298,7 @@ function ResultStep({ workspaceId, item }: { workspaceId: string; item: NotionIm
             Import more
           </Link>
         </div>
-      </Body>
+      </ImportBody>
     </>
   )
 }

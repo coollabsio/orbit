@@ -534,6 +534,10 @@ export function DocTree({
           <Import className="size-[14px]" />
           Import from Notion
         </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => navigate('/docs/import/obsidian')}>
+          <Import className="size-[14px]" />
+          Import from Obsidian
+        </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   )

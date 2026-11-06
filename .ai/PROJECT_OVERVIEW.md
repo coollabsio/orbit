@@ -11,7 +11,7 @@ The production binary embeds the matching Vite build. It serves the SPA and `/ap
 These routes use the production API and the database:
 
 - `/setup`, `/login`, `/register`, `/recovery`, `/onboarding`, and `/accept-invitation`
-- `/` (home summaries), `/tasks`, `/views`, task trash, and project settings
+- `/` (home summaries), `/tasks`, `/views`, task trash, project settings, Asana import (`/tasks-import`) Linear import (`/tasks-import/linear`) and Trello import (`/tasks-import/trello`); the Obsidian vault import lives in Docs (`/docs/import/obsidian`)
 - `/docs` (collaborative pages, trash, Notion import)
 - `/chat` (channels, DMs, threads); `/dm/*` redirects to `/chat`
 - `/activity` (`/inbox` redirects to it), `/profile`, `/settings`, and `/admin`
