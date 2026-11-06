@@ -46,6 +46,15 @@ export function ThemedBlockNoteView<B extends BlockSchema, I extends InlineConte
         '[&_.bn-toggle-button>svg]:size-4! [&_.bn-toggle-add-block-button]:ml-5!',
         // The open state turns the mark 90°. Animate that turn. Reduced motion: no turn.
         '[&_.bn-toggle-button]:transition-transform! [&_.bn-toggle-button]:duration-150! [&_.bn-toggle-button]:ease-[cubic-bezier(0.23,1,0.32,1)]! motion-reduce:[&_.bn-toggle-button]:transition-none!',
+        // Edit link (and the same form for a caption or a file name) wraps a full
+        // Input in a second bordered box: popover, black `bg-background`, then
+        // `dark:bg-input/30`. The outer box is the field. The inner input has no chrome.
+        '[&_.bn-form-popover]:gap-2! [&_.bn-form-popover]:rounded-lg! [&_.bn-form-popover]:p-2.5!',
+        '[&_.bn-text-input]:h-8! [&_.bn-text-input]:gap-2! [&_.bn-text-input]:rounded-lg! [&_.bn-text-input]:border-input! [&_.bn-text-input]:bg-transparent! [&_.bn-text-input]:px-2.5! [&_.bn-text-input]:py-0! [&_.bn-text-input]:shadow-none! [&_.bn-text-input]:dark:bg-input/30!',
+        '[&_.bn-text-input]:has-[:focus-visible]:border-ring! [&_.bn-text-input]:has-[:focus-visible]:ring-3! [&_.bn-text-input]:has-[:focus-visible]:ring-ring/50!',
+        '[&_.bn-text-input>svg]:size-4! [&_.bn-text-input>svg]:shrink-0! [&_.bn-text-input>svg]:text-muted-foreground!',
+        '[&_.bn-text-input_input]:h-auto! [&_.bn-text-input_input]:min-h-0! [&_.bn-text-input_input]:rounded-none! [&_.bn-text-input_input]:border-0! [&_.bn-text-input_input]:bg-transparent! [&_.bn-text-input_input]:p-0! [&_.bn-text-input_input]:shadow-none! [&_.bn-text-input_input]:ring-0! [&_.bn-text-input_input]:outline-none!',
+        '[&_.bn-text-input_input]:focus-visible:border-transparent! [&_.bn-text-input_input]:focus-visible:ring-0! [&_.bn-text-input_input]:dark:bg-transparent!',
         className,
       )}
       {...props}
