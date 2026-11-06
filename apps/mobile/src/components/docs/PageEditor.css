@@ -44,6 +44,15 @@ body {
   text-underline-offset: 2px;
 }
 
+/* The open/close mark is 18px in BlockNote. 12px sits with the line of text. The empty-toggle "add" line lines up with that text. */
+.orbit-page-editor .bn-toggle-button > svg {
+  width: 12px;
+  height: 12px;
+}
+.orbit-page-editor .bn-toggle-add-block-button {
+  margin-left: 16px;
+}
+
 /* Placeholders: only in the focused empty block. */
 .orbit-page-editor .bn-editor[contenteditable='true'] .bn-block-content[data-is-empty-and-focused]:has(.ProseMirror-trailingBreak:only-child)::after {
   content: 'Write something';
