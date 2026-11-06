@@ -37,7 +37,6 @@ import { ProfilePopoverProvider } from './ProfilePopover'
 import { NoWorkspaceShell } from './NoWorkspaceShell'
 import { useAppSidebarTheme } from '@/lib/customTheme'
 import { MenuSurfaceContext } from '@/components/ui/menuSurface'
-import { useNewUi } from '@/lib/themeContext'
 import { useSidebarMenuSurface } from './sidebarMenu'
 import { hostsPageList, SidebarSlotContext } from './sidebarSlot'
 
@@ -93,18 +92,15 @@ function Shell() {
     setDrawerPage(pathname + search)
     setDrawerOpen(false)
   }
-  // only in the new UI (Account settings → Appearance → Layout)
-  const newUi = useNewUi()
-  const hostsList = newUi && desktop && !sidebarCollapsed && hostsPageList(pathname)
+  const hostsList = desktop && !sidebarCollapsed && hostsPageList(pathname)
   // a long page tree needs room: the sidebar that holds it can be dragged wider
   const [pageListWidth, setPageListWidth] = usePageListWidth()
   const [resizing, setResizing] = useState(false)
   const [pageListSlot, setPageListSlot] = useState<HTMLElement | null>(null)
   // Account settings → Appearance → Custom colours the sidebar too, not only chat
   const sidebarTheme = useAppSidebarTheme()
-  // the new UI's sidebar menus share one look and the custom theme; the classic ones keep their own
-  const sidebarMenuSurface = useSidebarMenuSurface()
-  const menuSurface = newUi ? sidebarMenuSurface : null
+  // the sidebar menus share one look and the custom theme
+  const menuSurface = useSidebarMenuSurface()
 
   useLayoutEffect(() => {
     const viewport = window.visualViewport
@@ -171,7 +167,7 @@ function Shell() {
             <WorkspaceSwitcher collapsed={sidebarCollapsed} />
             <ActivityBell unread={inboxUnread} />
           </div>
-          <SidebarNav contextual={newUi} collapsed={sidebarCollapsed} chatBadge={chatBadge} chatUnread={chatUnread} isRoot={isRoot} pageListRef={hostsList ? setPageListSlot : undefined} />
+          <SidebarNav collapsed={sidebarCollapsed} chatBadge={chatBadge} chatUnread={chatUnread} isRoot={isRoot} pageListRef={hostsList ? setPageListSlot : undefined} />
           <div
             className={cn(
               'flex shrink-0 items-center justify-between gap-1 py-2',
@@ -214,7 +210,7 @@ function Shell() {
           style={sidebarTheme.style}
         >
           <MenuSurfaceContext value={menuSurface}>
-            <SidebarNav contextual={newUi} backShowsMenu onNavigate={() => setDrawerOpen(false)} chatBadge={chatBadge} chatUnread={chatUnread} isRoot={isRoot} />
+            <SidebarNav backShowsMenu onNavigate={() => setDrawerOpen(false)} chatBadge={chatBadge} chatUnread={chatUnread} isRoot={isRoot} />
           </MenuSurfaceContext>
         </SideSheetContent>
       </SideSheet>

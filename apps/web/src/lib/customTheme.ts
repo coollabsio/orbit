@@ -1,5 +1,4 @@
 import { useSyncExternalStore, type CSSProperties } from 'react'
-import { useNewUi } from './themeContext'
 
 /**
  * Account settings → Appearance → Custom: a personal colour theme for the whole app, in place of Light, System or
@@ -237,7 +236,5 @@ export function appSidebarTheme(theme: CustomTheme | null): { scheme?: 'dark' | 
 
 /** The custom theme for the sidebar and the menus it opens (they are portalled out of it, so they need it too). */
 export function useAppSidebarTheme() {
-  const theme = useCustomTheme()
-  // the classic layout keeps the custom theme on chat only
-  return appSidebarTheme(useNewUi() ? theme : null)
+  return appSidebarTheme(useCustomTheme())
 }

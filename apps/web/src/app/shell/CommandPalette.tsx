@@ -261,8 +261,8 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       onOpenChange={(next) => { if (!next) onClose() }}
       title="Command palette"
       description={chatEnabled ? 'Search tasks, pages, conversations and navigation.' : 'Search tasks, pages and navigation.'}
-      // the pink tint of the dark shell, like the sidebar menus; the new UI adds the custom theme (`theme` is empty otherwise)
-      className="top-[12vh] max-h-[min(60vh,28rem)] sm:max-w-[576px] dark:bg-sidebar-popover dark:ring-sidebar-tint/22 new-ui:bg-sidebar-popover"
+      // the pink tint of the dark shell, like the sidebar menus, with the custom theme (`theme` is empty without one)
+      className="top-[12vh] max-h-[min(60vh,28rem)] sm:max-w-[576px] bg-sidebar-popover dark:ring-sidebar-tint/22"
       style={theme.style}
     >
       {/* `shouldFilter={false}`: the entry list is already filtered here (tasks and pages are
@@ -279,7 +279,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           />
           <Kbd className="absolute top-1/2 right-3 -translate-y-1/2 px-1.5 text-[11px] text-muted-foreground/70">esc</Kbd>
         </div>
-        <CommandList className="mx-1.5 mt-1 mb-1.5 max-h-none min-h-0 flex-1 rounded-lg bg-background p-1 ring-1 ring-border dark:bg-[color-mix(in_oklab,var(--primary)_6%,oklch(0.2264_0_0))] new-ui:dark:bg-[color-mix(in_oklab,var(--sidebar-popover),white_3%)] dark:ring-sidebar-tint/12 dark:**:data-[slot=command-item]:data-selected:bg-sidebar-tint/10">
+        <CommandList className="mx-1.5 mt-1 mb-1.5 max-h-none min-h-0 flex-1 rounded-lg bg-background p-1 ring-1 ring-border dark:bg-[color-mix(in_oklab,var(--sidebar-popover),white_3%)] dark:ring-sidebar-tint/12 dark:**:data-[slot=command-item]:data-selected:bg-sidebar-tint/10">
           <CommandEmpty className="p-6 text-[13px] text-muted-foreground">No results for “{query}”</CommandEmpty>
           {here.length > 0 ? (
             <CommandGroup heading="Commands" className="p-0">

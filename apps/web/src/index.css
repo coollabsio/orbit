@@ -12,8 +12,6 @@
 /* Account settings → Appearance (lib/theme.tsx): Style → Flat, and Navigation style → Floating */
 @custom-variant flat (&:where([data-flat] *));
 @custom-variant floating (&:where([data-floating] *));
-/* Account settings → Appearance → Layout → New UI. `:is`, so `new-ui:dark:` beats a plain `dark:` */
-@custom-variant new-ui (&:is([data-new-ui] *));
 
 /* hover-only affordances (e.g. relation × buttons): real hover and a fine pointer; touch keeps them visible */
 @custom-variant hover-fine {
@@ -102,7 +100,8 @@
     --sidebar-foreground: oklch(0.145 0 0);
     --sidebar-primary: oklch(0.659 0.216 358.989);
     --sidebar-primary-foreground: oklch(1 0 0);
-    --sidebar-accent: oklch(0.97 0 0);
+    /* the selected row in a side list: the sidebar colour, a bit darker (lighter in dark mode) */
+    --sidebar-accent: color-mix(in oklch, var(--sidebar), black 6%);
     --sidebar-accent-foreground: oklch(0.205 0 0);
     --sidebar-border: oklch(0.922 0 0);
     --sidebar-ring: oklch(0.708 0 0);
@@ -146,7 +145,7 @@
     --sidebar-foreground: oklch(0.985 0 0);
     --sidebar-primary: oklch(0.659 0.216 358.989);
     --sidebar-primary-foreground: oklch(1 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
+    --sidebar-accent: color-mix(in oklch, var(--sidebar), white 9%);
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
@@ -159,15 +158,6 @@
     --sidebar-nav-active: oklch(0.9612 0 0);
     --sidebar-nav-muted: oklch(0.58 0.04 359);
     --sidebar-popover: color-mix(in oklab, var(--primary) 10%, oklch(0.2002 0 0));
-}
-
-/* New UI: the selected row in a side list is the sidebar colour, a bit darker (lighter in dark mode) */
-:root[data-new-ui] {
-    --sidebar-accent: color-mix(in oklch, var(--sidebar), black 6%);
-}
-
-:root.dark[data-new-ui] {
-    --sidebar-accent: color-mix(in oklch, var(--sidebar), white 9%);
 }
 
 @layer base {

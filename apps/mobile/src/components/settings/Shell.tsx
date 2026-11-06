@@ -1,11 +1,10 @@
-import { type Href, router, useNavigation, usePathname } from 'expo-router'
+import { type Href, useNavigation, usePathname } from 'expo-router'
 import type { Permission } from '@orbit/api/generated/types.gen'
 import { type ReactNode, useState } from 'react'
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Switch, View } from 'react-native'
 
-import { useAuthOptions } from '../../hooks/account'
 import { useOrbit } from '../../orbit-context'
-import { alpha, cssColors, useButtonStyle, useLayout, useTheme } from '../../theme'
+import { alpha, cssColors, useButtonStyle, useTheme } from '../../theme'
 import { Icon, type IconName, IconButton, PaneHeader, PickerSheet, type Presence, PullRefresh, SafeAreaView, StatusMark, Text } from '../../ui'
 
 export interface SettingsNavItem {
@@ -64,17 +63,13 @@ export const ADMIN_NAV: readonly SettingsNavItem[] = [
 ]
 
 /**
- * The web's `SettingsShell` on a phone: the topbar, the two-column sub-navigation between hairlines, then the cards.
- * A page opened from another screen gets a back button; the area's own pages swap in place. In the new UI the drawer
- * lists the area's pages instead, so the grid is left out.
+ * The web's `SettingsShell` on a phone: the topbar, then the cards. A page opened from another screen gets a back
+ * button. The drawer lists the area's pages.
  */
 export function SettingsShell({ title, nav, children, onRefresh }: { title: string; nav: readonly SettingsNavItem[]; children: ReactNode; onRefresh?: () => Promise<unknown> }) {
   const { colors } = useTheme()
   const navigation = useNavigation()
   const pathname = usePathname()
-  const newUi = useLayout() === 'new'
-  const { workspace } = useOrbit()
-  const cloud = useAuthOptions().data?.billing_enabled ?? false
   const muted = alpha(colors.mutedForeground, 0.7)
   // the longest matching link names the page, so `/settings/admin/users` beats `/settings/admin`
   const page = nav
@@ -106,28 +101,6 @@ export function SettingsShell({ title, nav, children, onRefresh }: { title: stri
           keyboardShouldPersistTaps="handled"
           refreshControl={onRefresh ? <PullRefresh onRefresh={onRefresh} /> : undefined}
         >
-          {newUi ? null : (
-            <View accessibilityRole="tablist" accessibilityLabel={title} className="flex-row flex-wrap gap-0.5 py-3 border-t border-b border-border">
-              {allowedNav(nav, workspace.permissions, cloud).map((item) => {
-                const active = pathname === item.href
-                return (
-                  <Pressable
-                    key={item.href}
-                    accessibilityRole="tab"
-                    accessibilityLabel={item.label}
-                    accessibilityState={{ selected: active }}
-                    onPress={active ? undefined : () => router.replace(item.href)}
-                    className={`w-[49.6%] h-8 flex-row items-center gap-2.5 px-2.5 rounded-lg ${active ? 'bg-sidebar-accent' : 'active:bg-muted'}`}
-                  >
-                    <Icon name={item.icon} size={18} color={alpha(active ? colors.sidebarAccentForeground : colors.foreground, 0.9)} />
-                    <Text numberOfLines={1} className="font-noto-medium text-[13px] flex-1">
-                      {item.label}
-                    </Text>
-                  </Pressable>
-                )
-              })}
-            </View>
-          )}
           {children}
         </ScrollView>
       </KeyboardAvoidingView>

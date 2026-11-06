@@ -10,7 +10,7 @@ import { useOrbit } from '../orbit-context'
 import { useChatBadge, useProjects } from '../queries'
 import { splitAlpha } from '../data/color'
 import { customSidebarTheme } from '../data/custom-theme'
-import { alpha, cssColors, mix, useAppCustomTheme, useButtonStyle, useLayout, useTheme } from '../theme'
+import { alpha, cssColors, mix, useButtonStyle, useCustomTheme, useTheme } from '../theme'
 import { ColorScope } from '../theme/ColorScope'
 import { CountBadge, Icon, type IconName } from '../ui'
 import { NewProjectSheet } from './NewProjectSheet'
@@ -119,7 +119,7 @@ interface NavLink {
 }
 
 /**
- * The settings areas of the new UI's contextual drawer: the links of Shell.tsx's sub-navigation. A function, because
+ * The settings areas of the contextual drawer: the links of Shell.tsx's nav lists. A function, because
  * Shell.tsx imports this file: its arrays may not exist yet while this module loads.
  */
 const areaNavs = () => ({ workspace: WORKSPACE_NAV, account: ACCOUNT_NAV, admin: ADMIN_NAV })
@@ -138,8 +138,8 @@ function Drawer({
   panHandlers: ReturnType<typeof PanResponder.create>['panHandlers']
   onClose: () => void
 }) {
-  // the new UI's custom theme colours the drawer with its sidebar colour (the web's `appSidebarTheme`)
-  const custom = useAppCustomTheme()
+  // the custom theme colours the drawer with its sidebar colour (the web's `appSidebarTheme`)
+  const custom = useCustomTheme()
   const sidebarTheme = useMemo(() => (custom ? customSidebarTheme(custom) : null), [custom])
   const panel = <DrawerPanel mounted={mounted} width={width} onClose={onClose} />
   return (
@@ -167,8 +167,8 @@ function Drawer({
 }
 
 /**
- * The web's `SidebarNav`: workspace, Search, the products, Personal, Manage, the user. In the new UI a settings page
- * shows its area's links and Back instead of the app links; Back shows the app links again without leaving the page.
+ * The web's `SidebarNav`: Search, the products, Manage. A settings page or Tasks shows its area's links and Back
+ * instead of the app links; Back shows the app links again without leaving the page.
  */
 function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: number; onClose: () => void }) {
   const { colors } = useTheme()
@@ -178,11 +178,10 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
   const pathname = usePathname()
   const { view, project } = useGlobalSearchParams<{ view?: string; project?: string }>()
   const chatBadge = useChatBadge()
-  const newUi = useLayout() === 'new'
   const reduceMotion = useReduceMotion()
 
   const navs = areaNavs()
-  const pageArea = newUi ? drawerAreaOf(pathname, navs) : null
+  const pageArea = drawerAreaOf(pathname, navs)
   // the area whose Back was pressed: the app links show until the page moves to another area or the drawer closes
   const [mainMenuFor, setMainMenuFor] = useState<DrawerArea | null>(null)
   if (!mounted && mainMenuFor) setMainMenuFor(null)
@@ -212,13 +211,10 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
   const onTasks = pathname === '/tasks' || pathname.startsWith('/tasks/')
   const onSettings = pathname === '/settings' || pathname.startsWith('/settings/')
   const onAdmin = pathname.startsWith('/settings/admin')
-  const taskView = (name: string) => pathname === '/tasks' && view === name
   const workspaceLinks: NavLink[] = [
     { label: 'Home', icon: 'home', href: '/', active: pathname === '/' },
     { label: 'Tasks', icon: 'tasks', href: tasksHref({ project }, {}), active: onTasks && !view },
   ]
-  // the new UI keeps the task presets in the Tasks area
-  const personal: NavLink[] = newUi ? [] : TASK_PRESETS.map((preset) => ({ label: preset.label, icon: preset.icon, href: tasksHref({ project }, { view: preset.view }), active: taskView(preset.view) }))
 
   return (
     <View className="flex-1 overflow-hidden rounded-l-2xl border-l border-sidebar-edge bg-sidebar px-3" style={{ paddingTop: 12 + insets.top, paddingBottom: 12 + insets.bottom }}>
@@ -257,21 +253,16 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
               {workspaceLinks.map((link) => (
                 <NavRow key={link.label} link={link} onPress={() => go(link.href)} />
               ))}
-              {newUi ? null : <SubRow label="Views" onPress={() => go('/tasks')} />}
               <NavRow link={{ label: 'Docs', icon: 'docs', href: '/docs', active: pathname.startsWith('/docs') }} onPress={() => go('/docs')} />
               <NavRow link={{ label: 'Chat', icon: 'chat', href: '/chat', active: pathname.startsWith('/chat'), badge: chatBadge.count, dot: chatBadge.unread }} onPress={() => go('/chat')} />
               <NavRow link={{ label: 'Mail', icon: 'mail', href: '/', active: false }} comingSoon />
-              {personal.length > 0 ? <Section label="Personal" /> : null}
-              {personal.map((link) => (
-                <NavRow key={link.label} link={link} onPress={() => go(link.href)} />
-              ))}
               <Section label="Manage" />
-              <NavRow link={{ label: 'Settings', icon: 'settings', href: '/settings', active: onSettings && !onAdmin }} onPress={() => (newUi ? setOpenedArea('workspace') : go('/settings'))} />
+              <NavRow link={{ label: 'Settings', icon: 'settings', href: '/settings', active: onSettings && !onAdmin }} onPress={() => setOpenedArea('workspace')} />
               {user.installation_admin ? (
                 <>
                   {/* the installation, not the workspace: it sits apart at the bottom */}
                   <View className="flex-1" />
-                  <NavRow link={{ label: 'Admin', icon: 'admin', href: '/settings/admin', active: onAdmin }} tone="neutral" onPress={() => (newUi ? setOpenedArea('admin') : go('/settings/admin'))} />
+                  <NavRow link={{ label: 'Admin', icon: 'admin', href: '/settings/admin', active: onAdmin }} tone="neutral" onPress={() => setOpenedArea('admin')} />
                 </>
               ) : null}
             </>
@@ -284,7 +275,7 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
 }
 
 /**
- * The new UI's Tasks area (the web's `TasksAreaNav`): All tasks, Views, the task presets and the projects. A preset
+ * The Tasks area (the web's `TasksAreaNav`): All tasks, Views, the task presets and the projects. A preset
  * keeps the project and a project keeps the preset. The web's Favorite views are left out: the app has no saved views.
  */
 function TasksArea({ view, project, onTasks, onBack, go }: { view?: string; project?: string; onTasks: boolean; onBack: () => void; go: (href: Href) => void }) {
@@ -440,16 +431,6 @@ function Tile({ icon, active, pressed, tone }: { icon: IconName; active: boolean
     >
       <Icon name={icon} size={16} color={icon_} />
     </View>
-  )
-}
-
-/** "Views" nested under Tasks behind a 1px guide line. */
-function SubRow({ label, onPress }: { label: string; onPress: () => void }) {
-  const dark = useTheme().scheme === 'dark'
-  return (
-    <Pressable accessibilityRole="button" accessibilityLabel="Task views" onPress={onPress} className={`ml-5 h-7 justify-center border-l pl-3 ${dark ? 'border-sidebar-tint/10' : 'border-black/8'}`}>
-      <RNText className="font-noto-medium text-[13px] text-sidebar-nav">{label}</RNText>
-    </Pressable>
   )
 }
 

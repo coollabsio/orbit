@@ -17,7 +17,6 @@ import { useOrbit } from '../../orbit-context'
 import { useChatCategories, useChatStates, useChatBadge, useConversations, usePeople } from '../../queries'
 import { useTheme } from '../../theme'
 import { Avatar, CountBadge, EmptyState, ErrorView, HeaderTitle, Icon, type IconName, IconButton, LoadingView, PaneHeader, PullRefresh, SafeAreaView, Text } from '../../ui'
-import { ChatColorScope } from '../../components/chat/ChatColorScope'
 import { useShownPresence } from '../../components/chat/Pane'
 
 const PRESENCE_LABEL = { online: 'Online', idle: 'Idle', dnd: 'Do not disturb', invisible: 'Invisible' } as const
@@ -32,14 +31,6 @@ type Overlay =
 
 /** The web's mobile chat list: Unreads and Threads, then each section, then the user bar. */
 export default function ChatScreen() {
-  return (
-    <ChatColorScope surface="list">
-      <ChatScreenContent />
-    </ChatColorScope>
-  )
-}
-
-function ChatScreenContent() {
   const { user } = useOrbit()
   const { colors } = useTheme()
   const conversations = useConversations()

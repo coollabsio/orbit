@@ -12,18 +12,9 @@ import { useOrbit } from '../../../orbit-context'
 import { useConversations, usePeople } from '../../../queries'
 import { useTheme } from '../../../theme'
 import { Button, EmptyState, ErrorView, Icon, LoadingView, PickerSheet, Spinner, Text } from '../../../ui'
-import { ChatColorScope } from '../../../components/chat/ChatColorScope'
 
 /** Search in a conversation (or all of them) with the web's filters. A result opens the message where it is. */
 export default function SearchScreen() {
-  return (
-    <ChatColorScope surface="page">
-      <SearchScreenContent />
-    </ChatColorScope>
-  )
-}
-
-function SearchScreenContent() {
   const { id, q } = useLocalSearchParams<{ id: string; q?: string }>()
   const { user } = useOrbit()
   const { colors, scheme } = useTheme()

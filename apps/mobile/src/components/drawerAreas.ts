@@ -1,6 +1,6 @@
 /** The settings areas (the web's `settingsAreaOf`). */
 export type SettingsArea = 'workspace' | 'account' | 'admin'
-/** The areas whose links replace the app links in the new UI's drawer: a settings area or Tasks. */
+/** The areas whose links replace the app links in the drawer: a settings area or Tasks. */
 export type DrawerArea = SettingsArea | 'tasks'
 
 export const DRAWER_AREA_TITLES: Record<DrawerArea, string> = { workspace: 'Settings', account: 'Account settings', admin: 'Admin', tasks: 'Tasks' }

@@ -74,7 +74,7 @@ export default function RootLayout() {
 
 function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
   const { state } = useSession()
-  // the root is above `AppColorScope`, so it reads the app's colours itself (custom theme in the new UI)
+  // the root is above `AppColorScope`, so it reads the app's colours itself (with the custom theme)
   const palette = useAppPalette()
   const theme = { ...useTheme(), scheme: palette.scheme, colors: { ...palettes[palette.scheme], ...palette.colors } }
   const [schemeLoaded, setSchemeLoaded] = useState(false)

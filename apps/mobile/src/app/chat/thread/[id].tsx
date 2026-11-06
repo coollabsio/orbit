@@ -15,21 +15,12 @@ import { useOrbit } from '../../../orbit-context'
 import { useConversations, usePeople } from '../../../queries'
 import { useTheme } from '../../../theme'
 import { ErrorView, Icon, IconButton, LoadingView, SafeAreaView, Text } from '../../../ui'
-import { ChatColorScope } from '../../../components/chat/ChatColorScope'
 
 /**
  * A thread in full view, as the web's `/chat/:id/thread/:messageId` on a phone: the root, its replies, and a composer
  * that replies in the thread (and can also send to the conversation). The bell follows or unfollows it.
  */
 export default function ThreadScreen() {
-  return (
-    <ChatColorScope surface="page">
-      <ThreadScreenContent />
-    </ChatColorScope>
-  )
-}
-
-function ThreadScreenContent() {
   const { id: rootId } = useLocalSearchParams<{ id: string }>()
   const { client, workspaceId, user, session } = useOrbit()
   const [actions, setActions] = useState(false)

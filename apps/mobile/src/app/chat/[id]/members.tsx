@@ -13,21 +13,12 @@ import { useOrbit } from '../../../orbit-context'
 import { useConversations, useMembers } from '../../../queries'
 import { presenceColors, useTheme } from '../../../theme'
 import { Avatar, Button, EmptyState, ErrorView, Icon, IconButton, LoadingView, Text } from '../../../ui'
-import { ChatColorScope } from '../../../components/chat/ChatColorScope'
 
 /**
  * The web `MembersPane`: online people under their role, offline people dimmed at the end. A tap opens the direct
  * message with them; those who manage a private channel add and remove people.
  */
 export default function MembersScreen() {
-  return (
-    <ChatColorScope surface="page">
-      <MembersScreenContent />
-    </ChatColorScope>
-  )
-}
-
-function MembersScreenContent() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const { user } = useOrbit()
   const { colors } = useTheme()

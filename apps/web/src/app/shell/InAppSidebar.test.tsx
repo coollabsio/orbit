@@ -3,7 +3,6 @@ import { render } from '@testing-library/react'
 import { useState, type ReactNode } from 'react'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { setCustomTheme } from '@/lib/customTheme'
-import { ThemeContext } from '@/lib/themeContext'
 import { InAppSidebar } from './InAppSidebar'
 import { SidebarSlotContext } from './sidebarSlot'
 
@@ -22,15 +21,11 @@ function RowMenu() {
 
 function Sidebar({ hosted, children }: { hosted: boolean; children: ReactNode }) {
   const [slot, setSlot] = useState<HTMLElement | null>(null)
-  // the app shell gives the sidebar a slot only in the new UI
-  const newUi = { theme: 'dark', appearance: { theme: 'dark', style: '3d', navStyle: 'default', layout: 'new' }, setAppearance: () => {}, toggleTheme: () => {} } as const
   return (
-    <ThemeContext value={newUi}>
-      <SidebarSlotContext value={hosted ? slot : null}>
-        <aside ref={setSlot} />
-        <InAppSidebar>{children}</InAppSidebar>
-      </SidebarSlotContext>
-    </ThemeContext>
+    <SidebarSlotContext value={hosted ? slot : null}>
+      <aside ref={setSlot} />
+      <InAppSidebar>{children}</InAppSidebar>
+    </SidebarSlotContext>
   )
 }
 

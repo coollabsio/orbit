@@ -9,18 +9,9 @@ import { useOrbit } from '../../orbit-context'
 import { useConversations } from '../../queries'
 import { useTheme } from '../../theme'
 import { Button, EmptyState, Icon, Input, LoadingView, Text } from '../../ui'
-import { ChatColorScope } from '../../components/chat/ChatColorScope'
 
 /** Browse channels: the public channels you are not in, to open or join. Joined ones are in the chat list. */
 export default function BrowseChannelsScreen() {
-  return (
-    <ChatColorScope surface="page">
-      <BrowseChannelsScreenContent />
-    </ChatColorScope>
-  )
-}
-
-function BrowseChannelsScreenContent() {
   const { user } = useOrbit()
   const { colors } = useTheme()
   const conversations = useConversations()

@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react'
-import { ChevronDown, Setting2 as Settings, TickCircle, User } from 'reicon-react'
+import { Setting2 as Settings, TickCircle, User } from 'reicon-react'
 import { cn } from 'cn'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { CUSTOM_THEME_PRESETS, serializeCustomTheme, setCustomTheme, useCustomTheme } from '@/lib/customTheme'
@@ -10,11 +10,6 @@ const THEMES: { value: Appearance['theme']; label: string; description: string; 
   { value: 'light', label: 'Light', description: 'Bright surfaces and dark text.', preview: 'bg-white' },
   { value: 'system', label: 'System', description: 'Follow your operating system.', preview: 'bg-linear-to-r from-white via-neutral-400 to-[#050505]' },
   { value: 'dark', label: 'Dark', description: 'Dark surfaces and soft contrast.', preview: 'bg-[#181818]' },
-]
-
-const LAYOUTS: { value: Appearance['layout']; label: string; description: string }[] = [
-  { value: 'classic', label: 'Classic', description: 'The sidebar always shows the app links. Settings, Docs and Chat have their own list beside the content. The custom theme colors chat.' },
-  { value: 'new', label: 'New UI', description: 'The sidebar changes with the page: settings links, the page tree and conversations, with Back. The custom theme colors the whole app.' },
 ]
 
 const NAV_STYLES: { value: Appearance['navStyle']; label: string; description: string }[] = [
@@ -31,8 +26,6 @@ const STYLES: { value: Appearance['style']; label: string; description: string }
 export function AppearancePage() {
   const { appearance, setAppearance } = useTheme()
   const customTheme = useCustomTheme()
-  // in the new UI the custom theme replaces the colour theme; in the classic layout it colours chat on top of it
-  const newUi = appearance.layout === 'new'
   const [customThemeOpen, setCustomThemeOpen] = useState(false)
   const customThemeName = customTheme
     ? (CUSTOM_THEME_PRESETS.find((preset) => serializeCustomTheme(preset.theme) === serializeCustomTheme(customTheme))?.name ?? 'Your colors')
@@ -40,46 +33,6 @@ export function AppearancePage() {
 
   return (
     <>
-      <SettingsCard title="Layout">
-        <div className="grid gap-3 sm:grid-cols-2">
-          {LAYOUTS.map((option) => {
-            const contextual = option.value === 'new'
-            return (
-              <AppearanceOption
-                key={option.value}
-                label={option.label}
-                description={option.description}
-                selected={appearance.layout === option.value}
-                onClick={() => setAppearance({ layout: option.value })}
-                previewClassName="items-stretch justify-start"
-              >
-                {/* the sidebar: app icons, or Back and the page's list; classic adds a second list column */}
-                <span className="flex w-14 flex-col gap-1.5 border-r bg-background px-2 py-2">
-                  {contextual ? (
-                    <>
-                      <span className="flex h-3 items-center gap-1 text-muted-foreground"><ChevronDown className="size-2.5 rotate-90" /><span className="h-1 flex-1 rounded-full bg-muted-foreground/30" /></span>
-                      {[0, 1, 2].map((index) => <span key={index} className={cn('h-1.5 rounded-full bg-muted-foreground/25', index === 0 && 'bg-primary/50')} />)}
-                    </>
-                  ) : (
-                    [User, Settings].map((Icon, index) => (
-                      <span key={index} className="flex size-5 items-center justify-center rounded-md border bg-muted/50 text-muted-foreground">
-                        <Icon className="size-3" />
-                      </span>
-                    ))
-                  )}
-                </span>
-                {contextual ? null : (
-                  <span className="flex w-12 flex-col gap-1.5 border-r px-2 py-2">
-                    {[0, 1, 2].map((index) => <span key={index} className={cn('h-1.5 rounded-full bg-muted-foreground/25', index === 0 && 'bg-primary/50')} />)}
-                  </span>
-                )}
-                <span className="flex-1 bg-background" />
-              </AppearanceOption>
-            )
-          })}
-        </div>
-      </SettingsCard>
-
       <SettingsCard title="Color theme" description="Choose the color scheme used in this browser.">
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {THEMES.map((option) => (
@@ -87,9 +40,9 @@ export function AppearancePage() {
               key={option.value}
               label={option.label}
               description={option.description}
-              selected={!(newUi && customTheme) && appearance.theme === option.value}
+              selected={!customTheme && appearance.theme === option.value}
               onClick={() => {
-                if (newUi) setCustomTheme(null)
+                setCustomTheme(null)
                 setAppearance({ theme: option.value })
               }}
               previewClassName={option.preview}
@@ -97,12 +50,11 @@ export function AppearancePage() {
               <span className="h-8 w-20 rounded-md border border-black/10 bg-neutral-100/80 shadow-sm dark:border-white/10 dark:bg-black/20" />
             </AppearanceOption>
           ))}
-          {/* the custom theme opens its editor. New UI: it is a theme of its own, and picking one above turns it off.
-              Classic: it colours chat on top of the theme above, so it is never the chosen one */}
+          {/* the custom theme opens its editor: it is a theme of its own, and picking one above turns it off */}
           <AppearanceOption
             label={customTheme ? `Custom · ${customThemeName}` : 'Custom'}
-            description={newUi ? 'Your own colors for the whole app. Pick a preset or your own.' : 'Your own chat colors. Pick a preset or your own.'}
-            selected={newUi ? Boolean(customTheme) : undefined}
+            description="Your own colors for the whole app. Pick a preset or your own."
+            selected={Boolean(customTheme)}
             aria-haspopup="dialog"
             onClick={() => setCustomThemeOpen(true)}
           >
