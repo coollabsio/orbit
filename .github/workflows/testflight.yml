@@ -21,7 +21,6 @@ jobs:
         working-directory: apps/mobile
     env:
       EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-      EXPO_ASC_API_KEY_PATH: ${{ runner.temp }}/asc-api-key.p8
       EXPO_ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
       EXPO_ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
       EXPO_APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
@@ -43,6 +42,8 @@ jobs:
           ASC_API_KEY_P8: ${{ secrets.ASC_API_KEY_P8 }}
           ASC_APP_ID: ${{ vars.ASC_APP_ID }}
         run: |
+          EXPO_ASC_API_KEY_PATH="$RUNNER_TEMP/asc-api-key.p8"
+          echo "EXPO_ASC_API_KEY_PATH=$EXPO_ASC_API_KEY_PATH" >> "$GITHUB_ENV"
           printf '%s\n' "$ASC_API_KEY_P8" > "$EXPO_ASC_API_KEY_PATH"
           jq --arg path "$EXPO_ASC_API_KEY_PATH" --arg key "$EXPO_ASC_KEY_ID" \
              --arg issuer "$EXPO_ASC_ISSUER_ID" --arg app "$ASC_APP_ID" \
