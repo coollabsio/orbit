@@ -4,15 +4,20 @@ import { Tip } from '@/components/common/Tip'
 import { cn } from 'cn'
 
 /**
- * Actions at the end of a docs tree row (a `group/row`): with a mouse they fade in on hover/focus (and stay while one of
- * their menus is open); on touch they are always shown. Their clicks never reach the row.
+ * Actions at the end of a docs tree row (a `group/row`). On a mouse they take no width until the row is hovered,
+ * focused, or a menu is open, so the title uses the full row. On touch they stay in the row. Clicks do not reach the row.
  */
 export function TreeRowActions({ className, onClick, ...props }: ComponentProps<'span'>) {
   return (
     <span
       data-slot="tree-row-actions"
       className={cn(
-        'relative z-20 flex shrink-0 items-center gap-0.5 transition-opacity duration-150 ease-out hover-fine:opacity-0 hover-fine:group-hover/row:opacity-100 hover-fine:group-focus-within/row:opacity-100 hover-fine:has-data-[popup-open]:opacity-100',
+        'relative z-20 flex shrink-0 items-center gap-0.5 transition-opacity duration-150 ease-out',
+        // Idle on a mouse: width 0, so the title is not cut early for buttons the user cannot see.
+        'hover-fine:w-0 hover-fine:min-w-0 hover-fine:overflow-hidden hover-fine:opacity-0',
+        'hover-fine:group-hover/row:w-auto hover-fine:group-hover/row:min-w-min hover-fine:group-hover/row:overflow-visible hover-fine:group-hover/row:opacity-100',
+        'hover-fine:group-focus-within/row:w-auto hover-fine:group-focus-within/row:min-w-min hover-fine:group-focus-within/row:overflow-visible hover-fine:group-focus-within/row:opacity-100',
+        'hover-fine:has-data-[popup-open]:w-auto hover-fine:has-data-[popup-open]:min-w-min hover-fine:has-data-[popup-open]:overflow-visible hover-fine:has-data-[popup-open]:opacity-100',
         className,
       )}
       onClick={(event) => {
