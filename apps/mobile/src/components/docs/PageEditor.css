@@ -44,13 +44,22 @@ body {
   text-underline-offset: 2px;
 }
 
-/* The open/close mark is 18px in BlockNote. 12px sits with the line of text. The empty-toggle "add" line lines up with that text. */
+/* The open/close mark is 18px in BlockNote. 16px sits with the line of text. The empty-toggle "add" line lines up with that text. */
 .orbit-page-editor .bn-toggle-button > svg {
-  width: 12px;
-  height: 12px;
+  width: 16px;
+  height: 16px;
 }
 .orbit-page-editor .bn-toggle-add-block-button {
-  margin-left: 16px;
+  margin-left: 20px;
+}
+/* The open state turns the mark 90°. Animate that turn. */
+.orbit-page-editor .bn-toggle-button {
+  transition: transform 150ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .orbit-page-editor .bn-toggle-button {
+    transition: none;
+  }
 }
 
 /* Placeholders: only in the focused empty block. */

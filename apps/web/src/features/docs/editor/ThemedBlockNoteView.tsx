@@ -29,10 +29,12 @@ export function ThemedBlockNoteView<B extends BlockSchema, I extends InlineConte
         '[&_.bn-block-group_.bn-block:not(:has(.bn-toggle-wrapper))_.bn-block-group_.bn-block-outer:not([data-prev-depth-changed])]:before:border-l-0!',
         // BlockNote's unlayered `.bn-shadcn svg { width: revert }` beats the shadcn `size-4` icon rule, so the side-menu
         // icons and the menu chevrons and checkmarks fall back to their 24px size attribute. The same rule makes the
-        // open/close mark 1em (it grows with a heading). Keep that mark at 12px. The empty-toggle "add" line was
-        // indented for an 18px mark; 16px lines it up with the text after the smaller mark.
+        // open/close mark 1em (it grows with a heading). Keep that mark at 16px. The empty-toggle "add" line was
+        // indented for an 18px mark; 20px lines it up with the text after the smaller mark.
         "[&_.bn-side-menu_.bn-button_svg]:size-4! [&_[data-slot^=dropdown-menu-]_svg:not([class*='size-'])]:size-4!",
-        '[&_.bn-toggle-button>svg]:size-3! [&_.bn-toggle-add-block-button]:ml-4!',
+        '[&_.bn-toggle-button>svg]:size-4! [&_.bn-toggle-add-block-button]:ml-5!',
+        // The open state turns the mark 90°. Animate that turn. Reduced motion: no turn.
+        '[&_.bn-toggle-button]:transition-transform! [&_.bn-toggle-button]:duration-150! [&_.bn-toggle-button]:ease-[cubic-bezier(0.23,1,0.32,1)]! motion-reduce:[&_.bn-toggle-button]:transition-none!',
         className,
       )}
       {...props}
