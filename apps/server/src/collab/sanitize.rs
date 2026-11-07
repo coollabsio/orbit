@@ -262,6 +262,87 @@ fn sanitize_math(value: &Value) -> Value {
     }
 }
 
+/// A comment's blocks without the empty lines around its text: empty paragraphs at the start and
+/// the end go (Enter), and so do line breaks and spaces at the start of the first block and the
+/// end of the last (Shift+Enter). Code keeps its white space. The web's `trimBlocks` does the same.
+#[must_use]
+pub fn trim_comment_blocks(mut blocks: Vec<Value>) -> Vec<Value> {
+    while blocks.first().is_some_and(is_blank_paragraph) {
+        blocks.remove(0);
+    }
+    while blocks.last().is_some_and(is_blank_paragraph) {
+        blocks.pop();
+    }
+    if let Some(first) = blocks.first_mut() {
+        trim_edge_text(first, true);
+    }
+    if let Some(last) = blocks.last_mut() {
+        trim_edge_text(last, false);
+    }
+    blocks
+}
+
+fn text_of(item: &Value) -> Option<&str> {
+    (item.get("type").and_then(Value::as_str) == Some("text"))
+        .then(|| item.get("text").and_then(Value::as_str))
+        .flatten()
+}
+
+fn is_code_text(item: &Value) -> bool {
+    item.pointer("/styles/code") == Some(&Value::Bool(true))
+}
+
+fn is_blank_paragraph(block: &Value) -> bool {
+    if block.get("type").and_then(Value::as_str) != Some("paragraph") {
+        return false;
+    }
+    if block
+        .get("children")
+        .and_then(Value::as_array)
+        .is_some_and(|children| !children.is_empty())
+    {
+        return false;
+    }
+    match block.get("content") {
+        None | Some(Value::Null) => true,
+        Some(Value::Array(items)) => items
+            .iter()
+            .all(|item| text_of(item).is_some_and(|text| text.trim().is_empty())),
+        Some(_) => false,
+    }
+}
+
+/// Removes the white space at one end of a block's text (`start` or the end), up to inline code.
+fn trim_edge_text(block: &mut Value, start: bool) {
+    if block.get("type").and_then(Value::as_str) == Some("codeBlock") {
+        return;
+    }
+    let Some(content) = block.get_mut("content").and_then(Value::as_array_mut) else {
+        return;
+    };
+    while let Some(index) = if start {
+        (!content.is_empty()).then_some(0)
+    } else {
+        content.len().checked_sub(1)
+    } {
+        let item = &mut content[index];
+        let Some(text) = text_of(item).filter(|_| !is_code_text(item)) else {
+            return;
+        };
+        let trimmed = if start {
+            text.trim_start()
+        } else {
+            text.trim_end()
+        }
+        .to_owned();
+        if !trimmed.is_empty() {
+            item["text"] = Value::String(trimmed);
+            return;
+        }
+        content.remove(index);
+    }
+}
+
 fn mention_name(value: Option<&Value>) -> String {
     value
         .and_then(Value::as_str)
@@ -627,6 +708,51 @@ mod tests {
     use crate::collab::{DocKind, LinkPolicy};
 
     const PAGE: &str = "0199a0b0-0000-7000-8000-000000000001";
+
+    fn text(value: &str) -> Value {
+        json!({"type": "text", "text": value, "styles": {}})
+    }
+
+    fn paragraph(content: &[Value]) -> Value {
+        json!({"type": "paragraph", "content": content, "children": []})
+    }
+
+    #[test]
+    fn comment_blocks_lose_the_empty_lines_around_their_text() {
+        let blocks = vec![
+            paragraph(&[]),
+            paragraph(&[text("  ")]),
+            paragraph(&[text("\nhi")]),
+            paragraph(&[]),
+            paragraph(&[text("there\n"), text("\n")]),
+            paragraph(&[]),
+        ];
+        assert_eq!(
+            trim_comment_blocks(blocks),
+            vec![
+                paragraph(&[text("hi")]),
+                paragraph(&[]),
+                paragraph(&[text("there")])
+            ]
+        );
+        assert_eq!(
+            trim_comment_blocks(vec![paragraph(&[]), paragraph(&[text("\n")])]),
+            Vec::<Value>::new()
+        );
+    }
+
+    #[test]
+    fn comment_blocks_keep_code_images_and_nested_blocks() {
+        let code = json!({"type": "text", "text": "x  ", "styles": {"code": true}});
+        let image = json!({"type": "image", "props": {"url": "/x.png"}, "children": []});
+        let nested =
+            json!({"type": "paragraph", "content": [], "children": [paragraph(&[text("x")])]});
+        let blocks = vec![image.clone(), nested.clone(), paragraph(&[code.clone()])];
+        assert_eq!(
+            trim_comment_blocks(blocks),
+            vec![image, nested, paragraph(&[code])]
+        );
+    }
 
     #[test]
     fn links_follow_the_editor_policy() {

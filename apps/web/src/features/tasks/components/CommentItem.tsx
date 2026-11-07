@@ -8,7 +8,7 @@ import { Kbd } from '@/components/ui/kbd'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { ConfirmDeleteModal } from '@/components/common/ConfirmDeleteModal'
 import { Attachments } from '@/components/common/Attachments'
-import { contentEquals } from '@/features/docs/editor/content'
+import { contentEquals, trimBlocks } from '@/features/docs/editor/content'
 import { uploadInlineFile } from '@/features/tasks/api/inlineFiles'
 import { commentSaveAction, isEmptyRichText } from '@/features/tasks/lib/richText'
 import { useNearViewport } from '@/features/tasks/lib/useNearViewport'
@@ -56,8 +56,10 @@ export function CommentItem({ state, taskId, comment, reply }: CommentItemProps)
     setEditing(true)
   }
   const commitEdit = () => {
-    const content = editorRef.current?.getContent() ?? []
-    const changed = dirty.current && !contentEquals(content, shown ?? comment.bodyJson)
+    const content = trimBlocks(editorRef.current?.getContent() ?? [])
+    // an older comment can still have empty lines around its text: removing them alone is no edit
+    const before = shown ?? comment.bodyJson
+    const changed = dirty.current && !(before && contentEquals(content, trimBlocks(before)))
     const action = commentSaveAction({ content, changed, hasAttachments: (comment.attachments?.length ?? 0) > 0 })
     if (action === 'confirm-delete') {
       setConfirmDelete(true)
