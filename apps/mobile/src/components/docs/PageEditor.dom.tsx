@@ -9,6 +9,7 @@ import './PageEditor.css'
 
 import { withCollaboration } from '@blocknote/core/yjs'
 import { BlockNoteViewRaw, useCreateBlockNote } from '@blocknote/react'
+import { setEditableInPlace } from '@orbit/editor/editable'
 import { commentMarks } from '@orbit/editor/commentMarks'
 import { CollabSession, type CollabProblem, type CollabState } from '@orbit/editor/collab/session'
 import { collabSocket, COLLAB_FRAGMENT } from '@orbit/editor/collab/target'
@@ -315,6 +316,10 @@ function Editor({ connection, editable, theme, server, actions, editorRef }: Edi
 
   useEffect(() => watchDeletedFiles(editor, (url) => actions.current.fileDeleted(url)), [editor])
 
+  // The view mounts once, with the first value; later changes switch the mounted editor (see `setEditableInPlace`).
+  const [mountEditable] = useState(editable)
+  useEffect(() => setEditableInPlace(editor, editable), [editor, editable])
+
   useEffect(() => {
     editorRef.current = editor
     let last = ''
@@ -350,7 +355,7 @@ function Editor({ connection, editable, theme, server, actions, editorRef }: Edi
     <div ref={rootRef} className="orbit-editor-root">
       <BlockNoteViewRaw
         editor={editor}
-        editable={editable}
+        editable={mountEditable}
         theme={theme}
         formattingToolbar={false}
         linkToolbar={false}

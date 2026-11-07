@@ -29,6 +29,7 @@ import { cn } from 'cn'
 import { collabBlockPresence } from '../collab/blockPresence'
 import { renderCollabCursor } from '../collab/cursor'
 import { ImageZoomButton } from './ImageZoomButton'
+import { setEditableInPlace } from '@orbit/editor/editable'
 import { internalPageLinkId, isSafeLinkHref } from '@orbit/editor/links'
 import { linkMentions, pastedFilesToCopy, toEditorContent, toStoredContent, type FileScope, type FileToCopy } from './content'
 import { insertPageBlock } from './pageBlockCommands'
@@ -332,6 +333,13 @@ function PageEditorInner({
     latest.setEditor(editor)
   }, [latest, editor])
 
+  // The view mounts once, with the first value; later changes switch the mounted editor (see `setEditableInPlace`).
+  const [mountEditable] = useState(editable)
+  const viewShown = !collab || threadsSettled
+  useEffect(() => {
+    if (viewShown) setEditableInPlace(editor, editable)
+  }, [editor, editable, viewShown])
+
   // A file an admin deleted answers 410: its file block says so.
   useEffect(() => watchDeletedFiles(editor, isDeletedFile), [editor])
 
@@ -443,7 +451,7 @@ function PageEditorInner({
       <div className="contents" onClickCapture={onClickCapture} onKeyDownCapture={onKeyDownCapture}>
         <ThemedBlockNoteView
           editor={editor}
-          editable={editable}
+          editable={mountEditable}
           theme={theme}
           data-slot="page-editor"
           className={cn(
