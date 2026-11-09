@@ -1456,6 +1456,39 @@ async fn a_row_trashed_alone_restores_into_its_database_wherever_it_moved() {
     );
     fixture.restore_page(row_id).await;
     assert_eq!(names(&fixture.database(&db).await["rows"]), ["Row"]);
+
+    // Once the database is deleted forever, the row has nothing to rejoin: it comes back as a
+    // plain page at the top level of its space.
+    fixture.trash_page(row_id).await;
+    fixture.trash_page(&db).await;
+    let (_, trash) = fixture.call("GET", "pages/trash", None).await;
+    let db_version = trash["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == db.as_str())
+        .unwrap()["version"]
+        .clone();
+    fixture
+        .ok(
+            "DELETE",
+            &format!("pages/{db}/permanent?expected_version={db_version}"),
+            None,
+        )
+        .await;
+    fixture.restore_page(row_id).await;
+    let orphan = fixture.page(row_id).await;
+    assert_eq!(
+        (
+            orphan["parent_id"].as_str(),
+            orphan["database_id"].as_str(),
+            orphan["private"].as_bool()
+        ),
+        (None, None, Some(true)),
+        "{orphan}"
+    );
+    let (_, tree) = fixture.call("GET", "pages", None).await;
+    assert_eq!(names(&tree["items"]), ["Row"]);
 }
 
 #[tokio::test]
