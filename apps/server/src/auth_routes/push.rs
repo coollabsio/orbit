@@ -8,8 +8,10 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use super::{ApiError, ApiJson, AuthState, ProblemBody, authenticate};
+use crate::push::apns::{self, ApnsEnvironment};
 use crate::push::{
-    Notice, NotificationPrefs, PushService, PushSubscriptionRecord, allowed_endpoint, webpush,
+    ApnsDeviceRecord, Notice, NotificationPrefs, PushService, PushSubscriptionRecord,
+    allowed_endpoint, webpush,
 };
 
 #[derive(Serialize, ToSchema)]
@@ -114,9 +116,95 @@ pub(super) async fn delete_push_subscription(
     Ok(StatusCode::NO_CONTENT)
 }
 
+#[utoipa::path(get, path = "/api/v1/push/apns", responses((status = 200, body = Vec<ApnsDeviceRecord>), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json")))]
+pub(super) async fn list_apns_devices(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<Vec<ApnsDeviceRecord>>, ApiError> {
+    let instance = "/api/v1/push/apns";
+    let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
+    PushService::of(state.repository.database())
+        .apns_devices(session.user.id)
+        .await
+        .map(Json)
+        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ApnsDeviceBody {
+    /// The APNs device token of the app, hex.
+    token: String,
+    /// `sandbox` for a development build, `production` for the App Store and TestFlight.
+    environment: ApnsEnvironment,
+    /// What the list of devices shows, e.g. "iPhone · iOS 26.1".
+    label: String,
+}
+
+#[utoipa::path(post, path = "/api/v1/push/apns", request_body = ApnsDeviceBody, responses((status = 200, body = ApnsDeviceRecord), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json"), (status = 422, description = "invalid_token", body = ProblemBody, content_type = "application/problem+json"), (status = 503, description = "push_not_configured", body = ProblemBody, content_type = "application/problem+json")))]
+pub(super) async fn create_apns_device(
+    State(state): State<AuthState>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<ApnsDeviceBody>,
+) -> Result<Json<ApnsDeviceRecord>, ApiError> {
+    let instance = "/api/v1/push/apns";
+    let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
+    let push = PushService::of(state.repository.database());
+    if !push.apns_enabled() {
+        return Err(ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "push_not_configured",
+            "Push not configured",
+            "This server has no APNs key, so it cannot send notifications to iPhones.",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
+    let Some(token) = apns::parse_token(&body.token) else {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "invalid_token",
+            "Invalid device token",
+            "The device token is not an APNs token.",
+            instance,
+            request_id.as_ref(),
+        ));
+    };
+    let label: String = body.label.trim().chars().take(120).collect();
+    push.register_apns(
+        session.user.id,
+        session.id,
+        &token,
+        body.environment,
+        &label,
+        TimestampMillis::now(),
+    )
+    .await
+    .map(Json)
+    .map_err(|_| ApiError::internal(instance, request_id.as_ref()))
+}
+
+#[utoipa::path(delete, path = "/api/v1/push/apns/{id}", params(("id" = String, Path)), responses((status = 204), (status = 401, description = "authentication_required", body = ProblemBody, content_type = "application/problem+json")))]
+pub(super) async fn delete_apns_device(
+    State(state): State<AuthState>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<StatusCode, ApiError> {
+    let instance = "/api/v1/push/apns/{id}";
+    let session = authenticate(&state, &headers, instance, request_id.as_ref()).await?;
+    PushService::of(state.repository.database())
+        .unregister_apns(session.user.id, &id)
+        .await
+        .map_err(|_| ApiError::internal(instance, request_id.as_ref()))?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
 #[derive(Serialize, ToSchema)]
 pub(super) struct TestPushResult {
-    /// How many of the user's browsers took the push.
+    /// How many of the user's browsers and phones took the push.
     sent: usize,
 }
 

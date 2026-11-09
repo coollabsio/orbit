@@ -38,6 +38,11 @@ Orbit reads its configuration only from environment variables that start with `O
 | `ORBIT_TRIAL_TASKS` | `50` | The most tasks (not counting the trash) a workspace holds during its trial. A whole number, 0 or more. Only with `ORBIT_CLOUD=true`. |
 | `ORBIT_TRIAL_PAGES` | `20` | The most pages (not counting the trash) a workspace holds during its trial. A whole number, 0 or more. Only with `ORBIT_CLOUD=true`. |
 | `ORBIT_TRIAL_MEMBERS` | `3` | The most members, pending invitations included, a workspace holds during its trial. A whole number, 1 or more (the owner counts). Only with `ORBIT_CLOUD=true`. |
+| `ORBIT_APNS_KEY` | none (iOS pushes off) | The text of the APNs auth key (`AuthKey_<key id>.p8`, PEM) from the Apple developer account, for native iOS push notifications. Set it with `ORBIT_APNS_KEY_ID` and `ORBIT_APNS_TEAM_ID`. See [iOS push notifications (APNs)](#ios-push-notifications-apns). |
+| `ORBIT_APNS_KEY_FILE` | none | The path of a file that contains the APNs key, instead of `ORBIT_APNS_KEY`. Do not set both. |
+| `ORBIT_APNS_KEY_ID` | none | The 10-character key ID of the APNs key. |
+| `ORBIT_APNS_TEAM_ID` | none | The 10-character team ID of the Apple developer account. |
+| `ORBIT_APNS_TOPIC` | `io.coollabs.orbit` | The bundle ID of the iOS app. |
 
 Create the app key once with `openssl rand -base64 32` and keep a copy outside the server. Orbit does not start without it. See [Email, registration and the app key](#email-registration-and-the-app-key).
 
@@ -119,11 +124,23 @@ A person changes their email in **Account → Profile** (needs a mail server). O
 
 Without a mail server, Profile tells the person to ask an administrator. An admin opens **Admin → Users → Manage → Change email**, which works with or without a mail server. The new address is set at once and marked verified, and no confirmation email is sent, so confirm who is asking first. The person is signed out everywhere, and pending email change and password reset links stop working. If a mail server is saved, the old address gets the same notice. On Orbit Cloud this action needs a mail server (`409 smtp_required`), and both addresses get an email: the old one the notice, the new one "An Orbit administrator set this address as the email of your account". An admin can change their own email there too and stays signed in on the current device. The same rules as the other account actions apply: nobody can change the root account's email except the root user, and only the root user can change another admin's. A taken address answers `409 email_taken`, a deleted account `409 account_deleted`. The audit log records `account.email_changed` with the admin as the actor.
 
-A person can also delete their account in **Account → Profile**, after typing their email and their password (or a fresh sign-in). Orbit refuses while they own a workspace outside the trash (`409 owns_workspaces`, delete those first) and for the root user (`409 root_account`). The account row stays so tasks, comments and messages keep their author, but it is anonymized: the name becomes "Deleted user", the email becomes `deleted-<id>@deleted.invalid` (so the address can register again), and the password, second factors, passkeys, connected accounts, sessions, OAuth grants, personal API tokens, push subscriptions, avatar, profile fields and memberships are removed. **Admin → Users** shows it as **Deleted**; it can never be reinstated (`409 account_deleted`). The audit log has `account.deleted`.
+A person can also delete their account in **Account → Profile**, after typing their email and their password (or a fresh sign-in). Orbit refuses while they own a workspace outside the trash (`409 owns_workspaces`, delete those first) and for the root user (`409 root_account`). The account row stays so tasks, comments and messages keep their author, but it is anonymized: the name becomes "Deleted user", the email becomes `deleted-<id>@deleted.invalid` (so the address can register again), and the password, second factors, passkeys, connected accounts, sessions, OAuth grants, personal API tokens, push subscriptions and registered phones, avatar, profile fields and memberships are removed. **Admin → Users** shows it as **Deleted**; it can never be reinstated (`409 account_deleted`). The audit log has `account.deleted`.
 
 Saved secrets (the SMTP password, GitHub App keys, Notion and Asana import tokens, Linear import API keys, Trello import API keys and tokens) are encrypted with the app key. `ORBIT_APP_KEY` (base64 of 32 random bytes, from `openssl rand -base64 32`) is required. Orbit does not create a key. Keep a copy outside the server and its backups: a database restored without the same key cannot read its saved secrets, and the root user must enter them again. Users with two-factor authentication must set it up again.
 
 Older versions created an `app.key` file beside the SQLite database. If that file still exists, Orbit starts only when `ORBIT_APP_KEY` holds the same key. Set `ORBIT_APP_KEY` to the contents of the file, start Orbit, and then you can delete the file.
+
+## iOS push notifications (APNs)
+
+Browsers get Web Push without any setup. The iOS app gets notifications through Apple's push service (APNs) only when the server has an APNs auth key:
+
+1. In the Apple developer account, open **Certificates, Identifiers & Profiles → Keys**, create a key with **Apple Push Notifications service (APNs)**, and download `AuthKey_<key id>.p8` (Apple lets you download it once).
+2. Set `ORBIT_APNS_KEY_FILE` to the path of that file (or `ORBIT_APNS_KEY` to its text), `ORBIT_APNS_KEY_ID` to the key ID and `ORBIT_APNS_TEAM_ID` to the team ID. Set `ORBIT_APNS_TOPIC` only for a build with another bundle ID.
+3. Restart Orbit. `orbit config show` lists the APNs variables (the key redacted). Orbit does not start when the key is not a `.p8` key, or when only some of the three variables are set.
+
+One key sends to both APNs hosts: the app tells the server whether its device token is for `production` (App Store and TestFlight) or `sandbox` (development builds). Without a key, the app's registration (`POST /api/v1/push/apns`) answers `503 push_not_configured`, and Web Push works as before.
+
+A phone gets pushes like a browser: only while the session that registered it is valid, and not while the person is active in an open tab or in the app (its live connection). Revoking or deleting the session stops them. APNs answers for a token that is no longer valid (`410`, `BadDeviceToken`, `DeviceTokenNotForTopic`) remove the phone; the app registers it again when it starts. Other refusals (for example `403 InvalidProviderToken` for a wrong key ID or team ID) are logged as `APNs push not sent` and keep the phone.
 
 ## Sign in with Google and GitHub
 

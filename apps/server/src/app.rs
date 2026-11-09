@@ -659,6 +659,10 @@ impl App {
         });
         let push = crate::push::PushService::of(&self.database);
         push.set_origin(&self.config.http.public_origin);
+        if let Some(apns) = &self.config.apns {
+            let client = crate::push::apns::ApnsClient::new(apns).map_err(AppError::Background)?;
+            push.set_apns_sender(std::sync::Arc::new(client));
+        }
         let token = service_shutdown.clone();
         spawn_service(&mut services, "push inbox", async move {
             push.run_inbox_service(token).await

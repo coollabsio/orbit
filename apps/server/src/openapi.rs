@@ -37,6 +37,9 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::auth_routes::push::list_push_subscriptions,
         crate::auth_routes::push::create_push_subscription,
         crate::auth_routes::push::delete_push_subscription,
+        crate::auth_routes::push::list_apns_devices,
+        crate::auth_routes::push::create_apns_device,
+        crate::auth_routes::push::delete_apns_device,
         crate::auth_routes::push::send_test_push,
         crate::auth_routes::push::get_notification_preferences,
         crate::auth_routes::push::put_notification_preferences,
@@ -672,6 +675,10 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         }
         "put_status" => add_code(&mut responses, "422", "invalid_status"),
         "create_push_subscription" => add_code(&mut responses, "422", "invalid_subscription"),
+        "create_apns_device" => {
+            add_code(&mut responses, "422", "invalid_token");
+            add_code(&mut responses, "503", "push_not_configured");
+        }
         "put_shortcuts" => add_code(&mut responses, "422", "invalid_shortcuts"),
         "change_password" => {
             add_code(&mut responses, "401", "invalid_credentials");
@@ -1090,6 +1097,7 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "update_me"
             | "put_status"
             | "create_push_subscription"
+            | "create_apns_device"
             | "put_notification_preferences"
             | "put_shortcuts"
             | "change_password"

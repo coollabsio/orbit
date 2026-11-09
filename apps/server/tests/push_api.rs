@@ -6,6 +6,7 @@ use futures_util::future::BoxFuture;
 use orbit_platform::{AuthenticatedUser, Id, PasswordService, TestDatabase, TimestampMillis};
 use orbit_server::auth_routes::{AuthState, CookieMode, auth_router};
 use orbit_server::live::LiveHub;
+use orbit_server::push::apns::{ApnsDevice, ApnsMessage, ApnsSender};
 use orbit_server::push::{
     Notice, PushKind, PushSender, PushService, SendError, Subscription, Vapid,
 };
@@ -50,6 +51,43 @@ impl PushSender for FakeSender {
             Ok(())
         };
         Box::pin(async move { result })
+    }
+}
+
+/// Records the pushes to phones. A token that starts with "dead" answers as one APNs no longer
+/// takes, one that starts with "b0" is busy the first time.
+#[derive(Default)]
+struct FakeApns {
+    sent: Mutex<Vec<(ApnsDevice, ApnsMessage)>>,
+    tried: Mutex<Vec<String>>,
+}
+
+impl ApnsSender for FakeApns {
+    fn send(
+        &self,
+        device: ApnsDevice,
+        message: ApnsMessage,
+    ) -> BoxFuture<'static, Result<(), SendError>> {
+        let earlier = {
+            let mut tried = self.tried.lock().unwrap();
+            tried.push(device.token.clone());
+            tried.iter().filter(|token| **token == device.token).count() - 1
+        };
+        let result = if device.token.starts_with("dead") {
+            Err(SendError::Gone)
+        } else if device.token.starts_with("b0") && earlier == 0 {
+            Err(SendError::Busy("busy".to_owned()))
+        } else {
+            self.sent.lock().unwrap().push((device, message));
+            Ok(())
+        };
+        Box::pin(async move { result })
+    }
+}
+
+impl FakeApns {
+    fn sent(&self) -> Vec<(ApnsDevice, ApnsMessage)> {
+        std::mem::take(&mut self.sent.lock().unwrap())
     }
 }
 
@@ -181,6 +219,18 @@ impl Fixture {
     async fn subscribe(&self, cookie: &str, endpoint: &str) -> (StatusCode, Value) {
         let body = json!({ "endpoint": endpoint, "p256dh": KEY, "auth": AUTH, "label": "Firefox on Linux" });
         self.send("POST", "/api/v1/push/subscriptions", cookie, Some(body))
+            .await
+    }
+
+    async fn register_apns(
+        &self,
+        cookie: &str,
+        token: &str,
+        environment: &str,
+    ) -> (StatusCode, Value) {
+        let body =
+            json!({ "token": token, "environment": environment, "label": "iPhone · iOS 26.1" });
+        self.send("POST", "/api/v1/push/apns", cookie, Some(body))
             .await
     }
 
@@ -579,4 +629,131 @@ async fn a_busy_push_service_gets_the_push_again_and_a_subscription_that_keeps_f
         .unwrap();
     fixture.push.push(owner, &notice()).await.unwrap();
     assert_eq!(failures(busy).await, Some(0));
+}
+
+#[tokio::test]
+async fn phones_register_with_apns_get_pushes_and_go_with_their_token_or_session() {
+    let fixture = Fixture::new().await;
+    let (ada, ada_cookie) = fixture.member("ada").await;
+    let owner = &fixture.owner_cookie;
+    let good = "AB".repeat(32);
+    let dead = format!("dead{}", "00".repeat(30));
+    let busy = format!("b0{}", "11".repeat(31));
+
+    // A server without an APNs key says so.
+    let (status, problem) = fixture.register_apns(owner, &good, "production").await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(problem["code"], "push_not_configured");
+
+    let apns = Arc::new(FakeApns::default());
+    fixture.push.set_apns_sender(apns.clone());
+    for token in ["abc".to_owned(), "zz".repeat(32), "a".repeat(63)] {
+        let (status, problem) = fixture.register_apns(owner, &token, "production").await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(problem["code"], "invalid_token");
+    }
+    let (status, _) = fixture.register_apns(owner, &good, "staging").await;
+    assert_eq!(status.as_u16() / 100, 4);
+
+    let (status, record) = fixture.register_apns(owner, &good, "sandbox").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(record["label"], "iPhone · iOS 26.1");
+    assert_eq!(record["environment"], "sandbox");
+    assert!(record["created_at"].is_string());
+    // The same phone again, now a production build: still one row, the same id.
+    let (_, again) = fixture.register_apns(owner, &good, "production").await;
+    assert_eq!(again["id"], record["id"]);
+    fixture.register_apns(owner, &dead, "production").await;
+    fixture.register_apns(owner, &busy, "production").await;
+    let (_, list) = fixture.send("GET", "/api/v1/push/apns", owner, None).await;
+    assert_eq!(list.as_array().unwrap().len(), 3);
+    let (_, list) = fixture
+        .send("GET", "/api/v1/push/apns", &ada_cookie, None)
+        .await;
+    assert!(list.as_array().unwrap().is_empty());
+
+    // A test push reaches the good phone and, on the second try, the busy one; APNs no longer
+    // takes the dead token, so it goes.
+    let (_, result) = fixture.send("POST", "/api/v1/push/test", owner, None).await;
+    assert_eq!(result["sent"], 2);
+    let mut sent = apns.sent();
+    sent.sort_by(|a, b| a.0.token.cmp(&b.0.token));
+    assert_eq!(sent.len(), 2);
+    let (device, message) = &sent[0];
+    assert_eq!(device.token, "ab".repeat(32));
+    assert_eq!(device.environment.as_str(), "production");
+    assert_eq!(message.collapse_id, "test");
+    let payload: Value = serde_json::from_slice(&message.payload).unwrap();
+    assert_eq!(
+        payload,
+        json!({ "aps": { "alert": { "title": "Orbit", "body": "Push notifications work on this device." },
+            "sound": "default", "thread-id": "test" }, "url": "/profile/notifications" })
+    );
+    assert_eq!(sent[1].0.token, busy);
+    let (_, list) = fixture.send("GET", "/api/v1/push/apns", owner, None).await;
+    assert_eq!(list.as_array().unwrap().len(), 2);
+
+    // Somebody else cannot remove a phone; its owner can.
+    let uri = format!("/api/v1/push/apns/{}", record["id"].as_str().unwrap());
+    let (status, _) = fixture.send("DELETE", &uri, &ada_cookie, None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, list) = fixture.send("GET", "/api/v1/push/apns", owner, None).await;
+    assert_eq!(list.as_array().unwrap().len(), 2);
+    fixture.send("DELETE", &uri, owner, None).await;
+    let (_, list) = fixture.send("GET", "/api/v1/push/apns", owner, None).await;
+    assert_eq!(list.as_array().unwrap().len(), 1);
+
+    // A phone signed in to another account: the token moves to that user and session.
+    fixture
+        .register_apns(&ada_cookie, &busy, "production")
+        .await;
+    let (_, list) = fixture.send("GET", "/api/v1/push/apns", owner, None).await;
+    assert!(list.as_array().unwrap().is_empty());
+    fixture
+        .push
+        .notify(ada, PushKind::DirectMessages, &notice())
+        .await
+        .unwrap();
+    assert_eq!(apns.sent().len(), 1);
+
+    // An active live tab gets the signal and no phone gets a push.
+    let hub = LiveHub::of(&fixture.database);
+    let tab = hub.connect(fixture.workspace_id, ada, UserStatus::default());
+    fixture
+        .push
+        .notify(ada, PushKind::DirectMessages, &notice())
+        .await
+        .unwrap();
+    assert!(apns.sent().is_empty());
+    // The app went to the background (`{"type":"activity","idle":false,"away":true}`).
+    hub.set_away(fixture.workspace_id, tab.id, ada, true);
+    fixture
+        .push
+        .notify(ada, PushKind::DirectMessages, &notice())
+        .await
+        .unwrap();
+    let sent = apns.sent();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0].1.collapse_id, "chat:1");
+    hub.disconnect(fixture.workspace_id, tab.id, ada);
+
+    // A revoked session gets no pushes; a deleted one takes its phone with it.
+    sqlx::query("UPDATE sessions SET revoked_at = 1 WHERE user_id = $1")
+        .bind(ada.to_string())
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let sent = fixture.push.push(ada, &notice()).await.unwrap();
+    assert_eq!(sent, 0);
+    assert!(apns.sent().is_empty());
+    sqlx::query("DELETE FROM sessions WHERE user_id = $1")
+        .bind(ada.to_string())
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let left: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM apns_devices")
+        .fetch_one(fixture.database.pool())
+        .await
+        .unwrap();
+    assert_eq!(left, 0);
 }

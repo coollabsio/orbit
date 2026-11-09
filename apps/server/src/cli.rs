@@ -1341,6 +1341,15 @@ pub fn redacted_config(config: &Config) -> String {
         }
         None => lines.push("ORBIT_CLOUD=false".to_owned()),
     }
+    match &config.apns {
+        Some(apns) => lines.extend([
+            "ORBIT_APNS_KEY=[REDACTED]".to_owned(),
+            format!("ORBIT_APNS_KEY_ID={}", apns.key_id),
+            format!("ORBIT_APNS_TEAM_ID={}", apns.team_id),
+            format!("ORBIT_APNS_TOPIC={}", apns.topic),
+        ]),
+        None => lines.push("# ORBIT_APNS_KEY is not set: no native iOS pushes".to_owned()),
+    }
     lines.join("\n")
 }
 

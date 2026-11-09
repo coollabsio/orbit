@@ -147,6 +147,37 @@ export type ApiTokenRecord = {
  */
 export type ApiTokenScope = 'tasks:read' | 'tasks:write' | 'docs:read' | 'docs:write' | 'chat:read';
 
+export type ApnsDeviceBody = {
+    /**
+     * `sandbox` for a development build, `production` for the App Store and TestFlight.
+     */
+    environment: ApnsEnvironment;
+    /**
+     * What the list of devices shows, e.g. "iPhone · iOS 26.1".
+     */
+    label: string;
+    /**
+     * The APNs device token of the app, hex.
+     */
+    token: string;
+};
+
+/**
+ * A phone the user gets pushes on through APNs.
+ */
+export type ApnsDeviceRecord = {
+    created_at: string;
+    environment: ApnsEnvironment;
+    id: string;
+    label: string;
+};
+
+/**
+ * Which APNs a device token belongs to: `sandbox` for development builds, `production` for the
+ * App Store and TestFlight.
+ */
+export type ApnsEnvironment = 'production' | 'sandbox';
+
 /**
  * An Asana import. Never contains the token.
  */
@@ -5046,7 +5077,7 @@ export type TeamspaceUpdateBody = {
 
 export type TestPushResult = {
     /**
-     * How many of the user's browsers took the push.
+     * How many of the user's browsers and phones took the push.
      */
     sent: number;
 };
@@ -11212,6 +11243,168 @@ export type PutNotificationPreferencesResponses = {
 };
 
 export type PutNotificationPreferencesResponse = PutNotificationPreferencesResponses[keyof PutNotificationPreferencesResponses];
+
+export type ListApnsDevicesData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/push/apns';
+};
+
+export type ListApnsDevicesErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type ListApnsDevicesError = ListApnsDevicesErrors[keyof ListApnsDevicesErrors];
+
+export type ListApnsDevicesResponses = {
+    200: Array<ApnsDeviceRecord>;
+};
+
+export type ListApnsDevicesResponse = ListApnsDevicesResponses[keyof ListApnsDevicesResponses];
+
+export type CreateApnsDeviceData = {
+    body: ApnsDeviceBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path?: never;
+    query?: never;
+    url: '/api/v1/push/apns';
+};
+
+export type CreateApnsDeviceErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * invalid_token
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * push_not_configured
+     */
+    503: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type CreateApnsDeviceError = CreateApnsDeviceErrors[keyof CreateApnsDeviceErrors];
+
+export type CreateApnsDeviceResponses = {
+    200: ApnsDeviceRecord;
+};
+
+export type CreateApnsDeviceResponse = CreateApnsDeviceResponses[keyof CreateApnsDeviceResponses];
+
+export type DeleteApnsDeviceData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        id: string;
+    };
+    query?: never;
+    url: '/api/v1/push/apns/{id}';
+};
+
+export type DeleteApnsDeviceErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type DeleteApnsDeviceError = DeleteApnsDeviceErrors[keyof DeleteApnsDeviceErrors];
+
+export type DeleteApnsDeviceResponses = {
+    204: void;
+};
+
+export type DeleteApnsDeviceResponse = DeleteApnsDeviceResponses[keyof DeleteApnsDeviceResponses];
 
 export type GetPushKeyData = {
     body?: never;
