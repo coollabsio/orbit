@@ -816,3 +816,32 @@ test('a thread link for a row opens the comments of the row in the peek, not on 
   await waitFor(() => expect(search(view)).not.toContain('thread='))
   expect(search(view)).toContain('row=r1')
 })
+
+test('"Open" on a row puts ?row= in the URL and shows the peek; its property list has one line per property, "Empty" for a missing value, and a checkbox toggle is one PATCH; closing drops ?row=', async () => {
+  let done = false
+  const { view, calls } = setup('/docs/db', (call) => {
+    if (call.path === '/pages') return Response.json({ items: [databaseSummary] })
+    if (call.path === '/pages/db') return Response.json(fullPage('db', { title: 'Research', kind: 'database' }))
+    if (call.path === '/databases/db') return Response.json(databaseDetail([databaseRow('r1', 'Paper A', done ? { 'p-done': true } : {})]))
+    if (call.path === '/pages/r1') return Response.json(rowPage('r1', 'Paper A'))
+    if (call.method === 'PATCH' && call.path === '/databases/db/rows/r1/values') {
+      done = true
+      return Response.json(databaseRow('r1', 'Paper A', { 'p-done': true }))
+    }
+  })
+  fireEvent.click(await view.findByRole('button', { name: 'Open' }))
+  await waitFor(() => expect(search(view)).toContain('row=r1'))
+  const peek = await view.findByRole('complementary', { name: 'Row' })
+  const properties = await within(peek).findByRole('group', { name: 'Properties' })
+  expect(within(properties).getByText('Done')).toBeTruthy()
+  expect(within(properties).getByText('Notes')).toBeTruthy()
+  expect(within(properties).getAllByText('Empty')).toHaveLength(1)
+  const checkbox = within(properties).getByRole('checkbox', { name: 'Done' })
+  expect(checkbox.getAttribute('aria-checked')).toBe('false')
+  await userEvent.click(checkbox)
+  await waitFor(() => expect(calls.filter((call) => call.method === 'PATCH' && call.path === '/databases/db/rows/r1/values')).toHaveLength(1))
+  expect(calls.find((call) => call.method === 'PATCH' && call.path === '/databases/db/rows/r1/values')?.body).toEqual({ 'p-done': true })
+  await waitFor(() => expect(within(properties).getByRole('checkbox', { name: 'Done' }).getAttribute('aria-checked')).toBe('true'))
+  fireEvent.click(within(peek).getByRole('button', { name: 'Close row' }))
+  await waitFor(() => expect(search(view)).not.toContain('row='))
+})
