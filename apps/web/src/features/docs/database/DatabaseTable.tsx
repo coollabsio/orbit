@@ -478,7 +478,7 @@ export function DatabaseTable(props: DatabaseTableProps) {
                           variant="outline"
                           size="xs"
                           data-open-row=""
-                          className="absolute top-1/2 right-1.5 h-6 -translate-y-1/2 gap-1 bg-background px-1.5 text-xs text-muted-foreground hover-fine:opacity-0 hover-fine:group-hover/row:opacity-100"
+                          className="absolute inset-y-0 right-1.5 my-auto h-6 gap-1 bg-background px-1.5 text-xs text-muted-foreground hover-fine:opacity-0 hover-fine:group-hover/row:opacity-100"
                           onClick={() => onOpenRow(row.id)}
                         >
                           <ArrowUpRight className="size-3" />
