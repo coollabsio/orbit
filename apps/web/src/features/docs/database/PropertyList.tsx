@@ -109,10 +109,7 @@ function PropertyLine({ property, row }: { property: Property; row: Row }) {
             onCommit={commit}
             onTitle={() => {}}
             onOptions={canEditSchema ? saveOptions : undefined}
-            onClose={() => {
-              setEditing(false)
-              anchor?.focus()
-            }}
+            onClose={() => setEditing(false)}
           />
         ) : null}
       </div>
