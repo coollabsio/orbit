@@ -27,8 +27,11 @@ sub-pages (`apps/server/src/notion/scan.rs:28`).
   property type, resize, hide and reorder columns, multi-column sort, a flat AND filter, search in
   the view, manual row order (drag) when the view has no sorts, multi-row select and delete,
   keyboard navigation.
-- **Saved views:** more than one table view per database, shown as tabs. Each view has its own
-  columns, sorts and filter.
+- **Board view:** columns by a `select` or `status` property, cards with the title and chosen
+  properties, drag cards between and inside columns, reorder and hide columns (section 7.7).
+- **Saved views:** more than one table or board view per database, shown as tabs. Each view has
+  its own columns (or groups and card properties), sorts and filter. The "+" picker lists the
+  other Notion layouts as "Soon".
 - **Row page:** opens in a side peek from the table, or as a full page. A property list shows
   under the title.
 - **Mobile:** a database screen with a row list, a view picker and the row page with editable
@@ -38,7 +41,7 @@ sub-pages (`apps/server/src/notion/scan.rs:28`).
 
 | Phase | Item |
 |---|---|
-| P2 | Inline database block, linked views, board view, calculation footer, AND/OR filter groups, row templates, property values in search, CSV import and export, moving pages into and out of a database |
+| P2 | Inline database block, linked views, board grouped by `person`, sub-groups (swim lanes), calculation footer, AND/OR filter groups, row templates, property values in search, CSV import and export, moving pages into and out of a database |
 | P3 | Relation, rollup, formula, files, email, phone, unique ID, button; gallery, calendar, timeline and list views; MCP and token API tools for databases; form view |
 
 ## 3. Concepts
@@ -48,7 +51,7 @@ sub-pages (`apps/server/src/notion/scan.rs:28`).
 | Database | A page with `kind = 'database'`. It has no BlockNote body in P1. It has properties, views and rows. |
 | Row | A page whose parent is a database page. The row title is the `title` property. |
 | Property | One typed column of a database. It has a stable id, so a rename does not break views. |
-| View | A saved way to show the rows: type (`table` in P1), columns, sorts, filter. All members who can edit the database share the views. |
+| View | A saved way to show the rows: type (`table` or `board` in P1), columns or groups, sorts, filter. All members who can edit the database share the views. |
 
 A database lives in a space (teamspace or private) like any page. Its rows inherit the space and
 the access of the database page, as sub-pages do today.
@@ -177,6 +180,36 @@ converted and will be cleared"); otherwise the type changes at once.
 - Max 10 sorts and 20 filter rules for each view. All rules must match (AND). AND/OR groups are P2.
 - A rule or sort that names a deleted property is dropped when the view loads and when it saves.
 
+A **board** view (`type = 'board'`, migration `0079_database_board_views.sql` widens the `type`
+check; SQLite rebuilds `database_views` as `0021` does) uses the same `sorts` and `filter`, and
+four more fields (a table view ignores them; empty ones are left out of the JSON):
+
+```json
+{
+  "group_by": "<select or status property id>",
+  "group_order": ["opt_2", null, "opt_1"],
+  "hidden_groups": [null],
+  "card_properties": ["<property id>", "…"]
+}
+```
+
+- `group_by` must name a `select` or `status` property (422 `config.group_by` for another type).
+  A `person` group is P2: a row can have several people, so one card would sit in several
+  columns.
+- `group_order` lists option ids in column order, with `null` for the "No <property>" column.
+  Options missing from it follow in option order; "No <property>" comes first unless it is placed.
+  A status board has no "No <property>" column: a row with no status sits in the first `todo`
+  option, as the table shows it.
+- `hidden_groups` lists the columns shown under "Hidden groups". `card_properties` lists the
+  properties on each card, after the title (which always shows).
+- **Repair** on load and save, as for the other fields: unknown options and repeats leave
+  `group_order` and `hidden_groups`, unknown properties and the title leave `card_properties`. A
+  board whose `group_by` is missing, deleted or no longer a select or status groups by the first
+  `status` property, else the first `select`, else none (the client shows "Choose a property to
+  group by"); a changed `group_by` resets `group_order` and `hidden_groups`. A new board gets its
+  group property the same way.
+- A duplicate keeps its source's type.
+
 Filter operators:
 
 | Types | Operators |
@@ -220,13 +253,13 @@ route to the OpenAPI document and run `just api`, so `@orbit/api` gets the gener
 | `POST /databases/{database_id}/properties` | `{name, type, config?, position?}`, or `{duplicate_of, name?}` (with `type`, `config` or `position`: 422) | The property; it is added to all views. A duplicate copies the config (new option ids) and the values, and goes right after its source, among the properties and in every view; its name defaults to "<name> (copy)" |
 | `PATCH /databases/{database_id}/properties/{property_id}` | `{name?, type?, config?, position?, dry_run?}`; `type` and `config` cannot be in the same request (422) | `{property, converted, cleared}`; `dry_run: true` returns them without saving (no audit event, no realtime event) |
 | `DELETE /databases/{database_id}/properties/{property_id}` | — | 204; its values go too; views drop it |
-| `POST /databases/{database_id}/views` | `{name, type: "table", config?, duplicate_of?}` | The view |
+| `POST /databases/{database_id}/views` | `{name, type: "table" \| "board", config?, duplicate_of?}` | The view; with `duplicate_of`, the source's type |
 | `PATCH /databases/{database_id}/views/{view_id}` | `{name?, config?, position?}` | The view |
 | `DELETE /databases/{database_id}/views/{view_id}` | — | 204; 409 for the last view |
 | `POST /databases/{database_id}/rows` | `{title?, icon?, values?, after_row_id?}`; `after_row_id` omitted = last, `null` = first; `values` cannot hold the title or a computed property | The new row |
 | `PATCH /databases/{database_id}/rows/{row_id}/values` | `{"<property_id>": value \| null, …}` | The row |
 | `POST /databases/{database_id}/rows/trash` | `{row_ids: [...]}` (max 500) | 204; one trash batch for each row |
-| `POST /databases/{database_id}/rows/{row_id}/move` | `{after_row_id: id \| null}` | The row (manual order, sets `pages.position`) |
+| `POST /databases/{database_id}/rows/{row_id}/move` | `{after_row_id: id \| null, values?}`; `values` as in `PATCH …/values` | The row (manual order, sets `pages.position`). The values are written in the same transaction, so a board card dropped into another column sets its group value and its place in one request; a bad value moves nothing |
 
 `GET /databases/{database_id}` returns:
 
@@ -333,11 +366,16 @@ shadcn-style code, inline Tailwind, `cva` for variants, reicon outline icons, fl
   start at the same left edge (the page padding, wide enough for the row handles and checkboxes),
   and the table scrolls sideways. The page menu has no "Full width" item.
 - **View tabs:** each tab shows the view icon and name. Click selects. Right-click or "⋯" gives
-  Rename, Duplicate, Delete. "+" adds a table view. The selected view is stored per user in
+  Rename, Duplicate (keeps the type), Delete. "+" opens "Add a new view": a 4 × 2 grid of icon
+  tiles (Table, Board, List, Gallery, Calendar, Timeline, Chart, Form). Table and Board create a
+  view named after the type, made unique ("Board 2"); the others are disabled with a small "Soon".
+  Arrow keys move in the grid, Enter picks, Esc closes. The selected view is stored per user in
   `localStorage` (`orbit:database-view:<database_id>`), and the URL holds it (`?view=<id>`).
 - **Toolbar:** Filter and Sort show a count when they are active (pink text). Search opens an
   inline field that filters the visible rows only for this user (it is not saved). "⋯" opens
-  Properties (show, hide, reorder), Wrap cells, Lock database, Copy link to view. "New" adds a
+  Properties (show, hide, reorder), Wrap cells, Lock database, Copy link to view. On a board, "⋯"
+  has Group by (select and status properties) and Card properties instead of Properties and Wrap
+  cells. "New" adds a
   row at the top of the view and opens it in the side peek; the "▾" part is for templates (P2,
   hidden in P1).
 - **Filter bar:** one chip for each rule, `<property>: <value summary>`. Click opens a popover
@@ -428,6 +466,30 @@ Range select and paste of many cells is P2.
 - The tree shows a database with a table icon (or its own icon) and no expand arrow, because rows
   are not in the tree.
 
+### 7.7 Board
+
+- `DatabaseBoard.tsx`. The rows go through `applyView` (filter, search over the title and the card
+  properties, sort), then `groupRows` (`@orbit/database/board`).
+- **Columns:** 260 px wide, side by side; the page scrolls sideways. The header has the option
+  pill (or "No <property>"), the count, "⋯" (Hide group) and "+" (a card at the top of the
+  column). "+ New" at the bottom adds a card at the end. A new card gets the column's value and
+  the values the filter needs (`newRowValues`), and opens its title field. "Hidden groups" lists
+  the hidden columns after the last one, each with a show button.
+- **Cards:** the title, then each card property that has a value, with the table's `CellView`.
+  A click opens the row (`/docs/<row id>` until the side peek lands).
+- **Drag and drop** as the task board: native HTML5 events, the dragged card stays mounted
+  (faded), and a placeholder shows among the other cards. A drop into another column without
+  sorts is one `POST …/rows/{id}/move` with `values`; inside a column it is a plain move. With
+  sorts, the order in a column follows the sort: only drops into another column count (`PATCH
+  …/values`), and the source column says "Remove sorts to reorder cards". Column headers drag to
+  reorder the groups (`group_order`).
+- Moves are optimistic and roll back with a toast on error. Each column renders 50 cards, then
+  "Show 50 more"; there is no virtualization.
+- **Rules:** cards move and are added only with value access (not in a read-only workspace).
+  Group by, card properties, hidden groups and column order are view changes: shared at once, or
+  local with "Changes are only visible to you" for members who cannot change the view (D1).
+- No group property: "Choose a property to group by", with "Add a Status property".
+
 ## 8. Mobile (`apps/mobile`)
 
 Port the same data and logic (`@orbit/database`, the same API client). Mobile has no wide table,
@@ -505,6 +567,8 @@ Each step ends in a state you can check.
 | D3 | A database page has no body (no description above the table) in P1. | 2026-11-09 |
 | D4 | A `person` property holds Orbit workspace members only, no free text, as in Notion. | 2026-11-09 |
 | D5 | The slash menu item is "Database – full page": it creates a database as a sub-page and inserts a `page` link block. The inline database block is P2. | 2026-11-09 |
+| D6 | The board view moves into P1. It groups by `select` and `status` only; `person` and sub-groups are P2. Its settings live in `config_json` next to the table settings, not in a separate table. | 2026-11-09 |
+| D7 | A card move is one request: `POST …/rows/{id}/move` takes optional `values` and writes them with the new place in one transaction, so a failed value never leaves a card half moved. | 2026-11-09 |
 
 ## 14. P2: Notion import
 
@@ -544,7 +608,7 @@ source as an Orbit database. Before, it made a static table page with the rows a
 | `relation` | `text` with the titles of the related pages (`relation_titles`). More than 25 come from the property-item endpoint. |
 | `unique_id` | `text` (`PREFIX-N`) |
 | `button`, `verification`, `place`, unknown | Skipped (`property:<type>`) |
-| Views | One `table` view for each view of the data source, with the same name and order. Columns (order, width, hidden), wrap, sorts and the AND part of the filter are kept. Filter parts in an OR group of more than one condition, or with no Orbit operator, are dropped (`view_filter`). Timestamp sorts are dropped (`view_sort`). Other layouts become tables (`view_type:<type>`). When the views cannot be read, the database gets one "Table" view (`views_unavailable`). |
+| Views | One view for each view of the data source, with the same name and order. Columns (order, width, hidden), wrap, sorts and the AND part of the filter are kept. Filter parts in an OR group of more than one condition, or with no Orbit operator, are dropped (`view_filter`). Timestamp sorts are dropped (`view_sort`). A `board` view stays a board: it groups by the same property when that property became a `select` or `status` (else the first status or select), and its visible properties become the card properties. Other layouts become tables (`view_type:<type>`). When the views cannot be read, the database gets one "Table" view (`views_unavailable`). |
 | Rows | Rows of the database, in Notion's order (oldest first). The body converts as for pages, without the old property table. At most 5,000 rows (`rows_truncated`). |
 | Inline database | A database sub-page of its page. The `child_database` block becomes a `page` link block. |
 
