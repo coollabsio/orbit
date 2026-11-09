@@ -1,3 +1,4 @@
+import type { PageKind } from '@orbit/api/generated/types.gen'
 import { router } from 'expo-router'
 import { type ReactNode, useMemo, useState } from 'react'
 import { Pressable, ScrollView, View } from 'react-native'
@@ -46,16 +47,25 @@ export default function DocsScreen() {
   const muted = alpha(colors.mutedForeground, 0.7)
   const failed = (what: string) => (error: unknown) => setNotice(`${what} ${errorMessage(error)}`)
 
-  const newPage = (where: { space?: string | null; parentId?: string }) => {
+  const newPage = (where: { space?: string | null; parentId?: string; kind?: PageKind }) => {
     setNotice(null)
     create.mutate(where, {
       onSuccess: (page) => {
         if (where.parentId) setCollapsed((current) => new Set([...current].filter((key) => key !== where.parentId)))
         router.push(`/docs/${page.id}`)
       },
-      onError: failed('Could not create the page.'),
+      onError: failed(where.kind === 'database' ? 'Could not create the database.' : 'Could not create the page.'),
     })
   }
+  /** The web tree's "+" menu: a page or a database in the same place. */
+  const createMenu = (title: string, where: { space?: string | null; parentId?: string }) =>
+    setMenu({
+      title,
+      actions: [
+        { label: 'New page', icon: 'docs', onPress: () => newPage(where) },
+        { label: 'New database', icon: 'grid', onPress: () => newPage({ ...where, kind: 'database' }) },
+      ],
+    })
   const newTeamspace = () =>
     setPrompt({ title: 'New teamspace', label: 'Name', placeholder: 'Teamspace name', confirmLabel: 'Create', onSubmit: (name) => teamspaceWrites.create.mutateAsync(name) })
 
@@ -134,7 +144,7 @@ export default function DocsScreen() {
             })
           }
         />
-        <IconButton icon="plus" label="New page" size={32} variant="primary" disabled={create.isPending} onPress={() => newPage({ space: null })} />
+        <IconButton icon="plus" label="New page" size={32} variant="primary" disabled={create.isPending} onPress={() => createMenu('New', { space: null })} />
       </PaneHeader>
       {notice ? (
         <Pressable accessibilityRole="alert" accessibilityLabel={notice} onPress={() => setNotice(null)} className="mx-3 mb-1 p-2.5 rounded-md bg-destructive/10">
@@ -157,7 +167,7 @@ export default function DocsScreen() {
                   key={page.id}
                   label={pageTitle(page)}
                   paddingLeft={28}
-                  leading={page.icon ? <Text className="text-[14px]">{page.icon}</Text> : <Icon name="docs" size={15} color={muted} />}
+                  leading={<PageIcon page={page} color={muted} />}
                   onPress={() => router.push(`/docs/${page.id}`)}
                   actions={<IconButton icon="more" label={`${pageTitle(page)} options`} size={22} iconSize={13} color={muted} onPress={() => pageMenu(page)} />}
                 />
@@ -179,23 +189,23 @@ export default function DocsScreen() {
                     actions={
                       <>
                         {teamspace ? <IconButton icon="more" label={`${space.name} options`} size={22} iconSize={13} color={muted} onPress={() => teamspaceMenu(teamspace)} /> : null}
-                        <IconButton icon="plus" label={`New page in ${space.name}`} size={22} iconSize={13} color={muted} onPress={() => newPage({ space: space.key })} />
+                        <IconButton icon="plus" label={`New page in ${space.name}`} size={22} iconSize={13} color={muted} onPress={() => createMenu(`New in ${space.name}`, { space: space.key })} />
                       </>
                     }
                   />
-                  {open ? <PageRows rows={space.rows} collapsed={collapsed} onToggle={toggle} onCreateChild={(parentId) => newPage({ parentId })} onMenu={pageMenu} /> : null}
+                  {open ? <PageRows rows={space.rows} collapsed={collapsed} onToggle={toggle} onCreateChild={(page) => createMenu(`New in ${pageTitle(page)}`, { parentId: page.id })} onMenu={pageMenu} /> : null}
                 </View>
               )
             })}
           </View>
           <View>
-            <GroupHeader label="Private" icon="lock" action={<IconButton icon="plus" label="New private page" size={22} iconSize={13} color={muted} onPress={() => newPage({ space: 'private' })} />} />
+            <GroupHeader label="Private" icon="lock" action={<IconButton icon="plus" label="New private page" size={22} iconSize={13} color={muted} onPress={() => createMenu('New private', { space: 'private' })} />} />
             {spaces.private.rows.length === 0 ? (
               <View className="h-8 justify-center pl-10">
                 <Text className="text-[13px] text-muted-foreground/60">No pages inside</Text>
               </View>
             ) : (
-              <PageRows rows={spaces.private.rows} collapsed={collapsed} onToggle={toggle} onCreateChild={(parentId) => newPage({ parentId })} onMenu={pageMenu} />
+              <PageRows rows={spaces.private.rows} collapsed={collapsed} onToggle={toggle} onCreateChild={(page) => createMenu(`New in ${pageTitle(page)}`, { parentId: page.id })} onMenu={pageMenu} />
             )}
           </View>
         </ScrollView>
@@ -245,7 +255,7 @@ function PageRows({
   rows: TreeRow[]
   collapsed: ReadonlySet<string>
   onToggle: (key: string) => void
-  onCreateChild: (parentId: string) => void
+  onCreateChild: (page: PageSummary) => void
   onMenu: (page: PageSummary) => void
 }) {
   const { colors } = useTheme()
@@ -256,12 +266,12 @@ function PageRows({
       label={pageTitle(row.page)}
       paddingLeft={28 + row.depth * 18}
       chevron={row.hasChildren ? { open: !collapsed.has(row.page.id), onPress: () => onToggle(row.page.id) } : null}
-      leading={row.page.icon ? <Text className="text-[14px]">{row.page.icon}</Text> : <Icon name="docs" size={15} color={muted} />}
+      leading={<PageIcon page={row.page} color={muted} />}
       onPress={() => router.push(`/docs/${row.page.id}`)}
       actions={
         <>
           <IconButton icon="more" label={`${pageTitle(row.page)} options`} size={22} iconSize={13} color={muted} onPress={() => onMenu(row.page)} />
-          <IconButton icon="plus" label={`New page in ${pageTitle(row.page)}`} size={22} iconSize={13} color={muted} onPress={() => onCreateChild(row.page.id)} />
+          {row.page.kind === 'database' ? null : <IconButton icon="plus" label={`New page in ${pageTitle(row.page)}`} size={22} iconSize={13} color={muted} onPress={() => onCreateChild(row.page)} />}
         </>
       }
     />
@@ -306,4 +316,9 @@ function TreeItem({
       <View className="flex-row gap-0.5 pl-1 pr-1.5">{actions}</View>
     </View>
   )
+}
+
+/** The page's emoji, else a table for a database and a document for a page. */
+function PageIcon({ page, color }: { page: PageSummary; color: string }) {
+  return page.icon ? <Text className="text-[14px]">{page.icon}</Text> : <Icon name={page.kind === 'database' ? 'grid' : 'docs'} size={15} color={color} />
 }

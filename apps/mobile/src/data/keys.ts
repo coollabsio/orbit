@@ -23,6 +23,7 @@ export const keys = {
   pages: (workspaceId: string) => ['pages', workspaceId] as const,
   page: (workspaceId: string, pageId: string) => ['page', workspaceId, pageId] as const,
   teamspaces: (workspaceId: string) => ['teamspaces', workspaceId] as const,
+  database: (workspaceId: string, databaseId: string) => ['database', workspaceId, databaseId] as const,
 }
 
 export type QueryKey = readonly string[]
@@ -32,7 +33,7 @@ export type QueryKey = readonly string[]
  * notifications are in it, as on the web, where the event refreshes the whole workspace.
  */
 export function workspaceDataKeys(workspaceId: string): QueryKey[] {
-  return (['tasks', 'task', 'comments', 'task-activity', 'projects', 'statuses', 'labels', 'members', 'notifications', 'pages', 'page', 'teamspaces'] as const).map(
+  return (['tasks', 'task', 'comments', 'task-activity', 'projects', 'statuses', 'labels', 'members', 'notifications', 'pages', 'page', 'teamspaces', 'database'] as const).map(
     (resource) => [resource, workspaceId],
   )
 }

@@ -1,4 +1,5 @@
 /** The Docs writes, favorites, trash and comments, over `data/docs-api.ts`. The tree lists are in `src/queries.ts`. */
+import type { DatabaseDetail, PageKind } from '@orbit/api/generated/types.gen'
 import { type QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import type { UploadFile } from '../data/account-api'
@@ -8,9 +9,18 @@ import { keys } from '../data/keys'
 import type { Page, PageSummary, Teamspace } from '../data/orbit'
 import { useOrbit } from '../orbit-context'
 
-/** A saved page into its detail cache and the tree, without a refetch. */
+/**
+ * A saved page into its detail cache and the tree, without a refetch. A database row is not in the tree: its title
+ * and icon go to its database instead.
+ */
 function reconcile(queryClient: QueryClient, workspaceId: string, page: Page) {
   queryClient.setQueryData(keys.page(workspaceId, page.id), page)
+  if (page.database_id) {
+    queryClient.setQueryData<DatabaseDetail>(keys.database(workspaceId, page.database_id), (detail) =>
+      detail && { ...detail, rows: detail.rows.map((row) => (row.id === page.id ? { ...row, title: page.title, icon: page.icon, version: page.version } : row)) },
+    )
+    return
+  }
   const summary: PageSummary = {
     id: page.id,
     parent_id: page.parent_id,
@@ -33,8 +43,8 @@ export function useCreatePage() {
   const { client, workspaceId } = useOrbit()
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ space = null, parentId }: { space?: string | null; parentId?: string }) =>
-      docs.newPage(client, workspaceId, parentId ? { parent_id: parentId } : spaceRequest(space)),
+    mutationFn: ({ space = null, parentId, kind = 'page' }: { space?: string | null; parentId?: string; kind?: PageKind }) =>
+      docs.newPage(client, workspaceId, { ...(parentId ? { parent_id: parentId } : spaceRequest(space)), ...(kind === 'database' ? { kind } : {}) }),
     onSuccess: (page) => {
       reconcile(queryClient, workspaceId, page)
       void queryClient.invalidateQueries({ queryKey: keys.pages(workspaceId), exact: true })
@@ -96,13 +106,14 @@ export function useToggleFavorite() {
   })
 }
 
-/** Everything a trash change touches: the tree, the trash and the open pages. */
+/** Everything a trash change touches: the tree, the trash, the open pages and the databases (a row is a page). */
 function useRefreshDocs() {
   const { workspaceId } = useOrbit()
   const queryClient = useQueryClient()
   return () => {
     void queryClient.invalidateQueries({ queryKey: keys.pages(workspaceId) })
     void queryClient.invalidateQueries({ queryKey: ['page', workspaceId] })
+    void queryClient.invalidateQueries({ queryKey: ['database', workspaceId] })
   }
 }
 

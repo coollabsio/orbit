@@ -61,6 +61,7 @@ const ICONS = {
   shield: 'ShieldTick',
   keyboard: 'Keyboard',
   driver: 'Driver',
+  square: 'Stop',
 } as const
 
 const output = resolve(import.meta.dir, '../src/ui/icons.gen.ts')
