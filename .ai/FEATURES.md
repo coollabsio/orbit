@@ -489,7 +489,7 @@ This feature is mock-backed. No outbound or inbound SMTP service runs in milesto
 ## Chat
 
 Core files: `features/chat/pages/ChatPage.tsx`, `features/chat/components/*`, `features/chat/api/*`.
-Design: `docs/superpowers/specs/2026-10-01-chat-redesign-design.md` (UI) and
+Design: `docs/specs/2026-10-01-chat-redesign-design.md` (UI) and
 `2026-10-02-chat-backend-design.md` (backend); both are local files.
 
 Chat runs on the server and is on in every build. `lib/chatEnabled.ts` is the one switch that
