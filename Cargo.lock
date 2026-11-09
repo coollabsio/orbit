@@ -2364,7 +2364,7 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 
 [[package]]
 name = "orbit-domain"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "orbit-platform",
  "serde",
@@ -2373,7 +2373,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-platform"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "argon2",
  "async-compression",
@@ -2409,7 +2409,7 @@ dependencies = [
 
 [[package]]
 name = "orbit-server"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "aes-gcm",
  "axum",
