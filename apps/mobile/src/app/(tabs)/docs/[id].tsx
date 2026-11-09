@@ -1,4 +1,4 @@
-import { collabStatusLabel, type CollabProblem, type CollabState } from '@orbit/editor/collab/session'
+import type { CollabProblem } from '@orbit/editor/collab/session'
 import { isSafeLinkHref } from '@orbit/editor/links'
 import { useQuery } from '@tanstack/react-query'
 import { router, useLocalSearchParams } from 'expo-router'
@@ -31,16 +31,6 @@ const CARET_MARGIN = 24
  * A page: its cover, icon and title (native), and its body in the page editor (BlockNote in a web view), which
  * co-edits the page live with everyone else. A formatting bar sits above the keyboard while the body has focus.
  */
-/** The web's sync dot beside the status label in the page header (no pulse: Uniwind has no keyframe animations). */
-const STATUS_DOT: Record<CollabState['status'], string> = {
-  live: 'bg-emerald-500',
-  connecting: 'bg-amber-400',
-  reset: 'bg-amber-400',
-  offline: 'bg-amber-500',
-  lost: 'bg-destructive',
-  error: 'bg-destructive',
-}
-
 export default function DocScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const { client, workspaceId, session } = useOrbit()
@@ -69,7 +59,6 @@ export default function DocScreen() {
   const editor = useRef<PageEditorRef>(null)
   const [format, setFormat] = useState<FormatState>(IDLE_FORMAT)
   const [choosingBlock, setChoosingBlock] = useState(false)
-  const [sync, setSync] = useState<CollabState | null>(null)
   const [problem, setProblem] = useState<ProblemResponse | null>(null)
   const [generation, setGeneration] = useState(0)
   const scroll = useRef<React.ComponentRef<typeof ScrollView>>(null)
@@ -187,14 +176,6 @@ export default function DocScreen() {
         <Text numberOfLines={1} className="font-noto-medium text-[13px] flex-1">
           {page.data ? pageTitle(page.data) : ''}
         </Text>
-        {sync ? (
-          <View accessibilityRole="text" accessibilityLiveRegion="polite" className="flex-row items-center gap-1.5">
-            <View className={`size-1.5 rounded-full ${STATUS_DOT[sync.status]}`} />
-            <Text numberOfLines={1} className={`text-[12px] ${sync.status === 'lost' || sync.status === 'error' ? 'text-destructive' : 'text-muted-foreground/70'}`}>
-              {collabStatusLabel(sync)}
-            </Text>
-          </View>
-        ) : null}
         <View>
           <IconButton icon="comment" label={openThreads > 0 ? `Comments, ${openThreads} open` : 'Comments'} color={muted} onPress={() => setCommentsOpen(true)} />
           {openThreads > 0 ? (
@@ -287,7 +268,6 @@ export default function DocScreen() {
                   epoch={page.data.collab_epoch}
                   generation={generation}
                   editable={editable}
-                  onStatus={setSync}
                   onProblem={onProblem}
                   onProbe={onProbe}
                   onFormat={setFormat}
@@ -315,7 +295,6 @@ export default function DocScreen() {
 
 type EditorViewProps = Pick<PageEditorProps, 'pageId' | 'epoch' | 'generation' | 'editable'> & {
   ref: React.Ref<PageEditorRef>
-  onStatus: (state: CollabState) => void
   onProblem: (problem: CollabProblem) => void
   onProbe: () => void
   onFormat: (state: FormatState) => void
@@ -368,7 +347,6 @@ const EditorView = memo(function EditorView({ ref, pageId, epoch, generation, ed
       openUrl: whileMounted(mounted, async (url: string) => {
         if (isSafeLinkHref(url)) void Linking.openURL(url).catch(() => {})
       }),
-      onStatus: whileMounted(mounted, async (state: CollabState) => latest.current.onStatus(state)),
       onProblem: whileMounted(mounted, async (problem: CollabProblem) => latest.current.onProblem(problem)),
       onProbe: whileMounted(mounted, async () => latest.current.onProbe()),
       onFormat: whileMounted(mounted, async (state: FormatState) => latest.current.onFormat(state)),

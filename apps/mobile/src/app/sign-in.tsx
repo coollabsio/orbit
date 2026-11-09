@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
-import { KeyboardAvoidingView, Linking, Platform, ScrollView, View } from 'react-native'
+import { Linking, ScrollView, View } from 'react-native'
 
+import { Select } from '../components/settings/Shell'
 import { accountKeys, authOptions } from '../data/account-api'
 import { createClient, normalizeServer, type SignIn, signIn as signInWithPassword, signInSecondFactor } from '../data/orbit'
 import { isPasswordTokenSpent, linkProviderAccount, looksLikeServer, type PasswordStep, type Provider, PROVIDER_LABEL, providerErrorMessage, startProviderSignIn } from '../data/sign-in-provider'
@@ -12,8 +13,15 @@ import { Button, Input, Text } from '../ui'
 
 type Step = { name: 'credentials' } | { name: 'two_factor'; server: string; twoFactorToken: string } | { name: 'password'; server: string; challenge: PasswordStep }
 
-// Orbit Cloud, so cloud users only type their email and password; self-hosted users replace it
-const DEFAULT_SERVER = process.env.EXPO_PUBLIC_ORBIT_SERVER || 'https://app.orbit.so'
+const CLOUD_SERVER = 'https://app.orbit.so'
+// a dev build points `EXPO_PUBLIC_ORBIT_SERVER` at the dev server: it starts on Custom with that host
+const ENV_SERVER = process.env.EXPO_PUBLIC_ORBIT_SERVER
+const CUSTOM_DEFAULT = ENV_SERVER && normalizeServer(ENV_SERVER) !== CLOUD_SERVER ? ENV_SERVER : ''
+type ServerKind = 'cloud' | 'custom'
+const SERVER_OPTIONS = [
+  { value: 'cloud', label: 'Orbit Cloud' },
+  { value: 'custom', label: 'Custom' },
+] as const satisfies readonly { value: ServerKind; label: string }[]
 // The development seed user (`just seed`), as on the web sign-in page.
 const DEV_USER = __DEV__ ? { email: 'test@example.com', password: 'password' } : { email: '', password: '' }
 
@@ -21,7 +29,9 @@ export default function SignInScreen() {
   const { state, signIn } = useSession()
   const { colors } = useTheme()
   const [step, setStep] = useState<Step>({ name: 'credentials' })
-  const [server, setServer] = useState(DEFAULT_SERVER)
+  const [serverKind, setServerKind] = useState<ServerKind>(CUSTOM_DEFAULT ? 'custom' : 'cloud')
+  const [customServer, setCustomServer] = useState(CUSTOM_DEFAULT)
+  const server = serverKind === 'cloud' ? CLOUD_SERVER : customServer
   const [email, setEmail] = useState(DEV_USER.email)
   const [password, setPassword] = useState(DEV_USER.password)
   const [code, setCode] = useState('')
@@ -108,13 +118,13 @@ export default function SignInScreen() {
       : 'Enter the 6-digit code from your authenticator app, or a recovery code.'
 
   return (
-    <KeyboardAvoidingView
+    <View
       className="flex-1 bg-background"
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       // the web sign-in's soft accent glow from the top edge
       style={{ backgroundImage: `radial-gradient(ellipse 60% 45% at 50% 0%, ${alpha(colors.primary, 0.14)}, transparent)` }}
     >
-      <ScrollView contentContainerClassName="grow justify-center p-6" keyboardShouldPersistTaps="handled">
+      {/* the keyboard insets the scroll view natively, so the card stays still and the focused field scrolls into view */}
+      <ScrollView contentContainerClassName="grow justify-center p-6" keyboardShouldPersistTaps="handled" automaticallyAdjustKeyboardInsets>
         {/* the web `AuthForm`: a header, then an inset panel with the fields and actions */}
         <View className="w-full max-w-115 self-center rounded-xl border border-border bg-card shadow-lg">
           <View className="gap-1 px-6 pt-6 pb-5">
@@ -124,7 +134,13 @@ export default function SignInScreen() {
           <View className="-mx-px -mb-px gap-4 rounded-xl border border-border bg-background/40 p-6">
             {step.name === 'credentials' ? (
               <>
-                <Input label="Server" required placeholder="orbit.example.com" autoCapitalize="none" autoCorrect={false} keyboardType="url" textContentType="URL" value={server} onChangeText={setServer} />
+                <View className="gap-2">
+                  <Text className="font-noto-medium text-[14px] leading-[19.25px]">Server</Text>
+                  <Select label="Server" value={serverKind} options={SERVER_OPTIONS} onChange={setServerKind} />
+                </View>
+                {serverKind === 'custom' ? (
+                  <Input label="Server address" required placeholder="orbit.example.com" autoCapitalize="none" autoCorrect={false} keyboardType="url" textContentType="URL" value={customServer} onChangeText={setCustomServer} />
+                ) : null}
                 <Input label="Email" required placeholder="you@example.com" autoCapitalize="none" autoComplete="email" keyboardType="email-address" textContentType="username" value={email} onChangeText={setEmail} />
                 <Input
                   label="Password"
@@ -219,7 +235,7 @@ export default function SignInScreen() {
           </View>
         </View>
       </ScrollView>
-    </KeyboardAvoidingView>
+    </View>
   )
 }
 

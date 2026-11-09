@@ -29,7 +29,7 @@ export const guestHomePath = '/chat'
  * user itself). Every other page sends it to `guestHomePath`.
  */
 export function guestMayOpen(pathname: string) {
-  return /^\/(chat|admin)(\/|$)/.test(pathname) || /^\/profile(\/(security|sessions|appearance|notifications))?\/?$/.test(pathname)
+  return /^\/(chat|admin)(\/|$)/.test(pathname) || /^\/profile(\/(general|security|sessions|appearance|notifications))?\/?$/.test(pathname)
 }
 
 /** Below `/chat` (a conversation, a thread, Unreads, Threads): a full screen on a phone, so the dock is hidden. */

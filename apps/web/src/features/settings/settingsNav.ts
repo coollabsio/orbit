@@ -133,6 +133,12 @@ const AREAS: Record<SettingsAreaName, SettingsArea> = {
   },
 }
 
+/**
+ * Where a link opens on a phone. There the area's root (`/settings`) is its menu, so the root page (`end`) has its
+ * own path below it.
+ */
+export const phonePath = (item: SettingsNavItem) => (item.end ? `${item.to}/general` : item.to)
+
 const under = (pathname: string, root: string) => pathname === root || pathname.startsWith(`${root}/`)
 
 /** The settings area a route belongs to; the sidebar shows that area's links instead of the app links. */

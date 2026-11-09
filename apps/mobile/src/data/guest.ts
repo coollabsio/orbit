@@ -11,7 +11,7 @@ export const guestHome = '/chat'
  * and Admin (the installation's, which checks the user itself).
  */
 export function guestMayOpen(pathname: string): boolean {
-  return pathname === '/settings' || /^\/(chat|settings\/(profile|appearance|notifications|security|sessions|admin))(\/|$)/.test(pathname)
+  return pathname === '/settings' || /^\/(chat|settings\/(account|profile|appearance|notifications|security|sessions|admin))(\/|$)/.test(pathname)
 }
 
 export const isGuestRole = (role: string | undefined) => role === 'guest'
