@@ -74,6 +74,7 @@ import { CoverBanner } from './CoverBanner'
 import { CoverSourcePanel } from './CoverSourcePanel'
 import { PageHistoryPane } from './PageHistoryPane'
 import { PageLinkDialog } from './PageLinkDialog'
+import { DatabasePage } from '@/features/docs/database/DatabasePage'
 
 const PageEditor = lazy(() => loadPageEditor().then((module) => ({ default: module.PageEditor })))
 
@@ -145,6 +146,8 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
     navigateRef.current = navigate
   })
   const pageId = page.id
+  /** A database page has no document: the table replaces the editor, comments and history. */
+  const isDatabase = page.kind === 'database'
   const pageActions = useDocPageActions()
   const hasChildren = pages.some((item) => item.parent_id === pageId)
 
@@ -353,6 +356,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
     user: collabUser,
     onProblem: onCollabProblem,
     onProbe: () => void probePage(),
+    enabled: !isDatabase,
   })
   useEffect(() => {
     sessionRef.current = collab.session
@@ -579,7 +583,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
   const space = spaceKey(byId.get(pageId) ?? page)
   const spaceTargets: SpaceKey[] = [...(teamspaces ?? []).map((teamspace) => teamspaceSpace(teamspace.id)), PRIVATE_SPACE]
   const status = saveState.status
-  const syncStatus = lost ? 'lost' : collab.state.status
+  const syncStatus = lost ? 'lost' : isDatabase ? 'live' : collab.state.status
   // Content sync is the headline; failed or conflicting title/icon/cover saves take over the label.
   const statusLabel =
     status === 'error'
@@ -610,6 +614,126 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
     candidates: pageMentionCandidates(membersQuery.data ?? [], byId.get(pageId) ?? page, selfId),
     privatePage: (byId.get(pageId) ?? page).teamspace_id === null,
   }
+
+  const coverBlock = (
+    <>
+      {cover.url ? (
+        <CoverBanner
+          key={`${cover.url}:${cover.position ?? ''}`}
+          url={cover.url}
+          position={cover.position}
+          onChange={changeCover}
+          onUpload={uploadCover}
+          readOnly={readOnly}
+        />
+      ) : null}
+    </>
+  )
+  const titleBlock = (
+    <>
+      {locked ? (
+        <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground" data-lock-badge="">
+          <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-muted px-2 py-0.5">
+            <Lock className="size-3 shrink-0" aria-hidden="true" />
+            <span className="truncate">{page.locked_by ? `Locked by ${page.locked_by.id === selfId ? 'you' : page.locked_by.display_name}` : 'Locked'}</span>
+          </span>
+          <Button type="button" variant="ghost" size="xs" disabled={setPageLock.isPending} onClick={() => toggleLock(false)}>
+            Unlock
+          </Button>
+        </div>
+      ) : null}
+      {icon ? (
+        <div className="relative z-[2] w-fit data-[cover=true]:mt-[-52px]" data-cover={cover.url ? 'true' : undefined}>
+          <Popover open={iconPickerOpen} onOpenChange={setIconPickerOpen}>
+            <PopoverTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="h-auto cursor-pointer rounded-xl border-0 p-0.5 text-[60px] leading-none font-normal drop-shadow-[0_1px_2px_rgb(0_0_0/0.3)] hover:bg-foreground/[0.02] disabled:opacity-100 dark:hover:bg-foreground/[0.02]"
+                  disabled={readOnly}
+                  aria-label="Change icon"
+                />
+              }
+            >
+              <Emoji value={icon} />
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-auto gap-0 p-0">
+              <EmojiPicker
+                onPick={(emoji) => {
+                  changeIcon(emoji)
+                  setIconPickerOpen(false)
+                }}
+                onRemove={() => {
+                  changeIcon(null)
+                  setIconPickerOpen(false)
+                }}
+              />
+            </PopoverContent>
+          </Popover>
+        </div>
+      ) : null}
+      {!readOnly && (!icon || !cover.url) ? (
+        <div className="flex gap-2 pt-1.5 pb-2.5" data-print-hide="">
+          {!icon ? (
+            <Popover open={addIconOpen} onOpenChange={setAddIconOpen}>
+              <PopoverTrigger
+                render={<Button type="button" variant="ghost" size="sm" className="text-muted-foreground/70 hover:text-foreground" />}
+              >
+                😀 Add icon
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-auto gap-0 p-0">
+                <EmojiPicker
+                  onPick={(emoji) => {
+                    changeIcon(emoji)
+                    setAddIconOpen(false)
+                  }}
+                />
+              </PopoverContent>
+            </Popover>
+          ) : null}
+          {!cover.url ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground/70 hover:text-foreground"
+              onClick={() => setCoverPanelOpen((open) => !open)}
+            >
+              🖼️ Add cover
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+      {!readOnly && !cover.url && coverPanelOpen ? (
+        <div className="mb-3 max-w-[420px] rounded-lg border border-border p-3" data-print-hide="">
+          <CoverSourcePanel
+            onUpload={uploadCover}
+            onPicked={(url) => {
+              setCoverPanelOpen(false)
+              changeCover({ cover_url: url, cover_position: null })
+            }}
+          />
+        </div>
+      ) : null}
+      <Input
+        className="mb-5 h-auto w-full rounded-none border-0 bg-transparent p-0 text-[30px] leading-[1.25] font-bold text-foreground shadow-none outline-none placeholder:text-muted-foreground/70 focus:outline-none focus-visible:ring-0 md:text-[30px] max-[899px]:mb-3.5 max-[899px]:text-[22px]! dark:bg-transparent"
+        value={title}
+        readOnly={readOnly}
+        maxLength={500}
+        placeholder="Untitled"
+        aria-label="Page title"
+        onChange={(e) => changeTitle(e.target.value)}
+        onBlur={() => void saver.flush()}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            editorRef.current?.focus()
+          }
+        }}
+      />
+    </>
+  )
 
   return (
     <>
@@ -679,25 +803,27 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
               </>
             ) : null}
           </span>
-          <Tip label="Comments" side="bottom">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className={cn('gap-1 px-1.5 text-muted-foreground/70', commentsOpen && 'bg-muted text-foreground')}
-              aria-label={counts.open > 0 ? `Comments (${counts.open} open)` : 'Comments'}
-              aria-pressed={commentsOpen}
-              data-comments-toggle=""
-              onClick={() => setCommentsOpen((open) => !open)}
-            >
-              <CommentIcon className="size-4" />
-              {counts.open > 0 ? (
-                <span className="min-w-4 rounded-full bg-primary px-1 text-center text-[10px] leading-4 font-semibold text-primary-foreground tabular-nums" data-comments-badge="">
-                  {counts.open}
-                </span>
-              ) : null}
-            </Button>
-          </Tip>
+          {isDatabase ? null : (
+            <Tip label="Comments" side="bottom">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className={cn('gap-1 px-1.5 text-muted-foreground/70', commentsOpen && 'bg-muted text-foreground')}
+                aria-label={counts.open > 0 ? `Comments (${counts.open} open)` : 'Comments'}
+                aria-pressed={commentsOpen}
+                data-comments-toggle=""
+                onClick={() => setCommentsOpen((open) => !open)}
+              >
+                <CommentIcon className="size-4" />
+                {counts.open > 0 ? (
+                  <span className="min-w-4 rounded-full bg-primary px-1 text-center text-[10px] leading-4 font-semibold text-primary-foreground tabular-nums" data-comments-badge="">
+                    {counts.open}
+                  </span>
+                ) : null}
+              </Button>
+            </Tip>
+          )}
           <Tip label={favoriteLabel} side="bottom">
             <Button
               type="button"
@@ -752,10 +878,12 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
                 {locked ? <Unlock className="size-[14px]" /> : <Lock className="size-[14px]" />}
                 {locked ? 'Unlock page' : 'Lock page'}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setHistoryOpen(true)}>
-                <History className="size-[14px]" />
-                Version history
-              </DropdownMenuItem>
+              {isDatabase ? null : (
+                <DropdownMenuItem onClick={() => setHistoryOpen(true)}>
+                  <History className="size-[14px]" />
+                  Version history
+                </DropdownMenuItem>
+              )}
               {pageActions ? (
                 <DropdownMenuItem onClick={() => pageActions.duplicate(pageId, false)}>
                   <Copy className="size-[14px]" />
@@ -848,183 +976,85 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
           </div>
         ) : null}
         <div className="relative flex min-h-0 min-w-0 flex-1">
-        <div data-print-root="" className="min-h-0 flex-1 overflow-y-auto px-6 pt-8 pb-24 max-[899px]:px-3 max-[899px]:pt-[18px] max-[899px]:pb-14">
-          {cover.url ? (
-            <CoverBanner
-              key={`${cover.url}:${cover.position ?? ''}`}
-              url={cover.url}
-              position={cover.position}
-              onChange={changeCover}
-              onUpload={uploadCover}
-              readOnly={readOnly}
-            />
-          ) : null}
-          <div className={cn('mx-auto', fullWidth ? 'max-w-none px-[30px] max-[899px]:px-0' : 'max-w-[760px]')} data-full-width={fullWidth || undefined}>
-            {locked ? (
-              <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground" data-lock-badge="">
-                <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-muted px-2 py-0.5">
-                  <Lock className="size-3 shrink-0" aria-hidden="true" />
-                  <span className="truncate">{page.locked_by ? `Locked by ${page.locked_by.id === selfId ? 'you' : page.locked_by.display_name}` : 'Locked'}</span>
-                </span>
-                <Button type="button" variant="ghost" size="xs" disabled={setPageLock.isPending} onClick={() => toggleLock(false)}>
-                  Unlock
-                </Button>
-              </div>
-            ) : null}
-            {icon ? (
-              <div className="relative z-[2] w-fit data-[cover=true]:mt-[-52px]" data-cover={cover.url ? 'true' : undefined}>
-                <Popover open={iconPickerOpen} onOpenChange={setIconPickerOpen}>
-                  <PopoverTrigger
-                    render={
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        className="h-auto cursor-pointer rounded-xl border-0 p-0.5 text-[60px] leading-none font-normal drop-shadow-[0_1px_2px_rgb(0_0_0/0.3)] hover:bg-foreground/[0.02] disabled:opacity-100 dark:hover:bg-foreground/[0.02]"
-                        disabled={readOnly}
-                        aria-label="Change icon"
-                      />
-                    }
-                  >
-                    <Emoji value={icon} />
-                  </PopoverTrigger>
-                  <PopoverContent align="start" className="w-auto gap-0 p-0">
-                    <EmojiPicker
-                      onPick={(emoji) => {
-                        changeIcon(emoji)
-                        setIconPickerOpen(false)
-                      }}
-                      onRemove={() => {
-                        changeIcon(null)
-                        setIconPickerOpen(false)
-                      }}
-                    />
-                  </PopoverContent>
-                </Popover>
-              </div>
-            ) : null}
-            {!readOnly && (!icon || !cover.url) ? (
-              <div className="flex gap-2 pt-1.5 pb-2.5" data-print-hide="">
-                {!icon ? (
-                  <Popover open={addIconOpen} onOpenChange={setAddIconOpen}>
-                    <PopoverTrigger
-                      render={<Button type="button" variant="ghost" size="sm" className="text-muted-foreground/70 hover:text-foreground" />}
-                    >
-                      😀 Add icon
-                    </PopoverTrigger>
-                    <PopoverContent align="start" className="w-auto gap-0 p-0">
-                      <EmojiPicker
-                        onPick={(emoji) => {
-                          changeIcon(emoji)
-                          setAddIconOpen(false)
-                        }}
-                      />
-                    </PopoverContent>
-                  </Popover>
-                ) : null}
-                {!cover.url ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="text-muted-foreground/70 hover:text-foreground"
-                    onClick={() => setCoverPanelOpen((open) => !open)}
-                  >
-                    🖼️ Add cover
-                  </Button>
-                ) : null}
-              </div>
-            ) : null}
-            {!readOnly && !cover.url && coverPanelOpen ? (
-              <div className="mb-3 max-w-[420px] rounded-lg border border-border p-3" data-print-hide="">
-                <CoverSourcePanel
-                  onUpload={uploadCover}
-                  onPicked={(url) => {
-                    setCoverPanelOpen(false)
-                    changeCover({ cover_url: url, cover_position: null })
-                  }}
-                />
-              </div>
-            ) : null}
-            <Input
-              className="mb-5 h-auto w-full rounded-none border-0 bg-transparent p-0 text-[30px] leading-[1.25] font-bold text-foreground shadow-none outline-none placeholder:text-muted-foreground/70 focus:outline-none focus-visible:ring-0 md:text-[30px] max-[899px]:mb-3.5 max-[899px]:text-[22px]! dark:bg-transparent"
-              value={title}
-              readOnly={readOnly}
-              maxLength={500}
-              placeholder="Untitled"
-              aria-label="Page title"
-              onChange={(e) => changeTitle(e.target.value)}
-              onBlur={() => void saver.flush()}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  editorRef.current?.focus()
-                }
-              }}
-            />
-            <div onBlur={() => void saver.flush()}>
-              {collab.connection && collab.state.ready ? (
-                <Suspense fallback={editorSpinner}>
-                  <PageEditor
-                    // A new document (page switch, reset) needs a new editor instance.
-                    key={collab.key}
-                    ref={editorRef}
-                    pageId={pageId}
-                    collab={{ provider: collab.connection.provider, fragment: collab.connection.fragment, user: collabUser }}
-                    editable={!lost && syncStatus !== 'error' && !readOnly}
-                    resolvePage={resolvePage}
-                    onOpenPage={onOpenPage}
-                    onCreateSubpage={onCreateSubpage}
-                    onPickPage={onPickPage}
-                    uploadFile={uploadFile}
-                    comments={{
-                      workspaceId,
-                      pageId,
-                      userId: selfId,
-                      members: membersQuery.data ?? null,
-                      mentionable: mentionableMembers(membersQuery.data ?? [], byId.get(pageId) ?? page, selfId),
-                      panel: commentsOpen && commentsList ? { container: commentsList, filter: commentsFilter } : null,
-                      showThreadId,
-                      onThreadShown: () => setShowThreadId(null),
-                      onError: (action) =>
-                        toast.error(
-                          action === 'create'
-                            ? 'Could not add the comment.'
-                            : action === 'reply'
-                              ? 'Could not send the reply.'
-                              : action === 'edit'
-                                ? 'Could not save the comment.'
-                                : action === 'delete'
-                                  ? 'Could not delete the comment.'
-                                  : 'Could not update the thread.',
-                        ),
-                    }}
-                    mentions={mentions}
-                    className="-mx-[54px] min-h-40 max-[899px]:mx-0"
-                  />
-                </Suspense>
-              ) : (
-                // Never bind an editor to a document before its first sync (it would be empty). Until then, show the
-                // REST content read-only; the live editor replaces it with the same blocks.
-                <div data-testid="editor-preview">
+        {isDatabase ? (
+          <DatabasePage
+            workspaceId={workspaceId}
+            databaseId={pageId}
+            locked={locked}
+            fullWidth={fullWidth}
+            cover={coverBlock}
+            title={titleBlock}
+          />
+        ) : (
+          <div data-print-root="" className="min-h-0 flex-1 overflow-y-auto px-6 pt-8 pb-24 max-[899px]:px-3 max-[899px]:pt-[18px] max-[899px]:pb-14">
+            {coverBlock}
+            <div className={cn('mx-auto', fullWidth ? 'max-w-none px-[30px] max-[899px]:px-0' : 'max-w-[760px]')} data-full-width={fullWidth || undefined}>
+              {titleBlock}
+              <div onBlur={() => void saver.flush()}>
+                {collab.connection && collab.state.ready ? (
                   <Suspense fallback={editorSpinner}>
                     <PageEditor
-                      key={`preview:${collab.key}`}
-                      pageId={`preview:${pageId}`}
-                      initialContent={page.content}
-                      editable={false}
+                      // A new document (page switch, reset) needs a new editor instance.
+                      key={collab.key}
+                      ref={editorRef}
+                      pageId={pageId}
+                      collab={{ provider: collab.connection.provider, fragment: collab.connection.fragment, user: collabUser }}
+                      editable={!lost && syncStatus !== 'error' && !readOnly}
                       resolvePage={resolvePage}
                       onOpenPage={onOpenPage}
                       onCreateSubpage={onCreateSubpage}
                       onPickPage={onPickPage}
+                      uploadFile={uploadFile}
+                      comments={{
+                        workspaceId,
+                        pageId,
+                        userId: selfId,
+                        members: membersQuery.data ?? null,
+                        mentionable: mentionableMembers(membersQuery.data ?? [], byId.get(pageId) ?? page, selfId),
+                        panel: commentsOpen && commentsList ? { container: commentsList, filter: commentsFilter } : null,
+                        showThreadId,
+                        onThreadShown: () => setShowThreadId(null),
+                        onError: (action) =>
+                          toast.error(
+                            action === 'create'
+                              ? 'Could not add the comment.'
+                              : action === 'reply'
+                                ? 'Could not send the reply.'
+                                : action === 'edit'
+                                  ? 'Could not save the comment.'
+                                  : action === 'delete'
+                                    ? 'Could not delete the comment.'
+                                    : 'Could not update the thread.',
+                          ),
+                      }}
                       mentions={mentions}
                       className="-mx-[54px] min-h-40 max-[899px]:mx-0"
                     />
                   </Suspense>
-                </div>
-              )}
+                ) : (
+                  // Never bind an editor to a document before its first sync (it would be empty). Until then, show the
+                  // REST content read-only; the live editor replaces it with the same blocks.
+                  <div data-testid="editor-preview">
+                    <Suspense fallback={editorSpinner}>
+                      <PageEditor
+                        key={`preview:${collab.key}`}
+                        pageId={`preview:${pageId}`}
+                        initialContent={page.content}
+                        editable={false}
+                        resolvePage={resolvePage}
+                        onOpenPage={onOpenPage}
+                        onCreateSubpage={onCreateSubpage}
+                        onPickPage={onPickPage}
+                        mentions={mentions}
+                        className="-mx-[54px] min-h-40 max-[899px]:mx-0"
+                      />
+                    </Suspense>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-        </div>
+        )}
         {commentsOpen ? (
           <CommentsPanel
             filter={commentsFilter}

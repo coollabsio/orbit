@@ -11,6 +11,8 @@ export interface CollabUser {
 }
 
 export interface UseCollabSessionOptions extends CollabTarget {
+  /** `false` opens no session (a database page has no document). */
+  enabled?: boolean
   /** Bump to drop the local document and open a fresh session (after a 4409 reset). */
   generation: number
   /** Local awareness user (the server overwrites it with the session's user for everyone else). */
@@ -35,7 +37,7 @@ const INITIAL: CollabState = { status: 'connecting', problem: null, ready: false
  * One Y.Doc + provider per document, epoch and generation: created on mount, destroyed on document switch and
  * unmount. Never bind an editor before `state.ready` (the first sync): an unsynced fragment is empty.
  */
-export function useCollabSession({ workspaceId, kind, id, epoch, generation, user, onProblem, onProbe }: UseCollabSessionOptions): CollabSessionView {
+export function useCollabSession({ workspaceId, kind, id, epoch, generation, user, onProblem, onProbe, enabled = true }: UseCollabSessionOptions): CollabSessionView {
   const connect = useContext(CollabConnectContext)
   const key = `${kind}:${id}:${epoch}:${generation}`
   const [view, setView] = useState<Omit<CollabSessionView, 'key'> & { key: string | null }>({
@@ -50,6 +52,7 @@ export function useCollabSession({ workspaceId, kind, id, epoch, generation, use
   })
 
   useEffect(() => {
+    if (!enabled) return
     let cancelled = false
     let session: CollabSession | null = null
     void connect({ workspaceId, kind, id, epoch }).then(
@@ -83,7 +86,7 @@ export function useCollabSession({ workspaceId, kind, id, epoch, generation, use
       session?.destroy()
       setView({ key: null, connection: null, state: INITIAL, session: null })
     }
-  }, [connect, workspaceId, kind, id, epoch, generation, key])
+  }, [connect, workspaceId, kind, id, epoch, generation, key, enabled])
 
   // A stale view (previous document/epoch) never reaches the caller.
   if (view.key !== key) return { key, connection: null, state: INITIAL, session: null }

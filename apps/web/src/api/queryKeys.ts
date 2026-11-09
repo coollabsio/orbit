@@ -80,6 +80,8 @@ export const queryKeys = {
     version: (workspaceId: string, pageId: string, versionId: string) =>
       [...workspace(workspaceId), 'pages', 'versions', pageId, versionId] as const,
   },
+  /** A database page's properties, views and rows (`GET /databases/{id}`); realtime refetches it with the workspace. */
+  database: (workspaceId: string, databaseId: string) => [...workspace(workspaceId), 'databases', databaseId] as const,
   /**
    * Deliberately outside the workspace prefix: realtime events invalidate that whole prefix, and an import creates
    * thousands of pages. The import views poll these keys instead of refetching a (large) scan tree on every event.
