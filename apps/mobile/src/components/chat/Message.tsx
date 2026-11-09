@@ -57,7 +57,7 @@ export function MessageItem({ message, groupStart, highlighted = false, handlers
       onLongPress={() => handlers.onLongPress(message)}
       delayLongPress={350}
       accessibilityHint="Long press for actions"
-      className={`${highlighted ? 'bg-primary/12' : mentioned ? 'bg-primary/8' : 'active:bg-muted/50'} ${groupStart ? 'mt-2' : 'mt-0'}`}
+      className={`${highlighted ? 'bg-primary/12' : mentioned ? 'bg-primary/8' : ''} ${groupStart ? 'mt-2' : 'mt-0'}`}
     >
       {message.reply_to ? <Quote author={handlers.nameOf(message.reply_to.author_id)} body={message.reply_to.sticker && !message.reply_to.body ? 'Sticker' : handlers.text(message.reply_to.body)} /> : null}
       <View className={`flex-row gap-2 px-3 pb-0.5 ${groupStart ? 'pt-1' : 'pt-0.5'}`}>
