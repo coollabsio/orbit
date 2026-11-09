@@ -454,7 +454,8 @@ export function SidebarNav({
         >
           {pageList ? (
             <>
-              <BackToApp label={PAGE_LIST_TITLES[areaOf(location.pathname) ?? ''] ?? ''} onNavigate={onNavigate} />
+              {/* a guest has Chat alone: there is no main menu to go back to */}
+              {guest ? null : <BackToApp label={PAGE_LIST_TITLES[areaOf(location.pathname) ?? ''] ?? ''} onNavigate={onNavigate} />}
               {/* the page renders its list here (`InAppSidebar`); it scrolls on its own */}
               <div ref={pageListRef} data-slot="sidebar-page-list" className="-mx-3 mt-2 flex min-h-0 flex-1 flex-col" />
             </>
