@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { applyChatEvents } from '../../../chat-cache'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { KeyboardAvoidingView, Platform, Pressable, Share, View } from 'react-native'
+import { Platform, Pressable, Share, View } from 'react-native'
 
 import { Composer, useComposer } from '../../../components/chat/Composer'
 import { MessageItem } from '../../../components/chat/Message'
@@ -14,7 +14,7 @@ import { useChatWrite, useFollowedThreads, useThread, useThreadFollowsRoot } fro
 import { useOrbit } from '../../../orbit-context'
 import { useConversations, usePeople } from '../../../queries'
 import { useTheme } from '../../../theme'
-import { ErrorView, Icon, IconButton, LoadingView, SafeAreaView, Text } from '../../../ui'
+import { ErrorView, Icon, IconButton, LoadingView, KeyboardSpace, SafeAreaView, Text } from '../../../ui'
 
 /**
  * A thread in full view, as the web's `/chat/:id/thread/:messageId` on a phone: the root, its replies, and a composer
@@ -114,7 +114,7 @@ export default function ThreadScreen() {
         />
         <IconButton icon="more" label="Thread actions" size={32} iconSize={20} color={colors.foreground} disabled={!conversationId} onPress={() => setActions(true)} />
       </View>
-      <KeyboardAvoidingView className="flex-1" behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardSpace>
         {!thread.data || !root ? (
           thread.isError ? (
             <ErrorView error={thread.error} onRetry={() => void thread.refetch()} />
@@ -146,7 +146,7 @@ export default function ThreadScreen() {
           />
         )}
         {root && member && !conversation?.archived ? <Composer state={composer} placeholder="Reply…" nameOf={handlers.nameOf} alsoSendTo={conversation?.kind === 'dm' ? 'this conversation' : where} /> : null}
-      </KeyboardAvoidingView>
+      </KeyboardSpace>
       {sheet}
       <ActionSheet
         visible={actions}
