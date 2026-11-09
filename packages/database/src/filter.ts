@@ -125,7 +125,7 @@ function matchDate(cell: CellValue | null, rule: DatabaseFilterRule, target: str
 }
 
 /** The local day a rule names: a relative value from `ctx.now`, or an absolute date or time. */
-function ruleDay(value: string, ctx: ViewContext): string | null {
+export function ruleDay(value: string, ctx: ViewContext): string | null {
   const relative = RELATIVE_DAYS[value]
   if (relative) return relative(localDay(ctx.now, ctx.timeZone))
   const point = parseDatePoint(value)

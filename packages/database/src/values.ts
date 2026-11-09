@@ -281,6 +281,25 @@ export function valueFromText(property: Property, input: string, ctx: ViewContex
   }
 }
 
+/**
+ * The text a number's edit field shows. A percent shows the percentage the cell shows, so a
+ * stored 0.125 edits as "12.5".
+ */
+export function numberEditText(property: Property, number: number): string {
+  return String(isPercent(property) ? rounded(number * 100) : number)
+}
+
+/**
+ * The number an edit field's text stores, the inverse of `numberEditText`: in a percent property
+ * "50" and "50%" store 0.5. `null` when the text is not a number.
+ */
+export function numberFromEditText(property: Property, input: string): number | null {
+  const text = input.trim()
+  if (!isPercent(property)) return parseNumber(text)
+  const number = parseNumber(text.endsWith('%') ? text.slice(0, -1).trim() : text)
+  return number === null ? null : rounded(number / 100)
+}
+
 export function optionName(property: Property, id: string): string {
   return options(property).find((option) => option.id === id)?.name ?? ''
 }
@@ -299,6 +318,15 @@ export function unreachable(value: never): never {
 function moment(iso: string): CellValue | null {
   const ms = Date.parse(iso)
   return Number.isNaN(ms) ? null : { kind: 'date', date: { start: { kind: 'moment', iso, ms }, end: null } }
+}
+
+function isPercent(property: Property): boolean {
+  return property.type === 'number' && property.config.format === 'percent'
+}
+
+/** Drops the binary noise of a scale by 100 (0.07 * 100 is 7.000000000000001). */
+function rounded(number: number): number {
+  return Number(number.toPrecision(15))
 }
 
 /** Rust's `str::parse::<f64>` for finite numbers: no commas, no hex, no inner spaces. */
