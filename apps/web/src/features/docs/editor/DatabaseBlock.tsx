@@ -112,7 +112,7 @@ function DatabaseBlockBody({ host, blockId, databaseId, linkId, onShowOwnViews }
       env={env}
       locked={database.database.locked}
       viewKey={`orbit:database-view:${databaseId}:${blockId}`}
-      block={{ id: blockId, rowLimit: BLOCK_ROW_LIMIT }}
+      block={{ id: blockId, rowLimit: BLOCK_ROW_LIMIT, peekContainer: host.peekContainer }}
       layout={({ controls, content }) => (
         <>
           <DatabaseTitle databaseId={databaseId} linked={!!linkId} title={database.database.title} icon={database.database.icon} />

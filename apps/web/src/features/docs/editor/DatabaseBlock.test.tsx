@@ -39,12 +39,12 @@ const detail = (rows: number): DatabaseDetail => ({
   rows: Array.from({ length: rows }, (_, index) => row(`r${index}`, index, `Book ${index}`, { 'p-notes': `note ${index}` })),
 })
 
-const host = { workspaceId: 'ws', pageId: 'host', locked: false }
+const host = { workspaceId: 'ws', pageId: 'host', locked: false, peekContainer: null }
 const workspace = testWorkspace('owner', { id: 'ws' })
-const block = (props: { databaseId: string; linkId?: string }) => ({ id: 'db-block', type: 'database', props: { linkId: '', ...props } })
+const block = (props: { databaseId: string; linkId?: string }, id = 'db-block') => ({ id, type: 'database', props: { linkId: '', ...props } })
 const content = (databaseBlock: unknown) => [
   { id: 'before', type: 'paragraph', content: [{ type: 'text', text: 'Before', styles: {} }] },
-  databaseBlock,
+  ...(Array.isArray(databaseBlock) ? databaseBlock : [databaseBlock]),
   { id: 'after', type: 'paragraph', content: [{ type: 'text', text: 'After', styles: {} }] },
 ]
 
@@ -54,12 +54,14 @@ function notFoundServer(code = 'page_not_found') {
     Response.json({ type: 'about:blank', title: 'Not found', status: 404, detail: 'Not found.', code, instance: '/', request_id: 'r' }, { status: 404, headers: { 'content-type': 'application/problem+json' } })) as unknown as typeof fetch
 }
 
-async function renderBlock(databaseBlock: unknown, cached?: DatabaseDetail, notFoundCode?: string, onDatabaseBlockRemoved?: (databaseId: string) => void) {
-  notFoundServer(notFoundCode)
+/** `peek`: the page opens at `url` with its row-peek pane, and requests stay pending (the peek shows its spinner). */
+async function renderBlock(databaseBlock: unknown, cached?: DatabaseDetail, notFoundCode?: string, onDatabaseBlockRemoved?: (databaseId: string) => void, peek?: { url: string; container: HTMLElement }) {
+  if (peek) globalThis.fetch = (() => new Promise(() => {})) as unknown as typeof fetch
+  else notFoundServer(notFoundCode)
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } } })
   if (cached) client.setQueryData(queryKeys.database('ws', 'db-1'), cached)
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <MemoryRouter>
+    <MemoryRouter initialEntries={[peek?.url ?? '/']}>
       <QueryClientProvider client={client}>
         <WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}>{children}</WorkspaceContext.Provider>
       </QueryClientProvider>
@@ -69,7 +71,7 @@ async function renderBlock(databaseBlock: unknown, cached?: DatabaseDetail, notF
   const onChange = mock((value: unknown[]) => void value)
   let view!: ReturnType<typeof render>
   await act(async () => {
-    view = render(<PageEditor ref={ref} pageId="host" initialContent={content(databaseBlock)} editable onChange={onChange} databaseHost={host} onDatabaseBlockRemoved={onDatabaseBlockRemoved} />, { wrapper })
+    view = render(<PageEditor ref={ref} pageId="host" initialContent={content(databaseBlock)} editable onChange={onChange} databaseHost={{ ...host, peekContainer: peek?.container ?? null }} onDatabaseBlockRemoved={onDatabaseBlockRemoved} />, { wrapper })
     await new Promise((resolve) => setTimeout(resolve, 0))
   })
   const root = () => view.container.querySelector('[data-slot="database-block"]') as HTMLElement
@@ -171,5 +173,18 @@ describe('database block', () => {
     await userEvent.click(view.getByRole('button', { name: "Show the database's own views" }))
     const stored = ref.current!.getContent() as { type: string; props?: { linkId?: string } }[]
     expect(stored[1].props?.linkId).toBe('')
+  })
+
+  test('a row opened from a block shows in the page pane, outside the editor, and only for that block', async () => {
+    const pane = document.createElement('div')
+    document.body.append(pane)
+    const { view } = await renderBlock([block({ databaseId: 'db-1' }), block({ databaseId: 'db-1' }, 'db-block-2')], detail(2), undefined, undefined, {
+      url: '/docs/host?row=r1&row_block=db-block-2',
+      container: pane,
+    })
+    expect(view.container.querySelectorAll('[data-slot="database-block"]').length).toBe(2)
+    expect(view.container.querySelectorAll('[data-row-peek]').length).toBe(0)
+    expect([...pane.querySelectorAll('[data-row-peek]')].map((peek) => peek.getAttribute('data-row-peek'))).toEqual(['r1'])
+    pane.remove()
   })
 })

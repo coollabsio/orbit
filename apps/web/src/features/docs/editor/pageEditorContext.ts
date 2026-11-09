@@ -15,6 +15,8 @@ export interface DatabaseBlockHost {
   pageId: string
   /** The page lock: the views of its linked view blocks are read-only. */
   locked: boolean
+  /** Where a block's row peek renders: the page's right pane, outside the editor. Null until the page mounts it. */
+  peekContainer: HTMLElement | null
 }
 
 export interface PageEditorContextValue {

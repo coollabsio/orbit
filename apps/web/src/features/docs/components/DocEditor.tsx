@@ -208,6 +208,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
   const [commentsOpen, setCommentsOpen] = useState(false)
   const [commentsFilter, setCommentsFilter] = useState<CommentsFilter>('open')
   const [commentsList, setCommentsList] = useState<HTMLDivElement | null>(null)
+  const [peekSlot, setPeekSlot] = useState<HTMLDivElement | null>(null)
   const [searchParams, setSearchParams] = useSearchParams()
   // A database page has no comments and no body: on `/docs/<database>?row=<row>&thread=<id>` the deep links belong to
   // the row peek's editor, so the database page's editor leaves them alone.
@@ -637,7 +638,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
     [workspaceId, pageId],
   )
 
-  const databaseHost = useMemo(() => ({ workspaceId, pageId, locked }), [workspaceId, pageId, locked])
+  const databaseHost = useMemo(() => ({ workspaceId, pageId, locked, peekContainer: peekSlot }), [workspaceId, pageId, locked, peekSlot])
   const trashPage = useTrashPage(workspaceId).mutate
   /** Deleting an inline database block keeps the database (spec 3.5); the toast offers to trash it too. */
   const onDatabaseBlockRemoved = useCallback(
@@ -1168,6 +1169,8 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
             </div>
           </div>
         )}
+        {/* The row peek of a database block in the page, a flex item of this row (as on a database page). */}
+        <div ref={setPeekSlot} className="contents" />
         {commentsOpen ? (
           <CommentsPanel
             filter={commentsFilter}

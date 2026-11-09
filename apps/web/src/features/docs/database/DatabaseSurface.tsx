@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { useSearchParams } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { applyView, repairConfig } from '@orbit/database/view'
@@ -37,8 +38,11 @@ interface DatabaseSurfaceProps {
   viewKey: string
   /** The full page: the selected view is also in `?view=`, and the table is virtualized in `scrollElement`. */
   page?: { scrollElement: HTMLElement | null }
-  /** A database block: its id (for the row peek in the URL) and the rows it shows before "Load more". */
-  block?: { id: string; rowLimit: number }
+  /**
+   * A database block: its id (for the row peek in the URL), the rows it shows before "Load more" and where its row peek
+   * renders (the host page's right pane, outside the editor).
+   */
+  block?: { id: string; rowLimit: number; peekContainer: HTMLElement | null }
   layout: (parts: SurfaceParts) => ReactNode
 }
 
@@ -96,8 +100,8 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
   const peekParam = searchParams.get('row')
   const peekRowId = peekParam && (!block || searchParams.get(PEEK_BLOCK_PARAM) === block.id) ? peekParam : null
   /**
-   * The side peek is in the URL (`?row=`, next to `?view=`): Back closes it and a link reopens it. Another row in an
-   * open peek replaces the entry, so Back still closes the peek.
+   * The side peek is in the URL (`?row=`, next to `?view=`): Back closes it and a link reopens it. Another row while a
+   * peek is open (from this view or another block in the page) replaces the entry, so Back still closes the peek.
    */
   const setPeekRow = (rowId: string | null) => {
     if (rowId === peekRowId) return
@@ -110,7 +114,7 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
         else next.delete(PEEK_BLOCK_PARAM)
         return next
       },
-      { replace: rowId !== null && peekRowId !== null },
+      { replace: rowId !== null && peekParam !== null },
     )
   }
 
@@ -258,21 +262,23 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
     </>
   )
 
+  const peek = peekRowId ? (
+    <RowPeek
+      workspaceId={workspaceId}
+      databaseId={databaseId}
+      rowId={peekRowId}
+      viewId={view.id}
+      order={rows.map((row) => row.id)}
+      focusTitle={focusRowId === peekRowId}
+      onShowRow={setPeekRow}
+      onClose={() => setPeekRow(null)}
+    />
+  ) : null
+
   return (
     <DatabaseEnvContext.Provider value={env}>
       {layout({ controls, content, board })}
-      {peekRowId ? (
-        <RowPeek
-          workspaceId={workspaceId}
-          databaseId={databaseId}
-          rowId={peekRowId}
-          viewId={view.id}
-          order={rows.map((row) => row.id)}
-          focusTitle={focusRowId === peekRowId}
-          onShowRow={setPeekRow}
-          onClose={() => setPeekRow(null)}
-        />
-      ) : null}
+      {block ? block.peekContainer && createPortal(peek, block.peekContainer) : peek}
     </DatabaseEnvContext.Provider>
   )
 }
