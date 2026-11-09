@@ -114,7 +114,7 @@ To add an icon, add its reicon name to `ICONS` in `scripts/generate-icons.ts` an
 
 ## Store builds
 
-The sign-in screen fills in Orbit Cloud (`https://app.orbit.so`) unless `EXPO_PUBLIC_ORBIT_SERVER` is set, so a cloud user only types an email and a password. A self-hosted user replaces the server. The `preview` and `production` profiles in `eas.json` set it to Orbit Cloud, so a release build never fills in a dev server from `.env.local`.
+The sign-in screen's Server dropdown starts on Orbit Cloud (`https://app.orbit.so`), so a cloud user only types an email and a password. A self-hosted user picks Custom and types the address of their Orbit server. When `EXPO_PUBLIC_ORBIT_SERVER` is set to another server, the dropdown starts on Custom with that address. The `preview` and `production` profiles in `eas.json` set it to Orbit Cloud, so a release build never fills in a dev server from `.env.local`.
 
 What is configured:
 

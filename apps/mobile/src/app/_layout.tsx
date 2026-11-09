@@ -109,7 +109,8 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
       }}
     >
       <Stack.Protected guard={signedIn}>
-        <Stack.Screen name="(tabs)" />
+        {/* signing in or out swaps the whole app: no push animation */}
+        <Stack.Screen name="(tabs)" options={{ animation: 'none' }} />
         <Stack.Screen name="chat/[id]" />
         <Stack.Screen name="chat/[id]/members" />
         <Stack.Screen name="chat/[id]/search" />
@@ -122,7 +123,7 @@ function RootNavigator({ fontsReady }: { fontsReady: boolean }) {
         <Stack.Screen name="chat/browse" />
       </Stack.Protected>
       <Stack.Protected guard={!signedIn}>
-        <Stack.Screen name="sign-in" />
+        <Stack.Screen name="sign-in" options={{ animation: 'none' }} />
       </Stack.Protected>
     </Stack>
   )

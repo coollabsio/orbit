@@ -9,6 +9,9 @@ interface AreaLink {
   href: string
 }
 
+/** Each settings area's menu: its root route, which is no page of its own. */
+const AREA_ROOTS: Record<SettingsArea, string> = { workspace: '/settings', account: '/settings/account', admin: '/settings/admin' }
+
 const under = (pathname: string, root: string) => pathname === root || pathname.startsWith(`${root}/`)
 
 /**
@@ -21,7 +24,7 @@ export function drawerAreaOf(pathname: string, areas: Record<SettingsArea, reado
   let found: SettingsArea | null = null
   let length = -1
   for (const [area, links] of Object.entries(areas) as [SettingsArea, readonly AreaLink[]][]) {
-    for (const link of links) {
+    for (const link of [...links, { href: AREA_ROOTS[area] }]) {
       if (link.href.length > length && under(pathname, link.href)) {
         found = area
         length = link.href.length

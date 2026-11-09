@@ -14,6 +14,7 @@ describe('drawerAreaOf', () => {
     expect(drawerAreaOf('/settings', areas)).toBe('workspace')
     expect(drawerAreaOf('/settings/members', areas)).toBe('workspace')
     expect(drawerAreaOf('/settings/profile', areas)).toBe('account')
+    expect(drawerAreaOf('/settings/account', areas)).toBe('account')
     expect(drawerAreaOf('/settings/appearance', areas)).toBe('account')
     expect(drawerAreaOf('/settings/workspace-agentic', areas)).toBe('workspace')
     expect(drawerAreaOf('/settings/agentic', areas)).toBe('account')
