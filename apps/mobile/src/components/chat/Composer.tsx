@@ -2,14 +2,17 @@ import { useQueryClient } from '@tanstack/react-query'
 import { applyChatActions, applyChatEvents, chatQueryKeys } from '../../chat-cache'
 import * as DocumentPicker from 'expo-document-picker'
 import * as ImagePicker from 'expo-image-picker'
-import { useState } from 'react'
-import { Image, Platform, Pressable, ScrollView, View } from 'react-native'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Image, Platform, Pressable, ScrollView, type TextInputInstance, View } from 'react-native'
 import { TextInput } from '../../ui/scaled'
 
-import { newNonce, type ThreadPages, upsertThreadMessage } from '../../data/chat'
+import { decodeMentions, newNonce, type ThreadPages, upsertThreadMessage } from '../../data/chat'
 import * as chat from '../../data/chat-api'
+import { encodeMentions, GLOBAL_MENTIONS, type MentionTarget } from '../../data/mentions'
 import type { MessageRecord } from '../../data/orbit'
 import { showError } from '../../hooks/chat'
+import { useConversations, useMentionPeople, usePeople } from '../../queries'
+import { MentionSuggestions, useMentionField } from '../MentionSuggestions'
 
 import { useOrbit } from '../../orbit-context'
 import { useTheme } from '../../theme'
@@ -50,6 +53,18 @@ export function useComposer(conversationId: string, threadRootId: string | null)
   const [mode, setMode] = useState<Mode>({ kind: 'new', replyTo: null })
   const [alsoInChannel, setAlsoInChannel] = useState(false)
   const [pending, setPending] = useState<PendingMessage[]>([])
+  // The draft holds `@Name` and `#name`; the stored body `<@id>` and `<#id>`, as on the web.
+  const people = usePeople()
+  const mentionable = useMentionPeople()
+  const conversations = useConversations().data
+  const conversation = conversations?.find((item) => item.id === conversationId)
+  const channels = useMemo<MentionTarget[]>(() => (conversations ?? []).filter((item) => item.kind !== 'dm').map(({ id, name }) => ({ id, name })), [conversations])
+  // Who `@` offers: everybody in a public channel, the members of a private channel or a DM; `@channel` and `@here`
+  // outside a thread.
+  const mentionPeople = useMemo(
+    () => [...mentionable.filter((person) => conversation?.kind === 'public' || conversation?.member_ids.includes(person.id)), ...(threadRootId === null ? GLOBAL_MENTIONS : [])],
+    [mentionable, conversation, threadRootId],
+  )
 
   const upload = (key: string, picked: { uri: string; name: string; width?: number; height?: number }) =>
     uploadPart(picked.uri, picked.name)
@@ -82,7 +97,8 @@ export function useComposer(conversationId: string, threadRootId: string | null)
   const canSend = !uploading && (draft.trim() !== '' || (mode.kind === 'new' && ready.length > 0))
 
   const send = () => {
-    const body = draft.trim()
+    const typed = draft.trim()
+    const body = encodeMentions(typed, people, channels)
     if (!canSend) return
     if (mode.kind === 'edit') {
       const { message } = mode
@@ -95,7 +111,7 @@ export function useComposer(conversationId: string, threadRootId: string | null)
           received(result)
         },
         (error) => {
-          setDraft(body)
+          setDraft(typed)
           setMode({ kind: 'edit', message })
           showError('The message was not edited', error)
         },
@@ -117,7 +133,7 @@ export function useComposer(conversationId: string, threadRootId: string | null)
       },
       (error) => {
         setPending((list) => list.filter((other) => other.nonce !== item.nonce))
-        setDraft((current) => current || body)
+        setDraft((current) => current || typed)
         showError('Message not sent', error)
       },
     )
@@ -133,7 +149,7 @@ export function useComposer(conversationId: string, threadRootId: string | null)
     reply: (message: MessageRecord) => setMode({ kind: 'new', replyTo: message }),
     edit: (message: MessageRecord) => {
       setMode({ kind: 'edit', message })
-      setDraft(message.body)
+      setDraft(decodeMentions(message.body, people, channels))
     },
     cancelMode: () => {
       if (mode.kind === 'edit') setDraft('')
@@ -144,6 +160,8 @@ export function useComposer(conversationId: string, threadRootId: string | null)
     pending,
     canSend,
     send,
+    mentionPeople,
+    channels,
   }
 }
 
@@ -159,7 +177,16 @@ export function Composer({ state, placeholder, nameOf, alsoSendTo }: { state: Co
   const [attachOpen, setAttachOpen] = useState(false)
   const [emojiOpen, setEmojiOpen] = useState(false)
   const { draft, setDraft, mode } = state
-  const append = (text: string) => setDraft(`${draft}${draft && !draft.endsWith(' ') ? ' ' : ''}${text}`)
+  const input = useRef<TextInputInstance>(null)
+  // Reply and Edit open the keyboard. They run from the message's action sheet, so wait until its Modal has slid
+  // away: iOS drops a focus that happens while the Modal is still on screen.
+  const target = mode.kind === 'edit' ? mode.message.id : mode.replyTo?.id
+  useEffect(() => {
+    if (!target) return
+    const timer = setTimeout(() => input.current?.focus(), Platform.OS === 'web' ? 0 : 350)
+    return () => clearTimeout(timer)
+  }, [target])
+  const mention = useMentionField({ text: draft, setText: setDraft, people: state.mentionPeople, channels: state.channels, inputRef: input })
 
   const pickImages = async (camera: boolean) => {
     const options: ImagePicker.ImagePickerOptions = { mediaTypes: ['images', 'videos'], allowsMultipleSelection: !camera, selectionLimit: 10, quality: 0.9 }
@@ -223,7 +250,9 @@ export function Composer({ state, placeholder, nameOf, alsoSendTo }: { state: Co
             ))}
           </ScrollView>
         ) : null}
+        <MentionSuggestions suggestions={mention.suggestions} onPick={mention.pick} />
         <TextInput
+          {...mention.inputProps}
           value={draft}
           onChangeText={setDraft}
           onFocus={() => setFocused(true)}
@@ -240,7 +269,7 @@ export function Composer({ state, placeholder, nameOf, alsoSendTo }: { state: Co
         <View className="flex-row items-center gap-1 p-1.5">
           <IconButton icon="attach" label="Attach files" size={32} iconSize={20} disabled={mode.kind === 'edit'} onPress={() => setAttachOpen(true)} />
           <IconButton icon="smile" label="Emoji" size={32} iconSize={20} onPress={() => setEmojiOpen(true)} />
-          <IconButton icon="at" label="Mention" size={32} iconSize={20} onPress={() => append('@')} />
+          <IconButton icon="at" label="Mention" size={32} iconSize={20} onPress={mention.mention} />
           <View className="flex-1" />
           <Pressable
             accessibilityRole="button"

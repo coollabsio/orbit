@@ -4,7 +4,6 @@ import { useState } from 'react'
 import { View } from 'react-native'
 
 import { Dialog } from '../../../components/settings/Dialog'
-import { ProfilePicture } from '../../../components/settings/ProfilePicture'
 import { ACCOUNT_NAV, Note, SettingsCard, SettingsShell } from '../../../components/settings/Shell'
 import { passwordProblem, requestEmailChange } from '../../../data/account-api'
 import * as api from '../../../data/orbit'
@@ -14,7 +13,7 @@ import { pickImage, useAuthOptions, useChangePassword, useConnectedAccounts, use
 import { DeleteAccountDialog } from '../../../components/settings/DeleteAccountDialog'
 import { useOrbit } from '../../../orbit-context'
 import { errorMessage } from '../../../session-context'
-import { Button, Input, Text } from '../../../ui'
+import { Avatar, Button, Input, Text } from '../../../ui'
 
 /** The server refuses a bigger picture. */
 const MAX_PICTURE_BYTES = 512 * 1024
@@ -96,7 +95,7 @@ function PictureField() {
   return (
     // the web's row wraps at phone width: the picture above the button and its hint
     <View className="items-start gap-4">
-      <ProfilePicture id={user.id} name={user.display_name} url={user.avatar_url} size={64} />
+      <Avatar id={user.id} name={user.display_name} size={64} />
       <View className="min-w-0 gap-2">
         <View className="flex-row gap-2">
           <Button label={setPicture.isPending ? 'Saving…' : user.avatar_url ? 'Change picture' : 'Upload picture'} variant="outline" disabled={setPicture.isPending} onPress={choose} />

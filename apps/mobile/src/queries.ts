@@ -4,6 +4,7 @@ import { useMemo } from 'react'
 
 import { chatBadge, type Person } from './data/chat'
 import { keys } from './data/keys'
+import type { MentionTarget } from './data/mentions'
 import * as api from './data/orbit'
 import { useOrbit } from './orbit-context'
 
@@ -45,6 +46,15 @@ export function useMembers() {
 export function usePeople(): Person[] {
   const members = useMembers()
   return useMemo(() => (members.data ?? []).map((member) => ({ id: member.user_id, name: member.display_name })), [members.data])
+}
+
+/** Members who can be mentioned (not suspended), with the email's local part as the handle, as on the web. */
+export function useMentionPeople(): MentionTarget[] {
+  const members = useMembers()
+  return useMemo(
+    () => (members.data ?? []).filter((member) => !member.suspended_at).map((member) => ({ id: member.user_id, name: member.display_name, handle: member.email.split('@')[0] ?? member.email })),
+    [members.data],
+  )
 }
 
 export function useConversations() {

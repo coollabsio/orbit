@@ -4,6 +4,7 @@
  */
 import type { CreatePageBody, PageFavorite, PageKind } from '@orbit/api/generated/types.gen'
 
+import { type MentionTarget, mentionInlineContent } from './mentions'
 import type { PageSummary, Teamspace } from './orbit'
 
 export const pageTitle = (page: Pick<PageSummary, 'title'>) => page.title.trim() || 'Untitled'
@@ -122,8 +123,8 @@ export function blockId(random: () => number = Math.random): string {
   })
 }
 
-/** One BlockNote paragraph per non-empty line, as the web editor stores typed text. */
-export function paragraphBlocks(text: string, makeId: () => string = blockId): Record<string, unknown>[] {
+/** One BlockNote paragraph per non-empty line, as the web editor stores typed text; `@Name` of `people` is a mention. */
+export function paragraphBlocks(text: string, makeId: () => string = blockId, people: readonly MentionTarget[] = []): Record<string, unknown>[] {
   return text
     .split('\n')
     .map((line) => line.trimEnd())
@@ -132,7 +133,7 @@ export function paragraphBlocks(text: string, makeId: () => string = blockId): R
       id: makeId(),
       type: 'paragraph',
       props: { backgroundColor: 'default', textAlignment: 'left', textColor: 'default' },
-      content: [{ type: 'text', text: line, styles: {} }],
+      content: mentionInlineContent(line, people),
       children: [],
     }))
 }
