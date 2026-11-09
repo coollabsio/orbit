@@ -8,7 +8,7 @@ import { Kbd } from '@/components/ui/kbd'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { ConfirmDeleteModal } from '@/components/common/ConfirmDeleteModal'
 import { Attachments } from '@/components/common/Attachments'
-import { contentEquals } from '@/features/docs/editor/content'
+import { contentEquals, trimBlocks } from '@/features/docs/editor/content'
 import { uploadInlineFile } from '@/features/tasks/api/inlineFiles'
 import { commentSaveAction, isEmptyRichText } from '@/features/tasks/lib/richText'
 import { useNearViewport } from '@/features/tasks/lib/useNearViewport'
@@ -43,8 +43,8 @@ export function CommentItem({ state, taskId, comment, reply }: CommentItemProps)
   /** A saved edit shown until the server's new version arrives (no flash of the old text). */
   const [saved, setSaved] = useState<{ version: number; content: unknown[] } | null>(null)
   const shown = saved?.version === comment.version ? saved.content : null
-  const author = state.users.find((u) => u.id === comment.authorId)
-  const name = author?.name ?? 'Someone'
+  const author = comment.authorServiceAccountName ? undefined : state.users.find((u) => u.id === comment.authorId)
+  const name = comment.authorServiceAccountName || author?.name || 'Someone'
   const mentions = useMemo(() => ({ members: state.users, candidates: state.users.filter((user) => !user.suspended), privatePage: false }), [state.users])
   const fileScope = useMemo(() => ({ workspaceId: workspace.id, taskId }), [workspace.id, taskId])
   const [bodyRef, nearScreen] = useNearViewport<HTMLDivElement>()
@@ -56,8 +56,10 @@ export function CommentItem({ state, taskId, comment, reply }: CommentItemProps)
     setEditing(true)
   }
   const commitEdit = () => {
-    const content = editorRef.current?.getContent() ?? []
-    const changed = dirty.current && !contentEquals(content, shown ?? comment.bodyJson)
+    const content = trimBlocks(editorRef.current?.getContent() ?? [])
+    // an older comment can still have empty lines around its text: removing them alone is no edit
+    const before = shown ?? comment.bodyJson
+    const changed = dirty.current && !(before && contentEquals(content, trimBlocks(before)))
     const action = commentSaveAction({ content, changed, hasAttachments: (comment.attachments?.length ?? 0) > 0 })
     if (action === 'confirm-delete') {
       setConfirmDelete(true)

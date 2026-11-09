@@ -45,7 +45,7 @@ import {
 } from '@/features/docs/api/pages'
 import { usePageFavorites, useToggleFavorite } from '@/features/docs/api/favorites'
 import { usePageVisit, useSetPageLock } from '@/features/docs/api/pageOptions'
-import { lastEditedLabel, useLastEdited } from '@/features/docs/lastEdited'
+import { useLastEdited } from '@/features/docs/lastEdited'
 import { useRestorePageVersion } from '@/features/docs/api/pageVersions'
 import { useCurrentUser } from '@/features/auth/api'
 import { PageAutosaver, type AutosaveState, type PagePatch } from '@/features/docs/autosave'
@@ -589,13 +589,15 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
         : syncStatus === 'live' && status === 'saving'
           ? 'Saving…'
           : collabStatusLabel({ ...collab.state, status: syncStatus })
+  // A healthy sync needs no label. "Live" only repeated the edit time next to it.
+  const showStatus = statusLabel !== 'Live'
   const statusTitle =
-    syncStatus === 'live'
-      ? 'Changes sync live with everyone on this page.'
-      : syncStatus === 'offline'
-        ? 'Your edits are kept in this tab and sync when the connection is back.'
-        : undefined
+    syncStatus === 'offline'
+      ? 'Your edits are kept in this tab and sync when the connection is back.'
+      : undefined
   const displayTitle = title.trim() ? title : 'Untitled'
+  const editedBy = lastEdited.edit.userId === selfId ? 'you' : lastEdited.edit.name.trim() || 'someone'
+  const editedAt = new Date(lastEdited.edit.at).toISOString()
   const favorite = favoritesQuery.data?.includes(pageId) ?? false
   const setFavorite = (next: boolean) =>
     toggleFavorite.mutate(
@@ -649,33 +651,32 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
             </span>
           </nav>
           <span className="flex-1" />
-          <span
-            className="min-w-0 truncate text-xs whitespace-nowrap text-muted-foreground/70 max-[1099px]:hidden"
-            data-last-edited=""
-            title={new Date(lastEdited.edit.at).toLocaleString()}
-          >
-            {lastEditedLabel(lastEdited.edit, selfId, lastEdited.now)}
-          </span>
           <PresenceAvatars people={people} onReveal={(person) => revealCollabCursor(document, person.id)} />
           <span
             className={cn(
               'flex items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground/70',
               (status === 'error' || status === 'conflict' || syncStatus === 'lost' || syncStatus === 'error') && 'text-destructive',
+              !showStatus && 'hidden',
             )}
             role="status"
             aria-live="polite"
             title={statusTitle}
+            hidden={!showStatus}
             data-save-status={status}
             data-collab-status={syncStatus}
           >
-            {status === 'error' || status === 'conflict' ? null : (
-              <span className={cn('size-1.5 shrink-0 rounded-full', STATUS_DOT[syncStatus])} aria-hidden="true" />
-            )}
-            {statusLabel}
-            {status === 'error' ? (
-              <Button type="button" variant="ghost" size="xs" onClick={() => void saver.flush()}>
-                Retry
-              </Button>
+            {showStatus ? (
+              <>
+                {status === 'error' || status === 'conflict' ? null : (
+                  <span className={cn('size-1.5 shrink-0 rounded-full', STATUS_DOT[syncStatus])} aria-hidden="true" />
+                )}
+                {statusLabel}
+                {status === 'error' ? (
+                  <Button type="button" variant="ghost" size="xs" onClick={() => void saver.flush()}>
+                    Retry
+                  </Button>
+                ) : null}
+              </>
             ) : null}
           </span>
           <Tip label="Comments" side="bottom">
@@ -794,6 +795,15 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
                 <Trash2 className="size-[14px]" />
                 Move to trash
               </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <div className="px-1.5 py-1 text-xs leading-5 text-muted-foreground" title={new Date(lastEdited.edit.at).toLocaleString()}>
+                <p className="truncate" data-last-edited="">
+                  Last edited by {editedBy}
+                </p>
+                <p>
+                  {dayLabel(editedAt)} at {timeOfDay(editedAt)}
+                </p>
+              </div>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

@@ -1,21 +1,22 @@
 import { toast } from 'sonner'
-import { useState, type FormEvent } from 'react'
+import { useState, type FormEvent, type ReactNode } from 'react'
 import { Copy, Key } from 'reicon-react'
 import { confirmAction } from '@/components/common/confirmAction'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Field, FieldContent, FieldDescription, FieldLabel, FieldLegend, FieldSet, FieldTitle } from '@/components/ui/field'
+import { Field, FieldContent, FieldDescription, FieldLabel, FieldTitle } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { relativeTime, shortDate } from '@/lib/format'
 import { useCan } from '@/features/workspaces/permissions'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useProjects } from '@/features/tasks/api/projects'
 import { SettingsCard } from '@/components/common/SettingsCard'
+import { AccessPicker, ProjectPicker, type ScopeResource } from '@/components/common/ScopeAccess'
 import { FieldGrid, RequiredMark, RowIcon, SettingsRow } from '@/features/settings/components/SettingsParts'
 import { useApiTokens, useCreateApiToken, useRevokeApiToken } from '@/features/settings/api/apiTokens'
+import type { ApiTokenScope } from '@orbit/api/generated/types.gen'
 
 const EXPIRATION_OPTIONS = [
   { value: 'never', label: 'Never expires' },
@@ -27,6 +28,18 @@ const EXPIRATION_OPTIONS = [
 
 type ExpirationValue = typeof EXPIRATION_OPTIONS[number]['value']
 
+function tokenResources(serviceAccount: boolean, projects: ReactNode): ScopeResource<ApiTokenScope>[] {
+  return [
+    { name: 'Tasks', hint: 'In the selected projects. Write includes delete.', read: 'tasks:read', write: 'tasks:write', details: projects },
+    { name: 'Docs', hint: 'Including your private docs', read: 'docs:read', write: 'docs:write', disabled: serviceAccount },
+    { name: 'Chat', hint: 'Including your private channels and DMs. MCP only.', read: 'chat:read', disabled: serviceAccount },
+  ]
+}
+
+
+function isExpired(expiresAt?: string | null) {
+  return expiresAt != null && new Date(expiresAt).getTime() <= Date.now()
+}
 
 export function ApiTokensPage() {
   const { workspace } = useWorkspace()
@@ -38,23 +51,32 @@ export function ApiTokensPage() {
   const revokeToken = useRevokeApiToken(workspace.id)
   const [name, setName] = useState('')
   const [projectIds, setProjectIds] = useState<string[]>([])
+  const [allProjects, setAllProjects] = useState(false)
   const projectNames = new Map(projects.map((project) => [project.id, project.name]))
-  const [read, setRead] = useState(true)
-  const [write, setWrite] = useState(true)
-  const [docsRead, setDocsRead] = useState(false)
-  const [chatRead, setChatRead] = useState(false)
+  const [scopes, setScopes] = useState<ApiTokenScope[]>(['tasks:read'])
   const [serviceAccount, setServiceAccount] = useState(false)
   const [expiration, setExpiration] = useState<ExpirationValue>('never')
   const [issuedToken, setIssuedToken] = useState<string>()
   const [copied, setCopied] = useState(false)
 
+  // Projects only limit task access, so a token without a task scope needs none.
+  const taskScope = scopes.some((scope) => scope.startsWith('tasks:'))
+  const ready = name.trim() !== '' && scopes.length > 0 && (!taskScope || allProjects || projectIds.length > 0)
+
   if (!canManage) return <SettingsCard title="API tokens"><p className="m-0 text-muted-foreground">Only workspace owners and administrators can manage API tokens.</p></SettingsCard>
+
+  // A service account has task access only, so selecting it drops the docs and chat scopes.
+  function selectServiceAccount(checked: boolean) {
+    setServiceAccount(checked)
+    if (!checked) return
+    const taskScopes = scopes.filter((scope) => scope.startsWith('tasks:'))
+    setScopes(taskScopes.length ? taskScopes : ['tasks:read'])
+  }
 
   async function submit(event: FormEvent) {
     event.preventDefault()
-    const scopes = [...(read ? ['read' as const] : []), ...(write ? ['write' as const] : []), ...(docsRead ? ['docs:read' as const] : []), ...(chatRead ? ['chat:read' as const] : [])]
-    if (!name.trim() || projectIds.length === 0 || scopes.length === 0) return
-    const issued = await createToken.mutateAsync({ name: name.trim(), projectIds, scopes, serviceAccount, expiresInDays: expiration === 'never' ? null : Number(expiration) })
+    if (!ready) return
+    const issued = await createToken.mutateAsync({ name: name.trim(), projectIds: taskScope && !allProjects ? projectIds : [], allProjects: taskScope && allProjects, scopes, serviceAccount, expiresInDays: expiration === 'never' ? null : Number(expiration) })
     setIssuedToken(issued.token)
     setName('')
     setCopied(false)
@@ -65,22 +87,6 @@ export function ApiTokensPage() {
       <form onSubmit={(event) => void submit(event)}>
         <FieldGrid>
         <Field><FieldLabel htmlFor="api-token-name">Name <RequiredMark /></FieldLabel><Input id="api-token-name" value={name} maxLength={100} onChange={(event) => setName(event.target.value)} placeholder="Discord bot" /></Field>
-        <Field>
-          <FieldLabel htmlFor="api-token-projects">Projects <RequiredMark /></FieldLabel>
-          {/* Base UI's `multiple` replaces the old Listbox `selectedValues` + `closeOnSelect={false}` pair: the popup stays open while toggling projects. */}
-          <Select multiple value={projectIds} disabled={projectsQuery.isPending || projects.length === 0} onValueChange={(value) => setProjectIds(value)}>
-            <SelectTrigger id="api-token-projects" aria-label="Projects">
-              <SelectValue>
-                {(value: string[]) => value.length === 0
-                  ? <span className="text-muted-foreground">{projectsQuery.isPending ? 'Loading projects…' : 'Select projects…'}</span>
-                  : value.length === 1 ? projectNames.get(value[0]) : `${value.length} projects selected`}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {projects.map((project) => <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </Field>
         <Field>
           <FieldLabel htmlFor="api-token-expiration">Expiration</FieldLabel>
           {/* `items` lets Select.Value render the option label instead of the raw value. */}
@@ -93,24 +99,20 @@ export function ApiTokensPage() {
             </SelectContent>
           </Select>
         </Field>
-        <FieldSet className="flex-row gap-[18px]">
-          <FieldLegend variant="label">Scopes</FieldLegend>
-          <Label className="font-normal"><Checkbox checked={read} onCheckedChange={setRead} /> Read</Label>
-          <Label className="font-normal"><Checkbox checked={write} onCheckedChange={setWrite} /> Write tasks (includes delete)</Label>
-          <Label className="font-normal"><Checkbox checked={docsRead} disabled={serviceAccount} onCheckedChange={setDocsRead} /> Read docs (including your private docs)</Label>
-          <Label className="font-normal"><Checkbox checked={chatRead} disabled={serviceAccount} onCheckedChange={setChatRead} /> Read chat (including your private channels and DMs)</Label>
-        </FieldSet>
         {/* a choice card: the whole card toggles the checkbox and tints while checked */}
         <FieldLabel className="min-[900px]:col-span-2">
           <Field orientation="horizontal">
-            <Checkbox checked={serviceAccount} disabled={docsRead || chatRead} onCheckedChange={setServiceAccount} />
+            <Checkbox checked={serviceAccount} onCheckedChange={selectServiceAccount} />
             <FieldContent>
               <FieldTitle>Use a service account</FieldTitle>
-              <FieldDescription>For Discord and other unattended integrations. Tokens with the same name reuse this identity.</FieldDescription>
+              <FieldDescription>For bots, such as a Discord bot. Changes show as made by this account, not by you. Tokens with the same name share one account.</FieldDescription>
             </FieldContent>
           </Field>
         </FieldLabel>
-        <Button className="justify-self-start" type="submit" disabled={createToken.isPending || !name.trim() || projectIds.length === 0 || (!read && !write && !docsRead && !chatRead)}>Create token</Button>
+        <div className="min-[900px]:col-span-2">
+          <AccessPicker id="api-token-access" resources={tokenResources(serviceAccount, taskScope ? <ProjectPicker id="api-token-projects" projects={projects} selected={projectIds} onChange={setProjectIds} all={allProjects} onAllChange={setAllProjects} empty={projectsQuery.isPending ? 'Loading projects…' : projects.length ? undefined : 'This workspace has no active projects.'} /> : null)} scopes={scopes} onChange={setScopes} />
+        </div>
+        <Button className="justify-self-start" type="submit" disabled={createToken.isPending || !ready}>Create token</Button>
         {createToken.isError ? <p className="text-destructive" role="alert">The API token could not be created.</p> : null}
         </FieldGrid>
       </form>
@@ -123,7 +125,7 @@ export function ApiTokensPage() {
         {tokens.data?.length === 0 ? <SettingsRow>No active API tokens.</SettingsRow> : null}
         {tokens.data?.map((token) => <SettingsRow className="flex-nowrap" key={token.id}>
           <RowIcon><Key /></RowIcon>
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5"><span className="flex items-center gap-2 text-[13px] font-medium text-foreground">{token.name}</span><span className="text-xs text-muted-foreground/70">{token.service_account_name ? `Service account: ${token.service_account_name}` : 'Personal token'} · <code>{token.token_prefix}…</code> · {token.project_ids.map((id) => projectNames.get(id) ?? 'Unavailable project').join(', ')} · {token.expires_at ? `expires ${shortDate(token.expires_at)}` : 'never expires'} · created {relativeTime(token.created_at)}</span></div>
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5"><span className="flex items-center gap-2 text-[13px] font-medium text-foreground">{token.name}{isExpired(token.expires_at) ? <Badge variant="destructive">Expired</Badge> : null}</span><span className="text-xs text-muted-foreground/70">{token.service_account_name ? `Service account: ${token.service_account_name}` : 'Personal token'} · <code>{token.token_prefix}…</code> · {token.all_projects ? 'All projects · ' : token.project_ids.length ? `${token.project_ids.map((id) => projectNames.get(id) ?? 'Unavailable project').join(', ')} · ` : null}{token.expires_at ? `${isExpired(token.expires_at) ? 'expired' : 'expires'} ${shortDate(token.expires_at)}` : 'never expires'} · created {relativeTime(token.created_at)}</span></div>
           <span className="flex gap-1">{token.scopes.map((scope) => <Badge variant="secondary" key={scope}>{scope}</Badge>)}</span>
           <Button variant="ghost" type="button" disabled={revokeToken.isPending} onClick={async () => { if (await confirmAction({ title: `Revoke ${token.name}?`, description: 'The integration will lose access immediately.', confirmLabel: 'Revoke', danger: true })) revokeToken.mutate(token.id) }}>Revoke</Button>
         </SettingsRow>)}

@@ -1,6 +1,6 @@
 /** The settings areas (the web's `settingsAreaOf`). */
 export type SettingsArea = 'workspace' | 'account' | 'admin'
-/** The areas whose links replace the app links in the new UI's drawer: a settings area or Tasks. */
+/** The areas whose links replace the app links in the drawer: a settings area or Tasks. */
 export type DrawerArea = SettingsArea | 'tasks'
 
 export const DRAWER_AREA_TITLES: Record<DrawerArea, string> = { workspace: 'Settings', account: 'Account settings', admin: 'Admin', tasks: 'Tasks' }
@@ -33,7 +33,12 @@ export function drawerAreaOf(pathname: string, areas: Record<SettingsArea, reado
 
 /** The web's section labels (`settingsNav.ts`); a link not listed here sits in its area's first section. */
 const SECTIONS: Record<SettingsArea, { label: string; hrefs?: readonly string[] }[]> = {
-  workspace: [{ label: 'Workspace' }, { label: 'Integrations', hrefs: ['/settings/file-storage', '/settings/workspace-agentic'] }],
+  workspace: [
+    { label: 'Workspace' },
+    { label: 'Chat', hrefs: ['/settings/emoji', '/settings/stickers'] },
+    { label: 'Integrations', hrefs: ['/settings/file-storage', '/settings/github', '/settings/workspace-agentic', '/settings/api-tokens'] },
+    { label: 'Advanced', hrefs: ['/settings/import', '/settings/export', '/settings/danger-zone'] },
+  ],
   account: [
     { label: 'Account' },
     { label: 'Preferences', hrefs: ['/settings/appearance', '/settings/notifications'] },

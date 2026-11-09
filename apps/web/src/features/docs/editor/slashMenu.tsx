@@ -1,7 +1,7 @@
 import { filterSuggestionItems, insertOrUpdateBlockForSlashMenu } from '@blocknote/core/extensions'
 import { getDefaultReactSlashMenuItems, type DefaultReactSuggestionItem } from '@blocknote/react'
-import { DocumentText, Hierarchy, LampOn, Link2 } from 'reicon-react'
-import { MERMAID_LANGUAGE } from '@orbit/editor/codeLanguages'
+import { DocumentText, Hierarchy, LampOn, Link2, Math as MathIcon } from 'reicon-react'
+import { MATH_LANGUAGE, MERMAID_LANGUAGE } from '@orbit/editor/codeLanguages'
 import { CALLOUT_DEFAULT_BACKGROUND } from '@orbit/editor/schema'
 import type { PageEditorInstance } from '@orbit/editor/schema'
 
@@ -69,6 +69,38 @@ export function mermaidSlashItem(editor: PageEditorInstance): DefaultReactSugges
   }
 }
 
+/** "Math" (Basic blocks): a code block with the language `latex`, which shows the formula. */
+export function mathSlashItem(editor: PageEditorInstance): DefaultReactSuggestionItem {
+  return {
+    title: 'Math',
+    subtext: 'Write a formula',
+    aliases: ['math', 'latex', 'tex', 'equation', 'formula', 'katex'],
+    group: PAGE_ITEMS_GROUP,
+    icon: <MathIcon className="size-[18px]" />,
+    onItemClick: () => {
+      insertOrUpdateBlockForSlashMenu(editor, {
+        type: 'codeBlock',
+        props: { language: MATH_LANGUAGE },
+        content: 'e^{i\\pi} + 1 = 0',
+      })
+    },
+  }
+}
+
+/** "Inline math" (Basic blocks): a formula in the current sentence. */
+export function inlineMathSlashItem(editor: PageEditorInstance): DefaultReactSuggestionItem {
+  return {
+    title: 'Inline math',
+    subtext: 'Formula inside a sentence',
+    aliases: ['inline', 'inline math', 'inline equation'],
+    group: PAGE_ITEMS_GROUP,
+    icon: <MathIcon className="size-[18px]" />,
+    onItemClick: () => {
+      editor.insertInlineContent([{ type: 'math', props: { latex: '' } }])
+    },
+  }
+}
+
 /** Inserts `item` right after the default item with `key` (e.g. Callout after Quote), else at the group start. */
 export function insertAfterKey<T extends { group?: string; key?: string }>(items: readonly T[], key: string, item: T): T[] {
   const index = items.findIndex((candidate) => candidate.key === key && candidate.group === item.group)
@@ -107,18 +139,25 @@ export function preferTitleMatches<T extends { title: string; group?: string }>(
 
 /**
  * Slash menu items for the page editor: BlockNote's defaults (already limited to block types present in the
- * schema, so video/audio are gone while Image and File stay), Callout after Quote, Mermaid after Code Block, plus the page items,
- * filtered by the typed query.
+ * schema, so video/audio are gone while Image and File stay), Callout after Quote, Mermaid and Math after Code Block,
+ * plus the page items, filtered by the typed query.
  */
+function withCodePictures(editor: PageEditorInstance, items: DefaultReactSuggestionItem[]) {
+  const withMermaid = insertAfterKey(items, 'code_block', mermaidSlashItem(editor))
+  const index = withMermaid.findIndex((item) => item.title === 'Mermaid diagram')
+  const math = [mathSlashItem(editor), inlineMathSlashItem(editor)]
+  if (index === -1) return mergeSlashItems(withMermaid, math)
+  return [...withMermaid.slice(0, index + 1), ...math, ...withMermaid.slice(index + 1)]
+}
+
 export function getPageSlashMenuItems(editor: PageEditorInstance, actions: PageSlashActions, query: string): DefaultReactSuggestionItem[] {
   const defaults = insertAfterKey(getDefaultReactSlashMenuItems(editor), 'quote', calloutSlashItem(editor))
-  const merged = mergeSlashItems(insertAfterKey(defaults, 'code_block', mermaidSlashItem(editor)), pageSlashItems(actions))
+  const merged = mergeSlashItems(withCodePictures(editor, defaults), pageSlashItems(actions))
   return preferTitleMatches(filterSuggestionItems(merged, query), query)
 }
 
 /** Slash menu items for task descriptions and comments: the page items without Sub-page and Link a page. */
 export function getTaskSlashMenuItems(editor: PageEditorInstance, query: string): DefaultReactSuggestionItem[] {
   const defaults = insertAfterKey(getDefaultReactSlashMenuItems(editor), 'quote', calloutSlashItem(editor))
-  const merged = insertAfterKey(defaults, 'code_block', mermaidSlashItem(editor))
-  return preferTitleMatches(filterSuggestionItems(merged, query), query)
+  return preferTitleMatches(filterSuggestionItems(withCodePictures(editor, defaults), query), query)
 }

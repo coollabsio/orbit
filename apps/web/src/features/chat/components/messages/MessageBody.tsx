@@ -9,6 +9,7 @@ import type { Message } from '../../api/types'
 import { useChatHost } from '../../chatHost'
 import { decodeMentions } from '../../lib/mentionTokens'
 import { LinkEmbed } from './LinkEmbed'
+import { MessageBlocks } from './MessageBlocks'
 import { extractLinkUrls, isJumboEmoji, isLongMessage, standaloneLinkUrls } from './messageText'
 import { useChatPeople } from './people'
 import { findTypedTaskIds, linkTaskIds, taskIdUrl } from './taskIds'
@@ -50,6 +51,15 @@ export function MessageBody({ message }: { message: Message }) {
       <p data-slot="message-body" data-deleted="" className="text-muted-foreground italic">
         This message was deleted
       </p>
+    )
+  }
+
+  // An integration's layout blocks replace its text; the text is their plain form for previews and search.
+  if (message.blocks && message.blocks.length > 0) {
+    return (
+      <div data-slot="message-body" className="min-w-0">
+        <MessageBlocks blocks={message.blocks} messageId={message.id} interactive={message.bot?.interactive === true} />
+      </div>
     )
   }
 

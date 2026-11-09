@@ -140,6 +140,45 @@ export function useRevokeSessions() {
   })
 }
 
+export function usePasskeys() {
+  const { client } = useOrbit()
+  return useQuery({ queryKey: account.accountKeys.passkeys, queryFn: () => account.passkeys(client) })
+}
+
+export function useDeletePasskey() {
+  const { client } = useOrbit()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => account.deletePasskey(client, id),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: account.accountKeys.passkeys }),
+  })
+}
+
+/** The browsers that get push notifications (the app itself gets none yet). */
+export function usePushDevices() {
+  const { client } = useOrbit()
+  return useQuery({ queryKey: account.accountKeys.pushDevices, queryFn: () => account.pushDevices(client) })
+}
+
+export function useRemovePushDevice() {
+  const { client } = useOrbit()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => account.removePushDevice(client, id),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: account.accountKeys.pushDevices }),
+  })
+}
+
+/** Deletes the open workspace: the workspace list drops it and the app opens the next one. */
+export function useDeleteWorkspace() {
+  const { client, workspace } = useOrbit()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () => account.deleteWorkspace(client, workspace),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: keys.workspaces }),
+  })
+}
+
 export function useOAuthConnections() {
   const { client } = useOrbit()
   return useQuery({ queryKey: account.accountKeys.oauthConnections, queryFn: () => account.oauthConnections(client) })

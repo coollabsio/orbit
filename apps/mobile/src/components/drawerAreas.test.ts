@@ -4,7 +4,7 @@ import { drawerAreaOf, drawerSections, tasksHref } from './drawerAreas'
 
 // the shape of Shell.tsx's WORKSPACE_NAV, ACCOUNT_NAV and ADMIN_NAV (Shell.tsx itself loads react-native)
 const areas = {
-  workspace: [{ href: '/settings' }, { href: '/settings/file-storage' }, { href: '/settings/workspace-agentic' }, { href: '/settings/members' }],
+  workspace: [{ href: '/settings' }, { href: '/settings/members' }, { href: '/settings/emoji' }, { href: '/settings/file-storage' }, { href: '/settings/workspace-agentic' }, { href: '/settings/export' }, { href: '/settings/danger-zone' }],
   account: [{ href: '/settings/profile' }, { href: '/settings/appearance' }, { href: '/settings/notifications' }, { href: '/settings/agentic' }],
   admin: [{ href: '/settings/admin' }, { href: '/settings/admin/users' }, { href: '/settings/admin/audit' }, { href: '/settings/admin/storage' }],
 }
@@ -44,7 +44,9 @@ describe('drawerSections', () => {
   test('groups links under the web section labels', () => {
     expect(drawerSections('workspace', areas.workspace)).toEqual([
       { label: 'Workspace', items: [{ href: '/settings' }, { href: '/settings/members' }] },
+      { label: 'Chat', items: [{ href: '/settings/emoji' }] },
       { label: 'Integrations', items: [{ href: '/settings/file-storage' }, { href: '/settings/workspace-agentic' }] },
+      { label: 'Advanced', items: [{ href: '/settings/export' }, { href: '/settings/danger-zone' }] },
     ])
     expect(drawerSections('admin', areas.admin)).toEqual([
       { label: 'Instance', items: [{ href: '/settings/admin' }, { href: '/settings/admin/users' }] },

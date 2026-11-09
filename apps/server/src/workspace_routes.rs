@@ -29,7 +29,7 @@ use crate::image_compression::{CompressionStatus, ImageCompressor};
 use crate::mail::{self, Mailer};
 use crate::object_storage::Owner;
 use crate::repositories::api_tokens::{
-    ApiTokenError, ApiTokenRecord, ApiTokenRepository, IssuedApiToken,
+    ApiTokenError, ApiTokenRecord, ApiTokenRepository, ApiTokenScope, IssuedApiToken, TokenProjects,
 };
 use crate::repositories::identity::{
     AdminAccountError, AdminUser, AuthenticatedSession, IdentityRepository,
@@ -633,17 +633,6 @@ async fn put_member_note(
     Ok(StatusCode::NO_CONTENT)
 }
 
-#[derive(Clone, Copy, Deserialize, ToSchema)]
-#[serde(rename_all = "lowercase")]
-enum ApiTokenScope {
-    Read,
-    Write,
-    #[serde(rename = "docs:read")]
-    DocsRead,
-    #[serde(rename = "chat:read")]
-    ChatRead,
-}
-
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct CreateApiTokenBody {
@@ -654,6 +643,10 @@ struct CreateApiTokenBody {
     #[serde(default)]
     project_ids: Vec<String>,
     project_id: Option<String>,
+    /// Cover every live project of the workspace, including projects created later, instead of
+    /// `project_ids`.
+    #[serde(default)]
+    all_projects: bool,
     scopes: Vec<ApiTokenScope>,
 }
 
@@ -698,43 +691,32 @@ async fn create_api_token(
             project_ids.push(id);
         }
     }
+    // Projects only limit task access, so a token without a task scope stores none.
+    let task_scope = ApiTokenScope::grants_tasks(&body.scopes);
+    if !task_scope || body.all_projects {
+        project_ids.clear();
+    }
     if name.is_empty()
         || name.chars().count() > 100
-        || project_ids.is_empty()
+        || (task_scope && !body.all_projects && project_ids.is_empty())
         || body.scopes.is_empty()
         || (body.service_account
-            && body
-                .scopes
-                .iter()
-                .any(|s| matches!(s, ApiTokenScope::DocsRead | ApiTokenScope::ChatRead)))
+            && body.scopes.iter().any(|s| {
+                matches!(
+                    s,
+                    ApiTokenScope::DocsRead | ApiTokenScope::DocsWrite | ApiTokenScope::ChatRead
+                )
+            }))
     {
         return Err(ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "invalid_api_token",
             "Invalid API token",
-            "Token names must contain 1 to 100 characters, and at least one project and scope are required.",
+            "Token names must contain 1 to 100 characters, at least one scope is required, and a task scope needs at least one project or all projects.",
             instance,
             request_id.as_ref(),
         ));
     }
-    let can_read = body
-        .scopes
-        .iter()
-        .any(|scope| matches!(scope, ApiTokenScope::Read));
-    let can_write = body
-        .scopes
-        .iter()
-        .any(|scope| matches!(scope, ApiTokenScope::Write));
-    let mcp_scopes = body
-        .scopes
-        .iter()
-        .filter_map(|s| match s {
-            ApiTokenScope::DocsRead => Some("docs:read"),
-            ApiTokenScope::ChatRead => Some("chat:read"),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join(" ");
     let now = TimestampMillis::now();
     let expires_at = match body.expires_in_days {
         None => None,
@@ -754,18 +736,20 @@ async fn create_api_token(
     };
     let issued = state
         .api_tokens
-        .create_scoped(
+        .create(
             workspace_id,
             session.user.id,
             name.to_owned(),
-            project_ids,
-            can_read,
-            can_write,
+            if body.all_projects {
+                TokenProjects::All
+            } else {
+                TokenProjects::Only(project_ids)
+            },
+            &body.scopes,
             body.service_account,
             expires_at,
             request_id_value(request_id.as_ref()),
             now,
-            &mcp_scopes,
         )
         .await
         .map_err(|error| api_token_problem(error, &instance, request_id.as_ref()))?;
@@ -1492,6 +1476,8 @@ async fn list_admin_users(
 struct AdminUserSummary {
     /// Accounts, deleted accounts excluded.
     users: i64,
+    /// Accounts active in the last day, week and month.
+    active: crate::repositories::identity::ActiveUserCounts,
     /// Workspaces by trial state; `null` on a self-hosted server, which has no trials.
     trials: Option<crate::repositories::billing::TrialCounts>,
 }
@@ -1517,10 +1503,19 @@ async fn get_admin_user_summary(
         )
     };
     let users = state.identity.count_users().await.map_err(|_| internal())?;
+    let active = state
+        .identity
+        .active_user_counts()
+        .await
+        .map_err(|_| internal())?;
     let trials = crate::repositories::billing::trial_counts(state.identity.database())
         .await
         .map_err(|_| internal())?;
-    Ok(Json(AdminUserSummary { users, trials }))
+    Ok(Json(AdminUserSummary {
+        users,
+        active,
+        trials,
+    }))
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -2624,6 +2619,23 @@ async fn save_s3(
         crate::secret_box::encrypt_secret(key, &secret)
             .map_err(|()| internal(instance, request_id.as_ref()))?,
     );
+    let workspaces = WorkspaceStorageRepository::new(state.identity.database().clone())
+        .all()
+        .await
+        .map_err(|_| internal(instance, request_id.as_ref()))?;
+    if let Some(workspace) = workspaces
+        .iter()
+        .find(|workspace| crate::object_storage::overlap(&workspace.s3, &s3))
+    {
+        return Err(invalid(
+            "prefix",
+            &format!(
+                "workspace {} keeps its files in this bucket under this prefix, or a prefix inside or around \
+                 it; use another bucket or prefix.",
+                workspace.workspace_id
+            ),
+        ));
+    }
     if let Some(old) = &saved.s3 {
         let moved =
             (&old.endpoint, &old.bucket, &old.prefix) != (&s3.endpoint, &s3.bucket, &s3.prefix);
@@ -2849,11 +2861,12 @@ async fn save_workspace_bucket(
     if installation
         .s3
         .as_ref()
-        .is_some_and(|own| location_of(own) == location_of(&s3))
+        .is_some_and(|own| crate::object_storage::overlap(own, &s3))
     {
         return Err(invalid(
-            "bucket",
-            "the installation keeps its files under this bucket and prefix; use another prefix.",
+            "prefix",
+            "the installation keeps its files in this bucket under this prefix, or a prefix inside or around it; \
+             use another bucket or prefix.",
         ));
     }
     if let Some(old) = saved.filter(|old| location_of(&old.s3) != location_of(&s3)) {

@@ -1,9 +1,8 @@
 import { router } from 'expo-router'
 import { type ReactNode, useMemo, useState } from 'react'
-import { Pressable, RefreshControl, ScrollView, View } from 'react-native'
+import { Pressable, ScrollView, View } from 'react-native'
 
 import { IconDialog } from '../../../components/docs/IconDialog'
-import { MenuButton } from '../../../components/Drawer'
 import { ActionSheet, ConfirmDialog, type ConfirmRequest, PromptDialog, type PromptRequest, type SheetAction } from '../../../components/settings/Dialog'
 import { docSpaces, favoritePages, pageTitle, trashPrompt, type TreeRow } from '../../../data/docs'
 import type { PageSummary, Teamspace } from '../../../data/orbit'
@@ -12,7 +11,7 @@ import { useOrbit } from '../../../orbit-context'
 import { usePages, useTeamspaces } from '../../../queries'
 import { errorMessage } from '../../../session-context'
 import { alpha, useTheme } from '../../../theme'
-import { ErrorView, HeaderTitle, Icon, type IconName, IconButton, LoadingView, PaneHeader, SafeAreaView, Text } from '../../../ui'
+import { ErrorView, HeaderTitle, Icon, type IconName, IconButton, LoadingView, PaneHeader, PullRefresh, SafeAreaView, Text } from '../../../ui'
 
 type Menu = { title: string; actions: SheetAction[] }
 
@@ -116,9 +115,8 @@ export default function DocsScreen() {
   }
 
   return (
-    <SafeAreaView edges={['top', 'left', 'right']} className="flex-1 bg-background">
+    <SafeAreaView edges={['left', 'right']} className="flex-1 bg-background">
       <PaneHeader>
-        <MenuButton />
         <View className="flex-1">
           <HeaderTitle>Documents</HeaderTitle>
         </View>
@@ -150,7 +148,7 @@ export default function DocsScreen() {
           <LoadingView />
         )
       ) : (
-        <ScrollView contentContainerClassName="px-2 pt-2 pb-4 gap-3.5" refreshControl={<RefreshControl refreshing={pages.isRefetching} onRefresh={() => void refresh()} tintColor={colors.mutedForeground} />}>
+        <ScrollView contentContainerClassName="px-2 pt-2 pb-4 gap-3.5" refreshControl={<PullRefresh onRefresh={() => refresh()} />}>
           {favoriteRows.length > 0 ? (
             <View>
               <GroupHeader label="Favorites" icon="star" />
@@ -206,10 +204,10 @@ export default function DocsScreen() {
         accessibilityRole="link"
         accessibilityLabel="Trash"
         onPress={() => router.push('/docs/trash')}
-        className="h-[49px] flex-row items-center gap-2.5 px-4 border-t border-border active:bg-muted"
+        className="h-[49px] flex-row items-center gap-2 px-4 border-t border-border active:bg-muted"
       >
         <Icon name="trash" size={15} color={colors.mutedForeground} />
-        <Text className="font-noto-medium text-[13px] text-foreground">Trash</Text>
+        <Text className="font-noto-medium text-[13px] text-muted-foreground">Trash</Text>
       </Pressable>
 
       <ActionSheet visible={menu !== null} title={menu?.title} actions={menu?.actions ?? []} onClose={() => setMenu(null)} />
@@ -262,8 +260,8 @@ function PageRows({
       onPress={() => router.push(`/docs/${row.page.id}`)}
       actions={
         <>
-          <IconButton icon="plus" label={`New page in ${pageTitle(row.page)}`} size={22} iconSize={13} color={muted} onPress={() => onCreateChild(row.page.id)} />
           <IconButton icon="more" label={`${pageTitle(row.page)} options`} size={22} iconSize={13} color={muted} onPress={() => onMenu(row.page)} />
+          <IconButton icon="plus" label={`New page in ${pageTitle(row.page)}`} size={22} iconSize={13} color={muted} onPress={() => onCreateChild(row.page.id)} />
         </>
       }
     />

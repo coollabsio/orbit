@@ -14,10 +14,12 @@ function Location() {
 
 test('the task navigation includes a current calendar week view', () => {
   const view = render(
-    <MemoryRouter initialEntries={['/tasks']}>
-      <SidebarNav />
-      <Location />
-    </MemoryRouter>,
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter initialEntries={['/tasks']}>
+        <SidebarNav />
+        <Location />
+      </MemoryRouter>
+    </QueryClientProvider>,
   )
 
   fireEvent.click(view.getByRole('link', { name: 'This week' }))
@@ -30,10 +32,12 @@ test('the task navigation includes a current calendar week view', () => {
 
 test('task views keep the selected project', () => {
   const view = render(
-    <MemoryRouter initialEntries={['/tasks?project=project-r']}>
-      <SidebarNav />
-      <Location />
-    </MemoryRouter>,
+    <QueryClientProvider client={new QueryClient()}>
+      <MemoryRouter initialEntries={['/tasks?project=project-r']}>
+        <SidebarNav />
+        <Location />
+      </MemoryRouter>
+    </QueryClientProvider>,
   )
 
   fireEvent.click(view.getByRole('link', { name: 'My tasks' }))
@@ -45,7 +49,7 @@ test('task views keep the selected project', () => {
   fireEvent.click(view.getByRole('link', { name: 'My week' }))
   expect(view.getByTestId('location').textContent).toBe('/tasks?project=project-r&view=my_week')
 
-  fireEvent.click(view.getByRole('link', { name: 'Tasks' }))
+  fireEvent.click(view.getByRole('link', { name: 'All tasks' }))
   expect(view.getByTestId('location').textContent).toBe('/tasks?project=project-r')
 })
 
@@ -61,37 +65,9 @@ test('settings pages are not duplicated in the main sidebar', () => {
   expect(view.queryByRole('link', { name: 'Sessions' })).toBeNull()
 })
 
-test('task views nest under Tasks, not beside the other apps', () => {
-  const view = render(
-    <MemoryRouter initialEntries={['/tasks']}>
-      <SidebarNav />
-      <Location />
-    </MemoryRouter>,
-  )
-  const links = view.getAllByRole('link').map((link) => link.getAttribute('aria-label'))
-  expect(links.indexOf('Task views')).toBe(links.indexOf('Tasks') + 1)
-  expect(view.queryByRole('link', { name: 'Views' })).toBeNull()
-  fireEvent.click(view.getByRole('link', { name: 'Task views' }))
-  expect(view.getByTestId('location').textContent).toBe('/views')
-  expect(view.getByRole('link', { name: 'Task views' }).dataset.active).toBe('true')
-  expect(view.getByRole('link', { name: 'Tasks' }).dataset.active).toBe('false')
-})
-
-test('the views entry shows on every route, so the rows below never move', () => {
-  for (const path of ['/', '/views/view-1', '/tasks/task-1']) {
-    const view = render(
-      <MemoryRouter initialEntries={[path]}>
-        <SidebarNav />
-      </MemoryRouter>,
-    )
-    expect(view.getAllByRole('link', { name: 'Task views' })).toHaveLength(1)
-    view.unmount()
-  }
-})
-
 test('docs are enabled in the sidebar and highlight on page routes', () => {
   const view = render(
-    <MemoryRouter initialEntries={['/tasks']}>
+    <MemoryRouter initialEntries={['/']}>
       <SidebarNav />
       <Location />
     </MemoryRouter>,
@@ -109,7 +85,7 @@ test('docs are enabled in the sidebar and highlight on page routes', () => {
 
 test('chat and direct messages are not products in production: Chat is "Coming soon"', () => {
   const view = render(
-    <MemoryRouter initialEntries={['/tasks']}>
+    <MemoryRouter initialEntries={['/']}>
       <SidebarNav chatEnabled={false} chatBadge={4} />
     </MemoryRouter>,
   )
@@ -122,7 +98,7 @@ test('chat and direct messages are not products in production: Chat is "Coming s
 
 test('in a development build Chat is a link that highlights on its routes', () => {
   const view = render(
-    <MemoryRouter initialEntries={['/tasks']}>
+    <MemoryRouter initialEntries={['/']}>
       <SidebarNav chatEnabled />
       <Location />
     </MemoryRouter>,
@@ -137,7 +113,7 @@ test('in a development build Chat is a link that highlights on its routes', () =
 test('the chat count shows on the Chat item, is in its name, stops at 99+ and hides at zero', () => {
   const badgeOf = (count: number | undefined) => {
     const view = render(
-      <MemoryRouter initialEntries={['/tasks']}>
+      <MemoryRouter initialEntries={['/']}>
         <SidebarNav chatEnabled chatBadge={count} />
       </MemoryRouter>,
     )
@@ -157,7 +133,7 @@ test('inside account settings the sidebar shows its links, and Back returns to t
   const view = render(
     <QueryClientProvider client={new QueryClient()}>
       <MemoryRouter initialEntries={['/tasks?view=mine']}>
-        <SidebarNav contextual />
+        <SidebarNav />
         <Link to="/profile/appearance">Open appearance</Link>
         <Location />
       </MemoryRouter>
@@ -187,7 +163,7 @@ function ShellWithPageList() {
   return (
     <SidebarSlotContext value={slot}>
       <aside data-testid="sidebar">
-        <SidebarNav contextual pageListRef={setSlot} />
+        <SidebarNav pageListRef={setSlot} />
       </aside>
       <main data-testid="page">
         <InAppSidebar>
@@ -241,22 +217,11 @@ test('Back pops: from docs to account settings and back twice, it never loops be
   expect(view.queryByRole('link', { name: 'Back to the main menu' })).toBeNull()
 })
 
-test('the classic layout keeps the app links in settings, with no Back', () => {
-  const view = render(
-    <MemoryRouter initialEntries={['/profile/appearance']}>
-      <SidebarNav />
-    </MemoryRouter>,
-  )
-  expect(view.getByRole('link', { name: 'Tasks' })).toBeTruthy()
-  expect(view.queryByRole('link', { name: 'Back to the main menu' })).toBeNull()
-  expect(view.queryByRole('link', { name: 'Appearance' })).toBeNull()
-})
-
 test('in the mobile drawer Back shows the main menu and stays on the page', () => {
   const view = render(
     <QueryClientProvider client={new QueryClient()}>
       <MemoryRouter initialEntries={['/tasks', '/profile/appearance']} initialIndex={1}>
-        <SidebarNav contextual backShowsMenu />
+        <SidebarNav backShowsMenu />
         <Location />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -267,11 +232,11 @@ test('in the mobile drawer Back shows the main menu and stays on the page', () =
   expect(view.queryByRole('link', { name: 'Appearance' })).toBeNull()
 })
 
-test('in the new UI Tasks has its own area: views, task pages and projects leave the main menu', () => {
+test('Tasks has its own area: views, task pages and projects leave the main menu', () => {
   const view = render(
     <QueryClientProvider client={new QueryClient()}>
       <MemoryRouter initialEntries={['/']}>
-        <SidebarNav contextual />
+        <SidebarNav />
         <Link to="/tasks?view=overdue">Open overdue</Link>
         <Location />
       </MemoryRouter>
@@ -292,7 +257,7 @@ test('the task trash sits in the Tasks area, which stays open while the trash is
   const view = render(
     <QueryClientProvider client={new QueryClient()}>
       <MemoryRouter initialEntries={['/tasks']}>
-        <SidebarNav contextual />
+        <SidebarNav />
         <Location />
       </MemoryRouter>
     </QueryClientProvider>,

@@ -310,7 +310,7 @@ export function ChatPage() {
       <div
         data-slot="chat-page"
         data-view={location.view === 'home' ? 'index' : 'detail'}
-        className="group/chat flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background text-foreground max-[899px]:-mt-[env(safe-area-inset-top,0px)] dark:[--background:var(--card)]"
+        className="group/chat flex min-h-0 min-w-0 flex-1 overflow-hidden bg-background text-foreground max-[899px]:data-[view=detail]:-mt-[env(safe-area-inset-top,0px)] dark:[--background:var(--card)]"
         style={customThemeVariables(theme)}
       >
         <ChatSidebar />

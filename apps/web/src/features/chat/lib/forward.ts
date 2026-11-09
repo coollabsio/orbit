@@ -1,4 +1,5 @@
 import type { Conversation, Message } from '../api/types'
+import { isOwnMessage } from './bot'
 
 /** How many conversations one forward can go to (Discord's limit). */
 export const FORWARD_LIMIT = 5
@@ -14,7 +15,7 @@ export function canForward(message: Message): boolean {
  */
 export function canEdit(message: Message, currentUserId: string | null): boolean {
   const stickerOnly = Boolean(message.stickerId) && message.body === ''
-  return canForward(message) && !message.forwarded && !stickerOnly && message.authorId === currentUserId
+  return canForward(message) && !message.forwarded && !stickerOnly && isOwnMessage(message, currentUserId)
 }
 
 /**

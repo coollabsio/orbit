@@ -16,6 +16,7 @@ import { useWindowFocused } from './messages/environment'
 import { MessageList, type MessageListHandle } from './messages/MessageList'
 import { conversationTitle, useChatPeople } from './messages/people'
 import { onMarkedUnread } from './messages/unreadSignal'
+import { EphemeralMessages } from './messages/EphemeralMessages'
 
 function hasFiles(event: DragEvent): boolean {
   return Array.from(event.dataTransfer.types).includes('Files')
@@ -181,6 +182,7 @@ function ConversationColumn({ conversation, state, focusMessageId }: ColumnProps
       )}
       {canWrite ? (
         <>
+          <EphemeralMessages conversationId={conversationId} />
           <TypingLine conversationId={conversationId} />
           <ConnectionLine />
           <Composer

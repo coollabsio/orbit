@@ -40,6 +40,25 @@ Every change must work on both.
   (Orbit refuses other databases), and the server needs `ORBIT_APP_KEY`. S3 for files and backups stays optional
   and is set in Admin → Storage. Operator details: [`docs/operations.md`](docs/operations.md).
 
+## Development servers: one per worktree
+
+Jean starts the dev server with `./scripts/dev run` (from `jean.json`). It wraps `just dev`, so several worktrees
+can run at the same time:
+
+- **Ports:** the main checkout uses web 18888 and API 18080. Each worktree gets a fixed slot for its branch: web
+  `24000 + slot*10`, API one higher. Slots are kept in `.dev-instances/slots` next to the shared git directory.
+- **Database:** a worktree uses its own SQLite file in `data/` and does not read the main checkout's `.env.local`.
+  Thus a branch's migrations never change the main dev database. A worktree can have its own `.env.local`.
+- **URL:** when Tailscale runs, the web port is published over HTTPS on the tailnet name
+  (`https://<host>.ts.net:<web port>`), and the server uses it as its public origin.
+
+To test a running app, call Jean MCP `get_run_environments` with your `worktreeId`, and use the ports and URL it
+gives for your worktree. If your worktree has no running environment, start it with `start_run_environment`. Do not
+use another worktree's server: it runs other code and another database. `./scripts/dev urls` lists all instances.
+Before you trust a page, check who owns its port (`ss -ltnp`, then `readlink /proc/<pid>/cwd`).
+`./scripts/dev teardown` frees a worktree's slot (Jean runs it when it removes the worktree). `just e2e` still uses
+the fixed port 18080, so it cannot run while the main checkout's server runs.
+
 ## Development mail: Mailpit
 
 In development, Orbit sends mail to Mailpit (SMTP `127.0.0.1:11025`, inbox at `http://127.0.0.1:18026`). The dev

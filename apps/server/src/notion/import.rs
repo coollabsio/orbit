@@ -36,8 +36,8 @@ use utoipa::ToSchema;
 
 use super::client::{NotionClient, NotionClientConfig, NotionError};
 use super::convert::{
-    ConvertContext, ConvertReport, ConvertedPage, MapResolver, PageCover, ResolvedFile,
-    collect_file_refs, convert_page,
+    ConvertContext, ConvertReport, ConvertedPage, DatabaseRows, MapResolver, PageCover,
+    ResolvedFile, collect_file_refs, convert_page, database_table,
 };
 use super::files::sanitize_file_name;
 use super::model::{BlockNode, NotionPage, normalize_id};
@@ -1212,6 +1212,20 @@ impl NotionImportService {
                     .insert(item.notion_id.clone(), page_id.to_string());
             }
         }
+        // Database rows, so databases show as tables (their own page, and inline in a parent).
+        for item in items
+            .iter()
+            .filter(|item| item.kind == "database" && item.status == "created")
+        {
+            match load_database(&client, &item.notion_id, &mut resolver).await {
+                Ok(()) => {}
+                Err(NotionError::Unauthorized { message }) => {
+                    return Err(Failure::from(NotionError::Unauthorized { message }));
+                }
+                // The page then lists its rows as sub-page cards.
+                Err(error) => tracing::debug!(error = %error, "Notion database rows skipped"),
+            }
+        }
         for index in 0..items.len() {
             if items[index].status != "created" {
                 continue;
@@ -1384,9 +1398,20 @@ impl NotionImportService {
             .filter(|child| matches!(child.status.as_str(), "created" | "done"))
             .filter_map(|child| child.page_id)
             .collect();
+        let table = resolver
+            .databases
+            .get(&item.notion_id)
+            .and_then(|database| {
+                let mut context = ConvertContext::new(&*resolver);
+                let table = database_table(&database.rows, &mut context);
+                report.convert.merge(context.report());
+                table
+            });
         let changes = if item.kind == "database" {
             PageChanges {
-                content: Some(
+                content: Some(if let Some(table) = table {
+                    vec![table]
+                } else {
                     children
                         .iter()
                         .map(|child| {
@@ -1397,8 +1422,8 @@ impl NotionImportService {
                                 "children": []
                             })
                         })
-                        .collect(),
-                ),
+                        .collect()
+                }),
                 origin: SaveOrigin::Import,
                 ..PageChanges::default()
             }
@@ -1926,6 +1951,40 @@ pub(crate) fn clamp(value: &str, max_chars: usize, max_bytes: usize) -> String {
         out.push(c);
     }
     out
+}
+
+/// Loads a database's rows (all data sources, oldest first) and the number formats of its
+/// properties into the resolver.
+async fn load_database(
+    client: &NotionClient,
+    database_id: &str,
+    resolver: &mut MapResolver,
+) -> Result<(), NotionError> {
+    let database = client.retrieve_database(database_id).await?;
+    let mut rows = Vec::new();
+    for source in &database.data_sources {
+        let schema = client.retrieve_data_source(&source.id).await?;
+        let formats = schema
+            .properties
+            .iter()
+            .filter_map(|(name, property)| {
+                let format = property.get("number")?.get("format")?.as_str()?;
+                Some((name.clone(), format.to_owned()))
+            })
+            .collect();
+        if let Some(id) = normalize_id(&source.id) {
+            resolver.number_formats.insert(id, formats);
+        }
+        rows.extend(client.query_data_source_all(&source.id).await?.pages);
+    }
+    resolver.databases.insert(
+        database_id.to_owned(),
+        DatabaseRows {
+            inline: database.is_inline,
+            rows,
+        },
+    );
+    Ok(())
 }
 
 /// Runs the (synchronous, non-`Send`) converter outside any await point.

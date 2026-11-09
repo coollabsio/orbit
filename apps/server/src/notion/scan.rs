@@ -25,7 +25,8 @@ const MAX_TITLE_BYTES: usize = 2_000;
 #[serde(rename_all = "snake_case")]
 pub enum NotionImportNodeKind {
     Page,
-    /// Imported as a page named like the database; its rows become sub-pages.
+    /// Imported as a page named like the database that shows its rows as a table; each row
+    /// also becomes a sub-page. An inline database shows the table in its parent page too.
     Database,
 }
 

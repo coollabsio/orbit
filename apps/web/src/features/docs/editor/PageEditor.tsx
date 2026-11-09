@@ -29,16 +29,19 @@ import { cn } from 'cn'
 import { collabBlockPresence } from '../collab/blockPresence'
 import { renderCollabCursor } from '../collab/cursor'
 import { ImageZoomButton } from './ImageZoomButton'
+import { setEditableInPlace } from '@orbit/editor/editable'
 import { internalPageLinkId, isSafeLinkHref } from '@orbit/editor/links'
 import { linkMentions, pastedFilesToCopy, toEditorContent, toStoredContent, type FileScope, type FileToCopy } from './content'
 import { insertPageBlock } from './pageBlockCommands'
 import { PageEditorContext, type PageEditorContextValue, type PageRef } from './pageEditorContext'
 import { watchDeletedFiles } from '@orbit/editor/deletedFiles'
 import type { PageEditorInstance } from '@orbit/editor/schema'
+import { selectBlockExtension } from '@orbit/editor/selectBlock'
 import { EDITOR_BLOCK_TYPES, markdownToTaskBlocks, pageEditorSchema, TASK_EDITOR_BLOCK_TYPES, taskEditorSchema } from './schema'
 import { getPageSlashMenuItems, getTaskSlashMenuItems } from './slashMenu'
 import { PageMentionMenu } from './MentionMenu'
 import { PageMentionNamesContext, type PageMentionOptions } from './pageMentions'
+import { BlockSideMenuController } from './BlockSideMenu'
 import { ThemedBlockNoteView } from './ThemedBlockNoteView'
 import { commentsApi, threadsQueryOptions } from '../comments/api'
 import { commentComponents } from '../comments/components'
@@ -277,6 +280,7 @@ function PageEditorInner({
     // Tiptap would inject its base stylesheet as a <style> tag, which the production CSP (`style-src 'self'`)
     // blocks. The same rules ship statically at the end of src/index.css instead.
     _tiptapOptions: { injectCSS: false },
+    extensions: [selectBlockExtension()],
     domAttributes: ariaLabel ? { editor: { 'aria-label': ariaLabel } } : undefined,
     dictionary,
   }
@@ -294,6 +298,7 @@ function PageEditorInner({
         withCollaboration({
           ...options,
           extensions: [
+            ...options.extensions,
             // Task documents carry no comment marks, so they need no comments extension.
             ...(task ? [] : [commentsExtension]),
             ...(collab.provider.awareness ? [collabBlockPresence({ awareness: collab.provider.awareness, selfId: collab.user.id })] : []),
@@ -327,6 +332,13 @@ function PageEditorInner({
   useEffect(() => {
     latest.setEditor(editor)
   }, [latest, editor])
+
+  // The view mounts once, with the first value; later changes switch the mounted editor (see `setEditableInPlace`).
+  const [mountEditable] = useState(editable)
+  const viewShown = !collab || threadsSettled
+  useEffect(() => {
+    if (viewShown) setEditableInPlace(editor, editable)
+  }, [editor, editable, viewShown])
 
   // A file an admin deleted answers 410: its file block says so.
   useEffect(() => watchDeletedFiles(editor, isDeletedFile), [editor])
@@ -439,7 +451,7 @@ function PageEditorInner({
       <div className="contents" onClickCapture={onClickCapture} onKeyDownCapture={onKeyDownCapture}>
         <ThemedBlockNoteView
           editor={editor}
-          editable={editable}
+          editable={mountEditable}
           theme={theme}
           data-slot="page-editor"
           className={cn(
@@ -452,8 +464,8 @@ function PageEditorInner({
             // The callout's placeholder sits next to the emoji (BlockNote's would follow the whole row).
             "[&>.bn-editor[contenteditable=true]_.bn-block-content[data-content-type=callout]:has(.ProseMirror-trailingBreak:only-child)]:after:content-['Callout']!",
             '[&>.bn-editor[contenteditable=true]_.bn-block-content[data-content-type=callout]:has(.ProseMirror-trailingBreak:only-child)]:after:absolute [&>.bn-editor[contenteditable=true]_.bn-block-content[data-content-type=callout]:has(.ProseMirror-trailingBreak:only-child)]:after:top-px [&>.bn-editor[contenteditable=true]_.bn-block-content[data-content-type=callout]:has(.ProseMirror-trailingBreak:only-child)]:after:left-8',
-            // Headings scale with their text: the app's global `h1 { leading-7 }` is a fixed 28px, too short for a 3em
-            // heading, so its text ran into the next block.
+            // Headings scale with their text: the app's global `h1 { leading-7 }` is a fixed 28px, too short for these
+            // headings, so the text ran into the next block. Sizes live in index.css.
             '[&_.bn-editor_:is(h1,h2,h3,h4,h5,h6)]:leading-[1.3]',
             // Inline links use the app's link style instead of the browser's blue.
             '[&_.bn-editor_a[data-inline-content-type=link]]:text-primary! [&_.bn-editor_a[data-inline-content-type=link]]:underline! [&_.bn-editor_a[data-inline-content-type=link]]:underline-offset-2!',
@@ -501,12 +513,13 @@ function PageEditorInner({
               "[&>.bn-editor[contenteditable=true]_.bn-block-content[data-is-only-empty-block]:has(.ProseMirror-trailingBreak:only-child)]:after:content-['Leave_a_reply…']!",
             className,
           )}
-          sideMenu={sideMenu}
+          sideMenu={false}
           slashMenu={false}
           formattingToolbar={false}
           comments={false}
           onChange={onChange ? (changed) => onChange(toStoredContent(changed.document, fileScope)) : undefined}
         >
+          {sideMenu ? <BlockSideMenuController /> : null}
           <SuggestionMenuController
             triggerCharacter="/"
             getItems={async (query) => (task ? getTaskSlashMenuItems(editor, query) : getPageSlashMenuItems(editor, slashActions, query))}

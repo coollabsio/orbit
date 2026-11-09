@@ -5,6 +5,7 @@ import { BillingBanner } from '../../components/BillingBanner'
 import { Dock } from '../../components/Dock'
 import { DrawerProvider } from '../../components/Drawer'
 import { MailServerBanner } from '../../components/MailServerBanner'
+import { TopBar } from '../../components/TopBar'
 import { guestHome, guestMayOpen } from '../../data/guest'
 import { useLiveUpdates } from '../../live'
 import { useIsGuest } from '../../orbit-context'
@@ -19,6 +20,7 @@ export default function TabsLayout() {
   if (guest && !guestMayOpen(pathname)) return <Redirect href={guestHome} />
   return (
     <DrawerProvider>
+      <TopBar />
       <Tabs tabBar={(props) => (
           <>
             <MailServerBanner />

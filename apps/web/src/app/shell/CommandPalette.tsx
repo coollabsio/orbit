@@ -54,7 +54,7 @@ interface CommandEntry {
   /** Runs the command, after the palette has closed. */
   run?: boolean
   keywords: string
-  /** Already matched by the server (page body search): skip the local title/keyword filter. */
+  /** Already matched by the server (task and page search): skip the local title/keyword filter. */
   serverMatch?: boolean
   /** Page hits: matched words in the title, and body text around the match. */
   titleHighlights?: TextRange[]
@@ -144,12 +144,15 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
   const projects = useProjects(workspace.id)
   const navigate = useNavigate()
   const [query, setQuery] = useState('')
-  const taskQuery = useTasks(workspace.id, { search: query || undefined, limit: 25 })
+  // Both searches wait for typing to pause and keep their last hits until the new ones arrive, so the list changes
+  // once per search instead of flickering on each key.
   const debouncedQuery = useDebouncedValue(query, 250)
+  const search = debouncedQuery.trim()
+  const taskQuery = useTasks(workspace.id, { search, limit: 25 }, { enabled: search.length > 0 })
   const pageQuery = usePageSearch(workspace.id, debouncedQuery)
   const recentQuery = useRecentPages(workspace.id, !docsHidden)
   const recentCount = recentQuery.data?.length ?? 0
-  const teamspaces = useTeamspaces(workspace.id, debouncedQuery.trim().length > 0 || recentCount > 0)
+  const teamspaces = useTeamspaces(workspace.id, search.length > 0 || recentCount > 0)
 
   const entries = useMemo<CommandEntry[]>(() => {
     const nav: CommandEntry[] = [
@@ -173,16 +176,20 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       { id: 'nav_appearance', icon: Settings, title: 'Go to Appearance', meta: 'Navigation', to: '/profile/appearance', keywords: 'appearance theme dark light system custom colors flat 3d floating navigation style' },
       { id: 'nav_shortcuts', icon: Settings, title: 'Go to Keyboard shortcuts', meta: 'Navigation', to: '/profile/shortcuts', keywords: 'keyboard shortcuts keys hotkeys customize' },
     ]
-    const tasks: CommandEntry[] = (taskQuery.data?.pages.flatMap((page) => page.items) ?? []).map((record) => taskFromRecord(record, projects.data?.find((project) => project.id === record.project_id))).map((t) => ({
-      id: t.id,
-      icon: SquareCheck,
-      title: t.title,
-      meta: t.identifier,
-      to: taskPath(t),
-      keywords: `${t.identifier} ${t.labels.join(' ')}`,
-    }))
-    // Only show page hits for the query they belong to (the debounced search lags the input).
-    const pages: CommandEntry[] = query.trim() && debouncedQuery === query
+    // Server hits: the server matched them (tasks also on their description), so no local filter.
+    const searching = query.trim().length > 0
+    const tasks: CommandEntry[] = searching
+      ? (taskQuery.data?.pages.flatMap((page) => page.items) ?? []).map((record) => taskFromRecord(record, projects.data?.find((project) => project.id === record.project_id))).map((t) => ({
+          id: t.id,
+          icon: SquareCheck,
+          title: t.title,
+          meta: t.identifier,
+          to: taskPath(t),
+          keywords: `${t.identifier} ${t.labels.join(' ')}`,
+          serverMatch: true,
+        }))
+      : []
+    const pages: CommandEntry[] = searching
       ? (pageQuery.data ?? []).map((page) => ({
           id: `page_${page.id}`,
           icon: FileText,
@@ -198,7 +205,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       : []
     if (docsHidden) return [...nav.filter((entry) => !entry.to?.startsWith('/docs')), ...tasks]
     return [...nav, ...pages, ...tasks]
-  }, [projects.data, taskQuery.data, pageQuery.data, teamspaces.data, query, debouncedQuery])
+  }, [projects.data, taskQuery.data, pageQuery.data, teamspaces.data, query])
 
   /** Recently opened pages, shown while the query is empty. */
   const recent = useMemo<CommandEntry[]>(
@@ -254,8 +261,8 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       onOpenChange={(next) => { if (!next) onClose() }}
       title="Command palette"
       description={chatEnabled ? 'Search tasks, pages, conversations and navigation.' : 'Search tasks, pages and navigation.'}
-      // the pink tint of the dark shell, like the sidebar menus; the new UI adds the custom theme (`theme` is empty otherwise)
-      className="top-[12vh] max-h-[min(60vh,28rem)] sm:max-w-[576px] dark:bg-sidebar-popover dark:ring-sidebar-tint/22 new-ui:bg-sidebar-popover"
+      // the pink tint of the dark shell, like the sidebar menus, with the custom theme (`theme` is empty without one)
+      className="top-[12vh] max-h-[min(60vh,28rem)] sm:max-w-[576px] bg-sidebar-popover dark:ring-sidebar-tint/22"
       style={theme.style}
     >
       {/* `shouldFilter={false}`: the entry list is already filtered here (tasks and pages are
@@ -272,7 +279,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
           />
           <Kbd className="absolute top-1/2 right-3 -translate-y-1/2 px-1.5 text-[11px] text-muted-foreground/70">esc</Kbd>
         </div>
-        <CommandList className="mx-1.5 mt-1 mb-1.5 max-h-none min-h-0 flex-1 rounded-lg bg-background p-1 ring-1 ring-border dark:bg-[color-mix(in_oklab,var(--primary)_6%,oklch(0.2264_0_0))] new-ui:dark:bg-[color-mix(in_oklab,var(--sidebar-popover),white_3%)] dark:ring-sidebar-tint/12 dark:**:data-[slot=command-item]:data-selected:bg-sidebar-tint/10">
+        <CommandList className="mx-1.5 mt-1 mb-1.5 max-h-none min-h-0 flex-1 rounded-lg bg-background p-1 ring-1 ring-border dark:bg-[color-mix(in_oklab,var(--sidebar-popover),white_3%)] dark:ring-sidebar-tint/12 dark:**:data-[slot=command-item]:data-selected:bg-sidebar-tint/10">
           <CommandEmpty className="p-6 text-[13px] text-muted-foreground">No results for “{query}”</CommandEmpty>
           {here.length > 0 ? (
             <CommandGroup heading="Commands" className="p-0">

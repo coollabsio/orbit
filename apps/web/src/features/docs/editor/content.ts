@@ -119,6 +119,59 @@ export function toStoredContent(document: readonly unknown[], scope?: FileScope)
   return sanitizeFileBlocks(sanitizeLinks(document) as unknown[], scope)
 }
 
+/**
+ * A comment as it is sent: without the empty lines around it. Empty paragraphs at the start and the end go (Enter),
+ * and so do line breaks and spaces at the start of the first block and the end of the last (Shift+Enter).
+ */
+export function trimBlocks<T>(blocks: readonly T[]): T[] {
+  let start = 0
+  let end = blocks.length
+  while (start < end && isBlankParagraph(blocks[start])) start += 1
+  while (end > start && isBlankParagraph(blocks[end - 1])) end -= 1
+  const kept = blocks.slice(start, end)
+  if (kept.length > 0) {
+    kept[0] = trimEdgeText(kept[0], 'start')
+    kept[kept.length - 1] = trimEdgeText(kept[kept.length - 1], 'end')
+  }
+  return kept
+}
+
+function isWhitespaceText(item: unknown): boolean {
+  return isRecord(item) && item.type === 'text' && typeof item.text === 'string' && item.text.trim() === ''
+}
+
+function isBlankParagraph(block: unknown): boolean {
+  if (!isRecord(block) || block.type !== 'paragraph') return false
+  if (Array.isArray(block.children) && block.children.length > 0) return false
+  return block.content === undefined || (Array.isArray(block.content) && block.content.every(isWhitespaceText))
+}
+
+/** Plain text (not inline code, which keeps its white space). */
+function isPlainText(item: unknown): item is Record<string, unknown> & { text: string } {
+  return isRecord(item) && item.type === 'text' && typeof item.text === 'string' && !(isRecord(item.styles) && item.styles.code)
+}
+
+/**
+ * The block with the white space at one end of its text removed, up to inline code (a code block keeps all of it).
+ * The server trims comments the same way (`trim_comment_blocks`).
+ */
+function trimEdgeText<T>(block: T, side: 'start' | 'end'): T {
+  if (!isRecord(block) || block.type === 'codeBlock' || !Array.isArray(block.content)) return block
+  const content: unknown[] = [...block.content]
+  const edge = () => (side === 'start' ? 0 : content.length - 1)
+  while (content.length > 0) {
+    const item = content[edge()]
+    if (!isPlainText(item)) break
+    const text = side === 'start' ? item.text.trimStart() : item.text.trimEnd()
+    if (text !== '') {
+      content[edge()] = { ...item, text }
+      break
+    }
+    content.splice(edge(), 1)
+  }
+  return { ...block, content }
+}
+
 function stableStringify(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
   if (isRecord(value)) {

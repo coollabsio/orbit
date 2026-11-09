@@ -12,6 +12,7 @@ import {
 } from '@orbit/api/generated/sdk.gen'
 import type { PageComment, PageThread } from '@orbit/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
+import { trimBlocks } from '../editor/content'
 
 type ApiClient = ReturnType<typeof createApiClient>
 
@@ -68,18 +69,18 @@ export function commentsApi(workspaceId: string, pageId: string, client: ApiClie
   const page = { workspace_id: workspaceId, page_id: pageId }
   return {
     createThread: async (body, quote) => {
-      const { data } = await createPageThread({ client, path: page, body: { body: body as never, quote }, throwOnError: true })
+      const { data } = await createPageThread({ client, path: page, body: { body: trimBlocks(body) as never, quote }, throwOnError: true })
       return required(data, 'Thread response was empty.')
     },
     addComment: async (threadId, body) => {
-      const { data } = await createPageComment({ client, path: { ...page, thread_id: threadId }, body: { body: body as never }, throwOnError: true })
+      const { data } = await createPageComment({ client, path: { ...page, thread_id: threadId }, body: { body: trimBlocks(body) as never }, throwOnError: true })
       return required(data, 'Comment response was empty.')
     },
     updateComment: async (threadId, commentId, body) => {
       const { data } = await updatePageComment({
         client,
         path: { ...page, thread_id: threadId, comment_id: commentId },
-        body: { body: body as never },
+        body: { body: trimBlocks(body) as never },
         throwOnError: true,
       })
       return required(data, 'Comment response was empty.')

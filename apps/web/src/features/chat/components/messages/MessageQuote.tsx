@@ -3,7 +3,9 @@ import { UserAvatar } from '@/components/common/UserAvatar'
 import { extractPreview, wordlessPreview } from '@/lib/messagePreview'
 import type { Message } from '../../api/types'
 import { decodeMentions } from '../../lib/mentionTokens'
+import { BotAvatar } from './BotAvatar'
 import { useMessageList } from './messageListContext'
+import { authorName } from './people'
 
 /**
  * The line above an inline reply: the author of the message it answers and the start of that message, on one line of
@@ -29,8 +31,8 @@ export function MessageQuote({ message, active }: { message: Message; active: bo
           className="flex h-5 min-w-0 items-center gap-1.5 rounded-sm text-left outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
           onClick={() => openQuoted(message)}
         >
-          <UserAvatar user={author} name="?" size={16} />
-          <span className="shrink-0 font-medium text-foreground/90">{author?.name ?? 'Unknown'}</span>
+          {quote.botName ? <BotAvatar bot={{ name: quote.botName, iconUrl: null }} size={16} /> : <UserAvatar user={author} name="?" size={16} />}
+          <span className="shrink-0 font-medium text-foreground/90">{authorName(people, quote.authorId, quote.botName)}</span>
           <span className="truncate text-[13px]">
             <EmojiText text={text || wordlessPreview(quote.sticker === true)} />
           </span>

@@ -7,7 +7,6 @@ import { Button, buttonVariants } from '@/components/ui/button'
 import { MenuSurfaceContext } from '@/components/ui/menuSurface'
 import { useIsInstallationAdmin } from '@/features/workspaces/permissions'
 import { useAppSidebarTheme } from '@/lib/customTheme'
-import { useNewUi } from '@/lib/themeContext'
 import { useSidebarMenuSurface } from './sidebarMenu'
 import { SettingsAreaLinks } from './SidebarNav'
 import { UserMenu } from './UserMenu'
@@ -21,8 +20,7 @@ export function NoWorkspaceShell() {
   const isOperator = useIsInstallationAdmin()
   const home = isOperator ? '/admin' : '/profile'
   const sidebarTheme = useAppSidebarTheme()
-  const sidebarMenuSurface = useSidebarMenuSurface()
-  const menuSurface = useNewUi() ? sidebarMenuSurface : null
+  const menuSurface = useSidebarMenuSurface()
   const [drawerOpen, setDrawerOpen] = useState(false)
   // any move to another page closes the drawer, as in the workspace app
   const { pathname } = useLocation()

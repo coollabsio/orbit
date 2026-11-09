@@ -17,7 +17,8 @@ export function NativeText(props: TextProps) {
 /**
  * React Native's `TextInput` with the app's font scaling, at 16px like every web field on a phone
  * (`max-md:text-[16px]!` in the web's index.css). The style wins over a size in `className`, as `!` does there.
+ * `editorSize` keeps the `className` size: for a composer the web draws with its rich-text editor, not a field.
  */
-export function TextInput({ style, ...props }: TextInputProps) {
-  return <RNTextInput {...useFontScaling()} {...props} style={[style, { fontSize: 16 }]} />
+export function TextInput({ style, editorSize = false, ...props }: TextInputProps & { editorSize?: boolean }) {
+  return <RNTextInput {...useFontScaling()} {...props} style={editorSize ? style : [style, { fontSize: 16 }]} />
 }

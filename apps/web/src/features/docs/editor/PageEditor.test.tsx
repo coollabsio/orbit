@@ -52,6 +52,39 @@ describe('PageEditor', () => {
     expect(root.querySelector(':scope > .bn-editor')).toBeTruthy()
   })
 
+  test('an inline formula sits in the sentence and a click opens its source', async () => {
+    const { view } = await renderEditor({
+      initialContent: [
+        {
+          id: 'p',
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: 'Energy is ', styles: {} },
+            { type: 'math', props: { latex: 'E=mc^2' } },
+            { type: 'text', text: ' today', styles: {} },
+          ],
+        },
+      ],
+    })
+    const formula = view.container.querySelector('[data-slot="inline-math"]')
+    expect(formula).toBeTruthy()
+    expect(formula!.querySelector('.katex')).toBeTruthy()
+    expect(formula!.querySelector('.katex-display')).toBeNull()
+    const line = formula!.closest('.bn-inline-content')
+    expect(line!.textContent).toContain('Energy is')
+    expect(line!.textContent).toContain('today')
+
+    fireEvent.mouseDown(formula!)
+    const input = (await view.findByLabelText('Formula')) as HTMLInputElement
+    expect(input.value).toBe('E=mc^2')
+    fireEvent.change(input, { target: { value: 'a^2' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    const drawn = view.container.querySelector('[data-slot="inline-math"]')
+    expect(drawn!.querySelector('.katex')).toBeTruthy()
+    expect(drawn!.querySelector('.katex-display')).toBeNull()
+    expect(drawn!.textContent).not.toContain('E=mc^2')
+  })
+
   test('starts from empty content with a single empty paragraph and no change event', async () => {
     const { ref, props } = await renderEditor()
     const content = ref.current!.getContent() as { type: string; content: unknown[] }[]

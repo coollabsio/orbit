@@ -4,6 +4,7 @@ shadow/
 **/.DS_Store
 target/
 /data/
+.dev-instances/
 backups/
 .env.local
 todo.md

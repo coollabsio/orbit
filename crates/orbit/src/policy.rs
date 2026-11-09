@@ -105,15 +105,16 @@ impl Actor {
         matches!(self.role, WorkspaceRole::Guest)
     }
 
-    /// Only the author rewrites a task comment.
+    /// Only the author rewrites a task comment. `author_id` is `None` for a comment that a
+    /// service account wrote: no member is its author.
     #[must_use]
-    pub fn can_edit_comment(self, author_id: Id) -> bool {
-        self.user_id == author_id
+    pub fn can_edit_comment(self, author_id: Option<Id>) -> bool {
+        author_id == Some(self.user_id)
     }
 
     #[must_use]
-    pub fn can_delete_comment(self, author_id: Id) -> bool {
-        self.user_id == author_id || self.can(Permission::CommentsModerate)
+    pub fn can_delete_comment(self, author_id: Option<Id>) -> bool {
+        author_id == Some(self.user_id) || self.can(Permission::CommentsModerate)
     }
 
     /// `shared` is workspace visibility; a personal view is only ever its owner's.
@@ -148,6 +149,12 @@ impl Actor {
     #[must_use]
     pub const fn can_purge_page(self, private: bool) -> bool {
         private || self.can(Permission::PagesPurge)
+    }
+
+    /// Tasks are shared like teamspace pages, so deleting one forever takes the same role.
+    #[must_use]
+    pub const fn can_purge_task(self) -> bool {
+        self.can(Permission::PagesPurge)
     }
 
     /// Moving teamspace pages into a private space hides them from everyone else and lets the

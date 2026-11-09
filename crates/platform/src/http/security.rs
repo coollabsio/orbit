@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::net::{IpAddr, Ipv4Addr};
 
 use axum::http::header::{
-    CONTENT_SECURITY_POLICY, HeaderName, HeaderValue, REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS,
+    HeaderName, HeaderValue, CONTENT_SECURITY_POLICY, REFERRER_POLICY, X_CONTENT_TYPE_OPTIONS,
     X_FRAME_OPTIONS,
 };
 use axum::http::{HeaderMap, Method, Uri};
@@ -84,13 +84,15 @@ impl OriginPolicy {
     pub(crate) fn permits(&self, method: &Method, uri: &Uri, headers: &HeaderMap) -> bool {
         if matches!(
             uri.path(),
-            "/api/v1/integrations/discord/events"
+            "/api/public/v1/integrations/discord/events"
                 | "/api/v1/integrations/github/webhook"
                 | "/api/v1/billing/stripe/webhook"
                 | "/oauth/register"
                 | "/oauth/token"
                 | "/oauth/revoke"
-        ) {
+        ) || uri.path().starts_with("/api/v1/hooks/chat/")
+        {
+            // Machine-to-machine: the secret in the path is the credential, and no cookie is read.
             return true;
         }
         if matches!(
@@ -204,9 +206,15 @@ pub(crate) fn inspect_request(
                 .find(|ip| !policy.is_trusted_ip(*ip))
                 .unwrap_or(first);
         }
-        if let Some(value) = consistent_header(headers, X_REQUEST_ID)? {
-            request_id =
-                RequestId::from_trusted_header(value.to_str().map_err(|_| ())?).ok_or(())?;
+        // Proxies pass the client's `X-Request-Id` on unchanged, so it is untrusted input: a value
+        // Orbit cannot use gets a server-generated ID instead of failing the request (issue #52).
+        if let Some(forwarded) = consistent_header(headers, X_REQUEST_ID)
+            .ok()
+            .flatten()
+            .and_then(|value| value.to_str().ok())
+            .and_then(RequestId::from_trusted_header)
+        {
+            request_id = forwarded;
         }
         if let Some(forwarded_transport) = forwarded_transport(headers)? {
             transport = forwarded_transport;
@@ -276,8 +284,12 @@ pub(crate) fn add_security_headers(
     let script_source = csp_script_hash
         .map(|hash| format!("script-src 'self' '{hash}'; "))
         .unwrap_or_else(|| "script-src 'self'; ".to_owned());
+    // The style-src hash is the empty string's: it allows only an empty `<style>`, which BlockNote's placeholder
+    // plugin creates and then fills through the CSSOM (`insertRule`), which CSP does not restrict.
+    // `frame-src` `blob:` is the PDF preview (the file URL itself cannot be framed). Vimeo joins YouTube.
+    // `media-src` `https:` lets a document play an audio or video file the page links to.
     let policy = format!(
-        "default-src 'self'; {script_source}style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: https:; frame-src https://www.youtube-nocookie.com; media-src 'self' https://video.twimg.com; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self' https://github.com"
+        "default-src 'self'; {script_source}style-src 'self' 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: https:; frame-src blob: https://www.youtube-nocookie.com https://player.vimeo.com; media-src 'self' https:; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self' https://github.com"
     );
     headers.insert(
         CONTENT_SECURITY_POLICY,
@@ -331,7 +343,7 @@ mod tests {
     use axum::http::header::{AUTHORIZATION, COOKIE, ORIGIN, UPGRADE};
     use axum::http::{HeaderMap, Method, Uri};
 
-    use super::{OriginPolicy, add_security_headers, bearer_token};
+    use super::{add_security_headers, bearer_token, OriginPolicy};
 
     #[test]
     fn responses_refuse_framing_and_isolate_the_opener() {

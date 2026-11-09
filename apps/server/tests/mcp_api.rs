@@ -6,9 +6,10 @@ use orbit_platform::{
     HttpPlatformLayer, Id, OriginPolicy, PasswordService, TestDatabase, TimestampMillis,
 };
 use orbit_server::mcp::{McpState, router};
-use orbit_server::repositories::api_tokens::ApiTokenRepository;
+use orbit_server::repositories::api_tokens::{ApiTokenRepository, ApiTokenScope};
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
-use orbit_server::repositories::tasks::{CreateTask, TaskRepository};
+use orbit_server::repositories::pages::revision;
+use orbit_server::repositories::tasks::{CreateTask, TaskRecord, TaskRepository};
 use serde_json::{Value, json};
 use tower::ServiceExt;
 
@@ -93,8 +94,7 @@ impl Fixture {
                 setup.user_id,
                 "MCP".into(),
                 vec![setup.project_id],
-                true,
-                false,
+                &[ApiTokenScope::TasksRead],
                 false,
                 None,
                 "test",
@@ -176,6 +176,11 @@ async fn create_task(
         .unwrap()
         .task
         .id
+}
+
+/// The `version` that the tools show for `task` (its revision).
+fn token_version(task: &TaskRecord) -> u64 {
+    revision(task.version, task.updated_at)
 }
 
 fn request(token: Option<&str>, method: &str, params: Value) -> Request<Body> {
@@ -357,8 +362,7 @@ async fn bearer_credentials_are_required_and_checked_on_every_request() {
             fixture.user,
             "Write only".into(),
             vec![fixture.project],
-            false,
-            true,
+            &[ApiTokenScope::TasksWrite],
             false,
             None,
             "test",
@@ -455,8 +459,7 @@ async fn identity_is_request_local_and_not_reused_between_connections() {
             fixture.user,
             "Other".into(),
             vec![fixture.other_project],
-            true,
-            false,
+            &[ApiTokenScope::TasksRead],
             false,
             None,
             "test",
@@ -672,11 +675,11 @@ async fn task_writes_require_scope_and_versions_and_stay_in_granted_projects() {
     let denied = f
         .tool(
             "update_task",
-            json!({"task_id": f.task, "expected_version": current.version, "title": "Changed"}),
+            json!({"task_id": f.task, "expected_version": token_version(&current), "title": "Changed"}),
         )
         .await;
     assert!(denied.get("error").is_some(), "{denied}");
-    sqlx::query("UPDATE api_tokens SET can_write = 1 WHERE id = $1")
+    sqlx::query("UPDATE api_tokens SET scopes = 'tasks:read tasks:write' WHERE id = $1")
         .bind(f.token_id.to_string())
         .execute(f.database.pool())
         .await
@@ -684,7 +687,7 @@ async fn task_writes_require_scope_and_versions_and_stay_in_granted_projects() {
     let updated = f
         .tool(
             "update_task",
-            json!({"task_id": f.task, "expected_version": current.version, "title": "Changed"}),
+            json!({"task_id": f.task, "expected_version": token_version(&current), "title": "Changed"}),
         )
         .await;
     assert_eq!(
@@ -694,7 +697,7 @@ async fn task_writes_require_scope_and_versions_and_stay_in_granted_projects() {
     let stale = f
         .tool(
             "delete_task",
-            json!({"task_id": f.task, "expected_version": current.version}),
+            json!({"task_id": f.task, "expected_version": token_version(&current)}),
         )
         .await;
     assert_eq!(stale["result"]["isError"], true, "{stale}");
@@ -706,7 +709,7 @@ async fn task_writes_require_scope_and_versions_and_stay_in_granted_projects() {
     let denied = f
         .tool(
             "delete_task",
-            json!({"task_id": f.other_task, "expected_version": secret.version}),
+            json!({"task_id": f.other_task, "expected_version": token_version(&secret)}),
         )
         .await;
     assert_eq!(denied["result"]["isError"], true, "{denied}");
@@ -742,6 +745,26 @@ async fn task_writes_require_scope_and_versions_and_stay_in_granted_projects() {
         deleted["result"]["structuredContent"]["deleted"], true,
         "{deleted}"
     );
+    // `permanent` deletes the task forever, also from the trash.
+    let task_rows = || async {
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM tasks WHERE id = $1")
+            .bind(id.as_str().unwrap())
+            .fetch_one(f.database.pool())
+            .await
+            .unwrap()
+    };
+    assert_eq!(task_rows().await, 1, "the default delete only trashes");
+    let purged = f
+        .tool(
+            "delete_task",
+            json!({"task_id": id, "expected_version": version, "permanent": true}),
+        )
+        .await;
+    assert_eq!(
+        purged["result"]["structuredContent"]["deleted"], true,
+        "{purged}"
+    );
+    assert_eq!(task_rows().await, 0);
     // An approved parent must not trash an unapproved child.
     sqlx::query("UPDATE tasks SET parent_task_id = $1 WHERE id = $2")
         .bind(f.task.to_string())
@@ -753,7 +776,7 @@ async fn task_writes_require_scope_and_versions_and_stay_in_granted_projects() {
     let denied = f
         .tool(
             "delete_task",
-            json!({"task_id": f.task, "expected_version": current.version}),
+            json!({"task_id": f.task, "expected_version": token_version(&current)}),
         )
         .await;
     assert_eq!(denied["result"]["isError"], true, "{denied}");
@@ -763,12 +786,114 @@ async fn task_writes_require_scope_and_versions_and_stay_in_granted_projects() {
             .await
             .is_ok()
     );
-    let denied = f.tool("update_task", json!({"task_id": f.task, "expected_version": current.version, "title": "Forbidden tree write"})).await;
+    let denied = f.tool("update_task", json!({"task_id": f.task, "expected_version": token_version(&current), "title": "Forbidden tree write"})).await;
     assert_eq!(denied["result"]["isError"], true, "{denied}");
 }
 
 #[tokio::test]
-async fn docs_and_chat_require_explicit_scopes_and_never_expose_write_tools() {
+async fn sub_issues_can_be_created_listed_moved_and_detached_within_the_grant() {
+    let f = Fixture::new().await;
+    sqlx::query("UPDATE api_tokens SET scopes = 'tasks:read tasks:write' WHERE id = $1")
+        .bind(f.token_id.to_string())
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    let parent = f.tasks.get_task(f.workspace, f.task, f.user).await.unwrap();
+    let identifier: String =
+        sqlx::query_scalar("SELECT projects.project_key FROM projects WHERE id = $1")
+            .bind(f.project.to_string())
+            .fetch_one(f.database.pool())
+            .await
+            .unwrap();
+    let identifier = format!("{identifier}-{}", parent.number);
+    let created = f
+        .tool(
+            "create_task",
+            json!({"project_id": f.project, "status_id": parent.status_id, "title": "Child", "parent_task_id": identifier}),
+        )
+        .await;
+    let child = &created["result"]["structuredContent"];
+    assert_eq!(child["parent_task_id"], f.task.to_string(), "{created}");
+    assert_eq!(child["identifier"], identifier);
+    assert!(
+        child["url"]
+            .as_str()
+            .unwrap()
+            .starts_with("https://orbit.test/tasks/")
+    );
+    let child_id: Id = child["id"].as_str().unwrap().parse().unwrap();
+    let children = f
+        .tool("list_tasks", json!({"parent_task_id": f.task}))
+        .await;
+    let items = children["result"]["structuredContent"]["items"]
+        .as_array()
+        .unwrap();
+    assert_eq!(items.len(), 1, "{children}");
+    assert_eq!(items[0]["id"], child_id.to_string());
+    // A parent outside the grant is neither listed nor usable.
+    let hidden = f
+        .tool("list_tasks", json!({"parent_task_id": f.other_task}))
+        .await;
+    assert_eq!(hidden["result"]["isError"], true, "{hidden}");
+    let hidden = f
+        .tool(
+            "create_task",
+            json!({"project_id": f.project, "status_id": parent.status_id, "title": "Hidden child", "parent_task_id": f.other_task}),
+        )
+        .await;
+    assert_eq!(hidden["result"]["isError"], true, "{hidden}");
+    // A task cannot move under its own sub-issue.
+    let cycle = f
+        .tool(
+            "update_task",
+            json!({"task_id": f.task, "expected_version": token_version(&parent), "parent_task_id": child_id}),
+        )
+        .await;
+    assert_eq!(cycle["result"]["isError"], true, "{cycle}");
+    assert!(cycle.to_string().contains("its own sub-issues"), "{cycle}");
+    let current = f
+        .tasks
+        .get_task(f.workspace, child_id, f.user)
+        .await
+        .unwrap();
+    let moved = f
+        .tool(
+            "update_task",
+            json!({"task_id": child_id, "expected_version": token_version(&current), "parent_task_id": f.other_task}),
+        )
+        .await;
+    assert_eq!(moved["result"]["isError"], true, "{moved}");
+    let detached = f
+        .tool(
+            "update_task",
+            json!({"task_id": child_id, "expected_version": token_version(&current), "parent_task_id": null}),
+        )
+        .await;
+    assert!(
+        detached["result"]["structuredContent"]["parent_task_id"].is_null(),
+        "{detached}"
+    );
+    let current = f
+        .tasks
+        .get_task(f.workspace, child_id, f.user)
+        .await
+        .unwrap();
+    assert!(current.parent.is_none());
+    let attached = f
+        .tool(
+            "update_task",
+            json!({"task_id": child_id, "expected_version": token_version(&current), "parent_task_id": f.task}),
+        )
+        .await;
+    assert_eq!(
+        attached["result"]["structuredContent"]["parent_task_id"],
+        f.task.to_string(),
+        "{attached}"
+    );
+}
+
+#[tokio::test]
+async fn docs_and_chat_require_explicit_scopes_and_doc_writes_need_docs_write() {
     use orbit_platform::{
         AttachmentMutationCoordinator, LocalBlobStore, UploadLimits, UploadService,
     };
@@ -880,7 +1005,7 @@ async fn docs_and_chat_require_explicit_scopes_and_never_expose_write_tools() {
         let r = f.tool(name, json!({})).await;
         assert!(r.get("error").is_some(), "{r}");
     }
-    sqlx::query("UPDATE api_tokens SET mcp_scopes = 'docs:read chat:read' WHERE id = $1")
+    sqlx::query("UPDATE api_tokens SET scopes = 'tasks:read docs:read chat:read' WHERE id = $1")
         .bind(f.token_id.to_string())
         .execute(f.database.pool())
         .await
@@ -951,12 +1076,52 @@ async fn docs_and_chat_require_explicit_scopes_and_never_expose_write_tools() {
     assert!(!listing.to_string().contains("create_doc"));
     let denied = f.tool("get_doc", json!({"page_id": Id::new_v7()})).await;
     assert_eq!(denied["result"]["isError"], true, "{denied}");
+    let refused = f.tool("create_doc", json!({"title": "x"})).await;
+    assert!(refused.get("error").is_some(), "{refused}");
+
+    sqlx::query("UPDATE api_tokens SET scopes = 'tasks:read docs:write' WHERE id = $1")
+        .bind(f.token_id.to_string())
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    let listing = f.rpc("tools/list", json!({})).await.to_string();
+    for name in ["create_doc", "update_doc", "get_doc"] {
+        assert!(listing.contains(name), "{name}: {listing}");
+    }
+    let created = f
+        .tool(
+            "create_doc",
+            json!({"title": "Agent notes", "markdown": "## Findings\n\nAll good."}),
+        )
+        .await;
+    let doc = &created["result"]["structuredContent"];
+    assert_eq!(doc["title"], "Agent notes", "{created}");
+    assert_eq!(doc["content"][0]["type"], "heading", "{created}");
+    let updated = f
+        .tool(
+            "update_doc",
+            json!({"page_id": doc["id"], "expected_version": doc["version"], "markdown": "Rewritten."}),
+        )
+        .await;
+    let text = &updated["result"]["structuredContent"]["content"][0]["content"][0]["text"];
+    assert_eq!(text, "Rewritten.", "{updated}");
+    let read = f.tool("get_doc", json!({"page_id": doc["id"]})).await;
+    let markdown = &read["result"]["structuredContent"]["markdown"];
+    assert_eq!(markdown, "Rewritten.\n", "{read}");
+    let stale = f
+        .tool(
+            "update_doc",
+            json!({"page_id": doc["id"], "expected_version": doc["version"], "title": "x"}),
+        )
+        .await;
+    assert_eq!(stale["result"]["isError"], true, "{stale}");
+    assert!(stale.to_string().contains("version changed"), "{stale}");
 }
 
 #[tokio::test]
-async fn task_writes_are_refused_in_a_read_only_cloud_workspace() {
+async fn writes_are_refused_in_a_read_only_cloud_workspace() {
     let f = Fixture::new().await;
-    sqlx::query("UPDATE api_tokens SET can_write = 1 WHERE id = $1")
+    sqlx::query("UPDATE api_tokens SET scopes = 'tasks:read tasks:write docs:write' WHERE id = $1")
         .bind(f.token_id.to_string())
         .execute(f.database.pool())
         .await
@@ -984,12 +1149,13 @@ async fn task_writes_are_refused_in_a_read_only_cloud_workspace() {
         ),
         (
             "update_task",
-            json!({"task_id": f.task, "expected_version": current.version, "title": "Changed"}),
+            json!({"task_id": f.task, "expected_version": token_version(&current), "title": "Changed"}),
         ),
         (
             "delete_task",
-            json!({"task_id": f.task, "expected_version": current.version}),
+            json!({"task_id": f.task, "expected_version": token_version(&current)}),
         ),
+        ("create_doc", json!({"title": "Created"})),
     ];
     for (name, arguments) in calls {
         let refused = f.tool(name, arguments).await;
@@ -1013,4 +1179,50 @@ async fn task_writes_are_refused_in_a_read_only_cloud_workspace() {
         read["result"]["structuredContent"]["title"],
         "Approved task"
     );
+}
+
+#[tokio::test]
+async fn doc_and_chat_reads_report_database_errors_as_errors() {
+    use orbit_platform::{
+        AttachmentMutationCoordinator, LocalBlobStore, UploadLimits, UploadService,
+    };
+    use orbit_server::repositories::{chat::ChatRepository, pages::PageRepository};
+    let mut f = Fixture::new().await;
+    let root = tempfile::tempdir().unwrap();
+    let uploads = UploadService::new(
+        (*f.database).clone(),
+        Arc::new(LocalBlobStore::new(root.path().join("files"))),
+        AttachmentMutationCoordinator::default(),
+        UploadLimits::default(),
+    );
+    f.app = router(
+        McpState::new(Arc::new(f.tokens.clone()), Arc::new(f.tasks.clone())).with_content(
+            Arc::new(PageRepository::new((*f.database).clone())),
+            Arc::new(ChatRepository::new((*f.database).clone(), uploads)),
+        ),
+        "https://orbit.test",
+    );
+    sqlx::query("UPDATE api_tokens SET scopes = 'tasks:read docs:read chat:read' WHERE id = $1")
+        .bind(f.token_id.to_string())
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    let missing = f.tool("get_doc", json!({"page_id": Id::new_v7()})).await;
+    assert_eq!(missing["result"]["isError"], true, "{missing}");
+    for table in ["pages", "chat_conversations"] {
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "ALTER TABLE {table} RENAME TO {table}_unavailable"
+        )))
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    }
+    for (name, arguments) in [
+        ("list_docs", json!({})),
+        ("get_doc", json!({"page_id": Id::new_v7()})),
+        ("list_conversations", json!({})),
+    ] {
+        let failed = f.tool(name, arguments).await;
+        assert_eq!(failed["error"]["code"], -32603, "{name}: {failed}");
+    }
 }

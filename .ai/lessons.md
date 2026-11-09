@@ -17,8 +17,12 @@
 - Any process-local state (maps, locks, counters, caches, "running" flags, background loops) is per server. If it must hold for every server, keep it in the database (a serialized `immediate_transaction`, `Database::try_singleton`) or send it through `crate::cluster`. Test such changes with two `App`s on one database (`apps/server/tests/shared_postgres`), and prove the test fails without the fix.
 - `immediate_transaction()` takes one advisory lock for the whole Postgres database, so every writer of the cluster waits for it. A hot counter that needs no read-then-write logic uses one atomic statement on the pool instead (`INSERT … ON CONFLICT … DO UPDATE SET n = t.n + 1 RETURNING n`, as `rate_limit_windows` does); keep per-request state of very frequent requests in memory and document that it is per server.
 
-## Jean run environments share ports
-- `jean.json` gives every worktree the same ports (web 18888, API 18080), and `just dev` uses `--strictPort`. Before you trust a run environment, check who owns the ports (`ss -ltnp | grep -E ':18080|:18888'`, then `readlink /proc/<pid>/cwd`): another worktree's Vite server can answer on 18888 with its own code (2026-10-20).
+## Write transactions and background services
+- Do slow CPU work (Markdown merges, Yjs reconciles of big docs) before `immediate_transaction()`, on `spawn_blocking`, and only check and persist inside it: the transaction holds every writer of the database, and a CPU-bound task also stalls the other tasks of its tokio worker. Markdown doc writes do this under the collab room lock and check the revision and the log again in the transaction (2026-11-05).
+- A background loop (job worker, scheduler, attachment reconciliation, integrity job) must treat `orbit_platform::is_transient_lock_error` and S3 errors (`BlobStoreError::ObjectStorage`) as "retry on the next round", never as fatal: any service error stops the whole server (`AppError::Background`), SQLite returns "database is locked" after the 5 s busy timeout (2026-11-05), and a rotated S3 secret put the server in a restart loop that the admin could not fix from the UI (#69, 2026-11-06).
+
+## Jean run environments: one port block per worktree
+- `jean.json` runs `./scripts/dev run`. The main checkout keeps web 18888 / API 18080; each worktree gets a stable slot with web `24000 + slot*10` and API +1, its own SQLite in `data/`, and a `tailscale serve` HTTPS URL (2026-11-05). `jean.json` has no fixed `ports`, so Jean shows the ports that really listen; confirm the owner with `ss -ltnp` and `readlink /proc/<pid>/cwd` before you trust a page.
 
 ## SQLite 3.46.0 (bundled by libsqlite3-sys 0.30) FTS5 integrity false positive
 - `PRAGMA integrity_check` reports "malformed inverted index for FTS5 table …" after a row of an FTS5 table is UPDATEd twice
@@ -54,7 +58,7 @@
 - Layer/nested two-tone card surfaces are a reference pattern, not Coolify. Coolify cards = one surface + one border.
 
 ## Tooling
-- `jean.json` gives every worktree the same run ports (18888 web, 18080 API, `--strictPort`), so a second worktree's run environment cannot start while another one runs, and port 18080 can also be taken by a local VM. Check who owns the port (`ss -ltnp`, `/proc/<pid>/cwd`) before you trust a page there. Without a working run environment, build the web app and let Playwright serve `dist/` and stub `/api` with `page.route` (no extra server process) (2026-10-20).
+- Without a working run environment, build the web app and let Playwright serve `dist/` and stub `/api` with `page.route` (no extra server process) (2026-10-20).
 - Do not run `bunx expo lint` in `apps/mobile`: mobile has no ESLint setup, and the command installs ESLint, edits `package.json` and `bun.lock` and writes `eslint.config.js`. The mobile checks are `bunx tsc --noEmit -p .`, `bun test src` and the iOS bundle (`bunx expo export --platform ios` when no Metro runs) (2026-10-28).
 - Never `git stash` to compare against `main`: other sessions edit this working tree at the same time, so the stash takes their work and `stash pop` fails on their new edits. Undo your change in place (or use `git show HEAD:path`) instead (2026-10-15).
 - The release image is static musl on Alpine with no OpenSSL. Pick pure-Rust crates (rustls, RustCrypto); `webauthn-rs` 0.5 needs OpenSSL, so Orbit pins the pure-Rust 0.6 line.
@@ -64,7 +68,7 @@
 - Headless Firefox `--screenshot` does not wait for `loading="lazy"` images inside a scroll container (they show alt text). Data-URL images should load eagerly anyway; for real URLs, accept the artifact or test on a bare page.
 - Headless Firefox `--screenshot` captures CSS animations at frame 0: anything with an enter animation (modal fade, `slide-in-right` panels) is invisible/off-screen in the PNG. Verify such UI with a static test page that links the built CSS and sets `*{animation:none!important}`; a 50%-black backdrop is also invisible on the near-black canvas, so do not read its absence as "not rendered".
 - Browser-default `text-align: center` on `<button>` inherits into child spans — the base reset must set `text-align: left` on buttons.
-- The production CSP is `style-src 'self'`: a library that adds a `<style>` at runtime (Sonner, Mermaid) works on the Vite dev server and loses its styles in production. Put the rules in `index.css` or a constructed style sheet (`document.adoptedStyleSheets`), and test a production build served with the server's CSP header.
+- The production CSP is `style-src 'self'` plus the empty-string hash (an empty `<style>` filled with `insertRule` works): a library that adds a `<style>` at runtime (Sonner, Mermaid) works on the Vite dev server and loses its styles in production. Put the rules in `index.css` or a constructed style sheet (`document.adoptedStyleSheets`), and test a production build served with the server's CSP header.
 - Typecheck the web app with `bunx tsc -b` (what `build` runs). `tsc --noEmit -p .` checks nothing: the root `tsconfig.json` only has references, so it passes on broken code.
 - In `apps/web`, run `bun test src` (the `test` script), not bare `bun test`: bare `bun test` also loads the Playwright e2e files and reports false failures.
 - `cargo test --workspace` stops at the first failing test binary; use `--no-fail-fast` to see the whole suite.

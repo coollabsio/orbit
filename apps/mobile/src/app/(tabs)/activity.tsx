@@ -1,17 +1,15 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { type Href, router } from 'expo-router'
 import { useState } from 'react'
-import { Alert, FlatList, Pressable, RefreshControl, View } from 'react-native'
+import { Alert, FlatList, Pressable, View } from 'react-native'
 
-import { MenuButton } from '../../components/Drawer'
 import { relativeTime } from '../../data/format'
 import { isMention, notificationCopy, notificationTarget } from '../../data/inbox'
 import * as api from '../../data/orbit'
 import { useOrbit } from '../../orbit-context'
 import { useNotifications, usePages, usePeople } from '../../queries'
 import { errorMessage } from '../../session-context'
-import { useTheme } from '../../theme'
-import { Button, CountBadge, EmptyState, ErrorView, HeaderTitle, LoadingView, PaneHeader, SafeAreaView, Text } from '../../ui'
+import { Button, CountBadge, EmptyState, ErrorView, HeaderTitle, LoadingView, PaneHeader, PullRefresh, SafeAreaView, Text } from '../../ui'
 
 type Tab = 'all' | 'unread' | 'mentions'
 const TABS: { value: Tab; label: string }[] = [
@@ -24,7 +22,6 @@ const TABS: { value: Tab; label: string }[] = [
 export default function ActivityScreen() {
   const { client, workspaceId } = useOrbit()
   const queryClient = useQueryClient()
-  const { colors } = useTheme()
   const [tab, setTab] = useState<Tab>('all')
   const notifications = useNotifications()
   const people = usePeople()
@@ -46,9 +43,8 @@ export default function ActivityScreen() {
   const items = all.filter((item) => (tab === 'unread' ? !item.read_at : tab === 'mentions' ? isMention(item) : true))
 
   return (
-    <SafeAreaView edges={['top', 'left', 'right']} className="flex-1 bg-background">
-      <PaneHeader className="px-3">
-        <MenuButton />
+    <SafeAreaView edges={['left', 'right']} className="flex-1 bg-background">
+      <PaneHeader className="min-h-12 px-3">
         <HeaderTitle>Activity</HeaderTitle>
         {unreadCount > 0 ? <CountBadge count={unreadCount} /> : null}
         <View className="flex-1" />
@@ -82,7 +78,7 @@ export default function ActivityScreen() {
           data={items}
           keyExtractor={(item) => item.id}
           contentContainerClassName={items.length === 0 ? 'grow' : undefined}
-          refreshControl={<RefreshControl refreshing={notifications.isRefetching} onRefresh={() => void notifications.refetch()} tintColor={colors.mutedForeground} />}
+          refreshControl={<PullRefresh onRefresh={() => notifications.refetch()} />}
           ListEmptyComponent={<EmptyState icon="inbox" title="You're all caught up" description="Assignments and mentions appear here." />}
           renderItem={({ item }) => {
             const actor = people.find((person) => person.id === item.actor_user_id)

@@ -4,18 +4,22 @@
 // socket, so it co-edits the same document as the web. It runs in a web view; the screen around it is native and
 // talks to it through props, native actions (async functions) and `run` (the toolbar's commands).
 import '@blocknote/react/style.css'
+import 'katex/dist/katex.min.css'
 import './PageEditor.css'
 
 import { withCollaboration } from '@blocknote/core/yjs'
 import { BlockNoteViewRaw, useCreateBlockNote } from '@blocknote/react'
+import { setEditableInPlace } from '@orbit/editor/editable'
 import { commentMarks } from '@orbit/editor/commentMarks'
 import { CollabSession, type CollabProblem, type CollabState } from '@orbit/editor/collab/session'
 import { collabSocket, COLLAB_FRAGMENT } from '@orbit/editor/collab/target'
 import { ticketWebSocket, type TicketResult } from '@orbit/editor/collab/ticketSocket'
 import { watchDeletedFiles } from '@orbit/editor/deletedFiles'
 import { isSafeLinkHref } from '@orbit/editor/links'
+import { selectBlockExtension } from '@orbit/editor/selectBlock'
 import { CALLOUT_DEFAULT_EMOJI, createEditorSchemas, type PageEditorInstance } from '@orbit/editor/schema'
 import { type DOMImperativeFactory, useDOMImperativeHandle } from 'expo/dom'
+import katex from 'katex'
 import { createContext, type CSSProperties, type Ref, use, useEffect, useRef, useState } from 'react'
 import { WebsocketProvider } from 'y-websocket'
 import * as Y from 'yjs'
@@ -124,6 +128,17 @@ function Callout({ block, contentRef }: { block: { props: { emoji: string } }; c
   )
 }
 
+function InlineMath({ inlineContent }: { inlineContent: { props: { latex: string } } }) {
+  const latex = inlineContent.props.latex.trim()
+  if (!latex.trim()) return <span className="orbit-math">formula</span>
+  try {
+    const html = katex.renderToString(latex, { displayMode: false, throwOnError: true, trust: false, strict: 'ignore' })
+    return <span className="orbit-math" dangerouslySetInnerHTML={{ __html: html }} />
+  } catch {
+    return <span className="orbit-math">{latex}</span>
+  }
+}
+
 function Mention({ inlineContent }: { inlineContent: { props: { userId: string; name: string } } }) {
   const { members } = use(LookupsContext)
   const name = members[inlineContent.props.userId] ?? (inlineContent.props.name || 'Unknown user')
@@ -140,6 +155,7 @@ const { pageEditorSchema } = createEditorSchemas({
   page: { render: PageCard },
   callout: { render: Callout },
   mention: { render: Mention },
+  math: { render: InlineMath },
   codeBlock: { tokenClass: (type) => (COLORED_TOKENS.has(type) ? `orbit-token-${type}` : undefined) },
 })
 
@@ -266,7 +282,7 @@ function Editor({ connection, editable, theme, server, actions, editorRef }: Edi
     withCollaboration({
       schema: pageEditorSchema,
       // Without the comment mark, y-prosemirror would drop the text of anchored comments for everyone.
-      extensions: [commentMarks()],
+      extensions: [commentMarks(), selectBlockExtension()],
       collaboration: {
         provider: connection.provider,
         fragment: connection.fragment,
@@ -299,6 +315,10 @@ function Editor({ connection, editable, theme, server, actions, editorRef }: Edi
   )
 
   useEffect(() => watchDeletedFiles(editor, (url) => actions.current.fileDeleted(url)), [editor])
+
+  // The view mounts once, with the first value; later changes switch the mounted editor (see `setEditableInPlace`).
+  const [mountEditable] = useState(editable)
+  useEffect(() => setEditableInPlace(editor, editable), [editor, editable])
 
   useEffect(() => {
     editorRef.current = editor
@@ -335,7 +355,7 @@ function Editor({ connection, editable, theme, server, actions, editorRef }: Edi
     <div ref={rootRef} className="orbit-editor-root">
       <BlockNoteViewRaw
         editor={editor}
-        editable={editable}
+        editable={mountEditable}
         theme={theme}
         formattingToolbar={false}
         linkToolbar={false}

@@ -29,7 +29,7 @@ import { completeEmoticon, replaceEmoticons } from '../../lib/emoticons'
 import { encodeMentions, extractMentions } from '../../lib/mentionTokens'
 import { quoteOf } from '../../lib/quote'
 import { useCoarsePointer } from '../messages/environment'
-import { conversationTitle, useChatPeople } from '../messages/people'
+import { authorName, conversationTitle, useChatPeople } from '../messages/people'
 import { ComposerInput } from './ComposerInput'
 import { completeCodeFence, inOpenCodeBlock } from './composerSegments'
 import { ComposerUploads } from './ComposerUploads'
@@ -270,7 +270,7 @@ export function Composer({ ref, conversation, threadRootId = null, replyTo = nul
             className="flex items-center gap-2 rounded-t-lg border border-b-0 border-input bg-muted/40 pl-3 text-xs text-muted-foreground"
           >
             <span className="min-w-0 flex-1 truncate">
-              Replying to <span className="font-medium text-foreground">{people.byId.get(replyTo.authorId)?.name ?? 'Unknown'}</span>
+              Replying to <span className="font-medium text-foreground">{authorName(people, replyTo.authorId, replyTo.bot?.name)}</span>
             </span>
             <Tip label="Cancel reply">
               <Button

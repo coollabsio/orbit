@@ -128,6 +128,32 @@ describe('getPageSlashMenuItems', () => {
     expect(e.document[0].content).toEqual([{ type: 'text', text: 'flowchart TD\n  A[Start] --> B[End]', styles: {} }])
   })
 
+  test('offers Math right after Mermaid diagram; it inserts a code block with the language latex', () => {
+    const e = editor()
+    const titles = getPageSlashMenuItems(e, actions, '').map((item) => item.title)
+    expect(titles.indexOf('Math')).toBe(titles.indexOf('Mermaid diagram') + 1)
+    expect(getPageSlashMenuItems(e, actions, 'formula')[0].title).toBe('Math')
+
+    e.setTextCursorPosition(e.document[0].id)
+    getPageSlashMenuItems(e, actions, 'equation')[0].onItemClick()
+    expect(e.document[0].type).toBe('codeBlock')
+    expect(e.document[0].props).toEqual({ language: 'latex' })
+    expect(e.document[0].content).toEqual([{ type: 'text', text: 'e^{i\\pi} + 1 = 0', styles: {} }])
+  })
+
+  test('offers Inline math right after Math; it inserts a formula in the sentence', () => {
+    const e = editor()
+    const titles = getPageSlashMenuItems(e, actions, '').map((item) => item.title)
+    expect(titles.indexOf('Inline math')).toBe(titles.indexOf('Math') + 1)
+    expect(getPageSlashMenuItems(e, actions, 'inline')[0].title).toBe('Inline math')
+
+    e.setTextCursorPosition(e.document[0].id)
+    getPageSlashMenuItems(e, actions, 'inline')[0].onItemClick()
+    expect(e.document[0].type).toBe('paragraph')
+    const content = e.document[0].content as { type: string; props?: { latex?: string } }[]
+    expect(content).toEqual([{ type: 'math', props: { latex: '' } }])
+  })
+
   test('a title match is selected first, before alias-only matches ("/sub" → Sub-page)', () => {
     const items = getPageSlashMenuItems(editor(), actions, 'sub')
     expect(items[0].title).toBe('Sub-page')
@@ -163,6 +189,8 @@ describe('task profile', () => {
     const titles = getTaskSlashMenuItems(BlockNoteEditor.create({ schema: taskEditorSchema }) as never, '').map((item) => item.title)
     expect(titles).toContain('Callout')
     expect(titles).toContain('Mermaid diagram')
+    expect(titles).toContain('Math')
+    expect(titles).toContain('Inline math')
     expect(titles).not.toContain('Sub-page')
     expect(titles).not.toContain('Link a page')
   })

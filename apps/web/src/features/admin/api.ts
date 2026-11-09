@@ -20,7 +20,7 @@ export function useAdminUsers(search: string) {
   })
 }
 
-/** The number of accounts and, on Orbit Cloud, of ongoing and expired trials. Admins only. */
+/** The number of accounts, of daily, weekly and monthly active users and, on Orbit Cloud, of ongoing and expired trials. Admins only. */
 export function useAdminUserSummary() {
   return useQuery({
     queryKey: queryKeys.adminUserSummary,

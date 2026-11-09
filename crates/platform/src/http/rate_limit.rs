@@ -2,8 +2,9 @@
 //! its credential (the session cookie or the `Authorization` header) and, when it has a credential,
 //! the workspace in its path. The first of these over its limit refuses the request, so refused
 //! requests do not use up the budget of the subjects after it. The workspace is charged only once
-//! the response shows the credential was accepted ([`WorkspaceCharge`]): anyone can send a made-up
-//! cookie, and it must not use up the budget of the workspace's members.
+//! the response shows the credential was accepted (a status below 400, [`WorkspaceCharge`]):
+//! anyone can send a made-up cookie or token, and it must not use up the budget of the
+//! workspace's members.
 //!
 //! The sensitive classes (sign-in, recovery and registration, invitations) are counted in the
 //! database (`rate_limit_windows`), so their limits hold for every server of the database. They are
@@ -33,7 +34,13 @@ pub(super) enum EndpointClass {
     /// Chat has its own budget, so a busy conversation cannot use up the requests of the
     /// other apps (and they cannot use up chat's).
     Chat,
+    /// Incoming chat webhooks (`/api/v1/hooks/…`): the general limit per client address, and
+    /// [`WEBHOOK_PER_MINUTE`] for each webhook.
+    Webhook,
     General,
+    /// The APIs of integrations: the public REST API (`/api/public/…`) and MCP. Their own budget,
+    /// with the general limit, so busy tokens cannot use up the web app's requests.
+    TokenApi,
 }
 
 impl EndpointClass {
@@ -44,7 +51,9 @@ impl EndpointClass {
             Self::Invitation => "invitation",
             Self::Upload => "upload",
             Self::Chat => "chat",
+            Self::Webhook => "webhook",
             Self::General => "general",
+            Self::TokenApi => "token_api",
         }
     }
 
@@ -61,6 +70,9 @@ impl EndpointClass {
 /// that is looked at), so its budget is this many times the general one.
 const CHAT_RATE_FACTOR: u32 = 3;
 
+/// Accepted messages of one incoming webhook in a minute (Slack allows about one a second).
+const WEBHOOK_PER_MINUTE: u32 = 60;
+
 /// Who a request is counted against. Credentials and workspaces are kept as digests, so the
 /// memory of an entry is fixed and no token is kept.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -68,6 +80,7 @@ enum Subject {
     Ip(IpAddr),
     Credential([u8; 16]),
     Workspace([u8; 16]),
+    Webhook([u8; 16]),
 }
 
 impl Subject {
@@ -77,6 +90,7 @@ impl Subject {
             Self::Ip(ip) => format!("{class}:ip:{ip}"),
             Self::Credential(digest) => format!("{class}:credential:{}", hex(&digest)),
             Self::Workspace(digest) => format!("{class}:workspace:{}", hex(&digest)),
+            Self::Webhook(digest) => format!("{class}:webhook:{}", hex(&digest)),
         }
     }
 }
@@ -109,13 +123,13 @@ pub(super) struct WorkspaceCharge {
 }
 
 impl WorkspaceCharge {
-    /// Whether a response with `status` was served to an accepted credential of the workspace.
+    /// Whether a response with `status` was served to an accepted credential of the workspace:
+    /// only a response below 400 shows that. A made-up credential gets error responses before
+    /// it is checked: the router's 405, and the 400, 413, 415 and 422 of the extractors (the web
+    /// handlers check the session after their extractors). So no error is charged, also not the
+    /// errors of members.
     pub(super) fn applies_to(status: axum::http::StatusCode) -> bool {
-        use axum::http::StatusCode;
-        !matches!(
-            status,
-            StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN | StatusCode::NOT_FOUND
-        )
+        status.as_u16() < 400
     }
 }
 
@@ -180,6 +194,22 @@ impl RateLimiter {
                 return Err(refused);
             }
         }
+        // Like a workspace, a webhook is charged only once its secret was accepted, so requests
+        // with a wrong secret cannot use up its budget.
+        if class == EndpointClass::Webhook {
+            let Some(webhook) = webhook_in(path) else {
+                return Ok(None);
+            };
+            let subject = Subject::Webhook(digest(webhook.as_bytes()));
+            if self.hits(subject, class, minute).await >= WEBHOOK_PER_MINUTE {
+                return Err(refused);
+            }
+            return Ok(Some(WorkspaceCharge {
+                subject,
+                class,
+                minute,
+            }));
+        }
         let Some(workspace) = workspace_in(path).filter(|_| credential.is_some()) else {
             return Ok(None);
         };
@@ -237,7 +267,9 @@ impl RateLimiter {
                 .config
                 .general_per_minute
                 .saturating_mul(CHAT_RATE_FACTOR),
-            EndpointClass::General => self.config.general_per_minute,
+            EndpointClass::Webhook | EndpointClass::General | EndpointClass::TokenApi => {
+                self.config.general_per_minute
+            }
         }
     }
 
@@ -345,9 +377,18 @@ fn rate_limit_ip(ip: IpAddr) -> IpAddr {
     }
 }
 
-/// The workspace ID of a `/api/v1/workspaces/{id}/…` path.
+/// The workspace ID of a `/api/v1/workspaces/{id}/…` or `/api/public/v1/workspaces/{id}/…` path.
 fn workspace_in(path: &str) -> Option<&str> {
-    path.strip_prefix("/api/v1/workspaces/")?
+    path.strip_prefix("/api/v1/workspaces/")
+        .or_else(|| path.strip_prefix("/api/public/v1/workspaces/"))?
+        .split('/')
+        .next()
+        .filter(|id| !id.is_empty())
+}
+
+/// The webhook ID of a `/api/v1/hooks/chat/{id}/{secret}` path.
+fn webhook_in(path: &str) -> Option<&str> {
+    path.strip_prefix("/api/v1/hooks/chat/")?
         .split('/')
         .next()
         .filter(|id| !id.is_empty())
@@ -360,11 +401,19 @@ pub(super) fn endpoint_class(method: &Method, path: &str) -> Option<EndpointClas
     ) {
         return Some(EndpointClass::Authentication);
     }
-    if path == "/mcp" || path.starts_with("/.well-known/oauth-") {
+    // Before the rules below: their words (`/session`, `/attachments`, …) can be in any path that
+    // a client makes up.
+    if path == "/mcp" || path == "/api/public" || path.starts_with("/api/public/") {
+        return Some(EndpointClass::TokenApi);
+    }
+    if path.starts_with("/.well-known/oauth-") {
         return Some(EndpointClass::General);
     }
     if path != "/api" && !path.starts_with("/api/") {
         return None;
+    }
+    if path.starts_with("/api/v1/hooks/") {
+        return Some(EndpointClass::Webhook);
     }
     // The provider callback is a GET that calls out to Google or GitHub; the generic rules below miss it.
     if path.starts_with("/api/v1/auth/providers/") {
@@ -573,6 +622,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn public_api_tokens_share_their_workspace_budget() {
+        let limiter = RateLimiter::new(RateLimitConfig {
+            general_per_minute: 2,
+            workspace_multiplier: 2,
+            ..RateLimitConfig::default()
+        });
+        let path = "/api/public/v1/workspaces/w1/tasks";
+        for client in 0..4_u32 {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                AUTHORIZATION,
+                format!("Bearer orb_{client}").parse().unwrap(),
+            );
+            let charge = limiter
+                .check(IpAddr::V4(client.into()), &Method::GET, path, &headers)
+                .await;
+            limiter.charge(charge.ok().flatten().unwrap()).await;
+        }
+        let mut headers = HeaderMap::new();
+        headers.insert(AUTHORIZATION, "Bearer orb_9".parse().unwrap());
+        assert!(
+            limiter
+                .check(IpAddr::V4(9_u32.into()), &Method::GET, path, &headers)
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
     async fn refused_credentials_do_not_count_against_a_workspace() {
         let limiter = RateLimiter::new(RateLimitConfig {
             general_per_minute: 1,
@@ -604,6 +682,25 @@ mod tests {
         );
     }
 
+    #[test]
+    fn only_a_response_below_400_charges_the_workspace() {
+        use axum::http::StatusCode;
+        // A made-up credential gets these before (or without) its check: the router's 405, the
+        // extractors' 400, 413, 415 and 422 (web handlers check the session in their body), a
+        // socket's 426, the billing guard's 402 and 503. The errors of members are not charged
+        // either: their status does not show where they came from.
+        for status in [
+            400, 401, 402, 403, 404, 405, 409, 413, 415, 422, 426, 500, 503,
+        ] {
+            let status = StatusCode::from_u16(status).unwrap();
+            assert!(!WorkspaceCharge::applies_to(status), "{status}");
+        }
+        for status in [101, 200, 201, 204, 302, 304] {
+            let status = StatusCode::from_u16(status).unwrap();
+            assert!(WorkspaceCharge::applies_to(status), "{status}");
+        }
+    }
+
     #[tokio::test]
     async fn requests_without_a_credential_do_not_count_against_a_workspace() {
         let limiter = RateLimiter::new(RateLimitConfig {
@@ -621,6 +718,95 @@ mod tests {
         assert!(
             limiter
                 .check(ip, &Method::GET, path, &headers)
+                .await
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn every_public_api_path_and_mcp_are_token_api_requests() {
+        for (method, path) in [
+            (Method::GET, "/api/public/v1/me"),
+            (Method::GET, "/api/public/v1/workspaces/w/tasks"),
+            (Method::POST, "/api/public/v1/workspaces/w/tasks/t/comments"),
+            (Method::PATCH, "/api/public/v1/workspaces/w/docs/d"),
+            (Method::POST, "/api/public/v1/integrations/discord/events"),
+            (Method::GET, "/api/public/v2/anything"),
+            (Method::POST, "/mcp"),
+            // Made-up paths with the words of the stricter classes stay in the token API class.
+            (Method::POST, "/api/public/v1/workspaces/w/docs/session"),
+            (Method::POST, "/api/public/v1/workspaces/w/tasks/login"),
+            (Method::POST, "/api/public/v1/workspaces/w/setup"),
+            (Method::POST, "/api/public/v1/recovery"),
+            (Method::POST, "/api/public/v1/auth/register"),
+            (Method::POST, "/api/public/v1/workspaces/w/invitations"),
+            (
+                Method::POST,
+                "/api/public/v1/workspaces/w/tasks/t/attachments",
+            ),
+            (Method::POST, "/api/public/v1/workspaces/w/chat/files"),
+            (
+                Method::GET,
+                "/api/public/v1/workspaces/w/chat/conversations",
+            ),
+        ] {
+            assert_eq!(
+                endpoint_class(&method, path),
+                Some(EndpointClass::TokenApi),
+                "{method} {path}"
+            );
+        }
+        // The web app keeps its classes.
+        for (path, class) in [
+            ("/api/v1/workspaces/w/tasks", EndpointClass::General),
+            (
+                "/api/v1/workspaces/w/tasks/t/comments",
+                EndpointClass::General,
+            ),
+            ("/api/v1/auth/session", EndpointClass::Authentication),
+            (
+                "/.well-known/oauth-authorization-server",
+                EndpointClass::General,
+            ),
+        ] {
+            assert_eq!(endpoint_class(&Method::GET, path), Some(class), "{path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn token_api_requests_do_not_use_up_the_web_app_budget() {
+        let limiter = RateLimiter::new(RateLimitConfig {
+            general_per_minute: 2,
+            workspace_multiplier: 1,
+            ..RateLimitConfig::default()
+        })
+        .with_session_cookie("session");
+        let client = IpAddr::V4(1_u32.into());
+        let mut bearer = HeaderMap::new();
+        bearer.insert(AUTHORIZATION, "Bearer orb_busy".parse().unwrap());
+        let public = "/api/public/v1/workspaces/w1/tasks";
+        for _ in 0..2 {
+            let charge = limiter.check(client, &Method::GET, public, &bearer).await;
+            limiter.charge(charge.ok().flatten().unwrap()).await;
+        }
+        // The address, the token and the workspace are at their token API limit.
+        assert!(
+            limiter
+                .check(client, &Method::GET, public, &bearer)
+                .await
+                .is_err()
+        );
+        assert!(
+            limiter
+                .check(client, &Method::POST, "/mcp", &bearer)
+                .await
+                .is_err()
+        );
+        // The web app of the same address and workspace has its own budget.
+        let web = "/api/v1/workspaces/w1/tasks";
+        assert!(
+            limiter
+                .check(client, &Method::GET, web, &with_cookie("member"))
                 .await
                 .is_ok()
         );

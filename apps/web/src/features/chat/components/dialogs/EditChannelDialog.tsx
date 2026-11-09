@@ -7,10 +7,12 @@ import { Input } from '@/components/ui/input'
 import { InputGroup, InputGroupAddon, InputGroupInput } from '@/components/ui/input-group'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import type { ChannelInput } from '@/features/chat/api/client'
 import { useUpdateChannel } from '@/features/chat/api/mutations'
 import { useCategories, useConversation } from '@/features/chat/api/queries'
 import { ChatError, type Conversation } from '@/features/chat/api/types'
+import { ChannelWebhooks } from './ChannelWebhooks'
 import { CHANNEL_NAME_MAX, channelNameFinal, channelNameInput, chatErrorMessage } from './channelLib'
 
 const NO_CATEGORY = 'none'
@@ -21,17 +23,32 @@ interface EditChannelDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
-/** Name, topic, category and visibility of a channel. The form is mounted only while the dialog is open, so it starts from the saved values each time. */
+/** Name, topic, category and visibility of a channel, and its incoming webhooks. The form is mounted only while the dialog is open, so it starts from the saved values each time. */
 export function EditChannelDialog({ conversationId, open, onOpenChange }: EditChannelDialogProps) {
   const conversation = useConversation(conversationId).data
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="overflow-y-auto sm:max-w-md">
+      <DialogContent className="overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Edit channel</DialogTitle>
         </DialogHeader>
         {conversation && conversation.kind !== 'dm' ? (
-          <EditChannelForm conversation={conversation} onDone={() => onOpenChange(false)} />
+          <Tabs defaultValue="settings" className="gap-4">
+            <TabsList variant="line" className="w-full justify-start gap-1.5 border-b">
+              <TabsTrigger value="settings" className="flex-none px-2.5">
+                Settings
+              </TabsTrigger>
+              <TabsTrigger value="integrations" className="flex-none px-2.5">
+                Integrations
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="settings">
+              <EditChannelForm conversation={conversation} onDone={() => onOpenChange(false)} />
+            </TabsContent>
+            <TabsContent value="integrations">
+              <ChannelWebhooks conversation={conversation} />
+            </TabsContent>
+          </Tabs>
         ) : (
           <p className="text-sm text-muted-foreground">This channel is not available.</p>
         )}

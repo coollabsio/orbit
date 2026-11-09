@@ -15,16 +15,19 @@ export interface EmptyStateProps {
 
 export function EmptyState({ title, description, icon, action }: EmptyStateProps) {
   const { colors } = useTheme()
+  // the web's `EmptyState` (shadcn `Empty`): a 32px icon tile, 14px medium title, 14px relaxed description
   return (
-    <View className="flex-1 items-center justify-center gap-2 p-6">
-      {icon ? (
-        <View className="mb-2 size-12 items-center justify-center rounded-xl bg-muted">
-          <Icon name={icon} size={24} color={colors.mutedForeground} />
-        </View>
-      ) : null}
-      <Text className="text-center font-noto-semibold text-[17px] leading-[22px]">{title}</Text>
-      {description ? <Text className="max-w-[300px] text-center leading-[21px] text-muted-foreground">{description}</Text> : null}
-      {action ? <View className="mt-2">{action}</View> : null}
+    <View className="flex-1 items-center justify-center gap-4 p-6">
+      <View className="max-w-[384px] items-center gap-2">
+        {icon ? (
+          <View className="mb-2 size-8 items-center justify-center rounded-lg bg-muted">
+            <Icon name={icon} size={20} color={colors.foreground} />
+          </View>
+        ) : null}
+        <Text className="text-center font-noto-medium text-[14px] tracking-tight">{title}</Text>
+        {description ? <Text className="text-center text-[14px] leading-[22.75px] text-muted-foreground">{description}</Text> : null}
+      </View>
+      {action ? <View className="items-center">{action}</View> : null}
     </View>
   )
 }

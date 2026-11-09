@@ -513,7 +513,8 @@ test('content is live: a read-only preview until the first sync, then the live e
   await editorMounted(view)
   const editorSection = view.container.querySelector('section:last-of-type') as HTMLElement
   await waitFor(() => expect(editorSection.textContent).toContain('Shared text'))
-  expect(collabStatus(view).textContent).toBe('Live')
+  expect(collabStatus(view).dataset.collabStatus).toBe('live')
+  expect(collabStatus(view).hidden).toBe(true)
 
   act(() => collab.last().provider.replace(text('Edited elsewhere')))
   await waitFor(() => expect(editorSection.textContent).toContain('Edited elsewhere'))
@@ -528,7 +529,8 @@ test('content is live: a read-only preview until the first sync, then the live e
 test('offline: "Connecting…" then "Offline", beforeunload warns only with unsynced edits, reconnect is live again', async () => {
   const { view, collab } = setup('/docs/first', pageRoutes(), 'owner', { content: () => text('Body') })
   await editorMounted(view)
-  await waitFor(() => expect(collabStatus(view).textContent).toBe('Live'))
+  await waitFor(() => expect(collabStatus(view).dataset.collabStatus).toBe('live'))
+  expect(collabStatus(view).hidden).toBe(true)
   const provider = collab.last().provider
 
   act(() => provider.drop(1006))
@@ -542,7 +544,8 @@ test('offline: "Connecting…" then "Offline", beforeunload warns only with unsy
   expect(beforeUnloadBlocked()).toBeTrue()
 
   act(() => provider.connectAndSync())
-  await waitFor(() => expect(collabStatus(view).textContent).toBe('Live'))
+  await waitFor(() => expect(collabStatus(view).dataset.collabStatus).toBe('live'))
+  expect(collabStatus(view).hidden).toBe(true)
   expect(beforeUnloadBlocked()).toBeFalse()
 })
 
@@ -604,7 +607,8 @@ test('4409 (document reset) refetches the page and reconnects with the new epoch
   expect(collab.last().target.epoch).toBe('epoch-2')
   expect(collab.connections[0].provider.destroyed).toBeTrue()
   await waitFor(() => expect(editorSection.textContent).toContain('After reset'))
-  expect(collabStatus(view).textContent).toBe('Live')
+  expect(collabStatus(view).dataset.collabStatus).toBe('live')
+  expect(collabStatus(view).hidden).toBe(true)
   expect(location(view)).toBe('/docs/first')
 })
 
@@ -635,7 +639,8 @@ test('4413 shows a sync notice, stops editing, and "Reload page" opens a fresh d
   await waitFor(() => expect(view.container.querySelector('.bn-editor')?.getAttribute('contenteditable')).toBe('false'))
   fireEvent.click(within(notice).getByRole('button', { name: 'Reload page' }))
   await waitFor(() => expect(collab.connections).toHaveLength(2))
-  await waitFor(() => expect(collabStatus(view).textContent).toBe('Live'))
+  await waitFor(() => expect(collabStatus(view).dataset.collabStatus).toBe('live'))
+  expect(collabStatus(view).hidden).toBe(true)
   await waitForAbsence(() => view.queryByRole('alert'))
 })
 

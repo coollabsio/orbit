@@ -5,8 +5,8 @@ use serde_json::{Number, Value};
 use super::rich_text::{
     format_date_value, format_timestamp, link, plain, resolve_href, rich_text_to_inline, str_at,
 };
-use super::{ConvertContext, make_block, table_cell, table_content, table_props};
-use crate::notion::model::{NotionPage, normalize_id};
+use super::{ConvertContext, Resolver, make_block, table_cell, table_content, table_props};
+use crate::notion::model::{NotionPage, Parent, normalize_id};
 
 /// Renders a database row's properties as a BlockNote table block (name column as header
 /// column), skipping empty values. The title comes first, then the other properties by name
@@ -24,8 +24,10 @@ pub fn database_row_properties_table(
     let mut entries: Vec<(&String, &Value)> = page.properties.iter().collect();
     entries.sort_by_key(|(name, value)| (str_at(value, &["type"]) != Some("title"), name.as_str()));
     let mut rows = Vec::new();
+    let resolver = ctx.resolver;
     for (name, value) in entries {
-        let Some(content) = property_inline(value, ctx) else {
+        let format = number_format(page, name, resolver);
+        let Some(content) = property_inline(value, format, ctx) else {
             continue;
         };
         if content.is_empty() {
@@ -48,14 +50,107 @@ pub fn database_row_properties_table(
     ))
 }
 
-/// A property value as inline content; `None` for empty or unsupported values.
-fn property_inline(value: &Value, ctx: &mut ConvertContext<'_>) -> Option<Vec<Value>> {
+/// Rows shown in one table; more are counted as `database_rows_truncated` (every row stays a
+/// sub-page).
+const MAX_TABLE_ROWS: usize = 1_000;
+
+/// Renders a database's rows as a BlockNote table, like Notion's table view: a header row with
+/// the property names (the title first, then the others by name), and one row per page whose
+/// title links to the imported page. `None` without rows.
+pub fn database_table(rows: &[NotionPage], ctx: &mut ConvertContext<'_>) -> Option<Value> {
+    let rows: Vec<&NotionPage> = rows.iter().filter(|row| !row.in_trash).collect();
+    if rows.is_empty() {
+        return None;
+    }
+    let mut columns: Vec<(&String, bool)> = Vec::new();
+    for row in &rows {
+        for (name, value) in &row.properties {
+            let kind = str_at(value, &["type"]);
+            if kind != Some("button") && !columns.iter().any(|(known, _)| *known == name) {
+                columns.push((name, kind == Some("title")));
+            }
+        }
+    }
+    columns.sort_by_key(|(name, title)| (!title, name.as_str()));
+    let header = columns
+        .iter()
+        .map(|(name, _)| table_cell(vec![plain((*name).clone())]))
+        .collect();
+    let mut out = vec![serde_json::json!({ "cells": Value::Array(header) })];
+    if rows.len() > MAX_TABLE_ROWS {
+        ctx.lossy("database_rows_truncated");
+    }
+    let resolver = ctx.resolver;
+    for row in rows.into_iter().take(MAX_TABLE_ROWS) {
+        let cells = columns
+            .iter()
+            .map(|(name, title)| {
+                let value = row.properties.get(*name);
+                let content = if *title {
+                    title_cell(row, value, ctx)
+                } else {
+                    let format = number_format(row, name, resolver);
+                    value.and_then(|value| property_inline(value, format, ctx))
+                };
+                table_cell(content.unwrap_or_default())
+            })
+            .collect();
+        out.push(serde_json::json!({ "cells": Value::Array(cells) }));
+    }
+    let content = table_content(columns.len(), true, false, out);
+    Some(make_block(
+        ctx,
+        "table",
+        table_props(),
+        Some(content),
+        Vec::new(),
+    ))
+}
+
+/// The row's title, linked to its imported page.
+fn title_cell(
+    row: &NotionPage,
+    value: Option<&Value>,
+    ctx: &mut ConvertContext<'_>,
+) -> Option<Vec<Value>> {
+    let title = value
+        .and_then(|value| value.get("title"))
+        .and_then(Value::as_array)
+        .map(|items| crate::notion::model::plain_text(items))
+        .filter(|title| !title.trim().is_empty())
+        .unwrap_or_else(|| "Untitled".to_owned());
+    let page = normalize_id(&row.id).and_then(|id| ctx.resolver.page_link(&id));
+    Some(match page {
+        Some(page) => vec![link(format!("/docs/{page}"), vec![plain(title)])],
+        None => vec![plain(title)],
+    })
+}
+
+/// The number format of a row's property, from its data source's schema.
+fn number_format<'r>(
+    row: &NotionPage,
+    property: &str,
+    resolver: &'r dyn Resolver,
+) -> Option<&'r str> {
+    let Some(Parent::DataSourceId { data_source_id, .. }) = &row.parent else {
+        return None;
+    };
+    resolver.number_format(&normalize_id(data_source_id)?, property)
+}
+
+/// A property value as inline content; `None` for empty or unsupported values. `format` is the
+/// property's number format.
+fn property_inline(
+    value: &Value,
+    format: Option<&str>,
+    ctx: &mut ConvertContext<'_>,
+) -> Option<Vec<Value>> {
     let kind = str_at(value, &["type"])?;
     let data = value.get(kind).unwrap_or(&Value::Null);
     let text = |value: String| (!value.trim().is_empty()).then(|| vec![plain(value)]);
     match kind {
         "title" | "rich_text" => Some(rich_text_to_inline(data.as_array()?, ctx)),
-        "number" => text(format_number(data.as_number()?)),
+        "number" => text(format_number_as(data.as_number()?, format)),
         "select" | "status" => text(str_at(data, &["name"])?.to_owned()),
         "multi_select" => {
             text(join(data.as_array()?.iter().filter_map(|option| {
@@ -94,7 +189,7 @@ fn property_inline(value: &Value, ctx: &mut ConvertContext<'_>) -> Option<Vec<Va
                 "array" => {
                     let mut out = Vec::new();
                     for item in result.as_array()? {
-                        let Some(content) = property_inline(item, ctx) else {
+                        let Some(content) = property_inline(item, None, ctx) else {
                             continue;
                         };
                         if content.is_empty() {
@@ -217,6 +312,111 @@ fn join(values: impl Iterator<Item = String>) -> String {
         .filter(|value| !value.trim().is_empty())
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// A number as Notion shows it in `format`: `number_with_commas` groups thousands, `percent`
+/// multiplies by 100, and currencies get their symbol and two decimals (none for yen, won and
+/// dong). Unknown formats show the plain number.
+pub fn format_number_as(number: &Number, format: Option<&str>) -> String {
+    let Some(value) = number.as_f64() else {
+        return format_number(number);
+    };
+    let format = format.unwrap_or("number");
+    if format == "number_with_commas" {
+        return group_thousands(&format_number(number));
+    }
+    if format == "percent" {
+        // Rounded so that 0.07 shows as 7%, not 7.000000000000001%.
+        let percent = (value * 100.0 * 1e9).round() / 1e9;
+        return format!("{}%", format_float(percent));
+    }
+    let Some(symbol) = currency_symbol(format) else {
+        return format_number(number);
+    };
+    let digits = match format {
+        "yen" | "won" | "vietnamese_dong" => format!("{:.0}", value.abs()),
+        "bitcoin" => format_float(value.abs()),
+        _ => format!("{:.2}", value.abs()),
+    };
+    let sign = if value < 0.0 { "-" } else { "" };
+    format!("{sign}{symbol}{}", group_thousands(&digits))
+}
+
+fn currency_symbol(format: &str) -> Option<&'static str> {
+    Some(match format {
+        "dollar" => "$",
+        "australian_dollar" => "A$",
+        "canadian_dollar" => "CA$",
+        "singapore_dollar" => "S$",
+        "euro" => "€",
+        "pound" => "£",
+        "yen" => "¥",
+        "ruble" => "₽",
+        "rupee" => "₹",
+        "won" => "₩",
+        "yuan" => "CN¥",
+        "real" => "R$",
+        "lira" => "₺",
+        "rupiah" => "Rp",
+        "franc" => "CHF ",
+        "hong_kong_dollar" => "HK$",
+        "new_zealand_dollar" => "NZ$",
+        "krona" => "SEK ",
+        "norwegian_krone" => "NOK ",
+        "mexican_peso" => "MX$",
+        "rand" => "R",
+        "new_taiwan_dollar" => "NT$",
+        "danish_krone" => "DKK ",
+        "zloty" => "zł",
+        "baht" => "฿",
+        "forint" => "Ft",
+        "koruna" => "Kč",
+        "shekel" => "₪",
+        "chilean_peso" => "CLP$",
+        "philippine_peso" => "₱",
+        "dirham" => "AED ",
+        "colombian_peso" => "COP$",
+        "riyal" => "SAR ",
+        "ringgit" => "RM",
+        "leu" => "lei ",
+        "argentine_peso" => "ARS$",
+        "uruguayan_peso" => "$U",
+        "peruvian_sol" => "S/",
+        "vietnamese_dong" => "₫",
+        "pakistani_rupee" => "Rs",
+        "nigerian_naira" => "₦",
+        "bitcoin" => "₿",
+        _ => return None,
+    })
+}
+
+/// `1234567.5` → `1,234,567.5` (keeps a leading `-`).
+fn group_thousands(number: &str) -> String {
+    let (sign, rest) = number
+        .strip_prefix('-')
+        .map_or(("", number), |rest| ("-", rest));
+    let (int, frac) = rest
+        .split_once('.')
+        .map_or((rest, None), |(i, f)| (i, Some(f)));
+    let mut grouped = String::new();
+    for (index, digit) in int.chars().enumerate() {
+        if index > 0 && (int.len() - index) % 3 == 0 {
+            grouped.push(',');
+        }
+        grouped.push(digit);
+    }
+    match frac {
+        Some(frac) => format!("{sign}{grouped}.{frac}"),
+        None => format!("{sign}{grouped}"),
+    }
+}
+
+fn format_float(value: f64) -> String {
+    if value.fract() == 0.0 && value.abs() < 1e15 {
+        format!("{}", value as i64)
+    } else {
+        format!("{value}")
+    }
 }
 
 fn format_number(number: &Number) -> String {

@@ -1,0 +1,77 @@
+name: 🐞 Bug Report
+description: "File a new bug report."
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > [!IMPORTANT]
+        > **Please make sure you use the latest version of Orbit before you submit an issue. The bug may already be fixed in a recent update.** (If the issue is on the latest version and was not in an earlier version, please tell us.)
+        >
+        > If you plan to submit a fix, branch from `main` and target `main` with your pull request.
+
+  - type: textarea
+    attributes:
+      label: Description and Error Message
+      description: Describe the error you got, with the relevant log output (server logs or the browser console).
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Expected Behavior
+      description: Describe what you expected to happen instead.
+    validations:
+      required: true
+
+  - type: textarea
+    attributes:
+      label: Steps to Reproduce
+      description: Give a step-by-step guide to reproduce the issue. Without it, we may not be able to help you.
+      value: |
+        1.
+        2.
+        3.
+        4.
+    validations:
+      required: true
+
+  - type: input
+    attributes:
+      label: Orbit Version
+      description: The Orbit release, Docker image tag, or commit you run.
+      placeholder: "v0.1.1"
+    validations:
+      required: true
+
+  - type: dropdown
+    attributes:
+      label: Database
+      options:
+        - "SQLite (default)"
+        - "Postgres"
+    validations:
+      required: true
+
+  - type: input
+    attributes:
+      label: Install Method and Operating System
+      description: For example Docker, binary, or built from source, and the OS (`cat /etc/os-release`).
+      placeholder: "Docker on Ubuntu 24.04"
+
+  - type: input
+    attributes:
+      label: Browser
+      description: If the issue is in the web app, the browser and its version.
+      placeholder: "Firefox 140"
+
+  - type: textarea
+    attributes:
+      label: Screenshots / Visuals
+      description: If possible, add screenshots or screen recordings that show the issue.
+
+  - type: textarea
+    attributes:
+      label: Additional Information
+      description: Any other relevant details about the issue.

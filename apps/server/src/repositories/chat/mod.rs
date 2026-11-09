@@ -11,13 +11,17 @@
 //! Each write returns the chat events it caused, with their audience, for the caller's response
 //! and for the live socket.
 
+mod blocks;
 mod conversations;
 mod emoji;
 mod files;
+mod interactions;
 mod messages;
 mod search;
+mod slack;
 mod state;
 mod stickers;
+mod webhooks;
 
 use std::collections::HashMap;
 
@@ -32,14 +36,21 @@ use utoipa::ToSchema;
 use super::membership;
 pub use crate::live::Recipients;
 
+pub use blocks::{BlocksError, MessageBlock, check_message_blocks, parse_blocks};
 pub use conversations::{
     ChannelCreate, ChannelUpdate, MAX_GUEST_CHANNELS, join_invited_channels, require_guest_channels,
 };
 pub use emoji::{CustomEmojiImage, CustomEmojiRecord, EMOJI_MAX_BYTES};
+pub use interactions::{Click, ResponseTarget};
+pub use messages::BotPost;
 pub use messages::{ForwardInput, MessageCursor, SendInput};
 pub use search::{SearchHitRecord, SearchInput, SearchPage};
+pub use slack::{attachment_blocks, cut, emoji_name, mrkdwn_to_markdown};
 pub use state::{ConversationCursor, ReadSnapshot, StateUpdate, ThreadCursor};
 pub use stickers::{CustomStickerImage, CustomStickerRecord, STICKER_MAX_BYTES, StickerRecord};
+pub use webhooks::{
+    BotSender, DeliveryRecord, HookTarget, WebhookInput, WebhookRecord, WebhookWithSecret,
+};
 
 /// Characters in one message body.
 pub const MESSAGE_MAX_CHARS: usize = 4000;
@@ -250,6 +261,9 @@ pub struct ReplyToRecord {
     pub body: String,
     /// The quoted message has a sticker: a quote with no text says so.
     pub sticker: bool,
+    /// Set when an integration posted the quoted message: show it as the author.
+    #[schema(required = true)]
+    pub bot_name: Option<String>,
 }
 
 /// Characters of the quoted body in a [`ReplyToRecord`].
@@ -263,13 +277,14 @@ impl ReplyToRecord {
             author_id: target.author_id,
             body: target.body.chars().take(REPLY_TO_BODY_CHARS).collect(),
             sticker: target.sticker_id.is_some(),
+            bot_name: target.bot.as_ref().map(|bot| bot.name.clone()),
         })
     }
 }
 
 /// Where a forwarded message came from: the original message as it was when it was forwarded.
 /// The original may be gone, or in a conversation that the reader cannot open.
-#[derive(Clone, Copy, Debug, Serialize, ToSchema)]
+#[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct ForwardedRecord {
     #[schema(value_type = String)]
     pub message_id: Id,
@@ -280,6 +295,26 @@ pub struct ForwardedRecord {
     /// When the original message was sent.
     #[schema(value_type = String, format = DateTime)]
     pub created_at: TimestampMillis,
+    /// Set when an integration posted the original: show it as the author.
+    #[schema(required = true)]
+    pub bot_name: Option<String>,
+}
+
+/// The integration that posted a message. `author_id` of such a message is the member who set the
+/// integration up; show this name and icon instead.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct BotRecord {
+    #[schema(value_type = String)]
+    pub webhook_id: Id,
+    pub name: String,
+    /// An https image, or null for the default bot avatar.
+    #[schema(required = true)]
+    pub icon_url: Option<String>,
+    /// An emoji name (`ghost`, without colons) shown as the avatar instead of `icon_url`.
+    #[schema(required = true)]
+    pub icon_emoji: Option<String>,
+    /// Its buttons without a `url` send clicks: the webhook is live and has a request URL.
+    pub interactive: bool,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -340,6 +375,13 @@ pub struct MessageRecord {
     /// Null when the message has no sticker, or the sticker is deleted.
     #[schema(required = true)]
     pub sticker: Option<StickerRecord>,
+    /// Set when an integration (an incoming webhook) posted the message. Nobody can edit it.
+    #[schema(required = true)]
+    pub bot: Option<BotRecord>,
+    /// Layout blocks that show as a card in place of `body`; `body` is then their plain text.
+    /// Only integrations post them.
+    #[schema(required = true)]
+    pub blocks: Option<Vec<MessageBlock>>,
     #[serde(skip)]
     pub(crate) last_reply_id: Option<Id>,
 }
@@ -348,6 +390,15 @@ impl MessageRecord {
     /// The message shows in the conversation's main list.
     fn in_main(&self) -> bool {
         self.thread_root_id.is_none() || self.also_in_channel
+    }
+
+    /// Who counts as the sender, whose own message is never unread and never mentions them: the
+    /// author, or for an integration's message the webhook, which is no member. So a webhook's
+    /// message is unread for everyone, also for the member who set the webhook up.
+    fn sender_id(&self) -> Id {
+        self.bot
+            .as_ref()
+            .map_or(self.author_id, |bot| bot.webhook_id)
     }
 }
 
@@ -451,6 +502,9 @@ pub enum ChatEvent {
     /// A custom sticker was added or deleted: read the list again.
     #[serde(rename = "stickers.changed")]
     StickersChanged,
+    /// An integration's reply that only this member sees, live; it is not stored.
+    #[serde(rename = "message.ephemeral")]
+    MessageEphemeral { message: MessageRecord },
 }
 
 /// Who an event is for, as the write that made it sees it.
@@ -955,10 +1009,15 @@ const MESSAGE_SELECT: &str = "SELECT m.id, m.conversation_id, m.thread_root_id, 
      l.sticker_id IS NOT NULL AS last_sticker, q.sticker_id IS NOT NULL AS quoted_sticker, \
      m.reply_to_id, q.author_id AS quoted_author_id, substr(q.body, 1, 200) AS quoted_body, \
      m.forward_of_id, m.forward_conversation_id, m.forward_author_id, m.forward_created_at, \
+     m.forward_bot_name, q.bot_name AS quoted_bot_name, m.webhook_id, m.bot_name, m.bot_icon_url, m.bot_icon_emoji, \
+     CAST(CASE WHEN wh.request_url IS NOT NULL AND wh.revoked_at IS NULL THEN 1 ELSE 0 END AS BIGINT) \
+     AS bot_interactive, \
+     m.blocks, \
      m.sticker_id, s.workspace_id AS sticker_workspace_id, s.name AS sticker_name \
      FROM chat_messages m LEFT JOIN chat_messages l ON l.id = m.last_reply_id \
      LEFT JOIN chat_messages q ON q.id = m.reply_to_id AND q.deleted_at IS NULL \
-     LEFT JOIN custom_stickers s ON s.id = m.sticker_id";
+     LEFT JOIN custom_stickers s ON s.id = m.sticker_id \
+     LEFT JOIN chat_webhooks wh ON wh.id = m.webhook_id";
 
 fn message_from_row(row: &AnyRow) -> Result<MessageRecord, ChatError> {
     let body: String = row.get("body");
@@ -988,6 +1047,7 @@ fn message_from_row(row: &AnyRow) -> Result<MessageRecord, ChatError> {
             author_id: parse_id(author_id)?,
             body: row.get("quoted_body"),
             sticker: row.get("quoted_sticker"),
+            bot_name: row.get("quoted_bot_name"),
         }),
         _ => None,
     };
@@ -1004,6 +1064,7 @@ fn message_from_row(row: &AnyRow) -> Result<MessageRecord, ChatError> {
                 conversation_id,
                 author_id,
                 created_at: TimestampMillis::from_millis(created_at),
+                bot_name: row.get("forward_bot_name"),
             })
         }
         _ => None,
@@ -1021,6 +1082,18 @@ fn message_from_row(row: &AnyRow) -> Result<MessageRecord, ChatError> {
             url: stickers::image_url(workspace_id, id),
         }),
         _ => None,
+    };
+    let bot = parse_optional_id(row.get("webhook_id"))?.map(|webhook_id| BotRecord {
+        webhook_id,
+        name: row.get::<Option<String>, _>("bot_name").unwrap_or_default(),
+        icon_url: row.get("bot_icon_url"),
+        icon_emoji: row.get("bot_icon_emoji"),
+        interactive: row.get("bot_interactive"),
+    });
+    let blocks = match row.get::<Option<String>, _>("blocks") {
+        Some(_) if deleted => None,
+        Some(json) => Some(serde_json::from_str(&json).map_err(|_| corrupt("message blocks"))?),
+        None => None,
     };
     Ok(MessageRecord {
         id: parse_id(row.get("id"))?,
@@ -1061,6 +1134,8 @@ fn message_from_row(row: &AnyRow) -> Result<MessageRecord, ChatError> {
         forwarded,
         sticker_id,
         sticker,
+        bot,
+        blocks,
         last_reply_id: parse_optional_id(row.get("last_reply_id"))?,
     })
 }

@@ -9,8 +9,13 @@ import {
   type ReactInlineContentImplementation,
 } from '@blocknote/react'
 import { codeBlockSpec, type CodeBlockOptions } from './codeHighlight'
+import { FileExternalHtml, FilePreview } from './FilePreview'
+import { linkEmbedExtension } from './linkEmbed'
 
-/** Media blocks without page-file support: video and audio stay out (images and files upload as page files). */
+/**
+ * Video and audio stay out of the schema. A file block shows the player (and a text or PDF preview) from the
+ * file name, and a paragraph that is only a video link shows the player above the link.
+ */
 export const REMOVED_BLOCK_TYPES = ['video', 'audio'] as const
 
 /** Blocks whose `props.url` points at an uploaded page file (or an external http(s) URL). */
@@ -25,6 +30,21 @@ export const CALLOUT_DEFAULT_BACKGROUND = 'gray'
 const baseBlockSpecs = Object.fromEntries(
   Object.entries(defaultBlockSpecs).filter(([type]) => !(REMOVED_BLOCK_TYPES as readonly string[]).includes(type)),
 ) as Omit<typeof defaultBlockSpecs, RemovedBlockType>
+
+// Same file props as BlockNote. Only the view changes, so stored documents and the server schema stay as they are.
+const fileBlock = baseBlockSpecs.file
+const fileWithPreview = createReactBlockSpec(fileBlock.config, {
+  meta: fileBlock.implementation.meta,
+  parse: fileBlock.implementation.parse,
+  render: FilePreview,
+  toExternalHTML: FileExternalHtml,
+})()
+
+const paragraphBlock = baseBlockSpecs.paragraph
+const paragraphWithEmbed: typeof paragraphBlock = {
+  ...paragraphBlock,
+  extensions: [...(paragraphBlock.extensions ?? []), linkEmbedExtension()],
+}
 
 /** A link to another page, rendered as a card. `pageId` is the target page id; the block has no inline content. */
 const pageBlockConfig = {
@@ -59,15 +79,26 @@ const mentionConfig = {
   content: 'none',
 } as const
 
+/** A formula inside a sentence. `latex` is the source; the host draws it. */
+const mathConfig = {
+  type: 'math',
+  propSchema: {
+    latex: { default: '' },
+  },
+  content: 'none',
+} as const
+
 type PageBlockImplementation = ReactCustomBlockImplementation<typeof pageBlockConfig>
 type CalloutImplementation = ReactCustomBlockImplementation<typeof calloutBlockConfig>
 type MentionImplementation = ReactInlineContentImplementation<typeof mentionConfig, StyleSchemaFromSpecs<typeof defaultStyleSpecs>>
+type MathImplementation = ReactInlineContentImplementation<typeof mathConfig, StyleSchemaFromSpecs<typeof defaultStyleSpecs>>
 
 /** How a host draws the custom blocks. Views never change the schema, so every host edits the same documents. */
 export interface EditorViews {
   page: { render: PageBlockImplementation['render']; toExternalHTML?: PageBlockImplementation['toExternalHTML'] }
   callout: { render: CalloutImplementation['render']; toExternalHTML?: CalloutImplementation['toExternalHTML'] }
   mention: { render: MentionImplementation['render'] }
+  math: { render: MathImplementation['render'] }
   codeBlock: CodeBlockOptions
 }
 
@@ -75,15 +106,18 @@ export function createEditorSchemas(views: EditorViews) {
   const codeBlock = codeBlockSpec(views.codeBlock)
   const callout = createReactBlockSpec(calloutBlockConfig, views.callout)
   const mention = createReactInlineContentSpec(mentionConfig, views.mention)
+  const math = createReactInlineContentSpec(mathConfig, views.math)
 
   const pageEditorSchema = BlockNoteSchema.create({
     blockSpecs: {
       ...baseBlockSpecs,
+      file: fileWithPreview,
+      paragraph: paragraphWithEmbed,
       codeBlock,
       page: createReactBlockSpec(pageBlockConfig, views.page)(),
       callout: callout(),
     },
-    inlineContentSpecs: { ...defaultInlineContentSpecs, mention },
+    inlineContentSpecs: { ...defaultInlineContentSpecs, mention, math },
   })
 
   /**
@@ -93,10 +127,12 @@ export function createEditorSchemas(views: EditorViews) {
   const taskEditorSchema = BlockNoteSchema.create({
     blockSpecs: {
       ...baseBlockSpecs,
+      file: fileWithPreview,
+      paragraph: paragraphWithEmbed,
       codeBlock,
       callout: callout(),
     },
-    inlineContentSpecs: { ...defaultInlineContentSpecs, mention },
+    inlineContentSpecs: { ...defaultInlineContentSpecs, mention, math },
   })
 
   return { pageEditorSchema, taskEditorSchema }

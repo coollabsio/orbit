@@ -18,7 +18,7 @@ Mail still uses isolated frontend seed data, and `/mail` redirects to `/tasks`. 
 - User menu provides Account settings and a link to Account settings → Appearance (`/profile/appearance`).
 - Mobile uses a bottom dock and a full navigation drawer.
 - Topbar breadcrumbs are route-derived in `Topbar.tsx`.
-- Appearance (port of Coolify's Profile → Appearance, `lib/theme.tsx`): Layout Classic/New UI (`orbit:layout`, default classic, `[data-new-ui]` on `<html>`, `new-ui:` variant, `useNewUi()`): the new UI turns on the contextual sidebar (settings areas, the docs and chat lists in the sidebar, Back) and the whole-app custom theme on the sidebar, its menus (`MenuSurfaceContext`) and ⌘K; the classic layout keeps the custom theme on chat only. color theme Light/System/Dark (default dark, `localStorage.theme`), the custom theme (`lib/customTheme.ts`, `CustomThemeDialog`; replaces Light/System/Dark while set: `ThemeProvider` puts `customThemeVariables` on `<html>` and picks `.dark` from the message colour; picking a base theme clears it; the app sidebar uses `appSidebarTheme`, which puts `.dark` or `.light` on the sidebar so its `dark:` styles follow the sidebar colour), Navigation style Default/Floating (`orbit:nav-style`, `[data-floating]` on `<html>`, `floating:` variant, desktop only) and Style 3D/Flat (`orbit:style`, `[data-flat]`, `flat:` variant on buttons and sidebar items). `index.html` applies all of them before first paint. Coolify's Page width and Chart times are not ported.
+- Appearance (port of Coolify's Profile → Appearance, `lib/theme.tsx`): the sidebar is contextual (settings areas, the docs and chat lists in the sidebar, Back), and the custom theme colours the whole app, with the sidebar, its menus (`MenuSurfaceContext`) and ⌘K. Color theme Light/System/Dark (default dark, `localStorage.theme`), the custom theme (`lib/customTheme.ts`, `CustomThemeDialog`; replaces Light/System/Dark while set: `ThemeProvider` puts `customThemeVariables` on `<html>` and picks `.dark` from the message colour; picking a base theme clears it; the app sidebar uses `appSidebarTheme`, which puts `.dark` or `.light` on the sidebar so its `dark:` styles follow the sidebar colour), Navigation style Default/Floating (`orbit:nav-style`, `[data-floating]` on `<html>`, `floating:` variant, desktop only) and Style 3D/Flat (`orbit:style`, `[data-flat]`, `flat:` variant on buttons and sidebar items). `index.html` applies all of them before first paint. Coolify's Page width and Chart times are not ported.
 
 ## Home
 
@@ -70,6 +70,49 @@ Core files: `TasksPage.tsx`, `components/TaskList.tsx`, `components/TaskBoard.ts
 - Writes include the observed record version. Stale writes restore the server record and expose a conflict prompt.
 - Bulk and reorder requests are one atomic request of at most 100 items. Empty unchanged choices are local no-ops.
 - Task and project trash have server-backed restore flows and 30-day retention.
+- Asana import (`pages/AsanaImportPage.tsx`, `api/asanaImports.ts`; server `asana/`, routes `/imports/asana`, migration
+  0069): "Import from Asana" under "New project" in the Tasks sidebar (and in the header project menu) opens
+  `/tasks-import`. Same states and token rules as the Notion import (scan, choose, import; token encrypted, wiped in every
+  final state; private to its creator). Choose lists projects by workspace and team (archived ones unselected). Each
+  project becomes a new Orbit project. Sections become statuses: a status with the same name is reused, otherwise
+  done-like names are `completed`, the first section `unstarted`, the rest `started`. Completed Asana tasks outside a
+  completed status go to the project's Done. Tasks keep rich-text notes, dates (dates at 12:00 UTC), priority (custom field
+  "Priority"), tags as labels, assignee matched by email (else a description line), other custom fields, linked files (as
+  links), subtasks (five levels), comments (by the importer, prefixed with the Asana author and time), Asana-hosted files
+  and dependencies (blocked by). Tasks are created with `TaskRepository::import_task`: no notifications, no sub-issue
+  auto-close, Asana's `completed_at`. A restart resumes from `asana_import_items` without duplicates. A failed or cancelled
+  import keeps what it made.
+- Linear import (`pages/LinearImportPage.tsx`, `api/linearImports.ts`; server `linear/`, routes `/imports/linear`,
+  migration 0070): "Import from Linear" in the header project menu and in Settings → Import opens `/tasks-import/linear`.
+  Same states and key rules as the Asana import (personal API key encrypted, wiped in every final state; private to its
+  creator). Choose lists teams with issue counts (archived ones unselected). Each team becomes a new Orbit project keyed
+  by the team key. Workflow states become statuses: the same name is reused (Canceled matches Cancelled), otherwise
+  triage/backlog/unstarted → `unstarted`, started → `started`, completed → `completed`, canceled → `cancelled`; Linear's
+  "Duplicate" state lands on Cancelled until its duplicate relation moves it. Issues keep the markdown description, title,
+  priority (0-4 → none/urgent/high/medium/low), labels (`Group/Name` for grouped labels), assignee matched by email (else a
+  description line), due date (12:00 UTC), completed or canceled time, URL as source, sub-issues (five levels; deeper ones
+  and ones whose parent is in another team go to the top level with a "Parent" line). Linear project, cycle, milestone,
+  estimate and SLA become description lines; linked attachments a Links section. Uploads (`uploads.linear.app`) in the
+  description and comments are downloaded with the key, attached, and their URLs rewritten. Comments are written by the
+  importer with author and time, replies flattened in time order. Relations: blocks, related and duplicate (similar is
+  skipped); a relation Orbit cannot hold (one per pair of tasks, one duplicate per task, no chains) is checked before the
+  write, skipped and counted. Trashed issues are left out. Shared importer code: server `task_import.rs`, web
+  `api/importStatus.ts` and `components/ImportLayout.tsx`.
+- Trello import (`pages/TrelloImportPage.tsx`, `api/trelloImports.ts`; server `trello/`, routes `/imports/trello`,
+  migration 0071): "Import from Trello" in the header project menu and in Settings → Import opens `/tasks-import/trello`.
+  Same states and rules as the Asana and Linear imports. Connect takes a Power-Up API key and a read-only token (the page
+  links Trello's authorization page for the typed key); both are encrypted and wiped in every final state, and a key or
+  token Trello rejects shows Trello's reason under its field. Choose lists boards by Trello Workspace with open card counts
+  (archived boards unselected). Each board becomes a new Orbit project. Open lists become statuses in board order (same
+  name reused; a done-like name is completed, the first list unstarted, the others started); archived lists and archived
+  cards are skipped and counted. Open cards keep title, markdown description, card URL as source, labels (unnamed ones
+  named after their color, Trello colors kept), start and due dates, and list and card order; a card on a completed list
+  gets its last activity as completed time. A card member is assigned only when exactly one active Orbit member has the
+  same full name (Trello hides other members' emails); otherwise a "Members" line. Checklists become task lists
+  (checklist blocks) in the description, not sub-issues. Custom field values and "Due date: marked complete" on an open
+  list become description lines; link attachments a Links section. Uploaded attachments and uploads linked from the
+  description and comments are downloaded, attached, and their URLs rewritten; a download Trello refuses is counted.
+  Comments are written by the importer, oldest first, with author and time.
 
 ### Sub-issues
 
@@ -256,8 +299,24 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
   `TextRange { start, end }` in UTF-16 code units (JS string indices, end exclusive); the UI renders them as `<strong>`
   text nodes (no HTML). On Postgres, `page_search` is a table with a `tsvector` column in the `orbit_search` text search
   configuration (unaccent + simple), ranked by `ts_rank` with titles weighted 10x.
+- Obsidian import (`pages/ObsidianImportPane.tsx`, `components/ObsidianImportChooser.tsx`, `api/obsidianImports.ts`;
+  server `obsidian/` and `collab::markdown_import::obsidian_to_blocks`, routes `/imports/obsidian`, migration 0072):
+  Documents header "…" → "Import from Obsidian" and Settings → Import open `/docs/import/obsidian`. Upload one `.zip`
+  of a vault (progress, cancel) → `obsidian.scan` checks the archive safely (`obsidian/vault.rs`: no extraction, `..`,
+  absolute paths, symlinks, encryption, entry/size/ratio caps fail it with a message shown on the page; `.obsidian/`,
+  `.trash/`, `__MACOSX/`, dotfiles, canvases, CSV, oversized files and case duplicates are skipped and counted; one
+  top-level folder is stripped) → tree (folders that hold notes become pages; `Folder/Folder.md` is the folder page's
+  content; a folder without one lists its sub-pages) with the Notion import's tree picker and destination fields
+  (`components/ImportTreePicker.tsx`, `ImportDestinationFields.tsx`, `ImportParts.tsx`, `import/*.ts`, shared) →
+  `obsidian.import`: pass 1 creates pages parents first, pass 2 converts each note with wikilinks resolved like
+  Obsidian (relative path, vault path, else unique file name; `Note#Heading` links to the note, unresolved links stay
+  text), linked and embedded files attached as page files (images → image blocks, other files → file blocks, unlinked
+  attachments skipped), `![[Note]]` → link, `> [!type]` callouts → `callout` blocks, `==x==` → yellow background,
+  `%%comments%%` and frontmatter dropped, the Notion page size cap. Same lifecycle rules as the Notion import (private,
+  resumable, cancel keeps filled pages and trashes unfilled ones, trial page limit, read-only stop, 24 h expiry); the
+  archive is deleted in every final state.
 - Notion import (`pages/NotionImportPane.tsx`, `components/NotionImportChooser.tsx`, `api/notionImports.ts`,
-  `notionImport/selection.ts`; server `notion/import.rs`, routes `/imports/notion`): Documents header "…" → "Import from
+  `import/selection.ts`; server `notion/import.rs`, routes `/imports/notion`): Documents header "…" → "Import from
   Notion" opens `/docs/import`, a pane next to the tree like Trash. Steps follow the import's status at
   `/docs/import/:importId`: Connect (password field for a Notion personal access token, sent once, never cached client-side;
   problems map to sentences: invalid token, app key missing, import in progress + link to it, Notion unavailable) →
@@ -460,6 +519,20 @@ turns its routes, navigation and shortcuts off.
   edited. Emoticons (`:D`) become emoji, a typed task ID (`GEN-1`) of a real project shows as a chip
   and a card, a message of only emoji (1 to 30) shows them large, and `<https://…>` is a link with no
   card. A backslash keeps `\:D`, `\:name:` and `\GEN-1` as text.
+- Incoming webhooks (`docs/chat-webhooks.md`): a tool posts JSON to a secret URL
+  (`POST /api/v1/hooks/chat/{id}/{secret}`, `chat_routes/hooks.rs`) and a message shows in one channel as that
+  tool (`message.bot`: name, icon, an "App" badge). The channel's creator and owners and admins manage them in
+  Edit channel > Integrations; only a hash of the secret is stored, so the URL shows once. `author_id` of such a
+  message is the member who made the webhook, but it is unread for them too, makes no Inbox item, and nobody
+  can edit it (`MessageRecord::sender_id`, `lib/bot.ts`). All bot posts go through `ChatRepository::post_as_bot`. A webhook may send Slack Block Kit `blocks` (header, section, context, image,
+  divider, markdown, rich_text; `repositories/chat/blocks.rs`, stored in `chat_messages.blocks`): they show in place
+  of the body (`MessageBlocks.tsx`; rich text becomes Markdown in `lib/blocks.ts`), and the body is their plain text. The hook is a drop-in for Slack's (`repositories/chat/slack.rs`): mrkdwn becomes
+  Markdown, legacy `attachments` become `attachment` blocks, form `payload=` works, unknown block types are left out,
+  long text is cut, `icon_emoji` is the avatar (`bot.icon_emoji`), and the answer is plain `ok`. Buttons without a URL are interactive when the webhook has a request URL
+  (Integrations > Interactivity): `chat_routes/interactions.rs` sends a Slack-signed `block_actions` payload (3 s, no
+  redirects, public addresses only outside development), and the integration answers through
+  `/api/v1/hooks/chat/{id}/responses/{token}` (5 uses, 30 min): replace, delete, `in_channel`, or an ephemeral reply
+  (live-only `message.ephemeral` event, `EphemeralMessages.tsx`). The signing secret is encrypted with the app key.
 - Custom emoji belong to the workspace (Workspace Settings > Emoji, owners and admins): `:name:` stays
   text in the body and in reactions and becomes the image when it is shown.
 - Stickers belong to the workspace too (Workspace Settings > Stickers, owners and admins; 512 KiB, 100 for

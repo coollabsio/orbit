@@ -2,11 +2,11 @@ use std::future::Ready;
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::task::{Context, Poll, Waker};
 
-use axum::body::{Body, to_bytes};
+use axum::body::{to_bytes, Body};
 use axum::extract::ConnectInfo;
 use axum::http::header::{CONTENT_LENGTH, CONTENT_SECURITY_POLICY, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue, Request, StatusCode};
@@ -18,7 +18,7 @@ use orbit_platform::{
     RateLimitConfig, RequestId, RequestTransport,
 };
 use serde_json::Value;
-use tower::{Layer, Service, ServiceExt, service_fn};
+use tower::{service_fn, Layer, Service, ServiceExt};
 
 #[derive(Clone)]
 struct PendingService;
@@ -134,11 +134,9 @@ async fn unsafe_requests_reject_foreign_and_missing_origins_as_problem_details()
         assert_eq!(response.headers()[CONTENT_TYPE], "application/problem+json");
         let problem = body_json(response).await;
         assert_eq!(problem["code"], "origin_forbidden");
-        assert!(
-            problem["request_id"]
-                .as_str()
-                .is_some_and(|id| !id.is_empty())
-        );
+        assert!(problem["request_id"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty()));
     }
 }
 
@@ -314,12 +312,10 @@ async fn untrusted_forwarded_headers_are_ignored_and_a_uuid_v7_request_id_is_gen
         .to_owned();
     assert_ne!(response_id, "upstream-id");
     assert!(Id::from_str(&response_id).is_ok());
-    assert!(
-        response
-            .headers()
-            .get("strict-transport-security")
-            .is_none()
-    );
+    assert!(response
+        .headers()
+        .get("strict-transport-security")
+        .is_none());
     let body = body_json(response).await;
     assert_eq!(body["request_id"], response_id);
     assert_eq!(body["client_ip"], "192.0.2.10");
@@ -362,6 +358,52 @@ async fn trusted_proxy_headers_are_validated_and_used() {
     assert_eq!(body["has_request_id_header"], false);
     assert_eq!(body["has_forwarded_for_header"], false);
     assert_eq!(body["has_forwarded_proto_header"], false);
+}
+
+#[tokio::test]
+async fn trusted_proxy_replaces_an_unusable_client_request_id() {
+    let policy =
+        OriginPolicy::new("https://orbit.test").trust_proxy(IpNet::from_str("10.0.0.0/8").unwrap());
+    let app = test_app(policy);
+    let send = |values: &'static [&'static str]| {
+        let mut request = request("GET", "/forwarding-view");
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from((
+                Ipv4Addr::new(10, 1, 2, 3),
+                4123,
+            ))));
+        for value in values {
+            request
+                .headers_mut()
+                .append("x-request-id", HeaderValue::from_static(value));
+        }
+        app.clone().oneshot(request)
+    };
+
+    // ChatGPT's MCP client sends IDs with a slash suffix (issue #52).
+    let response = send(&["69bbe4ed-800c-4d1c-93fd-59cb80a7ccdf/tvke"])
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        body_json(response).await["request_id"],
+        "69bbe4ed-800c-4d1c-93fd-59cb80a7ccdf/tvke"
+    );
+
+    for values in [&["bad id with spaces"][..], &["a", "b"][..]] {
+        let response = send(values).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let generated = response.headers()["x-request-id"]
+            .to_str()
+            .unwrap()
+            .to_owned();
+        assert!(
+            generated.parse::<orbit_platform::Id>().is_ok(),
+            "{generated}"
+        );
+        assert_eq!(body_json(response).await["request_id"], generated.as_str());
+    }
 }
 
 #[tokio::test]
@@ -467,11 +509,9 @@ async fn forwarded_chain_cannot_spoof_an_address_before_the_nearest_untrusted_ho
     let response = app.oneshot(request).await.unwrap();
     let body = to_bytes(response.into_body(), 1024).await.unwrap();
 
-    assert!(
-        String::from_utf8(body.to_vec())
-            .unwrap()
-            .ends_with("|203.0.113.9")
-    );
+    assert!(String::from_utf8(body.to_vec())
+        .unwrap()
+        .ends_with("|203.0.113.9"));
 }
 
 #[tokio::test]
@@ -791,11 +831,11 @@ async fn csp_allows_only_the_verified_bootstrap_hash_and_local_image_variants() 
     assert!(csp.contains("script-src 'self' 'sha256-YWJj'"));
     // External https images load (covers, image blocks); plain http and other sources stay blocked.
     assert!(csp.contains("img-src 'self' data: blob: https:;"));
-    assert!(csp.contains("style-src 'self'; style-src-attr 'unsafe-inline'"));
+    assert!(csp.contains("style-src 'self' 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='; style-src-attr 'unsafe-inline'"));
     assert!(!csp.contains("http:"));
     assert_eq!(
         csp,
-        "default-src 'self'; script-src 'self' 'sha256-YWJj'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: https:; frame-src https://www.youtube-nocookie.com; media-src 'self' https://video.twimg.com; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self' https://github.com"
+        "default-src 'self'; script-src 'self' 'sha256-YWJj'; style-src 'self' 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: https:; frame-src blob: https://www.youtube-nocookie.com https://player.vimeo.com; media-src 'self' https:; frame-ancestors 'none'; object-src 'none'; base-uri 'none'; form-action 'self' https://github.com"
     );
 }
 

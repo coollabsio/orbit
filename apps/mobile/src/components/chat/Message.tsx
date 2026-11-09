@@ -21,6 +21,8 @@ export interface MessageHandlers {
   onLongPress: (message: MessageRecord) => void
   onReact: (message: MessageRecord, emoji: string) => void
   onAddReaction: (message: MessageRecord) => void
+  /** A thread you follow has unread replies: its summary gets the web's pink square and a bold count. */
+  threadUnread?: (rootId: string) => boolean
   /** Absent in a thread: its replies have no thread of their own. */
   onOpenThread?: (message: MessageRecord) => void
 }
@@ -37,8 +39,10 @@ export function MessageItem({ message, groupStart, highlighted = false, handlers
   if (message.kind !== 'message') {
     const what = message.kind === 'join' ? 'joined' : message.kind === 'leave' ? 'left' : 'pinned a message'
     return (
-      <Text className="text-[12px] leading-[16px] px-3 py-1 text-muted-foreground">
-        {author} {what} · {timeOfDay(message.created_at)}
+      // the web `SystemRow`: the name a little brighter, the time 8px after the text
+      <Text className="text-[12px] leading-[16px] px-4 py-1 text-muted-foreground">
+        <Text className="font-noto-medium text-[12px] leading-[16px] text-foreground/80">{author}</Text> {what}
+        <Text className="text-[12px] leading-[16px] text-muted-foreground">{'  '}{timeOfDay(message.created_at)}</Text>
       </Text>
     )
   }
@@ -133,10 +137,11 @@ function Quote({ author, body }: { author: string; body: string }) {
 function ReplySummary({ message, handlers }: { message: MessageRecord; handlers: MessageHandlers }) {
   const reply = message.last_reply
   const replies = `${message.reply_count} ${message.reply_count === 1 ? 'reply' : 'replies'}`
+  const unread = handlers.threadUnread?.(message.id) ?? false
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Open thread, ${replies}`}
+      accessibilityLabel={`Open thread, ${replies}${unread ? ', unread replies' : ''}`}
       onPress={() => handlers.onOpenThread?.(message)}
       className="mt-1.5 -ml-1 py-1 pl-1 pr-2 rounded-md active:bg-muted"
     >
@@ -153,8 +158,9 @@ function ReplySummary({ message, handlers }: { message: MessageRecord; handlers:
           </View>
         ) : null}
         <View className="flex-row items-center gap-1.5">
-          <Text className="font-noto-medium text-[12px] leading-[16px] text-foreground/90">{replies}</Text>
-          {message.last_reply_at ? <Text className="text-[12px] leading-[16px] text-muted-foreground">last reply {relativeAgo(message.last_reply_at)}</Text> : null}
+          {unread ? <View className="size-1.5 bg-primary" /> : null}
+          <Text className={`text-[12px] leading-[16px] ${unread ? 'font-noto-bold text-foreground' : 'font-noto-medium text-foreground/90'}`}>{replies}</Text>
+          {message.last_reply_at ? <Text className={`text-[12px] leading-[16px] text-muted-foreground ${unread ? 'font-noto-semibold' : ''}`}>last reply {relativeAgo(message.last_reply_at)}</Text> : null}
         </View>
       </View>
     </Pressable>
@@ -216,7 +222,7 @@ const fit = (width: number, height: number, maxWidth: number, maxHeight: number)
  * Downloads a chat file with the session's token into the cache and hands it to the system preview (Quick Look on
  * iOS, the app for its type on Android), where it can be saved or shared.
  */
-function useOpenFile() {
+export function useOpenFile() {
   const { session } = useOrbit()
   const image = useServerImage()
   const [opening, setOpening] = useState<string | null>(null)
@@ -271,7 +277,7 @@ function FileCard({ file }: { file: ChatFileRecord }) {
 }
 
 /** An image of a message over the whole screen, with its name, Close and Open (save or share). */
-function ImageViewer({ file, onClose }: { file: ChatFileRecord | null; onClose: () => void }) {
+export function ImageViewer({ file, onClose }: { file: ChatFileRecord | null; onClose: () => void }) {
   const image = useServerImage()
   const { open, opening } = useOpenFile()
   // Read outside the Modal: a SafeAreaView inside a full-screen iOS Modal measures no insets, and the bar sat under the status bar.

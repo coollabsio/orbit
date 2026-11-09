@@ -3,7 +3,7 @@ import { isSafeLinkHref } from '@orbit/editor/links'
 import { useQuery } from '@tanstack/react-query'
 import { router, useLocalSearchParams } from 'expo-router'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
-import { Image, KeyboardAvoidingView, Linking, Platform, RefreshControl, ScrollView, View } from 'react-native'
+import { Image, KeyboardAvoidingView, Linking, Platform, ScrollView, View } from 'react-native'
 import { TextInput } from '../../../ui/scaled'
 
 import { CommentsSheet } from '../../../components/docs/Comments'
@@ -22,7 +22,7 @@ import { useOrbit } from '../../../orbit-context'
 import { useMembers, usePages } from '../../../queries'
 import { errorMessage } from '../../../session-context'
 import { alpha, useTheme } from '../../../theme'
-import { Button, CountBadge, ErrorView, Icon, IconButton, LoadingView, PaneHeader, SafeAreaView, Text } from '../../../ui'
+import { Button, CountBadge, ErrorView, Icon, IconButton, LoadingView, PaneHeader, PullRefresh, SafeAreaView, Text } from '../../../ui'
 
 /** Room kept between the caret and the toolbar or the top of the screen while typing. */
 const CARET_MARGIN = 24
@@ -31,6 +31,16 @@ const CARET_MARGIN = 24
  * A page: its cover, icon and title (native), and its body in the page editor (BlockNote in a web view), which
  * co-edits the page live with everyone else. A formatting bar sits above the keyboard while the body has focus.
  */
+/** The web's sync dot beside the status label in the page header (no pulse: Uniwind has no keyframe animations). */
+const STATUS_DOT: Record<CollabState['status'], string> = {
+  live: 'bg-emerald-500',
+  connecting: 'bg-amber-400',
+  reset: 'bg-amber-400',
+  offline: 'bg-amber-500',
+  lost: 'bg-destructive',
+  error: 'bg-destructive',
+}
+
 export default function DocScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const { client, workspaceId, session } = useOrbit()
@@ -171,12 +181,20 @@ export default function DocScreen() {
       : []
 
   return (
-    <SafeAreaView edges={['top', 'left', 'right']} className="flex-1 bg-background">
-      <PaneHeader className="px-3">
+    <SafeAreaView edges={['left', 'right']} className="flex-1 bg-background">
+      <PaneHeader className="min-h-12 px-3">
         <IconButton icon="back" label="Back to docs" color={muted} onPress={() => (router.canGoBack() ? router.back() : router.navigate('/docs'))} />
         <Text numberOfLines={1} className="font-noto-medium text-[13px] flex-1">
           {page.data ? pageTitle(page.data) : ''}
         </Text>
+        {sync ? (
+          <View accessibilityRole="text" accessibilityLiveRegion="polite" className="flex-row items-center gap-1.5">
+            <View className={`size-1.5 rounded-full ${STATUS_DOT[sync.status]}`} />
+            <Text numberOfLines={1} className={`text-[12px] ${sync.status === 'lost' || sync.status === 'error' ? 'text-destructive' : 'text-muted-foreground/70'}`}>
+              {collabStatusLabel(sync)}
+            </Text>
+          </View>
+        ) : null}
         <View>
           <IconButton icon="comment" label={openThreads > 0 ? `Comments, ${openThreads} open` : 'Comments'} color={muted} onPress={() => setCommentsOpen(true)} />
           {openThreads > 0 ? (
@@ -188,9 +206,9 @@ export default function DocScreen() {
         <IconButton icon="star" label={favorite ? 'Remove from favorites' : 'Add to favorites'} color={favorite ? colors.primary : muted} onPress={() => toggleFavorite.mutate({ pageId: id, favorite: !favorite })} />
         <IconButton icon="more" label="Page options" color={muted} onPress={() => setMenu(pageMenu())} />
       </PaneHeader>
-      {problem?.notice || (sync?.ready && sync.status !== 'live') ? (
+      {problem?.notice ? (
         <Text accessibilityRole="alert" className="text-[12px] mx-3 mb-1 text-muted-foreground">
-          {problem?.notice ?? (sync ? collabStatusLabel(sync) : '')}
+          {problem.notice}
         </Text>
       ) : null}
       {notice ? (
@@ -213,7 +231,7 @@ export default function DocScreen() {
             scrollEventThrottle={16}
             onScroll={(event) => (scrollY.current = event.nativeEvent.contentOffset.y)}
             onLayout={(event) => (viewportHeight.current = event.nativeEvent.layout.height)}
-            refreshControl={<RefreshControl refreshing={page.isRefetching} onRefresh={() => void page.refetch()} tintColor={colors.mutedForeground} />}
+            refreshControl={<PullRefresh onRefresh={() => page.refetch()} />}
           >
             {page.data.cover_url ? (
               <View>

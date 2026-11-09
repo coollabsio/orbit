@@ -3,12 +3,14 @@ import { createEditorSchemas, type TaskEditorSchema } from '@orbit/editor/schema
 import { CalloutExternalView, CalloutView } from './CalloutBlock'
 import { codeBlockOptions } from './codeBlock'
 import { PageBlockExternalView, PageBlockView } from './PageBlockCard'
+import { MathInlineView } from './MathInline'
 import { PageMentionView } from './PageMentionChip'
 
 export const { pageEditorSchema, taskEditorSchema } = createEditorSchemas({
   page: { render: PageBlockView, toExternalHTML: PageBlockExternalView },
   callout: { render: CalloutView, toExternalHTML: CalloutExternalView },
   mention: { render: PageMentionView },
+  math: { render: MathInlineView },
   codeBlock: codeBlockOptions,
 })
 

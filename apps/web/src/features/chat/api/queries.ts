@@ -70,6 +70,41 @@ export function useCategories() {
   })
 }
 
+/** The incoming webhooks of a channel, for its managers. Read again each time the settings open. */
+export function useWebhooks(conversationId: string) {
+  const { client, workspaceId } = useChatContext()
+  return useQuery({
+    queryKey: chatKeys.webhooks(workspaceId, conversationId),
+    queryFn: () => requireClient(client).listWebhooks(conversationId),
+    enabled: client !== null,
+  })
+}
+
+/** The last clicks sent to a webhook, for its managers. */
+export function useWebhookDeliveries(conversationId: string, webhookId: string, enabled: boolean) {
+  const { client, workspaceId } = useChatContext()
+  return useQuery({
+    queryKey: chatKeys.deliveries(workspaceId, webhookId),
+    queryFn: () => requireClient(client).listWebhookDeliveries(conversationId, webhookId),
+    enabled: client !== null && enabled,
+  })
+}
+
+const NO_EPHEMERAL: Message[] = []
+
+/** Integration replies only the user sees in a conversation. They live in this tab's memory until a reload. */
+export function useEphemeralMessages(conversationId: string): Message[] {
+  const { workspaceId } = useChatContext()
+  return (
+    useQuery({
+      queryKey: chatKeys.ephemeral(workspaceId, conversationId),
+      queryFn: () => NO_EPHEMERAL,
+      staleTime: Number.POSITIVE_INFINITY,
+      gcTime: Number.POSITIVE_INFINITY,
+    }).data ?? NO_EPHEMERAL
+  )
+}
+
 /** The user's read cursor, counts, notification setting and favorite flag for each joined conversation. */
 export function useConversationStates() {
   const { client, workspaceId } = useChatContext()

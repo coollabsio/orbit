@@ -1,5 +1,6 @@
 import type { Message } from '../api/types'
 import { isSameDay } from './time'
+import { isOwnMessage } from './bot'
 
 const CONTINUE_WITHIN = 5 * 60_000
 const GROUP_SPAN = 10 * 60_000
@@ -46,7 +47,7 @@ export function buildMessageRows(messages: readonly Message[], options: MessageR
     if (dayChanged) rows.push({ type: 'day', key: `day-${message.createdAt}`, at: message.createdAt })
 
     let isNew = false
-    if (!newLinePlaced && message.authorId !== currentUserId && message.kind === 'message') {
+    if (!newLinePlaced && !isOwnMessage(message, currentUserId ?? null) && message.kind === 'message') {
       isNew = lastReadMessageId == null || message.id > lastReadMessageId
     }
     if (isNew) {
@@ -63,6 +64,9 @@ export function buildMessageRows(messages: readonly Message[], options: MessageR
       // A reply shows its quote above the avatar and name.
       !message.replyToId &&
       previous.authorId === message.authorId &&
+      // An integration's messages group by the name they show, apart from its creator's own.
+      previous.bot?.webhookId === message.bot?.webhookId &&
+      previous.bot?.name === message.bot?.name &&
       message.createdAt - previous.createdAt < CONTINUE_WITHIN &&
       message.createdAt - groupStartedAt < GROUP_SPAN
     if (!continues) groupStartedAt = message.createdAt

@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 
-import { createProject, projectDraft, type ProjectRecord } from '../data/orbit'
+import { createProject, projectDraft, projects, type ProjectRecord } from '../data/orbit'
 import { keys } from '../data/keys'
 import { useOrbit } from '../orbit-context'
 import { Button, Input } from '../ui'
@@ -13,7 +13,11 @@ export function NewProjectSheet({ visible, onClose, onCreated }: { visible: bool
   const queryClient = useQueryClient()
   const [name, setName] = useState('')
   const create = useMutation({
-    mutationFn: (projectName: string) => createProject(client, workspaceId, projectDraft(projectName)),
+    mutationFn: async (projectName: string) => {
+      // A fresh list, so the key skips the keys of projects that other members made since the last load.
+      const existing = await projects(client, workspaceId)
+      return createProject(client, workspaceId, projectDraft(projectName, existing.map((project) => project.key)))
+    },
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: keys.projects(workspaceId) }),
   })
   const close = () => {

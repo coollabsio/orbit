@@ -75,3 +75,22 @@ export function loadEmojiIndex(): Promise<EmojiShortcode[]> {
     })
   return loading
 }
+
+let names: ReadonlyMap<string, string> | null = null
+
+/** The standard emoji by name (`rocket` → 🚀), once `loadEmojiNames` has loaded them; `null` before. */
+export function loadedEmojiNames(): ReadonlyMap<string, string> | null {
+  return names
+}
+
+/** Loads the standard emoji by name. The first emoji of a name wins, as in `emojiNamed`. */
+export function loadEmojiNames(): Promise<ReadonlyMap<string, string>> {
+  return loadEmojiIndex().then((index) => {
+    if (!names) {
+      const map = new Map<string, string>()
+      for (const entry of index) if (!map.has(entry.name)) map.set(entry.name, entry.emoji)
+      names = map
+    }
+    return names
+  })
+}

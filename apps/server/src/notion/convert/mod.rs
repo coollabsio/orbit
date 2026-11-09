@@ -20,7 +20,7 @@ use orbit_platform::Id;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
-pub use properties::database_row_properties_table;
+pub use properties::{database_row_properties_table, database_table, format_number_as};
 use rich_text::{plain, resolve_href, rich_text_to_inline, split_color, str_at, text};
 
 use super::files::is_allowed_file_url;
@@ -50,6 +50,22 @@ pub trait Resolver {
     fn member_by_email(&self, _email: &str) -> Option<(String, String)> {
         None
     }
+    /// The rows of an imported Notion database, so it can be shown as a table.
+    fn database(&self, _notion_id: &str) -> Option<&DatabaseRows> {
+        None
+    }
+    /// The number format (`dollar`, `percent`, …) of a number property of a data source.
+    fn number_format(&self, _data_source_id: &str, _property: &str) -> Option<&str> {
+        None
+    }
+}
+
+/// The rows of a Notion database (all its data sources), oldest first.
+#[derive(Clone, Debug, Default)]
+pub struct DatabaseRows {
+    /// Shown as a table inside its parent page in Notion (`is_inline`).
+    pub inline: bool,
+    pub rows: Vec<NotionPage>,
 }
 
 /// An uploaded file: the URL the editor loads and the display name.
@@ -68,6 +84,10 @@ pub struct MapResolver {
     pub users: HashMap<String, String>,
     /// Orbit members by lowercase email: `(user id, display name)`.
     pub members: HashMap<String, (String, String)>,
+    /// Imported databases by Notion id.
+    pub databases: HashMap<String, DatabaseRows>,
+    /// Number formats by data source id, then property name.
+    pub number_formats: HashMap<String, HashMap<String, String>>,
 }
 
 impl Resolver for MapResolver {
@@ -89,6 +109,17 @@ impl Resolver for MapResolver {
 
     fn member_by_email(&self, email: &str) -> Option<(String, String)> {
         self.members.get(email).cloned()
+    }
+
+    fn database(&self, notion_id: &str) -> Option<&DatabaseRows> {
+        self.databases.get(notion_id)
+    }
+
+    fn number_format(&self, data_source_id: &str, property: &str) -> Option<&str> {
+        self.number_formats
+            .get(data_source_id)?
+            .get(property)
+            .map(String::as_str)
     }
 }
 
@@ -462,7 +493,19 @@ fn convert_node(node: &BlockNode, ctx: &mut ConvertContext<'_>, out: &mut Vec<Va
         }
         "child_database" => {
             let title = str_at(data, &["title"]).unwrap_or_default().to_owned();
-            page_reference(&block.id, &title, ctx, out);
+            // An inline database with rows is a heading plus the table. Its own page already holds that table.
+            // A full-page database, or an inline database with no rows, stays a page card.
+            let resolver = ctx.resolver;
+            let rows = normalize_id(&block.id)
+                .and_then(|id| resolver.database(&id))
+                .filter(|database| database.inline)
+                .map(|database| database.rows.as_slice());
+            if let Some(table) = rows.and_then(|rows| database_table(rows, ctx)) {
+                database_heading(&block.id, &title, ctx, out);
+                out.push(table);
+            } else {
+                page_reference(&block.id, &title, ctx, out);
+            }
         }
         "link_to_page" => {
             let target = str_at(data, &["type"])
@@ -875,6 +918,24 @@ fn link_paragraph(url: &str, data: &Value, ctx: &mut ConvertContext<'_>, out: &m
     ));
 }
 
+/// The database name above an inline table. The name links to the database page when that page exists.
+fn database_heading(
+    notion_id: &str,
+    title: &str,
+    ctx: &mut ConvertContext<'_>,
+    out: &mut Vec<Value>,
+) {
+    let label = non_empty_title(title);
+    let content = match normalize_id(notion_id).and_then(|id| ctx.resolver.page_link(&id)) {
+        Some(page) => vec![rich_text::link(format!("/docs/{page}"), vec![plain(label)])],
+        None => vec![plain(label)],
+    };
+    let mut props = default_props(&Value::Null);
+    props.insert("level".into(), json!(2));
+    props.insert("isToggleable".into(), json!(false));
+    out.push(make_block(ctx, "heading", props, items(content), Vec::new()));
+}
+
 /// child_page/child_database/link_to_page → `page` block when imported, else a link paragraph.
 fn page_reference(
     notion_id: &str,
@@ -1003,7 +1064,7 @@ fn non_empty_title(title: &str) -> String {
     }
 }
 
-const TRUNCATION_NOTE: &str =
+pub(crate) const TRUNCATION_NOTE: &str =
     "The rest of this page was not imported because it is larger than Orbit's page size limit.";
 
 /// Keeps whole top-level blocks while the serialized content fits `max_content_bytes`.
@@ -1011,12 +1072,27 @@ fn truncate(content: &mut Vec<Value>, ctx: &mut ConvertContext<'_>) {
     let Some(max) = ctx.options.max_content_bytes else {
         return;
     };
+    let cut = cut_to_size(content, max);
+    if cut == 0 {
+        return;
+    }
+    ctx.report.truncated_blocks += u32::try_from(cut).unwrap_or(u32::MAX);
+    let mut styles = Map::new();
+    styles.insert("italic".into(), Value::Bool(true));
+    let note = items(vec![text(TRUNCATION_NOTE, styles)]);
+    let props = default_props(&Value::Null);
+    content.push(make_block(ctx, "paragraph", props, note, Vec::new()));
+}
+
+/// Drops top-level blocks from the end until the serialized content fits `max` bytes with room
+/// (1 KB) for a note; returns how many were dropped (0 when it already fits).
+pub(crate) fn cut_to_size(content: &mut Vec<Value>, max: usize) -> usize {
     let sizes: Vec<usize> = content
         .iter()
         .map(|block| serde_json::to_vec(block).map_or(0, |bytes| bytes.len() + 1))
         .collect();
     if sizes.iter().sum::<usize>() + 2 <= max {
-        return;
+        return 0;
     }
     let budget = max.saturating_sub(1024);
     let mut total = 2;
@@ -1028,13 +1104,9 @@ fn truncate(content: &mut Vec<Value>, ctx: &mut ConvertContext<'_>) {
         total += size;
         keep += 1;
     }
-    ctx.report.truncated_blocks += u32::try_from(content.len() - keep).unwrap_or(u32::MAX);
+    let cut = content.len() - keep;
     content.truncate(keep);
-    let mut styles = Map::new();
-    styles.insert("italic".into(), Value::Bool(true));
-    let note = items(vec![text(TRUNCATION_NOTE, styles)]);
-    let props = default_props(&Value::Null);
-    content.push(make_block(ctx, "paragraph", props, note, Vec::new()));
+    cut
 }
 
 #[cfg(test)]

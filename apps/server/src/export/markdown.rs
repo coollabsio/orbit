@@ -7,6 +7,8 @@
 //! (Markdown has no nesting for paragraphs). Both BlockNote's full form and its shorthand
 //! (string content, string table cells) are accepted.
 
+use std::ops::Range;
+
 use serde_json::{Map, Value};
 
 /// Where a link to a page goes and what it is called.
@@ -46,11 +48,73 @@ impl LinkResolver for KeepLinks {
     }
 }
 
+/// Where one block is in a Markdown text, in line indexes (0-based, end exclusive); mirrors the
+/// block tree. `head` is the block's own text (before its children), `full` the block with its
+/// children. A block that writes nothing (an empty paragraph) has empty ranges.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct Span {
+    pub full: Range<usize>,
+    pub head: Range<usize>,
+    pub children: Vec<Span>,
+}
+
+impl Span {
+    fn empty(at: usize) -> Self {
+        Self {
+            full: at..at,
+            head: at..at,
+            children: Vec::new(),
+        }
+    }
+
+    fn shift(&mut self, by: usize) {
+        let mut stack = vec![self];
+        while let Some(span) = stack.pop() {
+            span.full = span.full.start + by..span.full.end + by;
+            span.head = span.head.start + by..span.head.end + by;
+            stack.extend(span.children.iter_mut());
+        }
+    }
+
+    /// Keeps every range within the first `lines` lines.
+    fn clamp(&mut self, lines: usize) {
+        let mut stack = vec![self];
+        while let Some(span) = stack.pop() {
+            let clamp = |range: &Range<usize>| range.start.min(lines)..range.end.min(lines);
+            span.full = clamp(&span.full);
+            span.head = clamp(&span.head);
+            stack.extend(span.children.iter_mut());
+        }
+    }
+}
+
+/// Lines of a block's text (`\n`-separated).
+fn line_count(text: &str) -> usize {
+    if text.is_empty() {
+        0
+    } else {
+        text.matches('\n').count() + 1
+    }
+}
+
 /// Converts a block array; the result ends with one newline unless it is empty.
 #[must_use]
 pub fn blocks_to_markdown(blocks: &[Value], resolver: &dyn LinkResolver) -> String {
-    let text = Converter { resolver }.blocks(blocks);
-    if text.is_empty() { text } else { text + "\n" }
+    blocks_to_markdown_with_spans(blocks, resolver).0
+}
+
+/// [`blocks_to_markdown`] and where each block is in it (one [`Span`] per block).
+#[must_use]
+pub fn blocks_to_markdown_with_spans(
+    blocks: &[Value],
+    resolver: &dyn LinkResolver,
+) -> (String, Vec<Span>) {
+    let (text, spans) = Converter { resolver }.blocks(blocks);
+    if text.is_empty() {
+        (text, spans)
+    } else {
+        (text + "\n", spans)
+    }
 }
 
 /// Escapes text for use inside a Markdown link label or image alt text.
@@ -121,10 +185,29 @@ impl Styles {
     }
 }
 
-/// One piece of inline content after merging: styled text or a link.
+/// One piece of inline content after merging: styled text, a link, or a formula.
 enum Inline {
     Text(String, Styles),
     Link(String, Vec<(String, Styles)>),
+    /// LaTeX source. Written as `$...$` without the text escaper, so `\pi` stays one backslash.
+    Math(String),
+}
+
+/// `$...$` for a formula. A `\` or `$` in the source is written so Markdown gives it back:
+/// `\\` becomes `\`, and `\\$` becomes `\$`, which the importer reads as `$`.
+fn math_markdown(latex: &str, mode: Mode) -> String {
+    let mut out = String::from("$");
+    for character in latex.chars() {
+        match character {
+            '\n' | '\r' => out.push(' '),
+            '\\' => out.push_str("\\\\"),
+            '$' => out.push_str("\\\\$"),
+            '|' if mode == Mode::Cell => out.push_str("\\|"),
+            _ => out.push(character),
+        }
+    }
+    out.push('$');
+    out
 }
 
 struct Converter<'a> {
@@ -370,9 +453,13 @@ fn plain_text(value: Option<&Value>) -> String {
 }
 
 impl Converter<'_> {
-    fn blocks(&self, blocks: &[Value]) -> String {
+    fn blocks(&self, blocks: &[Value]) -> (String, Vec<Span>) {
         let mut out = String::new();
+        let mut spans = Vec::with_capacity(blocks.len());
+        // Newlines in `out`: the line the next text starts on, after its separator.
+        let mut newlines = 0;
         let mut previous_list = false;
+        let mut previous_kind = "";
         let mut number = 0_i64;
         for block in blocks {
             let kind = block_type(block);
@@ -387,23 +474,45 @@ impl Converter<'_> {
             } else {
                 number = 0;
             }
-            let text = self.block(block, number);
+            let (text, mut span) = self.block(block, number);
             if text.is_empty() {
                 // An empty paragraph still ends the list before it.
                 previous_list = false;
+                previous_kind = "";
+                spans.push(Span::empty(newlines + usize::from(!out.is_empty())));
                 continue;
             }
             let list = is_list(kind);
+            // A new numbered list that does not start at 1 cannot interrupt the item before it.
+            let new_list =
+                kind == "numberedListItem" && previous_kind != "numberedListItem" && number != 1;
+            previous_kind = kind;
             if !out.is_empty() {
-                out.push_str(if list && previous_list { "\n" } else { "\n\n" });
+                let separator = if list && previous_list && !new_list {
+                    "\n"
+                } else {
+                    "\n\n"
+                };
+                out.push_str(separator);
+                newlines += separator.len();
             }
+            span.shift(newlines);
+            spans.push(span);
+            newlines += text.matches('\n').count();
             out.push_str(&text);
             previous_list = list;
         }
-        out
+        (out, spans)
     }
 
-    fn block(&self, block: &Value, number: i64) -> String {
+    /// One block's text, and its span with lines counted from the block's first line.
+    fn block(&self, block: &Value, number: i64) -> (String, Span) {
+        let (text, mut span) = self.block_text(block, number);
+        span.clamp(line_count(&text));
+        (text, span)
+    }
+
+    fn block_text(&self, block: &Value, number: i64) -> (String, Span) {
         let kind = block_type(block);
         let nested = || self.blocks(children(block));
         match kind {
@@ -415,7 +524,7 @@ impl Converter<'_> {
                 } else {
                     format!("{} {}", "#".repeat(level as usize), text.trim())
                 };
-                join_blocks(&head, &nested())
+                joined(&head, nested())
             }
             "bulletListItem" | "toggleListItem" => self.list_item("- ", "", block),
             "checkListItem" => {
@@ -428,8 +537,8 @@ impl Converter<'_> {
             }
             "numberedListItem" => self.list_item(&format!("{number}. "), "", block),
             "quote" => {
-                let body = join_blocks(&self.paragraph(block.get("content")), &nested());
-                if body.is_empty() { body } else { quote(&body) }
+                let (body, span) = joined(&self.paragraph(block.get("content")), nested());
+                (if body.is_empty() { body } else { quote(&body) }, span)
             }
             "callout" => {
                 let emoji = prop_str(block, "emoji").trim();
@@ -439,8 +548,8 @@ impl Converter<'_> {
                     (false, true) => emoji.to_owned(),
                     (false, false) => format!("{emoji} {text}"),
                 };
-                let body = join_blocks(&head, &nested());
-                if body.is_empty() { body } else { quote(&body) }
+                let (body, span) = joined(&head, nested());
+                (if body.is_empty() { body } else { quote(&body) }, span)
             }
             "codeBlock" => {
                 let code = plain_text(block.get("content"));
@@ -459,10 +568,10 @@ impl Converter<'_> {
                 } else {
                     format!("{fence}{language}\n{code}\n{fence}")
                 };
-                join_blocks(&fenced, &nested())
+                joined(&fenced, nested())
             }
-            "divider" => join_blocks("---", &nested()),
-            "table" => join_blocks(&self.table(block.get("content")), &nested()),
+            "divider" => joined("---", nested()),
+            "table" => joined(&self.table(block.get("content")), nested()),
             "image" => {
                 let url = prop_str(block, "url");
                 let caption = prop_str(block, "caption").trim();
@@ -477,9 +586,9 @@ impl Converter<'_> {
                         link_destination(&self.resolver.url(url))
                     )
                 };
-                join_blocks(
+                joined(
                     &join_blocks(&media, &self.caption(caption, &media)),
-                    &nested(),
+                    nested(),
                 )
             }
             "file" | "video" | "audio" => {
@@ -503,10 +612,7 @@ impl Converter<'_> {
                         link_destination(&self.resolver.url(url))
                     )
                 };
-                join_blocks(
-                    &join_blocks(&link, &self.caption(caption, &link)),
-                    &nested(),
-                )
+                joined(&join_blocks(&link, &self.caption(caption, &link)), nested())
             }
             "page" => {
                 let page_id = prop_str(block, "pageId");
@@ -526,10 +632,10 @@ impl Converter<'_> {
                     None if page_id.is_empty() => String::new(),
                     None => "*Missing page*".to_owned(),
                 };
-                join_blocks(&link, &nested())
+                joined(&link, nested())
             }
             // Paragraphs and anything unknown: the text, then the children.
-            _ => join_blocks(&self.paragraph(block.get("content")), &nested()),
+            _ => joined(&self.paragraph(block.get("content")), nested()),
         }
     }
 
@@ -542,7 +648,7 @@ impl Converter<'_> {
         }
     }
 
-    fn list_item(&self, marker: &str, mark: &str, block: &Value) -> String {
+    fn list_item(&self, marker: &str, mark: &str, block: &Value) -> (String, Span) {
         let text = self.inline(block.get("content"), Mode::Block);
         let head = format!("{mark}{text}");
         let head = if head.is_empty() {
@@ -550,17 +656,39 @@ impl Converter<'_> {
         } else {
             escape_list_head(&head, !mark.is_empty())
         };
-        let nested = self.blocks(children(block));
+        let (nested, mut spans) = self.blocks(children(block));
+        // Only a list can follow the item's text directly; anything else would continue the
+        // text (CommonMark's lazy continuation lines), so a blank line goes between.
+        let separate = !head.is_empty()
+            && children(block)
+                .first()
+                .is_some_and(|first| !interrupts_paragraph(first));
+        // The marker line holds the head, even an empty one.
+        let head_lines = line_count(&head).max(1);
         let body = if nested.is_empty() {
             head
         } else if head.is_empty() {
             format!("\n{nested}")
+        } else if separate {
+            format!("{head}\n\n{nested}")
         } else {
             format!("{head}\n{nested}")
         };
-        indent(&body, marker, &" ".repeat(marker.len()))
+        for span in &mut spans {
+            span.shift(head_lines + usize::from(separate));
+        }
+        let text = indent(&body, marker, &" ".repeat(marker.len()))
             .trim_end()
-            .to_owned()
+            .to_owned();
+        let lines = line_count(&text);
+        (
+            text,
+            Span {
+                full: 0..lines,
+                head: 0..head_lines.min(lines),
+                children: spans,
+            },
+        )
     }
 
     fn paragraph(&self, content: Option<&Value>) -> String {
@@ -583,6 +711,16 @@ impl Converter<'_> {
                     match value {
                         Value::String(text) => {
                             items.push(Inline::Text(text.clone(), Styles::default()));
+                        }
+                        value if value.get("type").and_then(Value::as_str) == Some("math") => {
+                            let latex = value
+                                .get("props")
+                                .and_then(|props| props.get("latex"))
+                                .and_then(Value::as_str)
+                                .unwrap_or("");
+                            if !latex.trim().is_empty() {
+                                items.push(Inline::Math(latex.to_owned()));
+                            }
                         }
                         value if value.get("type").and_then(Value::as_str) == Some("mention") => {
                             items.push(Inline::Text(
@@ -619,6 +757,11 @@ impl Converter<'_> {
         for item in items {
             match item {
                 Inline::Text(text, styles) => push_run(&mut runs, &text, styles),
+                Inline::Math(latex) => {
+                    out.push_str(&runs_markdown(&runs, mode));
+                    runs.clear();
+                    out.push_str(&math_markdown(&latex, mode));
+                }
                 Inline::Link(href, label) => {
                     out.push_str(&runs_markdown(&runs, mode));
                     runs.clear();
@@ -733,6 +876,16 @@ impl Converter<'_> {
     }
 }
 
+/// Whether the block's Markdown can start right under a paragraph line: a list item with text,
+/// numbered from 1 (CommonMark lets no other list interrupt a paragraph).
+fn interrupts_paragraph(block: &Value) -> bool {
+    let kind = block_type(block);
+    is_list(kind)
+        && !plain_text(block.get("content")).trim().is_empty()
+        && (kind != "numberedListItem"
+            || prop_number(block, "start").is_none_or(|start| start == 1))
+}
+
 /// A list item's text must not read as a nested marker (the task box itself stays).
 fn escape_list_head(head: &str, has_box: bool) -> String {
     head.split('\n')
@@ -746,6 +899,25 @@ fn escape_list_head(head: &str, has_box: bool) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// [`join_blocks`] of a block's own text and its children's text, with the block's span.
+fn joined(head: &str, (rest, mut spans): (String, Vec<Span>)) -> (String, Span) {
+    let head_lines = line_count(head);
+    let offset = if head.is_empty() { 0 } else { head_lines + 1 };
+    for span in &mut spans {
+        span.shift(offset);
+    }
+    let text = join_blocks(head, &rest);
+    let lines = line_count(&text);
+    (
+        text,
+        Span {
+            full: 0..lines,
+            head: 0..head_lines,
+            children: spans,
+        },
+    )
 }
 
 /// Joins a block's own text and its (unindented) children with a blank line.

@@ -1,16 +1,15 @@
 import { router } from 'expo-router'
 import { useState } from 'react'
-import { RefreshControl, ScrollView, View } from 'react-native'
+import { Pressable, ScrollView, View } from 'react-native'
 
 import { ConfirmDialog, type ConfirmRequest } from '../../../components/settings/Dialog'
 import { pageTitle } from '../../../data/docs'
 import type { TrashedPage } from '../../../data/docs-api'
-import { relativeAgo } from '../../../data/format'
 import { usePageTrash, useTrashWrites } from '../../../hooks/docs'
 import { useTeamspaces } from '../../../queries'
 import { errorMessage } from '../../../session-context'
 import { alpha, useTheme } from '../../../theme'
-import { Button, EmptyState, ErrorView, Icon, IconButton, LoadingView, PaneHeader, SafeAreaView, Text } from '../../../ui'
+import { Button, EmptyState, ErrorView, Icon, IconButton, LoadingView, PaneHeader, PullRefresh, SafeAreaView, Text } from '../../../ui'
 
 /**
  * The web's docs Trash: pages trashed directly (their sub-pages come back with them), newest first, with Restore and
@@ -38,15 +37,28 @@ export default function DocsTrashScreen() {
       onConfirm: () => empty.mutate(),
     })
   }
-  const spaceOf = (page: TrashedPage) => (page.private || !page.teamspace_id ? 'Private' : (teamspaces.data?.find((item) => item.id === page.teamspace_id)?.name ?? 'Teamspace'))
+  const isPrivate = (page: TrashedPage) => page.private || !page.teamspace_id
+  const spaceOf = (page: TrashedPage) => (isPrivate(page) ? 'Private' : (teamspaces.data?.find((item) => item.id === page.teamspace_id)?.name ?? 'Teamspace'))
 
   return (
-    <SafeAreaView edges={['top', 'left', 'right']} className="flex-1 bg-background">
-      <PaneHeader className="px-3">
+    <SafeAreaView edges={['left', 'right']} className="flex-1 bg-background">
+      <PaneHeader className="min-h-12 px-3">
         <IconButton icon="back" label="Back to docs" color={alpha(colors.mutedForeground, 0.7)} onPress={() => (router.canGoBack() ? router.back() : router.navigate('/docs'))} />
-        <Icon name="trash" size={15} color={colors.mutedForeground} />
-        <Text className="font-noto-semibold text-[13px] flex-1">Trash</Text>
-        {purgeable > 0 ? <Button label="Empty trash" size="sm" variant="ghost" disabled={busy} onPress={requestEmpty} /> : null}
+        <Text numberOfLines={1} className="font-noto-semibold text-[13px] flex-1 min-w-0">
+          Trash
+        </Text>
+        {purgeable > 0 ? (
+          // the web's ghost `sm` button with `text-destructive`
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Empty trash"
+            disabled={busy}
+            onPress={requestEmpty}
+            className={`h-7 flex-row items-center rounded-md px-2.5 active:bg-muted dark:active:bg-muted/50 ${busy ? 'opacity-50' : ''}`}
+          >
+            <Text className="font-noto-medium text-[12.8px] leading-[18px] text-destructive">Empty trash</Text>
+          </Pressable>
+        ) : null}
       </PaneHeader>
       {failure ? <Text className="text-[13px] mx-4 mb-2 text-destructive">{errorMessage(failure)}</Text> : null}
       {!trash.data ? (
@@ -58,22 +70,24 @@ export default function DocsTrashScreen() {
       ) : trash.data.length === 0 ? (
         <EmptyState icon="trash" title="Trash is empty" description="Pages you move to the trash show here." />
       ) : (
-        <ScrollView contentContainerClassName="pb-6" refreshControl={<RefreshControl refreshing={trash.isRefetching} onRefresh={() => void trash.refetch()} tintColor={colors.mutedForeground} />}>
+        <ScrollView contentContainerClassName="pb-6" refreshControl={<PullRefresh onRefresh={() => trash.refetch()} />}>
           {trash.data.map((page, index) => (
-            <View key={page.id} className={`flex-row items-center gap-2.5 px-4 py-2.5 border-border ${index === 0 ? 'border-t-0' : 'border-t'}`}>
-              <View className="w-4.5 items-center">{page.icon ? <Text className="text-[15px]">{page.icon}</Text> : <Icon name="docs" size={15} color={colors.mutedForeground} />}</View>
-              <View className="flex-1 min-w-0">
-                <Text numberOfLines={1} className="font-noto-medium text-[13px]">
-                  {pageTitle(page)}
-                </Text>
-                <Text numberOfLines={1} className="text-[12px] text-muted-foreground">
-                  {`${spaceOf(page)} · deleted ${relativeAgo(page.deleted_at)}`}
+            <View key={page.id} className="min-h-10 flex-row items-center gap-2.5 border-b border-border px-3 py-1.5">
+              <View className="w-[18px] items-center">{page.icon ? <Text className="text-[15px]">{page.icon}</Text> : <Icon name="docs" size={15} color={alpha(colors.mutedForeground, 0.7)} />}</View>
+              <Text numberOfLines={1} className="flex-1 min-w-0 text-[13px]">
+                {pageTitle(page)}
+              </Text>
+              <View className="max-w-40 min-w-0 shrink flex-row items-center gap-1">
+                {isPrivate(page) ? <Icon name="lock" size={12} color={alpha(colors.mutedForeground, 0.7)} /> : null}
+                <Text numberOfLines={1} className="shrink text-[12px] text-muted-foreground/70">
+                  {spaceOf(page)}
                 </Text>
               </View>
-              <Button label="Restore" icon="rotateLeft" size="sm" variant="outline" disabled={busy} onPress={() => restore.mutate(page)} />
+              <Button label="Restore" icon="refresh" size="sm" variant="outline" disabled={busy} onPress={() => restore.mutate(page)} />
               {page.can_purge ? (
                 <IconButton
                   icon="trash"
+                  iconSize={14}
                   label={`Delete ${pageTitle(page)} forever`}
                   color={colors.destructive}
                   disabled={busy}

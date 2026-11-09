@@ -32,7 +32,7 @@ use crate::secret_box::{
     decrypt_secret as decrypt_github_secret, encrypt_secret as encrypt_github_secret,
 };
 
-const INSTANCE: &str = "/api/v1/integrations/discord/events";
+const INSTANCE: &str = "/api/public/v1/integrations/discord/events";
 const MAX_EVENT_ID_CHARS: usize = 200;
 const MAX_DESCRIPTION_CHARS: usize = 100_000;
 const MAX_URL_CHARS: usize = 2_048;
@@ -860,13 +860,21 @@ async fn github_webhook_from_database(
                 id,
             )
         })?;
-    let rows = match app_id {
-        Some(app_id) => sqlx::query(
-            "SELECT workspace_id, webhook_secret_encrypted FROM github_apps WHERE app_id = $1",
-        )
-        .bind(app_id),
-        None => sqlx::query("SELECT workspace_id, webhook_secret_encrypted FROM github_apps"),
-    }
+    // Every delivery of a GitHub App names the App. Without it Orbit would have to try the secret
+    // of every workspace, so one unsigned request would cost an HMAC per connected workspace.
+    let Some(app_id) = app_id else {
+        return Err(ApiError::new(
+            StatusCode::UNAUTHORIZED,
+            "invalid_github_signature",
+            "Invalid GitHub signature",
+            "The webhook signature is invalid.",
+            id,
+        ));
+    };
+    let rows = sqlx::query(
+        "SELECT workspace_id, webhook_secret_encrypted FROM github_apps WHERE app_id = $1",
+    )
+    .bind(app_id)
     .fetch_all(state.tasks.database().pool())
     .await
     .map_err(|_| ApiError::internal(id))?;
@@ -1304,7 +1312,8 @@ pub struct DiscordEventResponse {
 
 #[utoipa::path(
     post,
-    path = "/api/v1/integrations/discord/events",
+    path = "/api/public/v1/integrations/discord/events",
+    tag = "public-api",
     request_body = DiscordEventBody,
     responses(
         (status = 201, description = "Task created", body = DiscordEventResponse),
@@ -1316,7 +1325,8 @@ pub(crate) async fn create_discord_event(
     State(state): State<IntegrationState>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
-    ApiJson(body): ApiJson<DiscordEventBody>,
+    // Read after the token check, so a bad token or scope gets 401/403 whatever the body is.
+    body: Result<ApiJson<DiscordEventBody>, ApiError>,
 ) -> Result<Response, ApiError> {
     let token = bearer_token(&headers).ok_or_else(|| {
         ApiError::new(
@@ -1329,9 +1339,14 @@ pub(crate) async fn create_discord_event(
     })?;
     let principal = state
         .tokens
-        .authenticate(token, ApiTokenScope::Write, TimestampMillis::now())
+        .authenticate(
+            token,
+            Some(ApiTokenScope::TasksWrite),
+            TimestampMillis::now(),
+        )
         .await
         .map_err(|error| token_problem(error, request_id.as_ref().map(|value| &value.0)))?;
+    let ApiJson(body) = body?;
     let project_id = match body.project_id.as_deref() {
         Some(value) => value
             .parse()
@@ -1396,8 +1411,8 @@ pub(crate) async fn create_discord_event(
         .tasks
         .create_discord_task(
             principal.workspace_id,
-            principal.creator_id,
-            principal.service_account_id,
+            principal.actor_id,
+            principal.service_account.as_ref().map(|account| account.id),
             DiscordTask {
                 event_id: event_id.to_owned(),
                 payload_hash,

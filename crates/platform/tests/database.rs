@@ -46,6 +46,45 @@ async fn opens_sqlite_with_required_pragmas() {
 }
 
 #[tokio::test]
+async fn a_writer_that_waited_out_the_busy_timeout_gets_a_transient_lock_error() {
+    if orbit_platform::testing_postgres() {
+        // Orbit's writers wait for the write lock without a timeout; a statement with one fails.
+        let database = TestDatabase::new().await.unwrap();
+        let mut holder = database.pool().begin().await.unwrap();
+        sqlx::query("SELECT 1 FROM pg_advisory_xact_lock(42)")
+            .execute(&mut *holder)
+            .await
+            .unwrap();
+        let mut waiter = database.pool().begin().await.unwrap();
+        sqlx::query("SET LOCAL lock_timeout = '50ms'")
+            .execute(&mut *waiter)
+            .await
+            .unwrap();
+        let error = sqlx::query("SELECT 1 FROM pg_advisory_xact_lock(42)")
+            .execute(&mut *waiter)
+            .await
+            .unwrap_err();
+        assert!(orbit_platform::is_transient_lock_error(&error), "{error}");
+        drop(waiter);
+        drop(holder);
+        let error = database.execute("SELECT * FROM missing").await.unwrap_err();
+        assert!(!orbit_platform::is_transient_lock_error(&error), "{error}");
+        return;
+    }
+    let directory = tempfile::tempdir().unwrap();
+    let mut config = DatabaseConfig::new(directory.path().join("db.sqlite"));
+    config.busy_timeout = Duration::from_millis(50);
+    let database = Database::open(&config).await.unwrap();
+    let holder = database.immediate_transaction().await.unwrap();
+
+    let error = database.immediate_transaction().await.unwrap_err();
+    assert!(orbit_platform::is_transient_lock_error(&error), "{error}");
+    drop(holder);
+    let error = database.execute("SELECT * FROM missing").await.unwrap_err();
+    assert!(!orbit_platform::is_transient_lock_error(&error), "{error}");
+}
+
+#[tokio::test]
 async fn creates_the_platform_schema() {
     let db = TestDatabase::new().await.unwrap();
 
@@ -74,7 +113,7 @@ async fn github_schema_is_in_one_draft_migration() {
         db.scalar::<i64>("SELECT MAX(version) FROM schema_migrations")
             .await
             .unwrap(),
-        66
+        78
     );
     assert_eq!(
         db.scalar::<i64>("SELECT COUNT(*) FROM pragma_table_info('github_issue_links') WHERE name IN ('kind', 'pull_state', 'sync_paused')")
@@ -211,7 +250,7 @@ async fn rejects_a_schema_newer_than_the_binary() {
         error,
         MigrationError::SchemaNewer {
             database_version: 999,
-            binary_version: 66
+            binary_version: 78
         }
     ));
 }
@@ -2852,5 +2891,209 @@ async fn setup_owner_email_migration_confirms_only_the_setup_owner() {
             .await
             .unwrap(),
         None
+    );
+}
+
+#[tokio::test]
+async fn api_token_scopes_migration_keeps_each_token_s_access() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
+        .await
+        .unwrap();
+    MigrationRunner::embedded_through("test", 65)
+        .run(&database)
+        .await
+        .unwrap();
+    let mut transaction = database.immediate_transaction().await.unwrap();
+    sqlx::raw_sql(
+        "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at)
+         VALUES ('u', 'u@example.com', 'u@example.com', 'U', 'x', 1, 1);
+         INSERT INTO workspaces (id, name, owner_membership_id, created_at, updated_at) VALUES ('w', 'W', 'm', 1, 1);
+         INSERT INTO memberships (id, workspace_id, user_id, role, created_at, updated_at) VALUES ('m', 'w', 'u', 'owner', 1, 1);
+         INSERT INTO projects (id, workspace_id, name, project_key, color, created_at, updated_at)
+         VALUES ('p', 'w', 'P', 'P', '#ff0000', 1, 1);",
+    )
+    .execute(&mut *transaction)
+    .await
+    .unwrap();
+    for (byte, (id, read, write, extra)) in [
+        ("read", 1_i64, 0_i64, ""),
+        ("write", 0, 1, ""),
+        ("all", 1, 1, "docs:read chat:read"),
+        ("docs", 0, 0, "docs:read"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        sqlx::query(
+            "INSERT INTO api_tokens (id, workspace_id, project_id, name, token_hash, token_prefix, \
+             can_read, can_write, created_by, created_at, mcp_scopes) \
+             VALUES ($1, 'w', 'p', $2, $3, 'orb_x', $4, $5, 'u', 1, $6)",
+        )
+        .bind(id)
+        .bind(id)
+        .bind(vec![u8::try_from(byte).unwrap(); 32])
+        .bind(read)
+        .bind(write)
+        .bind(extra)
+        .execute(&mut *transaction)
+        .await
+        .unwrap();
+    }
+    transaction.commit().await.unwrap();
+
+    MigrationRunner::embedded("test")
+        .run(&database)
+        .await
+        .unwrap();
+
+    let scopes: Vec<(String, String)> =
+        sqlx::query_as("SELECT id, scopes FROM api_tokens ORDER BY id")
+            .fetch_all(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        scopes,
+        [
+            (
+                "all".to_owned(),
+                "tasks:read tasks:write docs:read chat:read".to_owned()
+            ),
+            ("docs".to_owned(), "docs:read".to_owned()),
+            ("read".to_owned(), "tasks:read".to_owned()),
+            ("write".to_owned(), "tasks:write".to_owned()),
+        ]
+    );
+    let old_flag = sqlx::query("SELECT can_read FROM api_tokens")
+        .fetch_all(database.pool())
+        .await;
+    assert!(old_flag.is_err(), "the read and write flags are gone");
+}
+
+#[tokio::test]
+async fn upgrading_past_the_api_token_scopes_migration_requires_a_backup() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
+        .await
+        .unwrap();
+    MigrationRunner::embedded_through("test", 65)
+        .run(&database)
+        .await
+        .unwrap();
+
+    let pending = MigrationRunner::embedded_through("test", 66)
+        .pending(&database)
+        .await
+        .unwrap();
+
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].version, 66);
+    assert!(
+        pending[0].destructive,
+        "0066 drops the read and write flags, so a verified backup must run first"
+    );
+}
+
+#[tokio::test]
+async fn an_api_token_may_have_no_project_but_a_set_project_is_still_checked() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = Database::open(&DatabaseConfig::new(directory.path().join("db.sqlite")))
+        .await
+        .unwrap();
+    MigrationRunner::embedded_through("test", 67)
+        .run(&database)
+        .await
+        .unwrap();
+    let mut transaction = database.immediate_transaction().await.unwrap();
+    sqlx::raw_sql(
+        "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at)
+         VALUES ('u', 'u@example.com', 'u@example.com', 'U', 'x', 1, 1);
+         INSERT INTO workspaces (id, name, owner_membership_id, created_at, updated_at)
+         VALUES ('w', 'W', 'm', 1, 1), ('w2', 'W2', 'm2', 1, 1);
+         INSERT INTO memberships (id, workspace_id, user_id, role, created_at, updated_at)
+         VALUES ('m', 'w', 'u', 'owner', 1, 1), ('m2', 'w2', 'u', 'owner', 1, 1);
+         INSERT INTO projects (id, workspace_id, name, project_key, color, created_at, updated_at)
+         VALUES ('p', 'w', 'P', 'P', '#ff0000', 1, 1), ('other', 'w2', 'O', 'O', '#ff0000', 1, 1);",
+    )
+    .execute(&mut *transaction)
+    .await
+    .unwrap();
+    transaction.commit().await.unwrap();
+    let insert = |id: &str, project: Option<&str>, service_account: Option<&str>, byte: u8| {
+        sqlx::query(
+            "INSERT INTO api_tokens (id, workspace_id, project_id, name, token_hash, token_prefix, \
+             scopes, created_by, created_at, service_account_id) \
+             VALUES ($1, 'w', $2, $1, $3, 'orb_x', 'docs:read', 'u', 1, $4)",
+        )
+        .bind(id.to_owned())
+        .bind(project.map(str::to_owned))
+        .bind(vec![byte; 32])
+        .bind(service_account.map(str::to_owned))
+    };
+    insert("old", Some("p"), None, 1)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    assert!(
+        insert("before", None, None, 2)
+            .execute(database.pool())
+            .await
+            .is_err(),
+        "0014 refuses a token without a project"
+    );
+
+    MigrationRunner::embedded("test")
+        .run(&database)
+        .await
+        .unwrap();
+
+    insert("none", None, None, 3)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let project_error = "api token project must be active and belong to the workspace";
+    let foreign = insert("foreign", Some("other"), None, 4)
+        .execute(database.pool())
+        .await
+        .unwrap_err();
+    assert!(foreign.to_string().contains(project_error), "{foreign}");
+    // Both checks fail: each backend reports the project first.
+    let both = insert("both", Some("other"), Some("missing"), 5)
+        .execute(database.pool())
+        .await
+        .unwrap_err();
+    assert!(both.to_string().contains(project_error), "{both}");
+    let service_account = insert("service", None, Some("missing"), 6)
+        .execute(database.pool())
+        .await
+        .unwrap_err();
+    assert!(
+        service_account
+            .to_string()
+            .contains("api token service account must be active and belong to the workspace"),
+        "{service_account}"
+    );
+
+    sqlx::query("UPDATE api_tokens SET project_id = NULL WHERE id = 'none'")
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let moved = sqlx::query("UPDATE api_tokens SET project_id = 'other' WHERE id = 'none'")
+        .execute(database.pool())
+        .await
+        .unwrap_err();
+    assert!(moved.to_string().contains(project_error), "{moved}");
+    let rows: Vec<(String, Option<String>)> =
+        sqlx::query_as("SELECT id, project_id FROM api_tokens ORDER BY id")
+            .fetch_all(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        rows,
+        [
+            ("none".to_owned(), None),
+            ("old".to_owned(), Some("p".to_owned())),
+        ],
+        "existing rows keep their project"
     );
 }

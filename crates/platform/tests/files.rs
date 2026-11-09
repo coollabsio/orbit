@@ -1,7 +1,7 @@
 use std::io;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 use orbit_platform::{
@@ -130,15 +130,13 @@ async fn stage_sniffs_bytes_and_never_uses_a_client_path_as_a_filesystem_path() 
     assert_eq!(png.detected_media_type, "image/png");
     assert_eq!(png.display_name, "picture.png");
     assert_eq!(png.sha256.len(), 64);
-    assert!(
-        fixture
-            .store
-            .temporary_files()
-            .await
-            .unwrap()
-            .iter()
-            .all(|file| file.path.starts_with(fixture.store.root()))
-    );
+    assert!(fixture
+        .store
+        .temporary_files()
+        .await
+        .unwrap()
+        .iter()
+        .all(|file| file.path.starts_with(fixture.store.root())));
 
     let svg = fixture
         .service
@@ -172,13 +170,11 @@ async fn finalize_deduplicates_only_inside_a_workspace_and_atomically_installs_t
         .await
         .unwrap();
     assert!(!first_temp.exists());
-    assert!(
-        fixture
-            .store
-            .path(&first_blob.storage_key)
-            .unwrap()
-            .exists()
-    );
+    assert!(fixture
+        .store
+        .path(&first_blob.storage_key)
+        .unwrap()
+        .exists());
 
     let duplicate = fixture
         .service
@@ -410,13 +406,11 @@ async fn failed_deduplicated_finalization_restarts_the_orphan_quarantine() {
         .await
         .unwrap();
     assert_eq!(result.deleted_blobs, 0);
-    assert!(
-        fixture
-            .store
-            .path(&orphan_blob.storage_key)
-            .unwrap()
-            .exists()
-    );
+    assert!(fixture
+        .store
+        .path(&orphan_blob.storage_key)
+        .unwrap()
+        .exists());
 }
 
 #[tokio::test]
@@ -877,13 +871,11 @@ async fn reconciliation_rechecks_quarantine_after_a_concurrent_failed_deduplicat
     let result = reconcile.await.unwrap().unwrap();
 
     assert_eq!(result.deleted_blobs, 0);
-    assert!(
-        fixture
-            .store
-            .path(&orphan_blob.storage_key)
-            .unwrap()
-            .exists()
-    );
+    assert!(fixture
+        .store
+        .path(&orphan_blob.storage_key)
+        .unwrap()
+        .exists());
 }
 
 #[tokio::test]
@@ -977,10 +969,32 @@ fn download_metadata_allows_only_safe_images_inline_and_always_uses_nosniff() {
     for media_type in ["image/svg+xml", "text/html", "application/pdf"] {
         let download = UploadService::download_metadata(media_type, "report\".svg");
         assert_eq!(download.disposition, ContentDisposition::Attachment);
+        assert_eq!(download.content_type, media_type);
         assert_eq!(download.x_content_type_options, "nosniff");
         assert!(!download.content_disposition.contains('\r'));
         assert!(!download.content_disposition.contains('\n'));
     }
+
+    // A sniffed octet-stream keeps `nosniff`, so the player type has to come from the file name.
+    let video = UploadService::download_metadata("application/octet-stream", "flower.MP4");
+    assert_eq!(video.content_type, "video/mp4");
+    assert_eq!(video.disposition, ContentDisposition::Inline);
+    let audio = UploadService::download_metadata("application/octet-stream", "beep.wav");
+    assert_eq!(audio.content_type, "audio/wav");
+    assert_eq!(audio.disposition, ContentDisposition::Inline);
+    let text = UploadService::download_metadata("application/octet-stream", "note.txt");
+    assert_eq!(text.content_type, "text/plain; charset=utf-8");
+    assert_eq!(text.disposition, ContentDisposition::Inline);
+    let pdf = UploadService::download_metadata("application/pdf", "orbit.pdf");
+    assert_eq!(pdf.content_type, "application/pdf");
+    assert_eq!(pdf.disposition, ContentDisposition::Attachment);
+    let unknown = UploadService::download_metadata("application/octet-stream", "data.bin");
+    assert_eq!(unknown.content_type, "application/octet-stream");
+    assert_eq!(unknown.disposition, ContentDisposition::Attachment);
+    // A sniffed HTML file stays HTML even when the name says otherwise.
+    let html = UploadService::download_metadata("text/html", "note.txt");
+    assert_eq!(html.content_type, "text/html");
+    assert_eq!(html.disposition, ContentDisposition::Attachment);
 }
 
 #[tokio::test]

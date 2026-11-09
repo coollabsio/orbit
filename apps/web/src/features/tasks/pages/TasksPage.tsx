@@ -9,7 +9,7 @@ import { toast } from 'sonner'
 import { UNDO_TOAST_DURATION } from '@/lib/toast'
 import { loadFailed } from '@/lib/connection'
 import { useScrollMemory } from '@/lib/useScrollMemory'
-import { Bookmark, ChevronDown, Add as Plus, Setting2 as Settings, TaskSquare as SquareCheck } from 'reicon-react'
+import { Bookmark, ChevronDown, Import, Add as Plus, Setting2 as Settings, TaskSquare as SquareCheck } from 'reicon-react'
 import { cn } from 'cn'
 import { ApiProblem } from '@orbit/api/problem'
 import { Button } from '@/components/ui/button'
@@ -423,6 +423,9 @@ function WorkspaceTasksPage() {
                     </div>)}
                     <DropdownMenuSeparator />
                     <DropdownMenuItem onClick={() => setShowNewProject(true)}><Plus />New project</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => navigate('/tasks-import')}><Import />Import from Asana</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => navigate('/tasks-import/linear')}><Import />Import from Linear</DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => navigate('/tasks-import/trello')}><Import />Import from Trello</DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
                 <PaneTitle className="max-[899px]:min-w-0 max-[899px]:flex-1 max-[899px]:basis-0">{viewTitle}</PaneTitle>

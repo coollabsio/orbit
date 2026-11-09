@@ -40,6 +40,8 @@ export interface Attachment {
 export interface TaskComment {
   id: string
   authorId: string
+  /** Set when a service account wrote the comment through an API token; it is the author then. */
+  authorServiceAccountName?: string
   /** Markdown copy of `bodyJson`. */
   body: string
   /** BlockNote blocks; null for a comment written before rich text (only `body` exists). */
@@ -323,6 +325,7 @@ export function taskFromRecord(
     comments: comments.map((comment) => ({
       id: comment.id,
       authorId: comment.author_id,
+      authorServiceAccountName: comment.author_service_account_name ?? undefined,
       body: comment.body,
       bodyJson: comment.body_json ?? null,
       canEdit: comment.can_edit,

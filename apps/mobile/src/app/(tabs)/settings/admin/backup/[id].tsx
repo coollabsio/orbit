@@ -61,7 +61,7 @@ export default function AdminBackupBrowseScreen() {
   }
 
   return (
-    <AdminShell refreshing={workspaces.isRefetching || items.isRefetching} onRefresh={() => void (workspaces.isError ? workspaces.refetch() : items.refetch())}>
+    <AdminShell onRefresh={() => (workspaces.isError ? workspaces.refetch() : items.refetch())}>
       <SettingsCard
         title={backup ? `Backup from ${new Date(backup.created_at).toLocaleString()}` : 'Backup'}
         description="Restores a copy. Current data does not change. Comments and history are not restored."

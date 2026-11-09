@@ -1,13 +1,12 @@
-import { type Href, router, useNavigation, usePathname } from 'expo-router'
+import { type Href, useNavigation, usePathname } from 'expo-router'
 import type { Permission } from '@orbit/api/generated/types.gen'
-import type { ReactNode } from 'react'
-import { KeyboardAvoidingView, Platform, Pressable, RefreshControl, ScrollView, Switch, View } from 'react-native'
+import { type ReactNode, useState } from 'react'
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Switch, View } from 'react-native'
 
 import { useOrbit } from '../../orbit-context'
-import { alpha, cssColors, setSchemePreference, useLayout, useTheme } from '../../theme'
-import { Icon, type IconName, IconButton, PaneHeader, SafeAreaView, Text } from '../../ui'
-import { MenuButton } from '../Drawer'
-import { guestMayOpen, isGuestRole } from '../../data/guest'
+import { guestMayOpen } from '../../data/guest'
+import { alpha, cssColors, useButtonStyle, useTheme } from '../../theme'
+import { Icon, type IconName, IconButton, PaneHeader, PickerSheet, type Presence, PullRefresh, SafeAreaView, StatusMark, Text } from '../../ui'
 
 export interface SettingsNavItem {
   href: Href & string
@@ -15,23 +14,35 @@ export interface SettingsNavItem {
   icon: IconName
   /** Shown only to roles that hold this permission. */
   permission?: Permission
+  /** Shown only in Orbit Cloud (billing on). */
+  cloud?: boolean
 }
 
 /**
- * The web's settings areas at phone size. API tokens, Emoji, Stickers, GitHub and Billing are desktop setup work, and
- * Keyboard shortcuts and Storage (this browser's chat cache) have no phone counterpart, so they are left out.
+ * The web's workspace settings in its order; `drawerAreas.ts` groups them under the web's section labels. Agentic
+ * lives at `/settings/workspace-agentic` because `/settings/agentic` is the account's.
  */
 export const WORKSPACE_NAV: readonly SettingsNavItem[] = [
   { href: '/settings', label: 'General', icon: 'settings' },
-  { href: '/settings/file-storage', label: 'File storage', icon: 'cloudConnection' },
-  { href: '/settings/workspace-agentic', label: 'Agentic', icon: 'robot' },
   { href: '/settings/members', label: 'Members', icon: 'people' },
+  { href: '/settings/billing', label: 'Billing', icon: 'card', cloud: true },
+  { href: '/settings/emoji', label: 'Emoji', icon: 'smile', permission: 'chat.manage' },
+  { href: '/settings/stickers', label: 'Stickers', icon: 'sticker', permission: 'chat.manage' },
+  { href: '/settings/file-storage', label: 'File storage', icon: 'cloudConnection' },
+  { href: '/settings/github', label: 'GitHub', icon: 'link2' },
+  { href: '/settings/workspace-agentic', label: 'Agentic', icon: 'robot' },
+  { href: '/settings/api-tokens', label: 'API tokens', icon: 'key', permission: 'api_tokens.manage' },
+  { href: '/settings/import', label: 'Import', icon: 'import' },
+  { href: '/settings/export', label: 'Export', icon: 'documentDownload', permission: 'workspace.export' },
+  { href: '/settings/danger-zone', label: 'Danger zone', icon: 'danger', permission: 'workspace.delete' },
 ]
 
-/** The links of `nav` this workspace role may open. */
-/** The links this person may open: by permission, and for a guest only its own settings (`guestMayOpen`). */
-export function allowedNav<T extends SettingsNavItem>(nav: readonly T[], permissions: readonly Permission[], guest = false): T[] {
-  return nav.filter((item) => (!item.permission || permissions.includes(item.permission)) && (!guest || guestMayOpen(item.href)))
+/**
+ * The links of `nav` this person may open: by permission, the cloud-only ones only in Orbit Cloud, and for a guest
+ * only its own settings (`guestMayOpen`).
+ */
+export function allowedNav<T extends SettingsNavItem>(nav: readonly T[], permissions: readonly Permission[], cloud: boolean, guest = false): T[] {
+  return nav.filter((item) => (!item.permission || permissions.includes(item.permission)) && (!item.cloud || cloud) && (!guest || guestMayOpen(item.href)))
 }
 
 export const ACCOUNT_NAV: readonly SettingsNavItem[] = [
@@ -56,58 +67,44 @@ export const ADMIN_NAV: readonly SettingsNavItem[] = [
 ]
 
 /**
- * The web's `SettingsShell` on a phone: the topbar, the two-column sub-navigation between hairlines, then the cards.
- * A page opened from another screen gets a back button; the area's own pages swap in place. In the new UI the drawer
- * lists the area's pages instead, so the grid is left out.
+ * The web's `SettingsShell` on a phone: the topbar, then the cards. A page opened from another screen gets a back
+ * button. The drawer lists the area's pages.
  */
-export function SettingsShell({ title, nav, children, refreshing, onRefresh }: { title: string; nav: readonly SettingsNavItem[]; children: ReactNode; refreshing?: boolean; onRefresh?: () => void }) {
-  const { colors, scheme } = useTheme()
+export function SettingsShell({ title, nav, children, onRefresh }: { title: string; nav: readonly SettingsNavItem[]; children: ReactNode; onRefresh?: () => Promise<unknown> }) {
+  const { colors } = useTheme()
   const navigation = useNavigation()
   const pathname = usePathname()
-  const newUi = useLayout() === 'new'
-  const { workspace } = useOrbit()
   const muted = alpha(colors.mutedForeground, 0.7)
+  // the longest matching link names the page, so `/settings/admin/users` beats `/settings/admin`
+  const page = nav
+    .filter((item) => pathname === item.href || pathname.startsWith(`${item.href}/`))
+    .sort((a, b) => b.href.length - a.href.length)[0]
+  // only this stack's history: the tab navigator around it can always go back
+  const canGoBack = (navigation.getState()?.index ?? 0) > 0
   return (
-    <SafeAreaView edges={['top', 'left', 'right']} className="flex-1 bg-background">
-      <PaneHeader>
-        {/* only this stack's history: the tab navigator around it can always go back */}
-        {(navigation.getState()?.index ?? 0) > 0 ? <IconButton icon="back" label="Back" color={muted} onPress={() => navigation.goBack()} /> : <MenuButton />}
-        <Text numberOfLines={1} className="font-noto-medium text-[13.5px] flex-1">
+    <SafeAreaView edges={['left', 'right']} className="flex-1 bg-background">
+      {/* the web's breadcrumb header: the area (muted, with its icon) / the page; same left inset as the cards */}
+      <PaneHeader className={`min-h-12 gap-[7px] ${canGoBack ? 'pl-2' : 'pl-5'}`}>
+        {canGoBack ? <IconButton icon="back" label="Back" color={muted} onPress={() => navigation.goBack()} /> : null}
+        <Icon name={AREA_ICON[title] ?? 'settings'} size={15} color={colors.mutedForeground} />
+        <Text numberOfLines={1} className="shrink font-noto-semibold text-[13px] text-muted-foreground">
           {title}
         </Text>
-        <View className="flex-row gap-1.5">
-          <IconButton icon="search" label="Search" color={muted} onPress={() => router.navigate('/tasks?search=1')} />
-          <IconButton icon={scheme === 'dark' ? 'sun' : 'moon'} label="Toggle theme" iconSize={15} color={muted} onPress={() => setSchemePreference(scheme === 'dark' ? 'light' : 'dark')} />
-        </View>
+        {page ? (
+          <>
+            <Text className="text-[13px] text-muted-foreground">/</Text>
+            <Text accessibilityRole="header" numberOfLines={1} className="shrink font-noto-semibold text-[13px] text-foreground">
+              {page.label}
+            </Text>
+          </>
+        ) : null}
       </PaneHeader>
       <KeyboardAvoidingView className="flex-1" behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <ScrollView
           contentContainerClassName="px-5 pt-5 pb-8 gap-6"
           keyboardShouldPersistTaps="handled"
-          refreshControl={onRefresh ? <RefreshControl refreshing={refreshing ?? false} onRefresh={onRefresh} tintColor={colors.mutedForeground} /> : undefined}
+          refreshControl={onRefresh ? <PullRefresh onRefresh={onRefresh} /> : undefined}
         >
-          {newUi ? null : (
-            <View accessibilityRole="tablist" accessibilityLabel={title} className="flex-row flex-wrap gap-0.5 py-3 border-t border-b border-border">
-              {allowedNav(nav, workspace.permissions, isGuestRole(workspace.role)).map((item) => {
-                const active = pathname === item.href
-                return (
-                  <Pressable
-                    key={item.href}
-                    accessibilityRole="tab"
-                    accessibilityLabel={item.label}
-                    accessibilityState={{ selected: active }}
-                    onPress={active ? undefined : () => router.replace(item.href)}
-                    className={`w-[49.6%] h-8 flex-row items-center gap-2.5 px-2.5 rounded-lg ${active ? 'bg-sidebar-accent' : 'active:bg-muted'}`}
-                  >
-                    <Icon name={item.icon} size={18} color={alpha(active ? colors.sidebarAccentForeground : colors.foreground, 0.9)} />
-                    <Text numberOfLines={1} className="font-noto-medium text-[13px] flex-1">
-                      {item.label}
-                    </Text>
-                  </Pressable>
-                )
-              })}
-            </View>
-          )}
           {children}
         </ScrollView>
       </KeyboardAvoidingView>
@@ -115,31 +112,82 @@ export function SettingsShell({ title, nav, children, refreshing, onRefresh }: {
   )
 }
 
+/** The web areas' header icons (`settingsNav.ts`). */
+const AREA_ICON: Record<string, IconName> = { Settings: 'settings', 'Account settings': 'user', Admin: 'admin' }
+
 /** The Admin area: only instance admins see it (the server refuses the others anyway). */
-export function AdminShell({ children, refreshing, onRefresh }: { children: ReactNode; refreshing?: boolean; onRefresh?: () => void }) {
+export function AdminShell({ children, onRefresh }: { children: ReactNode; onRefresh?: () => Promise<unknown> }) {
   const { user } = useOrbit()
   return (
-    <SettingsShell title="Admin" nav={ADMIN_NAV} refreshing={refreshing} onRefresh={onRefresh}>
+    <SettingsShell title="Admin" nav={ADMIN_NAV} onRefresh={onRefresh}>
       {user.installation_admin ? children : <Note>Only the instance admins of this Orbit server see the Admin area.</Note>}
     </SettingsShell>
   )
 }
 
-/** The web `SettingsCard`: a title strip (with its actions) on the card surface, the body on a panel below a hairline. */
-export function SettingsCard({ title, description, actions, flush = false, children }: { title: string; description?: string; actions?: ReactNode; flush?: boolean; children?: ReactNode }) {
+/**
+ * The web `SettingsCard`: a title strip (with its actions on the right) on the card surface, the body on a panel below
+ * a hairline. A description hides behind the dotted-underlined title (the web's tooltip); tapping the title shows it.
+ */
+export function SettingsCard({ title, description, actions, flush = false, danger = false, children }: { title: string; description?: string; actions?: ReactNode; flush?: boolean; /** Delete account: a destructive ring and title, and a body without its own fill. */ danger?: boolean; children?: ReactNode }) {
+  const { colors } = useTheme()
+  const [open, setOpen] = useState(false)
   return (
-    <View className="rounded-lg bg-card shadow-[0_0_0_1px_var(--color-border)]">
-      <View className="min-h-12 justify-center gap-2 py-2.5 pr-2 pl-4">
-        <View>
-          <Text className="font-noto-medium text-[14px] leading-[20px] text-foreground">{title}</Text>
-          {description ? <Text className="font-noto-medium text-[12px] leading-[16px] mt-0.5 text-muted-foreground">{description}</Text> : null}
+    <View className={`rounded-lg bg-card ${danger ? 'shadow-[0_0_0_1px_var(--color-destructive)]' : 'shadow-[0_0_0_1px_var(--color-border)]'}`}>
+      <View className="min-h-12 justify-center py-2 pr-2 pl-4">
+        <View className="flex-row flex-wrap items-center justify-between gap-2">
+          <View className="min-w-0 shrink py-0.5">
+            <Text
+              accessibilityRole={description ? 'button' : 'header'}
+              accessibilityHint={description}
+              onPress={description ? () => setOpen((value) => !value) : undefined}
+              className={`font-noto-medium text-[14px] leading-[20px] ${danger ? 'text-destructive' : 'text-foreground'} ${description ? 'underline' : ''}`}
+              // dotted and muted like the web's `decoration-dotted decoration-muted-foreground` (no class for these)
+              style={description ? { textDecorationStyle: 'dotted', textDecorationColor: colors.mutedForeground } : undefined}
+            >
+              {title}
+            </Text>
+          </View>
+          {actions ? <View className="min-w-0 max-w-full flex-row flex-wrap items-center gap-2">{actions}</View> : null}
         </View>
-        {actions ? <View className="flex-row flex-wrap gap-2">{actions}</View> : null}
+        {/* the web shows it in a tooltip; a tap on the title shows it here, under the whole row */}
+        {description && open ? <Text className="pr-2 pb-0.5 text-[12px] leading-[16px] text-muted-foreground">{description}</Text> : null}
       </View>
       {children !== undefined ? (
-        <View className={`rounded-b-lg overflow-hidden border-t border-border bg-background ${flush ? 'p-0' : 'p-4'}`}>{children}</View>
+        <View className={`rounded-b-lg overflow-hidden border-t border-border ${danger ? '' : 'bg-background'} ${flush ? 'p-0' : 'p-4'}`}>{children}</View>
       ) : null}
     </View>
+  )
+}
+
+/** The web `Select` (its 32px trigger, or the 28px `sm` one): the current choice and a chevron; the choices open in a `PickerSheet`. */
+export function Select<T extends string>({ value, options, onChange, label, size = 'default' }: { value: T; options: readonly { value: T; label: string }[]; onChange: (value: T) => void; label: string; size?: 'default' | 'sm' }) {
+  const { colors } = useTheme()
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={label}
+        onPress={() => setOpen(true)}
+        className={`flex-row items-center justify-between gap-1.5 border border-input pr-2 pl-2.5 dark:bg-input/30 active:bg-input/50 ${size === 'sm' ? 'h-7 rounded-md' : 'h-8 rounded-lg'}`}
+      >
+        <Text numberOfLines={1} className={`shrink text-foreground ${size === 'sm' ? 'text-[13px]' : 'text-[14px]'}`}>
+          {options.find((option) => option.value === value)?.label}
+        </Text>
+        <Icon name="chevronDown" size={16} color={colors.mutedForeground} />
+      </Pressable>
+      <PickerSheet
+        visible={open}
+        title={label}
+        options={options.map((option) => ({ key: option.value, label: option.label, selected: option.value === value }))}
+        onSelect={(key) => {
+          setOpen(false)
+          onChange(key as T)
+        }}
+        onClose={() => setOpen(false)}
+      />
+    </>
   )
 }
 
@@ -266,4 +314,54 @@ export function Segmented<T extends string>({ value, options, onChange, label }:
 /** A quiet status or error line inside a card. */
 export function Note({ children, error = false }: { children: ReactNode; error?: boolean }) {
   return <Text className={`text-[13px] leading-[19px] ${error ? 'text-destructive' : 'text-muted-foreground'}`}>{children}</Text>
+}
+
+/**
+ * The settings pages' avatar on the web (`Avatar size="sm"` + `AvatarFallback rounded-lg text-[11px]`): one initial
+ * on the muted fill, with the hairline ring, and an optional presence badge.
+ */
+export function InitialAvatar({ name, size = 28, presence }: { name: string; size?: number; presence?: Presence }) {
+  const { colors } = useTheme()
+  const badge = size <= 24 ? 8 : size <= 40 ? 10 : 12
+  return (
+    <View accessibilityLabel={name} style={{ width: size, height: size }}>
+      <View className="items-center justify-center rounded-lg bg-muted" style={{ width: size, height: size }}>
+        <Text className="font-noto-semibold text-[11px] text-muted-foreground">{name.charAt(0).toUpperCase()}</Text>
+      </View>
+      <View className="absolute inset-0 rounded-full border border-border" />
+      {presence ? (
+        <View className="absolute -right-0.5 -bottom-0.5 rounded-full p-0.5 bg-background">
+          <StatusMark presence={presence} size={badge} surface={colors.background} />
+        </View>
+      ) : null}
+    </View>
+  )
+}
+
+/**
+ * The web's 28px outline button with 11px text: the members' and users' `Manage`, and the `Copy` on a code block
+ * (`muted`, with its icon). The `src/ui` Button has no text-size override, so the settings pages keep this one.
+ */
+export function SmallOutlineButton({ label, onPress, icon, muted = false, state = 'idle', accessibilityLabel }: { label: string; onPress: () => void; icon?: IconName; muted?: boolean; state?: 'idle' | 'copied' | 'failed'; accessibilityLabel?: string }) {
+  const { colors, scheme } = useTheme()
+  const flat = useButtonStyle() === 'flat'
+  const edge = flat ? undefined : scheme === 'dark' ? alpha(cssColors.white, 0.08) : alpha(cssColors.black, 0.22)
+  const tone = state === 'copied' ? 'text-primary' : state === 'failed' ? 'text-destructive' : muted ? 'text-muted-foreground' : 'text-foreground'
+  const fill = state === 'copied' ? 'bg-primary/10' : state === 'failed' ? 'bg-destructive/10' : muted ? 'bg-background/90' : 'bg-background dark:bg-input/30'
+  const iconColor = state === 'copied' ? colors.primary : state === 'failed' ? colors.destructive : muted ? colors.mutedForeground : colors.foreground
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? label}
+      onPress={onPress}
+      className={`h-7 flex-row items-center justify-center gap-1 rounded-md border border-border dark:border-input active:bg-muted ${muted ? 'px-2' : 'px-2.5'} ${fill}`}
+      style={({ pressed }) => ({
+        boxShadow: edge && !pressed ? `0 2px 0 ${edge}` : undefined,
+        transform: flat ? [{ scale: pressed ? 0.97 : 1 }] : [{ translateY: pressed && edge ? 2 : 0 }],
+      })}
+    >
+      {icon ? <Icon name={icon} size={14} color={iconColor} /> : null}
+      <Text className={`${muted ? 'font-noto-semibold' : 'font-noto-medium'} text-[11px] leading-[16px] ${tone}`}>{label}</Text>
+    </Pressable>
+  )
 }
