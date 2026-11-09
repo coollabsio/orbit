@@ -5,7 +5,7 @@ import { Pressable, ScrollView, Switch, View } from 'react-native'
 
 import { useOrbit } from '../../orbit-context'
 import { alpha, cssColors, useButtonStyle, useTheme } from '../../theme'
-import { Icon, type IconName, KeyboardSpace, PaneHeader, PickerSheet, type Presence, PullRefresh, SafeAreaView, StatusMark, Text } from '../../ui'
+import { Icon, type IconName, KeyboardSpace, PaneHeader, PickerSheet, type Presence, PullRefresh, SafeAreaView, Spinner, StatusMark, Text } from '../../ui'
 
 export interface SettingsNavItem {
   href: Href & string
@@ -303,8 +303,16 @@ export function Segmented<T extends string>({ value, options, onChange, label }:
 }
 
 /** A quiet status or error line inside a card. */
-export function Note({ children, error = false }: { children: ReactNode; error?: boolean }) {
-  return <Text className={`text-[13px] leading-[19px] ${error ? 'text-destructive' : 'text-muted-foreground'}`}>{children}</Text>
+/** A short message. `loading` puts the spinner before it, as the web's `LoadingText`. */
+export function Note({ children, error = false, loading = false }: { children: ReactNode; error?: boolean; loading?: boolean }) {
+  const text = <Text className={`text-[13px] leading-[19px] ${error ? 'text-destructive' : 'text-muted-foreground'}`}>{children}</Text>
+  if (!loading) return text
+  return (
+    <View accessibilityRole="progressbar" className="flex-row items-center gap-2">
+      <Spinner />
+      {text}
+    </View>
+  )
 }
 
 /**

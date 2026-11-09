@@ -35,7 +35,7 @@ export default function AdminAuditScreen() {
         flush
       >
         {exportError ? <View className="p-4 border-b border-border"><Note error>The export could not be opened. {exportError}</Note></View> : null}
-        {audit.isPending ? <View className="p-4"><Note>Loading events…</Note></View> : null}
+        {audit.isPending ? <View className="p-4"><Note loading>Loading events…</Note></View> : null}
         {audit.isError ? (
           <View className="p-4 flex-row items-center gap-2">
             <Note error>Events could not be loaded.</Note>

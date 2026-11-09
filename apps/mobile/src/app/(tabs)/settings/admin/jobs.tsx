@@ -15,7 +15,7 @@ export default function AdminJobsScreen() {
   const limits = useJobLimits()
   return (
     <AdminShell onRefresh={() => limits.refetch()}>
-      {limits.isPending ? <SettingsCard title="Background jobs"><Note>Loading limits…</Note></SettingsCard> : null}
+      {limits.isPending ? <SettingsCard title="Background jobs"><Note loading>Loading limits…</Note></SettingsCard> : null}
       {limits.isError ? (
         <SettingsCard title="Background jobs">
           <View className="flex-row items-center gap-2">

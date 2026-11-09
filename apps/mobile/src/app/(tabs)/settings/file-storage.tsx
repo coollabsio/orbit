@@ -43,7 +43,7 @@ export default function FileStorageScreen() {
               <Button label="Retry" variant="ghost" onPress={() => void bucket.refetch()} />
             </View>
           ) : (
-            <Note>Loading file storage…</Note>
+            <Note loading>Loading file storage…</Note>
           )}
         </SettingsCard>
       )}
@@ -51,7 +51,7 @@ export default function FileStorageScreen() {
         title="Usage"
         description="Files, emoji and stickers of this workspace. A file attached more than once counts once; a deleted file stops counting about a day after the trash is emptied."
       >
-        {storage.data ? <StorageBar {...storageUse(storage.data)} /> : <Note error={storage.isError}>{storage.isError ? 'Storage use could not be loaded.' : 'Loading storage…'}</Note>}
+        {storage.data ? <StorageBar {...storageUse(storage.data)} /> : <Note error={storage.isError} loading={!storage.isError}>{storage.isError ? 'Storage use could not be loaded.' : 'Loading storage…'}</Note>}
         {files.length ? (
           <LargestFiles files={files} page={page} loading={storage.isFetching} onPage={setOffset} />
         ) : null}

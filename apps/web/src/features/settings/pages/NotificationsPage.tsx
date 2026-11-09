@@ -22,6 +22,7 @@ import {
 import { FieldGrid, RowIcon, SettingsRow } from '@/features/settings/components/SettingsParts'
 import { shortDate } from '@/lib/format'
 import { MIN_VOLUME, playSound, SOUND_SETS, type SoundSet, useSoundSettings } from '@/lib/sounds'
+import { LoadingText } from '@/components/ui/spinner'
 
 const PREFERENCES: { field: keyof NotificationPrefs; label: string }[] = [
   { field: 'direct_messages', label: 'Direct messages' },
@@ -96,7 +97,7 @@ function Devices() {
 
   return (
     <div className="flex flex-col divide-y">
-      {devices.isPending ? <SettingsRow role="status">Loading devices…</SettingsRow> : null}
+      {devices.isPending ? <SettingsRow><LoadingText>Loading devices…</LoadingText></SettingsRow> : null}
       {devices.isError ? <SettingsRow role="alert">Devices could not be loaded. <Button variant="ghost" onClick={() => void devices.refetch()}>Retry</Button></SettingsRow> : null}
       {devices.isSuccess && list.length === 0 ? <SettingsRow className="text-sm text-muted-foreground">No device gets notifications yet.</SettingsRow> : null}
       {list.map((device) => (
@@ -128,7 +129,7 @@ function Preferences() {
   const save = useSaveNotificationPreferences()
   const current = preferences.data
 
-  if (preferences.isPending) return <p className="text-sm text-muted-foreground" role="status">Loading…</p>
+  if (preferences.isPending) return <p className="text-sm text-muted-foreground"><LoadingText>Loading…</LoadingText></p>
   if (!current) return <p className="text-sm text-muted-foreground" role="alert">Your choices could not be loaded. <Button variant="ghost" onClick={() => void preferences.refetch()}>Retry</Button></p>
 
   return (

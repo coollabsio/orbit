@@ -15,6 +15,7 @@ import { useCan } from '@/features/workspaces/permissions'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { STICKER_IMAGE_TYPES, STICKER_NAME_MAX, stickerNameFromFile, stickerProblem } from '@/lib/customSticker'
 import { shortDate } from '@/lib/format'
+import { LoadingText } from '@/components/ui/spinner'
 
 /** What the server can answer to a new sticker or a delete, in words for the page. */
 const SERVER_PROBLEMS: Record<string, string> = {
@@ -113,7 +114,7 @@ export function StickersPage() {
     ) : (
       <SettingsCard title="Stickers" description={stickers.data ? `${stickers.data.length} of 100 in this workspace.` : undefined} flush>
         <div className="flex flex-col divide-y">
-          {stickers.isPending ? <SettingsRow>Loading stickers…</SettingsRow> : null}
+          {stickers.isPending ? <SettingsRow><LoadingText>Loading stickers…</LoadingText></SettingsRow> : null}
           {stickers.isError ? <SettingsRow role="alert">Stickers could not be loaded.</SettingsRow> : null}
           {stickers.data?.map((entry) => (
             <SettingsRow className="flex-nowrap" key={entry.id}>

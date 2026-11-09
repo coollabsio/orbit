@@ -97,7 +97,7 @@ export default function MembersScreen() {
           <Select label="Filter by role" value={roleFilter} options={ROLE_FILTERS} onChange={(value) => { setRoleFilter(value); setPage(1) }} />
           <Select label="Sort members" value={sort} options={SORTS} onChange={(value) => { setSort(value); setPage(1) }} />
         </View>
-        {members.isPending ? <View className="p-4"><Note>Loading workspace members…</Note></View> : null}
+        {members.isPending ? <View className="p-4"><Note loading>Loading workspace members…</Note></View> : null}
         {members.isError ? <View className="p-4"><Note error>Workspace members could not be loaded.</Note></View> : null}
         {members.data && list.length === 0 ? <View className="p-4"><Note>No matching members. Try a different name, email address, or role.</Note></View> : null}
         {visible.length > 0 ? (
@@ -231,7 +231,7 @@ function Invite() {
 function PendingInvitations() {
   const invitations = useInvitations(true)
   const { revokeInvitation } = useMemberWrites()
-  if (invitations.isPending) return <SettingsCard title="Pending invitations"><Note>Loading invitations…</Note></SettingsCard>
+  if (invitations.isPending) return <SettingsCard title="Pending invitations"><Note loading>Loading invitations…</Note></SettingsCard>
   if (invitations.isError) return <SettingsCard title="Pending invitations"><Note error>Invitations could not be loaded.</Note></SettingsCard>
   if (invitations.data.length === 0) return null
   return (

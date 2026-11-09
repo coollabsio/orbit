@@ -9,6 +9,7 @@ import { SettingsRow } from '@/features/settings/components/SettingsParts'
 import { useCreateLabel, useDeleteLabel, useLabels, useUpdateLabel } from '@/features/tasks/api/labels'
 import { LABEL_COLORS, LabelColorPicker, LabelPill } from '@/features/tasks/components/TaskLabels'
 import { projectLabels } from '@/features/tasks/taskMeta'
+import { LoadingText } from '@/components/ui/spinner'
 
 function LabelForm({ initial, submitLabel, pending, onSubmit, onCancel }: { initial?: LabelRecord; submitLabel: string; pending: boolean; onSubmit: (name: string, color: string) => Promise<void>; onCancel?: () => void }) {
   const [name, setName] = useState(initial?.name ?? '')
@@ -59,7 +60,7 @@ export function ProjectLabelsCard({ projectId }: { projectId: string }) {
           <LabelForm submitLabel="Create label" pending={createLabel.isPending} onSubmit={async (name, color) => { await createLabel.mutateAsync({ projectId, name, color }) }} />
         </SettingsRow>
         {createLabel.isError ? <SettingsRow className="text-xs text-destructive" role="alert">The label could not be created.</SettingsRow> : null}
-        {labels.isPending ? <SettingsRow>Loading labels…</SettingsRow> : null}
+        {labels.isPending ? <SettingsRow><LoadingText>Loading labels…</LoadingText></SettingsRow> : null}
         {labels.isError ? <SettingsRow role="alert">Labels could not be loaded.</SettingsRow> : null}
         {labels.isSuccess && sorted.length === 0 ? <SettingsRow>No labels yet.</SettingsRow> : null}
         {sorted.map((label) => editingId === label.id

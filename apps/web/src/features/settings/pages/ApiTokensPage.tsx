@@ -17,6 +17,7 @@ import { AccessPicker, ProjectPicker, type ScopeResource } from '@/components/co
 import { FieldGrid, RequiredMark, RowIcon, SettingsRow } from '@/features/settings/components/SettingsParts'
 import { useApiTokens, useCreateApiToken, useRevokeApiToken } from '@/features/settings/api/apiTokens'
 import type { ApiTokenScope } from '@orbit/api/generated/types.gen'
+import { LoadingText } from '@/components/ui/spinner'
 
 const EXPIRATION_OPTIONS = [
   { value: 'never', label: 'Never expires' },
@@ -120,7 +121,7 @@ export function ApiTokensPage() {
     </SettingsCard>
     <SettingsCard title="Active API tokens" flush>
       <div className="flex flex-col divide-y">
-        {tokens.isPending ? <SettingsRow>Loading API tokens…</SettingsRow> : null}
+        {tokens.isPending ? <SettingsRow><LoadingText>Loading API tokens…</LoadingText></SettingsRow> : null}
         {tokens.isError ? <SettingsRow role="alert">API tokens could not be loaded.</SettingsRow> : null}
         {tokens.data?.length === 0 ? <SettingsRow>No active API tokens.</SettingsRow> : null}
         {tokens.data?.map((token) => <SettingsRow className="flex-nowrap" key={token.id}>

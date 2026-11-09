@@ -10,7 +10,7 @@ export default function AdminGeneralScreen() {
   const settings = useInstanceSettings()
   return (
     <AdminShell onRefresh={() => settings.refetch()}>
-      {settings.isPending ? <SettingsCard title="General"><Note>Loading settings…</Note></SettingsCard> : null}
+      {settings.isPending ? <SettingsCard title="General"><Note loading>Loading settings…</Note></SettingsCard> : null}
       {settings.isError ? (
         <SettingsCard title="General">
           <View className="flex-row items-center gap-2">

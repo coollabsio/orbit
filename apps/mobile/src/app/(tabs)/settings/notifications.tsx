@@ -38,7 +38,7 @@ export default function NotificationsScreen() {
               <Button label="Retry" variant="ghost" onPress={() => void prefs.refetch()} />
             </View>
           ) : (
-            <Note>Loading…</Note>
+            <Note loading>Loading…</Note>
           )
         ) : (
           <View className="gap-4">
@@ -143,7 +143,7 @@ function Devices() {
   const removeError = removeBrowser.error ?? removeApns.error
   return (
     <>
-      {pending ? <SettingsRow first><Note>Loading devices…</Note></SettingsRow> : null}
+      {pending ? <SettingsRow first><Note loading>Loading devices…</Note></SettingsRow> : null}
       {failed ? (
         <SettingsRow first>
           <Note error>Devices could not be loaded.</Note>

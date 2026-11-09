@@ -13,6 +13,7 @@ import type { Project } from '@/features/tasks/api/models'
 import { PROJECT_COLORS } from '@/features/tasks/taskMeta'
 import { useCreateWorkspace, useWorkspaces } from '@/features/workspaces/api'
 import { useIsInstallationAdmin } from '@/features/workspaces/permissions'
+import { LoadingText } from '@/components/ui/spinner'
 
 /** The tag a project name suggests: its first three letters or digits, upper case. */
 function suggestedProjectKey(name: string) {
@@ -89,7 +90,7 @@ function ProjectStep({ workspaceId }: { workspaceId: string }) {
       </AuthCard>
     )
   }
-  if (!project) return <AuthCard><p role="status" className="text-[13px] text-muted-foreground">Loading…</p></AuthCard>
+  if (!project) return <AuthCard><p className="text-[13px] text-muted-foreground"><LoadingText>Loading…</LoadingText></p></AuthCard>
   return <ProjectForm workspaceId={workspaceId} project={project} />
 }
 

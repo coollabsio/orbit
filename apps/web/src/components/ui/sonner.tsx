@@ -4,7 +4,8 @@ import { Toaster as Sonner, type ToasterProps } from "sonner"
 // Sonner injects this CSS as a runtime <style> tag, which the production CSP (`style-src 'self'`) blocks (vite.config.ts turns that off).
 // Importing the file bundles it into our stylesheet so toasts are styled in production too.
 import "sonner/dist/styles.css"
-import { TickCircle as CircleCheckIcon, InfoCircle as InfoIcon, Danger as TriangleAlertIcon, Danger as OctagonXIcon, Loader as Loader2Icon } from 'reicon-react'
+import { TickCircle as CircleCheckIcon, InfoCircle as InfoIcon, Danger as TriangleAlertIcon, Danger as OctagonXIcon } from 'reicon-react'
+import { Spinner } from "@/components/ui/spinner"
 import { useTheme } from "@/lib/themeContext"
 
 const Toaster = ({ ...props }: ToasterProps) => {
@@ -29,7 +30,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
           <OctagonXIcon className="size-4" />
         ),
         loading: (
-          <Loader2Icon className="size-4 animate-spin" />
+          <Spinner aria-hidden />
         ),
       }}
       style={

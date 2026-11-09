@@ -12,6 +12,7 @@ import { currentUserQueryOptions } from '@/features/auth/api'
 import { createApiClient } from '@/api/client'
 import { oauthRequest, type OAuthConsent } from '@/features/auth/oauth'
 import { loginPath } from '@/features/auth/returnTo'
+import { LoadingText } from '@/components/ui/spinner'
 
 // Anonymous consent sessions must not trigger the app-wide /login redirect.
 const consentClient = createApiClient()
@@ -100,6 +101,6 @@ export function OAuthConsentPage() {
         <Button disabled={!workspace || (!allProjects && (!selected.length || selected.length > 100)) || approve.isPending} onClick={() => approve.mutate(true)}>{scopes.length ? 'Allow selected access' : 'Allow read access'}</Button>
       </div>
       <p className="text-xs text-muted-foreground">Allowing will redirect to <strong className="break-words font-medium text-foreground">{consent.data.redirect_to}</strong>.</p>
-    </> : <p>Loading connection…</p>}
+    </> : <p><LoadingText>Loading connection…</LoadingText></p>}
   </div></AuthCard>
 }

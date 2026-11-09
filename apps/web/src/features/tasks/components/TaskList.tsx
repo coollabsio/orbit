@@ -3,7 +3,8 @@ import { useCommand } from '@/shortcuts/useCommand'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useScrollMemory } from '@/lib/useScrollMemory'
 import { defaultRangeExtractor, useVirtualizer, type VirtualItem } from '@tanstack/react-virtual'
-import { Calendar, Copy, Danger, Flag, Hierarchy2, LinkBroken, Loader, Add as Plus, RecordCircle, TaskSquare as SquareCheck, Tag, UserAdd, Xmark as X } from 'reicon-react'
+import { Calendar, Copy, Danger, Flag, Hierarchy2, LinkBroken, Add as Plus, RecordCircle, TaskSquare as SquareCheck, Tag, UserAdd, Xmark as X } from 'reicon-react'
+import { Spinner } from '@/components/ui/spinner'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Tip } from '@/components/common/Tip'
@@ -569,7 +570,7 @@ function BulkBar({
         ) : null}
         {bulkSlow ? (
           <span role="status" className="flex shrink-0 items-center gap-1.5 px-2 text-xs whitespace-nowrap text-muted-foreground">
-            <Loader aria-hidden className="size-3.5 animate-spin" />
+            <Spinner aria-hidden className="size-3.5" />
             Updating…
           </span>
         ) : null}

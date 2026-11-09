@@ -12,6 +12,7 @@ import { PasswordInput } from '@/components/ui/password-input'
 import { useInstanceSettings, useRemoveSignInProvider, useSaveSignInProvider } from '@/features/admin/api'
 import { PROVIDER_NAMES } from '@/features/auth/providerSignIn'
 import { FieldGrid, RequiredMark } from '@/features/settings/components/SettingsParts'
+import { LoadingText } from '@/components/ui/spinner'
 
 const PROVIDERS: { provider: Provider; description: string }[] = [
   { provider: 'google', description: 'Create a client of type "Web application" in Google Cloud Console (APIs & Services → Credentials) and add the callback URL as an authorized redirect URI.' },
@@ -25,7 +26,7 @@ function problemText(error: unknown, fallback: string) {
 /** "Continue with Google / GitHub" on the sign-in page: the client each provider issued to this Orbit. */
 export function AdminSignInProvidersPage() {
   const settings = useInstanceSettings()
-  if (settings.isPending) return <SettingsCard title="Sign-in providers"><p role="status">Loading settings…</p></SettingsCard>
+  if (settings.isPending) return <SettingsCard title="Sign-in providers"><p><LoadingText>Loading settings…</LoadingText></p></SettingsCard>
   if (settings.isError) return <SettingsCard title="Sign-in providers"><p role="alert">Settings could not be loaded. <Button variant="ghost" onClick={() => void settings.refetch()}>Retry</Button></p></SettingsCard>
   return (
     <>

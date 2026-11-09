@@ -112,7 +112,7 @@ export default function EmojiScreen() {
         <View className="min-h-80"><EmptyState icon="smile" title="No custom emoji yet" description="Add an image above. Everyone in the workspace can then use it in chat." /></View>
       ) : (
         <SettingsCard title="Emoji" description={emoji.data ? `${emoji.data.length} of ${EMOJI_LIMIT} in this workspace.` : undefined} flush>
-          {emoji.isPending ? <SettingsRow first><Text className="text-[13px]">Loading emoji…</Text></SettingsRow> : null}
+          {emoji.isPending ? <SettingsRow first><Note loading>Loading emoji…</Note></SettingsRow> : null}
           {emoji.isError ? <SettingsRow first><Text accessibilityRole="alert" className="text-[13px]">Emoji could not be loaded.</Text></SettingsRow> : null}
           {emoji.data?.map((entry, index) => (
             <SettingsRow key={entry.id} first={index === 0}>

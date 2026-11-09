@@ -27,6 +27,7 @@ import { FieldGrid, RequiredMark } from '@/features/settings/components/Settings
 import { useSlowPending } from '@/lib/useDebouncedValue'
 import { ProfileTrigger } from '@/components/common/ProfileTrigger'
 import { loadFailed } from '@/lib/connection'
+import { LoadingText } from '@/components/ui/spinner'
 
 type Role = User['role']
 type Sort = 'name_asc' | 'name_desc' | 'email_asc' | 'role'
@@ -96,7 +97,7 @@ export function MembersPage() {
     })
   }, [users, search, roleFilter, sortBy])
 
-  if (membersQuery.isPending) return <SettingsCard title="Members"><p>Loading workspace members…</p></SettingsCard>
+  if (membersQuery.isPending) return <SettingsCard title="Members"><p><LoadingText>Loading workspace members…</LoadingText></p></SettingsCard>
   if (loadFailed(membersQuery)) return <SettingsCard title="Members"><p role="alert">Workspace members could not be loaded. No mock data was substituted.</p></SettingsCard>
 
   const lastPage = Math.max(1, Math.ceil(filtered.length / perPage))
@@ -423,7 +424,7 @@ export function MembersPage() {
         </form>
       ) : null}
 
-      {canManage && invitations.isPending ? <SettingsCard title="Pending invitations"><p role="status">Loading invitations…</p></SettingsCard> : null}
+      {canManage && invitations.isPending ? <SettingsCard title="Pending invitations"><p><LoadingText>Loading invitations…</LoadingText></p></SettingsCard> : null}
       {canManage && invitations.isError ? <SettingsCard title="Pending invitations"><p role="alert">Invitations could not be loaded. <Button variant="ghost" onClick={() => void invitations.refetch()}>Retry</Button></p></SettingsCard> : null}
       {canManage && pendingInvitations.length > 0 ? (
         <SettingsCard title="Pending invitations" flush>

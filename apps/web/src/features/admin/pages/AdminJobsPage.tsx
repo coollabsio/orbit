@@ -8,6 +8,7 @@ import { Field, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { useJobLimits, useSaveJobLimits } from '@/features/admin/api'
 import { SettingsRow } from '@/features/settings/components/SettingsParts'
+import { LoadingText } from '@/components/ui/spinner'
 
 const KIND_LABELS: Record<string, string> = {
   'notion.scan': 'Notion scans',
@@ -39,7 +40,7 @@ function draftOf(kinds: JobLimitView[], useDefaults = false): Draft {
 /** How many background jobs of each kind may run at once, on all servers and per workspace. */
 export function AdminJobsPage() {
   const limits = useJobLimits()
-  if (limits.isPending) return <SettingsCard title="Background jobs"><p role="status">Loading limits…</p></SettingsCard>
+  if (limits.isPending) return <SettingsCard title="Background jobs"><p><LoadingText>Loading limits…</LoadingText></p></SettingsCard>
   if (limits.isError) return <SettingsCard title="Background jobs"><p role="alert">Limits could not be loaded. <Button variant="ghost" onClick={() => void limits.refetch()}>Retry</Button></p></SettingsCard>
   // Remount on save so the form shows what the server stored.
   return <JobLimitsForm key={JSON.stringify(limits.data.kinds)} kinds={limits.data.kinds} />
