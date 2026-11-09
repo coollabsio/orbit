@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
-import type { Page, PageSummary, Teamspace, WorkspaceRole } from '@orbit/api/generated/types.gen'
+import type { DatabaseDetail, DatabaseRow, Page, PageSummary, Teamspace, WorkspaceRole } from '@orbit/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 import { ConfirmationModalHost } from '@/components/common/ConfirmationModal'
 import { WorkspaceProvider } from '@/features/workspaces/WorkspaceProvider'
@@ -59,7 +59,12 @@ type Handler = (call: Call) => Response | Promise<Response> | undefined
 
 function Location() {
   const location = useLocation()
-  return <output data-testid="location">{location.pathname}</output>
+  return (
+    <>
+      <output data-testid="location">{location.pathname}</output>
+      <output data-testid="location-search">{location.search}</output>
+    </>
+  )
 }
 
 interface SetupOptions {
@@ -88,7 +93,7 @@ function setup(path: string, handler: Handler, role: WorkspaceRole = 'owner', op
   const view = render(
     <QueryClientProvider client={client}>
       <CollabConnectContext value={collab.connect}>
-        <MemoryRouter initialEntries={[`${path}?workspace=workspace-1`]}>
+        <MemoryRouter initialEntries={[`${path}${path.includes('?') ? '&' : '?'}workspace=workspace-1`]}>
           <ConfirmationModalHost />
           <WorkspaceProvider>
             <Routes>
@@ -105,6 +110,7 @@ function setup(path: string, handler: Handler, role: WorkspaceRole = 'owner', op
 }
 
 const location = (view: ReturnType<typeof render>) => view.getByTestId('location').textContent
+const search = (view: ReturnType<typeof render>) => view.getByTestId('location-search').textContent
 
 /** The editor mounts after the collaborative document's first sync. */
 /** Empties the title through its real onChange (this needs the DOM registered before react-dom loads, see `test/dom.ts`). */
@@ -730,4 +736,68 @@ test('a page without sub-pages offers Markdown and PDF export only', async () =>
   expect(await view.findByRole('menuitem', { name: 'PDF' })).toBeTruthy()
   expect(view.getByRole('menuitem', { name: 'Markdown' })).toBeTruthy()
   expect(view.queryByRole('menuitem', { name: 'Markdown with sub-pages' })).toBeNull()
+})
+
+const databaseRow = (id: string, title: string, values: DatabaseRow['values'] = {}): DatabaseRow => ({
+  id, title, icon: null, position: 0, version: 1, has_content: false, created_at: '2026-11-09T10:00:00Z', created_by: 'user-1',
+  updated_at: '2026-11-09T10:00:00Z', updated_by: 'user-1', values,
+})
+
+/** The database "db": a title, a checkbox "Done" and a text "Notes"; one table view. */
+const databaseDetail = (rows: DatabaseRow[]): DatabaseDetail => ({
+  database: { id: 'db', title: 'Research', icon: null, locked: false, row_count: rows.length },
+  properties: [
+    { id: 'p-title', name: 'Name', type: 'title', config: {}, position: 0 },
+    { id: 'p-done', name: 'Done', type: 'checkbox', config: {}, position: 1 },
+    { id: 'p-notes', name: 'Notes', type: 'text', config: {}, position: 2 },
+  ],
+  views: [{ id: 'v1', name: 'Table', type: 'table', config: {}, position: 0 }],
+  rows,
+})
+
+const databaseSummary: PageSummary = { ...summary('db', null, 0, 'Research'), kind: 'database' }
+const rowPage = (id: string, title: string) => fullPage(id, { title, parent_id: 'db', database_id: 'db' })
+
+/** Rows are not in the tree; the open page itself is the target of its own menu. */
+test('the page menu of a row opened as a full page duplicates the row and opens the copy with its properties', async () => {
+  let duplicated = false
+  const rows = () => [databaseRow('r1', 'Paper A'), ...(duplicated ? [databaseRow('r1-copy', 'Paper A (copy)')] : [])]
+  const { view, calls } = setup('/docs/r1', (call) => {
+    if (call.path === '/pages') return Response.json({ items: [databaseSummary] })
+    if (call.path === '/databases/db') return Response.json(databaseDetail(rows()))
+    if (call.path === '/pages/r1' && call.method === 'GET') return Response.json(rowPage('r1', 'Paper A'))
+    if (call.path === '/pages/r1/duplicate') {
+      duplicated = true
+      return Response.json(rowPage('r1-copy', 'Paper A (copy)'), { status: 201 })
+    }
+    if (call.path === '/pages/r1-copy') return Response.json(rowPage('r1-copy', 'Paper A (copy)'))
+  })
+  await view.findByLabelText('Page title')
+  fireEvent.click(within(view.container.querySelector('section:last-of-type') as HTMLElement).getAllByRole('button', { name: 'Page options' }).at(-1)!)
+  await userEvent.click(await view.findByRole('menuitem', { name: 'Duplicate' }))
+  await waitFor(() => expect(location(view)).toBe('/docs/r1-copy'))
+  expect(calls.find((call) => call.path === '/pages/r1/duplicate')?.body).toEqual({ include_children: false })
+  // The copy is a new row of the database: its page shows the property list once the database is read again.
+  await waitFor(() => expect((view.getByLabelText('Page title') as HTMLInputElement).value).toBe('Paper A (copy)'))
+  const properties = await view.findByRole('group', { name: 'Properties' })
+  expect(within(properties).getAllByText('Empty')).toHaveLength(1)
+})
+
+test('"Move to trash" on a row opened as a full page trashes it and goes back to its database', async () => {
+  const { view, calls } = setup('/docs/r1', (call) => {
+    if (call.path === '/pages') return Response.json({ items: [databaseSummary] })
+    if (call.path === '/databases/db') return Response.json(databaseDetail([databaseRow('r1', 'Paper A')]))
+    if (call.path === '/pages/r1' && call.method === 'GET') return Response.json(rowPage('r1', 'Paper A'))
+    if (call.path === '/pages/r1' && call.method === 'DELETE') return new Response(null, { status: 204 })
+    if (call.path === '/pages/db') return Response.json(fullPage('db', { title: 'Research', kind: 'database' }))
+  })
+  await view.findByLabelText('Page title')
+  fireEvent.click(within(view.container.querySelector('section:last-of-type') as HTMLElement).getAllByRole('button', { name: 'Page options' }).at(-1)!)
+  await userEvent.click(await view.findByRole('menuitem', { name: 'Move to trash' }))
+  const dialog = await view.findByRole('dialog')
+  expect(dialog.textContent).toContain('Move “Paper A” to the trash?')
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Move to trash' }))
+  await waitFor(() => expect(location(view)).toBe('/docs/db'))
+  const trash = calls.find((call) => call.method === 'DELETE' && call.path === '/pages/r1')
+  expect(trash?.search).toBe('?expected_version=1')
 })

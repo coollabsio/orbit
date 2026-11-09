@@ -1,10 +1,8 @@
 import { useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router'
-import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { ChevronDown, ChevronUp, Copy, Link2, Maximize4, MoreH, Trash, Xmark } from 'reicon-react'
 import { isPaymentRequired } from '@orbit/api/problem'
-import { queryKeys } from '@/api/queryKeys'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Spinner } from '@/components/ui/spinner'
@@ -40,7 +38,6 @@ function inEditor(target: EventTarget | null): boolean {
  */
 export function RowPeek({ workspaceId, databaseId, rowId, viewId, order, focusTitle, onShowRow, onClose }: RowPeekProps) {
   const navigate = useNavigate()
-  const queryClient = useQueryClient()
   const page = usePage(workspaceId, rowId)
   const tree = usePageTree(workspaceId)
   const database = useDatabase(workspaceId, databaseId)
@@ -99,7 +96,6 @@ export function RowPeek({ workspaceId, databaseId, rowId, viewId, order, focusTi
       { pageId: rowId, includeChildren: false },
       {
         onSuccess: (copy) => {
-          void queryClient.invalidateQueries({ queryKey: queryKeys.database(workspaceId, databaseId) })
           onShowRow(copy.id)
           toast.success('Row duplicated.')
         },

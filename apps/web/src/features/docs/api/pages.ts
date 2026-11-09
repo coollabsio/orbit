@@ -268,7 +268,10 @@ export function useTrashPage(workspaceId: string) {
       if (snapshot?.tree) queryClient.setQueryData(treeKey, snapshot.tree)
       return promptForConflict(error, () => void queryClient.invalidateQueries({ queryKey: queryKeys.pages.all(workspaceId) }))
     },
-    onSuccess: (_result, _input, snapshot) => {
+    onSuccess: (_result, { pageId }, snapshot) => {
+      // A trashed row leaves its database's row list.
+      const databaseId = queryClient.getQueryData<Page>(queryKeys.pages.detail(workspaceId, pageId))?.database_id
+      if (databaseId) void queryClient.invalidateQueries({ queryKey: queryKeys.database(workspaceId, databaseId) })
       for (const id of snapshot?.subtree ?? []) queryClient.removeQueries({ queryKey: queryKeys.pages.detail(workspaceId, id), exact: true })
       void queryClient.invalidateQueries({ queryKey: treeKey })
       void queryClient.invalidateQueries({ queryKey: queryKeys.pages.trash(workspaceId) })
@@ -292,8 +295,9 @@ export function useRestorePage(workspaceId: string) {
     onError: (error) => promptForConflict(error, () => void queryClient.invalidateQueries({ queryKey: queryKeys.pages.trash(workspaceId) })),
     onSuccess: (page) => {
       queryClient.setQueryData(queryKeys.pages.detail(workspaceId, page.id), page)
-      // The restored subtree comes back too, so refetch rather than patch.
+      // The restored subtree comes back too, so refetch rather than patch. A restored row rejoins its database.
       void queryClient.invalidateQueries({ queryKey: queryKeys.pages.tree(workspaceId) })
+      if (page.database_id) void queryClient.invalidateQueries({ queryKey: queryKeys.database(workspaceId, page.database_id) })
       void queryClient.invalidateQueries({ queryKey: queryKeys.pages.trash(workspaceId) })
       // Favorites of the restored subtree come back.
       void queryClient.invalidateQueries({ queryKey: queryKeys.pages.favorites(workspaceId) })
@@ -353,8 +357,9 @@ export function useDuplicatePage(workspaceId: string) {
     },
     onSuccess: (page) => {
       reconcilePage(queryClient, workspaceId, page)
-      // Later siblings shift and copied sub-pages are new: refetch the tree.
+      // Later siblings shift and copied sub-pages are new: refetch the tree. A copied row is a new row of its database.
       void queryClient.invalidateQueries({ queryKey: queryKeys.pages.tree(workspaceId) })
+      if (page.database_id) void queryClient.invalidateQueries({ queryKey: queryKeys.database(workspaceId, page.database_id) })
     },
   })
 }

@@ -75,6 +75,8 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
     preloadPageEditor()
   }, [])
   const markGone = (id: string) => setGone({ id, key: locationKeyRef.current })
+  /** A tree page, or the open page when it is not in the tree (a database row). */
+  const findTarget = (id: string) => pages.find((item) => item.id === id) ?? (page.data?.id === id ? page.data : undefined)
 
   const createFirstPage = () => {
     createPage.mutate(
@@ -90,7 +92,7 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
 
   /** Confirm, save the open editor if it is affected, trash the subtree, then leave it if it was open. */
   const requestTrash = async (targetId: string) => {
-    const target = pages.find((item) => item.id === targetId)
+    const target = findTarget(targetId)
     if (!target) return
     const descendants = descendantsOf(pages, targetId)
     const confirmed = await confirmAction({
@@ -157,7 +159,7 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
 
   /** Save the open editor if the copy includes it, duplicate, then open the copy. */
   const requestDuplicate = async (targetId: string, includeChildren: boolean) => {
-    const target = pages.find((item) => item.id === targetId)
+    const target = findTarget(targetId)
     if (!target) return
     const copied = new Set([targetId, ...(includeChildren ? descendantsOf(pages, targetId).map((item) => item.id) : [])])
     if (activeIdRef.current && copied.has(activeIdRef.current) && editorControl.current) await editorControl.current.flush()
