@@ -205,7 +205,7 @@ async fn app_build_migrates_checks_readiness_and_returns_first_run_setup_url() {
             .scalar::<i64>("SELECT MAX(version) FROM schema_migrations")
             .await
             .unwrap(),
-        82
+        83
     );
 
     let readiness = app
@@ -566,6 +566,7 @@ async fn critical_durable_schedules_exist_before_serve() {
         kinds,
         [
             "backup.scheduled",
+            "docs.search_text",
             "integrity.weekly",
             "notion.cleanup",
             "workspace.retention"

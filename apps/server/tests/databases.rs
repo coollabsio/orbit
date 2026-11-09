@@ -2624,3 +2624,155 @@ async fn the_filter_migration_turns_p1_rules_into_the_root_and_group() {
     assert_eq!(config["filter"], json!({"op": "and", "children": rules}));
     assert_eq!(config["wrap_cells"], true);
 }
+
+async fn search(fixture: &Fixture, query: &str) -> Vec<Value> {
+    fixture
+        .ok("GET", &format!("pages/search?q={query}"), None)
+        .await["items"]
+        .as_array()
+        .unwrap()
+        .clone()
+}
+
+/// Bundled SQLite's integrity check, FTS5 findings confirmed by FTS5 (`.ai/lessons.md`).
+async fn assert_integrity(fixture: &Fixture) {
+    orbit_platform::IntegrityService::new((*fixture.database).clone())
+        .full()
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn search_finds_rows_by_their_property_values() {
+    let fixture = Fixture::new().await;
+    let db = fixture.create_database("Research").await;
+    let stage = fixture
+        .add_property(
+            &db,
+            json!({"name": "Stage", "type": "select", "config": {"options": [{"name": "Reading"}]}}),
+        )
+        .await;
+    let reading = option_id(&stage, "Reading");
+    let stage = id_of(&stage).to_owned();
+    let ticket = id_of(
+        &fixture
+            .add_property(&db, json!({"name": "Ticket", "type": "text"}))
+            .await,
+    )
+    .to_owned();
+    let owner = id_of(
+        &fixture
+            .add_property(&db, json!({"name": "Owner", "type": "person"}))
+            .await,
+    )
+    .to_owned();
+    let row = fixture
+        .add_row(
+            &db,
+            json!({"title": "Paper", "values": {
+                &stage: reading, &ticket: "ACME-12", &owner: [fixture.owner_id.to_string()],
+            }}),
+        )
+        .await;
+    let row = id_of(&row).to_owned();
+
+    let found = search(&fixture, "readi").await;
+    assert_eq!(found.len(), 1, "{found:?}");
+    assert_eq!(found[0]["id"], row.as_str());
+    assert_eq!(found[0]["snippet"], "Stage: Reading");
+    assert_eq!(
+        found[0]["snippet_highlights"],
+        json!([{"start": 7, "end": 14}])
+    );
+    assert_eq!(found[0]["database_title"], "Research");
+    assert_eq!(search(&fixture, "acme").await.len(), 1);
+    assert!(
+        search(&fixture, "owner").await.is_empty(),
+        "person names and property names are not indexed"
+    );
+
+    // A rename of the option finds the new name, not the old.
+    fixture
+        .ok(
+            "PATCH",
+            &format!("databases/{db}/properties/{stage}"),
+            Some(json!({"config": {"options": [{"id": reading, "name": "Finished"}]}})),
+        )
+        .await;
+    assert!(search(&fixture, "reading").await.is_empty());
+    assert_eq!(search(&fixture, "finished").await.len(), 1);
+
+    // A value write is found at once; a property delete removes its words.
+    let (status, _) = fixture
+        .set_values(&db, &row, json!({&ticket: "ZEBRA-7"}))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(search(&fixture, "acme").await.is_empty());
+    assert_eq!(search(&fixture, "zebra").await.len(), 1);
+    fixture
+        .ok(
+            "DELETE",
+            &format!("databases/{db}/properties/{ticket}"),
+            None,
+        )
+        .await;
+    assert!(search(&fixture, "zebra").await.is_empty());
+
+    // A copy of the database copies the searchable values of its rows.
+    fixture
+        .ok("POST", &format!("pages/{db}/duplicate"), Some(json!({})))
+        .await;
+    assert_eq!(search(&fixture, "finished").await.len(), 2);
+    assert_integrity(&fixture).await;
+}
+
+#[tokio::test]
+async fn the_search_text_backfill_fills_missing_rows_once() {
+    let fixture = Fixture::new().await;
+    let db = fixture.create_database("Backfill").await;
+    let note = id_of(
+        &fixture
+            .add_property(&db, json!({"name": "Note", "type": "text"}))
+            .await,
+    )
+    .to_owned();
+    for index in 0..3 {
+        fixture
+            .add_row(&db, json!({"title": format!("Row {index}"), "values": {&note: format!("quokka {index}")}}))
+            .await;
+    }
+    // Rows as migration 0083 leaves them.
+    sqlx::query("UPDATE pages SET property_text = NULL WHERE parent_id = $1")
+        .bind(&db)
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    assert!(search(&fixture, "quokka").await.is_empty());
+
+    let repository =
+        orbit_server::repositories::databases::DatabaseRepository::new((*fixture.database).clone());
+    assert_eq!(repository.fill_search_text().await.unwrap(), 3);
+    assert_eq!(repository.fill_search_text().await.unwrap(), 0);
+    let texts = || async {
+        sqlx::query_scalar::<_, Option<String>>(
+            "SELECT property_text FROM pages WHERE parent_id = $1 ORDER BY title",
+        )
+        .bind(&db)
+        .fetch_all(fixture.database.pool())
+        .await
+        .unwrap()
+    };
+    let filled = texts().await;
+    assert_eq!(
+        filled,
+        [
+            Some("quokka 0".to_owned()),
+            Some("quokka 1".to_owned()),
+            Some("quokka 2".to_owned())
+        ]
+    );
+    assert_eq!(repository.fill_search_text().await.unwrap(), 0);
+    assert_eq!(texts().await, filled, "a second run changes nothing");
+    assert_eq!(search(&fixture, "quokka").await.len(), 3);
+    assert_integrity(&fixture).await;
+}

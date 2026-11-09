@@ -550,6 +550,13 @@ impl MigrationRunner {
                     ),
                     false,
                 ),
+                Migration::new(
+                    83,
+                    include_str!(
+                        "../../../../apps/server/migrations/0083_page_property_search.sql"
+                    ),
+                    false,
+                ),
             ],
         );
         runner.postgres = vec![
@@ -767,6 +774,13 @@ impl MigrationRunner {
                 82,
                 include_str!(
                     "../../../../apps/server/migrations/postgres/0082_database_filter_groups.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                83,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0083_page_property_search.sql"
                 ),
                 false,
             ),

@@ -19,7 +19,7 @@ use utoipa::ToSchema;
 use super::billing::{TrialCapacityError, TrialLimitReached, ensure_trial_capacity};
 use super::databases::{
     DatabaseSchema, LinkCopy, RowCapacityError, block_links, copy_database_data, copy_links,
-    ensure_row_capacity, insert_schema, linked_databases,
+    ensure_row_capacity, insert_schema, linked_databases, row_search_lines,
 };
 use super::page_files::{page_file_url, page_has_file, parse_page_file_url};
 use super::page_mentions::notify_new_mentions;
@@ -299,12 +299,16 @@ pub struct PageSearchResult {
     #[schema(required = true)]
     pub icon: Option<String>,
     /// Plain body text around the best match (about 24 words, `…` where text was cut), or the
-    /// start of the body when only the title matched.
+    /// start of the body when only the title matched. A row found by a property value and not by
+    /// its body shows that value: `Status: Reading`.
     pub snippet: String,
     /// Matched words in `snippet`.
     pub snippet_highlights: Vec<TextRange>,
     /// Matched words in `title`.
     pub title_highlights: Vec<TextRange>,
+    /// For a row of a database: the database's title.
+    #[schema(required = true)]
+    pub database_title: Option<String>,
 }
 
 /// A span of a string in UTF-16 code units (JavaScript string indices): `start` inclusive, `end`
@@ -1980,9 +1984,10 @@ impl PageRepository {
         Ok(root)
     }
 
-    /// Full-text search (FTS5, migration 0027) over the titles and body text of live pages the
-    /// caller can see. Every word must match (the last one as a prefix); case and diacritics are
-    /// ignored. Ranked by BM25 with title matches weighted 10x body matches.
+    /// Full-text search (FTS5, migrations 0027 and 0083) over the titles, body text and property
+    /// values of live pages the caller can see. Every word must match (the last one as a prefix);
+    /// case and diacritics are ignored. Ranked by BM25 with title matches weighted 10x and
+    /// property values 2x body matches.
     pub async fn search_pages(
         &self,
         workspace_id: Id,
@@ -2008,14 +2013,18 @@ impl PageRepository {
                  ts_headline('orbit_search', page_search.body, q.query, \
                  'MaxWords=' || $1 || ', MinWords=' || greatest($1 / 2, 1) \
                  || ', ShortWord=0, StartSel=' || chr(2) || ', StopSel=' || chr(3)) AS marked_snippet, \
-                 page_search.body AS body \
+                 page_search.body AS body, \
+                 ts_headline('orbit_search', coalesce(page_search.props, ''), q.query, \
+                 'HighlightAll=true, StartSel=' || chr(2) || ', StopSel=' || chr(3)) AS marked_props, \
+                 parent.title AS database_title \
                  FROM page_search \
                  CROSS JOIN LATERAL (SELECT to_tsquery('orbit_search', $2) AS query) AS q \
                  JOIN page_search_rows ON page_search_rows.id = page_search.rowid \
                  JOIN pages ON pages.id = page_search_rows.page_id \
+                 LEFT JOIN pages AS parent ON parent.id = pages.parent_id AND parent.kind = 'database' \
                  WHERE page_search.search_vector @@ q.query \
                  AND pages.workspace_id = $3 AND pages.deleted_at IS NULL AND {visible} \
-                 ORDER BY ts_rank('{{0, 0, 0.1, 1}}', page_search.search_vector, q.query) DESC, \
+                 ORDER BY ts_rank('{{0, 0.2, 0.1, 1}}', page_search.search_vector, q.query) DESC, \
                  pages.updated_at DESC, pages.id DESC LIMIT $5",
                 visible = visible(4)
             )
@@ -2024,13 +2033,16 @@ impl PageRepository {
                 "SELECT pages.id AS id, pages.parent_id AS parent_id, pages.teamspace_id AS teamspace_id, \
              pages.title AS title, pages.icon AS icon, \
              highlight(page_search, 0, char(2), char(3)) AS marked_title, \
-             snippet(page_search, 1, char(2), char(3), '…', $1) AS marked_snippet \
+             snippet(page_search, 1, char(2), char(3), '…', $1) AS marked_snippet, \
+             highlight(page_search, 2, char(2), char(3)) AS marked_props, \
+             parent.title AS database_title \
              FROM page_search \
              JOIN page_search_rows ON page_search_rows.id = page_search.rowid \
              JOIN pages ON pages.id = page_search_rows.page_id \
+             LEFT JOIN pages AS parent ON parent.id = pages.parent_id AND parent.kind = 'database' \
              WHERE page_search MATCH $2 AND pages.workspace_id = $3 AND pages.deleted_at IS NULL \
              AND {visible} \
-             ORDER BY bm25(page_search, 10.0, 1.0), pages.updated_at DESC, pages.id DESC LIMIT $5",
+             ORDER BY bm25(page_search, 10.0, 1.0, 2.0), pages.updated_at DESC, pages.id DESC LIMIT $5",
                 visible = visible(4)
             )
         };
@@ -2042,10 +2054,23 @@ impl PageRepository {
             .bind(SEARCH_LIMIT)
             .fetch_all(self.database.pool())
             .await?;
+        // A row found by a value and not by its body shows that value, named by its property.
+        let mut property_hits = Vec::new();
+        for row in &rows {
+            let marked_props: String = row.get("marked_props");
+            let marked_snippet: String = row.get("marked_snippet");
+            if !marked_snippet.contains(MARK_OPEN) && marked_props.contains(MARK_OPEN) {
+                property_hits.push(parse_id(row.get("id"))?);
+            }
+        }
+        let property_lines = row_search_lines(&self.database, &property_hits)
+            .await
+            .map_err(|_| PageError::Corrupt)?;
         let items = rows
             .into_iter()
             .map(|row| {
                 let teamspace_id = parse_optional_id(row.get("teamspace_id"))?;
+                let id = parse_id(row.get("id"))?;
                 let title: String = row.get("title");
                 let (marked_title, title_highlights) =
                     split_marks(&row.get::<String, _>("marked_title"));
@@ -2053,9 +2078,15 @@ impl PageRepository {
                 if postgres {
                     marked_snippet = with_ellipses(marked_snippet, &row.get::<String, _>("body"));
                 }
-                let (snippet, snippet_highlights) = split_marks(&marked_snippet);
+                let (mut snippet, mut snippet_highlights) = split_marks(&marked_snippet);
+                if let Some(lines) = property_lines.get(&id)
+                    && let Some((value, snippet_value)) =
+                        property_snippet(&row.get::<String, _>("marked_props"), lines)
+                {
+                    (snippet, snippet_highlights) = (value, snippet_value);
+                }
                 Ok(PageSearchResult {
-                    id: parse_id(row.get("id"))?,
+                    id,
                     parent_id: parse_optional_id(row.get("parent_id"))?,
                     teamspace_id,
                     private: teamspace_id.is_none(),
@@ -2069,6 +2100,7 @@ impl PageRepository {
                     icon: row.get("icon"),
                     snippet,
                     snippet_highlights,
+                    database_title: row.get("database_title"),
                 })
             })
             .collect::<Result<_, PageError>>()?;
@@ -2560,6 +2592,28 @@ fn with_ellipses(marked: String, body: &str) -> String {
     let start = if body.starts_with(&plain) { "" } else { "…" };
     let end = if body.ends_with(&plain) { "" } else { "…" };
     format!("{start}{marked}{end}")
+}
+
+/// The first property value with a match in a row's marked `props` index text, as `Name: value`
+/// with the matched words' ranges. `lines` are the row's search lines, which name the property of
+/// each line of the index text.
+fn property_snippet(
+    marked_props: &str,
+    lines: &[(String, String)],
+) -> Option<(String, Vec<TextRange>)> {
+    let marked = marked_props.lines().find(|line| line.contains(MARK_OPEN))?;
+    let (value, ranges) = split_marks(marked);
+    let (name, _) = lines.iter().find(|(_, text)| *text == value)?;
+    let prefix = format!("{name}: ");
+    let shift = prefix.encode_utf16().count() as u32;
+    let ranges = ranges
+        .into_iter()
+        .map(|range| TextRange {
+            start: range.start + shift,
+            end: range.end + shift,
+        })
+        .collect();
+    Some((format!("{prefix}{value}"), ranges))
 }
 
 /// Removes the highlight markers from FTS output and returns the plain text with the marked

@@ -54196,9 +54196,17 @@
           "icon",
           "snippet",
           "snippet_highlights",
-          "title_highlights"
+          "title_highlights",
+          "database_title"
         ],
         "properties": {
+          "database_title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "For a row of a database: the database's title."
+          },
           "icon": {
             "type": [
               "string",
@@ -54220,7 +54228,7 @@
           },
           "snippet": {
             "type": "string",
-            "description": "Plain body text around the best match (about 24 words, `…` where text was cut), or the\nstart of the body when only the title matched."
+            "description": "Plain body text around the best match (about 24 words, `…` where text was cut), or the\nstart of the body when only the title matched. A row found by a property value and not by\nits body shows that value: `Status: Reading`."
           },
           "snippet_highlights": {
             "type": "array",

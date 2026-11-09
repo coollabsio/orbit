@@ -24,8 +24,11 @@ use crate::billing::TrialLimit;
 use crate::collab::CollabHub;
 
 mod links;
+mod search;
 pub use links::{DatabaseLink, LinkedViews, MAX_LINK_VIEWS};
 pub(super) use links::{LinkCopy, block_links, copy_links, linked_databases};
+pub use search::row_search_lines;
+use search::{SearchRows, refresh_search_text};
 
 pub const MAX_ROWS: i64 = 5_000;
 pub const MAX_PROPERTIES: usize = 100;
@@ -1941,6 +1944,15 @@ impl DatabaseRepository {
             }
             write_view_config(&mut tx, view.id, &view.config, now).await?;
         }
+        // A copy brings values, and a new status shows its default option on every row.
+        refresh_search_text(
+            &mut tx,
+            workspace_id,
+            database_id,
+            &properties,
+            SearchRows::All,
+        )
+        .await?;
         record(
             &mut tx,
             workspace_id,
@@ -2046,6 +2058,17 @@ impl DatabaseRepository {
             tx.rollback().await?;
             return Ok(update);
         }
+        // A rename of the property itself changes no searchable text.
+        if type_change.is_some() || changes.config.is_some() {
+            refresh_search_text(
+                &mut tx,
+                workspace_id,
+                database_id,
+                &properties,
+                SearchRows::All,
+            )
+            .await?;
+        }
         record(
             &mut tx,
             workspace_id,
@@ -2087,6 +2110,14 @@ impl DatabaseRepository {
             .await?;
         properties.remove(index);
         renumber_rows(&mut tx, "database_properties", &properties_ids(&properties)).await?;
+        refresh_search_text(
+            &mut tx,
+            workspace_id,
+            database_id,
+            &properties,
+            SearchRows::All,
+        )
+        .await?;
         for mut view in raw_views(&mut tx, database_id, Views::All).await? {
             let before = view.config.clone();
             view.config.repair(view.view_type, &properties);
@@ -2315,10 +2346,14 @@ impl DatabaseRepository {
             sibling_ids(&mut tx, workspace_id, space, Some(database_id), row_id).await?;
         let index = placement_index(&siblings, input.placement)?;
         siblings.insert(index, row_id);
+        let search_values: HashMap<Id, CellValue> = values
+            .iter()
+            .filter_map(|(id, value)| Some((*id, value.clone()?)))
+            .collect();
         sqlx::query(
             "INSERT INTO pages (id, workspace_id, parent_id, teamspace_id, owner_id, title, icon, position, \
-             creator_id, updated_by, version, created_at, updated_at, content_json, content_text) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 0, $11, $12, '[]', '')",
+             creator_id, updated_by, version, created_at, updated_at, content_json, content_text, property_text) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 0, $11, $12, '[]', '', $13)",
         )
         .bind(row_id.to_string())
         .bind(workspace_id.to_string())
@@ -2332,6 +2367,7 @@ impl DatabaseRepository {
         .bind(actor_id.to_string())
         .bind(now.as_millis())
         .bind(now.as_millis())
+        .bind(search::search_text(&properties, &search_values))
         .execute(&mut *tx)
         .await?;
         renumber(&mut tx, &siblings).await?;
@@ -2385,6 +2421,14 @@ impl DatabaseRepository {
         let properties = properties_in_tx(&mut tx, database_id).await?;
         let values = parse_values(&mut tx, workspace_id, &properties, &input).await?;
         write_values(&mut tx, workspace_id, row_id, &values, actor_id, now).await?;
+        refresh_search_text(
+            &mut tx,
+            workspace_id,
+            database_id,
+            &properties,
+            SearchRows::One(row_id),
+        )
+        .await?;
         record_with(
             &mut tx,
             workspace_id,
@@ -2490,6 +2534,14 @@ impl DatabaseRepository {
             let properties = properties_in_tx(&mut tx, database_id).await?;
             let values = parse_values(&mut tx, workspace_id, &properties, &values).await?;
             write_values(&mut tx, workspace_id, row_id, &values, actor_id, now).await?;
+            refresh_search_text(
+                &mut tx,
+                workspace_id,
+                database_id,
+                &properties,
+                SearchRows::One(row_id),
+            )
+            .await?;
         }
         let mut siblings = sibling_ids(
             &mut tx,
@@ -3341,6 +3393,9 @@ pub(super) async fn write_database_data(
         .execute(&mut **tx)
         .await?;
     }
+    search::refresh_rows(tx, pages.values().copied())
+        .await
+        .map_err(page_error)?;
     Ok(property_ids)
 }
 

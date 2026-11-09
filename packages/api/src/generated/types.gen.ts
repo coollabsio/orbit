@@ -3484,6 +3484,10 @@ export type PageSearch = {
 };
 
 export type PageSearchResult = {
+    /**
+     * For a row of a database: the database's title.
+     */
+    database_title: string | null;
     icon: string | null;
     id: string;
     parent_id: string | null;
@@ -3493,7 +3497,8 @@ export type PageSearchResult = {
     private: boolean;
     /**
      * Plain body text around the best match (about 24 words, `…` where text was cut), or the
-     * start of the body when only the title matched.
+     * start of the body when only the title matched. A row found by a property value and not by
+     * its body shows that value: `Status: Reading`.
      */
     snippet: string;
     /**
