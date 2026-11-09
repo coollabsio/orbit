@@ -300,6 +300,16 @@ export function numberFromEditText(property: Property, input: string): number | 
   return number === null ? null : rounded(number / 100)
 }
 
+/** Stored values with a patch applied: `null` removes a value, as the server does. */
+export function patchValues(values: DatabaseRow['values'], patch: Record<string, unknown>): DatabaseRow['values'] {
+  const next = { ...values }
+  for (const [propertyId, value] of Object.entries(patch)) {
+    if (value === null) delete next[propertyId]
+    else next[propertyId] = value
+  }
+  return next
+}
+
 export function optionName(property: Property, id: string): string {
   return options(property).find((option) => option.id === id)?.name ?? ''
 }

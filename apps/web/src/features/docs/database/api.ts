@@ -30,8 +30,9 @@ import type {
   UpdateDatabasePropertyBody,
   UpdateDatabaseViewBody,
 } from '@orbit/api/generated/types.gen'
-import { ApiProblem, isPaymentRequired } from '@orbit/api/problem'
-import { parseDatabase } from '@orbit/database/values'
+import { isPaymentRequired } from '@orbit/api/problem'
+import { databaseErrorMessage } from '@orbit/database/errors'
+import { parseDatabase, patchValues } from '@orbit/database/values'
 
 function required<T>(data: T | undefined, message: string): T {
   if (data === undefined) throw new Error(message)
@@ -48,18 +49,6 @@ export function useDatabase(workspaceId: string, databaseId: string) {
     // A stable function: TanStack Query parses once per fetched detail.
     select: parseDatabase,
   })
-}
-
-/** The toast for a failed database write: the lock and the row cap have their own words. */
-export function databaseErrorMessage(error: unknown, fallback: string): string {
-  if (error instanceof ApiProblem) {
-    if (error.code === 'page_locked') return 'This database is locked. Unlock it to change its properties and views.'
-    if (error.code === 'database_row_limit') return 'This database has the most rows it can hold (5,000).'
-    if (error.code === 'database_last_view') return 'A database needs at least one view.'
-    if (error.code === 'conflict') return 'This row changed somewhere else. The table now shows the latest version.'
-    if (error.status === 422) return error.detail
-  }
-  return fallback
 }
 
 type Path = { workspace_id: string; database_id: string }
@@ -111,16 +100,6 @@ function useDatabaseMutation<Vars, Result>(workspaceId: string, databaseId: stri
 
 function withRow(detail: Detail, rowId: string, change: (row: DatabaseRow) => DatabaseRow): Detail {
   return { ...detail, rows: detail.rows.map((row) => (row.id === rowId ? change(row) : row)) }
-}
-
-/** Stored values with a patch applied: `null` removes a value, as the server does. */
-export function patchValues(values: DatabaseRow['values'], patch: Record<string, unknown>): DatabaseRow['values'] {
-  const next = { ...values }
-  for (const [propertyId, value] of Object.entries(patch)) {
-    if (value === null) delete next[propertyId]
-    else next[propertyId] = value
-  }
-  return next
 }
 
 /** Patches a row in the cached database, e.g. the title typed on its page (no request; rows not loaded stay as they are). */
