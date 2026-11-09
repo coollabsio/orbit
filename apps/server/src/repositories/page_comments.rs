@@ -23,7 +23,7 @@ use utoipa::ToSchema;
 
 use super::pages::visible;
 use crate::audit::{self, AuditOutcome};
-use crate::collab::sanitize::normalize_link_href;
+use crate::collab::sanitize::{normalize_link_href, trim_comment_blocks};
 
 /// Blocks in one comment.
 const MAX_BLOCKS: usize = 50;
@@ -183,7 +183,7 @@ impl CommentBody {
         if mentions.len() > MAX_MENTIONS {
             return Err(PageCommentError::Invalid { field: "mentions" });
         }
-        let blocks = clean;
+        let blocks = trim_comment_blocks(clean);
         if serde_json::to_vec(&blocks).map_or(usize::MAX, |bytes| bytes.len()) > MAX_BODY_BYTES {
             return Err(invalid());
         }

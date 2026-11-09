@@ -19,7 +19,7 @@ use crate::audit::{self, AuditOutcome};
 use crate::billing::TrialLimit;
 use crate::collab::kind_task::members;
 use crate::collab::markdown_import::markdown_to_blocks;
-use crate::collab::sanitize::sanitize_blocks_for;
+use crate::collab::sanitize::{sanitize_blocks_for, trim_comment_blocks};
 use crate::collab::{CollabError, CollabHub, CollabWrite, DocKey, DocKind, LinkPolicy};
 use crate::export::markdown::{KeepLinks, blocks_to_markdown};
 
@@ -4091,15 +4091,19 @@ async fn comment_content(
     let policy = task_policy(workspace_id, task_id);
     match content {
         CommentContent::Blocks(blocks) => {
-            let blocks = sanitize_blocks_for(blocks, &policy);
+            let blocks = trim_comment_blocks(sanitize_blocks_for(blocks, &policy));
             if !has_content(&Value::Array(blocks.clone())) {
                 return Err(TaskError::Invalid { field: "body_json" });
             }
             Ok((description_markdown(&blocks), blocks))
         }
         CommentContent::Markdown { body, .. } => {
+            let body = body.trim();
             let blocks = imported_description(tx, workspace_id, body).await?;
-            Ok((body.clone(), sanitize_blocks_for(&blocks, &policy)))
+            Ok((
+                body.to_owned(),
+                trim_comment_blocks(sanitize_blocks_for(&blocks, &policy)),
+            ))
         }
     }
 }
