@@ -36,6 +36,7 @@ import { insertPageBlock } from './pageBlockCommands'
 import { PageEditorContext, type PageEditorContextValue, type PageRef } from './pageEditorContext'
 import { watchDeletedFiles } from '@orbit/editor/deletedFiles'
 import type { PageEditorInstance } from '@orbit/editor/schema'
+import type { PageKind } from '@orbit/api/generated/types.gen'
 import { selectBlockExtension } from '@orbit/editor/selectBlock'
 import { EDITOR_BLOCK_TYPES, markdownToTaskBlocks, pageEditorSchema, TASK_EDITOR_BLOCK_TYPES, taskEditorSchema } from './schema'
 import { getPageSlashMenuItems, getTaskSlashMenuItems } from './slashMenu'
@@ -143,8 +144,8 @@ export interface PageEditorProps {
   resolvePage?: (pageId: string) => PageRef | null
   /** Opens an in-app `/docs/<id>` link; without it the link navigates like any link. */
   onOpenPage?: (pageId: string) => void
-  /** Creates a child page of `pageId`; resolves to the new page id (reject/throw to abort). Page profile only. */
-  onCreateSubpage?: () => Promise<string>
+  /** Creates a child page (or database) of `pageId`; resolves to the new page id (reject/throw to abort). Page profile only. */
+  onCreateSubpage?: (kind: PageKind) => Promise<string>
   /** Lets the user pick an existing page; resolves to its id, or null when cancelled. Page profile only. */
   onPickPage?: () => Promise<string | null>
   /**
@@ -377,20 +378,23 @@ function PageEditorInner({
 
   const context = useMemo<PageEditorContextValue>(() => ({ resolvePage, onOpenPage: onOpenPage ?? (() => {}) }), [resolvePage, onOpenPage])
 
+  /** Creates the sub-page, links it at the cursor's block, then opens it. */
+  const createLinkedPage = (kind: PageKind) => {
+    const anchorId = editor.getTextCursorPosition().block.id
+    void onCreateSubpage(kind).then(
+      (pageId) => {
+        if (!mounted.current) return
+        insertPageBlock(editor, anchorId, pageId)
+        onOpenPage?.(pageId)
+      },
+      () => {
+        // Creation failed; the caller reports the error. Nothing to insert.
+      },
+    )
+  }
   const slashActions = {
-    onSubpage: () => {
-      const anchorId = editor.getTextCursorPosition().block.id
-      void onCreateSubpage().then(
-        (pageId) => {
-          if (!mounted.current) return
-          insertPageBlock(editor, anchorId, pageId)
-          onOpenPage?.(pageId)
-        },
-        () => {
-          // Creation failed; the caller reports the error. Nothing to insert.
-        },
-      )
-    },
+    onSubpage: () => createLinkedPage('page'),
+    onDatabase: () => createLinkedPage('database'),
     onLinkPage: () => {
       const anchorId = editor.getTextCursorPosition().block.id
       void onPickPage().then(

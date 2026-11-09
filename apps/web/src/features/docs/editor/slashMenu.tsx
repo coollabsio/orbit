@@ -1,6 +1,6 @@
 import { filterSuggestionItems, insertOrUpdateBlockForSlashMenu } from '@blocknote/core/extensions'
 import { getDefaultReactSlashMenuItems, type DefaultReactSuggestionItem } from '@blocknote/react'
-import { DocumentText, Hierarchy, LampOn, Link2, Math as MathIcon } from 'reicon-react'
+import { DocumentText, Grid, Hierarchy, LampOn, Link2, Math as MathIcon } from 'reicon-react'
 import { MATH_LANGUAGE, MERMAID_LANGUAGE } from '@orbit/editor/codeLanguages'
 import { CALLOUT_DEFAULT_BACKGROUND } from '@orbit/editor/schema'
 import type { PageEditorInstance } from '@orbit/editor/schema'
@@ -10,10 +10,12 @@ export const PAGE_ITEMS_GROUP = 'Basic blocks'
 
 export interface PageSlashActions {
   onSubpage: () => void
+  /** A database as a sub-page, linked from the current block (the inline database is not built yet). */
+  onDatabase: () => void
   onLinkPage: () => void
 }
 
-/** "Sub-page" and "Link a page" — titles, subtexts and aliases ported from the old docs slash menu. */
+/** "Sub-page", "Database – full page" and "Link a page" (the first and last ported from the old docs slash menu). */
 export function pageSlashItems(actions: PageSlashActions): DefaultReactSuggestionItem[] {
   return [
     {
@@ -23,6 +25,14 @@ export function pageSlashItems(actions: PageSlashActions): DefaultReactSuggestio
       group: PAGE_ITEMS_GROUP,
       icon: <DocumentText className="size-[18px]" />,
       onItemClick: actions.onSubpage,
+    },
+    {
+      title: 'Database – full page',
+      subtext: 'Create a database under this page',
+      aliases: ['database', 'table', 'db'],
+      group: PAGE_ITEMS_GROUP,
+      icon: <Grid className="size-[18px]" />,
+      onItemClick: actions.onDatabase,
     },
     {
       title: 'Link a page',

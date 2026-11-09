@@ -4,11 +4,11 @@ import { lazy, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, u
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { ArrowLeft, ArrowSwapHorizontal, Check, Copy, Download, MoreH as Ellipsis, History, Lock, Star, Trash as Trash2, Unlock, People as Users } from 'reicon-react'
+import { ArrowLeft, ArrowSwapHorizontal, Check, Copy, Download, MoreH as Ellipsis, Grid, History, Lock, Star, Trash as Trash2, Unlock, People as Users } from 'reicon-react'
 import { cn } from 'cn'
 import { apiClient, UNAUTHORIZED_EVENT } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
-import type { Page, PageSummary, PageVersionSummary, Teamspace } from '@orbit/api/generated/types.gen'
+import type { Page, PageKind, PageSummary, PageVersionSummary, Teamspace } from '@orbit/api/generated/types.gen'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -527,15 +527,18 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
   const onOpenPage = useCallback((id: string) => navigate(`/docs/${id}`), [navigate])
 
   const createSubpage = createPage.mutateAsync
-  const onCreateSubpage = useCallback(async () => {
-    try {
-      const created = await createSubpage({ parent_id: pageId })
-      return created.id
-    } catch (error) {
-      if (!isPaymentRequired(error)) toast.error('Could not create the sub-page. Try again.')
-      throw error
-    }
-  }, [createSubpage, pageId])
+  const onCreateSubpage = useCallback(
+    async (kind: PageKind) => {
+      try {
+        const created = await createSubpage(kind === 'database' ? { parent_id: pageId, kind } : { parent_id: pageId })
+        return created.id
+      } catch (error) {
+        if (!isPaymentRequired(error)) toast.error(kind === 'database' ? 'Could not create the database. Try again.' : 'Could not create the sub-page. Try again.')
+        throw error
+      }
+    },
+    [createSubpage, pageId],
+  )
 
   /** Editor image/file uploads: errors are toasted, then rethrown so BlockNote drops the empty block. */
   const uploadFile = useCallback(
@@ -885,6 +888,12 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
                 <DropdownMenuItem onClick={() => setHistoryOpen(true)}>
                   <History className="size-[14px]" />
                   Version history
+                </DropdownMenuItem>
+              )}
+              {isDatabase ? null : (
+                <DropdownMenuItem disabled={readOnly} onClick={() => void onCreateSubpage('database').then(onOpenPage, () => {})}>
+                  <Grid className="size-[14px]" />
+                  New database
                 </DropdownMenuItem>
               )}
               {pageActions ? (

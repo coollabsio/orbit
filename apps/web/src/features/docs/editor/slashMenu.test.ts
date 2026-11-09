@@ -70,7 +70,7 @@ describe('schema', () => {
 })
 
 describe('getPageSlashMenuItems', () => {
-  const actions = { onSubpage: mock(() => {}), onLinkPage: mock(() => {}) }
+  const actions = { onSubpage: mock(() => {}), onDatabase: mock(() => {}), onLinkPage: mock(() => {}) }
 
   test('offers the page items inside a single "Basic blocks" group, Image and File, but no Video or Audio', () => {
     const items = getPageSlashMenuItems(editor(), actions, '')
@@ -95,6 +95,15 @@ describe('getPageSlashMenuItems', () => {
 
     linkItems[0].onItemClick()
     expect(actions.onLinkPage).toHaveBeenCalledTimes(1)
+    expect(actions.onSubpage).not.toHaveBeenCalled()
+
+    for (const alias of ['database', 'db']) {
+      expect(getPageSlashMenuItems(e, actions, alias).map((item) => item.title)).toEqual(['Database – full page'])
+    }
+    const tableItems = getPageSlashMenuItems(e, actions, 'table')
+    expect(tableItems.map((item) => item.title)).toContain('Database – full page')
+    tableItems.find((item) => item.title === 'Database – full page')!.onItemClick()
+    expect(actions.onDatabase).toHaveBeenCalledTimes(1)
     expect(actions.onSubpage).not.toHaveBeenCalled()
   })
 
