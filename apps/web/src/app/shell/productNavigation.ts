@@ -24,11 +24,12 @@ export function isDisabledProductPath(pathname: string) {
 export const guestHomePath = '/chat'
 
 /**
- * What a guest may open: Chat and its own account settings, and Admin (the installation's, which checks the user
- * itself). Every other page sends it to `guestHomePath`.
+ * What a guest may open: Chat, the account settings that matter for chat (not Agentic or Keyboard shortcuts, which are
+ * for tasks, docs and AI clients), and Admin (the installation's, which checks the user itself). Every other page sends
+ * it to `guestHomePath`.
  */
 export function guestMayOpen(pathname: string) {
-  return /^\/(chat|profile|admin)(\/|$)/.test(pathname)
+  return /^\/(chat|admin)(\/|$)/.test(pathname) || /^\/profile(\/(security|sessions|appearance|notifications|storage))?\/?$/.test(pathname)
 }
 
 /** Below `/chat` (a conversation, a thread, Unreads, Threads): a full screen on a phone, so the dock is hidden. */

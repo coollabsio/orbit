@@ -246,12 +246,12 @@ export async function saveNotificationPrefs(client: OrbitClient, prefs: Notifica
   return (await putNotificationPreferences({ client, body: prefs, throwOnError: true })).data
 }
 
-/** The web's rows, in its order. */
-export const NOTIFICATION_CHOICES: readonly { field: keyof NotificationPrefs; label: string }[] = [
-  { field: 'direct_messages', label: 'Direct messages' },
-  { field: 'chat_mentions', label: 'Mentions in chat' },
-  { field: 'thread_replies', label: 'Replies in threads I follow' },
-  { field: 'channel_messages', label: 'All messages in channels set to "All messages"' },
+/** The web's rows, in its order. `chat`: also shown to a guest, who has only chat. */
+export const NOTIFICATION_CHOICES: readonly { field: keyof NotificationPrefs; label: string; chat?: true }[] = [
+  { field: 'direct_messages', label: 'Direct messages', chat: true },
+  { field: 'chat_mentions', label: 'Mentions in chat', chat: true },
+  { field: 'thread_replies', label: 'Replies in threads I follow', chat: true },
+  { field: 'channel_messages', label: 'All messages in channels set to "All messages"', chat: true },
   { field: 'task_assigned', label: 'Tasks assigned to me' },
   { field: 'mentions', label: 'Mentions in comments and pages' },
 ]
