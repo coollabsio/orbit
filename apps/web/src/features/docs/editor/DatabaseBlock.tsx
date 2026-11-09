@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { ArrowUpRight, Grid } from 'reicon-react'
+import { ArrowUpRight } from 'reicon-react'
 import { ApiProblem } from '@orbit/api/problem'
 import { ISOLATED_ATTR } from '@orbit/editor/isolation'
 import type { BlockNoteEditor } from '@blocknote/core'
@@ -128,7 +128,7 @@ function DatabaseBlockBody({ host, blockId, databaseId, linkId, onShowOwnViews }
   )
 }
 
-/** The database's icon and title (a click opens its full page); "↗" marks a linked view. */
+/** The database's own icon (only when set, as in Notion) and title; a click opens its full page; "↗" marks a linked view. */
 function DatabaseTitle({ databaseId, linked, title, icon }: { databaseId: string; linked: boolean; title?: string; icon?: string | null }) {
   const { resolvePage, onOpenPage } = usePageEditorContext()
   const page = resolvePage(databaseId)
@@ -142,9 +142,11 @@ function DatabaseTitle({ databaseId, linked, title, icon }: { databaseId: string
       className="-ml-1 flex w-fit max-w-full min-w-0 items-center gap-1.5 rounded-md px-1 py-1 text-left text-base font-semibold text-foreground outline-none hover:bg-foreground/[0.04] focus-visible:ring-2 focus-visible:ring-ring/50"
       onClick={() => onOpenPage(databaseId)}
     >
-      <span className="flex size-5 shrink-0 items-center justify-center" aria-hidden>
-        {emoji ? <Emoji value={emoji} /> : <Grid className="size-[18px] text-muted-foreground" />}
-      </span>
+      {emoji ? (
+        <span className="flex size-5 shrink-0 items-center justify-center" aria-hidden>
+          <Emoji value={emoji} />
+        </span>
+      ) : null}
       <span className="truncate">{name}</span>
       {linked ? <ArrowUpRight className="size-3.5 shrink-0 text-muted-foreground" aria-label="Linked view" /> : null}
     </button>
