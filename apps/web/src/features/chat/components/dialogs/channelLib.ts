@@ -62,10 +62,23 @@ export function addablePeople<T extends Person & { name: string }>(
   return pickablePeople(allowed, currentUserId, conversation.memberIds)
 }
 
-/** People a new message can go to: yourself first, as "Name (you)" (the DM with yourself), then `pickablePeople`. */
-export function messageablePeople<T extends Person & { name: string }>(members: readonly T[], currentUserId: string | null): T[] {
+/**
+ * People a new message can go to: yourself first, as "Name (you)" (the DM with yourself), then `pickablePeople`. As the
+ * server requires, a guest is offered only when it shares an open channel with you (and, when you are a guest, everybody is).
+ */
+export function messageablePeople<T extends Person & { name: string }>(
+  members: readonly T[],
+  conversations: readonly Pick<Conversation, 'kind' | 'archived' | 'memberIds'>[],
+  currentUserId: string | null,
+): T[] {
   const me = members.find((member) => member.id === currentUserId)
-  const others = pickablePeople(members, currentUserId)
+  const shared = new Set(
+    conversations
+      .filter((conversation) => conversation.kind !== 'dm' && !conversation.archived && currentUserId !== null && conversation.memberIds.includes(currentUserId))
+      .flatMap((conversation) => conversation.memberIds),
+  )
+  const reachable = members.filter((member) => (me?.role !== 'Guest' && member.role !== 'Guest') || shared.has(member.id))
+  const others = pickablePeople(reachable, currentUserId)
   return me ? [{ ...me, name: `${me.name} (you)` }, ...others] : others
 }
 

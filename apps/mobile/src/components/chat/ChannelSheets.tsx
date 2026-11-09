@@ -12,7 +12,7 @@ import * as chat from '../../data/chat-api'
 import type { CategoryRecord, ConversationRecord } from '../../data/orbit'
 import { useChatWrite } from '../../hooks/chat'
 import { useOrbit } from '../../orbit-context'
-import { useChatCategories, useMembers } from '../../queries'
+import { useChatCategories, useConversations, useMembers } from '../../queries'
 import { useTheme } from '../../theme'
 import { Avatar, Icon, Input, PickerSheet, Text } from '../../ui'
 import { ChoiceGroup, FormSheet } from './Sheet'
@@ -214,6 +214,7 @@ export function CategorySheet({ category, onClose }: { category?: CategoryRecord
 export function NewMessageSheet({ onClose }: { onClose: () => void }) {
   const { user } = useOrbit()
   const members = useMembers().data ?? []
+  const conversations = useConversations().data ?? []
   const run = useChatWrite()
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
@@ -229,7 +230,7 @@ export function NewMessageSheet({ onClose }: { onClose: () => void }) {
   }
   return (
     <FormSheet visible title="New message" description="Choose one person, several for a group conversation, or yourself for notes." submitLabel="Open" canSubmit={selectedIds.length > 0} busy={busy} onSubmit={() => void submit()} onClose={onClose}>
-      <MemberPicker autoFocus people={messageablePeople(members, user.id)} selectedIds={selectedIds} onChange={setSelectedIds} />
+      <MemberPicker autoFocus people={messageablePeople(members, conversations, user.id)} selectedIds={selectedIds} onChange={setSelectedIds} />
     </FormSheet>
   )
 }

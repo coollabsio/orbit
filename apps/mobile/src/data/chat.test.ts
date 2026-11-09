@@ -209,12 +209,26 @@ test('channel names are typed lowercase with hyphens, and sent without a trailin
 
 test('a new message offers yourself first, then the others by name, without suspended people', () => {
   const members = [member('zoe', 'Zoe'), member('me', 'Orbit Dev'), member('ada', 'Ada'), member('old', 'Old', { suspended_at: '2026-01-01T00:00:00Z' })]
-  expect(messageablePeople(members, 'me')).toEqual([
+  expect(messageablePeople(members, [], 'me')).toEqual([
     { id: 'me', name: 'Orbit Dev (you)' },
     { id: 'ada', name: 'Ada' },
     { id: 'zoe', name: 'Zoe' },
   ])
   expect(pickablePeople(members, 'me', ['zoe'])).toEqual([{ id: 'ada', name: 'Ada' }])
+})
+
+test('a new message offers a guest only when it shares an open channel with you, as the server requires', () => {
+  const members = [member('me', 'Me'), member('ada', 'Ada'), member('gus', 'Gus', { role: 'guest' }), member('gil', 'Gil', { role: 'guest' }), member('gia', 'Gia', { role: 'guest' })]
+  const conversations = [
+    conversation('design', { kind: 'private', member_ids: ['me', 'gus'] }),
+    conversation('old', { kind: 'private', archived: true, member_ids: ['me', 'gia'] }),
+    conversation('dm', { kind: 'dm', member_ids: ['me', 'gia'] }),
+    conversation('other', { kind: 'private', member_ids: ['ada', 'gil'] }),
+  ]
+  expect(messageablePeople(members, conversations, 'me').map((person) => person.id)).toEqual(['me', 'ada', 'gus'])
+  // a guest reaches only the people of its channels, members too
+  const asGuest = [member('gus', 'Gus', { role: 'guest' }), member('me', 'Me'), member('ada', 'Ada')]
+  expect(messageablePeople(asGuest, conversations, 'gus').map((person) => person.id)).toEqual(['gus', 'me'])
 })
 
 // ---- reactions
