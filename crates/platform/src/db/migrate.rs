@@ -533,6 +533,11 @@ impl MigrationRunner {
                     ),
                     false,
                 ),
+                Migration::new(
+                    80,
+                    include_str!("../../../../apps/server/migrations/0080_database_links.sql"),
+                    false,
+                ),
             ],
         );
         runner.postgres = vec![
@@ -733,6 +738,13 @@ impl MigrationRunner {
                 79,
                 include_str!(
                     "../../../../apps/server/migrations/postgres/0079_database_board_views.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                80,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0080_database_links.sql"
                 ),
                 false,
             ),
