@@ -2391,6 +2391,7 @@ impl TaskRepository {
         let mut snapshots = Vec::with_capacity(updates.len());
         for update in updates {
             let before = sub_issues::snapshot_in_tx(&mut tx, update.id).await?;
+            let task_before = task_in_tx(&mut tx, workspace_id, update.id, false).await?;
             let blocks = update_task_in_tx(
                 &mut tx,
                 workspace_id,
@@ -2406,6 +2407,22 @@ impl TaskRepository {
             }
             let after = sub_issues::snapshot_in_tx(&mut tx, update.id).await?;
             snapshots.push(before.zip(after));
+            // The task's own activity feed shows what changed (a reorder alone changes nothing it shows).
+            let task_after = task_in_tx(&mut tx, workspace_id, update.id, false).await?;
+            let changes = updated_fields(update, &task_before, &task_after);
+            if changes.as_object().is_some_and(|fields| !fields.is_empty()) {
+                self.record_write(
+                    &mut tx,
+                    workspace_id,
+                    actor_id,
+                    ("task.updated", "task"),
+                    update.id,
+                    request_id,
+                    json!({ "changes": changes }),
+                    now,
+                )
+                .await?;
+            }
         }
         record_mutation(
             &mut tx,
