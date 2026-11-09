@@ -218,9 +218,14 @@ export function projects(client: OrbitClient, workspaceId: string): Promise<Proj
   return allPages(async (cursor) => (await listProjects({ ...at(client, workspaceId), query: { cursor, limit: 100 } })).data)
 }
 
-/** A new project from its name, as the web's `projectDraft`: a key of up to five letters and digits, and violet. */
-export function projectDraft(name: string): ProjectBody {
-  return { name, key: name.replace(/[^a-z0-9]/gi, '').slice(0, 5).toUpperCase() || 'PROJ', color: '#8b5cf6' }
+/** A new project from its name, as the web's `projectDraft`: a key of up to five letters and digits, with the
+ * smallest free number after it when an existing project already has that key (`GENER` → `GENER2`), and violet. */
+export function projectDraft(name: string, takenKeys: readonly string[] = []): ProjectBody {
+  const base = name.replace(/[^a-z0-9]/gi, '').slice(0, 5).toUpperCase() || 'PROJ'
+  const taken = new Set(takenKeys.map((key) => key.toUpperCase()))
+  let key = base
+  for (let suffix = 2; taken.has(key); suffix += 1) key = `${base}${suffix}`
+  return { name, key, color: '#8b5cf6' }
 }
 
 export async function createProject(client: OrbitClient, workspaceId: string, body: ProjectBody): Promise<ProjectRecord> {

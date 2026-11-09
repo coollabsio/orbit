@@ -7,3 +7,9 @@ test('a new project gets a key of up to five letters and digits from its name, a
   expect(projectDraft('Q3 roadmap')).toMatchObject({ key: 'Q3ROA' })
   expect(projectDraft('🚀 —')).toMatchObject({ key: 'PROJ' })
 })
+
+test('a derived key that another project has gets the smallest free number, as on the web (#85)', () => {
+  expect(projectDraft('General - Y', ['GENER']).key).toBe('GENER2')
+  expect(projectDraft('General - Z', ['GENER', 'gener2', 'OTHER']).key).toBe('GENER3')
+  expect(projectDraft('Y - General', ['GENER']).key).toBe('YGENE')
+})

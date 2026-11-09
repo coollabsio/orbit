@@ -16,7 +16,6 @@ import {
   updateStatus,
 } from '@orbit/api/generated/sdk.gen'
 import type {
-  ProjectBody,
   ProjectRecord,
   ProjectUpdateBody,
   ReorderItem,
@@ -27,6 +26,7 @@ import type {
 import { queryKeys } from '@/api/queryKeys'
 import type { StatusCategory, TaskStatusDef } from './models'
 import { isTaskVersionConflict } from './conflicts'
+import { projectDraft } from './projectDraft'
 import { loadFailed } from '@/lib/connection'
 
 function required<T>(data: T | undefined, message: string): T {
@@ -50,18 +50,16 @@ export function statusFromRecord(status: StatusRecord): TaskStatusDef {
   }
 }
 
-export function useProjects(workspaceId: string, enabled = true) {
-  return useQuery({
-    queryKey: queryKeys.projects(workspaceId),
-    enabled,
-    queryFn: async () => {
-      const page = await fetchAllPages(async (cursor) => {
-        const { data } = await listProjects({ client: apiClient, path: { workspace_id: workspaceId }, query: { limit: 100, cursor }, throwOnError: true })
-        return required(data, 'Projects response was empty.')
-      })
-      return page.items
-    },
+async function fetchProjects(workspaceId: string): Promise<ProjectRecord[]> {
+  const page = await fetchAllPages(async (cursor) => {
+    const { data } = await listProjects({ client: apiClient, path: { workspace_id: workspaceId }, query: { limit: 100, cursor }, throwOnError: true })
+    return required(data, 'Projects response was empty.')
   })
+  return page.items
+}
+
+export function useProjects(workspaceId: string, enabled = true) {
+  return useQuery({ queryKey: queryKeys.projects(workspaceId), enabled, queryFn: () => fetchProjects(workspaceId) })
 }
 
 export function useProjectStatuses(workspaceId: string, projectId: string | undefined) {
@@ -103,7 +101,10 @@ export function useAllStatuses(workspaceId: string, projects: ProjectRecord[]) {
 export function useCreateProject(workspaceId: string) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async (body: ProjectBody) => {
+    mutationFn: async (name: string) => {
+      // A fresh list, so the key skips the keys of projects that other members made since the last load.
+      const existing = await fetchProjects(workspaceId)
+      const body = projectDraft(name, existing.map((project) => project.key))
       const { data } = await createProject({ client: apiClient, path: { workspace_id: workspaceId }, body, throwOnError: true })
       return required(data, 'Create project response was empty.')
     },

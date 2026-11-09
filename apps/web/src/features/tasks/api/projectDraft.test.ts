@@ -6,6 +6,13 @@ test('project creation derives a stable key and default token color', () => {
   expect(projectDraft('---')).toEqual({ name: '---', key: 'PROJ', color: '#8b5cf6' })
 })
 
+test('a derived key that another project has gets the smallest free number (#85)', () => {
+  expect(projectDraft('General - Y', ['GENER']).key).toBe('GENER2')
+  expect(projectDraft('General - Z', ['GENER', 'gener2', 'OTHER']).key).toBe('GENER3')
+  expect(projectDraft('---', ['PROJ']).key).toBe('PROJ2')
+  expect(projectDraft('Y - General', ['GENER']).key).toBe('YGENE')
+})
+
 test('selected projects have a settings route for rename and delete', () => {
   expect(projectSettingsPath('project-1')).toBe('/tasks/projects/project-1/settings')
   expect(projectSettingsPath(null)).toBeNull()
