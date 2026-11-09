@@ -114,6 +114,42 @@ export function decodeMentions(body: string, people: readonly Person[], conversa
   })
 }
 
+export interface TextPart {
+  text: string
+  mention: boolean
+}
+
+/** As the web's `isMentionBoundary`: a mention ends at the text's end, a space or punctuation. */
+const mentionEnds = (char: string | undefined) => !char || /\s|[.,!?;:()[\]{}"'`]/.test(char)
+
+/**
+ * Shown text split at the mentions in it, as the web marks them: `@Name` of a person, `#name` of a conversation,
+ * `@here` and `@channel`. The longest name wins, so `@Ada Lovelace` beats `@Ada`.
+ */
+export function mentionParts(text: string, people: readonly Person[], conversations: readonly Person[]): TextPart[] {
+  const labels = [...people.map((person) => `@${person.name}`), ...conversations.map((conversation) => `#${conversation.name}`), '@here', '@channel']
+    .filter((label) => label.length > 1)
+    .sort((a, b) => b.length - a.length)
+  const lower = text.toLowerCase()
+  const parts: TextPart[] = []
+  let plain = 0
+  let cursor = 0
+  while (cursor < text.length) {
+    const char = text[cursor]
+    const label = char === '@' || char === '#' ? labels.find((item) => lower.startsWith(item.toLowerCase(), cursor) && mentionEnds(text[cursor + item.length])) : undefined
+    if (!label) {
+      cursor += 1
+      continue
+    }
+    if (cursor > plain) parts.push({ text: text.slice(plain, cursor), mention: false })
+    parts.push({ text: text.slice(cursor, cursor + label.length), mention: true })
+    cursor += label.length
+    plain = cursor
+  }
+  if (plain < text.length) parts.push({ text: text.slice(plain), mention: false })
+  return parts
+}
+
 /** The main list of a conversation holds root messages and system rows; a thread reply only when also sent to the channel. */
 export const inMainList = (message: MessageRecord) => message.thread_root_id === null || message.also_in_channel
 

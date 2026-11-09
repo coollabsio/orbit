@@ -1,8 +1,9 @@
-import { expect, test } from 'bun:test'
+import { describe, expect, it, test } from 'bun:test'
 
 import {
   buildMessageRows,
   channelNameFinal,
+  mentionParts,
   channelNameInput,
   chatSections,
   chatBadge,
@@ -326,4 +327,28 @@ test('emoji groups come from emojibase in order, without components or newer emo
 
 test('file sizes read like the web', () => {
   expect([fileSize(512), fileSize(12_800), fileSize(3_565_158)]).toEqual(['512 B', '13 KB', '3.4 MB'])
+})
+
+describe('mentionParts', () => {
+  const people = [
+    { id: 'u1', name: 'Ada' },
+    { id: 'u2', name: 'Ada Lovelace' },
+  ]
+  const channels = [{ id: 'c1', name: 'general' }]
+
+  it('marks people, channels, @here and @channel; the longest name wins', () => {
+    expect(mentionParts('hi @Ada Lovelace, see #general @here!', people, channels)).toEqual([
+      { text: 'hi ', mention: false },
+      { text: '@Ada Lovelace', mention: true },
+      { text: ', see ', mention: false },
+      { text: '#general', mention: true },
+      { text: ' ', mention: false },
+      { text: '@here', mention: true },
+      { text: '!', mention: false },
+    ])
+  })
+
+  it('leaves unknown names, emails and partial words alone', () => {
+    expect(mentionParts('mail ada@x.io or @Adam or @nobody', people, channels)).toEqual([{ text: 'mail ada@x.io or @Adam or @nobody', mention: false }])
+  })
 })
