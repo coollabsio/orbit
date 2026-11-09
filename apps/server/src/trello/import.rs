@@ -21,6 +21,10 @@
 //!
 //! A card that fails is recorded and the import continues; revoked credentials fail the import.
 //! What was imported before a failure or cancellation stays.
+//!
+//! A later import of the same board reuses what a finished earlier import in the workspace made:
+//! its Orbit project and its tasks, while they exist. A card the earlier import finished is
+//! counted as done and not copied again.
 
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -49,11 +53,11 @@ use crate::repositories::tasks::{
 use crate::secret_box::{decrypt_secret, encrypt_secret};
 pub use crate::task_import::JobRun;
 use crate::task_import::{
-    Attached, Failure, LABEL_COLORS, NewProject, PROJECT_COLORS, attach_once, attachment_url,
-    column_statuses, display_instant, ensure_project, ensure_writable, escape_markdown,
-    find_or_create_label, job_kind, markdown_links, member_names, mentions_any,
+    Attached, Failure, ImportTables, LABEL_COLORS, NewProject, PROJECT_COLORS, attach_once,
+    attachment_url, column_statuses, display_instant, ensure_project, ensure_writable,
+    escape_markdown, find_or_create_label, job_kind, markdown_links, member_names, mentions_any,
     parse_instant_millis, parse_stored_id, project_key_base, project_statuses, retryable,
-    rewrite_links, stopped, with_source_details,
+    reuse_earlier_projects, reuse_earlier_tasks, rewrite_links, stopped, with_source_details,
 };
 
 /// Job kind names.
@@ -69,6 +73,14 @@ const MAX_CREDENTIAL_CHARS: usize = 512;
 const MAX_FAILURES_LISTED: i64 = 200;
 const MAX_LISTED_IMPORTS: i64 = 20;
 const ACTIVE: &str = "('scanning', 'queued', 'importing')";
+
+const TABLES: ImportTables = ImportTables {
+    imports: "trello_imports",
+    items: "trello_import_items",
+    source_id: "trello_id",
+    project_kind: "board",
+    task_kind: "card",
+};
 const OPEN: &str = "('scanning', 'ready', 'queued', 'importing')";
 /// Trello's label colors (the `_dark` and `_light` shades map to the base color).
 const TRELLO_COLORS: [(&str, &str); 10] = [
@@ -688,6 +700,7 @@ impl TrelloImportService {
             .execute(&mut *tx)
             .await?;
         }
+        reuse_earlier_projects(&mut tx, &TABLES, import_id, workspace_id).await?;
         tx.commit().await?;
         if let Err(error) = self
             .enqueue(import_job_kind(), import_id, workspace_id)
@@ -1269,6 +1282,7 @@ impl TrelloImportService {
             .bind(run.import_id.to_string())
             .execute(&mut *tx)
             .await?;
+        reuse_earlier_tasks(&mut tx, &TABLES, run.import_id, run.workspace_id).await?;
         tx.commit().await?;
         Ok(u32::try_from(archived).unwrap_or(u32::MAX))
     }

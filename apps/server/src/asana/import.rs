@@ -20,6 +20,10 @@
 //!
 //! A task that fails is recorded and the import continues; a revoked token fails the import.
 //! What was imported before a failure or cancellation stays.
+//!
+//! A later import of the same project reuses what a finished earlier import in the workspace made:
+//! its Orbit project and its tasks, while they exist. A task the earlier import finished is
+//! counted as done and not copied again.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Duration;
@@ -48,10 +52,11 @@ use crate::repositories::tasks::{CommentContent, CreateTask, TaskError, TaskRepo
 use crate::secret_box::{decrypt_secret, encrypt_secret};
 pub use crate::task_import::JobRun;
 use crate::task_import::{
-    Attached, Failure, LABEL_COLORS, NewProject, PROJECT_COLORS, attach_once, column_statuses,
-    display_instant, ensure_project, ensure_writable, find_or_create_label, job_kind,
-    member_emails, parse_date_millis, parse_instant_millis, parse_stored_id, project_key_base,
-    project_statuses, retryable, stopped,
+    Attached, Failure, ImportTables, LABEL_COLORS, NewProject, PROJECT_COLORS, attach_once,
+    column_statuses, display_instant, ensure_project, ensure_writable, find_or_create_label,
+    job_kind, member_emails, parse_date_millis, parse_instant_millis, parse_stored_id,
+    project_key_base, project_statuses, retryable, reuse_earlier_projects, reuse_earlier_tasks,
+    stopped,
 };
 
 /// Job kind names.
@@ -69,6 +74,14 @@ const MAX_TOKEN_CHARS: usize = 1_024;
 const MAX_FAILURES_LISTED: i64 = 200;
 const MAX_LISTED_IMPORTS: i64 = 20;
 const ACTIVE: &str = "('scanning', 'queued', 'importing')";
+
+const TABLES: ImportTables = ImportTables {
+    imports: "asana_imports",
+    items: "asana_import_items",
+    source_id: "asana_gid",
+    project_kind: "project",
+    task_kind: "task",
+};
 const OPEN: &str = "('scanning', 'ready', 'queued', 'importing')";
 
 /// Both job kinds: [`job_kind`], as for the Notion import.
@@ -620,6 +633,7 @@ impl AsanaImportService {
             .execute(&mut *tx)
             .await?;
         }
+        reuse_earlier_projects(&mut tx, &TABLES, import_id, workspace_id).await?;
         tx.commit().await?;
         if let Err(error) = self
             .enqueue(import_job_kind(), import_id, workspace_id)
@@ -1149,6 +1163,7 @@ impl AsanaImportService {
             .bind(run.import_id.to_string())
             .execute(&mut *tx)
             .await?;
+        reuse_earlier_tasks(&mut tx, &TABLES, run.import_id, run.workspace_id).await?;
         tx.commit().await?;
         Ok(())
     }

@@ -23,6 +23,10 @@
 //!
 //! An issue that fails is recorded and the import continues; a revoked key fails the import.
 //! What was imported before a failure or cancellation stays.
+//!
+//! A later import of the same team reuses what a finished earlier import in the workspace made:
+//! its Orbit project and its tasks, while they exist. An issue the earlier import finished is
+//! counted as done and not copied again.
 
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -52,11 +56,12 @@ use crate::repositories::tasks::{
 use crate::secret_box::{decrypt_secret, encrypt_secret};
 pub use crate::task_import::JobRun;
 use crate::task_import::{
-    Attached, Failure, LABEL_COLORS, NewProject, PROJECT_COLORS, attach_once, attachment_url,
-    category_color, display_instant, ensure_project, ensure_writable, escape_markdown,
-    find_or_create_label, job_kind, markdown_links, member_emails, mentions_any, parse_date_millis,
-    parse_instant_millis, parse_stored_id, project_key_base, project_statuses, retryable,
-    rewrite_links, stopped, with_source_details,
+    Attached, Failure, ImportTables, LABEL_COLORS, NewProject, PROJECT_COLORS, attach_once,
+    attachment_url, category_color, display_instant, ensure_project, ensure_writable,
+    escape_markdown, find_or_create_label, job_kind, markdown_links, member_emails, mentions_any,
+    parse_date_millis, parse_instant_millis, parse_stored_id, project_key_base, project_statuses,
+    retryable, reuse_earlier_projects, reuse_earlier_tasks, rewrite_links, stopped,
+    with_source_details,
 };
 
 /// Job kind names.
@@ -74,6 +79,14 @@ const MAX_TOKEN_CHARS: usize = 1_024;
 const MAX_FAILURES_LISTED: i64 = 200;
 const MAX_LISTED_IMPORTS: i64 = 20;
 const ACTIVE: &str = "('scanning', 'queued', 'importing')";
+
+const TABLES: ImportTables = ImportTables {
+    imports: "linear_imports",
+    items: "linear_import_items",
+    source_id: "linear_id",
+    project_kind: "team",
+    task_kind: "issue",
+};
 const OPEN: &str = "('scanning', 'ready', 'queued', 'importing')";
 
 /// Both job kinds: [`job_kind`], as for the Asana and Notion imports.
@@ -632,6 +645,7 @@ impl LinearImportService {
             .execute(&mut *tx)
             .await?;
         }
+        reuse_earlier_projects(&mut tx, &TABLES, import_id, workspace_id).await?;
         tx.commit().await?;
         if let Err(error) = self
             .enqueue(import_job_kind(), import_id, workspace_id)
@@ -1218,6 +1232,7 @@ impl LinearImportService {
             .bind(run.import_id.to_string())
             .execute(&mut *tx)
             .await?;
+        reuse_earlier_tasks(&mut tx, &TABLES, run.import_id, run.workspace_id).await?;
         tx.commit().await?;
         Ok(())
     }
