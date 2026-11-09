@@ -2,8 +2,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import { applyChatActions, applyChatEvents, chatQueryKeys } from '../../chat-cache'
 import * as DocumentPicker from 'expo-document-picker'
 import * as ImagePicker from 'expo-image-picker'
-import { useState } from 'react'
-import { Image, Platform, Pressable, ScrollView, View } from 'react-native'
+import { useEffect, useRef, useState } from 'react'
+import { Image, Platform, Pressable, ScrollView, type TextInputInstance, View } from 'react-native'
 import { TextInput } from '../../ui/scaled'
 
 import { newNonce, type ThreadPages, upsertThreadMessage } from '../../data/chat'
@@ -160,6 +160,15 @@ export function Composer({ state, placeholder, nameOf, alsoSendTo }: { state: Co
   const [emojiOpen, setEmojiOpen] = useState(false)
   const { draft, setDraft, mode } = state
   const append = (text: string) => setDraft(`${draft}${draft && !draft.endsWith(' ') ? ' ' : ''}${text}`)
+  const input = useRef<TextInputInstance>(null)
+  // Reply and Edit open the keyboard. They run from the message's action sheet, so wait until its Modal has slid
+  // away: iOS drops a focus that happens while the Modal is still on screen.
+  const target = mode.kind === 'edit' ? mode.message.id : mode.replyTo?.id
+  useEffect(() => {
+    if (!target) return
+    const timer = setTimeout(() => input.current?.focus(), Platform.OS === 'web' ? 0 : 350)
+    return () => clearTimeout(timer)
+  }, [target])
 
   const pickImages = async (camera: boolean) => {
     const options: ImagePicker.ImagePickerOptions = { mediaTypes: ['images', 'videos'], allowsMultipleSelection: !camera, selectionLimit: 10, quality: 0.9 }
@@ -224,6 +233,7 @@ export function Composer({ state, placeholder, nameOf, alsoSendTo }: { state: Co
           </ScrollView>
         ) : null}
         <TextInput
+          ref={input}
           value={draft}
           onChangeText={setDraft}
           onFocus={() => setFocused(true)}
