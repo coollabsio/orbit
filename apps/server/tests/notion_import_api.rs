@@ -1177,10 +1177,11 @@ async fn import_all_creates_pages_with_content_files_links_and_order() {
         done
     );
     let (_, beta_page) = harness.page(&harness.owner_cookie, &beta).await;
+    assert_eq!(beta_page["content"][0]["type"], "database");
     assert_eq!(
-        beta_page["content"][0]["props"]["pageId"],
-        tasks.as_str(),
-        "the inline database block links to the database"
+        beta_page["content"][0]["props"],
+        json!({"databaseId": tasks.as_str(), "linkId": ""}),
+        "the inline database block shows the database's own views"
     );
     let (_, row_page) = harness.page(&harness.owner_cookie, &row_one).await;
     assert_eq!(
@@ -2504,8 +2505,11 @@ async fn databases_import_with_typed_properties_values_and_views() {
         .iter()
         .map(|block| block["type"].as_str().unwrap())
         .collect();
-    assert_eq!(blocks, ["paragraph", "page", "paragraph"]);
-    assert_eq!(home_page["content"][1]["props"]["pageId"], inline.as_str());
+    assert_eq!(blocks, ["paragraph", "database", "paragraph"]);
+    assert_eq!(
+        home_page["content"][1]["props"],
+        json!({"databaseId": inline.as_str(), "linkId": ""})
+    );
     let (_, inline_page) = harness.page(&harness.owner_cookie, &inline).await;
     assert_eq!(inline_page["parent_id"], home.as_str());
     let inline = harness.imported(&id, INLINE_DB).await;

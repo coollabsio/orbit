@@ -463,10 +463,14 @@ fn convert_node(node: &BlockNode, ctx: &mut ConvertContext<'_>, out: &mut Vec<Va
                 Vec::new(),
             ));
         }
-        // An inline database is imported as a database sub-page: the block links to it.
-        "child_page" | "child_database" => {
+        "child_page" => {
             let title = str_at(data, &["title"]).unwrap_or_default().to_owned();
-            page_reference(&block.id, &title, ctx, out);
+            page_reference(&block.id, &title, PageBlock::Page, ctx, out);
+        }
+        // An inline database is imported as a database sub-page, shown here with its own views.
+        "child_database" => {
+            let title = str_at(data, &["title"]).unwrap_or_default().to_owned();
+            page_reference(&block.id, &title, PageBlock::Database, ctx, out);
         }
         "link_to_page" => {
             let target = str_at(data, &["type"])
@@ -475,7 +479,7 @@ fn convert_node(node: &BlockNode, ctx: &mut ConvertContext<'_>, out: &mut Vec<Va
             let title = normalize_id(target)
                 .and_then(|id| ctx.resolver.page_title(&id))
                 .unwrap_or_default();
-            page_reference(target, &title, ctx, out);
+            page_reference(target, &title, PageBlock::Page, ctx, out);
         }
         "image" | "file" | "pdf" | "video" | "audio" => media(node, ctx, out),
         "bookmark" | "link_preview" => {
@@ -879,10 +883,20 @@ fn link_paragraph(url: &str, data: &Value, ctx: &mut ConvertContext<'_>, out: &m
     ));
 }
 
-/// child_page/child_database/link_to_page → `page` block when imported, else a link paragraph.
+/// The editor block that shows an imported page or database.
+#[derive(Clone, Copy)]
+enum PageBlock {
+    Page,
+    /// A `database` block of the database's own views (`linkId` empty).
+    Database,
+}
+
+/// child_page/child_database/link_to_page → `page` or `database` block when imported, else a
+/// link paragraph.
 fn page_reference(
     notion_id: &str,
     title: &str,
+    kind: PageBlock,
     ctx: &mut ConvertContext<'_>,
     out: &mut Vec<Value>,
 ) {
@@ -892,8 +906,18 @@ fn page_reference(
     };
     if let Some(orbit_id) = ctx.resolver.page_link(&id) {
         let mut props = Map::new();
-        props.insert("pageId".into(), json!(orbit_id));
-        out.push(make_block(ctx, "page", props, None, Vec::new()));
+        let block = match kind {
+            PageBlock::Page => {
+                props.insert("pageId".into(), json!(orbit_id));
+                "page"
+            }
+            PageBlock::Database => {
+                props.insert("databaseId".into(), json!(orbit_id));
+                props.insert("linkId".into(), json!(""));
+                "database"
+            }
+        };
+        out.push(make_block(ctx, block, props, None, Vec::new()));
         return;
     }
     ctx.report.unresolved_page_links += 1;

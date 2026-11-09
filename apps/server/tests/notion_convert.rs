@@ -183,6 +183,7 @@ fn props_for(kind: &str) -> (&'static [&'static str], &'static [&'static str]) {
         ),
         "file" => (&["backgroundColor", "name", "url", "caption"], &[]),
         "page" => (&["pageId"], &[]),
+        "database" => (&["databaseId", "linkId"], &[]),
         other => panic!("block type {other} is not in Orbit's editor schema"),
     }
 }
@@ -192,7 +193,7 @@ const COLORS: &[&str] = &[
 ];
 
 /// Checks every block against Orbit's editor schema (BlockNote 0.55 defaults + `page` +
-/// `callout`).
+/// `database` + `callout`).
 fn assert_blocknote_schema(blocks: &[Value]) {
     let mut ids = HashSet::new();
     check_blocks(blocks, &mut ids);
@@ -653,7 +654,7 @@ fn child_pages_and_page_links() {
             "page",
             "paragraph",
             "paragraph",
-            "page",
+            "database",
             "page",
             "paragraph",
             "page"
@@ -671,8 +672,8 @@ fn child_pages_and_page_links() {
     assert_eq!(texts(&c[1]["content"]), "Not imported");
     assert_eq!(texts(&c[2]["content"]), "Untitled");
     assert_eq!(
-        c[3]["props"]["pageId"],
-        "01900000-0000-7000-8000-000000000003"
+        c[3]["props"],
+        json!({"databaseId": "01900000-0000-7000-8000-000000000003", "linkId": ""})
     );
     assert_eq!(
         c[4]["props"]["pageId"],
@@ -914,7 +915,7 @@ fn row_texts(table: &Value) -> Vec<Vec<String>> {
 }
 
 #[test]
-fn a_child_database_block_links_to_the_imported_database() {
+fn a_child_database_block_shows_the_imported_database() {
     let (page, _) = load("lists");
     let blocks: Vec<BlockNode> = vec![
         serde_json::from_value(json!({
@@ -927,10 +928,10 @@ fn a_child_database_block_links_to_the_imported_database() {
     let resolver = resolver();
     let mut ctx = ConvertContext::new(&resolver);
     let converted = convert_page(&page, &blocks, &mut ctx);
-    assert_eq!(types(&converted.content), ["page"]);
+    assert_eq!(types(&converted.content), ["database"]);
     assert_eq!(
-        converted.content[0]["props"]["pageId"],
-        "01900000-0000-7000-8000-000000000003"
+        converted.content[0]["props"],
+        json!({"databaseId": "01900000-0000-7000-8000-000000000003", "linkId": ""})
     );
 }
 
