@@ -1817,6 +1817,33 @@ export type GroupBy = 'status' | 'assignee' | 'priority' | 'project' | 'label' |
 
 export type GroupOp = 'and' | 'or';
 
+export type ImportPeopleList = {
+    items: Array<ImportPerson>;
+};
+
+/**
+ * A person from an import, with the number of their tasks that are not deleted.
+ */
+export type ImportPerson = {
+    /**
+     * Lowercase; `null` when the source did not give one.
+     */
+    email?: string | null;
+    id: string;
+    name: string;
+    source: ImportSource;
+    task_count: number;
+    /**
+     * The member their tasks are assigned to; `null` when not mapped.
+     */
+    user_id?: string | null;
+};
+
+/**
+ * The tool an import came from.
+ */
+export type ImportSource = 'asana' | 'linear' | 'trello';
+
 /**
  * What a tool posts: the payload of a Slack incoming webhook. Fields that Orbit does not use
  * (`channel`, `thread_ts`, `unfurl_links`) are ignored, so a Slack payload posts as it is.
@@ -2334,6 +2361,14 @@ export type LoginResponse = {
      */
     session_token?: string | null;
     user: AuthUserResponse;
+};
+
+/**
+ * The person after a mapping change, and how many of their tasks changed.
+ */
+export type MappedPerson = {
+    person: ImportPerson;
+    tasks_changed: number;
 };
 
 export type MemberNoteBody = {
@@ -5373,6 +5408,13 @@ export type TwoFactorStatus = {
      * Sign-in asks for an authenticator app code after the password.
      */
     totp_enabled: boolean;
+};
+
+export type UpdateImportPersonBody = {
+    /**
+     * The member who gets the person's tasks; `null` takes them back off the tasks.
+     */
+    user_id?: string | null;
 };
 
 export type UpdateMeBody = {
@@ -16587,6 +16629,127 @@ export type StartGithubManifestResponses = {
 };
 
 export type StartGithubManifestResponse = StartGithubManifestResponses[keyof StartGithubManifestResponses];
+
+export type ListImportPeopleData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/import-people';
+};
+
+export type ListImportPeopleErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * workspace_action_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * import_person_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type ListImportPeopleError = ListImportPeopleErrors[keyof ListImportPeopleErrors];
+
+export type ListImportPeopleResponses = {
+    200: ImportPeopleList;
+};
+
+export type ListImportPeopleResponse = ListImportPeopleResponses[keyof ListImportPeopleResponses];
+
+export type UpdateImportPersonData = {
+    body: UpdateImportPersonBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        person_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/import-people/{person_id}';
+};
+
+export type UpdateImportPersonErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: WorkspaceProblem;
+    /**
+     * authentication_required
+     */
+    401: WorkspaceProblem;
+    /**
+     * origin_forbidden, workspace_action_forbidden
+     */
+    403: WorkspaceProblem;
+    /**
+     * import_person_not_found
+     */
+    404: WorkspaceProblem;
+    /**
+     * contract_mismatch
+     */
+    409: WorkspaceProblem;
+    /**
+     * request_too_large
+     */
+    413: WorkspaceProblem;
+    /**
+     * validation_failed
+     */
+    422: WorkspaceProblem;
+    /**
+     * internal_error
+     */
+    500: WorkspaceProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: WorkspaceProblem;
+};
+
+export type UpdateImportPersonError = UpdateImportPersonErrors[keyof UpdateImportPersonErrors];
+
+export type UpdateImportPersonResponses = {
+    200: MappedPerson;
+};
+
+export type UpdateImportPersonResponse = UpdateImportPersonResponses[keyof UpdateImportPersonResponses];
 
 export type ListAsanaImportsData = {
     body?: never;

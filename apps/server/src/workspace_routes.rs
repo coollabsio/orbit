@@ -1165,6 +1165,12 @@ async fn accept_invitation(
             )
             .await
             .map_err(|error| workspace_problem(error, instance, request_id.as_ref()))?;
+        crate::import_people::map_joined_member(
+            state.identity.database(),
+            accepted.membership_id,
+            request_id_value(request_id.as_ref()),
+        )
+        .await;
         return Ok(Json(accepted).into_response());
     }
     let email = body
@@ -1247,6 +1253,12 @@ async fn accept_invitation(
         .registration_throttler
         .finish_success(reservation)
         .await;
+    crate::import_people::map_joined_member(
+        state.identity.database(),
+        registered.acceptance.membership_id,
+        request_id_value(request_id.as_ref()),
+    )
+    .await;
     let cookie = issued_session_cookie(
         state.cookie_mode,
         &registered.session.token,

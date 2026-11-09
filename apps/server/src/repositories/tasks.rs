@@ -2337,6 +2337,79 @@ impl TaskRepository {
         Ok(TaskUpdateOutcome { task, auto_closed })
     }
 
+    /// Replaces `from` with `to` among the assignees of each task, in the caller's transaction
+    /// and without notifications: Settings → Import gives all tasks of an imported person to a
+    /// member at once, and one notification per task would bury them. Skips deleted tasks and
+    /// tasks with another assignee who left the workspace. Returns how many tasks changed.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn swap_assignee_in_tx(
+        &self,
+        tx: &mut Transaction<'_, Any>,
+        workspace_id: Id,
+        actor_id: Id,
+        task_ids: &[Id],
+        (from, to): (Option<Id>, Option<Id>),
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<u32, TaskError> {
+        let mut changed = 0;
+        for &task_id in task_ids {
+            let before = match task_in_tx(tx, workspace_id, task_id, false).await {
+                Ok(task) => task,
+                Err(TaskError::NotFound) => continue,
+                Err(error) => return Err(error),
+            };
+            let mut assignees: Vec<Id> = before
+                .assignee_ids
+                .iter()
+                .copied()
+                .filter(|id| Some(*id) != from)
+                .collect();
+            if let Some(to) = to
+                && !assignees.contains(&to)
+            {
+                assignees.push(to);
+            }
+            if assignees.len() == before.assignee_ids.len()
+                && assignees.iter().all(|id| before.assignee_ids.contains(id))
+            {
+                continue;
+            }
+            let update = TaskUpdate {
+                id: task_id,
+                expected_version: before.version,
+                changes: TaskChanges {
+                    assignee_ids: Some(assignees),
+                    ..TaskChanges::default()
+                },
+            };
+            // Validation fails before any write, so the transaction stays usable.
+            match update_task_in_tx(tx, workspace_id, actor_id, &update, request_id, now, false)
+                .await
+            {
+                Ok(_) => {}
+                Err(TaskError::Invalid {
+                    field: "assignee_ids",
+                }) => continue,
+                Err(error) => return Err(error),
+            }
+            let after = task_in_tx(tx, workspace_id, task_id, false).await?;
+            self.record_write(
+                tx,
+                workspace_id,
+                actor_id,
+                ("task.updated", "task"),
+                task_id,
+                request_id,
+                json!({ "changes": updated_fields(&update, &before, &after) }),
+                now,
+            )
+            .await?;
+            changed += 1;
+        }
+        Ok(changed)
+    }
+
     pub async fn bulk_update_tasks(
         &self,
         workspace_id: Id,

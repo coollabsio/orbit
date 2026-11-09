@@ -282,6 +282,8 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::obsidian_import_routes::get_obsidian_import,
         crate::obsidian_import_routes::start_obsidian_import,
         crate::obsidian_import_routes::cancel_obsidian_import,
+        crate::import_people_routes::list_import_people,
+        crate::import_people_routes::update_import_person,
         crate::chat_routes::conversations::list_chat_conversations,
         crate::chat_routes::conversations::create_chat_channel,
         crate::chat_routes::conversations::update_chat_channel,
@@ -1040,6 +1042,13 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         id if linear_import_operation(id) => linear_import_errors(id, &mut responses),
         id if trello_import_operation(id) => trello_import_errors(id, &mut responses),
         id if obsidian_import_operation(id) => obsidian_import_errors(id, &mut responses),
+        "list_import_people" | "update_import_person" => {
+            add_code(&mut responses, "403", "workspace_action_forbidden");
+            add_code(&mut responses, "404", "import_person_not_found");
+            if operation_id == "update_import_person" {
+                add_code(&mut responses, "422", "validation_failed");
+            }
+        }
         id if task_operation(id) => task_errors(id, &mut responses),
         id if page_comment_operation(id) => page_comment_errors(id, &mut responses),
         id if page_operation(id) => page_errors(id, &mut responses),
@@ -1208,6 +1217,7 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "start_trello_import"
             | "get_obsidian_import"
             | "start_obsidian_import"
+            | "update_import_person"
     )
 }
 

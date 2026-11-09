@@ -463,7 +463,7 @@ function ResultStep({ workspaceId, item }: { workspaceId: string; item: TrelloIm
     if (report.links_added > 0) notes.push(`${plural(report.links_added, 'link attachment was', 'link attachments were')} added to card descriptions.`)
     if (report.unmatched_members > 0)
       notes.push(
-        `${plural(report.unmatched_members, 'card member has', 'card members have')} no Orbit member of the same full name; the card description names them.`,
+        `${plural(report.unmatched_members, 'card member has', 'card members have')} no Orbit member of the same full name; the card description names them. Assign them to a member in Settings → Import.`,
       )
     if (report.archived_lists_skipped > 0)
       notes.push(

@@ -31,6 +31,8 @@ export const queryKeys = {
   memberProfile: (workspaceId: string, userId: string) => [...workspace(workspaceId), 'profiles', userId] as const,
   invitations: (workspaceId: string) => [...workspace(workspaceId), 'invitations'] as const,
   apiTokens: (workspaceId: string) => [...workspace(workspaceId), 'api-tokens'] as const,
+  /** People from Asana, Linear and Trello imports, mapped to members in Settings → Import. */
+  importPeople: (workspaceId: string) => [...workspace(workspaceId), 'import-people'] as const,
   /** Full workspace exports (ZIP archives) that have not expired. */
   workspaceExports: (workspaceId: string) => [...workspace(workspaceId), 'exports'] as const,
   /** Orbit Cloud: the workspace's subscription and access. */

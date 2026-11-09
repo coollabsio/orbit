@@ -32,6 +32,7 @@ use crate::attachment_routes::AttachmentState;
 use crate::auth_routes::{CookieMode, initialize_auth};
 use crate::chat_routes::ChatState;
 use crate::export_routes::ExportState;
+use crate::import_people_routes::ImportPeopleState;
 use crate::import_routes::ImportState;
 use crate::integration_routes::IntegrationState;
 use crate::linear::client::LinearClientConfig;
@@ -194,6 +195,8 @@ impl App {
             .reconcile_github_attribution(orbit_platform::TimestampMillis::now())
             .await
             .map_err(|error| AppError::Database(error.to_string()))?;
+        // Imports made before their people were kept; in the background, never fatal.
+        tokio::spawn(crate::import_people::backfill(database.clone()));
 
         let identity = Arc::new(IdentityRepository::new(database.clone()));
         let (auth, setup) = initialize_auth(
@@ -500,6 +503,7 @@ impl App {
                     obsidian_imports,
                     cookie_mode,
                 ),
+                import_people: ImportPeopleState::new(Arc::clone(&identity), cookie_mode),
                 chat: ChatState::new(
                     Arc::clone(&identity),
                     attachment_state.uploads.clone(),

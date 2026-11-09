@@ -433,7 +433,7 @@ function ResultStep({ workspaceId, item }: { workspaceId: string; item: AsanaImp
     if (report.dependencies_linked > 0) notes.push(`${report.dependencies_linked} dependencies became “blocked by” relations.`)
     if (report.links_added > 0) notes.push(`${report.links_added} linked files (Google Drive, Dropbox and others) were added to descriptions as links.`)
     if (report.unmatched_assignees > 0)
-      notes.push(`${report.unmatched_assignees} tasks had an assignee with no Orbit member of the same email; they are unassigned and name the assignee.`)
+      notes.push(`${report.unmatched_assignees} tasks had an assignee with no Orbit member of the same email; they are unassigned and name the assignee. Assign them to a member in Settings → Import.`)
     if (report.missing_files > 0) notes.push(`${report.missing_files} Asana files could not be downloaded.`)
     if (report.skipped_subtasks > 0) notes.push(`${report.skipped_subtasks} subtasks deeper than five levels were not imported.`)
   }

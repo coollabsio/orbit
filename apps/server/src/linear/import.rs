@@ -45,6 +45,7 @@ use super::client::{LinearClient, LinearClientConfig, LinearError};
 use super::model::{LinearComment, LinearIssue};
 pub use super::scan::{LinearImportTeam, LinearImportTree};
 use super::scan::{MAX_TEAMS, build_tree};
+use crate::import_people::{self, Match, Source};
 use crate::notion::files::sanitize_file_name;
 use crate::notion::import::clamp;
 use crate::repositories::attachments::AttachmentRepository;
@@ -396,6 +397,8 @@ struct Run<'a> {
     report: StoredReport,
     /// Lowercase email → member id.
     members: HashMap<String, Id>,
+    /// Name key → member of the Linear people an admin mapped (Settings → Import).
+    mapped: HashMap<String, Id>,
     teams: HashMap<String, TeamContext>,
 }
 
@@ -881,6 +884,8 @@ impl LinearImportService {
             request_id: format!("linear-import-{import_id}"),
             report,
             members: member_emails(self.database(), workspace_id).await?,
+            mapped: import_people::mapped_members(self.database(), workspace_id, Source::Linear)
+                .await?,
             teams: HashMap::new(),
         };
 
@@ -1366,6 +1371,20 @@ impl LinearImportService {
             }
             created?;
         }
+        if let Some((found, name)) = source_assignee(run, &issue)
+            && !matches!(found, Match::Email(_))
+        {
+            let email = issue.assignee.as_ref().and_then(|a| a.email.as_deref());
+            import_people::record(
+                self.database(),
+                run.workspace_id,
+                Source::Linear,
+                &name,
+                email,
+                task_id,
+            )
+            .await?;
+        }
         sqlx::query(
             "UPDATE linear_import_items SET state = 'created' WHERE import_id = $1 AND kind = 'issue' AND linear_id = $2",
         )
@@ -1407,24 +1426,12 @@ impl LinearImportService {
             .and_then(|state| team.states.get(&state.id))
             .copied()
             .unwrap_or(team.open_status);
-        let assignee = issue.assignee.as_ref().and_then(|assignee| {
-            assignee
-                .email
-                .as_deref()
-                .and_then(|email| run.members.get(&email.trim().to_lowercase()))
-                .copied()
-        });
-        let unmatched = match (&issue.assignee, assignee) {
-            (Some(linear), None) => {
+        let found = source_assignee(run, issue);
+        let assignee = found.as_ref().and_then(|(found, _)| found.user_id());
+        let unmatched = match found {
+            Some((Match::Unmatched, name)) => {
                 run.report.unmatched_assignees += 1;
-                Some(
-                    linear
-                        .name
-                        .clone()
-                        .or_else(|| linear.display_name.clone())
-                        .or_else(|| linear.email.clone())
-                        .unwrap_or_else(|| "unknown".to_owned()),
-                )
+                Some(name)
             }
             _ => None,
         };
@@ -1540,20 +1547,8 @@ impl LinearImportService {
 
         if mentions_any(body, &files) {
             let detached = issue.parent.is_some() && item.parent_id.is_none();
-            let unmatched = issue.assignee.as_ref().and_then(|assignee| {
-                let matched = assignee
-                    .email
-                    .as_deref()
-                    .is_some_and(|email| run.members.contains_key(&email.trim().to_lowercase()));
-                (!matched).then(|| {
-                    assignee
-                        .name
-                        .clone()
-                        .or_else(|| assignee.display_name.clone())
-                        .or_else(|| assignee.email.clone())
-                        .unwrap_or_else(|| "unknown".to_owned())
-                })
-            });
+            let unmatched = source_assignee(run, &issue)
+                .and_then(|(found, name)| (found == Match::Unmatched).then_some(name));
             let markdown = description(
                 &issue,
                 &rewrite_links(body, &files),
@@ -2212,6 +2207,21 @@ fn priority(value: f64) -> &'static str {
         4 => "low",
         _ => "none",
     }
+}
+
+/// How the import assigns the issue's assignee, with the name an unassigned one gets in the
+/// description and in Settings → Import.
+fn source_assignee(run: &Run<'_>, issue: &LinearIssue) -> Option<(Match, String)> {
+    let assignee = issue.assignee.as_ref()?;
+    let name = assignee
+        .name
+        .clone()
+        .or_else(|| assignee.display_name.clone())
+        .or_else(|| assignee.email.clone())
+        .unwrap_or_else(|| "unknown".to_owned());
+    let found =
+        import_people::match_assignee(&run.members, &run.mapped, assignee.email.as_deref(), &name);
+    Some((found, name))
 }
 
 /// The issue's linked attachments that are not uploads, as `(title, url)`.

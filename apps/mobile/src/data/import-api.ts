@@ -18,6 +18,7 @@ import {
   getNotionImport,
   getObsidianImport,
   getTrelloImport,
+  listImportPeople,
   listAsanaImports,
   listLinearImports,
   listNotionImports,
@@ -28,10 +29,14 @@ import {
   startNotionImport,
   startObsidianImport,
   startTrelloImport,
+  updateImportPerson,
 } from '@orbit/api/generated/sdk.gen'
 import type {
   AsanaImport,
   CreateTrelloImportBody,
+  ImportPerson,
+  ImportSource,
+  MappedPerson,
   LinearImport,
   NotionImport,
   NotionImportDestination,
@@ -79,6 +84,7 @@ export const importKeys = {
   list: (workspaceId: string, kind: ImportKind) => ['imports', workspaceId, kind] as const,
   detail: (workspaceId: string, kind: ImportKind, id: string) => ['imports', workspaceId, kind, id] as const,
   tree: (workspaceId: string, kind: ImportKind, id: string) => ['imports', workspaceId, kind, id, 'tree'] as const,
+  people: (workspaceId: string) => ['imports', workspaceId, 'people'] as const,
 }
 
 /** Into Docs (pages) or into Tasks (projects). */
@@ -124,6 +130,26 @@ export async function startImport<K extends ImportKind>(client: OrbitClient, kin
 
 export async function cancelImport<K extends ImportKind>(client: OrbitClient, kind: K, workspaceId: string, importId: string): Promise<ImportRecord<K>> {
   return (await SDK[kind].cancel({ client, path: importPath(workspaceId, importId), throwOnError: true })).data as ImportRecord<K>
+}
+
+export type { ImportPerson }
+
+export const IMPORT_SOURCE_NAMES: Record<ImportSource, string> = { asana: 'Asana', linear: 'Linear', trello: 'Trello' }
+
+/** People that Asana, Linear and Trello imports could not assign (no member had their email). Admins only. */
+export async function listPeople(client: OrbitClient, workspaceId: string): Promise<ImportPerson[]> {
+  return (await listImportPeople({ client, path: { workspace_id: workspaceId }, throwOnError: true })).data.items
+}
+
+/** Gives all tasks of a person to a member (`null` takes them off again). */
+export async function mapPerson(client: OrbitClient, workspaceId: string, personId: string, userId: string | null): Promise<MappedPerson> {
+  return (await updateImportPerson({ client, path: { workspace_id: workspaceId, person_id: personId }, body: { user_id: userId }, throwOnError: true })).data
+}
+
+/** The web's toast after a person was mapped. */
+export function mappedNote(person: ImportPerson, tasksChanged: number, memberName: string | null): string {
+  const tasks = tasksChanged === 1 ? '1 task' : `${tasksChanged} tasks`
+  return memberName ? `${person.name}: ${tasks} assigned to ${memberName}.` : `${person.name} is no longer mapped: ${tasks} unassigned.`
 }
 
 // The token is sent once and never kept: these are plain calls, not mutations (whose state keeps the variables).
@@ -306,7 +332,7 @@ export function importNotes<K extends ImportKind>(kind: K, item: ImportRecord<K>
     if (!report) return notes
     push(report.dependencies_linked, `${report.dependencies_linked} dependencies became “blocked by” relations.`)
     push(report.links_added, `${report.links_added} linked files (Google Drive, Dropbox and others) were added to descriptions as links.`)
-    push(report.unmatched_assignees, `${report.unmatched_assignees} tasks had an assignee with no Orbit member of the same email; they are unassigned and name the assignee.`)
+    push(report.unmatched_assignees, `${report.unmatched_assignees} tasks had an assignee with no Orbit member of the same email; they are unassigned and name the assignee. Assign them to a member in Settings → Import.`)
     push(report.missing_files, `${report.missing_files} Asana files could not be downloaded.`)
     push(report.skipped_subtasks, `${report.skipped_subtasks} subtasks deeper than five levels were not imported.`)
   } else if (kind === 'linear') {
@@ -315,7 +341,7 @@ export function importNotes<K extends ImportKind>(kind: K, item: ImportRecord<K>
     push(report.relations_linked, `${report.relations_linked} blocking, related and duplicate relations were linked.`)
     push(report.relations_skipped, `${report.relations_skipped} relations were skipped: Orbit keeps one relation per pair of tasks and one duplicate per task.`)
     push(report.links_added, `${report.links_added} linked attachments (pull requests, threads and links) were added to descriptions.`)
-    push(report.unmatched_assignees, `${report.unmatched_assignees} issues had an assignee with no Orbit member of the same email; they are unassigned and name the assignee.`)
+    push(report.unmatched_assignees, `${report.unmatched_assignees} issues had an assignee with no Orbit member of the same email; they are unassigned and name the assignee. Assign them to a member in Settings → Import.`)
     push(report.missing_files, `${report.missing_files} Linear files could not be downloaded.`)
     push(report.detached_sub_issues, `${report.detached_sub_issues} sub-issues are at the top level (parent in another team, or more than five levels deep); their description names the parent.`)
   } else {
@@ -323,7 +349,7 @@ export function importNotes<K extends ImportKind>(kind: K, item: ImportRecord<K>
     if (!report) return notes
     push(report.checklists_added, `${plural(report.checklists_added, 'checklist was', 'checklists were')} written into card descriptions.`)
     push(report.links_added, `${plural(report.links_added, 'link attachment was', 'link attachments were')} added to card descriptions.`)
-    push(report.unmatched_members, `${plural(report.unmatched_members, 'card member has', 'card members have')} no Orbit member of the same full name; the card description names them.`)
+    push(report.unmatched_members, `${plural(report.unmatched_members, 'card member has', 'card members have')} no Orbit member of the same full name; the card description names them. Assign them to a member in Settings → Import.`)
     push(report.archived_lists_skipped, `${plural(report.archived_lists_skipped, 'archived list and its', 'archived lists and their')} cards were left out.`)
     push(report.archived_cards_skipped, `${plural(report.archived_cards_skipped, 'archived card was', 'archived cards were')} left out.`)
     push(report.refused_files, `Trello refused ${plural(report.refused_files, 'file download', 'file downloads')}; some Enterprise workspaces block them.`)

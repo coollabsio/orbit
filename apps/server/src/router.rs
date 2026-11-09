@@ -15,6 +15,7 @@ use crate::auth_routes::{AuthState, auth_router};
 use crate::backup_item_routes::{BackupItemState, backup_item_router};
 use crate::chat_routes::{ChatState, chat_router};
 use crate::export_routes::{ExportState, export_router};
+use crate::import_people_routes::{ImportPeopleState, import_people_router};
 use crate::import_routes::{ImportState, import_router};
 use crate::integration_routes::{IntegrationState, integration_router};
 use crate::linear_import_routes::{LinearImportState, linear_import_router};
@@ -54,6 +55,7 @@ pub struct ApiRoutes {
     pub linear_imports: LinearImportState,
     pub trello_imports: TrelloImportState,
     pub obsidian_imports: ObsidianImportState,
+    pub import_people: ImportPeopleState,
     pub chat: ChatState,
 }
 
@@ -95,6 +97,7 @@ pub fn production_router(
         .merge(linear_import_router(api.linear_imports))
         .merge(trello_import_router(api.trello_imports))
         .merge(obsidian_import_router(api.obsidian_imports))
+        .merge(import_people_router(api.import_people))
         .merge(crate::live::socket::live_router(api.chat.clone()))
         .merge(chat_router(api.chat))
         .merge(

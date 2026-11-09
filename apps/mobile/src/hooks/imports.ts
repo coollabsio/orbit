@@ -164,3 +164,24 @@ export function useConnectImport<K extends api.ImportKind>(kind: K, onCreated: (
   }
   return { imports: imports.data, pending, error, setError, running, submit }
 }
+
+/** People from Asana, Linear and Trello imports, for admins (`enabled`). */
+export function useImportPeople(enabled: boolean) {
+  const { client, workspaceId } = useOrbit()
+  return useQuery({ queryKey: api.importKeys.people(workspaceId), enabled, queryFn: () => api.listPeople(client, workspaceId) })
+}
+
+/** Maps a person to a member: their tasks change, so the tasks and the people list refresh. */
+export function useMapImportPerson() {
+  const { client, workspaceId } = useOrbit()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ personId, userId }: { personId: string; userId: string | null }) => api.mapPerson(client, workspaceId, personId, userId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: api.importKeys.people(workspaceId) })
+      void queryClient.invalidateQueries({ queryKey: keys.tasks(workspaceId) })
+      // every open task detail (`keys.task` starts with this prefix)
+      void queryClient.invalidateQueries({ queryKey: ['task', workspaceId] })
+    },
+  })
+}

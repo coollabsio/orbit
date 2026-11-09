@@ -389,7 +389,7 @@ function ResultStep({ workspaceId, item }: { workspaceId: string; item: LinearIm
       notes.push(`${report.relations_skipped} relations were skipped: Orbit keeps one relation per pair of tasks and one duplicate per task.`)
     if (report.links_added > 0) notes.push(`${report.links_added} linked attachments (pull requests, threads and links) were added to descriptions.`)
     if (report.unmatched_assignees > 0)
-      notes.push(`${report.unmatched_assignees} issues had an assignee with no Orbit member of the same email; they are unassigned and name the assignee.`)
+      notes.push(`${report.unmatched_assignees} issues had an assignee with no Orbit member of the same email; they are unassigned and name the assignee. Assign them to a member in Settings → Import.`)
     if (report.missing_files > 0) notes.push(`${report.missing_files} Linear files could not be downloaded.`)
     if (report.detached_sub_issues > 0)
       notes.push(`${report.detached_sub_issues} sub-issues are at the top level (parent in another team, or more than five levels deep); their description names the parent.`)

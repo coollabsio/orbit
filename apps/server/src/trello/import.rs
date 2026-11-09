@@ -43,6 +43,7 @@ use super::client::{TrelloClient, TrelloClientConfig, TrelloError};
 use super::model::{CustomField, TrelloCard, TrelloChecklist, TrelloComment};
 use super::scan::{MAX_BOARDS, build_tree};
 pub use super::scan::{TrelloImportBoard, TrelloImportTree, TrelloImportWorkspace};
+use crate::import_people::{self, Source};
 use crate::notion::files::sanitize_file_name;
 use crate::notion::import::clamp;
 use crate::repositories::attachments::AttachmentRepository;
@@ -430,6 +431,8 @@ struct Run<'a> {
     report: StoredReport,
     /// Lowercase full name → the members with that name.
     members: HashMap<String, Vec<Id>>,
+    /// Name key → member of the Trello people an admin mapped (Settings → Import).
+    mapped: HashMap<String, Id>,
     boards: HashMap<String, BoardContext>,
 }
 
@@ -940,6 +943,8 @@ impl TrelloImportService {
             request_id: format!("trello-import-{import_id}"),
             report,
             members: member_names(self.database(), workspace_id).await?,
+            mapped: import_people::mapped_members(self.database(), workspace_id, Source::Trello)
+                .await?,
             boards: HashMap::new(),
         };
 
@@ -1386,6 +1391,17 @@ impl TrelloImportService {
                     TimestampMillis::now(),
                 )
                 .await?;
+        }
+        for name in card_text(run, &item.board_id, &card, "").people {
+            import_people::record(
+                self.database(),
+                run.workspace_id,
+                Source::Trello,
+                &name,
+                None,
+                task_id,
+            )
+            .await?;
         }
         sqlx::query(
             "UPDATE trello_import_items SET state = 'created' WHERE import_id = $1 AND kind = 'card' AND trello_id = $2",
@@ -2019,6 +2035,9 @@ struct CardText {
     assignees: Vec<Id>,
     /// Members named in the description instead.
     unmatched_members: u32,
+    /// Card members no Orbit member has the full name of: mapped in Settings → Import, or
+    /// named in the description.
+    people: Vec<String>,
     links: u32,
 }
 
@@ -2028,12 +2047,17 @@ fn card_text(run: &Run<'_>, board_id: &str, card: &TrelloCard, body: &str) -> Ca
     let board = run.boards.get(board_id);
     let mut assignees = Vec::new();
     let mut unmatched = Vec::new();
+    let mut people = Vec::new();
     for member in &card.id_members {
         let name = board
             .and_then(|board| board.members.get(member))
             .cloned()
             .unwrap_or_else(|| "Trello member".to_owned());
-        match run.member_named(&name) {
+        let named = run.member_named(&name);
+        if named.is_none() {
+            people.push(name.clone());
+        }
+        match named.or_else(|| import_people::mapped_member(&run.mapped, &name)) {
             Some(id) if !assignees.contains(&id) => assignees.push(id),
             Some(_) => {}
             None => unmatched.push(name),
@@ -2077,6 +2101,7 @@ fn card_text(run: &Run<'_>, board_id: &str, card: &TrelloCard, body: &str) -> Ca
         markdown: with_source_details(&body, "Trello", &fields, &links),
         assignees,
         unmatched_members: u32::try_from(unmatched.len()).unwrap_or(u32::MAX),
+        people,
         links: u32::try_from(links.len()).unwrap_or(u32::MAX),
     }
 }

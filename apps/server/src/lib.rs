@@ -13,6 +13,8 @@ mod email_quota;
 pub mod export;
 pub mod export_routes;
 pub mod image_compression;
+pub mod import_people;
+pub mod import_people_routes;
 pub mod import_routes;
 pub mod integration_routes;
 pub mod linear;

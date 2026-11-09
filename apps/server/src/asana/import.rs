@@ -43,6 +43,7 @@ use super::convert::{bold, bullet, html_to_blocks, link, paragraph, text};
 use super::model::{AsanaAttachment, AsanaTask};
 pub use super::scan::{AsanaImportProject, AsanaImportTree, AsanaImportWorkspace};
 use super::scan::{MAX_PROJECTS, build_tree};
+use crate::import_people::{self, Match, Source};
 use crate::notion::files::sanitize_file_name;
 use crate::notion::import::clamp;
 use crate::repositories::attachments::AttachmentRepository;
@@ -386,6 +387,8 @@ struct Run<'a> {
     report: StoredReport,
     /// Lowercase email → member id.
     members: HashMap<String, Id>,
+    /// Name key → member of the Asana people an admin mapped (Settings → Import).
+    mapped: HashMap<String, Id>,
     /// Selected project gid → name.
     project_names: HashMap<String, String>,
     projects: HashMap<String, ProjectContext>,
@@ -871,6 +874,8 @@ impl AsanaImportService {
             request_id: format!("asana-import-{import_id}"),
             report,
             members,
+            mapped: import_people::mapped_members(self.database(), workspace_id, Source::Asana)
+                .await?,
             project_names: HashMap::new(),
             projects: HashMap::new(),
         };
@@ -1335,6 +1340,20 @@ impl AsanaImportService {
             }
             created?;
         }
+        if let Some((found, name)) = source_assignee(run, &task)
+            && !matches!(found, Match::Email(_))
+        {
+            let email = task.assignee.as_ref().and_then(|a| a.email.as_deref());
+            import_people::record(
+                self.database(),
+                run.workspace_id,
+                Source::Asana,
+                &name,
+                email,
+                task_id,
+            )
+            .await?;
+        }
         sqlx::query(
             "UPDATE asana_import_items SET state = 'created' WHERE import_id = $1 AND kind = 'task' AND asana_gid = $2",
         )
@@ -1407,23 +1426,12 @@ impl AsanaImportService {
             Some(status) if !closed(&status) => status,
             _ => project.open_status,
         };
-        let assignee = task.assignee.as_ref().and_then(|assignee| {
-            assignee
-                .email
-                .as_deref()
-                .and_then(|email| run.members.get(&email.trim().to_lowercase()))
-                .copied()
-        });
-        let unmatched = match (&task.assignee, assignee) {
-            (Some(asana), None) => {
+        let found = source_assignee(run, task);
+        let assignee = found.as_ref().and_then(|(found, _)| found.user_id());
+        let unmatched = match found {
+            Some((Match::Unmatched, name)) => {
                 run.report.unmatched_assignees += 1;
-                Some(
-                    asana
-                        .name
-                        .clone()
-                        .or_else(|| asana.email.clone())
-                        .unwrap_or_else(|| "unknown".to_owned()),
-                )
+                Some(name)
             }
             _ => None,
         };
@@ -2009,6 +2017,20 @@ fn priority(task: &AsanaTask) -> &'static str {
         Some("urgent" | "critical" | "highest") => "urgent",
         _ => "none",
     }
+}
+
+/// How the import assigns the task's assignee, with the name an unassigned one gets in the
+/// description and in Settings → Import.
+fn source_assignee(run: &Run<'_>, task: &AsanaTask) -> Option<(Match, String)> {
+    let assignee = task.assignee.as_ref()?;
+    let name = assignee
+        .name
+        .clone()
+        .or_else(|| assignee.email.clone())
+        .unwrap_or_else(|| "unknown".to_owned());
+    let found =
+        import_people::match_assignee(&run.members, &run.mapped, assignee.email.as_deref(), &name);
+    Some((found, name))
 }
 
 /// What the description carries besides the task's notes.
