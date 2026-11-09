@@ -24,7 +24,7 @@ import {
 import { EmptyState } from '@/components/common/EmptyState'
 import { Pane, PaneHeader, PaneTitle } from '@/components/common/Pane'
 import { useCurrentUser } from '@/features/auth/api'
-import { useMembers } from '@/features/workspaces/api'
+import { useTeamMembers } from '@/features/workspaces/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useAllStatuses, useProjects } from '@/features/tasks/api/projects'
 import { useLabels } from '@/features/tasks/api/labels'
@@ -120,7 +120,7 @@ function WorkspaceTasksPage() {
   const projectsQuery = useProjects(workspace.id)
   const projects = projectsQuery.data ?? EMPTY_PROJECTS
   const statusesQuery = useAllStatuses(workspace.id, projects)
-  const membersQuery = useMembers(workspace.id)
+  const membersQuery = useTeamMembers(workspace.id)
   const labelsQuery = useLabels(workspace.id)
   const currentUser = useCurrentUser()
   const queryClient = useQueryClient()

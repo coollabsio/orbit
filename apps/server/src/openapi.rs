@@ -352,6 +352,7 @@ impl Modify for ProblemDetails {
             WorkspaceRole::Owner,
             WorkspaceRole::Admin,
             WorkspaceRole::Member,
+            WorkspaceRole::Guest,
         ]
         .into_iter()
         .map(|role| {
@@ -852,6 +853,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             add_code(&mut responses, "409", "workspace_conflict");
             add_code(&mut responses, "409", "email_not_configured");
             add_code(&mut responses, "422", "invalid_email");
+            add_code(&mut responses, "422", "invalid_guest_channels");
             add_code(&mut responses, "502", "email_failed");
         }
         "get_instance_settings" | "remove_smtp" | "get_job_limits" => {

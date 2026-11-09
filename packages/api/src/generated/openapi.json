@@ -27583,7 +27583,7 @@
             }
           },
           "422": {
-            "description": "invalid_email",
+            "description": "invalid_email, invalid_guest_channels",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -47827,6 +47827,13 @@
           "delivery"
         ],
         "properties": {
+          "conversation_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The private channels a guest joins; required (one or more) for `guest`, refused for\nother roles."
+          },
           "delivery": {
             "$ref": "#/components/schemas/DeliveryBody"
           },
@@ -47843,9 +47850,17 @@
         "type": "object",
         "required": [
           "email",
-          "workspace_name"
+          "workspace_name",
+          "channels"
         ],
         "properties": {
+          "channels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The private channels a guest invitation adds the guest to; empty for other roles."
+          },
           "email": {
             "type": "string"
           },
@@ -54507,7 +54522,8 @@
         "enum": [
           "owner",
           "admin",
-          "member"
+          "member",
+          "guest"
         ]
       },
       "RoleChangeBody": {
@@ -57480,7 +57496,8 @@
         "enum": [
           "owner",
           "admin",
-          "member"
+          "member",
+          "guest"
         ]
       },
       "WorkspaceStorage": {
@@ -57550,6 +57567,7 @@
       "storage.manage",
       "workspace.export"
     ],
+    "guest": [],
     "member": [],
     "owner": [
       "workspace.update",

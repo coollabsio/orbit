@@ -22,7 +22,7 @@ export function channelNameFinal(value: string): string {
 
 interface Person {
   id: string
-  role: 'Owner' | 'Admin' | 'Member'
+  role: 'Owner' | 'Admin' | 'Member' | 'Guest'
   suspended?: boolean
 }
 
@@ -52,10 +52,33 @@ export function pickablePeople<T extends Person & { name: string }>(
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
-/** People a new message can go to: yourself first, as "Name (you)" (the DM with yourself), then `pickablePeople`. */
-export function messageablePeople<T extends Person & { name: string }>(members: readonly T[], currentUserId: string | null): T[] {
+/** Who "Add people" offers for a channel: the people not in it yet, and never a guest for a public channel. */
+export function addablePeople<T extends Person & { name: string }>(
+  conversation: Pick<Conversation, 'kind' | 'memberIds'>,
+  members: readonly T[],
+  currentUserId: string | null,
+): T[] {
+  const allowed = conversation.kind === 'public' ? members.filter((member) => member.role !== 'Guest') : members
+  return pickablePeople(allowed, currentUserId, conversation.memberIds)
+}
+
+/**
+ * People a new message can go to: yourself first, as "Name (you)" (the DM with yourself), then `pickablePeople`. As the
+ * server requires, a guest is offered only when it shares an open channel with you (and, when you are a guest, everybody is).
+ */
+export function messageablePeople<T extends Person & { name: string }>(
+  members: readonly T[],
+  conversations: readonly Pick<Conversation, 'kind' | 'archived' | 'memberIds'>[],
+  currentUserId: string | null,
+): T[] {
   const me = members.find((member) => member.id === currentUserId)
-  const others = pickablePeople(members, currentUserId)
+  const shared = new Set(
+    conversations
+      .filter((conversation) => conversation.kind !== 'dm' && !conversation.archived && currentUserId !== null && conversation.memberIds.includes(currentUserId))
+      .flatMap((conversation) => conversation.memberIds),
+  )
+  const reachable = members.filter((member) => (me?.role !== 'Guest' && member.role !== 'Guest') || shared.has(member.id))
+  const others = pickablePeople(reachable, currentUserId)
   return me ? [{ ...me, name: `${me.name} (you)` }, ...others] : others
 }
 

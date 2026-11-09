@@ -292,7 +292,7 @@ async fn a_notice_goes_to_the_active_tab_or_else_to_every_browser_and_respects_t
 
     // An active tab: it gets the signal and no browser gets a push.
     let hub = LiveHub::of(&fixture.database);
-    let mut tab = hub.connect(fixture.workspace_id, owner, UserStatus::default());
+    let mut tab = hub.connect(fixture.workspace_id, owner, false, UserStatus::default());
     push.notify(owner, PushKind::DirectMessages, &notice())
         .await
         .unwrap();
@@ -467,7 +467,7 @@ async fn a_long_title_and_body_are_cut_before_they_are_sent() {
 
     // An open tab gets the same short notice.
     let hub = LiveHub::of(&fixture.database);
-    let mut tab = hub.connect(fixture.workspace_id, owner, UserStatus::default());
+    let mut tab = hub.connect(fixture.workspace_id, owner, false, UserStatus::default());
     fixture
         .push
         .notify(owner, PushKind::Mentions, &long)

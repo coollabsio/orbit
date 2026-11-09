@@ -22,6 +22,7 @@ import { usePresenceOf } from '@/features/realtime/presence'
 import { useOwnStatus } from '@/features/realtime/useOwnStatus'
 import { useMembers } from '@/features/workspaces/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
+import { GuestBadge } from '@/components/common/GuestBadge'
 
 interface ProfileTarget {
   open: boolean
@@ -191,16 +192,19 @@ function ProfileCard({ userId, name, action, onClose }: { userId: string; name: 
       <ul className="flex flex-col gap-1.5 text-[13px]">
         <DetailRow icon={<StatusMark status={status} size={10} />}>{statusLabel(status)}</DetailRow>
         {localTime ? <DetailRow icon={<Clock aria-hidden="true" />}>{localTime}</DetailRow> : null}
-        <DetailRow icon={<Envelope aria-hidden="true" />}>
-          <button
-            type="button"
-            className="min-w-0 cursor-pointer truncate rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50 hover-fine:hover:underline"
-            aria-label={`Copy email address ${member.email}`}
-            onClick={copyEmail}
-          >
-            {member.email}
-          </button>
-        </DetailRow>
+        {/* a guest does not see the addresses of the people in its channels: the server sends none */}
+        {member.email ? (
+          <DetailRow icon={<Envelope aria-hidden="true" />}>
+            <button
+              type="button"
+              className="min-w-0 cursor-pointer truncate rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50 hover-fine:hover:underline"
+              aria-label={`Copy email address ${member.email}`}
+              onClick={copyEmail}
+            >
+              {member.email}
+            </button>
+          </DetailRow>
+        ) : null}
         {profile?.phone ? (
           <DetailRow icon={<Phone aria-hidden="true" />}>
             <a
@@ -212,7 +216,7 @@ function ProfileCard({ userId, name, action, onClose }: { userId: string; name: 
             </a>
           </DetailRow>
         ) : null}
-        <DetailRow icon={<ShieldUser aria-hidden="true" />}>{member.role}</DetailRow>
+        <DetailRow icon={<ShieldUser aria-hidden="true" />}>{member.role === 'Guest' ? <GuestBadge /> : member.role}</DetailRow>
       </ul>
 
       {profile?.bio ? <p data-slot="profile-bio" className="max-h-32 overflow-y-auto text-[13px] wrap-anywhere whitespace-pre-wrap text-foreground/85">{profile.bio}</p> : null}

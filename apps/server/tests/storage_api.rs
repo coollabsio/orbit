@@ -315,11 +315,7 @@ async fn rejected_s3_credentials_do_not_stop_attachment_reconciliation() {
         ..ObjectStorageState::default()
     });
     let mutations = AttachmentMutationCoordinator::default();
-    let store = TieredBlobStore::new(
-        LocalBlobStore::new(root.path()),
-        storage,
-        mutations.clone(),
-    );
+    let store = TieredBlobStore::new(LocalBlobStore::new(root.path()), storage, mutations.clone());
     let uploads = UploadService::new(
         (*fixture.database).clone(),
         Arc::new(store),

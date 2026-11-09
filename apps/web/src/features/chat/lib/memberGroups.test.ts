@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test'
 import type { PresenceEntry } from '@/features/realtime/presence'
 import { memberGroups } from './memberGroups'
 
-const person = (id: string, name: string, role: 'Owner' | 'Admin' | 'Member' = 'Member') => ({ id, name, role })
+const person = (id: string, name: string, role: 'Owner' | 'Admin' | 'Member' | 'Guest' = 'Member') => ({ id, name, role })
 const entry = (status: PresenceEntry['status']): PresenceEntry => ({ status, emoji: null, text: null, expiresAt: null })
 
 test('online people group by role, offline people come last whatever their role', () => {
@@ -24,5 +24,15 @@ test('idle and do not disturb count as online', () => {
     ['Owner', true, ['Ada']],
     ['Online', true, ['Zed']],
     ['Offline', false, ['Bob']],
+  ])
+})
+
+test('online guests have their own group after the members, offline ones go with everybody offline', () => {
+  const people = [person('u1', 'Zed'), person('u2', 'Gus', 'Guest'), person('u3', 'Gil', 'Guest')]
+  const groups = memberGroups(people, new Map([['u1', entry('online')], ['u2', entry('online')]]))
+  expect(groups.map((group) => [group.label, group.people.map((item) => item.name)])).toEqual([
+    ['Online', ['Zed']],
+    ['Guests', ['Gus']],
+    ['Offline', ['Gil']],
   ])
 })

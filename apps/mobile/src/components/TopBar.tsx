@@ -4,6 +4,7 @@ import { Pressable, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { SvgXml } from 'react-native-svg'
 
+import { isGuestRole } from '../data/guest'
 import { useOrbit } from '../orbit-context'
 import { useUnreadNotifications } from '../queries'
 import { alpha, useTheme } from '../theme'
@@ -22,7 +23,9 @@ export function TopBar() {
   const openDrawer = useOpenDrawer()
   const { user, workspace, workspaces, selectWorkspace } = useOrbit()
   const pathname = usePathname()
-  const unread = (useUnreadNotifications().data?.length ?? 0) > 0
+  // a guest has Chat and its account settings only: no Activity
+  const guest = isGuestRole(workspace.role)
+  const unread = (useUnreadNotifications(!guest).data?.length ?? 0) > 0
   const [switching, setSwitching] = useState(false)
   const [accountOpen, setAccountOpen] = useState(false)
   const onActivity = pathname === '/activity'
@@ -51,16 +54,18 @@ export function TopBar() {
         </Pressable>
       </View>
       <View className="flex-row items-center gap-1">
-        <Pressable
-          accessibilityRole="link"
-          accessibilityLabel={unread ? 'Activity, unread' : 'Activity'}
-          accessibilityState={{ selected: onActivity }}
-          onPress={() => router.navigate('/activity')}
-          className={`size-9 items-center justify-center rounded-lg active:bg-muted ${onActivity ? 'bg-muted' : ''}`}
-        >
-          <Icon name="bell" size={20} color={onActivity ? colors.foreground : colors.mutedForeground} />
-          {unread ? <View className="absolute top-1.5 right-1.5 size-3 rounded-full border-2 border-card bg-primary" /> : null}
-        </Pressable>
+        {guest ? null : (
+          <Pressable
+            accessibilityRole="link"
+            accessibilityLabel={unread ? 'Activity, unread' : 'Activity'}
+            accessibilityState={{ selected: onActivity }}
+            onPress={() => router.navigate('/activity')}
+            className={`size-9 items-center justify-center rounded-lg active:bg-muted ${onActivity ? 'bg-muted' : ''}`}
+          >
+            <Icon name="bell" size={20} color={onActivity ? colors.foreground : colors.mutedForeground} />
+            {unread ? <View className="absolute top-1.5 right-1.5 size-3 rounded-full border-2 border-card bg-primary" /> : null}
+          </Pressable>
+        )}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Account menu for ${user.display_name}`}

@@ -4,6 +4,7 @@ import { Pressable, ScrollView, View } from 'react-native'
 
 import { AddPeopleSheet } from '../../../components/chat/ChannelSheets'
 import { ChatSidePane, useShownPresence } from '../../../components/chat/Pane'
+import { Badge } from '../../../components/settings/Shell'
 import { conversationPermissions, memberGroups } from '../../../data/chat'
 import { presenceOf, usePresence } from '../../../data/chat-presence'
 import { currentStatus } from '../../../data/status'
@@ -84,6 +85,7 @@ export default function MembersScreen() {
                             </Text>
                             {/* amber-500, the same colour as the idle mark */}
                             {member.role === 'owner' ? <Icon name="crown" size={14} color={presenceColors.idle} /> : null}
+                            {member.role === 'guest' ? <Badge label="Guest" tone="outline" /> : null}
                           </View>
                           {status.emoji || status.text ? (
                             <Text numberOfLines={1} className="text-[12px] leading-[16px] text-muted-foreground">

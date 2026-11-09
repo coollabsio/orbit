@@ -32,6 +32,7 @@ import { visibleRows } from './sidebarRows'
 import { useStoredWidth, type WidthRange } from './storedWidth'
 import { useIsChatAdmin } from './useConversationActions'
 import { useSidebarDrag, type SidebarDrag, type SidebarDrop } from './useSidebarDrag'
+import { useIsGuest } from '@/features/workspaces/permissions'
 
 const SIDEBAR_WIDTH: WidthRange = { min: 220, max: 420, initial: 260 }
 
@@ -195,6 +196,8 @@ export function ChatSidebar() {
   const people = useMembers(workspaceId).data ?? []
   const badges = useChatBadges()
   const admin = useIsChatAdmin()
+  // a guest is only in the private channels it was added to: it browses and makes none
+  const guest = useIsGuest()
   const [width, setWidth] = useStoredWidth('orbit:chat:sidebar_width', SIDEBAR_WIDTH)
   const [collapsed, toggleCollapsed] = useCollapsedSections(workspaceId)
   const [showAllDms, setShowAllDms] = useState(false)
@@ -280,7 +283,7 @@ export function ChatSidebar() {
               </DropdownMenuTrigger>
             </Tip>
             <DropdownMenuContent align="end" className="w-auto min-w-44">
-              <DropdownMenuItem onClick={() => show({ kind: 'browse' })}>Browse channels</DropdownMenuItem>
+              {guest ? null : <DropdownMenuItem onClick={() => show({ kind: 'browse' })}>Browse channels</DropdownMenuItem>}
               {admin ? <DropdownMenuItem onClick={() => show({ kind: 'category' })}>New category</DropdownMenuItem> : null}
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={() => show({ kind: 'theme' })}>
@@ -297,7 +300,7 @@ export function ChatSidebar() {
             </Tip>
             <DropdownMenuContent align="end" className="w-auto min-w-44">
               <DropdownMenuItem onClick={() => show({ kind: 'message' })}>New message</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => show({ kind: 'channel', categoryId: null })}>New channel</DropdownMenuItem>
+              {guest ? null : <DropdownMenuItem onClick={() => show({ kind: 'channel', categoryId: null })}>New channel</DropdownMenuItem>}
             </DropdownMenuContent>
           </DropdownMenu>
         </SidebarListHeader>
@@ -319,8 +322,12 @@ export function ChatSidebar() {
             </Tip>
             <DropdownMenuContent align="end" className="w-auto min-w-44">
               <DropdownMenuItem onClick={() => show({ kind: 'message' })}>New message</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => show({ kind: 'channel', categoryId: null })}>New channel</DropdownMenuItem>
-              <DropdownMenuItem onClick={() => show({ kind: 'browse' })}>Browse channels</DropdownMenuItem>
+              {guest ? null : (
+                <>
+                  <DropdownMenuItem onClick={() => show({ kind: 'channel', categoryId: null })}>New channel</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => show({ kind: 'browse' })}>Browse channels</DropdownMenuItem>
+                </>
+              )}
               {admin ? (
                 <>
                   <DropdownMenuSeparator />
@@ -370,7 +377,7 @@ export function ChatSidebar() {
           const onAdd =
             section.kind === 'dms'
               ? () => show({ kind: 'message' })
-              : section.kind === 'favorites'
+              : section.kind === 'favorites' || guest
                 ? null
                 : () => show({ kind: 'channel', categoryId: section.category?.id ?? null })
           // Favorites and direct messages have their own order.

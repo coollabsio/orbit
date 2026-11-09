@@ -85,9 +85,10 @@ export function useNotifications() {
   return useQuery({ queryKey: keys.notifications(workspaceId), queryFn: () => api.notifications(client, workspaceId) })
 }
 
-export function useUnreadNotifications() {
+/** `enabled` is off for a guest: it has no Activity. */
+export function useUnreadNotifications(enabled = true) {
   const { client, workspaceId } = useOrbit()
-  return useQuery({ queryKey: keys.unreadNotifications(workspaceId), queryFn: () => api.unreadNotifications(client, workspaceId) })
+  return useQuery({ queryKey: keys.unreadNotifications(workspaceId), queryFn: () => api.unreadNotifications(client, workspaceId), enabled })
 }
 
 export function usePages() {

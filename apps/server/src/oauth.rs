@@ -84,7 +84,7 @@ impl OAuthState {
     /// Opaque tokens are audience-bound in SQLite, not taken from an external issuer.
     pub async fn authenticate(&self, token: &str) -> Result<Option<ApiTokenPrincipal>, OAuthError> {
         let now = TimestampMillis::now().as_millis();
-        let row = sqlx::query("SELECT g.id, g.user_id, g.workspace_id, g.project_ids, g.all_projects, g.mcp_scopes FROM oauth_tokens t JOIN oauth_grants g ON g.id = t.grant_id JOIN users u ON u.id = g.user_id JOIN memberships m ON m.user_id = g.user_id AND m.workspace_id = g.workspace_id JOIN workspaces w ON w.id = g.workspace_id WHERE t.access_hash = $1 AND t.access_expires_at > $2 AND g.revoked_at IS NULL AND g.resource = $3 AND g.scope = 'tasks:read' AND u.suspended_at IS NULL AND w.deleted_at IS NULL")
+        let row = sqlx::query("SELECT g.id, g.user_id, g.workspace_id, g.project_ids, g.all_projects, g.mcp_scopes FROM oauth_tokens t JOIN oauth_grants g ON g.id = t.grant_id JOIN users u ON u.id = g.user_id JOIN memberships m ON m.user_id = g.user_id AND m.workspace_id = g.workspace_id AND m.role <> 'guest' JOIN workspaces w ON w.id = g.workspace_id WHERE t.access_hash = $1 AND t.access_expires_at > $2 AND g.revoked_at IS NULL AND g.resource = $3 AND g.scope = 'tasks:read' AND u.suspended_at IS NULL AND w.deleted_at IS NULL")
             .bind(hash(token)).bind(now).bind(&self.resource).fetch_optional(self.database.pool()).await?;
         let Some(row) = row else {
             return Ok(None);
@@ -537,7 +537,7 @@ async fn consent(
     }
     let (client, redirect_uri): (String, String) = sqlx::query_as("SELECT c.name, r.redirect_uri FROM oauth_clients c JOIN oauth_requests r ON r.client_id = c.id WHERE r.id = $1")
         .bind(&id).fetch_one(&mut *tx).await?;
-    let rows = sqlx::query("SELECT p.id, p.name, p.workspace_id, w.name AS workspace_name FROM projects p JOIN workspaces w ON w.id = p.workspace_id JOIN memberships m ON m.workspace_id = w.id WHERE m.user_id = $1 AND p.deleted_at IS NULL AND w.deleted_at IS NULL ORDER BY w.name, p.name, p.id")
+    let rows = sqlx::query("SELECT p.id, p.name, p.workspace_id, w.name AS workspace_name FROM projects p JOIN workspaces w ON w.id = p.workspace_id JOIN memberships m ON m.workspace_id = w.id AND m.role <> 'guest' WHERE m.user_id = $1 AND p.deleted_at IS NULL AND w.deleted_at IS NULL ORDER BY w.name, p.name, p.id")
         .bind(user.to_string()).fetch_all(&mut *tx).await?;
     let projects: Vec<_> = rows
         .into_iter()
@@ -590,7 +590,7 @@ async fn approve(
             .workspace_id
             .ok_or_else(|| OAuthError::invalid("invalid_request"))?;
         let project_ids = if input.all_projects {
-            let Flag(member) = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM workspaces w JOIN memberships m ON m.workspace_id = w.id WHERE w.id = $1 AND m.user_id = $2 AND w.deleted_at IS NULL)")
+            let Flag(member) = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM workspaces w JOIN memberships m ON m.workspace_id = w.id AND m.role <> 'guest' WHERE w.id = $1 AND m.user_id = $2 AND w.deleted_at IS NULL)")
                 .bind(workspace.to_string()).bind(user.to_string()).fetch_one(&mut *tx).await?;
             if !member {
                 return Err(OAuthError::invalid("invalid_request"));
@@ -603,7 +603,7 @@ async fn approve(
             return Err(OAuthError::invalid("invalid_request"));
         }
         for project in &project_ids {
-            let Flag(allowed) = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM projects p JOIN workspaces w ON w.id = p.workspace_id JOIN memberships m ON m.workspace_id = w.id WHERE p.id = $1 AND p.workspace_id = $2 AND m.user_id = $3 AND p.deleted_at IS NULL AND w.deleted_at IS NULL)")
+            let Flag(allowed) = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM projects p JOIN workspaces w ON w.id = p.workspace_id JOIN memberships m ON m.workspace_id = w.id AND m.role <> 'guest' WHERE p.id = $1 AND p.workspace_id = $2 AND m.user_id = $3 AND p.deleted_at IS NULL AND w.deleted_at IS NULL)")
                 .bind(project.to_string()).bind(workspace.to_string()).bind(user.to_string()).fetch_one(&mut *tx).await?;
             if !allowed {
                 return Err(OAuthError::invalid("invalid_request"));
@@ -750,10 +750,10 @@ async fn token(
     };
     let valid_query = match state.database.backend() {
         Backend::Sqlite => {
-            "SELECT EXISTS(SELECT 1 FROM oauth_grants g JOIN users u ON u.id = g.user_id JOIN memberships m ON m.user_id = g.user_id AND m.workspace_id = g.workspace_id JOIN workspaces w ON w.id = g.workspace_id WHERE g.id = $1 AND g.client_id = $2 AND g.revoked_at IS NULL AND u.suspended_at IS NULL AND w.deleted_at IS NULL AND (g.all_projects = 1 OR EXISTS(SELECT 1 FROM projects p, json_each(g.project_ids) j WHERE p.id = j.value AND p.workspace_id = g.workspace_id AND p.deleted_at IS NULL)))"
+            "SELECT EXISTS(SELECT 1 FROM oauth_grants g JOIN users u ON u.id = g.user_id JOIN memberships m ON m.user_id = g.user_id AND m.workspace_id = g.workspace_id AND m.role <> 'guest' JOIN workspaces w ON w.id = g.workspace_id WHERE g.id = $1 AND g.client_id = $2 AND g.revoked_at IS NULL AND u.suspended_at IS NULL AND w.deleted_at IS NULL AND (g.all_projects = 1 OR EXISTS(SELECT 1 FROM projects p, json_each(g.project_ids) j WHERE p.id = j.value AND p.workspace_id = g.workspace_id AND p.deleted_at IS NULL)))"
         }
         Backend::Postgres => {
-            "SELECT EXISTS(SELECT 1 FROM oauth_grants g JOIN users u ON u.id = g.user_id JOIN memberships m ON m.user_id = g.user_id AND m.workspace_id = g.workspace_id JOIN workspaces w ON w.id = g.workspace_id WHERE g.id = $1 AND g.client_id = $2 AND g.revoked_at IS NULL AND u.suspended_at IS NULL AND w.deleted_at IS NULL AND (g.all_projects = 1 OR EXISTS(SELECT 1 FROM projects p, jsonb_array_elements_text(g.project_ids::jsonb) AS j(value) WHERE p.id = j.value AND p.workspace_id = g.workspace_id AND p.deleted_at IS NULL)))"
+            "SELECT EXISTS(SELECT 1 FROM oauth_grants g JOIN users u ON u.id = g.user_id JOIN memberships m ON m.user_id = g.user_id AND m.workspace_id = g.workspace_id AND m.role <> 'guest' JOIN workspaces w ON w.id = g.workspace_id WHERE g.id = $1 AND g.client_id = $2 AND g.revoked_at IS NULL AND u.suspended_at IS NULL AND w.deleted_at IS NULL AND (g.all_projects = 1 OR EXISTS(SELECT 1 FROM projects p, jsonb_array_elements_text(g.project_ids::jsonb) AS j(value) WHERE p.id = j.value AND p.workspace_id = g.workspace_id AND p.deleted_at IS NULL)))"
         }
     };
     let Flag(valid) = sqlx::query_scalar(valid_query)
@@ -824,10 +824,10 @@ async fn grants(
     let user = user(&state, &headers).await?;
     let query = match state.database.backend() {
         Backend::Sqlite => {
-            "SELECT g.id, g.mcp_scopes, g.all_projects, c.name AS client_name, w.name AS workspace_name, g.created_at, (SELECT json_group_array(p.name) FROM projects p JOIN json_each(g.project_ids) j ON j.value = p.id WHERE p.workspace_id = g.workspace_id AND p.deleted_at IS NULL) AS project_names FROM oauth_grants g JOIN oauth_clients c ON c.id = g.client_id JOIN workspaces w ON w.id = g.workspace_id JOIN memberships m ON m.workspace_id = w.id AND m.user_id = g.user_id WHERE g.user_id = $1 AND g.revoked_at IS NULL AND w.deleted_at IS NULL ORDER BY g.created_at DESC"
+            "SELECT g.id, g.mcp_scopes, g.all_projects, c.name AS client_name, w.name AS workspace_name, g.created_at, (SELECT json_group_array(p.name) FROM projects p JOIN json_each(g.project_ids) j ON j.value = p.id WHERE p.workspace_id = g.workspace_id AND p.deleted_at IS NULL) AS project_names FROM oauth_grants g JOIN oauth_clients c ON c.id = g.client_id JOIN workspaces w ON w.id = g.workspace_id JOIN memberships m ON m.workspace_id = w.id AND m.user_id = g.user_id AND m.role <> 'guest' WHERE g.user_id = $1 AND g.revoked_at IS NULL AND w.deleted_at IS NULL ORDER BY g.created_at DESC"
         }
         Backend::Postgres => {
-            "SELECT g.id, g.mcp_scopes, g.all_projects, c.name AS client_name, w.name AS workspace_name, g.created_at, (SELECT COALESCE(json_agg(p.name)::text, '[]') FROM projects p JOIN jsonb_array_elements_text(g.project_ids::jsonb) AS j(value) ON j.value = p.id WHERE p.workspace_id = g.workspace_id AND p.deleted_at IS NULL) AS project_names FROM oauth_grants g JOIN oauth_clients c ON c.id = g.client_id JOIN workspaces w ON w.id = g.workspace_id JOIN memberships m ON m.workspace_id = w.id AND m.user_id = g.user_id WHERE g.user_id = $1 AND g.revoked_at IS NULL AND w.deleted_at IS NULL ORDER BY g.created_at DESC"
+            "SELECT g.id, g.mcp_scopes, g.all_projects, c.name AS client_name, w.name AS workspace_name, g.created_at, (SELECT COALESCE(json_agg(p.name)::text, '[]') FROM projects p JOIN jsonb_array_elements_text(g.project_ids::jsonb) AS j(value) ON j.value = p.id WHERE p.workspace_id = g.workspace_id AND p.deleted_at IS NULL) AS project_names FROM oauth_grants g JOIN oauth_clients c ON c.id = g.client_id JOIN workspaces w ON w.id = g.workspace_id JOIN memberships m ON m.workspace_id = w.id AND m.user_id = g.user_id AND m.role <> 'guest' WHERE g.user_id = $1 AND g.revoked_at IS NULL AND w.deleted_at IS NULL ORDER BY g.created_at DESC"
         }
     };
     let rows = sqlx::query(query)

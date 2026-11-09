@@ -28,7 +28,9 @@ use utoipa::ToSchema;
 use crate::auth_routes::CookieMode;
 use crate::link_preview::LinkPreviewer;
 use crate::live::{LiveHub, NewEvent, Recipients};
-use crate::repositories::chat::{ChatError, ChatEvent, ChatRepository, Written};
+use crate::repositories::chat::{
+    ChatError, ChatEvent, ChatRepository, Emitted, Written, live_event,
+};
 use crate::repositories::identity::IdentityRepository;
 use crate::task_routes::{ApiError, authenticate_session, validation};
 
@@ -100,15 +102,7 @@ impl ChatState {
     ) -> Result<(Written<T>, u64), ChatError> {
         let _order = self.hub.write_lock(workspace_id).await;
         let written = write.await?;
-        let events: Vec<NewEvent> = written
-            .events
-            .iter()
-            .map(|emitted| NewEvent {
-                recipients: emitted.recipients.clone(),
-                topic: TOPIC,
-                event: serde_json::to_value(&emitted.event).unwrap_or_default(),
-            })
-            .collect();
+        let events: Vec<NewEvent> = written.events.iter().map(Emitted::live).collect();
         // The number of the write's last event. A client that has seen it on its socket knows
         // that the response is not news, and that it must not put it over newer events.
         let seq = match self.hub.publish(workspace_id, &events).await {
@@ -159,11 +153,7 @@ impl ChatState {
         }
         let states: Vec<NewEvent> = states
             .into_iter()
-            .map(|(user_id, event)| NewEvent {
-                recipients: Recipients::Users(vec![user_id]),
-                topic: TOPIC,
-                event: serde_json::to_value(&event).unwrap_or_default(),
-            })
+            .map(|(user_id, event)| live_event(Recipients::Users(vec![user_id]), &event))
             .collect();
         if let Err(error) = self.hub.publish(workspace_id, &states).await {
             tracing::warn!(error = %error, "chat states for the live socket");
@@ -172,8 +162,6 @@ impl ChatState {
     }
 }
 
-/// The topic of chat events on the live socket.
-const TOPIC: &str = "chat";
 /// A number no live socket has seen (the largest integer a browser reads exactly).
 const UNSEEN_SEQ: u64 = (1 << 53) - 1;
 

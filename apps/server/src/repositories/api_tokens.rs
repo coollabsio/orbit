@@ -343,7 +343,7 @@ impl ApiTokenRepository {
             "SELECT api_tokens.id, api_tokens.workspace_id, api_tokens.created_by, api_tokens.service_account_id, service_accounts.name AS service_account_name, api_tokens.scopes, api_tokens.all_projects \
              FROM api_tokens JOIN workspaces ON workspaces.id = api_tokens.workspace_id \
              LEFT JOIN users ON users.id = api_tokens.created_by AND users.suspended_at IS NULL \
-             LEFT JOIN memberships ON memberships.workspace_id = api_tokens.workspace_id AND memberships.user_id = api_tokens.created_by \
+             LEFT JOIN memberships ON memberships.workspace_id = api_tokens.workspace_id AND memberships.user_id = api_tokens.created_by AND memberships.role <> 'guest' \
              LEFT JOIN service_accounts ON service_accounts.id = api_tokens.service_account_id AND service_accounts.workspace_id = api_tokens.workspace_id AND service_accounts.disabled_at IS NULL \
              WHERE api_tokens.token_hash = $1 AND api_tokens.revoked_at IS NULL AND workspaces.deleted_at IS NULL \
              AND (api_tokens.expires_at IS NULL OR api_tokens.expires_at > $2) \
