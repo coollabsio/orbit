@@ -39,6 +39,9 @@ sub-pages (`apps/server/src/notion/scan.rs:28`).
 
 ### Not in P1 (later phases)
 
+The design for these items is in [Docs databases, P2 and P3](2026-11-09-docs-databases-p2-p3-design.md)
+(build order in its section 1.1). The Notion import (section 14) is done.
+
 | Phase | Item |
 |---|---|
 | P2 | Inline database block, linked views, board grouped by `person`, sub-groups (swim lanes), calculation footer, AND/OR filter groups, row templates, property values in search, CSV import and export, moving pages into and out of a database |
