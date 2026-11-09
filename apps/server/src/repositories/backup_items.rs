@@ -858,7 +858,8 @@ impl BackupItemRepository {
         .map(|row| row.get("id"))
         .collect();
         let memberships: HashMap<String, String> =
-            sqlx::query("SELECT id, user_id FROM memberships WHERE workspace_id = $1")
+            // guests have no tasks: a restored task keeps no guest as assignee
+            sqlx::query("SELECT id, user_id FROM memberships WHERE workspace_id = $1 AND role <> 'guest'")
                 .bind(workspace_id.to_string())
                 .fetch_all(&mut *tx)
                 .await?
@@ -1382,7 +1383,9 @@ async fn is_member(
     user_id: Id,
 ) -> Result<bool, sqlx::Error> {
     let Flag(member) = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM memberships WHERE workspace_id = $1 AND user_id = $2)",
+        // a guest has no pages, so a private page is never restored into its space
+        "SELECT EXISTS(SELECT 1 FROM memberships WHERE workspace_id = $1 AND user_id = $2 \
+         AND role <> 'guest')",
     )
     .bind(workspace_id.to_string())
     .bind(user_id.to_string())

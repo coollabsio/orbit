@@ -22,12 +22,14 @@ import {
 import { FieldGrid, RowIcon, SettingsRow } from '@/features/settings/components/SettingsParts'
 import { shortDate } from '@/lib/format'
 import { MIN_VOLUME, playSound, SOUND_SETS, type SoundSet, useSoundSettings } from '@/lib/sounds'
+import { useIsGuest } from '@/features/workspaces/permissions'
 
-const PREFERENCES: { field: keyof NotificationPrefs; label: string }[] = [
-  { field: 'direct_messages', label: 'Direct messages' },
-  { field: 'chat_mentions', label: 'Mentions in chat' },
-  { field: 'thread_replies', label: 'Replies in threads I follow' },
-  { field: 'channel_messages', label: 'All messages in channels set to "All messages"' },
+/** `chat`: also shown to a guest, who has only chat. */
+const PREFERENCES: { field: keyof NotificationPrefs; label: string; chat?: true }[] = [
+  { field: 'direct_messages', label: 'Direct messages', chat: true },
+  { field: 'chat_mentions', label: 'Mentions in chat', chat: true },
+  { field: 'thread_replies', label: 'Replies in threads I follow', chat: true },
+  { field: 'channel_messages', label: 'All messages in channels set to "All messages"', chat: true },
   { field: 'task_assigned', label: 'Tasks assigned to me' },
   { field: 'mentions', label: 'Mentions in comments and pages' },
 ]
@@ -127,6 +129,7 @@ function Preferences() {
   const preferences = useNotificationPreferences()
   const save = useSaveNotificationPreferences()
   const current = preferences.data
+  const guest = useIsGuest()
 
   if (preferences.isPending) return <p className="text-sm text-muted-foreground" role="status">Loading…</p>
   if (!current) return <p className="text-sm text-muted-foreground" role="alert">Your choices could not be loaded. <Button variant="ghost" onClick={() => void preferences.refetch()}>Retry</Button></p>
@@ -134,7 +137,7 @@ function Preferences() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col divide-y divide-border">
-        {PREFERENCES.map(({ field, label }) => (
+        {PREFERENCES.filter((preference) => !guest || preference.chat).map(({ field, label }) => (
           <div key={field} className="flex items-center justify-between gap-4 py-3 first:pt-0 last:pb-0">
             <span className="text-sm font-medium text-foreground">{label}</span>
             <Switch

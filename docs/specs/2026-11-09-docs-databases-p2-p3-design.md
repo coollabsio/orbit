@@ -55,8 +55,8 @@ rollup and formula functions when 9 and 13 land. Each item lists these extension
 
 | Area | Fact | Where |
 |---|---|---|
-| Schema | Tables `database_properties`, `database_views`, `page_property_values`; `pages.kind IN ('page','database')`. The property `type` is checked in Rust only, so a new property type needs no SQL change. | `migrations/0078_page_databases.sql` |
-| View types | `database_views.type IN ('table','board')`. A new view type needs a table rebuild on SQLite (as `0079`). | `migrations/0079_database_board_views.sql` |
+| Schema | Tables `database_properties`, `database_views`, `page_property_values`; `pages.kind IN ('page','database')`. The property `type` is checked in Rust only, so a new property type needs no SQL change. | `migrations/0079_page_databases.sql` |
+| View types | `database_views.type IN ('table','board')`. A new view type needs a table rebuild on SQLite (as `0080`). | `migrations/0080_database_board_views.sql` |
 | View config | `ViewConfig` (`#[serde(deny_unknown_fields)]`): `columns`, `sorts`, `filter.rules` (flat AND, max 20), `wrap_cells`, board fields. `repair` drops unknown ids. | `repositories/databases.rs` |
 | Limits | `MAX_ROWS` 5,000, `MAX_PROPERTIES` 100, `MAX_VIEWS` 50, `MAX_OPTIONS` 200, `MAX_CELL_ITEMS` 100, `MAX_SORTS` 10, `MAX_RULES` 20. | `repositories/databases.rs` |
 | Row cap | `ensure_row_capacity(tx, database_id, adding)` runs on every path that makes a row live. | `repositories/databases.rs` |
@@ -79,7 +79,7 @@ rollup and formula functions when 9 and 13 land. Each item lists these extension
   `crates/platform/tests/{database,backup}.rs` and `apps/server/tests/app_smoke.rs`. A new route
   updates the counts in `apps/server/tests/openapi_contract.rs`, then `just api`. Give each new
   `ToSchema` type a unique `#[schema(as = …)]` name (`.ai/lessons.md`).
-- **Migration numbers.** The next free number when the item merges (0080 and up at the time of
+- **Migration numbers.** The next free number when the item merges (0081 and up at the time of
   writing). This spec does not fix numbers.
 - **SQL.** `$n` placeholders, `SqlBuilder`, `orbit_platform::Row`, `i64` flags, `ON CONFLICT`.
   Writes use `immediate_transaction()`. Do slow work (parsing, conversion, formula checks) before
@@ -145,7 +145,7 @@ CREATE INDEX database_links_database ON database_links (database_id);
 CREATE INDEX database_links_host ON database_links (host_page_id);
 CREATE INDEX database_links_workspace ON database_links (workspace_id);
 
--- SQLite: rebuild database_views as 0079 does, with:
+-- SQLite: rebuild database_views as 0080 does, with:
 --   link_id TEXT REFERENCES database_links(id) ON DELETE CASCADE,
 --   type TEXT NOT NULL CHECK (type IN ('table','board','list','calendar','gallery','timeline','form'))
 CREATE INDEX database_views_link ON database_views (link_id, position, id);
@@ -272,7 +272,7 @@ OQ-1.1 asks for a cleanup job.
 
 ### 3.11 Status
 
-Done on 2026-11-09 (migration `0080_database_links`). Decisions: D-P2-1 as written; OQ-1.1 no cleanup job; OQ-1.3 the
+Done on 2026-11-09 (migration `0081_database_links`). Decisions: D-P2-1 as written; OQ-1.1 no cleanup job; OQ-1.3 the
 block keeps pointing to the same database; OQ-1.2 see below. Differences from this section:
 
 | # | Item | Where | Why |
@@ -1366,7 +1366,9 @@ cap. Web: required question blocks submit.
 | Button actions / presses | 5 / 10 per second per user | 15 |
 | Form submissions | 30 per user per hour | 16 |
 
-## 20. Decisions to confirm
+## 20. Decisions
+
+All accepted by the user on 2026-11-09 as recommended.
 
 | # | Decision | Date |
 |---|---|---|

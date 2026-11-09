@@ -15,6 +15,7 @@ import { useProjects } from '@/features/tasks/api/projects'
 import { NewProjectModal } from '@/features/tasks/components/NewProjectModal'
 import { savedViewsQueryOptions } from '@/features/views/api/views'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
+import { useIsGuest } from '@/features/workspaces/permissions'
 import { phonePath, settingsAreaOf, useSettingsArea, type SettingsAreaName } from '@/features/settings/settingsNav'
 import { useIsPhone } from '@/features/chat/pages/useChatViewport'
 import { chatEnabled, docsHidden } from './productNavigation'
@@ -378,8 +379,10 @@ export function SidebarNav({
   pageListRef?: (element: HTMLDivElement | null) => void
 }) {
   const location = useLocation()
-  // inside Tasks, Settings, Account settings or Admin the area's links and Back replace the app links
-  const pageArea: SidebarArea | null = settingsAreaOf(location.pathname) ?? (isTasksPath(location.pathname) ? 'tasks' : null)
+  // inside Tasks, Settings, Account settings or Admin the area's links and Back replace the app links;
+  // a guest has Chat and its account settings only (`GuestWorkspaceGate`)
+  const guest = useIsGuest()
+  const pageArea: SidebarArea | null = settingsAreaOf(location.pathname) ?? (isTasksPath(location.pathname) && !guest ? 'tasks' : null)
   // the area whose Back was pressed in the drawer: the main menu shows until the page moves to another area
   const [mainMenuFor, setMainMenuFor] = useState<SidebarArea | null>(null)
   const area = pageArea && pageArea === mainMenuFor ? null : pageArea
@@ -419,6 +422,7 @@ export function SidebarNav({
   return (
     <SidebarNavCollapsed.Provider value={collapsed}>
       <div data-slot="sidebar-nav" data-collapsed={collapsed} className="group/sidebar-nav flex min-h-0 flex-1 flex-col">
+        {guest ? null : (
         <div className="px-1 pb-3">
         <Tip label={collapsed ? 'Search' : undefined} side="right">
           {collapsed ? (
@@ -442,6 +446,7 @@ export function SidebarNav({
           )}
         </Tip>
         </div>
+        )}
         {/* a new area slides in: forward from the right, back to the app links from the left */}
         <div
           key={content}
@@ -451,13 +456,24 @@ export function SidebarNav({
         >
           {pageList ? (
             <>
-              <BackToApp label={PAGE_LIST_TITLES[areaOf(location.pathname) ?? ''] ?? ''} onNavigate={onNavigate} />
+              {/* a guest has Chat alone: there is no main menu to go back to */}
+              {guest ? null : <BackToApp label={PAGE_LIST_TITLES[areaOf(location.pathname) ?? ''] ?? ''} onNavigate={onNavigate} />}
               {/* the page renders its list here (`InAppSidebar`); it scrolls on its own */}
               <div ref={pageListRef} data-slot="sidebar-page-list" className="-mx-3 mt-2 flex min-h-0 flex-1 flex-col" />
             </>
           ) : (
             <div className="-mx-1 flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto overscroll-contain px-1 pb-2">
-              {area === 'tasks' ? <TasksAreaNav onNavigate={onNavigate} onBack={backShowsMenu ? () => setMainMenuFor(area) : undefined} /> : area ? <SettingsAreaNav area={area} onNavigate={onNavigate} onBack={backShowsMenu ? () => setMainMenuFor(area) : undefined} /> : (
+              {area === 'tasks' ? <TasksAreaNav onNavigate={onNavigate} onBack={backShowsMenu ? () => setMainMenuFor(area) : undefined} /> : area ? <SettingsAreaNav area={area} onNavigate={onNavigate} onBack={backShowsMenu ? () => setMainMenuFor(area) : undefined} /> : guest ? (
+                <>
+                  <SidebarNavItem to="/chat" icon={MessageSquare} label="Chat" badge={chatBadge} unread={chatUnread} onClick={onNavigate} />
+                  {isRoot ? (
+                    <>
+                      <div className="flex-1" aria-hidden="true" />
+                      <SidebarNavItem to="/admin" icon={SecurityUser} tone="neutral" label="Admin" onClick={onNavigate} />
+                    </>
+                  ) : null}
+                </>
+              ) : (
                 <>
                   {WORKSPACE_LINKS.map((link) => link.enabled || (link.to === '/chat' && chat) ? (
                     <SidebarNavItem

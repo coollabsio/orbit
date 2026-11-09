@@ -89,12 +89,20 @@ pub enum MembershipDenied {
     OwnerProtected,
     /// The owner role only moves through an ownership transfer.
     TransferRequired,
+    /// A member never becomes a guest; remove them and invite them again.
+    GuestDowngrade,
 }
 
 impl Actor {
     #[must_use]
     pub const fn can(self, permission: Permission) -> bool {
         Policy::can(self.role, permission)
+    }
+
+    /// Guests only see the private chat channels and DMs they belong to.
+    #[must_use]
+    pub const fn is_guest(self) -> bool {
+        matches!(self.role, WorkspaceRole::Guest)
     }
 
     /// Only the author rewrites a task comment. `author_id` is `None` for a comment that a
@@ -179,6 +187,9 @@ impl Actor {
             return Err(MembershipDenied::RoleForbidden);
         }
         self.owner_protected(target_role)?;
+        if new_role == WorkspaceRole::Guest {
+            return Err(MembershipDenied::GuestDowngrade);
+        }
         self.admin_protected(target_role)
     }
 
@@ -245,7 +256,7 @@ impl Error for PolicyError {}
 pub struct Policy;
 
 impl Policy {
-    /// The only place that maps a role to what it may do.
+    /// The only place that maps a role to what it may do. Guests hold no permission.
     #[must_use]
     pub const fn can(role: WorkspaceRole, permission: Permission) -> bool {
         match permission {

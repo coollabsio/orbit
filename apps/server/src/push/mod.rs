@@ -682,7 +682,9 @@ impl PushService {
                WHERE mentions.message_id = $1 AND mentions.user_id = members.user_id) AS mentioned, \
              EXISTS (SELECT 1 FROM chat_thread_members AS threads \
                WHERE threads.root_id = $2 AND threads.user_id = members.user_id \
-               AND threads.following = 1) AS following \
+               AND threads.following = 1) AS following, \
+             EXISTS (SELECT 1 FROM memberships WHERE memberships.workspace_id = members.workspace_id \
+               AND memberships.user_id = members.user_id AND memberships.role = 'guest') AS guest \
              FROM chat_members AS members WHERE members.conversation_id = $3 AND members.user_id <> $4",
         )
         .bind(message.id.to_string())
@@ -719,7 +721,15 @@ impl PushService {
                 avatar_url(message.author_id, conversation.get("avatar_updated_at"))
             },
         };
-        let body = self.readable(message, &workspace_id).await?;
+        let body = self.readable(message, &workspace_id, true).await?;
+        // A guest does not see public channels, so their names stay out of its notifications.
+        let guest_body = if message.body.contains("<#")
+            && members.iter().any(|member| member.get::<bool, _>("guest"))
+        {
+            self.readable(message, &workspace_id, false).await?
+        } else {
+            body.clone()
+        };
         let mut notices = Vec::new();
         for member in &members {
             let Ok(user_id) = member.get::<String, _>("user_id").parse::<Id>() else {
@@ -736,7 +746,11 @@ impl PushService {
             });
             if let Some(kind) = kind {
                 let notice = Notice {
-                    body: body.clone(),
+                    body: if member.get::<bool, _>("guest") {
+                        guest_body.clone()
+                    } else {
+                        body.clone()
+                    },
                     ..notice(kind)
                 };
                 notices.push((user_id, kind, notice));
@@ -756,12 +770,14 @@ impl PushService {
 
     /// The body of a message as a notification shows it: names for the mention tokens, one
     /// line, short. A user token gets the name of a member the message mentions, and a channel
-    /// token the name of a public channel of the message's workspace. Nothing else is looked
-    /// up, so the text cannot name what its author may not see.
+    /// token the name of a public channel of the message's workspace when `public_names` is set
+    /// (not for a guest). Nothing else is looked up, so the text cannot name what its author may
+    /// not see.
     async fn readable(
         &self,
         message: &MessageRecord,
         workspace_id: &str,
+        public_names: bool,
     ) -> Result<String, sqlx::Error> {
         let mentioned: HashMap<String, String> = if message.body.contains("<@") {
             sqlx::query(
@@ -795,7 +811,10 @@ impl PushService {
                     text.push_str(mentioned.get(id).map_or("someone", String::as_str));
                 }
                 Some(("#", id)) => {
-                    if !channels.contains_key(id) && channels.len() < CHANNEL_LOOKUPS {
+                    if public_names
+                        && !channels.contains_key(id)
+                        && channels.len() < CHANNEL_LOOKUPS
+                    {
                         let name: Option<String> = sqlx::query_scalar(
                             "SELECT name FROM chat_conversations \
                              WHERE id = $1 AND workspace_id = $2 AND kind = 'public'",

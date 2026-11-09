@@ -148,7 +148,7 @@ export function useMessageActions({ inThread, onReply, onForward, onAddReaction,
         icon: Copy,
         run: () => copy(decodeMentions(message.body, people.members, people.channels), 'Text copied'),
       },
-      { key: 'task', label: 'Create task', icon: TaskSquare, run: () => host.createTask(message) },
+      ...(host.createTask ? [{ key: 'task', label: 'Create task', icon: TaskSquare, run: () => host.createTask?.(message) }] : []),
       {
         key: 'pin',
         label: message.pinned ? 'Unpin' : 'Pin',

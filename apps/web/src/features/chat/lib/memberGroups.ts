@@ -3,7 +3,7 @@ import type { PresenceMap } from '@/features/realtime/presence'
 interface Member {
   id: string
   name: string
-  role: 'Owner' | 'Admin' | 'Member'
+  role: 'Owner' | 'Admin' | 'Member' | 'Guest'
 }
 
 export interface MemberGroup<T> {
@@ -13,8 +13,8 @@ export interface MemberGroup<T> {
 }
 
 /**
- * The member list in Discord's order: people who are online (idle and do not disturb too) under their role (Owner, Admin, then everybody else as
- * "Online"), and everybody who is offline together at the end. Names sort inside a group; empty groups are left out.
+ * The member list in Discord's order: people who are online (idle and do not disturb too) under their role (Owner, Admin, members as
+ * "Online", then guests), and everybody who is offline together at the end. Names sort inside a group; empty groups are left out.
  */
 export function memberGroups<T extends Member>(people: readonly T[], presence: PresenceMap): MemberGroup<T>[] {
   const sorted = [...people].sort((a, b) => a.name.localeCompare(b.name))
@@ -24,6 +24,7 @@ export function memberGroups<T extends Member>(people: readonly T[], presence: P
     { label: 'Owner', online: true, people: here.filter((person) => person.role === 'Owner') },
     { label: 'Admin', online: true, people: here.filter((person) => person.role === 'Admin') },
     { label: 'Online', online: true, people: here.filter((person) => person.role === 'Member') },
+    { label: 'Guests', online: true, people: here.filter((person) => person.role === 'Guest') },
     { label: 'Offline', online: false, people: sorted.filter((person) => !presence.has(person.id)) },
   ].filter((group) => group.people.length > 0)
 }

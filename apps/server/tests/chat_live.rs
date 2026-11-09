@@ -179,6 +179,25 @@ impl Server {
         }
     }
 
+    /// A guest of the workspace, in no conversation yet.
+    async fn guest(&self, name: &str) -> User {
+        let user = self.user(name, false).await;
+        let now = TimestampMillis::now();
+        sqlx::query(
+            "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
+             VALUES ($1, $2, $3, 'guest', 0, $4, $5)",
+        )
+        .bind(Id::new_v7().to_string())
+        .bind(&self.workspace)
+        .bind(user.id.to_string())
+        .bind(now.as_millis())
+        .bind(now.as_millis())
+        .execute(self.database.pool())
+        .await
+        .unwrap();
+        user
+    }
+
     /// A chat API call that must succeed.
     async fn chat(&self, user: &User, method: &str, path: &str, body: Option<Value>) -> Value {
         let mut request = self
@@ -508,6 +527,52 @@ async fn a_client_that_reconnects_gets_what_it_missed_or_a_resync() {
 }
 
 #[tokio::test]
+async fn a_replay_leaves_out_conversations_the_user_lost() {
+    let (server, owner) = Server::start().await;
+    let guest = server.guest("guest").await;
+    let shared = server
+        .chat(
+            &owner,
+            "POST",
+            "/conversations",
+            Some(json!({ "name": "with-guest", "kind": "private", "member_ids": [guest.id] })),
+        )
+        .await["result"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (mut socket, hello) = server.client(&guest).await;
+    let epoch = hello["epoch"].as_str().unwrap().to_owned();
+    drain(&mut socket).await;
+    let last = hello["seq"].as_u64().unwrap();
+    drop(socket);
+
+    // Sent while the guest could read the channel, but replayed after the guest lost it.
+    server.send(&owner, &shared, "Before removal", "n1").await;
+    server
+        .chat(
+            &owner,
+            "DELETE",
+            &format!("/conversations/{shared}/members/{}", guest.id),
+            None,
+        )
+        .await;
+
+    let mut socket = server
+        .socket(Some(&guest.token), &format!("?epoch={epoch}&after={last}"))
+        .await
+        .unwrap();
+    assert_eq!(next(&mut socket).await.unwrap()["type"], "hello");
+    let seen = drain(&mut socket).await;
+    assert_eq!(
+        seen,
+        [("chat".to_owned(), "conversation.removed".to_owned())],
+        "{seen:?}"
+    );
+    server.stop().await;
+}
+
+#[tokio::test]
 async fn a_new_or_deleted_emoji_tells_every_member_to_read_the_list_again() {
     let (server, owner) = Server::start().await;
     let ada = server.user("ada", true).await;
@@ -756,4 +821,89 @@ async fn a_server_that_stops_closes_live_sockets_with_service_restart() {
     assert_eq!(u16::from(close.code), 1012);
     assert_eq!(close.reason.as_str(), "server restarting");
     server.task.await.unwrap();
+}
+
+#[tokio::test]
+async fn a_guest_connection_gets_only_its_own_conversations() {
+    let (server, owner) = Server::start().await;
+    let guest = server.guest("guest").await;
+    let general = server.general(&owner).await;
+    let (mut owner_socket, _) = server.client(&owner).await;
+    let (mut guest_socket, hello) = server.client(&guest).await;
+    let epoch = hello["epoch"].as_str().unwrap().to_owned();
+    // No presence of the workspace's members, and none of the ones who come online later.
+    assert_eq!(hello["presence"], json!([]));
+    let ada = server.user("ada", true).await;
+    let (mut ada_socket, _) = server.client(&ada).await;
+    assert!(drain(&mut guest_socket).await.is_empty());
+    drain(&mut owner_socket).await;
+
+    // Nothing of a public channel: messages, typing, categories.
+    server.send(&owner, &general, "Public news", "n1").await;
+    let typing = |conversation: &str| {
+        Ws::Text(
+            json!({ "type": "typing", "conversation_id": conversation, "thread_root_id": null })
+                .to_string()
+                .into(),
+        )
+    };
+    ada_socket.send(typing(&general)).await.unwrap();
+    server
+        .chat(
+            &owner,
+            "POST",
+            "/categories",
+            Some(json!({ "name": "Projects" })),
+        )
+        .await;
+    assert!(drain(&mut guest_socket).await.is_empty());
+
+    // Everything of its private channel.
+    let shared = server
+        .chat(
+            &owner,
+            "POST",
+            "/conversations",
+            Some(json!({ "name": "with-guest", "kind": "private", "member_ids": [guest.id] })),
+        )
+        .await["result"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    server.send(&owner, &shared, "Hello guest", "n2").await;
+    let seen = drain(&mut guest_socket).await;
+    assert!(
+        seen.contains(&("chat".to_owned(), "message.created".to_owned())),
+        "{seen:?}"
+    );
+    assert!(seen.iter().all(|(topic, _)| topic == "chat"), "{seen:?}");
+    drain(&mut owner_socket).await;
+    owner_socket.send(typing(&shared)).await.unwrap();
+    assert_eq!(
+        next(&mut guest_socket).await.unwrap()["event"]["type"],
+        "typing"
+    );
+
+    // A replay leaves out the public events too.
+    drop(guest_socket);
+    let mut socket = server
+        .socket(Some(&guest.token), &format!("?epoch={epoch}&after=0"))
+        .await
+        .unwrap();
+    assert_eq!(next(&mut socket).await.unwrap()["type"], "hello");
+    let mut bodies = Vec::new();
+    while let Some(frame) = next(&mut socket).await {
+        assert_ne!(frame["type"], "resync");
+        if frame["event"]["type"] == "message.created" {
+            bodies.push(
+                frame["event"]["message"]["body"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned(),
+            );
+        }
+        assert_ne!(frame["event"]["type"], "categories.changed");
+    }
+    assert_eq!(bodies, ["Hello guest"]);
+    server.stop().await;
 }

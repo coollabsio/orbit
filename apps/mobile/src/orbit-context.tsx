@@ -3,6 +3,7 @@ import { createContext, type ReactNode, use, useEffect, useState } from 'react'
 
 import { accountKeys, authOptions } from './data/account-api'
 import { billingKey, workspaceBilling } from './data/billing'
+import { isGuestRole } from './data/guest'
 import { keys } from './data/keys'
 import { type OrbitClient, type User, type WorkspaceRecord, workspaces as listWorkspaces } from './data/orbit'
 import { loadWorkspaceId, saveWorkspaceId, type StoredSession } from './session'
@@ -83,4 +84,9 @@ export function useOrbit(): Orbit {
   const value = use(OrbitContext)
   if (!value) throw new Error('useOrbit must be used inside <OrbitProvider>')
   return value
+}
+
+/** A guest of the current workspace: it sees only Chat, its own channels and the people in them (`data/guest.ts`). */
+export function useIsGuest(): boolean {
+  return isGuestRole(useOrbit().workspace.role)
 }

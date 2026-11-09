@@ -15,7 +15,7 @@ import { PresenceAvatars } from '@/features/docs/collab/PresenceAvatars'
 import { collabProblemAction, collabStatusLabel, type CollabProblem, type CollabSession } from '@orbit/editor/collab/session'
 import { useCollabSession } from '@/features/docs/collab/useCollabSession'
 import { pageMentionCandidates } from '@/features/docs/editor/pageMentions'
-import { useMembers } from '@/features/workspaces/api'
+import { useTeamMembers } from '@/features/workspaces/api'
 import type { Task } from '@/features/tasks/api/models'
 import { uploadInlineFile } from '@/features/tasks/api/inlineFiles'
 import { EditorFallback, PageEditor } from './lazyEditor'
@@ -47,7 +47,7 @@ export function TaskDescriptionEditor({
 }) {
   const me = useCurrentUser()
   const selfId = me.data?.id ?? null
-  const members = useMembers(workspaceId).data
+  const members = useTeamMembers(workspaceId).data
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const editorRef = useRef<PageEditorHandle>(null)

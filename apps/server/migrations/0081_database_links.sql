@@ -39,7 +39,7 @@ BEGIN
     SELECT RAISE(ABORT, 'database link scope is immutable');
 END;
 
--- SQLite cannot alter a CHECK constraint, so database_views is rebuilt as in 0079 (see
+-- SQLite cannot alter a CHECK constraint, so database_views is rebuilt as in 0080 (see
 -- .ai/lessons.md): rows are copied aside, the table is dropped and recreated under the same
 -- name, and the rows come back under defer_foreign_keys. No table references database_views.
 PRAGMA defer_foreign_keys = ON;

@@ -4,7 +4,7 @@
 -- SQLite cannot alter a CHECK constraint, so database_views is rebuilt as in 0021: the runner holds
 -- a transaction with foreign_keys=ON, so the rows are copied aside, the table is dropped and
 -- recreated under the same name, and the rows come back under defer_foreign_keys. No table
--- references database_views, so the DROP cascades nowhere. Its indexes and triggers (0078) are
+-- references database_views, so the DROP cascades nowhere. Its indexes and triggers (0079) are
 -- recreated below.
 PRAGMA defer_foreign_keys = ON;
 

@@ -17,6 +17,7 @@ export const ROLE_PERMISSIONS: Record<WorkspaceRole, Permission[]> = {
     "storage.manage",
     "workspace.export"
   ],
+  "guest": [],
   "member": [],
   "owner": [
     "workspace.update",

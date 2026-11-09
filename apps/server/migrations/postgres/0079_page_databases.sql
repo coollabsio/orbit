@@ -1,4 +1,4 @@
--- Docs databases (P1), as in migrations/0078_page_databases.sql.
+-- Docs databases (P1), as in migrations/0079_page_databases.sql.
 ALTER TABLE pages ADD COLUMN kind TEXT NOT NULL DEFAULT 'page' CHECK (kind IN ('page', 'database'));
 
 CREATE FUNCTION pages_kind_immutable_fn() RETURNS trigger LANGUAGE plpgsql AS $$

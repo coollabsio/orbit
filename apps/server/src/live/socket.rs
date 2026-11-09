@@ -13,6 +13,7 @@
 //! and `{"type":"activity","idle":…,"away":…}`: `idle` when the tab has had no input for a while,
 //! `away` when its window has been out of focus for a while.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -24,7 +25,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use orbit_platform::{Id, TimestampMillis};
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{Value, json};
 use tokio::sync::broadcast;
 
 use super::events;
@@ -33,6 +34,7 @@ use crate::auth_routes::request_session;
 use crate::chat_routes::ChatState;
 use crate::collab::close;
 use crate::realtime::authorized;
+use crate::repositories::chat::ChatError;
 
 /// A connection that sent nothing for this long is dead: two heartbeats and a margin.
 const SILENCE: Duration = Duration::from_secs(60);
@@ -136,7 +138,10 @@ async fn serve(
         .status(user_id, TimestampMillis::now())
         .await
         .unwrap_or_default();
-    let mut attached = state.hub.connect(workspace_id, user_id, status.clone());
+    let guest = is_guest(&database, workspace_id, user_id).await;
+    let mut attached = state
+        .hub
+        .connect(workspace_id, user_id, guest, status.clone());
     let connection_id = attached.id;
     // A status change between the read and the connect did not reach the hub: the user had no
     // status there yet. One after the connect does, so the status is read once more.
@@ -146,7 +151,7 @@ async fn serve(
         state.hub.correct_status(user_id, &current);
     }
     // Read after the connection was added: an event after `newest` reaches it as a frame.
-    let close = match opening(&database, workspace_id, user_id, &resume, &attached).await {
+    let close = match opening(&state, workspace_id, user_id, guest, &resume, &attached).await {
         Ok(opening) => {
             state.hub.start_delivery(workspace_id, opening.newest).await;
             run(
@@ -156,6 +161,7 @@ async fn serve(
                 workspace_id,
                 session_id,
                 user_id,
+                guest,
                 &mut attached,
                 opening,
                 &mut revalidations,
@@ -175,6 +181,13 @@ async fn serve(
     let _ = send(&mut socket, Message::Close(frame)).await;
 }
 
+/// A failed read counts as a guest: the connection then gets the fewest events.
+async fn is_guest(database: &orbit_platform::Database, workspace_id: Id, user_id: Id) -> bool {
+    crate::repositories::membership::chat_actor(database.pool(), workspace_id, user_id)
+        .await
+        .map_or(true, |actor| actor.is_none_or(|actor| actor.is_guest()))
+}
+
 /// What a connection gets first.
 struct Opening {
     hello: String,
@@ -185,13 +198,14 @@ struct Opening {
 }
 
 async fn opening(
-    database: &orbit_platform::Database,
+    state: &ChatState,
     workspace_id: Id,
     user_id: Id,
+    guest: bool,
     resume: &Resume,
     attached: &super::hub::Attached,
-) -> Result<Opening, sqlx::Error> {
-    let pool = database.pool();
+) -> Result<Opening, ChatError> {
+    let pool = state.identity.database().pool();
     let epoch = events::epoch(pool).await?;
     let (oldest, newest) = events::range(pool, workspace_id).await?;
     // A replay is complete only if the oldest kept event is at or before the first one the
@@ -202,12 +216,26 @@ async fn opening(
                 && after <= newest
                 && (after == newest || oldest <= after + 1) =>
         {
-            Some(
-                events::after(pool, workspace_id, after)
+            let missed: Vec<_> = events::after(pool, workspace_id, after)
+                .await?
+                .into_iter()
+                .filter(|event| event.recipients.includes(user_id, guest))
+                .map(|event| event.frame)
+                .collect();
+            // An event was for the user when it was written; the user may have lost the
+            // conversation since (removed from a private channel), and the HTTP API then hides it.
+            let readable = if missed.is_empty() {
+                HashSet::new()
+            } else {
+                state
+                    .chat
+                    .readable_conversations(workspace_id, user_id)
                     .await?
+            };
+            Some(
+                missed
                     .into_iter()
-                    .filter(|event| event.recipients.includes(user_id))
-                    .map(|event| event.frame)
+                    .filter(|frame| conversation_of(frame).is_none_or(|id| readable.contains(&id)))
                     .collect(),
             )
         }
@@ -236,6 +264,7 @@ async fn run(
     workspace_id: Id,
     session_id: Id,
     user_id: Id,
+    guest: bool,
     attached: &mut super::hub::Attached,
     opening: Opening,
     revalidations: &mut broadcast::Receiver<Option<Id>>,
@@ -293,6 +322,10 @@ async fn run(
             _ = recheck.tick() => {
                 if !authorized(database, workspace_id, session_id).await.unwrap_or(false) {
                     return Some((close::SESSION, "session or access ended"));
+                }
+                // A guest who became a member reconnects to get the whole workspace's events.
+                if is_guest(database, workspace_id, user_id).await != guest {
+                    return Some((close::RESTART, "role changed"));
                 }
             }
             changed = revalidations.recv() => {
@@ -359,6 +392,24 @@ async fn run(
             }
         }
     }
+}
+
+/// The conversation a kept chat frame shows, if any. A `conversation.removed` frame shows none:
+/// it tells a user who lost the conversation to drop it.
+fn conversation_of(frame: &str) -> Option<Id> {
+    let frame: Value = serde_json::from_str(frame).ok()?;
+    let event = &frame["event"];
+    if event["type"] == "conversation.removed" {
+        return None;
+    }
+    [
+        &event["conversation_id"],
+        &event["message"]["conversation_id"],
+        &event["conversation"]["id"],
+        &event["state"]["conversation_id"],
+    ]
+    .into_iter()
+    .find_map(|id| id.as_str()?.parse().ok())
 }
 
 async fn send_text(socket: &mut WebSocket, text: String) -> bool {

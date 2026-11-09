@@ -5,6 +5,7 @@ import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Switch, View } f
 
 import { useAuthOptions } from '../../hooks/account'
 import { useOrbit } from '../../orbit-context'
+import { guestMayOpen, isGuestRole } from '../../data/guest'
 import { drawerSections, type SettingsArea } from '../drawerAreas'
 import { alpha, cssColors, useButtonStyle, useTheme } from '../../theme'
 import { Icon, type IconName, IconButton, PaneHeader, PickerSheet, type Presence, PullRefresh, SafeAreaView, StatusMark, Text } from '../../ui'
@@ -38,9 +39,12 @@ export const WORKSPACE_NAV: readonly SettingsNavItem[] = [
   { href: '/settings/danger-zone', label: 'Danger zone', icon: 'danger', permission: 'workspace.delete' },
 ]
 
-/** The links of `nav` this workspace role may open; the cloud-only ones only in Orbit Cloud. */
-export function allowedNav<T extends SettingsNavItem>(nav: readonly T[], permissions: readonly Permission[], cloud: boolean): T[] {
-  return nav.filter((item) => (!item.permission || permissions.includes(item.permission)) && (!item.cloud || cloud))
+/**
+ * The links of `nav` this person may open: by permission, the cloud-only ones only in Orbit Cloud, and for a guest
+ * only its own settings (`guestMayOpen`).
+ */
+export function allowedNav<T extends SettingsNavItem>(nav: readonly T[], permissions: readonly Permission[], cloud: boolean, guest = false): T[] {
+  return nav.filter((item) => (!item.permission || permissions.includes(item.permission)) && (!item.cloud || cloud) && (!guest || guestMayOpen(item.href)))
 }
 
 export const ACCOUNT_NAV: readonly SettingsNavItem[] = [
@@ -120,7 +124,7 @@ export function SettingsMenu({ title, area, nav }: { title: string; area: Settin
   const { colors } = useTheme()
   const { user, workspace } = useOrbit()
   const cloud = useAuthOptions().data?.billing_enabled ?? false
-  const sections = drawerSections(area, allowedNav(nav, workspace.permissions, cloud))
+  const sections = drawerSections(area, allowedNav(nav, workspace.permissions, cloud, isGuestRole(workspace.role)))
   return (
     <SettingsShell title={title} nav={nav}>
       {area === 'admin' && !user.installation_admin ? (

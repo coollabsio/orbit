@@ -61,7 +61,7 @@ the access of the database page, as sub-pages do today.
 
 ## 4. Data model
 
-Migration `0078_page_databases.sql`, and the same change in
+Migration `0079_page_databases.sql`, and the same change in
 `apps/server/migrations/postgres/`. Also update the places that `.ai/lessons.md` names:
 `crates/platform/src/db/migrate.rs` (both runners), `SUPPORTED_SCHEMA_VERSION` in
 `crates/platform/src/backup.rs`, the version in `crates/platform/tests/{database,backup}.rs` and
@@ -183,7 +183,7 @@ converted and will be cleared"); otherwise the type changes at once.
 - Max 10 sorts and 20 filter rules for each view. All rules must match (AND). AND/OR groups are P2.
 - A rule or sort that names a deleted property is dropped when the view loads and when it saves.
 
-A **board** view (`type = 'board'`, migration `0079_database_board_views.sql` widens the `type`
+A **board** view (`type = 'board'`, migration `0080_database_board_views.sql` widens the `type`
 check; SQLite rebuilds `database_views` as `0021` does) uses the same `sorts` and `filter`, and
 four more fields (a table view ignores them; empty ones are left out of the JSON):
 

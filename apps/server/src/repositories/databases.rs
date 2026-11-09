@@ -2487,7 +2487,7 @@ async fn parse_values(
             if members.is_none() {
                 members = Some(
                     sqlx::query_scalar::<_, String>(
-                        "SELECT user_id FROM memberships WHERE workspace_id = $1",
+                        "SELECT user_id FROM memberships WHERE workspace_id = $1 AND role <> 'guest'",
                     )
                     .bind(workspace_id.to_string())
                     .fetch_all(&mut **tx)

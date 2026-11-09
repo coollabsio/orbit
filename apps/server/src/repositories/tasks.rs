@@ -3074,8 +3074,10 @@ impl TaskRepository {
                 " AND (chat_conversation_id IS NULL OR EXISTS (SELECT 1 FROM chat_conversations c \
                  WHERE c.id = notifications.chat_conversation_id AND (c.kind = 'public' \
                  OR EXISTS (SELECT 1 FROM chat_members WHERE chat_members.conversation_id = c.id \
-                 AND chat_members.user_id = notifications.recipient_user_id))))",
-            );
+                 AND chat_members.user_id = notifications.recipient_user_id)) AND ",
+            )
+            .push(crate::repositories::chat::reachable_dm())
+            .push("))");
         if unread_only {
             query.push(" AND read_at IS NULL");
         }
@@ -3797,7 +3799,7 @@ async fn validate_assignees(
         });
     }
     for id in ids {
-        let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM memberships JOIN users ON users.id = memberships.user_id WHERE memberships.workspace_id = $1 AND memberships.user_id = $2 AND users.suspended_at IS NULL")
+        let exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM memberships JOIN users ON users.id = memberships.user_id WHERE memberships.workspace_id = $1 AND memberships.user_id = $2 AND memberships.role <> 'guest' AND users.suspended_at IS NULL")
             .bind(workspace_id.to_string()).bind(id.to_string()).fetch_one(&mut **tx).await?;
         if exists != 1 {
             return Err(TaskError::Invalid {
@@ -3841,7 +3843,8 @@ async fn notify_users(
     {
         let exists: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM memberships JOIN users ON users.id = memberships.user_id \
-             WHERE memberships.workspace_id = $1 AND memberships.user_id = $2 AND users.suspended_at IS NULL",
+             WHERE memberships.workspace_id = $1 AND memberships.user_id = $2 AND memberships.role <> 'guest' \
+             AND users.suspended_at IS NULL",
         )
         .bind(workspace_id.to_string())
         .bind(recipient.to_string())
@@ -3919,7 +3922,8 @@ async fn replace_assignees(
         .await?;
     for id in ids {
         let membership_id: String = sqlx::query_scalar(
-            "SELECT id FROM memberships WHERE workspace_id = (SELECT workspace_id FROM tasks WHERE id = $1) AND user_id = $2",
+            "SELECT id FROM memberships WHERE workspace_id = (SELECT workspace_id FROM tasks WHERE id = $1) AND user_id = $2 \
+             AND role <> 'guest'",
         )
         .bind(task_id.to_string())
         .bind(id.to_string())
@@ -4084,7 +4088,7 @@ async fn mentionable(
         let Flag(member) = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM memberships JOIN users ON users.id = memberships.user_id \
              WHERE memberships.workspace_id = $1 AND memberships.user_id = $2 \
-             AND users.suspended_at IS NULL)",
+             AND memberships.role <> 'guest' AND users.suspended_at IS NULL)",
         )
         .bind(workspace_id.to_string())
         .bind(user_id.to_string())

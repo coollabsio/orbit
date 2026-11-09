@@ -1,4 +1,4 @@
--- Docs databases: inline database blocks and linked views, as in migrations/0080_database_links.sql.
+-- Docs databases: inline database blocks and linked views, as in migrations/0081_database_links.sql.
 CREATE TABLE database_links (
     id TEXT PRIMARY KEY,
     workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,

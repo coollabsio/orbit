@@ -13,7 +13,7 @@ import * as chat from '../../data/chat-api'
 import type { CategoryRecord, ConversationRecord, ConversationStateRecord } from '../../data/orbit'
 import { useOwnStatus } from '../../hooks/account'
 import { confirmAction, useChatWrite, useFollowedThreads, useIsChatAdmin } from '../../hooks/chat'
-import { useOrbit } from '../../orbit-context'
+import { useIsGuest, useOrbit } from '../../orbit-context'
 import { useChatCategories, useChatStates, useChatBadge, useConversations, usePeople } from '../../queries'
 import { useTheme } from '../../theme'
 import { Avatar, CountBadge, EmptyState, ErrorView, HeaderTitle, Icon, type IconName, IconButton, LoadingView, PaneHeader, PullRefresh, SafeAreaView, Text } from '../../ui'
@@ -43,6 +43,8 @@ export default function ChatScreen() {
   const [themeOpen, setThemeOpen] = useState(false)
   const ownStatus = useOwnStatus()
   const admin = useIsChatAdmin()
+  // a guest is only in the private channels it was added to: it browses and makes none
+  const guest = useIsGuest()
   const run = useChatWrite()
   const threads = useFollowedThreads()
   const unreads = useChatBadge().count
@@ -85,14 +87,20 @@ export default function ChatScreen() {
             <PinnedRow icon="layer" name="Threads" count={unreadThreadCount(threads.data ?? [])} onPress={() => router.push('/chat/threads')} />
           </View>
           <View className="p-2 pt-3 gap-3">
-            {sections.length === 0 ? <EmptyState icon="chat" title="No conversations" description="Start a direct message or create a channel with New." /> : null}
+            {sections.length === 0 ? (
+              <EmptyState
+                icon="chat"
+                title="No conversations"
+                description={guest ? 'As a guest, you see only the channels that you are added to. Ask a channel manager to add you to a channel.' : 'Start a direct message or create a channel with New.'}
+              />
+            ) : null}
             {sections.map((section) => {
               const open = !collapsed.has(section.key)
               const category = admin ? categories.data?.find((item) => `category-${item.id}` === section.key) : undefined
               const onAdd =
                 section.key === 'dms'
                   ? () => setOverlay({ kind: 'message' })
-                  : section.key === 'favorites'
+                  : section.key === 'favorites' || guest
                     ? null
                     : () => setOverlay({ kind: 'channel', categoryId: section.key.startsWith('category-') ? section.key.slice('category-'.length) : null })
               return (
@@ -157,8 +165,10 @@ export default function ChatScreen() {
         visible={overlay?.kind === 'new'}
         items={[
           { key: 'message', label: 'New message', icon: 'messages2', onPress: () => setOverlay({ kind: 'message' }) },
-          { key: 'channel', label: 'New channel', icon: 'hashtag', onPress: () => setOverlay({ kind: 'channel', categoryId: null }) },
-          { key: 'browse', label: 'Browse channels', icon: 'search', onPress: () => router.push('/chat/browse') },
+          ...(guest ? [] : [
+            { key: 'channel', label: 'New channel', icon: 'hashtag' as const, onPress: () => setOverlay({ kind: 'channel', categoryId: null }) },
+            { key: 'browse', label: 'Browse channels', icon: 'search' as const, onPress: () => router.push('/chat/browse') },
+          ]),
           ...(admin ? [{ key: 'category', label: 'New category', icon: 'category' as const, onPress: () => setOverlay({ kind: 'category' }) }] : []),
         ]}
         onClose={close}

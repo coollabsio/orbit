@@ -523,19 +523,24 @@ impl MigrationRunner {
                 ),
                 Migration::new(
                     78,
-                    include_str!("../../../../apps/server/migrations/0078_page_databases.sql"),
+                    include_str!("../../../../apps/server/migrations/0078_guests.sql"),
                     false,
                 ),
                 Migration::new(
                     79,
-                    include_str!(
-                        "../../../../apps/server/migrations/0079_database_board_views.sql"
-                    ),
+                    include_str!("../../../../apps/server/migrations/0079_page_databases.sql"),
                     false,
                 ),
                 Migration::new(
                     80,
-                    include_str!("../../../../apps/server/migrations/0080_database_links.sql"),
+                    include_str!(
+                        "../../../../apps/server/migrations/0080_database_board_views.sql"
+                    ),
+                    false,
+                ),
+                Migration::new(
+                    81,
+                    include_str!("../../../../apps/server/migrations/0081_database_links.sql"),
                     false,
                 ),
             ],
@@ -731,21 +736,24 @@ impl MigrationRunner {
             ),
             Migration::new(
                 78,
-                include_str!("../../../../apps/server/migrations/postgres/0078_page_databases.sql"),
+                include_str!("../../../../apps/server/migrations/postgres/0078_guests.sql"),
                 false,
             ),
             Migration::new(
                 79,
-                include_str!(
-                    "../../../../apps/server/migrations/postgres/0079_database_board_views.sql"
-                ),
+                include_str!("../../../../apps/server/migrations/postgres/0079_page_databases.sql"),
                 false,
             ),
             Migration::new(
                 80,
                 include_str!(
-                    "../../../../apps/server/migrations/postgres/0080_database_links.sql"
+                    "../../../../apps/server/migrations/postgres/0080_database_board_views.sql"
                 ),
+                false,
+            ),
+            Migration::new(
+                81,
+                include_str!("../../../../apps/server/migrations/postgres/0081_database_links.sql"),
                 false,
             ),
         ];

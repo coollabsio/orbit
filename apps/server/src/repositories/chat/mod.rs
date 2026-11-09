@@ -34,10 +34,13 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use super::membership;
+use crate::live::NewEvent;
 pub use crate::live::Recipients;
 
 pub use blocks::{BlocksError, MessageBlock, check_message_blocks, parse_blocks};
-pub use conversations::{ChannelCreate, ChannelUpdate};
+pub use conversations::{
+    ChannelCreate, ChannelUpdate, MAX_GUEST_CHANNELS, join_invited_channels, require_guest_channels,
+};
 pub use emoji::{CustomEmojiImage, CustomEmojiRecord, EMOJI_MAX_BYTES};
 pub use interactions::{Click, ResponseTarget};
 pub use messages::BotPost;
@@ -525,6 +528,27 @@ pub struct Emitted {
     pub event: ChatEvent,
 }
 
+/// The topic of chat events on the live socket.
+const LIVE_TOPIC: &str = "chat";
+
+impl Emitted {
+    /// The event as the live socket numbers and sends it.
+    #[must_use]
+    pub fn live(&self) -> NewEvent {
+        live_event(self.recipients.clone(), &self.event)
+    }
+}
+
+/// A chat event for the live socket.
+#[must_use]
+pub fn live_event(recipients: Recipients, event: &ChatEvent) -> NewEvent {
+    NewEvent {
+        recipients,
+        topic: LIVE_TOPIC,
+        event: serde_json::to_value(event).unwrap_or_default(),
+    }
+}
+
 /// The result of a write and the events it caused.
 #[derive(Clone, Debug)]
 pub struct Written<T> {
@@ -542,12 +566,14 @@ pub struct Written<T> {
 }
 
 impl<T> Written<T> {
-    /// The events the caller itself sees.
+    /// The events the caller itself sees. Only managers write workspace-wide events (emoji,
+    /// stickers, categories) and guests only write in their own conversations, so the caller
+    /// counts as a member here.
     #[must_use]
     pub fn events_for(&self, user_id: Id) -> Vec<ChatEvent> {
         self.events
             .iter()
-            .filter(|emitted| emitted.recipients.includes(user_id))
+            .filter(|emitted| emitted.recipients.includes(user_id, false))
             .map(|emitted| emitted.event.clone())
             .collect()
     }
@@ -611,9 +637,25 @@ async fn finish<T>(
     events: Events,
     value: T,
 ) -> Result<Written<T>, ChatError> {
+    let emitted = resolve(&mut tx, events.events).await?;
+    tx.commit().await?;
+    Ok(Written {
+        value,
+        events: emitted,
+        counted: events.counted,
+        replied: events.replied,
+        inbox: events.inbox,
+    })
+}
+
+/// The audiences of `events` as user ids: the readers of each conversation as `conn` sees it.
+async fn resolve(
+    conn: &mut AnyConnection,
+    events: Vec<(Audience, ChatEvent)>,
+) -> Result<Vec<Emitted>, ChatError> {
     let mut members: HashMap<Id, (bool, Vec<Id>)> = HashMap::new();
-    let mut emitted = Vec::with_capacity(events.events.len());
-    for (audience, event) in events.events {
+    let mut emitted = Vec::with_capacity(events.len());
+    for (audience, event) in events {
         let recipients = match audience {
             Audience::Workspace => Recipients::Workspace,
             Audience::User(user_id) => Recipients::Users(vec![user_id]),
@@ -625,9 +667,9 @@ async fn finish<T>(
                             "SELECT kind = 'public' FROM chat_conversations WHERE id = $1",
                         )
                         .bind(id.to_string())
-                        .fetch_optional(&mut *tx)
+                        .fetch_optional(&mut *conn)
                         .await?;
-                        let users = member_ids(&mut tx, id).await?;
+                        let users = member_ids(&mut *conn, id).await?;
                         members
                             .entry(id)
                             .or_insert((public.is_some_and(|flag| flag.0), users))
@@ -642,14 +684,7 @@ async fn finish<T>(
         };
         emitted.push(Emitted { recipients, event });
     }
-    tx.commit().await?;
-    Ok(Written {
-        value,
-        events: emitted,
-        counted: events.counted,
-        replied: events.replied,
-        inbox: events.inbox,
-    })
+    Ok(emitted)
 }
 
 #[derive(Clone)]
@@ -793,13 +828,14 @@ impl Access {
     }
 }
 
-/// Non-members of the workspace and trashed workspaces are `NotFound`.
+/// Non-members of the workspace and trashed workspaces are `NotFound`. Guests pass: every
+/// conversation check below decides what a guest may see.
 async fn load_actor(
     conn: &mut AnyConnection,
     workspace_id: Id,
     user_id: Id,
 ) -> Result<Actor, ChatError> {
-    membership::actor(&mut *conn, workspace_id, user_id)
+    membership::chat_actor(&mut *conn, workspace_id, user_id)
         .await?
         .ok_or(ChatError::NotFound)
 }
@@ -838,7 +874,8 @@ async fn load_member(
     .transpose()
 }
 
-/// A private channel or DM that the caller is not in does not exist for the caller.
+/// A private channel or DM that the caller is not in does not exist for the caller. Neither does
+/// a public channel for a guest: guests only see the conversations they are in.
 async fn load_access(
     conn: &mut AnyConnection,
     workspace_id: Id,
@@ -850,8 +887,20 @@ async fn load_access(
         .await?
         .ok_or(ChatError::NotFound)?;
     let member = load_member(conn, conversation_id, user_id).await?;
-    if member.is_none() && conversation.kind != ConversationKind::Public {
+    if member.is_none() && (conversation.kind != ConversationKind::Public || actor.is_guest()) {
         return Err(ChatError::NotFound);
+    }
+    if conversation.kind == ConversationKind::Dm {
+        let Flag(reachable) = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT EXISTS(SELECT 1 FROM chat_conversations c WHERE c.id = $1 AND {})",
+            reachable_dm()
+        )))
+        .bind(conversation_id.to_string())
+        .fetch_one(&mut *conn)
+        .await?;
+        if !reachable {
+            return Err(ChatError::NotFound);
+        }
     }
     Ok(Access {
         actor,
@@ -875,7 +924,7 @@ async fn member_ids(conn: &mut AnyConnection, conversation_id: Id) -> Result<Vec
 /// Puts a new workspace member into every live public channel, with everything read, the way
 /// the `chat_default_channel_for_member` trigger does for `#general`. Every insert into
 /// `memberships` calls this in the same transaction, so a public channel always has every
-/// workspace member. Channels the member is in already stay as they are.
+/// workspace member. Channels the member is in already stay as they are. Guests join none.
 pub async fn join_public_channels(
     conn: &mut AnyConnection,
     workspace_id: Id,
@@ -890,6 +939,8 @@ pub async fn join_public_channels(
                 c.message_count, $2 \
          FROM chat_conversations c \
          WHERE c.workspace_id = $3 AND c.kind = 'public' AND c.archived_at IS NULL \
+         AND EXISTS (SELECT 1 FROM memberships WHERE memberships.workspace_id = c.workspace_id \
+                     AND memberships.user_id = $1 AND memberships.role <> 'guest') \
          ON CONFLICT (conversation_id, user_id) DO NOTHING",
     )
     .bind(user_id.to_string())
@@ -900,15 +951,61 @@ pub async fn join_public_channels(
     Ok(())
 }
 
-/// Every member of the workspace.
+/// Every member of the workspace who is in its public channels: everyone but guests.
 async fn workspace_member_ids(
     conn: &mut AnyConnection,
     workspace_id: Id,
 ) -> Result<Vec<Id>, ChatError> {
     sqlx::query_scalar::<_, String>(
-        "SELECT user_id FROM memberships WHERE workspace_id = $1 ORDER BY created_at, user_id",
+        "SELECT user_id FROM memberships WHERE workspace_id = $1 AND role <> 'guest' \
+         ORDER BY created_at, user_id",
     )
     .bind(workspace_id.to_string())
+    .fetch_all(&mut *conn)
+    .await?
+    .into_iter()
+    .map(parse_id)
+    .collect()
+}
+
+/// SQL: the conversation `c` is public, and `user_id` (an SQL expression) is no guest, so it
+/// may read it without being in it.
+fn public_for(user_id: &str) -> String {
+    format!(
+        "(c.kind = 'public' AND EXISTS (SELECT 1 FROM memberships reader \
+         WHERE reader.workspace_id = c.workspace_id AND reader.user_id = {user_id} \
+         AND reader.role <> 'guest'))"
+    )
+}
+
+/// SQL: the conversation `c` is no DM, or every guest in it still shares an open channel with
+/// every other member. A DM that fails this does not exist for anyone, as in `open_dm`.
+pub(crate) fn reachable_dm() -> &'static str {
+    "(c.kind <> 'dm' OR NOT EXISTS (SELECT 1 FROM chat_members dm_guest \
+     JOIN memberships dm_role ON dm_role.workspace_id = c.workspace_id \
+          AND dm_role.user_id = dm_guest.user_id AND dm_role.role = 'guest' \
+     JOIN chat_members dm_other ON dm_other.conversation_id = dm_guest.conversation_id \
+          AND dm_other.user_id <> dm_guest.user_id \
+     WHERE dm_guest.conversation_id = c.id AND NOT EXISTS (SELECT 1 FROM chat_members dm_own \
+          JOIN chat_members dm_theirs ON dm_theirs.conversation_id = dm_own.conversation_id \
+          JOIN chat_conversations dm_shared ON dm_shared.id = dm_own.conversation_id \
+          WHERE dm_own.workspace_id = c.workspace_id AND dm_own.user_id = dm_guest.user_id \
+          AND dm_theirs.user_id = dm_other.user_id AND dm_shared.kind <> 'dm' \
+          AND dm_shared.archived_at IS NULL)))"
+}
+
+/// The guests among `user_ids`, which has no duplicates.
+async fn guest_ids(
+    conn: &mut AnyConnection,
+    workspace_id: Id,
+    user_ids: &[Id],
+) -> Result<Vec<Id>, ChatError> {
+    sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
+        "SELECT user_id FROM memberships WHERE workspace_id = $1 AND role = 'guest' AND user_id {}",
+        in_ids(&*conn, 2)
+    )))
+    .bind(workspace_id.to_string())
+    .bind(id_list(user_ids.iter().copied()))
     .fetch_all(&mut *conn)
     .await?
     .into_iter()
