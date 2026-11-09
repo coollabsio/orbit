@@ -154,7 +154,7 @@ export function useDeletePasskey() {
   })
 }
 
-/** The browsers that get push notifications (the app itself gets none yet). */
+/** The browsers that get push notifications. The iOS devices are in `useApnsDevices`. */
 export function usePushDevices() {
   const { client } = useOrbit()
   return useQuery({ queryKey: account.accountKeys.pushDevices, queryFn: () => account.pushDevices(client) })
@@ -167,6 +167,17 @@ export function useRemovePushDevice() {
     mutationFn: (id: string) => account.removePushDevice(client, id),
     onSettled: () => void queryClient.invalidateQueries({ queryKey: account.accountKeys.pushDevices }),
   })
+}
+
+export function useApnsDevices() {
+  const { client } = useOrbit()
+  return useQuery({ queryKey: account.accountKeys.apnsDevices, queryFn: () => account.apnsDevices(client) })
+}
+
+/** Resolves to the number of devices the test notification went to. */
+export function useSendTestPush() {
+  const { client } = useOrbit()
+  return useMutation({ mutationFn: () => account.sendTestPush(client) })
 }
 
 /** Deletes the open workspace: the workspace list drops it and the app opens the next one. */

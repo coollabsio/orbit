@@ -6,11 +6,13 @@ import { DrawerProvider } from '../../components/Drawer'
 import { MailServerBanner } from '../../components/MailServerBanner'
 import { TopBar } from '../../components/TopBar'
 import { useLiveUpdates } from '../../live'
+import { usePushNotifications } from '../../push'
 import { useTheme } from '../../theme'
 
 export default function TabsLayout() {
   const { colors } = useTheme()
   useLiveUpdates()
+  usePushNotifications()
   return (
     <DrawerProvider>
       <TopBar />

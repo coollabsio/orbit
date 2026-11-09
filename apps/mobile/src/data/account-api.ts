@@ -26,6 +26,7 @@ import {
   putStatus,
   putNotificationPreferences,
   regenerateRecoveryCodes,
+  sendTestPush as sendTestPushRequest,
   removeAvatar,
   removeMember,
   removeWorkspaceBucket,
@@ -71,6 +72,7 @@ export const accountKeys = {
   sessions: ['account', 'sessions'] as const,
   passkeys: ['account', 'passkeys'] as const,
   pushDevices: ['account', 'push-devices'] as const,
+  apnsDevices: ['account', 'apns-devices'] as const,
   twoFactor: ['account', 'two-factor'] as const,
   connectedAccounts: ['account', 'connected-accounts'] as const,
   oauthConnections: ['account', 'oauth-connections'] as const,
@@ -213,6 +215,44 @@ export async function pushDevices(client: OrbitClient): Promise<PushSubscription
 export async function removePushDevice(client: OrbitClient, id: string): Promise<void> {
   await deletePushSubscription({ client, path: { id }, throwOnError: true })
 }
+
+/** An iPhone or iPad that gets notifications through APNs. Not in the generated SDK yet, so the calls are by hand. */
+export interface ApnsDevice {
+  id: string
+  label: string
+  environment: ApnsEnvironment
+  created_at: string
+}
+
+/** `sandbox` for a development build, `production` for TestFlight and the App Store. */
+export type ApnsEnvironment = 'production' | 'sandbox'
+
+/** Adds this device, or updates it when the server knows the token. It stops with the session. */
+export async function registerApnsDevice(client: OrbitClient, body: { token: string; environment: ApnsEnvironment; label: string }): Promise<ApnsDevice> {
+  return (await client.post<{ 200: ApnsDevice }, unknown, true>({ url: '/api/v1/push/apns', body, headers: { 'Content-Type': 'application/json' }, throwOnError: true })).data
+}
+
+/** The user's iOS devices. A server without the route has none. */
+export async function apnsDevices(client: OrbitClient): Promise<ApnsDevice[]> {
+  try {
+    return (await client.get<{ 200: ApnsDevice[] }, unknown, true>({ url: '/api/v1/push/apns', throwOnError: true })).data
+  } catch (error) {
+    if (error instanceof ApiProblem && error.status === 404) return []
+    throw error
+  }
+}
+
+export async function removeApnsDevice(client: OrbitClient, id: string): Promise<void> {
+  await client.delete({ url: '/api/v1/push/apns/{id}', path: { id }, throwOnError: true })
+}
+
+/** Sends a test notification to all the user's devices; resolves to how many took it. */
+export async function sendTestPush(client: OrbitClient): Promise<number> {
+  return (await sendTestPushRequest({ client, throwOnError: true })).data.sent
+}
+
+/** 503 `push_not_configured`: the server has no APNs key. */
+export const pushNotConfigured = (error: unknown) => error instanceof ApiProblem && error.code === 'push_not_configured'
 
 /** The web's `ago`: `just now`, `5m ago`, then `on Sep 4`. */
 export function passkeyAgo(iso: string, now: Date = new Date()): string {

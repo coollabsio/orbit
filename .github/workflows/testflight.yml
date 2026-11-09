@@ -69,8 +69,11 @@ jobs:
 
       - name: Generate the Xcode project
         run: |
-          jq --arg n "$BUILD_NUMBER" '.expo.ios.buildNumber = $n' app.json > app.ci.json && mv app.ci.json app.json
+          # The App Store build pushes through production APNs: the entitlement must say so (the profile must include Push Notifications).
+          jq --arg n "$BUILD_NUMBER" '.expo.ios.buildNumber = $n
+            | .expo.plugins |= map(if type == "array" and .[0] == "expo-notifications" then [.[0], (.[1] + {mode: "production"})] else . end)' app.json > app.ci.json && mv app.ci.json app.json
           bunx expo prebuild --platform ios --clean
+          grep -A1 '<key>aps-environment</key>' ios/*/*.entitlements | grep -q '<string>production</string>' || { echo 'aps-environment is not production'; exit 1; }
           # Sign only the app target; build settings on the xcodebuild command line would also hit the Pods targets.
           ruby -rxcodeproj -e '
             project = Xcodeproj::Project.open(Dir["ios/*.xcodeproj"].first)
