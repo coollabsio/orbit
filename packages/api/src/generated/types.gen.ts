@@ -20790,7 +20790,7 @@ export type RestorePageErrors = {
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, conflict
+     * contract_mismatch, conflict, database_trashed
      */
     409: TaskProblem;
     /**

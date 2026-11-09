@@ -1384,6 +1384,81 @@ async fn trash_and_restore_bring_back_rows_and_values() {
 }
 
 #[tokio::test]
+async fn a_row_trashed_alone_restores_into_its_database_wherever_it_moved() {
+    let fixture = Fixture::new().await;
+    let db = fixture.create_database("Movable").await;
+    let tags = id_of(property(&fixture.database(&db).await, "Tags")).to_owned();
+    fixture
+        .ok(
+            "PATCH",
+            &format!("databases/{db}/properties/{tags}"),
+            Some(json!({"config": {"options": [{"id": "a", "name": "A"}]}})),
+        )
+        .await;
+    let row = fixture
+        .add_row(&db, json!({"title": "Row", "values": {&tags: ["a"]}}))
+        .await;
+    let row_id = id_of(&row);
+    fixture.trash_page(row_id).await;
+
+    let version = fixture.page(&db).await["version"].clone();
+    fixture
+        .ok(
+            "POST",
+            &format!("pages/{db}/move"),
+            Some(json!({"expected_version": version, "parent_id": null, "private": true, "position": 0})),
+        )
+        .await;
+    fixture.restore_page(row_id).await;
+    let restored = fixture.page(row_id).await;
+    assert_eq!(
+        (
+            restored["parent_id"].as_str(),
+            restored["database_id"].as_str(),
+            restored["private"].as_bool()
+        ),
+        (Some(db.as_str()), Some(db.as_str()), Some(true)),
+        "{restored}"
+    );
+    let database = fixture.database(&db).await;
+    assert_eq!(names(&database["rows"]), ["Row"]);
+    assert_eq!(database["rows"][0]["values"], json!({&tags: ["a"]}));
+    let (_, tree) = fixture.call("GET", "pages", None).await;
+    assert_eq!(names(&tree["items"]), ["Movable"]);
+
+    // The row cannot come back while its database is in the trash.
+    fixture.trash_page(row_id).await;
+    fixture.trash_page(&db).await;
+    let (_, trash) = fixture.call("GET", "pages/trash", None).await;
+    let row_version = trash["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == row_id)
+        .unwrap()["version"]
+        .clone();
+    let (status, body) = fixture
+        .call(
+            "POST",
+            &format!("pages/{row_id}/restore"),
+            Some(json!({"expected_version": row_version})),
+        )
+        .await;
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (StatusCode::CONFLICT, Some("database_trashed")),
+        "{body}"
+    );
+    fixture.restore_page(&db).await;
+    assert_eq!(
+        names(&fixture.database(&db).await["rows"]),
+        Vec::<&str>::new()
+    );
+    fixture.restore_page(row_id).await;
+    assert_eq!(names(&fixture.database(&db).await["rows"]), ["Row"]);
+}
+
+#[tokio::test]
 async fn a_private_database_is_not_found_for_other_members() {
     let fixture = Fixture::new().await;
     let (_, member) = fixture.add_member("member@example.com").await;

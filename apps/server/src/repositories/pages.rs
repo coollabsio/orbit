@@ -429,6 +429,10 @@ pub enum PageError {
     /// through the database routes.
     #[error("pages cannot move into or out of a database")]
     DatabaseMoveUnsupported,
+    /// Restoring a row whose database is in the trash (or gone): a row cannot live outside its
+    /// database, so the database comes back first.
+    #[error("the row's database is in the trash")]
+    DatabaseTrashed,
     #[error("stored page data is invalid")]
     Corrupt,
     /// Orbit Cloud: the trial workspace holds as many pages as the trial allows.
@@ -1453,6 +1457,9 @@ impl PageRepository {
                     == Some(space) =>
             {
                 Some(parent_id)
+            }
+            Some(parent_id) if is_database(&mut tx, parent_id).await? => {
+                return Err(PageError::DatabaseTrashed);
             }
             _ => None,
         };

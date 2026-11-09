@@ -1650,6 +1650,9 @@ fn page_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
     if matches!(operation_id, "create_page" | "move_page") {
         add_code(responses, "409", "database_move_unsupported");
     }
+    if operation_id == "restore_page" {
+        add_code(responses, "409", "database_trashed");
+    }
     if operation_id == "list_recent_pages" {
         add_code(responses, "422", "validation_failed");
     }

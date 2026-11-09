@@ -33347,7 +33347,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, conflict",
+            "description": "contract_mismatch, conflict, database_trashed",
             "content": {
               "application/problem+json": {
                 "schema": {

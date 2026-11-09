@@ -1115,6 +1115,14 @@ fn page_problem(
             instance,
             request_id,
         ),
+        PageError::DatabaseTrashed => ApiError::new(
+            StatusCode::CONFLICT,
+            "database_trashed",
+            "Database in the trash",
+            "Restore the database first.",
+            instance,
+            request_id,
+        ),
         PageError::Busy => ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
             "page_busy",
