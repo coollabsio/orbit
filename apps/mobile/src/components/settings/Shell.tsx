@@ -4,6 +4,7 @@ import { type ReactNode, useState } from 'react'
 import { Pressable, ScrollView, Switch, View } from 'react-native'
 
 import { useOrbit } from '../../orbit-context'
+import { guestMayOpen } from '../../data/guest'
 import { alpha, cssColors, useButtonStyle, useTheme } from '../../theme'
 import { Icon, type IconName, KeyboardSpace, PaneHeader, PickerSheet, type Presence, PullRefresh, SafeAreaView, Spinner, StatusMark, Text } from '../../ui'
 
@@ -36,9 +37,12 @@ export const WORKSPACE_NAV: readonly SettingsNavItem[] = [
   { href: '/settings/danger-zone', label: 'Danger zone', icon: 'danger', permission: 'workspace.delete' },
 ]
 
-/** The links of `nav` this workspace role may open; the cloud-only ones only in Orbit Cloud. */
-export function allowedNav<T extends SettingsNavItem>(nav: readonly T[], permissions: readonly Permission[], cloud: boolean): T[] {
-  return nav.filter((item) => (!item.permission || permissions.includes(item.permission)) && (!item.cloud || cloud))
+/**
+ * The links of `nav` this person may open: by permission, the cloud-only ones only in Orbit Cloud, and for a guest
+ * only its own settings (`guestMayOpen`).
+ */
+export function allowedNav<T extends SettingsNavItem>(nav: readonly T[], permissions: readonly Permission[], cloud: boolean, guest = false): T[] {
+  return nav.filter((item) => (!item.permission || permissions.includes(item.permission)) && (!item.cloud || cloud) && (!guest || guestMayOpen(item.href)))
 }
 
 export const ACCOUNT_NAV: readonly SettingsNavItem[] = [

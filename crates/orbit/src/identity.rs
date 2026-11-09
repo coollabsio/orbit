@@ -30,6 +30,8 @@ pub enum WorkspaceRole {
     Owner,
     Admin,
     Member,
+    /// An outside person who only sees the private chat channels they were invited to.
+    Guest,
 }
 
 impl WorkspaceRole {
@@ -39,6 +41,7 @@ impl WorkspaceRole {
             Self::Owner => "owner",
             Self::Admin => "admin",
             Self::Member => "member",
+            Self::Guest => "guest",
         }
     }
 
@@ -48,6 +51,7 @@ impl WorkspaceRole {
             "owner" => Some(Self::Owner),
             "admin" => Some(Self::Admin),
             "member" => Some(Self::Member),
+            "guest" => Some(Self::Guest),
             _ => None,
         }
     }

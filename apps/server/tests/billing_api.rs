@@ -1140,6 +1140,80 @@ async fn a_new_workspace_is_on_a_trial_with_limits() {
             &json!("The trial allows 3 members. Choose a plan to add more.")
         )
     );
+    // Guests are no members: one is invited at the limit and does not count.
+    let (status, channel) = server
+        .call(
+            "POST",
+            &server.workspace("/chat/conversations"),
+            Some(json!({"name": "with-guests", "kind": "private", "member_ids": []})),
+        )
+        .await;
+    assert_eq!(status, 200, "{channel}");
+    // Padded past 64 KiB: the guard reads the whole body to see the role, and keeps it.
+    let body = json!({"email": "guest@example.com", "role": "guest", "delivery": "manual",
+                      "conversation_ids": [channel["result"]["id"]]});
+    let response = server
+        .http
+        .post(format!(
+            "{}{}",
+            server.base,
+            server.workspace("/invitations")
+        ))
+        .header("origin", &server.base)
+        .header("cookie", format!("{COOKIE}={}", server.session))
+        .header("content-type", "application/json")
+        .body(format!("{body}{}", " ".repeat(80 * 1024)))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status().as_u16();
+    let invitation: Value = response.json().await.unwrap();
+    assert_eq!(status, 201, "{invitation}");
+    let guest = server.add_user("guest@example.com", false).await;
+    let token = invitation["url"]
+        .as_str()
+        .unwrap()
+        .split("token=")
+        .nth(1)
+        .unwrap();
+    let (status, accepted) = server
+        .call_as(
+            &guest,
+            "POST",
+            "/api/v1/workspaces/invitations/accept",
+            Some(json!({"token": token})),
+        )
+        .await;
+    assert_eq!(status, 200, "{accepted}");
+    let (_, billing) = server
+        .call("GET", &server.workspace("/billing"), None)
+        .await;
+    assert_eq!(billing["trial"]["members"], json!({"used": 3, "limit": 3}));
+    // A guest who would become a member takes a seat, so the promotion is refused at the limit.
+    let (_, members) = server
+        .call("GET", &server.workspace("/members"), None)
+        .await;
+    let guest_membership = members["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["role"] == "guest")
+        .unwrap()
+        .clone();
+    let (status, problem) = server
+        .call(
+            "PATCH",
+            &server.workspace(&format!(
+                "/members/{}",
+                guest_membership["id"].as_str().unwrap()
+            )),
+            Some(json!({"role": "member", "expected_version": guest_membership["version"]})),
+        )
+        .await;
+    assert_eq!(
+        (status, &problem["code"]),
+        (402, &json!("trial_limit_reached"))
+    );
 
     // A stranger learns nothing about the trial: the handler refuses them as on any workspace.
     let stranger = server.add_user("stranger@example.com", false).await;

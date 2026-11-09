@@ -120,6 +120,7 @@ pub(crate) async fn ensure_writable(database: &Database, workspace_id: Id) -> Re
 }
 
 /// Lowercase email → user id of the workspace's active members (assignees are matched by email).
+/// Guests are left out: a task cannot have a guest assignee.
 pub(crate) async fn member_emails(
     database: &Database,
     workspace_id: Id,
@@ -127,7 +128,8 @@ pub(crate) async fn member_emails(
     Ok(sqlx::query(
         "SELECT users.id, users.normalized_email FROM memberships \
          JOIN users ON users.id = memberships.user_id \
-         WHERE memberships.workspace_id = $1 AND users.suspended_at IS NULL",
+         WHERE memberships.workspace_id = $1 AND memberships.role <> 'guest' \
+         AND users.suspended_at IS NULL",
     )
     .bind(workspace_id.to_string())
     .fetch_all(database.pool())
@@ -153,7 +155,8 @@ pub(crate) async fn member_names(
     for member in sqlx::query(
         "SELECT users.id, users.display_name FROM memberships \
          JOIN users ON users.id = memberships.user_id \
-         WHERE memberships.workspace_id = $1 AND users.suspended_at IS NULL",
+         WHERE memberships.workspace_id = $1 AND memberships.role <> 'guest' \
+         AND users.suspended_at IS NULL",
     )
     .bind(workspace_id.to_string())
     .fetch_all(database.pool())

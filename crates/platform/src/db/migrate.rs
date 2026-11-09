@@ -523,27 +523,32 @@ impl MigrationRunner {
                 ),
                 Migration::new(
                     78,
-                    include_str!("../../../../apps/server/migrations/0078_apns_devices.sql"),
+                    include_str!("../../../../apps/server/migrations/0078_guests.sql"),
                     false,
                 ),
                 Migration::new(
                     79,
-                    include_str!("../../../../apps/server/migrations/0079_import_people.sql"),
+                    include_str!("../../../../apps/server/migrations/0079_apns_devices.sql"),
                     false,
                 ),
                 Migration::new(
                     80,
-                    include_str!("../../../../apps/server/migrations/0080_linear_import_progress.sql"),
+                    include_str!("../../../../apps/server/migrations/0080_import_people.sql"),
                     false,
                 ),
                 Migration::new(
                     81,
-                    include_str!("../../../../apps/server/migrations/0081_import_finished_notices.sql"),
+                    include_str!("../../../../apps/server/migrations/0081_linear_import_progress.sql"),
                     false,
                 ),
                 Migration::new(
                     82,
-                    include_str!("../../../../apps/server/migrations/0082_import_people_assigning.sql"),
+                    include_str!("../../../../apps/server/migrations/0082_import_finished_notices.sql"),
+                    false,
+                ),
+                Migration::new(
+                    83,
+                    include_str!("../../../../apps/server/migrations/0083_import_people_assigning.sql"),
                     false,
                 ),
             ],
@@ -739,27 +744,32 @@ impl MigrationRunner {
             ),
             Migration::new(
                 78,
-                include_str!("../../../../apps/server/migrations/postgres/0078_apns_devices.sql"),
+                include_str!("../../../../apps/server/migrations/postgres/0078_guests.sql"),
                 false,
             ),
             Migration::new(
                 79,
-                include_str!("../../../../apps/server/migrations/postgres/0079_import_people.sql"),
+                include_str!("../../../../apps/server/migrations/postgres/0079_apns_devices.sql"),
                 false,
             ),
             Migration::new(
                 80,
-                include_str!("../../../../apps/server/migrations/postgres/0080_linear_import_progress.sql"),
+                include_str!("../../../../apps/server/migrations/postgres/0080_import_people.sql"),
                 false,
             ),
             Migration::new(
                 81,
-                include_str!("../../../../apps/server/migrations/postgres/0081_import_finished_notices.sql"),
+                include_str!("../../../../apps/server/migrations/postgres/0081_linear_import_progress.sql"),
                 false,
             ),
             Migration::new(
                 82,
-                include_str!("../../../../apps/server/migrations/postgres/0082_import_people_assigning.sql"),
+                include_str!("../../../../apps/server/migrations/postgres/0082_import_finished_notices.sql"),
+                false,
+            ),
+            Migration::new(
+                83,
+                include_str!("../../../../apps/server/migrations/postgres/0083_import_people_assigning.sql"),
                 false,
             ),
         ];

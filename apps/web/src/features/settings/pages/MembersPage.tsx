@@ -28,14 +28,15 @@ import { useSlowPending } from '@/lib/useDebouncedValue'
 import { ProfileTrigger } from '@/components/common/ProfileTrigger'
 import { loadFailed } from '@/lib/connection'
 import { LoadingText } from '@/components/ui/spinner'
+import { GuestBadge } from '@/components/common/GuestBadge'
+import { GuestChannelsField } from '@/features/settings/components/GuestChannelsField'
+import { INVITABLE_ROLES, invitationRequest, type InvitableRole } from '@/features/settings/lib/invitation'
 
 type Role = User['role']
 type Sort = 'name_asc' | 'name_desc' | 'email_asc' | 'role'
 
-const ROLES: Role[] = ['Owner', 'Admin', 'Member']
+const ROLES: Role[] = ['Owner', 'Admin', 'Member', 'Guest']
 const PAGE_SIZES = [10, 25, 50, 100]
-// Owner is never a choice: that role only moves through an ownership transfer.
-const INVITABLE_ROLES = ['Admin', 'Member'] as const
 // `items` lets Select.Value render the option label instead of the raw value.
 const ROLE_FILTER_OPTIONS = [{ value: 'all', label: 'All roles' }, ...ROLES.map((role) => ({ value: role, label: role }))]
 const SORT_OPTIONS: { value: Sort; label: string }[] = [
@@ -76,8 +77,11 @@ export function MembersPage() {
   const [perPage, setPerPage] = useState(10)
 
   const [inviteEmail, setInviteEmail] = useState('')
-  const [inviteRole, setInviteRole] = useState<(typeof INVITABLE_ROLES)[number]>('Member')
-  const [inviteLink, setInviteLink] = useState<string | null>(null)
+  const [inviteRole, setInviteRole] = useState<InvitableRole>('Member')
+  const [inviteChannels, setInviteChannels] = useState<string[]>([])
+  const [inviteProblem, setInviteProblem] = useState<string | null>(null)
+  // The role is the one the link was issued with, not the role picked since.
+  const [inviteLink, setInviteLink] = useState<{ url: string; role: InvitableRole } | null>(null)
   const [copied, setCopied] = useState(false)
   const [copyError, setCopyError] = useState(false)
 
@@ -110,9 +114,13 @@ export function MembersPage() {
     e.preventDefault()
     const email = inviteEmail.trim()
     if (!email) return
+    const role = inviteRole
+    const request = invitationRequest(email, role, inviteChannels, 'manual')
+    setInviteProblem('problem' in request ? request.problem : null)
+    if ('problem' in request) return
     try {
-      const response = await createInvitation.mutateAsync({ email, role: inviteRole.toLowerCase() as 'admin' | 'member', delivery: 'manual' })
-      setInviteLink(response.url ?? null)
+      const response = await createInvitation.mutateAsync(request.body)
+      setInviteLink(response.url ? { url: response.url, role } : null)
       setCopied(false)
     } catch {
       // Mutation feedback remains visible in the form.
@@ -122,8 +130,11 @@ export function MembersPage() {
   const emailInvitation = async () => {
     const email = inviteEmail.trim()
     if (!email) return
+    const request = invitationRequest(email, inviteRole, inviteChannels, 'smtp')
+    setInviteProblem('problem' in request ? request.problem : null)
+    if ('problem' in request) return
     try {
-      await createInvitation.mutateAsync({ email, role: inviteRole.toLowerCase() as 'admin' | 'member', delivery: 'smtp' })
+      await createInvitation.mutateAsync(request.body)
       setInviteLink(null)
       setInviteEmail('')
       toast(`Invitation sent to ${email}`)
@@ -135,7 +146,7 @@ export function MembersPage() {
   const copyLink = async () => {
     if (!inviteLink) return
     try {
-      await navigator.clipboard.writeText(inviteLink)
+      await navigator.clipboard.writeText(inviteLink.url)
       setCopied(true)
       setCopyError(false)
       toast('Invitation link copied')
@@ -244,7 +255,7 @@ export function MembersPage() {
                   </div>
                   <div className="truncate text-xs text-muted-foreground">{user.email}</div>
                   <div>
-                    <Badge variant="secondary">{user.role}</Badge>
+                    {user.role === 'Guest' ? <GuestBadge className="h-5 text-xs" /> : <Badge variant="secondary">{user.role}</Badge>}
                   </div>
                   <div className="flex justify-end">
                     {/* Your own row has no menu; the abilities themselves come from the server. */}
@@ -256,10 +267,16 @@ export function MembersPage() {
                           Manage
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-auto min-w-52">
-                          {(user.can.changeRole ? INVITABLE_ROLES : []).filter((role) => role !== user.role).map((role) => (
+                          {/* a guest becomes a member (and joins the public channels); nobody becomes a guest */}
+                          {user.can.changeRole && user.role === 'Guest' ? (
+                            <DropdownMenuItem onClick={() => changeRole.mutate({ membershipId: user.membershipId, version: user.version, role: 'member' })}>
+                              Convert to member
+                            </DropdownMenuItem>
+                          ) : null}
+                          {(user.can.changeRole && user.role !== 'Guest' ? (['Admin', 'Member'] as const) : []).filter((role) => role !== user.role).map((role) => (
                             <DropdownMenuItem
                               key={role}
-                              onClick={() => changeRole.mutate({ membershipId: user.membershipId, version: user.version, role: role.toLowerCase() as 'admin' | 'member' })}
+                              onClick={() => changeRole.mutate({ membershipId: user.membershipId, version: user.version, role: role === 'Admin' ? 'admin' : 'member' })}
                             >
                               Make {role.toLowerCase()}
                             </DropdownMenuItem>
@@ -394,7 +411,7 @@ export function MembersPage() {
                 <FieldLabel htmlFor="invite-role">
                   Role
                 </FieldLabel>
-                <Select items={INVITE_ROLE_OPTIONS} value={inviteRole} onValueChange={(value) => setInviteRole(value as (typeof INVITABLE_ROLES)[number])}>
+                <Select items={INVITE_ROLE_OPTIONS} value={inviteRole} onValueChange={(value) => setInviteRole(value as InvitableRole)}>
                   <SelectTrigger id="invite-role">
                     <SelectValue />
                   </SelectTrigger>
@@ -404,13 +421,15 @@ export function MembersPage() {
                 </Select>
               </Field>
             </FieldGrid>
+            {inviteRole === 'Guest' ? <GuestChannelsField value={inviteChannels} onChange={setInviteChannels} /> : null}
+            {inviteProblem ? <p role="alert" className="mt-2 text-destructive">{inviteProblem}</p> : null}
             {inviteLink ? (
               <div className="mt-4 flex items-end gap-2">
                 <Field>
                   <FieldLabel htmlFor="invite-link">
-                    Invitation link ({inviteRole})
+                    Invitation link ({inviteLink.role})
                   </FieldLabel>
-                  <Input id="invite-link" value={inviteLink} readOnly />
+                  <Input id="invite-link" value={inviteLink.url} readOnly />
                 </Field>
                 <Button type="button" variant="outline" onClick={copyLink}>
                   <Copy className="size-3.5" />

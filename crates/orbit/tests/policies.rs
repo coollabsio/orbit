@@ -101,10 +101,11 @@ fn roles_round_trip_through_their_stored_names() {
         WorkspaceRole::Owner,
         WorkspaceRole::Admin,
         WorkspaceRole::Member,
+        WorkspaceRole::Guest,
     ] {
         assert_eq!(WorkspaceRole::parse(role.as_str()), Some(role));
     }
-    assert_eq!(WorkspaceRole::parse("guest"), None);
+    assert_eq!(WorkspaceRole::parse("visitor"), None);
 }
 
 #[test]
@@ -209,6 +210,47 @@ fn members_leave_but_do_not_remove_or_invite_others() {
     assert_eq!(
         actor(WorkspaceRole::Admin).invite(WorkspaceRole::Admin),
         Ok(())
+    );
+}
+
+#[test]
+fn guests_hold_no_permission_and_only_managers_invite_them() {
+    assert_eq!(Policy::permissions(WorkspaceRole::Guest), []);
+    assert!(actor(WorkspaceRole::Guest).is_guest());
+    assert!(!actor(WorkspaceRole::Member).is_guest());
+    assert_eq!(
+        actor(WorkspaceRole::Admin).invite(WorkspaceRole::Guest),
+        Ok(())
+    );
+    assert_eq!(
+        actor(WorkspaceRole::Member).invite(WorkspaceRole::Guest),
+        Err(MembershipDenied::RoleForbidden)
+    );
+    assert_eq!(
+        actor(WorkspaceRole::Guest).invite(WorkspaceRole::Guest),
+        Err(MembershipDenied::RoleForbidden)
+    );
+}
+
+#[test]
+fn a_guest_becomes_a_member_but_nobody_becomes_a_guest() {
+    let admin = actor(WorkspaceRole::Admin);
+
+    assert_eq!(
+        admin.change_member_role(WorkspaceRole::Guest, WorkspaceRole::Member),
+        Ok(())
+    );
+    assert_eq!(
+        admin.change_member_role(WorkspaceRole::Member, WorkspaceRole::Guest),
+        Err(MembershipDenied::GuestDowngrade)
+    );
+    assert_eq!(
+        admin.change_member_role(WorkspaceRole::Admin, WorkspaceRole::Guest),
+        Err(MembershipDenied::GuestDowngrade)
+    );
+    assert_eq!(
+        actor(WorkspaceRole::Guest).change_member_role(WorkspaceRole::Guest, WorkspaceRole::Member),
+        Err(MembershipDenied::RoleForbidden)
     );
 }
 

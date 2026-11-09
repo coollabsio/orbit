@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useChatContext } from '@/features/chat/api/chatContext'
 import { useOpenDm } from '@/features/chat/api/mutations'
+import { useConversations } from '@/features/chat/api/queries'
 import { useChatNavigation } from '@/features/chat/useChatNavigation'
 import { useMembers } from '@/features/workspaces/api'
 import { chatErrorMessage, messageablePeople } from './channelLib'
@@ -34,6 +35,7 @@ export function NewMessageDialog({ open, onOpenChange }: NewMessageDialogProps) 
 function NewMessageForm({ onDone }: { onDone: () => void }) {
   const { workspaceId, currentUserId } = useChatContext()
   const members = useMembers(workspaceId).data ?? []
+  const conversations = useConversations().data ?? []
   const openDm = useOpenDm()
   const { openConversation } = useChatNavigation()
   const [selectedIds, setSelectedIds] = useState<string[]>([])
@@ -61,7 +63,7 @@ function NewMessageForm({ onDone }: { onDone: () => void }) {
       <MemberPicker
         autoFocus
         label="To"
-        people={messageablePeople(members, currentUserId)}
+        people={messageablePeople(members, conversations, currentUserId)}
         selectedIds={selectedIds}
         onChange={(ids) => {
           setSelectedIds(ids)

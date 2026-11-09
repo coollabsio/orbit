@@ -4,12 +4,12 @@ import { TextInput } from '../../../ui/scaled'
 
 import { ActionSheet, ConfirmDialog, type ConfirmRequest, type SheetAction } from '../../../components/settings/Dialog'
 import { Badge, FieldLabel, InitialAvatar, Note, RowText, Select, SettingsCard, SettingsRow, SettingsShell, SmallOutlineButton, WORKSPACE_NAV } from '../../../components/settings/Shell'
-import { filterMembers, type MemberAction, memberActions, roleLabel } from '../../../data/account-api'
+import { filterMembers, type InviteRole, invitationProblem, type MemberAction, memberActions, roleLabel } from '../../../data/account-api'
 import { shortDate } from '../../../data/format'
 import type { MemberRecord } from '../../../data/orbit'
 import { useAuthOptions, useInvitations, useMemberWrites } from '../../../hooks/account'
 import { useOrbit } from '../../../orbit-context'
-import { useMembers } from '../../../queries'
+import { useConversations, useMembers } from '../../../queries'
 import { errorMessage } from '../../../session-context'
 import { alpha, useTheme } from '../../../theme'
 import { Button, Icon, IconButton, Input, Text } from '../../../ui'
@@ -17,10 +17,11 @@ import { Button, Icon, IconButton, Input, Text } from '../../../ui'
 const INVITE_ROLES = [
   { value: 'admin', label: 'Admin' },
   { value: 'member', label: 'Member' },
+  { value: 'guest', label: 'Guest' },
 ] as const
 
 type Sort = 'name_asc' | 'name_desc' | 'email_asc' | 'role'
-const ROLE_FILTERS = [{ value: 'all', label: 'All roles' }, ...['owner', 'admin', 'member'].map((role) => ({ value: role, label: roleLabel(role) }))]
+const ROLE_FILTERS = [{ value: 'all', label: 'All roles' }, ...['owner', 'admin', 'member', 'guest'].map((role) => ({ value: role, label: roleLabel(role) }))]
 const SORTS: { value: Sort; label: string }[] = [
   { value: 'name_asc', label: 'Name A–Z' },
   { value: 'name_desc', label: 'Name Z–A' },
@@ -66,7 +67,7 @@ export default function MembersScreen() {
   }
   const sheet: SheetAction[] = managing
     ? memberActions(managing, user.id).map((action) => ({
-        label: action.kind === 'role' ? `Make ${action.role}` : action.kind === 'transfer' ? 'Transfer ownership' : 'Remove member',
+        label: action.kind === 'role' ? (managing.role === 'guest' ? 'Convert to member' : `Make ${action.role}`) : action.kind === 'transfer' ? 'Transfer ownership' : 'Remove member',
         icon: action.kind === 'role' ? 'userEdit' : action.kind === 'transfer' ? 'crown' : 'trash',
         destructive: action.kind === 'remove',
         onPress: () => run(managing, action),
@@ -174,18 +175,24 @@ function Invite() {
   const { invite } = useMemberWrites()
   const emailEnabled = useAuthOptions().data?.email_enabled ?? false
   const [email, setEmail] = useState('')
-  const [role, setRole] = useState<'member' | 'admin'>('member')
-  const [link, setLink] = useState<string | null>(null)
+  const [role, setRole] = useState<InviteRole>('member')
+  const [channelIds, setChannelIds] = useState<string[]>([])
+  const [problem, setProblem] = useState<string | null>(null)
+  // The role is the one the link was issued with, not the role picked since.
+  const [link, setLink] = useState<{ url: string; role: InviteRole } | null>(null)
   const [sent, setSent] = useState<string | null>(null)
   const send = (delivery: 'manual' | 'smtp') => {
     const address = email.trim()
     if (!address) return
     setSent(null)
+    const reason = invitationProblem(role, channelIds)
+    setProblem(reason)
+    if (reason) return
     invite.mutate(
-      { email: address, role, delivery },
+      { email: address, role, channelIds, delivery },
       {
         onSuccess: ({ url }) => {
-          if (delivery === 'manual') setLink(url)
+          if (delivery === 'manual') setLink(url ? { url, role } : null)
           else {
             setLink(null)
             setEmail('')
@@ -212,12 +219,14 @@ function Invite() {
           <FieldLabel>Role</FieldLabel>
           <Select label="Role" value={role} options={INVITE_ROLES} onChange={setRole} />
         </View>
+        {role === 'guest' ? <GuestChannels value={channelIds} onChange={setChannelIds} /> : null}
+        {problem ? <Note error>{problem}</Note> : null}
         {!emailEnabled ? <Note>Email delivery is not configured. Share the invitation link instead.</Note> : null}
         {link ? (
           <View className="gap-2">
-            <Input label={`Invitation link (${roleLabel(role)})`} value={link} editable={false} selectTextOnFocus />
+            <Input label={`Invitation link (${roleLabel(link.role)})`} value={link.url} editable={false} selectTextOnFocus />
             <View className="flex-row">
-              <Button label="Share link" icon="send" variant="outline" onPress={() => void Share.share({ message: link })} />
+              <Button label="Share link" icon="send" variant="outline" onPress={() => void Share.share({ message: link.url })} />
             </View>
           </View>
         ) : null}
@@ -225,6 +234,46 @@ function Invite() {
         {invite.isError ? <Note error>{errorMessage(invite.error)}</Note> : null}
       </View>
     </SettingsCard>
+  )
+}
+
+/** The private channels a guest joins: the open private channels the admin is in. */
+function GuestChannels({ value, onChange }: { value: readonly string[]; onChange: (ids: string[]) => void }) {
+  const { colors } = useTheme()
+  const conversations = useConversations()
+  const channels = (conversations.data ?? [])
+    .filter((conversation) => conversation.kind === 'private' && !conversation.archived)
+    .sort((a, b) => a.name.localeCompare(b.name))
+  return (
+    <View className="gap-1.5">
+      <FieldLabel>Channels</FieldLabel>
+      <Note>A guest sees only these private channels and the people in them.</Note>
+      {conversations.isPending ? <Note>Loading channels…</Note> : null}
+      {conversations.isError && !conversations.data ? (
+        <View className="flex-row items-center gap-2">
+          <Note error>Channels could not be loaded.</Note>
+          <Button label="Retry" variant="outline" size="sm" disabled={conversations.isFetching} onPress={() => void conversations.refetch()} />
+        </View>
+      ) : null}
+      {conversations.data && channels.length === 0 ? <Note>You are in no private channel. Make one in Chat first.</Note> : null}
+      {channels.map((channel) => {
+        const checked = value.includes(channel.id)
+        return (
+          <Pressable
+            key={channel.id}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked }}
+            accessibilityLabel={channel.name}
+            onPress={() => onChange(checked ? value.filter((id) => id !== channel.id) : [...value, channel.id])}
+            className="h-10 flex-row items-center gap-2 rounded-md border border-border px-3 active:bg-muted"
+          >
+            <Icon name={checked ? 'checkCircle' : 'circle'} size={18} color={checked ? colors.primary : colors.mutedForeground} />
+            <Icon name="lock" size={14} color={colors.mutedForeground} />
+            <Text numberOfLines={1} className="flex-1 text-[14px]">{channel.name}</Text>
+          </Pressable>
+        )
+      })}
+    </View>
   )
 }
 

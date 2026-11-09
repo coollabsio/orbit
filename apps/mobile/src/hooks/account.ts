@@ -322,7 +322,8 @@ export function useMemberWrites() {
     remove: useMutation({ mutationFn: (member: MemberRecord) => account.removeMembership(client, workspaceId, member), onSettled }),
     transfer: useMutation({ mutationFn: (member: MemberRecord) => account.transferOwnership(client, workspace, member), onSettled: workspaceChanged }),
     invite: useMutation({
-      mutationFn: ({ email, role, delivery }: { email: string; role: 'admin' | 'member'; delivery: 'manual' | 'smtp' }) => account.invite(client, workspaceId, email, role, delivery),
+      mutationFn: ({ email, role, channelIds, delivery }: { email: string; role: account.InviteRole; channelIds: readonly string[]; delivery: 'manual' | 'smtp' }) =>
+        account.invite(client, workspaceId, email, role, channelIds, delivery),
       onSettled,
     }),
     revokeInvitation: useMutation({ mutationFn: (id: string) => account.revokeInvitation(client, workspaceId, id), onSettled }),

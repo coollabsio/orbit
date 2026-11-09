@@ -177,6 +177,17 @@ async fn guard(State(state): State<GuardState>, mut request: Request, next: Next
         }
         (Check::Write(_) | Check::Create(..), WorkspaceAccess::ReadOnly) => Refusal::ReadOnly,
         (Check::Create(_, limit), WorkspaceAccess::Trial) => {
+            // Guests do not count as members, so a guest invitation passes the members limit.
+            if limit == TrialLimit::Members {
+                let (guest, read) = match invites_a_guest(request).await {
+                    Ok(read) => read,
+                    Err(response) => return response,
+                };
+                request = read;
+                if guest {
+                    return next.run(request).await;
+                }
+            }
             // Counted before the handler runs, so concurrent creates can pass the limit by a few:
             // a trial limit, not a security boundary.
             match repository::trial_usage(database, workspace_id, limit, TimestampMillis::now())
@@ -207,13 +218,28 @@ async fn guard(State(state): State<GuardState>, mut request: Request, next: Next
     }
 }
 
+/// Whether an invitation request asks for the guest role, and the request with its body again.
+/// The platform layer already caps the body at the request limit, so the guard reads all of it.
+/// A body that cannot be read gets the handler's `invalid_request` answer.
+async fn invites_a_guest(request: Request) -> Result<(bool, Request), Response> {
+    let (parts, body) = request.into_parts();
+    let Ok(bytes) = axum::body::to_bytes(body, usize::MAX).await else {
+        let request = Request::from_parts(parts, Body::empty());
+        return Err(problem(&request, StatusCode::BAD_REQUEST, invalid_body()));
+    };
+    let guest = serde_json::from_slice::<serde_json::Value>(&bytes)
+        .is_ok_and(|body| body["role"] == "guest");
+    Ok((guest, Request::from_parts(parts, Body::from(bytes))))
+}
+
 enum Refusal {
     ReadOnly,
     TrialLimit(TrialLimit),
 }
 
 /// Whether the request carries the session of a member of the workspace, as the handlers decide
-/// it (session cookie, then membership of a live workspace). Workspace routes take no API tokens.
+/// it (session cookie, then membership of a live workspace). Guests count: they write in chat.
+/// Workspace routes take no API tokens.
 async fn caller_is_member(
     state: &GuardState,
     workspace_id: Id,
@@ -222,7 +248,7 @@ async fn caller_is_member(
     let Some(session) = request_session(&state.identity, state.cookie_mode, headers).await else {
         return Ok(false);
     };
-    membership::actor(
+    membership::chat_actor(
         state.billing.database().pool(),
         workspace_id,
         session.user.id,
@@ -258,6 +284,15 @@ fn trial_limit(limit: TrialLimit, trial: &TrialConfig) -> Message {
         code: "trial_limit_reached",
         title: "Trial limit reached",
         detail: reached.detail(),
+    }
+}
+
+/// The workspace handlers' answer to a body they cannot read.
+fn invalid_body() -> Message {
+    Message {
+        code: "invalid_request",
+        title: "Invalid request",
+        detail: "The request body is not valid for this endpoint.".to_owned(),
     }
 }
 

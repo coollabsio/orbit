@@ -10,7 +10,7 @@ import { useChatContext } from '@/features/chat/api/chatContext'
 import { useAddMembers, useOpenDm, useRemoveMember } from '@/features/chat/api/mutations'
 import { useConversation } from '@/features/chat/api/queries'
 import type { Conversation } from '@/features/chat/api/types'
-import { canAddPeople, canManageChannel, chatErrorMessage, pickablePeople } from '@/features/chat/components/dialogs/channelLib'
+import { canAddPeople, canManageChannel, chatErrorMessage, addablePeople } from '@/features/chat/components/dialogs/channelLib'
 import { memberGroups } from '@/features/chat/lib/memberGroups'
 import { MemberPicker } from '@/features/chat/components/dialogs/MemberPicker'
 import { useChatNavigation } from '@/features/chat/useChatNavigation'
@@ -19,6 +19,7 @@ import { presenceOf, usePresence } from '@/features/realtime/presence'
 import { useMembers } from '@/features/workspaces/api'
 import type { User } from '@/features/workspaces/models'
 import { RightPane, RightPaneBody, RightPaneEmpty, RightPaneError, RightPaneLoading } from './RightPane'
+import { GuestBadge } from '@/components/common/GuestBadge'
 
 /**
  * The people in a conversation, laid out like Discord's member list: online people under their role, offline people
@@ -62,7 +63,7 @@ export function MembersPane({ conversationId }: { conversationId: string }) {
   return (
     <RightPane
       title="Members"
-      actions={conversation && canAddPeople(conversation, currentUser) ? <AddPeople conversation={conversation} people={pickablePeople(members, currentUserId, conversation.memberIds)} /> : null}
+      actions={conversation && canAddPeople(conversation, currentUser) ? <AddPeople conversation={conversation} people={addablePeople(conversation, members, currentUserId)} /> : null}
     >
       <RightPaneBody className="pt-0">
         {conversationQuery.isPending || membersQuery.isPending ? (
@@ -106,6 +107,8 @@ export function MembersPane({ conversationId }: { conversationId: string }) {
                                   <Crown className="size-3.5 shrink-0 text-amber-500" aria-hidden="true" />
                                   <span className="sr-only">Workspace owner</span>
                                 </>
+                              ) : person.role === 'Guest' ? (
+                                <GuestBadge />
                               ) : null}
                             </span>
                             {shown.emoji !== null || shown.text !== null ? (

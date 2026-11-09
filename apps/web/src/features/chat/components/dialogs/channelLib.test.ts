@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import { ChatError } from '@/features/chat/api/types'
-import { canAddPeople, canManageChannel, channelNameFinal, channelNameInput, chatErrorMessage, matchPeople, messageablePeople, pickablePeople } from './channelLib'
+import { addablePeople, canAddPeople, canManageChannel, channelNameFinal, channelNameInput, chatErrorMessage, matchPeople, messageablePeople, pickablePeople } from './channelLib'
 
 test('a channel name is lowercase and spaces become hyphens while it is typed', () => {
   expect(channelNameInput('Design Team')).toBe('design-team')
@@ -54,12 +54,12 @@ test('a picker offers nobody suspended, not the current user and not the exclude
 })
 
 test('a new message offers yourself first, as "(you)", then the others by name', () => {
-  expect(messageablePeople(people, 'u1').map((person): string[] => [person.id, person.name])).toEqual([
+  expect(messageablePeople(people, [], 'u1').map((person): string[] => [person.id, person.name])).toEqual([
     ['u1', 'Me (you)'],
     ['u3', 'Ada Lovelace'],
     ['u2', 'Zoe Park'],
   ])
-  expect(messageablePeople(people, null).map((person) => person.id)).toEqual(['u3', 'u1', 'u2'])
+  expect(messageablePeople(people, [], null).map((person) => person.id)).toEqual(['u3', 'u1', 'u2'])
 })
 
 test('people match by name, handle or email', () => {
@@ -76,4 +76,35 @@ test('a chat error becomes the sentence of the action, a general one, or the fal
   expect(chatErrorMessage(new ChatError('forbidden', 'x'), fallback)).toBe('You do not have permission to do this.')
   expect(chatErrorMessage(new ChatError('not_found', 'x'), fallback)).toBe(fallback)
   expect(chatErrorMessage(new Error('network'), fallback)).toBe(fallback)
+})
+
+test('"Add people" never offers a guest for a public channel, and does for a private one', () => {
+  const people = [
+    { id: 'u1', name: 'Me', role: 'Member' as const },
+    { id: 'u2', name: 'Gus', role: 'Guest' as const },
+    { id: 'u3', name: 'Ann', role: 'Member' as const },
+    { id: 'u4', name: 'In', role: 'Member' as const },
+  ]
+  const ids = (kind: 'public' | 'private') => addablePeople({ kind, memberIds: ['u4'] }, people, 'u1').map((person) => person.id)
+  expect(ids('public')).toEqual(['u3'])
+  expect(ids('private')).toEqual(['u3', 'u2'])
+})
+
+test('a new message offers a guest only when it shares an open channel with you, as the server requires', () => {
+  const people = [
+    { id: 'u1', name: 'Me', role: 'Member' as const },
+    { id: 'u2', name: 'Gus', role: 'Guest' as const },
+    { id: 'u3', name: 'Gil', role: 'Guest' as const },
+    { id: 'u4', name: 'Gia', role: 'Guest' as const },
+    { id: 'u5', name: 'Ann', role: 'Member' as const },
+  ]
+  const conversations = [
+    { kind: 'private' as const, archived: false, memberIds: ['u1', 'u2'] },
+    { kind: 'private' as const, archived: true, memberIds: ['u1', 'u4'] },
+    { kind: 'dm' as const, archived: false, memberIds: ['u1', 'u4'] },
+    { kind: 'private' as const, archived: false, memberIds: ['u5', 'u3'] },
+  ]
+  expect(messageablePeople(people, conversations, 'u1').map((person) => person.id)).toEqual(['u1', 'u5', 'u2'])
+  // a guest reaches only the people of its channels, members too
+  expect(messageablePeople(people, conversations, 'u2').map((person) => person.id)).toEqual(['u2', 'u1'])
 })

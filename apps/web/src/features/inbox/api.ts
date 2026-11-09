@@ -34,8 +34,10 @@ export function useNotifications(workspaceId: string, unread = false) {
 }
 
 /** Whether the inbox has an unread notification: one row is enough to know. */
-export function useHasUnreadNotifications(workspaceId: string) {
+/** `enabled` is off for a guest: it has no Activity. */
+export function useHasUnreadNotifications(workspaceId: string, enabled = true) {
   return useQuery({
+    enabled,
     // under the list's key, so what refreshes the inbox refreshes this
     queryKey: [...queryKeys.notifications(workspaceId, true), 'any'] as const,
     queryFn: async () => {

@@ -5,6 +5,7 @@ import { BotAvatar, BotBadge } from '@/features/chat/components/messages/BotAvat
 import { fullTimestamp, relativeAgo } from '@/features/chat/lib/time'
 import type { User } from '@/features/workspaces/models'
 import { ProfileTrigger } from '@/components/common/ProfileTrigger'
+import { GuestBadge } from '@/components/common/GuestBadge'
 
 interface MessageBylineProps {
   message: Pick<Message, 'authorId' | 'createdAt' | 'bot'>
@@ -40,6 +41,7 @@ export function MessageByline({ message, members, children, profile = false }: M
           <ProfileTrigger userId={profile ? author?.id : null} name={author?.name ?? 'Unknown'} className="truncate font-medium text-foreground">
             {author?.name ?? 'Unknown'}
           </ProfileTrigger>
+          {author?.role === 'Guest' ? <GuestBadge /> : null}
         </>
       )}
       <time dateTime={new Date(message.createdAt).toISOString()} title={fullTimestamp(message.createdAt)} className="shrink-0 text-xs font-normal text-muted-foreground">

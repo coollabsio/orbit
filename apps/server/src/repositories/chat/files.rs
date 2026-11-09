@@ -11,7 +11,7 @@ use sqlx::any::AnyRow;
 
 use super::{
     ChatError, ChatFileRecord, ChatRepository, MESSAGE_SELECT, MessageRecord, hydrate, id_list,
-    in_ids, load_access, load_actor, parse_id,
+    in_ids, load_access, load_actor, parse_id, reachable_dm,
 };
 
 /// Files of one message.
@@ -196,7 +196,7 @@ impl ChatRepository {
         let database = self.database.clone();
         self.uploads
             .download(move || async move {
-                let row = sqlx::query(
+                let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                     "SELECT b.storage_key, b.deleted_at, f.mime_type, f.file_name FROM chat_message_files f \
                      JOIN attachment_blobs b ON b.id = f.blob_id AND b.workspace_id = f.workspace_id \
                      JOIN workspaces w ON w.id = f.workspace_id AND w.deleted_at IS NULL \
@@ -204,10 +204,12 @@ impl ChatRepository {
                      LEFT JOIN chat_conversations c ON c.id = f.conversation_id \
                      WHERE f.id = $2 AND f.workspace_id = $3 AND ( \
                          (f.message_id IS NULL AND f.uploaded_by = me.user_id) \
-                         OR c.kind = 'public' \
-                         OR EXISTS (SELECT 1 FROM chat_members cm \
-                                    WHERE cm.conversation_id = c.id AND cm.user_id = me.user_id))",
-                )
+                         OR (c.kind = 'public' AND me.role <> 'guest') \
+                         OR (EXISTS (SELECT 1 FROM chat_members cm \
+                                     WHERE cm.conversation_id = c.id AND cm.user_id = me.user_id) \
+                             AND {}))",
+                    reachable_dm()
+                )))
                 .bind(actor_id.to_string())
                 .bind(file_id.to_string())
                 .bind(workspace_id.to_string())

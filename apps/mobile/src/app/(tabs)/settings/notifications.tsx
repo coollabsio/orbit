@@ -6,6 +6,7 @@ import { NOTIFICATION_CHOICES } from '../../../data/account-api'
 import { shortDate } from '../../../data/format'
 import { useApnsDevices, useNotificationPrefs, usePushDevices, useRemovePushDevice, useSaveNotificationPrefs, useSendTestPush } from '../../../hooks/account'
 import { type ThisDevice as ThisDeviceState, useRemoveApnsDevice, useThisDevice, useTurnOnPush } from '../../../push'
+import { useIsGuest } from '../../../orbit-context'
 import { errorMessage } from '../../../session-context'
 import { Button, Text } from '../../../ui'
 
@@ -18,6 +19,9 @@ export default function NotificationsScreen() {
   const prefs = useNotificationPrefs()
   const save = useSaveNotificationPrefs()
   const current = prefs.data
+  // a guest has only chat: no task or page rows
+  const guest = useIsGuest()
+  const choices = NOTIFICATION_CHOICES.filter((choice) => !guest || choice.chat)
   const devices = usePushDevices()
   const apns = useApnsDevices()
   const here = useThisDevice({ refresh: true })
@@ -43,8 +47,8 @@ export default function NotificationsScreen() {
         ) : (
           <View className="gap-4">
             <View>
-              {NOTIFICATION_CHOICES.map(({ field, label }, index) => (
-                <View key={field} className={`flex-row items-center justify-between gap-4 border-border ${index === 0 ? 'pt-0 border-t-0' : 'pt-3 border-t'} ${index === NOTIFICATION_CHOICES.length - 1 ? 'pb-0' : 'pb-3'}`}>
+              {choices.map(({ field, label }, index) => (
+                <View key={field} className={`flex-row items-center justify-between gap-4 border-border ${index === 0 ? 'pt-0 border-t-0' : 'pt-3 border-t'} ${index === choices.length - 1 ? 'pb-0' : 'pb-3'}`}>
                   <Text className="font-noto-medium text-[14px] flex-1">{label}</Text>
                   <Toggle label={label} value={current[field]} onChange={(checked) => save.mutate({ ...current, [field]: checked })} />
                 </View>

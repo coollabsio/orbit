@@ -82,7 +82,8 @@ where
 {
     let rows: Vec<(String, String)> = sqlx::query_as(
         "SELECT users.id, users.display_name FROM memberships \
-         JOIN users ON users.id = memberships.user_id WHERE memberships.workspace_id = $1",
+         JOIN users ON users.id = memberships.user_id WHERE memberships.workspace_id = $1 \
+         AND memberships.role <> 'guest'",
     )
     .bind(workspace_id.to_string())
     .fetch_all(executor)

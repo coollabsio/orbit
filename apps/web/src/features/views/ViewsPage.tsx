@@ -8,7 +8,7 @@ import { UserAvatar } from '@/components/common/UserAvatar'
 import { Button } from '@/components/ui/button'
 import { TaskSearchBox } from '@/features/tasks/components/TaskSearchBox'
 import type { User } from '@/features/workspaces/models'
-import { useMembers } from '@/features/workspaces/api'
+import { useTeamMembers } from '@/features/workspaces/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { useReorderFavorites, useSavedViews, type SavedView } from './api/views'
 import { FavoriteStar } from './components/FavoriteStar'
@@ -31,7 +31,7 @@ export function ViewsPage() {
   const { workspace } = useWorkspace()
   const navigate = useNavigate()
   const viewsQuery = useSavedViews(workspace.id)
-  const members = useMembers(workspace.id).data ?? []
+  const members = useTeamMembers(workspace.id).data ?? []
   const [search, setSearch] = useState('')
   const [dialog, setDialog] = useState<RowDialog | null>(null)
   const scroller = useRef<HTMLDivElement>(null)

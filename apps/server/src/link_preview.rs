@@ -12,7 +12,7 @@ use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use orbit_platform::{is_public_ip, PublicResolver};
+use orbit_platform::{PublicResolver, is_public_ip};
 use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Semaphore;
@@ -283,11 +283,7 @@ impl LinkPreviewer {
 }
 
 fn ttl(preview: &Option<LinkPreview>) -> Duration {
-    if preview.is_some() {
-        HIT_TTL
-    } else {
-        MISS_TTL
-    }
+    if preview.is_some() { HIT_TTL } else { MISS_TTL }
 }
 
 /// The start of the body, up to [`MAX_BODY_BYTES`].

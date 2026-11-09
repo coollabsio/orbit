@@ -1,6 +1,6 @@
 //! Channels, direct messages, their members, and the shared categories of the channel list.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use orbit_domain::{Actor, Permission};
 use orbit_platform::{Flag, Id, Row, TimestampMillis};
@@ -10,9 +10,10 @@ use super::messages::add_system_row;
 use super::state::emit_state;
 use super::{
     Access, CONVERSATION_COLUMNS, CategoryRecord, ChatError, ChatEvent, ChatRepository,
-    ConversationKind, ConversationRecord, Events, MessageKind, NotifyLevel, Written,
-    conversation_from_row, conversation_record, current_conversation_record, finish, id_list,
-    in_ids, json_values, load_access, load_actor, parse_id, workspace_member_ids,
+    ConversationKind, ConversationRecord, Emitted, Events, MessageKind, NotifyLevel, Written,
+    conversation_from_row, conversation_record, current_conversation_record, finish, guest_ids,
+    id_list, in_ids, json_values, load_access, load_actor, parse_id, public_for, reachable_dm,
+    resolve, workspace_member_ids,
 };
 
 const NAME_MAX_CHARS: usize = 80;
@@ -44,21 +45,25 @@ pub struct ChannelUpdate {
 
 impl ChatRepository {
     /// Conversations the caller can see: the ones it is in, and every public channel (to
-    /// browse and join). Archived ones are left out.
+    /// browse and join) unless the caller is a guest. Archived ones are left out.
     pub async fn list_conversations(
         &self,
         workspace_id: Id,
         actor_id: Id,
     ) -> Result<Vec<ConversationRecord>, ChatError> {
-        const VISIBLE: &str = "c.workspace_id = $1 AND c.archived_at IS NULL \
-             AND (c.kind = 'public' OR EXISTS (SELECT 1 FROM chat_members \
-                  WHERE chat_members.conversation_id = c.id AND chat_members.user_id = $2))";
+        let visible = format!(
+            "c.workspace_id = $1 AND c.archived_at IS NULL \
+             AND ({} OR EXISTS (SELECT 1 FROM chat_members \
+                  WHERE chat_members.conversation_id = c.id AND chat_members.user_id = $2)) AND {}",
+            public_for("$2"),
+            reachable_dm()
+        );
         let mut tx = self.database.pool().begin().await?;
         load_actor(&mut tx, workspace_id, actor_id).await?;
         let mut members: HashMap<Id, Vec<Id>> = HashMap::new();
         for row in sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT cm.conversation_id, cm.user_id FROM chat_members cm \
-             JOIN chat_conversations c ON c.id = cm.conversation_id WHERE {VISIBLE} \
+             JOIN chat_conversations c ON c.id = cm.conversation_id WHERE {visible} \
              ORDER BY cm.joined_at, cm.user_id"
         )))
         .bind(workspace_id.to_string())
@@ -72,7 +77,7 @@ impl ChatRepository {
                 .push(parse_id(row.get("user_id"))?);
         }
         sqlx::query(sqlx::AssertSqlSafe(format!(
-            "SELECT {CONVERSATION_COLUMNS} FROM chat_conversations c WHERE {VISIBLE} \
+            "SELECT {CONVERSATION_COLUMNS} FROM chat_conversations c WHERE {visible} \
              ORDER BY c.created_at, c.id"
         )))
         .bind(workspace_id.to_string())
@@ -88,13 +93,42 @@ impl ChatRepository {
         .collect()
     }
 
+    /// The conversations the caller can read now, archived ones too: the checks of
+    /// `load_access` for every conversation of the workspace.
+    pub async fn readable_conversations(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+    ) -> Result<HashSet<Id>, ChatError> {
+        sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
+            "SELECT c.id FROM chat_conversations c WHERE c.workspace_id = $1 \
+             AND ({} OR EXISTS (SELECT 1 FROM chat_members \
+                  WHERE chat_members.conversation_id = c.id AND chat_members.user_id = $2)) AND {}",
+            public_for("$2"),
+            reachable_dm()
+        )))
+        .bind(workspace_id.to_string())
+        .bind(actor_id.to_string())
+        .fetch_all(self.database.pool())
+        .await?
+        .into_iter()
+        .map(parse_id)
+        .collect()
+    }
+
+    /// The workspace's categories. A guest sees none: its channels show without a category.
     pub async fn list_categories(
         &self,
         workspace_id: Id,
         actor_id: Id,
     ) -> Result<Vec<CategoryRecord>, ChatError> {
         let mut tx = self.database.pool().begin().await?;
-        load_actor(&mut tx, workspace_id, actor_id).await?;
+        if load_actor(&mut tx, workspace_id, actor_id)
+            .await?
+            .is_guest()
+        {
+            return Ok(Vec::new());
+        }
         categories(&mut tx, workspace_id).await
     }
 
@@ -122,12 +156,20 @@ impl ChatRepository {
         }
         let now = TimestampMillis::now();
         let mut tx = self.database.immediate_transaction().await?;
-        load_actor(&mut tx, workspace_id, actor_id).await?;
+        if load_actor(&mut tx, workspace_id, actor_id)
+            .await?
+            .is_guest()
+        {
+            return Err(ChatError::Forbidden("Guests cannot create channels."));
+        }
         require_free_name(&mut tx, workspace_id, &name, None).await?;
         require_category(&mut tx, workspace_id, input.category_id).await?;
         require_workspace_members(&mut tx, workspace_id, &members).await?;
-        // Every workspace member is in a public channel, like the default one.
+        // Every workspace member is in a public channel, like the default one; guests never are.
         if input.kind == ConversationKind::Public {
+            if !guest_ids(&mut tx, workspace_id, &members).await?.is_empty() {
+                return Err(ChatError::Forbidden(GUESTS_ONLY_PRIVATE));
+            }
             members = workspace_member_ids(&mut tx, workspace_id).await?;
         }
         let id = Id::new_v7();
@@ -213,6 +255,14 @@ impl ChatRepository {
         let added = if current.kind == ConversationKind::Private && kind == ConversationKind::Public
         {
             let current_members = super::member_ids(&mut tx, conversation_id).await?;
+            if !guest_ids(&mut tx, workspace_id, &current_members)
+                .await?
+                .is_empty()
+            {
+                return Err(ChatError::Forbidden(
+                    "This channel has guests. Remove them before you make it public.",
+                ));
+            }
             let added: Vec<Id> = workspace_member_ids(&mut tx, workspace_id)
                 .await?
                 .into_iter()
@@ -349,6 +399,13 @@ impl ChatRepository {
         }
         access.require_open()?;
         require_workspace_members(&mut tx, workspace_id, &user_ids).await?;
+        if access.conversation.kind == ConversationKind::Public
+            && !guest_ids(&mut tx, workspace_id, &user_ids)
+                .await?
+                .is_empty()
+        {
+            return Err(ChatError::Forbidden(GUESTS_ONLY_PRIVATE));
+        }
         let current = super::member_ids(&mut tx, conversation_id).await?;
         let added: Vec<Id> = user_ids
             .into_iter()
@@ -417,6 +474,7 @@ impl ChatRepository {
         let now = TimestampMillis::now();
         let mut tx = self.database.immediate_transaction().await?;
         load_actor(&mut tx, workspace_id, actor_id).await?;
+        require_guests_share_a_channel(&mut tx, workspace_id, &members).await?;
         let existing: Option<String> = sqlx::query_scalar(
             "SELECT id FROM chat_conversations WHERE workspace_id = $1 AND dm_key = $2",
         )
@@ -780,6 +838,131 @@ async fn require_category(
     } else {
         Err(ChatError::NotFound)
     }
+}
+
+const GUESTS_ONLY_PRIVATE: &str = "Guests can only be in private channels.";
+
+/// How many channels one guest invitation may name.
+pub const MAX_GUEST_CHANNELS: usize = 50;
+
+/// The channels of a guest invitation: open private channels of the workspace that `actor`
+/// manages (see `Access::require_manage`) and is a member of. `conversation_ids` has no duplicates.
+pub async fn require_guest_channels(
+    conn: &mut AnyConnection,
+    workspace_id: Id,
+    actor: Actor,
+    conversation_ids: &[Id],
+) -> Result<(), ChatError> {
+    if conversation_ids.is_empty() || conversation_ids.len() > MAX_GUEST_CHANNELS {
+        return Err(ChatError::Invalid {
+            field: "conversation_ids",
+        });
+    }
+    for conversation_id in conversation_ids {
+        let created_by: Option<String> = sqlx::query_scalar(
+            "SELECT created_by FROM chat_conversations WHERE id = $1 AND workspace_id = $2 \
+             AND kind = 'private' AND archived_at IS NULL",
+        )
+        .bind(conversation_id.to_string())
+        .bind(workspace_id.to_string())
+        .fetch_optional(&mut *conn)
+        .await?;
+        let created_by = created_by
+            .map(parse_id)
+            .transpose()?
+            .ok_or(ChatError::Invalid {
+                field: "conversation_ids",
+            })?;
+        if !actor.can_manage_chat_channel(created_by) {
+            return Err(ChatError::Forbidden(
+                "Only the channel's creator and workspace owners and admins can do this.",
+            ));
+        }
+        // As for adding a member: only a member of the channel brings people into it.
+        if super::load_member(conn, *conversation_id, actor.user_id)
+            .await?
+            .is_none()
+        {
+            return Err(ChatError::Forbidden("Join the channel first."));
+        }
+    }
+    Ok(())
+}
+
+/// Puts a guest who accepted its invitation into the invitation's channels that are still
+/// private and open, with a `join` row in each, as adding a member does. Returns the events
+/// of that, for the live socket once the caller commits.
+pub async fn join_invited_channels(
+    conn: &mut AnyConnection,
+    workspace_id: Id,
+    invitation_id: Id,
+    user_id: Id,
+    now: TimestampMillis,
+) -> Result<Vec<Emitted>, ChatError> {
+    let channels: Vec<String> = sqlx::query_scalar(
+        "SELECT c.id FROM workspace_invitation_conversations i \
+         JOIN chat_conversations c ON c.id = i.conversation_id \
+         WHERE i.invitation_id = $1 AND c.kind = 'private' AND c.archived_at IS NULL \
+         ORDER BY c.id",
+    )
+    .bind(invitation_id.to_string())
+    .fetch_all(&mut *conn)
+    .await?;
+    if channels.is_empty() {
+        // Every channel of a guest invitation was archived, made public or deleted after it
+        // was sent: the guest would have nothing to see.
+        let Flag(guest) = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM workspace_invitations WHERE id = $1 AND role = 'guest')",
+        )
+        .bind(invitation_id.to_string())
+        .fetch_one(&mut *conn)
+        .await?;
+        if guest {
+            return Err(ChatError::Conflict(
+                "The invitation has no open channel left.",
+            ));
+        }
+    }
+    let mut events = Events::default();
+    for channel in channels {
+        let channel = parse_id(channel)?;
+        add_members(conn, channel, &[user_id], NotifyLevel::Mentions, now).await?;
+        let row = add_system_row(conn, channel, MessageKind::Join, user_id, now).await?;
+        let conversation = current_conversation_record(conn, workspace_id, channel).await?;
+        events.conversation(channel, ChatEvent::ConversationChanged { conversation });
+        events.conversation(channel, ChatEvent::MessageCreated { message: row });
+        emit_state(conn, workspace_id, channel, user_id, &mut events).await?;
+    }
+    resolve(conn, events.events).await
+}
+
+/// A guest only reaches the people of its channels: in a DM, every guest must share an open
+/// channel with every other member. Otherwise the DM does not exist for the caller.
+async fn require_guests_share_a_channel(
+    conn: &mut AnyConnection,
+    workspace_id: Id,
+    members: &[Id],
+) -> Result<(), ChatError> {
+    for guest in guest_ids(conn, workspace_id, members).await? {
+        for other in members.iter().filter(|other| **other != guest) {
+            let Flag(shared) = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM chat_members own JOIN chat_members theirs \
+                 ON theirs.conversation_id = own.conversation_id \
+                 JOIN chat_conversations c ON c.id = own.conversation_id \
+                 WHERE own.user_id = $1 AND theirs.user_id = $2 AND c.workspace_id = $3 \
+                 AND c.kind <> 'dm' AND c.archived_at IS NULL)",
+            )
+            .bind(guest.to_string())
+            .bind(other.to_string())
+            .bind(workspace_id.to_string())
+            .fetch_one(&mut *conn)
+            .await?;
+            if !shared {
+                return Err(ChatError::NotFound);
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Every id must be a member of the workspace. `user_ids` has no duplicates.

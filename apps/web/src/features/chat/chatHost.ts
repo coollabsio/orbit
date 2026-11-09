@@ -16,8 +16,8 @@ export interface ChatHost {
   renderLink: (url: string, plain: ReactNode, hidden: boolean) => ReactNode
   /** The keys of the workspace's projects: `ENG-12` in a message is a task only with one of these keys. */
   taskKeys: readonly string[]
-  /** Opens the new task dialog, filled in from this message. */
-  createTask: (message: Message) => void
+  /** Opens the new task dialog, filled in from this message. Absent for a guest, who has no tasks. */
+  createTask?: (message: Message) => void
 }
 
 export const ChatHostContext = createContext<ChatHost>({ renderLinkCard: () => null, renderLink: (_url, plain) => plain, taskKeys: [], createTask: () => {} })

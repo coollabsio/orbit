@@ -124,7 +124,7 @@ pub(crate) async fn notify_new_mentions(
         let Flag(allowed) = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM memberships JOIN users ON users.id = memberships.user_id \
              WHERE memberships.workspace_id = $1 AND memberships.user_id = $2 \
-             AND users.suspended_at IS NULL) \
+             AND memberships.role <> 'guest' AND users.suspended_at IS NULL) \
              AND NOT EXISTS(SELECT 1 FROM notifications WHERE kind = 'page_mentioned' \
              AND page_id = $3 AND recipient_user_id = $4 AND created_at > $5)",
         )

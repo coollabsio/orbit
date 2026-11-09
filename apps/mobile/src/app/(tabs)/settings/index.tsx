@@ -1,20 +1,27 @@
-import { router } from 'expo-router'
+import { Redirect, router } from 'expo-router'
 import { useState } from 'react'
 import { View } from 'react-native'
 
 import { ConfirmDialog, type ConfirmRequest } from '../../../components/settings/Dialog'
 import { Note, SettingsCard, SettingsShell, WORKSPACE_NAV } from '../../../components/settings/Shell'
+import { guestSettings } from '../../../data/guest'
 import { useAuthOptions, useMemberWrites, useRenameWorkspace } from '../../../hooks/account'
-import { useOrbit } from '../../../orbit-context'
+import { useIsGuest, useOrbit } from '../../../orbit-context'
 import { useMembers } from '../../../queries'
 import { errorMessage } from '../../../session-context'
 import { Button, Input, Text } from '../../../ui'
 
 /**
  * The dock's Settings: the web's workspace General page (name, leave, version). The account pages and Sign out are in
- * the account menu, as on the web.
+ * the account menu, as on the web. A guest has no workspace settings, so it gets its account settings.
  */
 export default function GeneralScreen() {
+  const guest = useIsGuest()
+  if (guest) return <Redirect href={guestSettings} />
+  return <General />
+}
+
+function General() {
   const { workspace } = useOrbit()
   const version = useAuthOptions().data?.version
 

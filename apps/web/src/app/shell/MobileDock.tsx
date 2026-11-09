@@ -4,6 +4,7 @@ import { NavLink, useLocation } from 'react-router'
 import { Home2 as Home, Message as MessageSquare, DocumentText as FileText, Setting2 as Settings, Sms as Mail, TaskSquare as SquareCheck } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
+import { useIsGuest } from '@/features/workspaces/permissions'
 import { chatEnabled, docsHidden, isChatConversationPath, mobileDockPathsFor } from './productNavigation'
 
 const DOCK_LINKS = [
@@ -14,6 +15,12 @@ const DOCK_LINKS = [
   { to: '/mail', label: 'Mail', icon: Mail },
   { to: '/settings', label: 'Settings', icon: Settings },
 ].filter((link) => !(docsHidden && link.to === '/docs'))
+
+/** A guest's dock: Chat and its own account settings. */
+const GUEST_DOCK_LINKS = [
+  { to: '/chat', label: 'Chat', icon: MessageSquare },
+  { to: '/profile', label: 'Settings', icon: Settings },
+]
 
 /** A dock entry: a link for the sections that exist, a disabled button for the upcoming ones. */
 function MobileDockItem({ to, label, icon: Icon, enabled, badge = 0, unread = false }: { to: string; label: string; icon: ComponentType<{ className?: string }>; enabled: boolean; badge?: number; /** A dot when there is no count. */ unread?: boolean }) {
@@ -58,14 +65,16 @@ function MobileDockItem({ to, label, icon: Icon, enabled, badge = 0, unread = fa
  */
 export function MobileDock({ chatEnabled: chat = chatEnabled, chatBadge = 0, chatUnread = false }: { chatEnabled?: boolean; /** Unread count on the Chat item. */ chatBadge?: number; /** Chat has an unread message, with or without a count. */ chatUnread?: boolean }) {
   const { pathname } = useLocation()
+  const guest = useIsGuest()
   if (isChatConversationPath(pathname)) return null
-  const paths = mobileDockPathsFor(chat)
+  const links = guest ? GUEST_DOCK_LINKS : DOCK_LINKS
+  const paths = guest ? GUEST_DOCK_LINKS.map((link) => link.to) : mobileDockPathsFor(chat)
   return (
     <nav
       className="hidden h-auto min-h-14 shrink-0 items-stretch bg-background pt-3 [@media(display-mode:standalone)]:pb-[env(safe-area-inset-bottom,0px)] max-[899px]:not-in-data-keyboard:flex"
       aria-label="Mobile navigation"
     >
-      {DOCK_LINKS.map((link) => (
+      {links.map((link) => (
         <MobileDockItem key={link.to} {...link} enabled={paths.includes(link.to)} badge={link.to === '/chat' ? chatBadge : 0} unread={link.to === '/chat' && chatUnread} />
       ))}
     </nav>

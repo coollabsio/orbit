@@ -346,7 +346,7 @@ async fn check_access(
                 AND sessions.idle_expires_at > $5 AND sessions.absolute_expires_at > $5) AS session_ok, \
          EXISTS(SELECT 1 FROM memberships JOIN workspaces ON workspaces.id = memberships.workspace_id \
                 WHERE memberships.user_id = $2 AND memberships.workspace_id = $3 \
-                AND workspaces.deleted_at IS NULL) AS member, \
+                AND memberships.role <> 'guest' AND workspaces.deleted_at IS NULL) AS member, \
          {state} AS doc_state"
     )))
     .bind(session_id.to_string())

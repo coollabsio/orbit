@@ -252,6 +252,7 @@ async fn require_live_page(
         "SELECT EXISTS(SELECT 1 FROM pages \
          JOIN workspaces ON workspaces.id = pages.workspace_id \
          JOIN memberships ON memberships.workspace_id = pages.workspace_id AND memberships.user_id = $1 \
+         AND memberships.role <> 'guest' \
          WHERE pages.id = $2 AND pages.workspace_id = $3 AND pages.deleted_at IS NULL \
          AND workspaces.deleted_at IS NULL AND {visible})",
         visible = visible(4)
@@ -284,6 +285,7 @@ async fn authorized_file(
          JOIN pages ON pages.id = page_files.page_id AND pages.workspace_id = page_files.workspace_id \
          JOIN workspaces ON workspaces.id = page_files.workspace_id \
          JOIN memberships ON memberships.workspace_id = page_files.workspace_id AND memberships.user_id = $1 \
+         AND memberships.role <> 'guest' \
          WHERE page_files.id = $2 AND page_files.page_id = $3 AND page_files.workspace_id = $4 \
          AND pages.deleted_at IS NULL AND workspaces.deleted_at IS NULL AND {visible}",
         visible = visible(5)

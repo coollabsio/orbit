@@ -1,7 +1,7 @@
 import { createOrbitClient } from '@orbit/api/client'
 import { expect, test } from 'bun:test'
 
-import { bucketMovingText, bucketPollInterval, confirmsEmail, deleteAccount, filterMembers, formatBytes, memberActions, ownedWorkspaces, passwordProblem, pickedImageName, requestEmailChange, sortedSessions, storageUse, twoFactorSummary } from './account-api'
+import { bucketMovingText, bucketPollInterval, confirmsEmail, deleteAccount, filterMembers, formatBytes, invitationProblem, memberActions, ownedWorkspaces, passwordProblem, pickedImageName, requestEmailChange, sortedSessions, storageUse, twoFactorSummary } from './account-api'
 import type { MemberRecord } from './orbit'
 
 const member = (id: string, fields: Partial<MemberRecord>): MemberRecord => ({
@@ -76,6 +76,19 @@ test('bucketMovingText names the direction', () => {
   expect(bucketMovingText({ removing: false, checking: false, files_to_move: 1 })).toBe('1 file left to move to your bucket.')
   expect(bucketMovingText({ removing: true, checking: false, files_to_move: 12 })).toBe("12 files left to move back to Orbit's storage.")
   expect(bucketMovingText({ removing: false, checking: true, files_to_move: 0 })).toBe('Checking which files to move…')
+})
+
+test('a guest only becomes a member, and nobody becomes a guest', () => {
+  const guest = { user_id: 'gus', role: 'guest', can_change_role: true, can_remove: true, can_transfer_ownership: false } as unknown as Parameters<typeof memberActions>[0]
+  expect(memberActions(guest, 'me')).toEqual([{ kind: 'role', role: 'member' }, { kind: 'remove' }])
+  const member = { ...guest, role: 'member' } as typeof guest
+  expect(memberActions(member, 'me')).toEqual([{ kind: 'role', role: 'admin' }, { kind: 'remove' }])
+})
+
+test('a guest invitation needs one or more channels', () => {
+  expect(invitationProblem('guest', [])).toBe('Choose one or more channels for the guest.')
+  expect(invitationProblem('guest', ['c1'])).toBeNull()
+  expect(invitationProblem('member', [])).toBeNull()
 })
 
 /** A client whose fetch records each request and answers with `reply`. */
