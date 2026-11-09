@@ -1,18 +1,16 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
-import { useNavigate, useSearchParams } from 'react-router'
+import { useSearchParams } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 import { applyView, repairConfig } from '@orbit/database/view'
 import { newRowValues } from '@orbit/database/newRow'
-import type { Property, ViewConfig, ViewContext } from '@orbit/database/types'
-import { useCurrentUser } from '@/features/auth/api'
-import { useMembers } from '@/features/workspaces/api'
-import { useWorkspaceReadOnly } from '@/features/workspaces/billing'
+import type { Property, ViewConfig } from '@orbit/database/types'
 import { useCreateRow, useDatabase, useUpdateView } from './api'
-import { DatabaseEnvContext, type DatabaseEnv } from './context'
+import { DatabaseEnvContext, useDatabaseEnvValue } from './context'
 import { DatabaseBoard, type NewCard } from './DatabaseBoard'
 import { DatabaseTable } from './DatabaseTable'
 import { newRule, withPinnedRows, type Pin } from './databaseLib'
+import { RowPeek } from './RowPeek'
 import { FilterBar } from './FilterBar'
 import { ViewTabs } from './ViewTabs'
 import { ViewToolbar } from './ViewToolbar'
@@ -46,40 +44,21 @@ function readStoredView(databaseId: string): string | null {
  * the view), the search, and the rows added since the view last changed.
  */
 export function DatabasePage({ workspaceId, databaseId, locked, cover, title }: DatabasePageProps) {
-  const navigate = useNavigate()
   const query = useDatabase(workspaceId, databaseId)
-  const membersQuery = useMembers(workspaceId)
-  const me = useCurrentUser()
-  const workspaceReadOnly = useWorkspaceReadOnly()
+  const env = useDatabaseEnvValue(workspaceId, databaseId, locked)
+  const { ctx, canEditSchema } = env
   const updateView = useUpdateView(workspaceId, databaseId)
   const createRow = useCreateRow(workspaceId, databaseId)
   const [searchParams, setSearchParams] = useSearchParams()
-  const [now] = useState(() => Date.now())
-  const [timeZone] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone)
   const [drafts, setDrafts] = useState<Readonly<Record<string, ViewConfig>>>({})
   const [search, setSearch] = useState('')
   const [pins, setPins] = useState<Pin[]>([])
   const [openRule, setOpenRule] = useState<number | null>(null)
   const [editRowId, setEditRowId] = useState<string | null>(null)
+  /** A row created from "New": the peek focuses its title. */
+  const [focusRowId, setFocusRowId] = useState<string | null>(null)
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null)
   const [viewport, setViewport] = useState(0)
-
-  const members = membersQuery.data ?? []
-  const ctx: ViewContext = {
-    userId: me.data?.id ?? '',
-    now,
-    timeZone,
-    members: new Map(members.map((user) => [user.id, user.name])),
-  }
-  const canEditSchema = !locked && !workspaceReadOnly
-  const env: DatabaseEnv = {
-    workspaceId,
-    databaseId,
-    ctx,
-    users: new Map(members.map((user) => [user.id, user])),
-    canEditValues: !workspaceReadOnly,
-    canEditSchema,
-  }
 
   // The header column stays put while the table scrolls sideways: it is as wide as the scroller's content box.
   // `left-0` keeps it at the content edge: a sticky offset already starts inside the scroller's padding.
@@ -142,6 +121,24 @@ export function DatabasePage({ workspaceId, databaseId, locked, cover, title }: 
     )
   }
 
+  const peekRowId = searchParams.get('row')
+  /**
+   * The side peek is in the URL (`?row=`, next to `?view=`): Back closes it and a link reopens it. Another row in an
+   * open peek replaces the entry, so Back still closes the peek.
+   */
+  const setPeekRow = (rowId: string | null) => {
+    if (rowId === peekRowId) return
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current)
+        if (rowId) next.set('row', rowId)
+        else next.delete('row')
+        return next
+      },
+      { replace: rowId !== null && peekRowId !== null },
+    )
+  }
+
   const views = [...database.views].sort((a, b) => a.position - b.position)
   const requested = searchParams.get('view') ?? readStoredView(databaseId)
   const view = views.find((candidate) => candidate.id === requested) ?? views[0]
@@ -181,8 +178,11 @@ export function DatabasePage({ workspaceId, databaseId, locked, cover, title }: 
     changeConfig({ ...config, filter: { rules: [...config.filter.rules, newRule(property)] } })
     setOpenRule(config.filter.rules.length)
   }
-  /** A new row with the values the filter needs; a board card also gets its column's value and place. */
-  const addRow = (at: Pin['at'], card?: Omit<NewCard, 'at'>) => {
+  /**
+   * A new row with the values the filter needs; a board card also gets its column's value and place. "New" in the
+   * toolbar opens it in the peek; the others edit its title in place, so typing rows stays fast.
+   */
+  const addRow = (at: Pin['at'], card?: Omit<NewCard, 'at'>, open: 'inline' | 'peek' = 'inline') => {
     const fill = newRowValues(config.filter.rules, database.properties, ctx)
     const after = card && 'after' in card ? card.after : at === 'top' ? null : undefined
     createRow.mutate(
@@ -190,7 +190,9 @@ export function DatabasePage({ workspaceId, databaseId, locked, cover, title }: 
       {
         onSuccess: (row) => {
           setPins((current) => (at === 'top' ? [{ id: row.id, at }, ...current] : [...current, { id: row.id, at }]))
-          setEditRowId(row.id)
+          if (open === 'inline') return setEditRowId(row.id)
+          setFocusRowId(row.id)
+          setPeekRow(row.id)
         },
       },
     )
@@ -215,7 +217,7 @@ export function DatabasePage({ workspaceId, databaseId, locked, cover, title }: 
                 locked={locked}
                 viewId={view.id}
                 viewType={view.type}
-                onNew={() => addRow('top')}
+                onNew={() => addRow('top', undefined, 'peek')}
               />
             </div>
             {draft && !canEditSchema ? (
@@ -239,7 +241,7 @@ export function DatabasePage({ workspaceId, databaseId, locked, cover, title }: 
               rows={rows}
               onConfig={changeConfig}
               onAddCard={({ at, ...card }) => addRow(at, card)}
-              onOpenRow={(rowId) => navigate(`/docs/${rowId}`)}
+              onOpenRow={(rowId) => setPeekRow(rowId)}
               filtered={config.filter.rules.length > 0 || search.trim() !== ''}
               onClearFilters={() => {
                 setSearch('')
@@ -265,7 +267,7 @@ export function DatabasePage({ workspaceId, databaseId, locked, cover, title }: 
                 if (property) addFilter(property)
               }}
               onAddRow={() => addRow('bottom')}
-              onOpenRow={(rowId) => navigate(`/docs/${rowId}`)}
+              onOpenRow={(rowId) => setPeekRow(rowId)}
               filtered={config.filter.rules.length > 0 || search.trim() !== ''}
               onClearFilters={() => {
                 setSearch('')
@@ -277,6 +279,18 @@ export function DatabasePage({ workspaceId, databaseId, locked, cover, title }: 
           </div>
         )}
       </DatabaseScroller>
+      {peekRowId ? (
+        <RowPeek
+          workspaceId={workspaceId}
+          databaseId={databaseId}
+          rowId={peekRowId}
+          viewId={view.id}
+          order={rows.map((row) => row.id)}
+          focusTitle={focusRowId === peekRowId}
+          onShowRow={setPeekRow}
+          onClose={() => setPeekRow(null)}
+        />
+      ) : null}
     </DatabaseEnvContext.Provider>
   )
 }

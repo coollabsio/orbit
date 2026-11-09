@@ -306,7 +306,7 @@ export function AddPropertyButton() {
 }
 
 /** A new property's name field and type list: picking a type creates it (an empty name takes the type's label). */
-function NewPropertyForm({ onCreate }: { onCreate: (name: string, type: DatabasePropertyType) => void }) {
+export function NewPropertyForm({ onCreate }: { onCreate: (name: string, type: DatabasePropertyType) => void }) {
   const [name, setName] = useState('')
   return (
     <Command label="Property type" loop>

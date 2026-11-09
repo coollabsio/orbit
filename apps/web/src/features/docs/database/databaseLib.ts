@@ -60,3 +60,10 @@ export function ruleSummary(rule: DatabaseFilterRule, property: Property, ctx: V
   }
   return `${operator} ${String(value)}`
 }
+
+/** The rows before and after `rowId` in the view's order (spec 7.5); null at an end, or when the view does not show it. */
+export function neighborRows(order: readonly string[], rowId: string): { previous: string | null; next: string | null } {
+  const at = order.indexOf(rowId)
+  if (at === -1) return { previous: null, next: null }
+  return { previous: order[at - 1] ?? null, next: order[at + 1] ?? null }
+}

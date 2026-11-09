@@ -466,6 +466,11 @@ export function DatabaseTable(props: DatabaseTableProps) {
                       onClick={(event) => {
                         if (isEditing) return
                         if ((event.target as HTMLElement).closest('a, [data-slot=checkbox], [data-open-row]')) return
+                        // A click on the title opens the row in the peek, where the title is edited (Enter still edits here).
+                        if (property.type === 'title') {
+                          setActive({ row: row.id, col: property.id })
+                          return onOpenRow(row.id)
+                        }
                         activate(row, property, event.currentTarget)
                       }}
                     >

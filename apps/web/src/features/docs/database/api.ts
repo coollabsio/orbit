@@ -123,6 +123,11 @@ export function patchValues(values: DatabaseRow['values'], patch: Record<string,
   return next
 }
 
+/** Patches a row in the cached database, e.g. the title typed on its page (no request; rows not loaded stay as they are). */
+export function patchDatabaseRow(queryClient: QueryClient, workspaceId: string, databaseId: string, rowId: string, patch: Partial<DatabaseRow>): void {
+  queryClient.setQueryData<Detail>(queryKeys.database(workspaceId, databaseId), (detail) => detail && withRow(detail, rowId, (row) => ({ ...row, ...patch })))
+}
+
 export type ValuesInput = { rowId: string; values: Record<string, unknown> }
 
 export function useUpdateValues(workspaceId: string, databaseId: string) {

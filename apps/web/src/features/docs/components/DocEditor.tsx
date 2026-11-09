@@ -1,6 +1,6 @@
 import { useCommand } from '@/shortcuts/useCommand'
 import { isPaymentRequired } from '@orbit/api/problem'
-import { lazy, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type Ref } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -75,6 +75,8 @@ import { CoverSourcePanel } from './CoverSourcePanel'
 import { PageHistoryPane } from './PageHistoryPane'
 import { PageLinkDialog } from './PageLinkDialog'
 import { DatabasePage } from '@/features/docs/database/DatabasePage'
+import { patchDatabaseRow } from '@/features/docs/database/api'
+import { PropertyList } from '@/features/docs/database/PropertyList'
 
 const PageEditor = lazy(() => loadPageEditor().then((module) => ({ default: module.PageEditor })))
 
@@ -113,6 +115,22 @@ interface DocEditorProps {
   /** The page went away while open (trashed or out of reach elsewhere); the editor is leaving for /docs. */
   onGone?: (pageId: string) => void
   controlRef?: Ref<DocEditorControl>
+  /** Shows the page as a database row's side peek instead of the main pane. */
+  peek?: DocEditorPeek
+}
+
+/** A row page in the side peek (spec 7.5): the peek's controls replace the page path, the favorite star and the page menu. */
+export interface DocEditorPeek {
+  /** Controls at the start of the header (close, full page, previous and next row). */
+  start: ReactNode
+  /** Controls at the end of the header (copy link, the row menu). */
+  end: ReactNode
+  /** The view the peek was opened from: the property list follows its order. */
+  viewId: string
+  /** A row just created: the title takes the focus. */
+  focusTitle: boolean
+  /** The row went away (trashed, out of reach): close the peek instead of leaving for /docs. */
+  onLeave: () => void
 }
 
 type Cover = { url: string | null; position: string | null }
@@ -134,7 +152,7 @@ const STATUS_DOT: Record<CollabState['status'], string> = {
 /** Banners for sync problems the user has to act on. */
 type SyncNotice = 'too-large' | 'protocol' | 'reconnect-failed' | null
 
-export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash, onRequestMove, onGone, controlRef }: DocEditorProps) {
+export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash, onRequestMove, onGone, controlRef, peek }: DocEditorProps) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const createPage = useCreatePage(workspaceId)
@@ -160,7 +178,8 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
   const [addIconOpen, setAddIconOpen] = useState(false)
   const [linkOpen, setLinkOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
-  useCommand('docs.history', () => setHistoryOpen((open) => !open))
+  // A database has no history; the peek has no room for it (the full row page has it).
+  useCommand('docs.history', () => setHistoryOpen((open) => !open), { enabled: !isDatabase && !peek })
   const [fullWidth, setFullWidth] = useState(page.full_width)
   const setPageLock = useSetPageLock(workspaceId)
   /** Locked pages are read-only here (the server refuses edits too, see `POST .../lock`). */
@@ -229,6 +248,15 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
           reconcilePage(queryClient, workspaceId, saved)
           // The tree follows the title being typed, not the one that was just saved.
           patchTreePage(queryClient, workspaceId, pageId, { title: titleRef.current })
+          if (page.database_id) {
+            patchDatabaseRow(queryClient, workspaceId, page.database_id, pageId, {
+              title: titleRef.current,
+              icon: saved.icon,
+              version: saved.version,
+              updated_at: saved.updated_at,
+              updated_by: saved.updated_by,
+            })
+          }
         },
         onStateChange: setSaveState,
         conflictOf: (error) =>
@@ -295,6 +323,10 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
     queryClient.setQueryData(queryKeys.pages.tree(workspaceId), (tree: PageSummary[] | undefined) => tree && removeSubtree(tree, pageId))
     void queryClient.invalidateQueries({ queryKey: queryKeys.pages.tree(workspaceId) })
     void queryClient.invalidateQueries({ queryKey: queryKeys.pages.favorites(workspaceId) })
+    if (peek) {
+      peek.onLeave()
+      return
+    }
     onGone?.(pageId)
     navigateRef.current('/docs', { replace: true })
   }
@@ -430,12 +462,14 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
     titleRef.current = next
     saver.update({ title: next })
     patchTreePage(queryClient, workspaceId, pageId, { title: next })
+    if (page.database_id) patchDatabaseRow(queryClient, workspaceId, page.database_id, pageId, { title: next })
   }
 
   const changeIcon = (next: string | null) => {
     setIcon(next)
     saver.update({ icon: next })
     patchTreePage(queryClient, workspaceId, pageId, { icon: next })
+    if (page.database_id) patchDatabaseRow(queryClient, workspaceId, page.database_id, pageId, { icon: next })
     void saver.flush()
   }
 
@@ -581,7 +615,9 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
     setLinkOpen(false)
   }
 
-  const ancestors = ancestorsOf(pages, pageId)
+  // A row is not in the tree: its path is its database's path, then the database.
+  const database = page.database_id ? byId.get(page.database_id) : undefined
+  const ancestors = database ? [...ancestorsOf(pages, database.id), database] : ancestorsOf(pages, pageId)
   // The tree summary follows optimistic moves (and sub-pages moved with their root); the detail may lag.
   const space = spaceKey(byId.get(pageId) ?? page)
   const spaceTargets: SpaceKey[] = [...(teamspaces ?? []).map((teamspace) => teamspaceSpace(teamspace.id)), PRIVATE_SPACE]
@@ -723,6 +759,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
         className="mb-5 h-auto w-full rounded-none border-0 bg-transparent p-0 text-[30px] leading-[1.25] font-bold text-foreground shadow-none outline-none placeholder:text-muted-foreground/70 focus:outline-none focus-visible:ring-0 md:text-[30px] max-[899px]:mb-3.5 max-[899px]:text-[22px]! dark:bg-transparent"
         value={title}
         readOnly={readOnly}
+        autoFocus={peek?.focusTitle}
         maxLength={500}
         placeholder="Untitled"
         aria-label="Page title"
@@ -744,39 +781,43 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
           edits (see the effect above) and content syncs through Yjs, so nothing here is remounted or overwritten. */}
       <Pane data-realtime-safe="" className="max-[899px]:group-data-[view=index]/docs:hidden">
         <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 max-[899px]:border-b-0">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            className="hidden text-muted-foreground/70 max-[899px]:inline-flex"
-            aria-label="Back to docs"
-            onClick={() => navigate('/docs')}
-          >
-            <ArrowLeft className="size-4" />
-          </Button>
-          <nav className="flex min-w-0 items-center gap-1.5 overflow-hidden text-[13px] text-muted-foreground/70" aria-label="Page path">
-            <span className="flex min-w-0 shrink-0 items-center gap-1.5 max-[899px]:hidden" data-space-crumb={space}>
-              <span className="flex max-w-40 min-w-0 items-center gap-1">
-                {space === PRIVATE_SPACE ? <Lock className="size-3.5 shrink-0" aria-hidden="true" /> : null}
-                <span className="truncate">{spaceLabel(space, teamspaces)}</span>
-              </span>
-              <span className="shrink-0">/</span>
-            </span>
-            {ancestors.map((ancestor) => (
-              <span key={ancestor.id} className="flex min-w-0 items-center gap-1.5 max-[899px]:hidden">
-                <Link
-                  className="block min-w-0 truncate rounded-[4px] text-muted-foreground/70 no-underline hover:text-foreground"
-                  to={`/docs/${ancestor.id}`}
-                >
-                  {pageTitle(ancestor)}
-                </Link>
-                <span className="shrink-0">/</span>
-              </span>
-            ))}
-            <span className="block min-w-0 shrink truncate font-medium text-foreground" aria-current="page">
-              {displayTitle}
-            </span>
-          </nav>
+          {peek ? peek.start : (
+            <>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="hidden text-muted-foreground/70 max-[899px]:inline-flex"
+                aria-label="Back to docs"
+                onClick={() => navigate('/docs')}
+              >
+                <ArrowLeft className="size-4" />
+              </Button>
+              <nav className="flex min-w-0 items-center gap-1.5 overflow-hidden text-[13px] text-muted-foreground/70" aria-label="Page path">
+                <span className="flex min-w-0 shrink-0 items-center gap-1.5 max-[899px]:hidden" data-space-crumb={space}>
+                  <span className="flex max-w-40 min-w-0 items-center gap-1">
+                    {space === PRIVATE_SPACE ? <Lock className="size-3.5 shrink-0" aria-hidden="true" /> : null}
+                    <span className="truncate">{spaceLabel(space, teamspaces)}</span>
+                  </span>
+                  <span className="shrink-0">/</span>
+                </span>
+                {ancestors.map((ancestor) => (
+                  <span key={ancestor.id} className="flex min-w-0 items-center gap-1.5 max-[899px]:hidden">
+                    <Link
+                      className="block min-w-0 truncate rounded-[4px] text-muted-foreground/70 no-underline hover:text-foreground"
+                      to={`/docs/${ancestor.id}`}
+                    >
+                      {pageTitle(ancestor)}
+                    </Link>
+                    <span className="shrink-0">/</span>
+                  </span>
+                ))}
+                <span className="block min-w-0 shrink truncate font-medium text-foreground" aria-current="page">
+                  {displayTitle}
+                </span>
+              </nav>
+            </>
+          )}
           <span className="flex-1" />
           <PresenceAvatars people={people} onReveal={(person) => revealCollabCursor(document, person.id)} />
           <span
@@ -827,125 +868,130 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
               </Button>
             </Tip>
           )}
-          <Tip label={favoriteLabel} side="bottom">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              className={cn('text-muted-foreground/70', favorite && 'text-amber-500 hover:text-amber-500 dark:text-amber-400 dark:hover:text-amber-400')}
-              aria-label={favoriteLabel}
-              aria-pressed={favorite}
-              disabled={favoritesQuery.isPending}
-              onClick={() => setFavorite(!favorite)}
-            >
-              <Star className="size-4" weight={favorite ? 'Filled' : 'Outline'} />
-            </Button>
-          </Tip>
-          <DropdownMenu>
-            <Tip label="Page options" side="bottom">
-              <DropdownMenuTrigger
-                render={<Button type="button" variant="ghost" size="icon-sm" className="text-muted-foreground/70" aria-label="Page options" />}
-              >
-                <Ellipsis className="size-4" />
-              </DropdownMenuTrigger>
-            </Tip>
-            <DropdownMenuContent align="end" className="w-auto max-w-64 min-w-44">
-              {onRequestMove && teamspaces ? (
-                <>
-                  <DropdownMenuGroup>
-                    <DropdownMenuLabel>Move to</DropdownMenuLabel>
-                    {spaceTargets.map((target) => (
-                      <DropdownMenuItem
-                        key={target}
-                        disabled={target === space}
-                        onClick={() => onRequestMove(pageId, target)}
-                      >
-                        {target === PRIVATE_SPACE ? <Lock className="size-[14px]" /> : <Users className="size-[14px]" />}
-                        <span className="min-w-0 flex-1 truncate">{spaceLabel(target, teamspaces)}</span>
-                        {target === space ? <Check className="size-[14px] text-muted-foreground" aria-label="Current space" /> : null}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuGroup>
-                  <DropdownMenuSeparator />
-                </>
-              ) : null}
-              <DropdownMenuItem onClick={() => setFavorite(!favorite)}>
-                <Star className="size-[14px]" weight={favorite ? 'Filled' : 'Outline'} />
-                {favoriteLabel}
-              </DropdownMenuItem>
-              {/* A database page is always full width. */}
-              {isDatabase ? null : (
-                <DropdownMenuCheckboxItem checked={fullWidth} onCheckedChange={toggleFullWidth}>
-                  <ArrowSwapHorizontal className="size-[14px]" />
-                  Full width
-                </DropdownMenuCheckboxItem>
-              )}
-              <DropdownMenuItem disabled={setPageLock.isPending} onClick={() => toggleLock(!locked)}>
-                {locked ? <Unlock className="size-[14px]" /> : <Lock className="size-[14px]" />}
-                {locked ? 'Unlock page' : 'Lock page'}
-              </DropdownMenuItem>
-              {isDatabase ? null : (
-                <DropdownMenuItem onClick={() => setHistoryOpen(true)}>
-                  <History className="size-[14px]" />
-                  Version history
-                </DropdownMenuItem>
-              )}
-              {isDatabase ? null : (
-                <DropdownMenuItem disabled={readOnly} onClick={() => void onCreateSubpage('database').then(onOpenPage, () => {})}>
-                  <Grid className="size-[14px]" />
-                  New database
-                </DropdownMenuItem>
-              )}
-              {pageActions ? (
-                <DropdownMenuItem onClick={() => pageActions.duplicate(pageId, false)}>
-                  <Copy className="size-[14px]" />
-                  Duplicate
-                </DropdownMenuItem>
-              ) : null}
-              {pageActions && hasChildren ? (
-                <DropdownMenuItem onClick={() => pageActions.duplicate(pageId, true)}>
-                  <Copy className="size-[14px]" />
-                  Duplicate with sub-pages
-                </DropdownMenuItem>
-              ) : null}
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger>
-                  <Download className="size-[14px]" />
-                  Export
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="min-w-44">
-                  <DropdownMenuItem
-                    onClick={() => void downloadPageMarkdown({ workspaceId, pageId, title: displayTitle, includeChildren: false })}
+          {peek ? peek.end : (
+            <>
+              <Tip label={favoriteLabel} side="bottom">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className={cn('text-muted-foreground/70', favorite && 'text-amber-500 hover:text-amber-500 dark:text-amber-400 dark:hover:text-amber-400')}
+                  aria-label={favoriteLabel}
+                  aria-pressed={favorite}
+                  disabled={favoritesQuery.isPending}
+                  onClick={() => setFavorite(!favorite)}
+                >
+                  <Star className="size-4" weight={favorite ? 'Filled' : 'Outline'} />
+                </Button>
+              </Tip>
+              <DropdownMenu>
+                <Tip label="Page options" side="bottom">
+                  <DropdownMenuTrigger
+                    render={<Button type="button" variant="ghost" size="icon-sm" className="text-muted-foreground/70" aria-label="Page options" />}
                   >
-                    Markdown
+                    <Ellipsis className="size-4" />
+                  </DropdownMenuTrigger>
+                </Tip>
+                <DropdownMenuContent align="end" className="w-auto max-w-64 min-w-44">
+                  {/* A row moves with its database. */}
+                  {onRequestMove && teamspaces && !page.database_id ? (
+                    <>
+                      <DropdownMenuGroup>
+                        <DropdownMenuLabel>Move to</DropdownMenuLabel>
+                        {spaceTargets.map((target) => (
+                          <DropdownMenuItem
+                            key={target}
+                            disabled={target === space}
+                            onClick={() => onRequestMove(pageId, target)}
+                          >
+                            {target === PRIVATE_SPACE ? <Lock className="size-[14px]" /> : <Users className="size-[14px]" />}
+                            <span className="min-w-0 flex-1 truncate">{spaceLabel(target, teamspaces)}</span>
+                            {target === space ? <Check className="size-[14px] text-muted-foreground" aria-label="Current space" /> : null}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuGroup>
+                      <DropdownMenuSeparator />
+                    </>
+                  ) : null}
+                  <DropdownMenuItem onClick={() => setFavorite(!favorite)}>
+                    <Star className="size-[14px]" weight={favorite ? 'Filled' : 'Outline'} />
+                    {favoriteLabel}
                   </DropdownMenuItem>
-                  {hasChildren ? (
-                    <DropdownMenuItem
-                      onClick={() => void downloadPageMarkdown({ workspaceId, pageId, title: displayTitle, includeChildren: true })}
-                    >
-                      Markdown with sub-pages
+                  {/* A database page is always full width. */}
+                  {isDatabase ? null : (
+                    <DropdownMenuCheckboxItem checked={fullWidth} onCheckedChange={toggleFullWidth}>
+                      <ArrowSwapHorizontal className="size-[14px]" />
+                      Full width
+                    </DropdownMenuCheckboxItem>
+                  )}
+                  <DropdownMenuItem disabled={setPageLock.isPending} onClick={() => toggleLock(!locked)}>
+                    {locked ? <Unlock className="size-[14px]" /> : <Lock className="size-[14px]" />}
+                    {locked ? 'Unlock page' : 'Lock page'}
+                  </DropdownMenuItem>
+                  {isDatabase ? null : (
+                    <DropdownMenuItem onClick={() => setHistoryOpen(true)}>
+                      <History className="size-[14px]" />
+                      Version history
+                    </DropdownMenuItem>
+                  )}
+                  {isDatabase ? null : (
+                    <DropdownMenuItem disabled={readOnly} onClick={() => void onCreateSubpage('database').then(onOpenPage, () => {})}>
+                      <Grid className="size-[14px]" />
+                      New database
+                    </DropdownMenuItem>
+                  )}
+                  {pageActions ? (
+                    <DropdownMenuItem onClick={() => pageActions.duplicate(pageId, false)}>
+                      <Copy className="size-[14px]" />
+                      Duplicate
                     </DropdownMenuItem>
                   ) : null}
-                  <DropdownMenuItem onClick={() => printPage(displayTitle)}>
-                    PDF
+                  {pageActions && hasChildren ? (
+                    <DropdownMenuItem onClick={() => pageActions.duplicate(pageId, true)}>
+                      <Copy className="size-[14px]" />
+                      Duplicate with sub-pages
+                    </DropdownMenuItem>
+                  ) : null}
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger>
+                      <Download className="size-[14px]" />
+                      Export
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent className="min-w-44">
+                      <DropdownMenuItem
+                        onClick={() => void downloadPageMarkdown({ workspaceId, pageId, title: displayTitle, includeChildren: false })}
+                      >
+                        Markdown
+                      </DropdownMenuItem>
+                      {hasChildren ? (
+                        <DropdownMenuItem
+                          onClick={() => void downloadPageMarkdown({ workspaceId, pageId, title: displayTitle, includeChildren: true })}
+                        >
+                          Markdown with sub-pages
+                        </DropdownMenuItem>
+                      ) : null}
+                      <DropdownMenuItem onClick={() => printPage(displayTitle)}>
+                        PDF
+                      </DropdownMenuItem>
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                  <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => onRequestTrash(pageId)}>
+                    <Trash2 className="size-[14px]" />
+                    Move to trash
                   </DropdownMenuItem>
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
-              <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => onRequestTrash(pageId)}>
-                <Trash2 className="size-[14px]" />
-                Move to trash
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <div className="px-1.5 py-1 text-xs leading-5 text-muted-foreground" title={new Date(lastEdited.edit.at).toLocaleString()}>
-                <p className="truncate" data-last-edited="">
-                  Last edited by {editedBy}
-                </p>
-                <p>
-                  {dayLabel(editedAt)} at {timeOfDay(editedAt)}
-                </p>
-              </div>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                  <DropdownMenuSeparator />
+                  <div className="px-1.5 py-1 text-xs leading-5 text-muted-foreground" title={new Date(lastEdited.edit.at).toLocaleString()}>
+                    <p className="truncate" data-last-edited="">
+                      Last edited by {editedBy}
+                    </p>
+                    <p>
+                      {dayLabel(editedAt)} at {timeOfDay(editedAt)}
+                    </p>
+                  </div>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </>
+          )}
         </div>
         {status === 'conflict' ? (
           <div
@@ -997,10 +1043,15 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
             title={titleBlock}
           />
         ) : (
-          <div data-print-root="" className="min-h-0 flex-1 overflow-y-auto px-6 pt-8 pb-24 max-[899px]:px-3 max-[899px]:pt-[18px] max-[899px]:pb-14">
+          <div
+            data-print-root=""
+            // The peek is narrow: room for the editor's block handles (-54px) on both sides.
+            className={cn('min-h-0 flex-1 overflow-y-auto px-6 pt-8 pb-24 max-[899px]:px-3 max-[899px]:pt-[18px] max-[899px]:pb-14', peek && 'px-[60px]')}
+          >
             {coverBlock}
             <div className={cn('mx-auto', fullWidth ? 'max-w-none px-[30px] max-[899px]:px-0' : 'max-w-[760px]')} data-full-width={fullWidth || undefined}>
               {titleBlock}
+              {page.database_id ? <PropertyList workspaceId={workspaceId} databaseId={page.database_id} rowId={pageId} viewId={peek?.viewId} /> : null}
               <div onBlur={() => void saver.flush()}>
                 {collab.connection && collab.state.ready ? (
                   <Suspense fallback={editorSpinner}>
