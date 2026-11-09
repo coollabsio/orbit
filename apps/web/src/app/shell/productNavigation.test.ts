@@ -15,10 +15,10 @@ import {
 
 test('a guest opens only chat and its own account settings', () => {
   expect(guestMayOpen(guestHomePath)).toBeTrue()
-  for (const path of ['/chat', '/chat/c1', '/chat/c1/thread/m1', '/chat/unreads', '/profile', '/profile/appearance', '/profile/notifications', '/profile/storage', '/admin']) {
+  for (const path of ['/chat', '/chat/c1', '/chat/c1/thread/m1', '/chat/unreads', '/profile', '/profile/appearance', '/profile/notifications', '/admin']) {
     expect(guestMayOpen(path)).toBeTrue()
   }
-  for (const path of ['/', '/tasks', '/tasks/t1', '/docs', '/views', '/activity', '/settings', '/settings/members', '/chatroom', '/profiles', '/profile/agentic', '/profile/shortcuts']) {
+  for (const path of ['/', '/tasks', '/tasks/t1', '/docs', '/views', '/activity', '/settings', '/settings/members', '/chatroom', '/profiles', '/profile/agentic', '/profile/shortcuts', '/profile/storage']) {
     expect(guestMayOpen(path)).toBeFalse()
   }
 })
