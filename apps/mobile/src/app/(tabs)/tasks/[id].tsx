@@ -5,6 +5,7 @@ import { type ReactNode, useMemo, useState } from 'react'
 import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from 'react-native'
 import { TextInput } from '../../../ui/scaled'
 
+import { MentionSuggestions, useMentionField } from '../../../components/MentionSuggestions'
 import { Attachments, type ShownFile } from '../../../components/tasks/Attachments'
 import { type FileSource, pickFiles } from '../../../components/tasks/files'
 import {
@@ -24,6 +25,7 @@ import { activityRows, buildFeed, type ActivityRow, type CommentThread, foldRun 
 import { relativeAgo } from '../../../data/format'
 import { keys } from '../../../data/keys'
 import { markdownToText } from '../../../data/markdown'
+import { mentionedUserIds } from '../../../data/mentions'
 import * as api from '../../../data/orbit'
 import * as taskApi from '../../../data/task-api'
 import {
@@ -46,7 +48,7 @@ import {
 } from '../../../data/tasks'
 import { useAdoptSubIssue, useCommentAttachments, useCreateTask, useRelationWrites, useSubIssues, useTaskAttachments, useTaskRelations, useTaskWrite } from '../../../hooks/tasks'
 import { useOrbit } from '../../../orbit-context'
-import { useLabels, usePeople, useProjects, useStatuses } from '../../../queries'
+import { useLabels, useMentionPeople, usePeople, useProjects, useStatuses } from '../../../queries'
 import { errorMessage } from '../../../session-context'
 import { alpha, useTheme } from '../../../theme'
 import { Avatar, Button, ErrorView, Icon, type IconName, IconButton, LoadingView, PaneHeader, PullRefresh, PriorityIcon, SafeAreaView, StatusIcon, Text } from '../../../ui'
@@ -126,8 +128,9 @@ export default function TaskScreen() {
   const createSubIssue = useCreateTask()
   const adopt = useAdoptSubIssue(id)
 
+  const mentionable = useMentionPeople()
   const sendComment = useMutation({
-    mutationFn: (body: string) => api.addComment(client, workspaceId, id, body),
+    mutationFn: (body: string) => api.addComment(client, workspaceId, id, body, mentionedUserIds(body, mentionable)),
     onSuccess: (comment) => {
       setDraft('')
       setDraftFiles([])
@@ -710,9 +713,12 @@ function CommentComposer({
 }) {
   const { colors, scheme } = useTheme()
   const [focused, setFocused] = useState(false)
+  const mention = useMentionField({ text: value, setText: onChangeText, people: useMentionPeople() })
   return (
     <View className={`mt-3 rounded-lg border bg-card/50 ${focused ? 'border-ring/50' : 'border-border'}`}>
+      <MentionSuggestions suggestions={mention.suggestions} onPick={mention.pick} />
       <TextInput
+        {...mention.inputProps}
         value={value}
         onChangeText={onChangeText}
         onFocus={() => setFocused(true)}
