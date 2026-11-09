@@ -1,4 +1,5 @@
 import { Hashtag } from 'reicon-react'
+import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Field, FieldLabel } from '@/components/ui/field'
 import { useConversations } from '@/features/chat/api/queries'
@@ -19,6 +20,11 @@ export function GuestChannelsField({ value, onChange }: { value: readonly string
       <p className="text-xs text-muted-foreground">A guest sees only these private channels and the people in them.</p>
       {conversations.isPending ? (
         <p role="status" className="text-xs text-muted-foreground">Loading channels…</p>
+      ) : !conversations.data ? (
+        <div role="alert" className="flex items-center gap-2 text-xs text-destructive">
+          Channels could not be loaded.
+          <Button type="button" size="xs" variant="outline" disabled={conversations.isFetching} onClick={() => void conversations.refetch()}>Retry</Button>
+        </div>
       ) : channels.length === 0 ? (
         <p className="text-xs text-muted-foreground">You are in no private channel. Make one in Chat first.</p>
       ) : (

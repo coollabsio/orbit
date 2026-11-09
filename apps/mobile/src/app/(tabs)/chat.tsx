@@ -87,7 +87,13 @@ export default function ChatScreen() {
             <PinnedRow icon="layer" name="Threads" count={unreadThreadCount(threads.data ?? [])} onPress={() => router.push('/chat/threads')} />
           </View>
           <View className="p-2 pt-3 gap-3">
-            {sections.length === 0 ? <EmptyState icon="chat" title="No conversations" description="Start a direct message or create a channel with New." /> : null}
+            {sections.length === 0 ? (
+              <EmptyState
+                icon="chat"
+                title="No conversations"
+                description={guest ? 'As a guest, you see only the channels that you are added to. Ask a channel manager to add you to a channel.' : 'Start a direct message or create a channel with New.'}
+              />
+            ) : null}
             {sections.map((section) => {
               const open = !collapsed.has(section.key)
               const category = admin ? categories.data?.find((item) => `category-${item.id}` === section.key) : undefined

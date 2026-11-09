@@ -79,7 +79,8 @@ export function MembersPage() {
   const [inviteRole, setInviteRole] = useState<InvitableRole>('Member')
   const [inviteChannels, setInviteChannels] = useState<string[]>([])
   const [inviteProblem, setInviteProblem] = useState<string | null>(null)
-  const [inviteLink, setInviteLink] = useState<string | null>(null)
+  // The role is the one the link was issued with, not the role picked since.
+  const [inviteLink, setInviteLink] = useState<{ url: string; role: InvitableRole } | null>(null)
   const [copied, setCopied] = useState(false)
   const [copyError, setCopyError] = useState(false)
 
@@ -112,12 +113,13 @@ export function MembersPage() {
     e.preventDefault()
     const email = inviteEmail.trim()
     if (!email) return
-    const request = invitationRequest(email, inviteRole, inviteChannels, 'manual')
+    const role = inviteRole
+    const request = invitationRequest(email, role, inviteChannels, 'manual')
     setInviteProblem('problem' in request ? request.problem : null)
     if ('problem' in request) return
     try {
       const response = await createInvitation.mutateAsync(request.body)
-      setInviteLink(response.url ?? null)
+      setInviteLink(response.url ? { url: response.url, role } : null)
       setCopied(false)
     } catch {
       // Mutation feedback remains visible in the form.
@@ -143,7 +145,7 @@ export function MembersPage() {
   const copyLink = async () => {
     if (!inviteLink) return
     try {
-      await navigator.clipboard.writeText(inviteLink)
+      await navigator.clipboard.writeText(inviteLink.url)
       setCopied(true)
       setCopyError(false)
       toast('Invitation link copied')
@@ -424,9 +426,9 @@ export function MembersPage() {
               <div className="mt-4 flex items-end gap-2">
                 <Field>
                   <FieldLabel htmlFor="invite-link">
-                    Invitation link ({inviteRole})
+                    Invitation link ({inviteLink.role})
                   </FieldLabel>
-                  <Input id="invite-link" value={inviteLink} readOnly />
+                  <Input id="invite-link" value={inviteLink.url} readOnly />
                 </Field>
                 <Button type="button" variant="outline" onClick={copyLink}>
                   <Copy className="size-3.5" />

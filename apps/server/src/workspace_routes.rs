@@ -3736,6 +3736,7 @@ fn workspace_problem(
             instance,
             request_id,
         ),
+        WorkspaceError::TrialLimit(reached) => ApiError::trial_limit(reached, instance, request_id),
         WorkspaceError::Unavailable(_) | WorkspaceError::Storage(_) => ApiError::new(
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal_error",

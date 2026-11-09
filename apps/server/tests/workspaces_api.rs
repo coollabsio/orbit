@@ -3072,6 +3072,17 @@ async fn a_guest_invitation_names_private_channels_and_joins_only_them() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    // An owner who is not in a private channel cannot bring a guest into it.
+    let secret = owner_channel(&database, &workspace, "secret", "private").await;
+    sqlx::query("DELETE FROM chat_members WHERE conversation_id = $1")
+        .bind(&secret)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let response = invite(&owner_cookie, guest_body(json!([secret])))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
 
     // A second invitation replaces the first one and its channels.
     let first = invite(&owner_cookie, guest_body(json!([press])))

@@ -176,7 +176,7 @@ export function ChatPage() {
   const conversations = useConversations()
   const people = useMembers(workspaceId).data
   const openNewTask = useOpenNewTask()
-  // a guest has no tasks or docs: no task keys, no Orbit link cards, no "Create task"
+  // a guest has no tasks or docs: no task keys, no Orbit link cards, no "Create task"; it cannot browse channels
   const guest = useIsGuest()
   const projects = useProjects(workspaceId, !guest).data
   const phone = useIsPhone()
@@ -255,7 +255,11 @@ export function ChatPage() {
     main = (
       <Pane>
         <div className="flex flex-1 flex-col p-6">
-          <EmptyState icon={Message} title="No conversations yet" description="Join a channel to start reading and writing messages." action={browseAction} />
+          {guest ? (
+            <EmptyState icon={Message} title="No conversations yet" description="As a guest, you see only the channels that you are added to. Ask a channel manager to add you to a channel." />
+          ) : (
+            <EmptyState icon={Message} title="No conversations yet" description="Join a channel to start reading and writing messages." action={browseAction} />
+          )}
         </div>
       </Pane>
     )
@@ -266,8 +270,12 @@ export function ChatPage() {
           <EmptyState
             icon={Lock}
             title="This conversation is not available"
-            description="It is private or it does not exist. You can find every public channel in Browse channels."
-            action={browseAction}
+            description={
+              guest
+                ? 'It is private or it does not exist. Select a conversation in the sidebar, or ask a channel manager to add you.'
+                : 'It is private or it does not exist. You can find every public channel in Browse channels.'
+            }
+            action={guest ? undefined : browseAction}
           />
         </div>
       </Pane>

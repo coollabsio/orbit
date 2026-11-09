@@ -457,7 +457,7 @@ impl AttachmentRepository {
 
     /// Attaches bytes the server already holds (a file an importer downloaded) to a task as
     /// `actor_id`. Goes through the same staging as an HTTP upload (size limit, file-name
-    /// validation, content sniffing, blob dedup); the actor must be an active member and the
+    /// validation, content sniffing, blob dedup); the actor must be an active non-guest member and the
     /// task and its project live.
     pub async fn create_from_bytes(
         &self,
@@ -496,6 +496,7 @@ impl AttachmentRepository {
              JOIN projects ON projects.id = tasks.project_id \
              JOIN workspaces ON workspaces.id = tasks.workspace_id \
              WHERE memberships.workspace_id = $2 AND memberships.user_id = $3 \
+             AND memberships.role <> 'guest' \
              AND users.suspended_at IS NULL AND tasks.deleted_at IS NULL \
              AND projects.deleted_at IS NULL AND workspaces.deleted_at IS NULL)",
         )

@@ -179,7 +179,9 @@ async fn guard(State(state): State<GuardState>, mut request: Request, next: Next
         (Check::Create(_, limit), WorkspaceAccess::Trial) => {
             // Guests do not count as members, so a guest invitation passes the members limit.
             if limit == TrialLimit::Members {
-                let (guest, read) = invites_a_guest(request).await;
+                let Some((guest, read)) = invites_a_guest(request).await else {
+                    return invalid_body(instance);
+                };
                 request = read;
                 if guest {
                     return next.run(request).await;
@@ -215,18 +217,15 @@ async fn guard(State(state): State<GuardState>, mut request: Request, next: Next
     }
 }
 
-/// The largest invitation body the guard reads; a larger one reaches the handler empty.
-const INVITATION_BODY_BYTES: usize = 64 * 1024;
-
-/// Whether an invitation request asks for the guest role, and the request with its body again.
-async fn invites_a_guest(request: Request) -> (bool, Request) {
+/// Whether an invitation request asks for the guest role, and the request with its body again;
+/// `None` when the body cannot be read. The platform layer already caps the body at the request
+/// limit, so the guard reads all of it.
+async fn invites_a_guest(request: Request) -> Option<(bool, Request)> {
     let (parts, body) = request.into_parts();
-    let bytes = axum::body::to_bytes(body, INVITATION_BODY_BYTES)
-        .await
-        .unwrap_or_default();
+    let bytes = axum::body::to_bytes(body, usize::MAX).await.ok()?;
     let guest = serde_json::from_slice::<serde_json::Value>(&bytes)
         .is_ok_and(|body| body["role"] == "guest");
-    (guest, Request::from_parts(parts, Body::from(bytes)))
+    Some((guest, Request::from_parts(parts, Body::from(bytes))))
 }
 
 enum Refusal {

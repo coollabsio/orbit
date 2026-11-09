@@ -22,6 +22,7 @@ use super::chat::{
     ChatError, MAX_GUEST_CHANNELS, join_invited_channels, join_public_channels,
     require_guest_channels,
 };
+use super::billing::{TrialCapacityError, TrialLimitReached, ensure_trial_capacity};
 use super::membership;
 use super::page_versions;
 use super::tasks::TaskError;
@@ -263,10 +264,21 @@ pub enum WorkspaceError {
     VersionConflict { current_version: u64 },
     #[error("the account already owns {limit} workspaces, the most the instance allows")]
     OwnedWorkspaceLimit { limit: u32 },
+    #[error("trial limit reached")]
+    TrialLimit(TrialLimitReached),
     #[error("workspace repository is unavailable")]
     Unavailable(#[from] sqlx::Error),
     #[error("workspace attachment storage is unavailable")]
     Storage(#[from] BlobStoreError),
+}
+
+impl From<TrialCapacityError> for WorkspaceError {
+    fn from(error: TrialCapacityError) -> Self {
+        match error {
+            TrialCapacityError::Reached(reached) => Self::TrialLimit(reached),
+            TrialCapacityError::Database(error) => Self::Unavailable(error),
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -704,7 +716,7 @@ impl WorkspaceRepository {
         .bind(actor_id.to_string())
         .bind(workspace_id.to_string())
         .bind(user_id.to_string())
-        .fetch_optional(self.database.pool())
+        .fetch_optional(&mut *connection)
         .await?
         .ok_or(WorkspaceError::NotFound)?;
         Ok(MemberProfile {
@@ -1453,8 +1465,8 @@ impl WorkspaceRepository {
         // The actor's own rule is checked against an ordinary member first, so a caller who may
         // not change roles learns nothing about the target, and the denial is audited even for
         // an unknown membership. The real target is then checked after the version.
-        let denied = match actor.change_member_role(WorkspaceRole::Member, role) {
-            Err(denied) => Some(denied),
+        let checked = match actor.change_member_role(WorkspaceRole::Member, role) {
+            Err(denied) => Err(denied),
             Ok(()) => {
                 let target =
                     target_membership(&mut transaction, workspace_id, membership_id).await?;
@@ -1463,34 +1475,48 @@ impl WorkspaceRepository {
                         current_version: target.version,
                     });
                 }
-                actor.change_member_role(target.role, role).err()
+                actor.change_member_role(target.role, role).map(|()| target)
             }
         };
-        if let Some(denied) = denied {
-            let reason = match denied {
-                MembershipDenied::RoleForbidden => "role_forbidden",
-                MembershipDenied::OwnerProtected => "owner_protected",
-                MembershipDenied::TransferRequired if role == WorkspaceRole::Owner => {
-                    "ownership_transfer_required"
-                }
-                MembershipDenied::TransferRequired => "owner_protected",
-                MembershipDenied::GuestDowngrade => "guest_downgrade",
-            };
-            audit::record(
+        let target = match checked {
+            Ok(target) => target,
+            Err(denied) => {
+                let reason = match denied {
+                    MembershipDenied::RoleForbidden => "role_forbidden",
+                    MembershipDenied::OwnerProtected => "owner_protected",
+                    MembershipDenied::TransferRequired if role == WorkspaceRole::Owner => {
+                        "ownership_transfer_required"
+                    }
+                    MembershipDenied::TransferRequired => "owner_protected",
+                    MembershipDenied::GuestDowngrade => "guest_downgrade",
+                };
+                audit::record(
+                    &mut transaction,
+                    workspace_id,
+                    Some(actor_id),
+                    "membership.change_denied",
+                    AuditOutcome::Failure,
+                    "membership",
+                    Some(membership_id),
+                    request_id,
+                    json!({"reason": reason}),
+                    now,
+                )
+                .await?;
+                transaction.commit().await?;
+                return Err(denied.into());
+            }
+        };
+        // Guests do not count as members, so a guest who becomes a member takes a trial seat.
+        if target.role == WorkspaceRole::Guest && role != WorkspaceRole::Guest {
+            ensure_trial_capacity(
+                &self.database,
                 &mut transaction,
                 workspace_id,
-                Some(actor_id),
-                "membership.change_denied",
-                AuditOutcome::Failure,
-                "membership",
-                Some(membership_id),
-                request_id,
-                json!({"reason": reason}),
-                now,
+                TrialLimit::Members,
+                1,
             )
             .await?;
-            transaction.commit().await?;
-            return Err(denied.into());
         }
         sqlx::query(
             "UPDATE memberships SET role = $1, version = version + 1, updated_at = $2 \
@@ -1505,11 +1531,7 @@ impl WorkspaceRepository {
         .await?;
         // A guest who becomes a member joins #general and every public channel. Every other
         // member is in them already, so for them this changes nothing.
-        let user_id: String = sqlx::query_scalar("SELECT user_id FROM memberships WHERE id = $1")
-            .bind(membership_id.to_string())
-            .fetch_one(&mut *transaction)
-            .await?;
-        join_public_channels(&mut transaction, workspace_id, parse_id(user_id)?, now).await?;
+        join_public_channels(&mut transaction, workspace_id, target.user_id, now).await?;
         audit::record(
             &mut transaction,
             workspace_id,

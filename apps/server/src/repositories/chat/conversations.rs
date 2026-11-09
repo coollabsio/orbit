@@ -822,7 +822,7 @@ const GUESTS_ONLY_PRIVATE: &str = "Guests can only be in private channels.";
 pub const MAX_GUEST_CHANNELS: usize = 50;
 
 /// The channels of a guest invitation: open private channels of the workspace that `actor`
-/// manages (see `Access::require_manage`). `conversation_ids` has no duplicates.
+/// manages (see `Access::require_manage`) and is a member of. `conversation_ids` has no duplicates.
 pub async fn require_guest_channels(
     conn: &mut AnyConnection,
     workspace_id: Id,
@@ -853,6 +853,13 @@ pub async fn require_guest_channels(
             return Err(ChatError::Forbidden(
                 "Only the channel's creator and workspace owners and admins can do this.",
             ));
+        }
+        // As for adding a member: only a member of the channel brings people into it.
+        if super::load_member(conn, *conversation_id, actor.user_id)
+            .await?
+            .is_none()
+        {
+            return Err(ChatError::Forbidden("Join the channel first."));
         }
     }
     Ok(())

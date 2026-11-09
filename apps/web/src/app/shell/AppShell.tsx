@@ -196,8 +196,7 @@ function Shell() {
         <ConnectionBanner live={live} />
         <MailServerBanner />
         <ReadOnlyBanner />
-        {/* the phone header loads tasks and projects; a guest has its dock (Chat, Settings) instead */}
-        {guest ? null : <Topbar onOpenDrawer={() => setDrawerOpen(true)} inboxUnread={inboxUnread} />}
+        <Topbar onOpenDrawer={() => setDrawerOpen(true)} inboxUnread={inboxUnread} />
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <ErrorBoundary resetKey={pathname}>
             <Outlet />

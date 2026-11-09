@@ -1160,6 +1160,17 @@ async fn a_new_workspace_is_on_a_trial_with_limits() {
         )
         .await;
     assert_eq!(status, 201, "{invitation}");
+    let guest = server.add_user("guest@example.com", false).await;
+    let token = invitation["url"].as_str().unwrap().split("token=").nth(1).unwrap();
+    let (status, accepted) = server
+        .call_as(
+            &guest,
+            "POST",
+            "/api/v1/workspaces/invitations/accept",
+            Some(json!({"token": token})),
+        )
+        .await;
+    assert_eq!(status, 200, "{accepted}");
     let (_, billing) = server
         .call("GET", &server.workspace("/billing"), None)
         .await;

@@ -178,7 +178,8 @@ function Invite() {
   const [role, setRole] = useState<InviteRole>('member')
   const [channelIds, setChannelIds] = useState<string[]>([])
   const [problem, setProblem] = useState<string | null>(null)
-  const [link, setLink] = useState<string | null>(null)
+  // The role is the one the link was issued with, not the role picked since.
+  const [link, setLink] = useState<{ url: string; role: InviteRole } | null>(null)
   const [sent, setSent] = useState<string | null>(null)
   const send = (delivery: 'manual' | 'smtp') => {
     const address = email.trim()
@@ -191,7 +192,7 @@ function Invite() {
       { email: address, role, channelIds, delivery },
       {
         onSuccess: ({ url }) => {
-          if (delivery === 'manual') setLink(url)
+          if (delivery === 'manual') setLink(url ? { url, role } : null)
           else {
             setLink(null)
             setEmail('')
@@ -223,9 +224,9 @@ function Invite() {
         {!emailEnabled ? <Note>Email delivery is not configured. Share the invitation link instead.</Note> : null}
         {link ? (
           <View className="gap-2">
-            <Input label={`Invitation link (${roleLabel(role)})`} value={link} editable={false} selectTextOnFocus />
+            <Input label={`Invitation link (${roleLabel(link.role)})`} value={link.url} editable={false} selectTextOnFocus />
             <View className="flex-row">
-              <Button label="Share link" icon="send" variant="outline" onPress={() => void Share.share({ message: link })} />
+              <Button label="Share link" icon="send" variant="outline" onPress={() => void Share.share({ message: link.url })} />
             </View>
           </View>
         ) : null}
@@ -248,6 +249,12 @@ function GuestChannels({ value, onChange }: { value: readonly string[]; onChange
       <FieldLabel>Channels</FieldLabel>
       <Note>A guest sees only these private channels and the people in them.</Note>
       {conversations.isPending ? <Note>Loading channels…</Note> : null}
+      {conversations.isError && !conversations.data ? (
+        <View className="flex-row items-center gap-2">
+          <Note error>Channels could not be loaded.</Note>
+          <Button label="Retry" variant="outline" size="sm" disabled={conversations.isFetching} onPress={() => void conversations.refetch()} />
+        </View>
+      ) : null}
       {conversations.data && channels.length === 0 ? <Note>You are in no private channel. Make one in Chat first.</Note> : null}
       {channels.map((channel) => {
         const checked = value.includes(channel.id)

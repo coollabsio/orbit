@@ -9,7 +9,7 @@ import { Emoji } from '@/components/common/Emoji'
 import { TaskStatusIcon } from '@/features/tasks/components/TaskStatusIcon'
 import { useCurrentUser } from '@/features/auth/api'
 import { useWorkspace } from '@/features/workspaces/workspaceContext'
-import { useTeamMembers } from '@/features/workspaces/api'
+import { useMembers } from '@/features/workspaces/api'
 import { useAllStatuses, useProjects } from '@/features/tasks/api/projects'
 import { taskFromRecord, type Task } from '@/features/tasks/api/models'
 import { useTasks } from '@/features/tasks/api/tasks'
@@ -82,7 +82,7 @@ export function HomePage() {
   const me = useCurrentUser()
   const projects = useProjects(workspace.id)
   const statuses = useAllStatuses(workspace.id, projects.data ?? [])
-  const members = useTeamMembers(workspace.id)
+  const members = useMembers(workspace.id)
   const pageTree = usePageTree(workspace.id, !docsHidden)
   const notifications = useNotifications(workspace.id, true)
   const myId = me.data?.id
