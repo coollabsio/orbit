@@ -275,9 +275,13 @@ A new pure TypeScript package, used by web and mobile. It has no React and no ne
   they exist.
 - `values.ts`: parse a value from the API; the display text of a value; a value from typed text
   (paste).
-- `filter.ts`: `matches(row, rule, ctx)`; `ctx` has the current user id and "now" (for `me` and
-  relative dates).
-- `sort.ts`: compare two rows for a list of sorts. Empty values go last in both directions. Select
+- `filter.ts`: `matches(row, rule, property, ctx)`; `ctx` has the current user id, "now", the time
+  zone and the member names (for `me`, relative dates and person names). Rules for unclear cases:
+  a date range counts by its start for `before`/`after`/`on_or_*`, and `is` matches a day inside
+  the range; a date with a time counts as its day in the viewer's time zone; an empty number
+  matches only `!=`; empty text matches `not_equals` and `not_contains`; a status with no value is
+  its first `todo` option, so it is never empty.
+- `sort.ts`: `sortRows(rows, sorts, properties, ctx)`; it computes each row's sort keys once. Empty values go last in both directions. Select
   and status sort by option order, person by name, checkbox `false` before `true`. Ties fall back
   to manual order (`position`, then `id`).
 - `view.ts`: `applyView(database, view, search, ctx) → rows` (filter, then search over the title
@@ -286,8 +290,13 @@ A new pure TypeScript package, used by web and mobile. It has no React and no ne
 Unit tests (`bun test`) cover each operator, the empty rules, sort ties and the repair. This is
 the logic that can break silently.
 
-Client sort and filter is enough for 5,000 rows: one `applyView` runs in a few milliseconds.
-Measure it with 5,000 rows and 20 properties before the web work is done.
+Client sort and filter is enough for 5,000 rows. Measured (`bun run bench`, 5,000 rows × 20
+properties, 3 sorts, 5 rules, desktop): 8 ms without search, 27 ms for a search with no hits. Phones
+are slower; cache each row's search text if search feels slow on mobile.
+
+Display rules: `percent` shows the value × 100 (0.125 → "12.5%"), as in Notion. The `relative` date
+format shows Today, Tomorrow or Yesterday, else the short date. Paste matches existing option and
+member names only (case ignored); it never creates options.
 
 ## 7. Web UI
 
