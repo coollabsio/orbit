@@ -10,7 +10,8 @@
 //!
 //! Jobs carry only the import id. Progress lives in `notion_import_items`, so a restarted job
 //! continues where it stopped: pass 1 creates every page (parents first, each with an id recorded
-//! before the page exists), pass 2 fetches each page's blocks, downloads its Notion-hosted files
+//! before the page exists; a database with the schema, views and rows of its Notion data source,
+//! fetched before any write), pass 2 fetches each page's blocks, downloads its Notion-hosted files
 //! as page files, converts the blocks with links rewritten to the new pages, and saves content,
 //! cover and child order. A page that fails is recorded and the import continues; a revoked token
 //! fails the import. When an import fails or is cancelled, the pages pass 1 created but pass 2
@@ -36,15 +37,19 @@ use utoipa::ToSchema;
 
 use super::client::{NotionClient, NotionClientConfig, NotionError};
 use super::convert::{
-    ConvertContext, ConvertReport, ConvertedPage, DatabaseRows, MapResolver, PageCover,
-    ResolvedFile, collect_file_refs, convert_page, database_table,
+    ConvertContext, ConvertOptions, ConvertReport, ConvertedPage, MapResolver, PageCover,
+    ResolvedFile, collect_file_refs, convert_page, data_source_title, database_title,
 };
+use super::database::{self, Members, Source};
 use super::files::sanitize_file_name;
-use super::model::{BlockNode, NotionPage, normalize_id};
+use super::model::{BlockNode, NotionPage, NotionView, normalize_id};
 pub use super::scan::{NotionImportNode, NotionImportNodeKind, NotionImportTree};
 use super::scan::{ScanControl, build_tree};
 use crate::billing::WorkspaceAccess;
 use crate::repositories::billing;
+use crate::repositories::databases::{
+    DatabaseError, DatabaseRepository, DatabaseSchema, NewRow, Property, RowPlacement,
+};
 use crate::repositories::membership;
 use crate::repositories::page_files::{PageFileRepository, page_file_url};
 use crate::repositories::page_versions::SaveOrigin;
@@ -172,6 +177,7 @@ pub struct NotionImportService {
 struct Inner {
     database: Database,
     pages: PageRepository,
+    databases: DatabaseRepository,
     files: PageFileRepository,
     jobs: JobQueue,
     settings: NotionImportSettings,
@@ -289,6 +295,10 @@ pub struct NotionImportReport {
     pub files_imported: u32,
     /// Selected pages this member imported before (the import creates new copies).
     pub previously_imported: u32,
+    /// Notion data sources imported as Orbit databases.
+    pub databases_imported: u32,
+    /// Database rows not imported because their database holds the most rows allowed (5,000).
+    pub rows_truncated: u32,
     /// Pages the import created but never filled because it failed or was cancelled; they
     /// were moved to the trash (a restored page no longer counts).
     pub unfilled_pages_trashed: u32,
@@ -356,6 +366,10 @@ struct StoredReport {
     files_imported: u32,
     #[serde(default)]
     previously_imported: u32,
+    #[serde(default)]
+    databases_imported: u32,
+    #[serde(default)]
+    rows_truncated: u32,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -424,6 +438,7 @@ impl NotionImportService {
         Self {
             inner: Arc::new(Inner {
                 pages: PageRepository::new(database.clone()),
+                databases: DatabaseRepository::new(database.clone()),
                 jobs: JobQueue::new(JobStore::new(database.clone())),
                 database,
                 files,
@@ -1068,7 +1083,7 @@ impl NotionImportService {
     async fn import(&self, import_id: Id, run: &JobRun) -> Result<(), Failure> {
         let Some(row) = sqlx::query(
             "SELECT workspace_id, user_id, status, token_ciphertext, selection_json, \
-             target_teamspace_id, target_private, report_json FROM notion_imports WHERE id = $1",
+             target_teamspace_id, target_private, report_json, tree_json FROM notion_imports WHERE id = $1",
         )
         .bind(import_id.to_string())
         .fetch_optional(self.database().pool())
@@ -1141,8 +1156,48 @@ impl NotionImportService {
             })?;
 
         let mut items = self.load_items(import_id).await?;
+        // User mentions, people and created-by values that carry the email of an active
+        // member become that member.
+        let mut members = Members::new();
+        for member in sqlx::query(
+            "SELECT users.id, users.display_name, users.normalized_email FROM memberships \
+             JOIN users ON users.id = memberships.user_id \
+             WHERE memberships.workspace_id = $1 AND users.suspended_at IS NULL",
+        )
+        .bind(workspace_id.to_string())
+        .fetch_all(self.database().pool())
+        .await?
+        {
+            members.insert(
+                member.get::<String, _>("normalized_email").to_lowercase(),
+                (member.get("id"), member.get("display_name")),
+            );
+        }
+        // Titles of every scanned page, for relations and links without a title.
+        let mut titles: HashMap<String, String> = row
+            .get::<Option<String>, _>("tree_json")
+            .and_then(|json| serde_json::from_str::<NotionImportTree>(&json).ok())
+            .map(|tree| {
+                tree.nodes
+                    .into_iter()
+                    .map(|node| (node.notion_id, node.title))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let context = ItemContext {
+            import_id,
+            workspace_id,
+            user_id,
+            client: &client,
+            destination_parent: parent_page_id,
+            destination_space,
+            members: &members,
+            titles: &titles,
+        };
+        let mut databases = DatabaseCache::default();
 
-        // Pass 1: create every page, parents first.
+        // Pass 1: create every page, parents first: databases with their schema and views,
+        // rows with their values.
         for index in 0..items.len() {
             if items[index].status != "pending" {
                 continue;
@@ -1159,16 +1214,14 @@ impl NotionImportService {
                             && matches!(item.status.as_str(), "created" | "done")
                     })
                 })
-                .and_then(|item| item.page_id);
+                .and_then(|item| Some((item.page_id?, item.kind.clone(), item.notion_id.clone())));
             let result = self
-                .create_item_page(
-                    import_id,
-                    workspace_id,
-                    user_id,
+                .create_item(
+                    &context,
                     &mut items[index],
                     parent,
-                    parent_page_id,
-                    destination_space,
+                    &mut databases,
+                    &mut report,
                 )
                 .await;
             match result {
@@ -1183,26 +1236,14 @@ impl NotionImportService {
         }
 
         // Pass 2: fill each page.
-        let mut resolver = MapResolver::default();
-        // User mentions that carry an email of an active member become Orbit mentions.
-        let members = sqlx::query(
-            "SELECT users.id, users.display_name, users.normalized_email FROM memberships \
-             JOIN users ON users.id = memberships.user_id \
-             WHERE memberships.workspace_id = $1 AND users.suspended_at IS NULL",
-        )
-        .bind(workspace_id.to_string())
-        .fetch_all(self.database().pool())
-        .await?;
-        for member in members {
-            resolver.members.insert(
-                member.get::<String, _>("normalized_email").to_lowercase(),
-                (member.get("id"), member.get("display_name")),
-            );
-        }
+        let mut resolver = MapResolver {
+            members,
+            ..MapResolver::default()
+        };
         for item in &items {
-            resolver
-                .titles
-                .insert(item.notion_id.clone(), item.title.clone());
+            titles
+                .entry(item.notion_id.clone())
+                .or_insert_with(|| item.title.clone());
             if matches!(item.status.as_str(), "created" | "done")
                 && let Some(page_id) = item.page_id
             {
@@ -1211,20 +1252,14 @@ impl NotionImportService {
                     .insert(item.notion_id.clone(), page_id.to_string());
             }
         }
-        // Database rows, so databases show as tables (their own page, and inline in a parent).
-        for item in items
-            .iter()
-            .filter(|item| item.kind == "database" && item.status == "created")
-        {
-            match load_database(&client, &item.notion_id, &mut resolver).await {
-                Ok(()) => {}
-                Err(NotionError::Unauthorized { message }) => {
-                    return Err(Failure::from(NotionError::Unauthorized { message }));
-                }
-                // The page then lists its rows as sub-page cards.
-                Err(error) => tracing::debug!(error = %error, "Notion database rows skipped"),
+        // A database with several data sources became one Orbit database per data source;
+        // links to the Notion database open the first one.
+        for (database_id, item_id) in &databases.aliases {
+            if let Some(page) = resolver.pages.get(item_id).cloned() {
+                resolver.pages.entry(database_id.clone()).or_insert(page);
             }
         }
+        resolver.titles = titles;
         for index in 0..items.len() {
             if items[index].status != "created" {
                 continue;
@@ -1233,12 +1268,17 @@ impl NotionImportService {
                 return stopped(run);
             }
             let item = items[index].clone();
+            let in_database = items.iter().any(|parent| {
+                parent.kind == "database"
+                    && Some(parent.notion_id.as_str()) == item.parent_notion_id.as_deref()
+                    && matches!(parent.status.as_str(), "created" | "done")
+            });
             let result = self
                 .fill_item_page(
                     workspace_id,
                     user_id,
                     &item,
-                    &items,
+                    in_database,
                     &client,
                     &mut resolver,
                     &mut report,
@@ -1280,17 +1320,19 @@ impl NotionImportService {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
-    async fn create_item_page(
+    /// Creates the item's page (a database with its schema, a row with its values, or a page)
+    /// under `parent` (`(page id, kind, notion id)` of the parent item), or under the
+    /// destination. The page id is recorded before the page exists, so a retry after a crash
+    /// finds the page instead of creating it twice.
+    async fn create_item(
         &self,
-        import_id: Id,
-        workspace_id: Id,
-        user_id: Id,
+        context: &ItemContext<'_>,
         item: &mut Item,
-        parent: Option<Id>,
-        destination_parent: Option<Id>,
-        destination_space: SpaceRequest,
+        parent: Option<(Id, String, String)>,
+        databases: &mut DatabaseCache,
+        report: &mut StoredReport,
     ) -> Result<(), Failure> {
+        let import_id = context.import_id;
         let page_id = match item.page_id {
             Some(page_id) => page_id,
             None => {
@@ -1312,53 +1354,55 @@ impl NotionImportService {
             .fetch_one(self.database().pool())
             .await?;
         if exists == 0 {
-            let is_root = parent.is_none();
-            let (parent_id, space) = match parent {
-                Some(parent) => (Some(parent), SpaceRequest::default()),
-                None => (destination_parent, destination_space),
-            };
-            let input = CreatePage {
-                kind: crate::repositories::pages::PageKind::Page,
-                parent_id,
-                space,
-                title: clamp(&item.title, MAX_TITLE_CHARS, MAX_TITLE_BYTES),
-                icon: item
-                    .icon
-                    .as_deref()
-                    .map(|icon| clamp(icon, MAX_ICON_CHARS, 256)),
-                position: None,
-            };
-            let request_id = format!("notion-import-{import_id}");
-            match self
-                .inner
-                .pages
-                .create_page_with_id(
-                    page_id,
-                    workspace_id,
-                    user_id,
-                    input,
-                    &request_id,
-                    TimestampMillis::now(),
-                )
-                .await
-            {
-                Ok(_) => {}
-                Err(PageError::Unavailable(error)) => return Err(Failure::from(error)),
-                Err(PageError::TrialLimit(reached)) => {
-                    return Err(Failure::Fatal(format!(
-                        "The import stopped at the trial's limit. {}",
-                        reached.detail()
-                    )));
+            match parent {
+                Some((database, kind, database_item)) if kind == "database" => {
+                    self.create_row(
+                        context,
+                        item,
+                        page_id,
+                        database,
+                        &database_item,
+                        databases,
+                        report,
+                    )
+                    .await?;
                 }
-                Err(_) if is_root => {
-                    return Err(Failure::Fatal(
-                        "The import destination is no longer available.".to_owned(),
-                    ));
+                parent if item.kind == "database" => {
+                    let fetched = fetch_source(context.client, &item.notion_id).await?;
+                    let plan = database::plan_database(page_id, &fetched.source, context.members);
+                    let (schema, dropped) = DatabaseSchema::new(plan.properties, plan.views)
+                        .map_err(|error| {
+                            Failure::Page(format!("The database could not be converted: {error}."))
+                        })?;
+                    databases.add(&item.notion_id, fetched.database_id, fetched.source);
+                    self.create_page(
+                        context,
+                        item,
+                        page_id,
+                        parent.map(|(page, _, _)| page),
+                        Some((&schema, &fetched.title)),
+                    )
+                    .await?;
+                    report.convert.merge(&plan.report);
+                    if dropped > 0 {
+                        *report
+                            .convert
+                            .lossy
+                            .entry("view_filter".to_owned())
+                            .or_default() += u32::try_from(dropped).unwrap_or(u32::MAX);
+                    }
+                    report.databases_imported += 1;
+                    self.save_progress(import_id, report, 0, 0).await?;
                 }
-                Err(_) => {
-                    return Err(Failure::Page(
-                        "The parent page was deleted during the import.".to_owned(),
-                    ));
+                parent => {
+                    self.create_page(
+                        context,
+                        item,
+                        page_id,
+                        parent.map(|(page, _, _)| page),
+                        None,
+                    )
+                    .await?;
                 }
             }
         }
@@ -1377,13 +1421,167 @@ impl NotionImportService {
         Ok(())
     }
 
+    /// A page, or a database page with `schema` and title, under `parent` or the destination.
+    async fn create_page(
+        &self,
+        context: &ItemContext<'_>,
+        item: &Item,
+        page_id: Id,
+        parent: Option<Id>,
+        database: Option<(&DatabaseSchema, &str)>,
+    ) -> Result<(), Failure> {
+        let is_root = parent.is_none();
+        let (parent_id, space) = match parent {
+            Some(parent) => (Some(parent), SpaceRequest::default()),
+            None => (context.destination_parent, context.destination_space),
+        };
+        let title = database.map_or(item.title.as_str(), |(_, title)| title);
+        let input = CreatePage {
+            kind: crate::repositories::pages::PageKind::Page,
+            parent_id,
+            space,
+            title: clamp(title, MAX_TITLE_CHARS, MAX_TITLE_BYTES),
+            icon: item
+                .icon
+                .as_deref()
+                .map(|icon| clamp(icon, MAX_ICON_CHARS, 256)),
+            position: None,
+        };
+        let request_id = format!("notion-import-{}", context.import_id);
+        let (workspace_id, user_id, now) = (
+            context.workspace_id,
+            context.user_id,
+            TimestampMillis::now(),
+        );
+        let created = match database {
+            Some((schema, _)) => {
+                self.inner
+                    .pages
+                    .create_database_with_id(
+                        page_id,
+                        workspace_id,
+                        user_id,
+                        input,
+                        schema,
+                        &request_id,
+                        now,
+                    )
+                    .await
+            }
+            None => {
+                self.inner
+                    .pages
+                    .create_page_with_id(page_id, workspace_id, user_id, input, &request_id, now)
+                    .await
+            }
+        };
+        match created {
+            Ok(_) => Ok(()),
+            Err(PageError::Unavailable(error)) => Err(Failure::from(error)),
+            Err(PageError::TrialLimit(reached)) => Err(trial_failure(&reached)),
+            Err(_) if is_root => Err(Failure::Fatal(
+                "The import destination is no longer available.".to_owned(),
+            )),
+            Err(_) => Err(Failure::Page(
+                "The parent page was deleted during the import.".to_owned(),
+            )),
+        }
+    }
+
+    /// A row of the Orbit database `database` with the values of its Notion page, through the
+    /// same rules as `POST …/rows` (row cap, trial limit, value checks).
+    #[allow(clippy::too_many_arguments)]
+    async fn create_row(
+        &self,
+        context: &ItemContext<'_>,
+        item: &Item,
+        page_id: Id,
+        database: Id,
+        database_item: &str,
+        databases: &mut DatabaseCache,
+        report: &mut StoredReport,
+    ) -> Result<(), Failure> {
+        let client = context.client;
+        if !databases.loaded.contains(database_item) {
+            let fetched = fetch_source(client, database_item).await?;
+            databases.add(database_item, fetched.database_id, fetched.source);
+        }
+        let mut row = match databases.rows.remove(&item.notion_id) {
+            Some(row) => row,
+            None => client.retrieve_page(&item.notion_id).await?,
+        };
+        for (name, property, kind) in database::paginated_properties(&row) {
+            match client.property_items_all(&row.id, &property).await {
+                Ok(items) => database::set_paginated(&mut row, &name, &kind, &items),
+                // Keep the first 25 when the full list cannot be read.
+                Err(error) => match Failure::from(error) {
+                    Failure::Page(_) => {}
+                    other => return Err(other),
+                },
+            }
+        }
+        let (workspace_id, user_id) = (context.workspace_id, context.user_id);
+        if let std::collections::hash_map::Entry::Vacant(entry) =
+            databases.properties.entry(database)
+        {
+            entry.insert(
+                self.inner
+                    .databases
+                    .properties(workspace_id, database, user_id)
+                    .await
+                    .map_err(row_failure)?,
+            );
+        }
+        let properties = databases
+            .properties
+            .get(&database)
+            .map_or(&[][..], Vec::as_slice);
+        let plan = database::plan_row(database, &row, properties, context.members, context.titles);
+        let input = NewRow {
+            title: clamp(&plan.title, MAX_TITLE_CHARS, MAX_TITLE_BYTES),
+            icon: plan
+                .icon
+                .as_deref()
+                .map(|icon| clamp(icon, MAX_ICON_CHARS, 256)),
+            values: plan.values,
+            placement: RowPlacement::Last,
+        };
+        let created = self
+            .inner
+            .databases
+            .create_row_with_id(
+                page_id,
+                workspace_id,
+                database,
+                user_id,
+                input,
+                &format!("notion-import-{}", context.import_id),
+                TimestampMillis::now(),
+            )
+            .await;
+        match created {
+            Ok(_) => {
+                report.convert.merge(&plan.report);
+                self.save_progress(context.import_id, report, 0, 0).await
+            }
+            Err(DatabaseError::RowLimit) => {
+                report.rows_truncated += 1;
+                self.save_progress(context.import_id, report, 0, 0).await?;
+                Err(Failure::Page(
+                    "The database already holds 5,000 rows, the most Orbit allows.".to_owned(),
+                ))
+            }
+            Err(error) => Err(row_failure(error)),
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     async fn fill_item_page(
         &self,
         workspace_id: Id,
         user_id: Id,
         item: &Item,
-        items: &[Item],
+        in_database: bool,
         client: &NotionClient,
         resolver: &mut MapResolver,
         report: &mut StoredReport,
@@ -1391,43 +1589,12 @@ impl NotionImportService {
         let page_id = item
             .page_id
             .ok_or_else(|| Failure::Page("The page was not created.".to_owned()))?;
+        // A database got its schema, views and rows in pass 1; it has no body.
+        if item.kind == "database" {
+            return Ok(());
+        }
         let request_id = format!("notion-import-{page_id}");
-        let children: Vec<Id> = items
-            .iter()
-            .filter(|child| child.parent_notion_id.as_deref() == Some(item.notion_id.as_str()))
-            .filter(|child| matches!(child.status.as_str(), "created" | "done"))
-            .filter_map(|child| child.page_id)
-            .collect();
-        let table = resolver
-            .databases
-            .get(&item.notion_id)
-            .and_then(|database| {
-                let mut context = ConvertContext::new(&*resolver);
-                let table = database_table(&database.rows, &mut context);
-                report.convert.merge(context.report());
-                table
-            });
-        let changes = if item.kind == "database" {
-            PageChanges {
-                content: Some(if let Some(table) = table {
-                    vec![table]
-                } else {
-                    children
-                        .iter()
-                        .map(|child| {
-                            json!({
-                                "id": Id::new_v7().to_string(),
-                                "type": "page",
-                                "props": {"pageId": child.to_string()},
-                                "children": []
-                            })
-                        })
-                        .collect()
-                }),
-                origin: SaveOrigin::Import,
-                ..PageChanges::default()
-            }
-        } else {
+        let changes = {
             let page = client.retrieve_page(&item.notion_id).await?;
             let tree = client.fetch_block_tree(&item.notion_id).await?;
             // Files an earlier attempt of this page already attached (a retry reuses them).
@@ -1494,7 +1661,7 @@ impl NotionImportService {
                     }
                 }
             }
-            let (converted, convert_report) = convert(&page, &tree.blocks, resolver);
+            let (converted, convert_report) = convert(&page, &tree.blocks, resolver, !in_database);
             report.convert.merge(&convert_report);
             let cover_url = match &converted.cover {
                 Some(PageCover::External { url })
@@ -1862,6 +2029,8 @@ impl NotionImportService {
                 truncated_blocks: stored.convert.truncated_blocks,
                 files_imported: stored.files_imported,
                 previously_imported: stored.previously_imported,
+                databases_imported: stored.databases_imported,
+                rows_truncated: stored.rows_truncated,
                 unfilled_pages_trashed: u32::try_from(unfilled_pages_trashed).unwrap_or_default(),
                 failures,
             })
@@ -1953,38 +2122,134 @@ pub(crate) fn clamp(value: &str, max_chars: usize, max_bytes: usize) -> String {
     out
 }
 
-/// Loads a database's rows (all data sources, oldest first) and the number formats of its
-/// properties into the resolver.
-async fn load_database(
-    client: &NotionClient,
-    database_id: &str,
-    resolver: &mut MapResolver,
-) -> Result<(), NotionError> {
-    let database = client.retrieve_database(database_id).await?;
-    let mut rows = Vec::new();
-    for source in &database.data_sources {
-        let schema = client.retrieve_data_source(&source.id).await?;
-        let formats = schema
-            .properties
-            .iter()
-            .filter_map(|(name, property)| {
-                let format = property.get("number")?.get("format")?.as_str()?;
-                Some((name.clone(), format.to_owned()))
-            })
-            .collect();
-        if let Some(id) = normalize_id(&source.id) {
-            resolver.number_formats.insert(id, formats);
+/// What every page of pass 1 needs.
+struct ItemContext<'a> {
+    import_id: Id,
+    workspace_id: Id,
+    user_id: Id,
+    client: &'a NotionClient,
+    destination_parent: Option<Id>,
+    destination_space: SpaceRequest,
+    members: &'a Members,
+    titles: &'a HashMap<String, String>,
+}
+
+/// Pass 1's knowledge of the imported databases.
+#[derive(Default)]
+struct DatabaseCache {
+    /// Database items whose data source was fetched in this run.
+    loaded: HashSet<String>,
+    /// Rows of the fetched data sources by Notion id, until their row is created.
+    rows: HashMap<String, NotionPage>,
+    /// Properties of the Orbit databases, as stored.
+    properties: HashMap<Id, Vec<Property>>,
+    /// Notion database id → item id, for databases whose item is one of their data sources.
+    aliases: HashMap<String, String>,
+}
+
+impl DatabaseCache {
+    fn add(&mut self, item_id: &str, database_id: Option<String>, source: Source) {
+        self.loaded.insert(item_id.to_owned());
+        if let Some(database_id) = database_id.as_deref().and_then(normalize_id)
+            && database_id != item_id
+        {
+            self.aliases.insert(database_id, item_id.to_owned());
         }
-        rows.extend(client.query_data_source_all(&source.id).await?.pages);
+        for row in source.rows {
+            if let Some(id) = normalize_id(&row.id) {
+                self.rows.insert(id, row);
+            }
+        }
     }
-    resolver.databases.insert(
-        database_id.to_owned(),
-        DatabaseRows {
-            inline: database.is_inline,
+}
+
+/// A data source with its title and the id of its database.
+struct FetchedSource {
+    title: String,
+    database_id: Option<String>,
+    source: Source,
+}
+
+/// Fetches the data source an import item stands for (a database id, or a data source id
+/// when the database has several), with its views and rows. Views that cannot be read give
+/// `views: None` (the database gets a default table).
+async fn fetch_source(client: &NotionClient, notion_id: &str) -> Result<FetchedSource, Failure> {
+    let (database, data_source_id) = match client.retrieve_database(notion_id).await {
+        Ok(database) => {
+            let Some(source) = database.data_sources.first() else {
+                return Err(Failure::Page(
+                    "The Notion database has no data source.".to_owned(),
+                ));
+            };
+            let id = source.id.clone();
+            (Some(database), id)
+        }
+        Err(NotionError::ObjectNotFound { .. }) => (None, notion_id.to_owned()),
+        Err(error) => return Err(Failure::from(error)),
+    };
+    let data_source = client.retrieve_data_source(&data_source_id).await?;
+    let title = match &database {
+        Some(database) if database.data_sources.len() <= 1 => database_title(database),
+        _ => data_source_title(&data_source),
+    };
+    let database_id = database
+        .as_ref()
+        .map(|database| database.id.clone())
+        .or_else(|| data_source.database_id().map(str::to_owned));
+    let views = match &database_id {
+        Some(database_id) => match fetch_views(client, database_id).await {
+            Ok(views) => Some(views),
+            Err(error) => match Failure::from(error) {
+                Failure::Page(_) => None,
+                other => return Err(other),
+            },
+        },
+        None => None,
+    };
+    let rows = client.query_data_source_all(&data_source_id).await?.pages;
+    Ok(FetchedSource {
+        title,
+        database_id,
+        source: Source {
+            data_source,
+            views,
             rows,
         },
-    );
-    Ok(())
+    })
+}
+
+/// The database's views in Notion's order; a view that is gone meanwhile is skipped.
+async fn fetch_views(
+    client: &NotionClient,
+    database_id: &str,
+) -> Result<Vec<NotionView>, NotionError> {
+    let mut views = Vec::new();
+    for id in client.list_view_ids(database_id).await? {
+        match client.retrieve_view(&id).await {
+            Ok(view) => views.push(view),
+            Err(NotionError::ObjectNotFound { .. } | NotionError::RestrictedResource { .. }) => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(views)
+}
+
+fn trial_failure(reached: &crate::repositories::billing::TrialLimitReached) -> Failure {
+    Failure::Fatal(format!(
+        "The import stopped at the trial's limit. {}",
+        reached.detail()
+    ))
+}
+
+fn row_failure(error: DatabaseError) -> Failure {
+    match error {
+        DatabaseError::Unavailable(error) => Failure::from(error),
+        DatabaseError::TrialLimit(reached) => trial_failure(&reached),
+        DatabaseError::NotFound => {
+            Failure::Page("The database was deleted during the import.".to_owned())
+        }
+        other => Failure::Page(format!("The row could not be created: {other}.")),
+    }
 }
 
 /// Runs the (synchronous, non-`Send`) converter outside any await point.
@@ -1992,8 +2257,12 @@ fn convert(
     page: &NotionPage,
     blocks: &[BlockNode],
     resolver: &MapResolver,
+    row_properties: bool,
 ) -> (ConvertedPage, ConvertReport) {
-    let mut context = ConvertContext::new(resolver);
+    let mut context = ConvertContext::new(resolver).with_options(ConvertOptions {
+        row_properties,
+        ..ConvertOptions::default()
+    });
     let converted = convert_page(page, blocks, &mut context);
     (converted, context.into_report())
 }

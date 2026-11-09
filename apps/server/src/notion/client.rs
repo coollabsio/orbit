@@ -27,7 +27,7 @@ use tokio::time::Instant;
 use super::files::{is_allowed_notion_file, suggested_file_name};
 use super::model::{
     Block, BlockNode, BlockTree, NotionDataSource, NotionDatabase, NotionPage, NotionUser,
-    QueryResults, SearchKind, SearchPage, SearchResult, SearchResults, normalize_id,
+    NotionView, QueryResults, SearchKind, SearchPage, SearchResult, SearchResults, normalize_id,
 };
 
 /// The Notion API version this client speaks.
@@ -443,6 +443,53 @@ impl NotionClient {
         })
     }
 
+    /// `GET /v1/views?database_id=…`: the ids of the database's own views (not linked views
+    /// elsewhere), in Notion's order.
+    pub async fn list_view_ids(&self, database_id: &str) -> Result<Vec<String>, NotionError> {
+        let id = checked_id(database_id)?;
+        let (views, _) = self
+            .collect_list::<IdOnly>(Method::GET, &format!("/v1/views?database_id={id}"), None)
+            .await?;
+        Ok(views.into_iter().map(|view| view.id).collect())
+    }
+
+    /// `GET /v1/views/{id}`: name, type, filter, sorts and layout of one view.
+    pub async fn retrieve_view(&self, view_id: &str) -> Result<NotionView, NotionError> {
+        let id = checked_id(view_id)?;
+        self.request(Method::GET, &format!("/v1/views/{id}"), &[], None)
+            .await
+    }
+
+    /// `GET /v1/pages/{id}/properties/{property_id}`, every item of a paginated value
+    /// (`people`, `relation`, `title`, `rich_text`): one value object per item.
+    pub async fn property_items_all(
+        &self,
+        page_id: &str,
+        property_id: &str,
+    ) -> Result<Vec<Value>, NotionError> {
+        let id = checked_id(page_id)?;
+        // Property ids come URL-encoded from Notion; encode what is left so the path stays one
+        // segment.
+        let property: String = property_id
+            .bytes()
+            .map(|byte| {
+                if byte.is_ascii_alphanumeric() || b"%-._~".contains(&byte) {
+                    char::from(byte).to_string()
+                } else {
+                    format!("%{byte:02X}")
+                }
+            })
+            .collect();
+        let (items, _) = self
+            .collect_list::<Value>(
+                Method::GET,
+                &format!("/v1/pages/{id}/properties/{property}"),
+                None,
+            )
+            .await?;
+        Ok(items)
+    }
+
     /// Downloads a Notion-hosted file. Only HTTPS URLs on the Notion file host allowlist are
     /// fetched (redirects included); the token is never sent. Fails with
     /// [`NotionError::FileTooLarge`] once more than `max_bytes` arrive.
@@ -662,6 +709,11 @@ impl NotionClient {
     fn with_loopback_files(token: &str, config: NotionClientConfig, port: u16) -> Self {
         Self::build(token, config, FilePolicy::Loopback(port)).expect("client")
     }
+}
+
+#[derive(Deserialize)]
+struct IdOnly {
+    id: String,
 }
 
 #[derive(Default)]

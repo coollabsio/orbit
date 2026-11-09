@@ -25,8 +25,9 @@ const MAX_TITLE_BYTES: usize = 2_000;
 #[serde(rename_all = "snake_case")]
 pub enum NotionImportNodeKind {
     Page,
-    /// Imported as a page named like the database that shows its rows as a table; each row
-    /// also becomes a sub-page. An inline database shows the table in its parent page too.
+    /// Imported as an Orbit database with its properties, views and rows. A database with
+    /// several data sources lists one node per data source (`notion_id` is then the data
+    /// source id). An inline database becomes a database sub-page of its page.
     Database,
 }
 
@@ -126,6 +127,7 @@ pub(crate) async fn build_tree(
     let mut raw: Vec<RawNode> = Vec::new();
     let mut index: HashMap<String, usize> = HashMap::new();
     let mut data_sources: HashMap<String, String> = HashMap::new();
+    let mut databases: HashMap<String, Vec<String>> = HashMap::new();
     let mut listed = 0usize;
     let mut incomplete = false;
     let mut more = false;
@@ -141,7 +143,13 @@ pub(crate) async fn build_tree(
         incomplete |= page.incomplete;
         for result in page.results {
             listed += 1;
-            add_result(result, &mut raw, &mut index, &mut data_sources);
+            add_result(
+                result,
+                &mut raw,
+                &mut index,
+                &mut data_sources,
+                &mut databases,
+            );
         }
         match page.next_cursor {
             Some(_) if listed >= MAX_SEARCH_RESULTS => {
@@ -150,6 +158,26 @@ pub(crate) async fn build_tree(
             }
             Some(next) if seen_cursors.insert(next.clone()) => cursor = Some(next),
             _ => break,
+        }
+    }
+
+    // A database with one data source is one node with the database id (what links and
+    // child_database blocks name). With several, each data source keeps its own node, and the
+    // database id stands for the first one.
+    for (database_id, sources) in &databases {
+        if index.contains_key(database_id) {
+            continue;
+        }
+        let [only] = sources.as_slice() else {
+            if let Some(&position) = sources.first().and_then(|first| index.get(first)) {
+                index.insert(database_id.clone(), position);
+            }
+            continue;
+        };
+        if let Some(position) = index.remove(only) {
+            raw[position].id = database_id.clone();
+            index.insert(database_id.clone(), position);
+            data_sources.insert(only.clone(), database_id.clone());
         }
     }
 
@@ -258,13 +286,15 @@ pub(crate) async fn build_tree(
     }))
 }
 
-/// Keeps a small record of one search result: pages become page nodes, data sources their
-/// database's node. Trashed and duplicate results are skipped.
+/// Keeps a small record of one search result: pages become page nodes, data sources database
+/// nodes (keyed by the data source id until all results are listed). Trashed and duplicate
+/// results are skipped.
 fn add_result(
     result: SearchResult,
     raw: &mut Vec<RawNode>,
     index: &mut HashMap<String, usize>,
     data_sources: &mut HashMap<String, String>,
+    databases: &mut HashMap<String, Vec<String>>,
 ) {
     let node = match result {
         SearchResult::DataSource(data_source) => {
@@ -274,13 +304,20 @@ fn add_result(
             if data_source.in_trash {
                 return;
             }
+            if index.contains_key(&data_source_id) {
+                return;
+            }
             let database_id = data_source
                 .database_id()
                 .and_then(normalize_id)
                 .unwrap_or_else(|| data_source_id.clone());
-            data_sources.insert(data_source_id, database_id.clone());
+            data_sources.insert(data_source_id.clone(), data_source_id.clone());
+            databases
+                .entry(database_id)
+                .or_default()
+                .push(data_source_id.clone());
             RawNode {
-                id: database_id,
+                id: data_source_id,
                 kind: NotionImportNodeKind::Database,
                 title: clamp(
                     &data_source_title(&data_source),

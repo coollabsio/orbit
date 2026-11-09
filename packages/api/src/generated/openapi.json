@@ -52558,10 +52558,18 @@
           "truncated_blocks",
           "files_imported",
           "previously_imported",
+          "databases_imported",
+          "rows_truncated",
           "unfilled_pages_trashed",
           "failures"
         ],
         "properties": {
+          "databases_imported": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Notion data sources imported as Orbit databases.",
+            "minimum": 0
+          },
           "failures": {
             "type": "array",
             "items": {
@@ -52597,6 +52605,12 @@
             "type": "integer",
             "format": "int32",
             "description": "Selected pages this member imported before (the import creates new copies).",
+            "minimum": 0
+          },
+          "rows_truncated": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Database rows not imported because their database holds the most rows allowed (5,000).",
             "minimum": 0
           },
           "skipped": {

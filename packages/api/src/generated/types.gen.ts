@@ -2912,6 +2912,10 @@ export type NotionImportProgress = {
  */
 export type NotionImportReport = {
     /**
+     * Notion data sources imported as Orbit databases.
+     */
+    databases_imported: number;
+    /**
      * The first 200 failed pages.
      */
     failures: Array<NotionImportFailure>;
@@ -2933,6 +2937,10 @@ export type NotionImportReport = {
      * Selected pages this member imported before (the import creates new copies).
      */
     previously_imported: number;
+    /**
+     * Database rows not imported because their database holds the most rows allowed (5,000).
+     */
+    rows_truncated: number;
     /**
      * Blocks dropped, by Notion type.
      */

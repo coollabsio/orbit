@@ -4,11 +4,13 @@
 //!   allowlisted file downloads.
 //! - [`convert`]: pure conversion of a page's block tree into Orbit editor content.
 //! - [`model`]: tolerant serde models shared by both.
+//! - [`database`]: a Notion data source as an Orbit database (schema, views, row values).
 //! - [`files`]: the Notion file host allowlist.
 //! - [`scan`] and [`import`]: the import jobs, their state and the API service.
 
 pub mod client;
 pub mod convert;
+pub mod database;
 pub mod files;
 pub mod import;
 pub mod model;

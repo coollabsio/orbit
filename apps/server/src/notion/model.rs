@@ -137,6 +137,28 @@ impl NotionDataSource {
     }
 }
 
+/// A database view (`object: "view"`, API 2025-09-03+). `filter` and `sorts` use the data
+/// source query shapes; `configuration` is the type-specific layout.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+pub struct NotionView {
+    pub id: String,
+    #[serde(default)]
+    pub data_source_id: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
+    /// `table`, `board`, `calendar`, `gallery`, …
+    #[serde(default, rename = "type")]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub filter: Option<Value>,
+    #[serde(default)]
+    pub sorts: Option<Vec<Value>>,
+    #[serde(default)]
+    pub quick_filters: Option<Map<String, Value>>,
+    #[serde(default)]
+    pub configuration: Option<Value>,
+}
+
 /// One item of a search or data source query result.
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(tag = "object", rename_all = "snake_case")]
