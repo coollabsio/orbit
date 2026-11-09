@@ -1,13 +1,26 @@
 import { useRef, useState } from 'react'
-import { Add, ArrowSwapHorizontal, Eye, Filter, Link, Lock, MoreH, Search, Sort, Unlock, Xmark } from 'reicon-react'
+import { Add, ArrowSwapHorizontal, Eye, Filter, Kanban, Link, Lock, MoreH, Search, Sort, Unlock, Xmark } from 'reicon-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Popover, PopoverContent } from '@/components/ui/popover'
 import { Tip } from '@/components/common/Tip'
-import type { Property, ViewConfig } from '@orbit/database/types'
+import type { DatabaseView, Property, ViewConfig } from '@orbit/database/types'
+import { groupable } from '@orbit/database/view'
 import { useSetPageLock } from '@/features/docs/api/pageOptions'
 import { useDatabaseEnv } from './context'
 import { PropertyPicker } from './FilterBar'
@@ -25,11 +38,12 @@ interface ViewToolbarProps {
   onSearch: (search: string) => void
   locked: boolean
   viewId: string
+  viewType: DatabaseView['type']
   onNew: () => void
 }
 
-/** Filter, Sort, search, "⋯" (properties, wrap cells, lock, link) and New (spec 7.1). */
-export function ViewToolbar({ properties, config, onConfig, onAddFilter, search, onSearch, locked, viewId, onNew }: ViewToolbarProps) {
+/** Filter, Sort, search, "⋯" (properties or a board's group and card properties, wrap cells, lock, link) and New (spec 7.1). */
+export function ViewToolbar({ properties, config, onConfig, onAddFilter, search, onSearch, locked, viewId, viewType, onNew }: ViewToolbarProps) {
   const { workspaceId, databaseId, canEditValues } = useDatabaseEnv()
   const setLock = useSetPageLock(workspaceId)
   const [searching, setSearching] = useState(search !== '')
@@ -121,14 +135,17 @@ export function ViewToolbar({ properties, config, onConfig, onAddFilter, search,
           </DropdownMenuTrigger>
         </Tip>
         <DropdownMenuContent align="end" className="w-52">
+          {viewType === 'board' ? <GroupByMenu properties={properties} config={config} onConfig={onConfig} /> : null}
           <DropdownMenuItem onClick={() => setPropertiesOpen(true)}>
             <Eye />
-            Properties
+            {viewType === 'board' ? 'Card properties' : 'Properties'}
           </DropdownMenuItem>
-          <DropdownMenuCheckboxItem checked={config.wrap_cells} onCheckedChange={(checked) => onConfig({ ...config, wrap_cells: checked })}>
-            <ArrowSwapHorizontal />
-            Wrap cells
-          </DropdownMenuCheckboxItem>
+          {viewType === 'table' ? (
+            <DropdownMenuCheckboxItem checked={config.wrap_cells} onCheckedChange={(checked) => onConfig({ ...config, wrap_cells: checked })}>
+              <ArrowSwapHorizontal />
+              Wrap cells
+            </DropdownMenuCheckboxItem>
+          ) : null}
           <DropdownMenuSeparator />
           {canEditValues ? (
             <DropdownMenuItem disabled={setLock.isPending} onClick={toggleLock}>
@@ -144,7 +161,11 @@ export function ViewToolbar({ properties, config, onConfig, onAddFilter, search,
       </DropdownMenu>
       <Popover open={propertiesOpen} onOpenChange={setPropertiesOpen}>
         <PopoverContent anchor={moreRef} align="end" className="w-64 gap-0 p-1">
-          <PropertiesList properties={properties} config={config} onConfig={onConfig} />
+          {viewType === 'board' ? (
+            <CardPropertiesList properties={properties} config={config} onConfig={onConfig} />
+          ) : (
+            <PropertiesList properties={properties} config={config} onConfig={onConfig} />
+          )}
         </PopoverContent>
       </Popover>
       {canEditValues ? (
@@ -215,6 +236,68 @@ function PropertiesList({ properties, config, onConfig }: { properties: Property
           </li>
         )
       })}
+    </ul>
+  )
+}
+
+/** A board's group property: a select or status property (the columns are its options). */
+function GroupByMenu({ properties, config, onConfig }: { properties: Property[]; config: ViewConfig; onConfig: (config: ViewConfig) => void }) {
+  const choices = properties.filter(groupable)
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger disabled={choices.length === 0}>
+        <Kanban />
+        Group by
+        <span className="ml-auto max-w-20 truncate text-xs text-muted-foreground">{choices.find((property) => property.id === config.group_by)?.name}</span>
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent className="w-48">
+        <DropdownMenuRadioGroup
+          value={config.group_by ?? ''}
+          onValueChange={(id: string) => {
+            if (id !== config.group_by) onConfig({ ...config, group_by: id, group_order: [], hidden_groups: [] })
+          }}
+        >
+          {choices.map((property) => {
+            const Icon = PROPERTY_TYPES[property.type].icon
+            return (
+              <DropdownMenuRadioItem key={property.id} value={property.id}>
+                <Icon className="text-muted-foreground" />
+                <span className="truncate">{property.name}</span>
+              </DropdownMenuRadioItem>
+            )
+          })}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
+  )
+}
+
+/** Show or hide the properties of a board's cards, after the title (which always shows). */
+function CardPropertiesList({ properties, config, onConfig }: { properties: Property[]; config: ViewConfig; onConfig: (config: ViewConfig) => void }) {
+  const shown = new Set(config.card_properties)
+  return (
+    <ul aria-label="Card properties" className="flex max-h-80 flex-col overflow-y-auto">
+      {properties
+        .filter((property) => property.type !== 'title')
+        .map((property) => {
+          const Icon = PROPERTY_TYPES[property.type].icon
+          return (
+            <li key={property.id} className="flex h-8 items-center gap-2 rounded-md px-1.5 text-sm hover:bg-muted/60">
+              <Icon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <span className="min-w-0 flex-1 truncate">{property.name}</span>
+              <Checkbox
+                aria-label={`Show ${property.name}`}
+                checked={shown.has(property.id)}
+                onCheckedChange={(checked) =>
+                  onConfig({
+                    ...config,
+                    card_properties: checked ? [...config.card_properties, property.id] : config.card_properties.filter((id) => id !== property.id),
+                  })
+                }
+              />
+            </li>
+          )
+        })}
     </ul>
   )
 }

@@ -332,7 +332,7 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
   the import is `ready`. Notion callouts become `callout` blocks (emoji icon, color, nested children; a non-emoji icon
   becomes 💡 and counts as `callout_icon` in the report).
   A Notion data source becomes an Orbit database (`notion/database.rs`, mapping in the databases spec section 14):
-  typed properties (computed Notion types as static values), option colors, row values, one table view for each
+  typed properties (computed Notion types as static values), option colors, row values, one table or board view for each
   Notion view (AND filters and sorts kept), rows as row pages in Notion order (max 5,000). A database with several
   data sources is one tree node and one database for each data source. An inline database is a database sub-page,
   and its block becomes a `page` link. Pass 1 fetches each data source before writing and creates databases and

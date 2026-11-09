@@ -1,6 +1,6 @@
 import { matches } from './filter'
 import { sortRows } from './sort'
-import type { Database, DatabaseView, Property, Row, ViewConfig, ViewContext } from './types'
+import type { Database, DatabaseView, GroupProperty, Property, Row, ViewConfig, ViewContext } from './types'
 import { cellOf, displayText } from './values'
 
 const DEFAULT_WIDTH = 200
@@ -59,7 +59,7 @@ export function repairConfig(view: DatabaseView, properties: readonly Property[]
 }
 
 /** A board can group by a `select` or `status` property. */
-export function groupable(property: Property | undefined): boolean {
+export function groupable(property: Property | undefined): property is GroupProperty {
   return property?.type === 'select' || property?.type === 'status'
 }
 

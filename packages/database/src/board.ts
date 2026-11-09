@@ -1,7 +1,5 @@
-import type { Property, Row, SelectOption, StatusOption, ViewConfig } from './types'
+import type { GroupProperty, Row, SelectOption, StatusOption, ViewConfig } from './types'
 import { cellOf } from './values'
-
-export type GroupProperty = Property & { type: 'select' | 'status' }
 
 /** One board column: an option of the group property, or `id: null` for "No <property>". */
 export type BoardGroup = {

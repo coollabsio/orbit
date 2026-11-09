@@ -173,13 +173,24 @@ export function useCreateRow(workspaceId: string, databaseId: string) {
   })
 }
 
+export type MoveInput = { rowId: string; afterRowId: string | null; values?: Record<string, unknown> }
+
+/** Manual order; `values` are written in the same request (a board card dropped into another column). */
 export function useMoveRow(workspaceId: string, databaseId: string) {
-  return useDatabaseMutation<{ rowId: string; afterRowId: string | null }, DatabaseRow>(workspaceId, databaseId, {
-    request: async (path, { rowId, afterRowId }) => {
-      const { data } = await moveDatabaseRow({ client: apiClient, path: { ...path, row_id: rowId }, body: { after_row_id: afterRowId }, throwOnError: true })
+  return useDatabaseMutation<MoveInput, DatabaseRow>(workspaceId, databaseId, {
+    request: async (path, { rowId, afterRowId, values }) => {
+      const { data } = await moveDatabaseRow({
+        client: apiClient,
+        path: { ...path, row_id: rowId },
+        body: { after_row_id: afterRowId, ...(values ? { values } : {}) },
+        throwOnError: true,
+      })
       return required(data, 'Move row response was empty.')
     },
-    optimistic: (detail, { rowId, afterRowId }) => ({ ...detail, rows: moveRowAfter(detail.rows, rowId, afterRowId) }),
+    optimistic: (detail, { rowId, afterRowId, values }) => {
+      const rows = moveRowAfter(detail.rows, rowId, afterRowId)
+      return { ...detail, rows: values ? rows.map((row) => (row.id === rowId ? { ...row, values: patchValues(row.values, values) } : row)) : rows }
+    },
     refetch: true,
     error: 'Could not move the row.',
   })

@@ -1,17 +1,19 @@
-import { useState } from 'react'
-import { Add, Copy, Edit2, Grid, MoreH, Trash } from 'reicon-react'
+import { useRef, useState, type KeyboardEvent } from 'react'
+import { Add, Copy, Edit2, MoreH, Trash } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } from '@/components/ui/popover'
 import { Tip } from '@/components/common/Tip'
 import { confirmAction } from '@/components/common/confirmAction'
 import type { DatabaseView } from '@orbit/database/types'
 import { useCreateView, useDeleteView, useUpdateView } from './api'
 import { useDatabaseEnv } from './context'
+import { VIEW_KINDS, uniqueViewName, viewIcon } from './viewTypes'
 
 const MAX_VIEWS = 50
 
-/** The view tabs (spec 7.1): click selects; right-click or "⋯" renames, duplicates or deletes; "+" adds a table view. */
+/** The view tabs (spec 7.1): click selects; right-click or "⋯" renames, duplicates or deletes; "+" picks the type of a new view. */
 export function ViewTabs({ views, activeId, onSelect }: { views: DatabaseView[]; activeId: string; onSelect: (viewId: string) => void }) {
   const { workspaceId, databaseId, canEditSchema } = useDatabaseEnv()
   const createView = useCreateView(workspaceId, databaseId)
@@ -19,6 +21,7 @@ export function ViewTabs({ views, activeId, onSelect }: { views: DatabaseView[];
   const deleteView = useDeleteView(workspaceId, databaseId)
   const [menuFor, setMenuFor] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null)
+  const [picking, setPicking] = useState(false)
 
   const finishRename = () => {
     if (!renaming) return
@@ -27,10 +30,15 @@ export function ViewTabs({ views, activeId, onSelect }: { views: DatabaseView[];
     setRenaming(null)
     if (view && name && name !== view.name) updateView.mutate({ viewId: view.id, body: { name } })
   }
-  const add = (duplicateOf?: DatabaseView) =>
+  const add = (type: DatabaseView['type'], name: string) => {
+    setPicking(false)
+    createView.mutate({ name: uniqueViewName(name, views), type }, { onSuccess: (view) => onSelect(view.id) })
+  }
+  // A copy keeps its source's type (the server reads it from `duplicate_of`).
+  const duplicate = (view: DatabaseView) =>
     createView.mutate(
-      duplicateOf ? { name: `${duplicateOf.name} (copy)`.slice(0, 200), type: 'table', duplicate_of: duplicateOf.id } : { name: 'Table', type: 'table' },
-      { onSuccess: (view) => onSelect(view.id) },
+      { name: `${view.name} (copy)`.slice(0, 200), type: view.type, duplicate_of: view.id },
+      { onSuccess: (copy) => onSelect(copy.id) },
     )
   const remove = async (view: DatabaseView) => {
     if (!(await confirmAction({ title: `Delete the view “${view.name}”?`, description: 'Its columns, sorts and filter go for everyone.', confirmLabel: 'Delete view', danger: true }))) return
@@ -39,9 +47,10 @@ export function ViewTabs({ views, activeId, onSelect }: { views: DatabaseView[];
   }
 
   return (
-    <div role="tablist" aria-label="Views" className="flex min-w-0 items-center gap-0.5 overflow-x-auto">
+    <div role="tablist" aria-label="Views" className="flex min-w-0 items-center gap-0.5 overflow-x-auto overflow-y-hidden -mb-[5px] pb-[5px]">
       {views.map((view) => {
         const selected = view.id === activeId
+        const Icon = viewIcon(view.type)
         if (renaming?.id === view.id) {
           return (
             <input
@@ -79,7 +88,7 @@ export function ViewTabs({ views, activeId, onSelect }: { views: DatabaseView[];
                 setMenuFor(view.id)
               }}
             >
-              <Grid className="size-3.5" aria-hidden="true" />
+              <Icon className="size-3.5" aria-hidden="true" />
               <span className="max-w-40 truncate">{view.name}</span>
             </Button>
             {canEditSchema ? (
@@ -102,7 +111,7 @@ export function ViewTabs({ views, activeId, onSelect }: { views: DatabaseView[];
                     <Edit2 />
                     Rename
                   </DropdownMenuItem>
-                  <DropdownMenuItem disabled={views.length >= MAX_VIEWS} onClick={() => add(view)}>
+                  <DropdownMenuItem disabled={views.length >= MAX_VIEWS} onClick={() => duplicate(view)}>
                     <Copy />
                     Duplicate
                   </DropdownMenuItem>
@@ -117,12 +126,63 @@ export function ViewTabs({ views, activeId, onSelect }: { views: DatabaseView[];
         )
       })}
       {canEditSchema && views.length < MAX_VIEWS ? (
-        <Tip label="Add a view">
-          <Button type="button" variant="ghost" size="icon-sm" aria-label="Add a view" className="text-muted-foreground" disabled={createView.isPending} onClick={() => add()}>
-            <Add />
-          </Button>
-        </Tip>
+        <Popover open={picking} onOpenChange={setPicking}>
+          <Tip label="Add a view">
+            <PopoverTrigger render={<Button type="button" variant="ghost" size="icon-sm" aria-label="Add a view" className="text-muted-foreground" disabled={createView.isPending} />}>
+              <Add />
+            </PopoverTrigger>
+          </Tip>
+          <PopoverContent align="start" className="w-[316px] gap-2 p-2">
+            <PopoverHeader className="px-1 pt-0.5">
+              <PopoverTitle className="text-xs font-medium text-muted-foreground">Add a new view</PopoverTitle>
+            </PopoverHeader>
+            <ViewKindGrid onPick={add} />
+          </PopoverContent>
+        </Popover>
       ) : null}
+    </div>
+  )
+}
+
+const GRID_COLUMNS = 4
+
+/** The view types as a grid of icon tiles; arrow keys move, Enter picks. Types that are not built yet say "Soon". */
+function ViewKindGrid({ onPick }: { onPick: (type: DatabaseView['type'], name: string) => void }) {
+  const tiles = useRef<(HTMLButtonElement | null)[]>([])
+  const move = (event: KeyboardEvent<HTMLDivElement>) => {
+    const step = { ArrowRight: 1, ArrowLeft: -1, ArrowDown: GRID_COLUMNS, ArrowUp: -GRID_COLUMNS }[event.key]
+    if (step === undefined) return
+    event.preventDefault()
+    const from = tiles.current.indexOf(document.activeElement as HTMLButtonElement)
+    const to = Math.min(Math.max((from === -1 ? 0 : from) + step, 0), VIEW_KINDS.length - 1)
+    tiles.current[to]?.focus()
+  }
+  return (
+    <div role="group" aria-label="View types" className="grid grid-cols-4 gap-1" onKeyDown={move}>
+      {VIEW_KINDS.map((kind, index) => {
+        const Icon = kind.icon
+        return (
+          <button
+            key={kind.label}
+            ref={(element) => {
+              tiles.current[index] = element
+            }}
+            type="button"
+            autoFocus={index === 0}
+            aria-disabled={kind.type === null || undefined}
+            className="flex h-[68px] flex-col items-center justify-center gap-1 rounded-md text-xs text-foreground outline-none hover:bg-muted/60 focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50 aria-disabled:cursor-default aria-disabled:text-muted-foreground aria-disabled:hover:bg-transparent"
+            onClick={() => {
+              if (kind.type) onPick(kind.type, kind.label)
+            }}
+          >
+            <Icon className="size-5" aria-hidden="true" />
+            <span className="text-center leading-tight">
+              {kind.label}
+              {kind.type === null ? <span className="block text-[10px] text-muted-foreground/70">Soon</span> : null}
+            </span>
+          </button>
+        )
+      })}
     </div>
   )
 }

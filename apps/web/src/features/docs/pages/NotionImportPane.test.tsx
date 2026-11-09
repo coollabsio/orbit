@@ -329,7 +329,7 @@ test('done: database notes read as sentences; other kinds stay in the lists', as
             databases_imported: 2,
             rows_truncated: 1,
             skipped: { 'property:button': 1, 'property:place': 2, embed: 1 },
-            lossy: { formula_values: 1, unmatched_people: 3, 'view_type:board': 1, 'view_type:calendar': 2, view_filter: 1, column_list: 1 },
+            lossy: { formula_values: 1, unmatched_people: 3, 'view_type:gallery': 1, 'view_type:calendar': 2, view_filter: 1, column_list: 1 },
           }),
         }),
       )
@@ -338,7 +338,7 @@ test('done: database notes read as sentences; other kinds stay in the lists', as
   expect(view.getByText('1 row was not imported: an Orbit database holds at most 5,000 rows.')).toBeTruthy()
   expect(view.getByText('1 formula property was imported as fixed values (Orbit does not recompute them).')).toBeTruthy()
   expect(view.getByText('3 people in person properties have no Orbit member with the same email and were left out.')).toBeTruthy()
-  expect(view.getByText('Views imported as tables (Orbit has table views only): calendar (2), board (1).')).toBeTruthy()
+  expect(view.getByText('Views imported as tables (Orbit has table and board views only): calendar (2), gallery (1).')).toBeTruthy()
   expect(view.getByText('Skipped database properties (not supported in Orbit): place (2), button (1).')).toBeTruthy()
   expect(view.getByText('embed (1)')).toBeTruthy()
   expect(view.getByText('column list (1)')).toBeTruthy()

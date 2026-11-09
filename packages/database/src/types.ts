@@ -66,6 +66,9 @@ export type PropertyKind =
 
 export type Property = Omit<DatabaseProperty, 'type' | 'config'> & PropertyKind
 
+/** A property a board can group by. */
+export type GroupProperty = Property & { type: 'select' | 'status' }
+
 /** A date (`2026-11-09`) or a UTC time (`2026-11-09T14:00:00Z`, normalized as the server stores it). */
 export type DatePoint = { kind: 'day'; day: string } | { kind: 'moment'; iso: string; ms: number }
 export type DateValue = { start: DatePoint; end: DatePoint | null }

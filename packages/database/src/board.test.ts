@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import { cardAfter, groupRows, type GroupProperty } from './board'
+import { cardAfter, groupRows } from './board'
 import { database, property } from './testing'
+import type { GroupProperty } from './types'
 
 const select = property('p-sel') as GroupProperty
 const status = property('p-status') as GroupProperty

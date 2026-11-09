@@ -10,6 +10,7 @@ import { useMembers } from '@/features/workspaces/api'
 import { useWorkspaceReadOnly } from '@/features/workspaces/billing'
 import { useCreateRow, useDatabase, useUpdateView } from './api'
 import { DatabaseEnvContext, type DatabaseEnv } from './context'
+import { DatabaseBoard, type NewCard } from './DatabaseBoard'
 import { DatabaseTable } from './DatabaseTable'
 import { newRule, withPinnedRows, type Pin } from './databaseLib'
 import { FilterBar } from './FilterBar'
@@ -40,7 +41,7 @@ function readStoredView(databaseId: string): string | null {
 }
 
 /**
- * A database page (spec 7.1): the page header, view tabs, toolbar, filter bar and the table. It owns the view state:
+ * A database page (spec 7.1): the page header, view tabs, toolbar, filter bar and the table or board. It owns the view state:
  * the selected view, view config drafts (saved for everyone after 500 ms, or kept local for viewers who cannot change
  * the view), the search, and the rows added since the view last changed.
  */
@@ -180,10 +181,12 @@ export function DatabasePage({ workspaceId, databaseId, locked, cover, title }: 
     changeConfig({ ...config, filter: { rules: [...config.filter.rules, newRule(property)] } })
     setOpenRule(config.filter.rules.length)
   }
-  const addRow = (at: Pin['at']) => {
+  /** A new row with the values the filter needs; a board card also gets its column's value and place. */
+  const addRow = (at: Pin['at'], card?: Omit<NewCard, 'at'>) => {
     const fill = newRowValues(config.filter.rules, database.properties, ctx)
+    const after = card && 'after' in card ? card.after : at === 'top' ? null : undefined
     createRow.mutate(
-      { ...(fill.title ? { title: fill.title } : {}), values: fill.values, ...(at === 'top' ? { after_row_id: null } : {}) },
+      { ...(fill.title ? { title: fill.title } : {}), values: { ...fill.values, ...card?.values }, ...(after !== undefined ? { after_row_id: after } : {}) },
       {
         onSuccess: (row) => {
           setPins((current) => (at === 'top' ? [{ id: row.id, at }, ...current] : [...current, { id: row.id, at }]))
@@ -211,6 +214,7 @@ export function DatabasePage({ workspaceId, databaseId, locked, cover, title }: 
                 onSearch={setSearch}
                 locked={locked}
                 viewId={view.id}
+                viewType={view.type}
                 onNew={() => addRow('top')}
               />
             </div>
@@ -226,31 +230,52 @@ export function DatabasePage({ workspaceId, databaseId, locked, cover, title }: 
             <FilterBar properties={database.properties} config={config} onConfig={changeConfig} openRule={openRule} onOpenRule={setOpenRule} />
           </div>
         </div>
-        {/* The row drag handles and checkboxes (40 px) sit left of the table, in this padding plus the scroller's
-            (54 px in all, 42 px below 900 px). */}
-        <div className="px-[30px] pt-2">
-          <DatabaseTable
-            key={view.id}
-            database={database}
-            config={config}
-            rows={rows}
-            scrollElement={scroller}
-            onConfig={changeConfig}
-            onFilter={(propertyId) => {
-              const property = database.properties.find((candidate) => candidate.id === propertyId)
-              if (property) addFilter(property)
-            }}
-            onAddRow={() => addRow('bottom')}
-            onOpenRow={(rowId) => navigate(`/docs/${rowId}`)}
-            filtered={config.filter.rules.length > 0 || search.trim() !== ''}
-            onClearFilters={() => {
-              setSearch('')
-              changeConfig({ ...config, filter: { rules: [] } })
-            }}
-            editRowId={editRowId}
-            onEditRowShown={() => setEditRowId(null)}
-          />
-        </div>
+        {view.type === 'board' ? (
+          <div className="px-[30px] pt-3">
+            <DatabaseBoard
+              key={view.id}
+              database={database}
+              config={config}
+              rows={rows}
+              onConfig={changeConfig}
+              onAddCard={({ at, ...card }) => addRow(at, card)}
+              onOpenRow={(rowId) => navigate(`/docs/${rowId}`)}
+              filtered={config.filter.rules.length > 0 || search.trim() !== ''}
+              onClearFilters={() => {
+                setSearch('')
+                changeConfig({ ...config, filter: { rules: [] } })
+              }}
+              editRowId={editRowId}
+              onEditRowShown={() => setEditRowId(null)}
+            />
+          </div>
+        ) : (
+          <div className="px-[30px] pt-2">
+            {/* The row drag handles and checkboxes (40 px) sit left of the table, in this padding plus the scroller's
+                (54 px in all, 42 px below 900 px). */}
+            <DatabaseTable
+              key={view.id}
+              database={database}
+              config={config}
+              rows={rows}
+              scrollElement={scroller}
+              onConfig={changeConfig}
+              onFilter={(propertyId) => {
+                const property = database.properties.find((candidate) => candidate.id === propertyId)
+                if (property) addFilter(property)
+              }}
+              onAddRow={() => addRow('bottom')}
+              onOpenRow={(rowId) => navigate(`/docs/${rowId}`)}
+              filtered={config.filter.rules.length > 0 || search.trim() !== ''}
+              onClearFilters={() => {
+                setSearch('')
+                changeConfig({ ...config, filter: { rules: [] } })
+              }}
+              editRowId={editRowId}
+              onEditRowShown={() => setEditRowId(null)}
+            />
+          </div>
+        )}
       </DatabaseScroller>
     </DatabaseEnvContext.Provider>
   )

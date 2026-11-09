@@ -83,7 +83,7 @@ export function notionDatabaseNotes(report: Report): {
   }
   if (viewTypes.length > 0)
     notes.push(
-      `Views imported as tables (Orbit has table views only): ${listed(viewTypes)}.`,
+      `Views imported as tables (Orbit has table and board views only): ${listed(viewTypes)}.`,
     );
   const skipped: Record<string, number> = {};
   const properties: [string, number][] = [];
