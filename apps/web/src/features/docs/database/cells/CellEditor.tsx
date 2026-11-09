@@ -10,7 +10,8 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { cellOf, numberEditText, numberFromEditText, options, parseValue } from '@orbit/database/values'
-import { OPTION_COLORS, type CellValue, type DatePoint, type OptionColor, type Property, type Row, type SelectOption } from '@orbit/database/types'
+import { dayOf, editedDate, localDate, localParts } from '@orbit/database/dates'
+import { OPTION_COLORS, type CellValue, type OptionColor, type Property, type Row, type SelectOption } from '@orbit/database/types'
 import { useDatabaseEnv } from '../context'
 import { OPTION_COLOR_LABELS } from '@orbit/database/meta'
 import { Pill } from './Pill'
@@ -336,29 +337,6 @@ function OptionMenu({ option, list, onOptions }: { option: SelectOption; list: r
   )
 }
 
-function dayOf(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-}
-
-function localDate(day: string): Date {
-  const [year, month, date] = day.split('-').map(Number)
-  return new Date(year, month - 1, date)
-}
-
-/** A point as the editor shows it: the viewer's local day and `HH:MM`. */
-function localParts(point: DatePoint): { day: string; time: string } {
-  if (point.kind === 'day') return { day: point.day, time: '09:00' }
-  const date = new Date(point.ms)
-  return { day: dayOf(date), time: `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}` }
-}
-
-function pointOf(day: string, time: string | null): DatePoint {
-  if (time === null) return { kind: 'day', day }
-  const date = new Date(`${day}T${time}:00`)
-  const iso = date.toISOString().replace(/\.\d{3}Z$/, 'Z')
-  return { kind: 'moment', iso, ms: date.getTime() }
-}
-
 function DateEditor({ anchor, value, onCommit, onClose }: CellEditorProps & { value: Extract<CellValue, { kind: 'date' }> | null }) {
   const start = value ? localParts(value.date.start) : null
   const end = value?.date.end ? localParts(value.date.end) : null
@@ -369,12 +347,7 @@ function DateEditor({ anchor, value, onCommit, onClose }: CellEditorProps & { va
   const [month, setMonth] = useState(() => (start ? localDate(start.day) : new Date()))
   const onOpenChange = usePopoverClose(anchor, onClose)
 
-  const save = (next: { start: string; end: string | null; withTime: boolean; startTime: string; endTime: string }) => {
-    const startPoint = pointOf(next.start, next.withTime ? next.startTime : null)
-    let endPoint = next.end ? pointOf(next.end, next.withTime ? next.endTime : null) : null
-    if (endPoint && (endPoint.kind === 'day' ? endPoint.day < next.start : endPoint.ms < (startPoint as { ms: number }).ms)) endPoint = null
-    onCommit({ kind: 'date', date: { start: startPoint, end: endPoint } })
-  }
+  const save = (next: Parameters<typeof editedDate>[0]) => onCommit({ kind: 'date', date: editedDate(next) })
   const current = { start: start?.day ?? null, end: end?.day ?? null, withTime, startTime, endTime }
 
   return (

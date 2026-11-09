@@ -144,3 +144,36 @@ function twoDigits(part: string | undefined, max: number): number | null {
 function pad(value: number): string {
   return String(value).padStart(2, '0')
 }
+
+/** The day of a `Date` in the runtime's zone, as `YYYY-MM-DD`. */
+export function dayOf(date: Date): string {
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+/** Midnight of a `YYYY-MM-DD` day in the runtime's zone. */
+export function localDate(day: string): Date {
+  const [year, month, date] = day.split('-').map(Number)
+  return new Date(year!, month! - 1, date)
+}
+
+/** A point as a date editor shows it: the viewer's local day and `HH:MM` (09:00 for a date without a time). */
+export function localParts(point: DatePoint): { day: string; time: string } {
+  if (point.kind === 'day') return { day: point.day, time: '09:00' }
+  const date = new Date(point.ms)
+  return { day: dayOf(date), time: `${pad(date.getHours())}:${pad(date.getMinutes())}` }
+}
+
+/** A local day, with a local `HH:MM` time or none, as the point the server stores. */
+export function localPoint(day: string, time: string | null): DatePoint {
+  if (time === null) return { kind: 'day', day }
+  const date = new Date(`${day}T${time}:00`)
+  const iso = date.toISOString().replace(/\.\d{3}Z$/, 'Z')
+  return { kind: 'moment', iso, ms: date.getTime() }
+}
+
+/** What a date editor saves: an end before the start is dropped. */
+export function editedDate(edit: { start: string; end: string | null; withTime: boolean; startTime: string; endTime: string }): DateValue {
+  const start = localPoint(edit.start, edit.withTime ? edit.startTime : null)
+  const end = edit.end ? localPoint(edit.end, edit.withTime ? edit.endTime : null) : null
+  return { start, end: end && dateValue(start, end) ? end : null }
+}
