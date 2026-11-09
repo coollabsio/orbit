@@ -8,7 +8,8 @@ import { keys } from './data/keys'
 import { type OrbitClient, type User, type WorkspaceRecord, workspaces as listWorkspaces } from './data/orbit'
 import { loadWorkspaceId, saveWorkspaceId, type StoredSession } from './session'
 import { useSession } from './session-context'
-import { ErrorView, LoadingView } from './ui'
+// not the `./ui` barrel: its `Avatar` reads this context, and the barrel would make a require cycle
+import { ErrorView, LoadingView } from './ui/StateView'
 
 export interface Orbit {
   client: OrbitClient
@@ -72,6 +73,11 @@ function BillingReady({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false)
   if (!ready && options.isFetched && (!enabled || billing.isFetched)) setReady(true)
   return ready ? children : <LoadingView />
+}
+
+/** `useOrbit()` for parts that also render outside a session (`src/ui`): `null` there. */
+export function useOrbitIfSignedIn(): Orbit | null {
+  return use(OrbitContext)
 }
 
 export function useOrbit(): Orbit {

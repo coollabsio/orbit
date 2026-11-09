@@ -1,4 +1,5 @@
-import { Text as RNText, TextInput as RNTextInput, type TextInputProps, type TextProps, useWindowDimensions } from 'react-native'
+import type { Ref } from 'react'
+import { Text as RNText, TextInput as RNTextInput, type TextInputInstance, type TextInputProps, type TextProps, useWindowDimensions } from 'react-native'
 
 /**
  * Text follows iOS/Android Text Size only upward. Safari ignores a smaller system text size, so the web keeps its
@@ -19,6 +20,6 @@ export function NativeText(props: TextProps) {
  * (`max-md:text-[16px]!` in the web's index.css). The style wins over a size in `className`, as `!` does there.
  * `editorSize` keeps the `className` size: for a composer the web draws with its rich-text editor, not a field.
  */
-export function TextInput({ style, editorSize = false, ...props }: TextInputProps & { editorSize?: boolean }) {
+export function TextInput({ style, editorSize = false, ...props }: TextInputProps & { editorSize?: boolean; ref?: Ref<TextInputInstance> }) {
   return <RNTextInput {...useFontScaling()} {...props} style={editorSize ? style : [style, { fontSize: 16 }]} />
 }

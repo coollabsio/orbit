@@ -7,6 +7,7 @@ import * as docs from '../data/docs-api'
 import { keys } from '../data/keys'
 import type { Page, PageSummary, Teamspace } from '../data/orbit'
 import { useOrbit } from '../orbit-context'
+import { useMentionPeople } from '../queries'
 
 /** A saved page into its detail cache and the tree, without a refetch. */
 function reconcile(queryClient: QueryClient, workspaceId: string, page: Page) {
@@ -150,9 +151,10 @@ export function usePageThreads(pageId: string) {
 export function useAddComment(pageId: string) {
   const { client, workspaceId } = useOrbit()
   const queryClient = useQueryClient()
+  const people = useMentionPeople()
   return useMutation({
     mutationFn: async ({ text, threadId }: { text: string; threadId?: string }) => {
-      const body = paragraphBlocks(text)
+      const body = paragraphBlocks(text, undefined, people)
       if (threadId) await docs.replyToThread(client, workspaceId, pageId, threadId, body)
       else await docs.commentOnPage(client, workspaceId, pageId, body)
     },
