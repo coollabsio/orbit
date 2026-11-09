@@ -7,7 +7,7 @@
 export const guestHome = '/chat'
 
 /**
- * What a guest may open: Chat, the Settings tab's own page (account links, leave the workspace), the account settings
+ * What a guest may open: Chat, the Settings tab's own page (the account links for a guest), the account settings
  * and Admin (the installation's, which checks the user itself).
  */
 export function guestMayOpen(pathname: string): boolean {

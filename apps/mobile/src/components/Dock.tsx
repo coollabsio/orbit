@@ -18,8 +18,10 @@ const ITEMS: { route: string | null; href: Href; label: string; icon: IconName }
   { route: 'settings', href: '/settings', label: 'Settings', icon: 'settings' },
 ]
 
-/** A guest's dock: Chat and its own settings. */
-const GUEST_ITEMS = ITEMS.filter((item) => item.route === 'chat' || item.route === 'settings')
+/** A guest's dock: Chat and its own account settings (the web's `/profile`), as it has no workspace settings. */
+const GUEST_ITEMS = ITEMS.filter((item) => item.route === 'chat' || item.route === 'settings').map((item) =>
+  item.route === 'settings' ? { ...item, href: '/settings/account' as Href } : item,
+)
 
 export function Dock({ state }: BottomTabBarProps) {
   const { colors } = useTheme()

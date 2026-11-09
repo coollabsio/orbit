@@ -255,7 +255,7 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
           ) : guest ? (
             <>
               <NavRow link={{ label: 'Chat', icon: 'chat', href: '/chat', active: pathname.startsWith('/chat'), badge: chatBadge.count, dot: chatBadge.unread }} onPress={() => go('/chat')} />
-              <NavRow link={{ label: 'Settings', icon: 'settings', href: '/settings', active: onSettings && !onAdmin }} onPress={() => go('/settings')} />
+              <NavRow link={{ label: 'Settings', icon: 'settings', href: '/settings/account', active: onSettings && !onAdmin }} onPress={() => go('/settings/account')} />
               {user.installation_admin ? (
                 <>
                   <View className="flex-1" />
