@@ -331,6 +331,14 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
   the light detail every 2 s only while scanning/queued/importing and fetches the tree once, under its own query key, when
   the import is `ready`. Notion callouts become `callout` blocks (emoji icon, color, nested children; a non-emoji icon
   becomes 💡 and counts as `callout_icon` in the report).
+  A Notion data source becomes an Orbit database (`notion/database.rs`, mapping in the databases spec section 14):
+  typed properties (computed Notion types as static values), option colors, row values, one table view for each
+  Notion view (AND filters and sorts kept), rows as row pages in Notion order (max 5,000). A database with several
+  data sources is one tree node and one database for each data source. An inline database is a database sub-page,
+  and its block becomes a `page` link. Pass 1 fetches each data source before writing and creates databases and
+  rows through the databases repository; property and option ids derive from the Notion ids, so a resumed import
+  finds them. The report adds `databases_imported`, `rows_truncated`, database lossy reasons and skipped
+  `property:<type>`; web and mobile render them as sentences (`@orbit/database/notionImport`).
   When an import fails (e.g. revoked token) or is cancelled, the pages it had created but not filled go to the trash (one
   audited batch per top-level page; a subtree is kept if anything in it has content or is not from the import) and the report
   counts them (`unfilled_pages_trashed`). Filled pages stay.

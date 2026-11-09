@@ -38,7 +38,7 @@ sub-pages (`apps/server/src/notion/scan.rs:28`).
 
 | Phase | Item |
 |---|---|
-| P2 | Inline database block, linked views, board view, calculation footer, AND/OR filter groups, row templates, Notion import as real databases, property values in search, CSV import and export, moving pages into and out of a database |
+| P2 | Inline database block, linked views, board view, calculation footer, AND/OR filter groups, row templates, property values in search, CSV import and export, moving pages into and out of a database |
 | P3 | Relation, rollup, formula, files, email, phone, unique ID, button; gallery, calendar, timeline and list views; MCP and token API tools for databases; form view |
 
 ## 3. Concepts
@@ -454,7 +454,7 @@ so it shows a list.
 | Backups | The new tables are in the database snapshot. Update `SUPPORTED_SCHEMA_VERSION`. |
 | Version history | Rows keep the page history for the title and body. Property values are not in history in P1. |
 | MCP and token API | No new tools in P1. The existing page tools see rows as pages. A database page reads as its title with no body. |
-| Notion import | No change in P1. P2 maps Notion data sources to databases. |
+| Notion import | Imports Notion data sources as databases (section 14). |
 | Comments, mentions, favorites, recent | Work on rows and on the database page as on pages. |
 
 ## 10. Build order
@@ -505,3 +505,46 @@ Each step ends in a state you can check.
 | D3 | A database page has no body (no description above the table) in P1. | 2026-11-09 |
 | D4 | A `person` property holds Orbit workspace members only, no free text, as in Notion. | 2026-11-09 |
 | D5 | The slash menu item is "Database – full page": it creates a database as a sub-page and inserts a `page` link block. The inline database block is P2. | 2026-11-09 |
+
+## 14. P2: Notion import
+
+Status: built 2026-11-09. The Notion import (`apps/server/src/notion/`) imports each Notion data
+source as an Orbit database. Before, it made a static table page with the rows as sub-pages.
+
+- **Where:** `notion/scan.rs` lists one tree node for each database. A database with several data
+  sources lists one node for each data source. `notion/import.rs` pass 1 fetches the data source,
+  its views and its rows (before any write transaction), then creates the database with
+  `PageRepository::create_database_with_id` and a `DatabaseSchema`, and each row with
+  `DatabaseRepository::create_row_with_id`. These use the same rules as the API: limits, the row
+  cap, the trial limit and value checks. Pass 2 fills the row bodies as before. `notion/database.rs`
+  holds the mapping. It is pure and has no I/O.
+- **Ids:** property and option ids come from the database page id and the Notion ids. Thus a
+  resumed import finds the schema of the first attempt and stores no map.
+- **Report:** `databases_imported`, `rows_truncated`, lossy reasons (`formula_values`,
+  `rollup_values`, `relation_titles`, `files_as_names`, `number_format`, `people_as_text`,
+  `unmatched_people`, `invalid_values`, `values_truncated`, `options_truncated`,
+  `properties_truncated`, `view_type:<type>`, `view_filter`, `view_sort`, `views_unavailable`) and
+  skipped `property:<type>`. Web and mobile show them as sentences (`@orbit/database/notionImport`).
+
+| Notion | Orbit |
+|---|---|
+| Database with N data sources | One Orbit database for each data source. The title is the database title when there is one data source, else the data source title. |
+| `title` | `title` |
+| `rich_text`, `email`, `phone_number` | `text` (plain text) |
+| `number` | `number`. `number`, `number_with_commas` and `percent` (fractions, as in Notion) keep their format. A currency becomes `currency` with its ISO 4217 code. `bitcoin` becomes `number` (`number_format`). |
+| `select`, `multi_select` | The same type, with option names and colors. Unknown colors become `default`. At most 200 options. |
+| `status` | `status`. The groups To-do, In progress and Complete become `todo`, `in_progress` and `done`. |
+| `date`, `created_time`, `last_edited_time` | `date`. A time is stored in UTC. The timestamps are static values. |
+| `people` | `person`: Notion users match Orbit members by email (case ignored). Other people are left out (`unmatched_people`). More than 25 come from the property-item endpoint. |
+| `created_by`, `last_edited_by` | `person` when every user matches a member, else `text` with the names (`people_as_text`) |
+| `checkbox`, `url` | The same type. A URL that is not http(s) is left out (`invalid_values`). |
+| `files` | `text` with the file names (`files_as_names`) |
+| `formula` | A static property of the result type: number, text, checkbox or date (`formula_values`) |
+| `rollup` | Number → `number`, date → `date`, other → `text` of the values (`rollup_values`) |
+| `relation` | `text` with the titles of the related pages (`relation_titles`). More than 25 come from the property-item endpoint. |
+| `unique_id` | `text` (`PREFIX-N`) |
+| `button`, `verification`, `place`, unknown | Skipped (`property:<type>`) |
+| Views | One `table` view for each view of the data source, with the same name and order. Columns (order, width, hidden), wrap, sorts and the AND part of the filter are kept. Filter parts in an OR group of more than one condition, or with no Orbit operator, are dropped (`view_filter`). Timestamp sorts are dropped (`view_sort`). Other layouts become tables (`view_type:<type>`). When the views cannot be read, the database gets one "Table" view (`views_unavailable`). |
+| Rows | Rows of the database, in Notion's order (oldest first). The body converts as for pages, without the old property table. At most 5,000 rows (`rows_truncated`). |
+| Inline database | A database sub-page of its page. The `child_database` block becomes a `page` link block. |
+

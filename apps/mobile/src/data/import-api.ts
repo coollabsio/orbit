@@ -29,6 +29,7 @@ import {
   startObsidianImport,
   startTrelloImport,
 } from '@orbit/api/generated/sdk.gen'
+import { notionDatabaseNotes } from '@orbit/database/notionImport'
 import type {
   AsanaImport,
   CreateTrelloImportBody,
@@ -293,6 +294,7 @@ export function importNotes<K extends ImportKind>(kind: K, item: ImportRecord<K>
     push(report.truncated_blocks, `${report.truncated_blocks} blocks were cut from pages that were too large.`)
     push(report.previously_imported, `${report.previously_imported} pages were imported before; this import created new copies.`)
     push(report.unfilled_pages_trashed, `${report.unfilled_pages_trashed} empty pages the import had created were moved to the trash.`)
+    notes.push(...notionDatabaseNotes(report).notes)
   } else if (kind === 'obsidian') {
     const report = (item as ObsidianImport).report
     if (!report) return notes

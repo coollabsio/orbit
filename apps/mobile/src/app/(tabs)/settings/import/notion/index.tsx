@@ -1,4 +1,5 @@
 import type { NotionImport, NotionImportNode, NotionImportTree } from '@orbit/api/generated/types.gen'
+import { notionDatabaseNotes } from '@orbit/database/notionImport'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useMemo, useState } from 'react'
 import { View } from 'react-native'
@@ -145,8 +146,9 @@ function Result({ item }: { item: NotionImport }) {
   const teamspaces = useTeamspaces()
   const report = item.report
   const destination = destinationLabel(item.destination, teamspaces.data, pages.data)
-  const skipped = countList(report?.skipped ?? {})
-  const lossy = countList(report?.lossy ?? {})
+  const database = report ? notionDatabaseNotes(report) : null
+  const skipped = countList(database?.skipped ?? {})
+  const lossy = countList(database?.lossy ?? {})
   const notes = [
     ...importNotes('notion', item).map((note) => <NoteLine key={note}>{note}</NoteLine>),
     ...(skipped
