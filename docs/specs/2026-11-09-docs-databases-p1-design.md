@@ -217,12 +217,12 @@ route to the OpenAPI document and run `just api`, so `@orbit/api` gets the gener
 |---|---|---|
 | `GET /databases/{database_id}` | — | The whole database (below) |
 | `POST /databases/{database_id}/properties` | `{name, type, config?, position?}` | The property; it is added to all views |
-| `PATCH /databases/{database_id}/properties/{property_id}` | `{name?, type?, config?, position?}` | The property, and `converted: n, cleared: n` when the type changes |
+| `PATCH /databases/{database_id}/properties/{property_id}` | `{name?, type?, config?, position?}`; `type` and `config` cannot be in the same request (422) | `{property, converted, cleared}` |
 | `DELETE /databases/{database_id}/properties/{property_id}` | — | 204; its values go too; views drop it |
 | `POST /databases/{database_id}/views` | `{name, type: "table", config?, duplicate_of?}` | The view |
 | `PATCH /databases/{database_id}/views/{view_id}` | `{name?, config?, position?}` | The view |
 | `DELETE /databases/{database_id}/views/{view_id}` | — | 204; 409 for the last view |
-| `POST /databases/{database_id}/rows` | `{title?, icon?, values?, after_row_id?}` | The new row |
+| `POST /databases/{database_id}/rows` | `{title?, icon?, values?, after_row_id?}`; `after_row_id` omitted = last, `null` = first; `values` cannot hold the title or a computed property | The new row |
 | `PATCH /databases/{database_id}/rows/{row_id}/values` | `{"<property_id>": value \| null, …}` | The row |
 | `POST /databases/{database_id}/rows/trash` | `{row_ids: [...]}` (max 500) | 204; one trash batch for each row |
 | `POST /databases/{database_id}/rows/{row_id}/move` | `{after_row_id: id \| null}` | The row (manual order, sets `pages.position`) |
@@ -235,7 +235,7 @@ route to the OpenAPI document and run `just api`, so `@orbit/api` gets the gener
   "properties": [{ "id": "…", "name": "Name", "type": "title", "config": {}, "position": 0 }],
   "views": [{ "id": "…", "name": "Table", "type": "table", "config": { … }, "position": 0 }],
   "rows": [{
-    "id": "…", "title": "Paper A", "icon": null, "position": 1024,
+    "id": "…", "title": "Paper A", "icon": null, "position": 0, "version": 0,
     "created_at": "…", "created_by": "…", "updated_at": "…", "updated_by": "…",
     "has_content": true,
     "values": { "<property_id>": ["opt_1", "opt_2"] }
@@ -251,11 +251,15 @@ Rules:
   at the cap. Also max 100 properties and 50 views for each database.
 - **Writes** use `immediate_transaction()`. Validate and convert before the transaction where
   possible (see `.ai/lessons.md`, "Write transactions").
+- **Validation errors:** 422 `validation_failed` with the field path in `detail` (for example
+  `values.<property id>` or `config.filter.rules[0].value`).
+- **Row positions** are `0..n` without gaps (the page `renumber`). A row added first rewrites the
+  positions of the other rows in the same transaction.
 - **Conflicts:** a cell write is last-write-wins. It needs no version, as a Notion cell does. A
   value write updates the row's `pages.updated_at` and `updated_by` (so `last_edited_*` work) but
   not `pages.version`. Property and view writes are also last-write-wins.
 - **Lock:** the page lock (`/pages/{id}/lock`) on a database page locks its properties and views
-  (403 `page_locked`). Members can still add rows and edit values, as in Notion's "Lock database".
+  (423 `page_locked`, as for pages). Members can still add rows and edit values, as in Notion's "Lock database".
 - **Realtime:** every write records an audit event and an outbox event like a page metadata
   `PATCH` (resource type `database`, with the database id). Clients refetch the database query
   on that event. Cell edits are frequent: during implementation, check how page title edits
