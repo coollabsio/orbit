@@ -78,7 +78,7 @@ export function ViewToolbar({ properties, config, onConfig, onAddFilter, search,
         trigger={
           <Button type="button" variant="ghost" size="sm" data-active={rules > 0 || undefined} className="text-muted-foreground data-active:text-primary" aria-label={rules > 0 ? `Filter (${rules})` : 'Filter'}>
             <Filter />
-            <span className="max-[899px]:hidden">Filter</span>
+            <span className="@max-lg/controls:hidden">Filter</span>
             {rules > 0 ? <Badge className="h-4 min-w-4 px-1 text-[10px] tabular-nums">{rules}</Badge> : null}
           </Button>
         }
@@ -90,13 +90,13 @@ export function ViewToolbar({ properties, config, onConfig, onAddFilter, search,
         trigger={
           <Button type="button" variant="ghost" size="sm" data-active={sorts > 0 || undefined} className="text-muted-foreground data-active:text-primary" aria-label={sorts > 0 ? `Sort (${sorts})` : 'Sort'}>
             <Sort />
-            <span className="max-[899px]:hidden">Sort</span>
+            <span className="@max-lg/controls:hidden">Sort</span>
             {sorts > 0 ? <Badge className="h-4 min-w-4 px-1 text-[10px] tabular-nums">{sorts}</Badge> : null}
           </Button>
         }
       />
       {searching ? (
-        <div className="flex h-7 w-48 items-center gap-1 rounded-md bg-secondary/40 px-2 focus-within:ring-2 focus-within:ring-ring/50">
+        <div className="flex h-7 w-48 items-center gap-1 rounded-md @max-lg/controls:w-24 bg-secondary/40 px-2 focus-within:ring-2 focus-within:ring-ring/50">
           <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
           <input
             autoFocus

@@ -190,7 +190,8 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
 
   const controls = (
     <>
-      <div className="flex items-center gap-2 border-b border-border pb-1">
+      {/* The toolbar fits the width it has (a block in a narrow page, a page next to a peek): narrow rows hide its labels. */}
+      <div className="@container/controls flex items-center gap-2 border-b border-border pb-1">
         <ViewTabs views={views} activeId={view.id} onSelect={selectView} />
         <span className="flex-1" />
         <ViewToolbar
