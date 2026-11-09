@@ -1167,6 +1167,43 @@ async fn edits_reactions_and_limits() {
 }
 
 #[tokio::test]
+async fn a_message_keeps_no_empty_lines_at_its_start_and_end() {
+    let fixture = Fixture::new().await;
+    let general = fixture.general().await;
+
+    // Like Discord: the lines between the text stay, the ones around it go (on a send and an edit).
+    let sent = fixture
+        .send_with(
+            &fixture.owner,
+            &general,
+            json!({ "body": "\n\n  hello\n\nthere \n\n" }),
+        )
+        .await;
+    assert_eq!(sent["result"]["body"], "hello\n\nthere");
+    let message = sent["result"]["id"].as_str().unwrap();
+    let edited = fixture
+        .ok(
+            &fixture.owner,
+            "PATCH",
+            &format!("/messages/{message}"),
+            Some(json!({ "body": "\nedited\n\n" })),
+        )
+        .await;
+    assert_eq!(edited["result"]["body"], "edited");
+
+    // Only empty lines is an empty message.
+    let (status, _) = fixture
+        .call(
+            &fixture.owner,
+            "POST",
+            &format!("/conversations/{general}/messages"),
+            Some(json!({ "body": "\n \n", "nonce": "blank" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
 async fn mark_unread_read_all_and_restore_move_the_cursors() {
     let fixture = Fixture::new().await;
     let ada = fixture.add_member("ada").await;

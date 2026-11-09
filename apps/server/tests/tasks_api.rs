@@ -7299,6 +7299,12 @@ async fn markdown_comment_body_still_works() {
     assert_eq!(status, StatusCode::CREATED, "{comment}");
     assert_eq!(comment["body"], "plain");
     assert_eq!(comment["body_json"][0]["content"][0]["text"], "plain");
+
+    // API and MCP clients get the same trim as the editor: no empty lines around the text.
+    let (status, comment) = post_comment(&fixture, &task, json!({"body": "\n\n  plain\n\n"})).await;
+    assert_eq!(status, StatusCode::CREATED, "{comment}");
+    assert_eq!(comment["body"], "plain");
+    assert_eq!(comment["body_json"].as_array().map(Vec::len), Some(1));
 }
 
 #[tokio::test]

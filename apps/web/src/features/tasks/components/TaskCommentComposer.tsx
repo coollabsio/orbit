@@ -9,6 +9,7 @@ import type { PageMentionMember } from '@/features/docs/editor/pageMentions'
 import { uploadInlineFile } from '@/features/tasks/api/inlineFiles'
 import { storageQuotaDetail } from '@orbit/api/problem'
 import { fileBlock, isEmptyRichText } from '@/features/tasks/lib/richText'
+import { trimBlocks } from '@/features/docs/editor/content'
 // Type-only import: erased at build time, so the BlockNote chunk stays lazy.
 import type { PageEditorHandle } from '@/features/docs/editor/PageEditor'
 import { EditorFallback, PageEditor } from './lazyEditor'
@@ -56,7 +57,7 @@ export function TaskCommentComposer({
   const sendTitle = useShortcutTitle('detail.sendComment', 'Send')
 
   const send = async () => {
-    const content = editorRef.current?.getContent() ?? []
+    const content = trimBlocks(editorRef.current?.getContent() ?? [])
     if (sending.current || pending || uploads > 0 || isEmptyRichText(content)) return
     sending.current = true
     try {

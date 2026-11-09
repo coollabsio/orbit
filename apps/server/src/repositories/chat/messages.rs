@@ -791,17 +791,20 @@ impl ChatRepository {
     }
 }
 
-/// The stored body: at most 4000 characters, not blank (unless the message has files or a
-/// sticker), and without the two control characters that the search index uses as highlight
-/// markers.
+/// The stored body: without the two control characters that the search index uses as highlight
+/// markers, without empty lines and spaces at its start and end (as Discord stores a message; API
+/// and MCP clients send such lines too), at most 4000 characters, and not blank (unless the
+/// message has files or a sticker).
 fn clean_body(body: &str, may_be_blank: bool) -> Result<String, ChatError> {
+    let body = body.replace(['\u{2}', '\u{3}'], "");
+    let body = body.trim();
     if body.chars().count() > MESSAGE_MAX_CHARS {
         return Err(ChatError::TooLong);
     }
-    if body.trim().is_empty() && !may_be_blank {
+    if body.is_empty() && !may_be_blank {
         return Err(ChatError::Invalid { field: "body" });
     }
-    Ok(body.replace(['\u{2}', '\u{3}'], ""))
+    Ok(body.to_owned())
 }
 
 fn threads_sql() -> String {
