@@ -130,6 +130,7 @@ export default function App() {
               <Route path="inbox" element={<MovedTo path="/activity" />} />
               <Route path="profile" element={<AccountLayout />}>
                 <Route index element={<ProfilePage />} />
+                <Route path="general" element={<ProfilePage />} />
                 <Route path="appearance" element={<AppearancePage />} />
                 <Route path="notifications" element={<NotificationsPage />} />
                 <Route path="security" element={<SecurityPage />} />
@@ -140,6 +141,7 @@ export default function App() {
               </Route>
               <Route path="admin" element={<AdminLayout />}>
                 <Route index element={<AdminSettingsPage />} />
+                <Route path="general" element={<AdminSettingsPage />} />
                 <Route path="users" element={<AdminUsersPage />} />
                 <Route path="email" element={<AdminEmailPage />} />
                 <Route path="sign-in-providers" element={<AdminSignInProvidersPage />} />
@@ -151,6 +153,7 @@ export default function App() {
               </Route>
               <Route path="settings" element={<SettingsLayout />}>
                 <Route index element={<GeneralPage />} />
+                <Route path="general" element={<GeneralPage />} />
                 {/* labels belong to a project now: each project's settings has them */}
                 <Route path="labels" element={<Navigate to="/tasks" replace />} />
                 <Route path="emoji" element={<EmojiPage />} />

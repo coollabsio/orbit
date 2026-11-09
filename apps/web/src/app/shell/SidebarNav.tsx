@@ -15,7 +15,8 @@ import { useProjects } from '@/features/tasks/api/projects'
 import { NewProjectModal } from '@/features/tasks/components/NewProjectModal'
 import { savedViewsQueryOptions } from '@/features/views/api/views'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
-import { settingsAreaOf, useSettingsArea, type SettingsAreaName } from '@/features/settings/settingsNav'
+import { phonePath, settingsAreaOf, useSettingsArea, type SettingsAreaName } from '@/features/settings/settingsNav'
+import { useIsPhone } from '@/features/chat/pages/useChatViewport'
 import { chatEnabled, docsHidden } from './productNavigation'
 import { hostsPageList } from './sidebarSlot'
 
@@ -339,11 +340,12 @@ function SettingsAreaNav({ area, onNavigate, onBack }: { area: SettingsAreaName;
 /** A settings area's sections and links. `NoWorkspaceShell` shows them without Back: there is no app to go back to. */
 export function SettingsAreaLinks({ area, profileOnly, onNavigate }: { area: SettingsAreaName; profileOnly?: boolean; onNavigate?: () => void }) {
   const collapsed = useContext(SidebarNavCollapsed)
+  const phone = useIsPhone()
   return useSettingsArea(area, profileOnly).sections.map((section) => (
     <Fragment key={section.label}>
       <SidebarSection label={section.label} collapsed={collapsed} />
       {section.items.map((item) => (
-        <SidebarNavItem key={item.to} to={item.to} end={item.end} icon={item.icon} label={item.label} onClick={onNavigate} />
+        <SidebarNavItem key={item.to} to={phone ? phonePath(item) : item.to} end={item.end} icon={item.icon} label={item.label} onClick={onNavigate} />
       ))}
     </Fragment>
   ))
