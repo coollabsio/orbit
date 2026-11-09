@@ -395,7 +395,7 @@ export function DatabaseTable(props: DatabaseTableProps) {
                         aria-label="Drag to move"
                         aria-disabled={sorted}
                         draggable={!sorted}
-                        className="flex h-6 w-4 cursor-grab items-center justify-center rounded-sm text-muted-foreground hover:bg-muted aria-disabled:cursor-default hover-fine:opacity-0 hover-fine:group-hover/row:opacity-100"
+                        className="relative z-1 flex h-6 w-4 cursor-grab items-center justify-center rounded-sm text-muted-foreground hover:bg-muted aria-disabled:cursor-default hover-fine:opacity-0 hover-fine:group-hover/row:opacity-100"
                         onDragStart={(event) => {
                           dragging.current = { kind: 'row', id: row.id }
                           event.dataTransfer.effectAllowed = 'move'
