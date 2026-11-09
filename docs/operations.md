@@ -132,7 +132,9 @@ Older versions created an `app.key` file beside the SQLite database. If that fil
 
 ## iOS push notifications (APNs)
 
-Browsers get Web Push without any setup. The iOS app gets notifications through Apple's push service (APNs) only when the server has an APNs auth key:
+Browsers get Web Push without any setup. The iOS app gets notifications through Apple's push service (APNs) only when the server has an APNs auth key.
+
+The Orbit app in the App Store accepts pushes only from coollabs' APNs key, so for now native push works only on Orbit Cloud (`app.orbit.so`). On a self-hosted server, the app says that this server does not send notifications to the app. People on an iPhone can still get notifications: open Orbit in Safari, add it to the Home Screen (iOS 16.4 or later), and turn on notifications there (Web Push). The steps below are for Orbit Cloud, or for a self-hosted server with its own build of the app (another bundle ID):
 
 1. In the Apple developer account, open **Certificates, Identifiers & Profiles → Keys**, create a key with **Apple Push Notifications service (APNs)**, and download `AuthKey_<key id>.p8` (Apple lets you download it once).
 2. Set `ORBIT_APNS_KEY_FILE` to the path of that file (or `ORBIT_APNS_KEY` to its text), `ORBIT_APNS_KEY_ID` to the key ID and `ORBIT_APNS_TEAM_ID` to the team ID. Set `ORBIT_APNS_TOPIC` only for a build with another bundle ID.

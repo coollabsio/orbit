@@ -65,7 +65,7 @@ const STATE_TEXT: Record<Exclude<ThisDeviceState['state'], 'unsupported'>, strin
   on: 'Notifications are on for this device.',
   off: 'Notifications are off on this device.',
   denied: 'Notifications are off for Orbit in iOS Settings. Turn on Allow Notifications there, then come back.',
-  not_configured: 'This Orbit server is not set up to send notifications to the app. Ask your admin to add an APNs key.',
+  not_configured: 'For now, the app gets notifications only from Orbit Cloud. To get them on this iPhone from this server, open Orbit in Safari, add it to the Home Screen, and turn on notifications there.',
 }
 
 /** Whether this iPhone gets notifications, with the button that changes it, as the web's This device. */
