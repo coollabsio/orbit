@@ -177,10 +177,10 @@ function RuleEditor({ rule, property, onChange }: { rule: DatabaseFilterRule; pr
   return (
     <>
       <div className="flex items-center gap-2">
-        <span className="min-w-0 truncate text-sm text-muted-foreground">{property.name}</span>
+        <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">{property.name}</span>
         {operators.length > 1 ? (
           <Select items={items} value={rule.operator} onValueChange={(value) => value && setOperator(value as DatabaseFilterOperator)}>
-            <SelectTrigger size="sm" aria-label="Operator" className="ml-auto">
+            <SelectTrigger size="sm" aria-label="Operator" className="w-auto shrink-0">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
