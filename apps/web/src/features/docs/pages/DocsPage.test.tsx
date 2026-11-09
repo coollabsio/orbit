@@ -801,3 +801,18 @@ test('"Move to trash" on a row opened as a full page trashes it and goes back to
   const trash = calls.find((call) => call.method === 'DELETE' && call.path === '/pages/r1')
   expect(trash?.search).toBe('?expected_version=1')
 })
+
+test('a thread link for a row opens the comments of the row in the peek, not on the database page', async () => {
+  const { view } = setup('/docs/db?row=r1&thread=t1', (call) => {
+    if (call.path === '/pages') return Response.json({ items: [databaseSummary] })
+    if (call.path === '/pages/db') return Response.json(fullPage('db', { title: 'Research', kind: 'database' }))
+    if (call.path === '/databases/db') return Response.json(databaseDetail([databaseRow('r1', 'Paper A')]))
+    if (call.path === '/pages/r1') return Response.json(rowPage('r1', 'Paper A'))
+    if (call.path === '/pages/r1/threads') return Response.json({ items: [] })
+  })
+  const peek = await view.findByRole('complementary', { name: 'Row' })
+  await within(peek).findByRole('complementary', { name: 'Comments' })
+  expect(view.getAllByRole('complementary', { name: 'Comments' })).toHaveLength(1)
+  await waitFor(() => expect(search(view)).not.toContain('thread='))
+  expect(search(view)).toContain('row=r1')
+})

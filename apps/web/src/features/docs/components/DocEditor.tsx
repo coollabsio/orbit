@@ -203,9 +203,11 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
   const [commentsFilter, setCommentsFilter] = useState<CommentsFilter>('open')
   const [commentsList, setCommentsList] = useState<HTMLDivElement | null>(null)
   const [searchParams, setSearchParams] = useSearchParams()
-  const threadParam = searchParams.get('thread')
+  // A database page has no comments and no body: on `/docs/<database>?row=<row>&thread=<id>` the deep links belong to
+  // the row peek's editor, so the database page's editor leaves them alone.
+  const threadParam = isDatabase ? null : searchParams.get('thread')
   // Inbox page mentions link to the mentioned block (`?block=<id>`).
-  useBlockDeepLink(page.id)
+  useBlockDeepLink(isDatabase ? null : page.id)
   const [showThreadId, setShowThreadId] = useState<string | null>(null)
   useEffect(() => {
     if (!threadParam) return
