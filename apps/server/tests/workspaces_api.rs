@@ -3118,6 +3118,19 @@ async fn a_guest_invitation_names_private_channels_and_joins_only_them() {
         .unwrap();
     let (guest, guest_cookie) =
         create_user(&database, &identity, "guest@example.com", "Guest").await;
+    // With no channel left to join, the guest cannot accept; the invitation stays pending.
+    let set_archived = |at: Option<i64>| {
+        sqlx::query("UPDATE chat_conversations SET archived_at = $1 WHERE id = $2")
+            .bind(at)
+            .bind(&launch)
+            .execute(database.pool())
+    };
+    set_archived(Some(1)).await.unwrap();
+    assert_eq!(
+        accept_url(&app, &guest_cookie, url).await.status(),
+        StatusCode::CONFLICT
+    );
+    set_archived(None).await.unwrap();
     assert_eq!(
         accept_url(&app, &guest_cookie, url).await.status(),
         StatusCode::OK
@@ -3217,17 +3230,31 @@ async fn a_guest_who_registers_from_its_invitation_joins_its_channels() {
         .nth(1)
         .unwrap()
         .to_owned();
-    let accepted = app
-        .clone()
-        .oneshot(json_request_without_cookie(
+    let register = || {
+        app.clone().oneshot(json_request_without_cookie(
             "POST",
             "/api/v1/workspaces/invitations/accept",
             json!({"token": token, "email": "new@example.com", "display_name": "New Guest",
                    "password": "long enough passphrase"}),
         ))
-        .await
-        .unwrap();
-    assert_eq!(accepted.status(), StatusCode::CREATED);
+    };
+    // With no channel left to join, the guest cannot register; nothing is created.
+    let set_kind = |kind: &'static str| {
+        sqlx::query("UPDATE chat_conversations SET kind = $1 WHERE id = $2")
+            .bind(kind)
+            .bind(&launch)
+            .execute(database.pool())
+    };
+    set_kind("public").await.unwrap();
+    assert_eq!(register().await.unwrap().status(), StatusCode::CONFLICT);
+    let users: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE normalized_email = 'new@example.com'")
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(users, 0);
+    set_kind("private").await.unwrap();
+    assert_eq!(register().await.unwrap().status(), StatusCode::CREATED);
     let user: String =
         sqlx::query_scalar("SELECT id FROM users WHERE normalized_email = 'new@example.com'")
             .fetch_one(database.pool())

@@ -2663,14 +2663,14 @@ async fn guests_migration_keeps_every_membership_child_row() {
          VALUES ('{task}', '{membership}', '{member}');
          INSERT INTO chat_conversations (id, workspace_id, kind, name, created_by, created_at, updated_at, message_count)
          VALUES ('{secret}', '{workspace}', 'private', 'secret', '{user}', 3, 3, 1);
-         INSERT INTO chat_members (conversation_id, user_id, workspace_id, notify, favorite, read_count, mention_count, joined_at)
-         VALUES ('{secret}', '{user}', '{workspace}', 'all', 1, 1, 0, 3),
-                ('{secret}', '{member}', '{workspace}', 'muted', 0, 0, 1, 4);
+         INSERT INTO chat_members (conversation_id, user_id, workspace_id, notify, favorite, last_read_message_id, read_count, mention_count, broadcast_count, joined_at)
+         VALUES ('{secret}', '{user}', '{workspace}', 'all', 1, '{root}', 1, 0, 2, 3),
+                ('{secret}', '{member}', '{workspace}', 'muted', 0, NULL, 0, 1, 3, 4);
          INSERT INTO chat_messages (id, conversation_id, kind, author_id, body, created_at, reply_count)
          VALUES ('{root}', '{secret}', 'message', '{user}', 'hi', 5, 1);
-         INSERT INTO chat_thread_members (root_id, user_id, workspace_id, conversation_id, following, read_reply_count, mention_count)
-         VALUES ('{root}', '{user}', '{workspace}', '{secret}', 1, 1, 0),
-                ('{root}', '{member}', '{workspace}', '{secret}', 0, 0, 1);
+         INSERT INTO chat_thread_members (root_id, user_id, workspace_id, conversation_id, following, last_read_reply_id, read_reply_count, mention_count)
+         VALUES ('{root}', '{user}', '{workspace}', '{secret}', 1, '{root}', 1, 0),
+                ('{root}', '{member}', '{workspace}', '{secret}', 0, NULL, 0, 1);
          COMMIT;"
     ))
     .await
@@ -2680,11 +2680,13 @@ async fn guests_migration_keeps_every_membership_child_row() {
             "SELECT 'a ' || task_id || ' ' || membership_id || ' ' || user_id FROM task_assignees
              UNION ALL
              SELECT 'c ' || conversation_id || ' ' || user_id || ' ' || notify || ' '
-                 || CAST(favorite AS TEXT) || ' ' || CAST(read_count AS TEXT) || ' '
-                 || CAST(mention_count AS TEXT) || ' ' || CAST(joined_at AS TEXT) FROM chat_members
+                 || CAST(favorite AS TEXT) || ' ' || COALESCE(last_read_message_id, '-') || ' '
+                 || CAST(read_count AS TEXT) || ' ' || CAST(mention_count AS TEXT) || ' '
+                 || CAST(broadcast_count AS TEXT) || ' ' || CAST(joined_at AS TEXT) FROM chat_members
              UNION ALL
              SELECT 't ' || root_id || ' ' || user_id || ' ' || CAST(following AS TEXT) || ' '
-                 || CAST(read_reply_count AS TEXT) || ' ' || CAST(mention_count AS TEXT)
+                 || COALESCE(last_read_reply_id, '-') || ' ' || CAST(read_reply_count AS TEXT) || ' '
+                 || CAST(mention_count AS TEXT)
              FROM chat_thread_members
              UNION ALL
              SELECT 'm ' || id || ' ' || role || ' ' || CAST(version AS TEXT) FROM memberships

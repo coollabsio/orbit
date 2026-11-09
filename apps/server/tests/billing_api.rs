@@ -1154,7 +1154,11 @@ async fn a_new_workspace_is_on_a_trial_with_limits() {
                       "conversation_ids": [channel["result"]["id"]]});
     let response = server
         .http
-        .post(format!("{}{}", server.base, server.workspace("/invitations")))
+        .post(format!(
+            "{}{}",
+            server.base,
+            server.workspace("/invitations")
+        ))
         .header("origin", &server.base)
         .header("cookie", format!("{COOKIE}={}", server.session))
         .header("content-type", "application/json")
@@ -1185,7 +1189,6 @@ async fn a_new_workspace_is_on_a_trial_with_limits() {
         .call("GET", &server.workspace("/billing"), None)
         .await;
     assert_eq!(billing["trial"]["members"], json!({"used": 3, "limit": 3}));
-
     // A guest who would become a member takes a seat, so the promotion is refused at the limit.
     let (_, members) = server
         .call("GET", &server.workspace("/members"), None)

@@ -15,20 +15,22 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use sqlx::{Any, AnyConnection, Transaction};
 use thiserror::Error;
+use tokio::sync::OwnedMutexGuard;
 use tokio_util::sync::CancellationToken;
 use utoipa::ToSchema;
 
+use super::billing::{TrialCapacityError, TrialLimitReached, ensure_trial_capacity};
 use super::chat::{
-    ChatError, MAX_GUEST_CHANNELS, join_invited_channels, join_public_channels,
+    ChatError, Emitted, MAX_GUEST_CHANNELS, join_invited_channels, join_public_channels,
     require_guest_channels,
 };
-use super::billing::{TrialCapacityError, TrialLimitReached, ensure_trial_capacity};
 use super::membership;
 use super::page_versions;
 use super::tasks::TaskError;
 use super::teamspaces::insert_default_teamspace;
 use crate::audit::{self, AuditEvent, AuditOutcome};
 use crate::billing::TrialLimit;
+use crate::live::LiveHub;
 
 const INVITATION_LIFETIME_MILLIS: i64 = 7 * 24 * 60 * 60 * 1_000;
 const WORKSPACE_TRASH_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
@@ -994,6 +996,25 @@ impl WorkspaceRepository {
         Ok(())
     }
 
+    /// The live socket's write lock of the invitation's workspace (none for an unknown token),
+    /// held from before an acceptance's transaction until its chat events are out, as
+    /// `ChatState::publish` does, so the events go out in commit order.
+    async fn invitation_write_lock(
+        &self,
+        hash: &[u8],
+    ) -> Result<Option<OwnedMutexGuard<()>>, WorkspaceError> {
+        let workspace_id: Option<String> = sqlx::query_scalar(
+            "SELECT workspace_id FROM workspace_invitations WHERE token_hash = $1",
+        )
+        .bind(hash.to_vec())
+        .fetch_optional(self.database.pool())
+        .await?;
+        Ok(match workspace_id {
+            Some(id) => Some(LiveHub::of(&self.database).write_lock(parse_id(id)?).await),
+            None => None,
+        })
+    }
+
     pub async fn accept_invitation(
         &self,
         token: &str,
@@ -1003,6 +1024,7 @@ impl WorkspaceRepository {
         now: TimestampMillis,
     ) -> Result<AcceptanceRecord, WorkspaceError> {
         let hash = token_hash(token);
+        let _order = self.invitation_write_lock(&hash).await?;
         let mut transaction = self.database.immediate_transaction().await?;
         let row = sqlx::query(
             "SELECT id, workspace_id, normalized_email, role, delivery, expires_at, accepted_at, \
@@ -1076,6 +1098,7 @@ impl WorkspaceRepository {
         .bind(user_id.to_string())
         .fetch_optional(&mut *transaction)
         .await?;
+        let mut chat_events = Vec::new();
         let (membership_id, created) = if let Some(id) = existing {
             (parse_id(id)?, false)
         } else {
@@ -1093,9 +1116,10 @@ impl WorkspaceRepository {
             .execute(&mut *transaction)
             .await?;
             join_public_channels(&mut transaction, workspace_id, user_id, now).await?;
-            join_invited_channels(&mut transaction, invitation_id, user_id, now)
-                .await
-                .map_err(from_chat)?;
+            chat_events =
+                join_invited_channels(&mut transaction, workspace_id, invitation_id, user_id, now)
+                    .await
+                    .map_err(from_chat)?;
             (id, true)
         };
         sqlx::query(
@@ -1130,6 +1154,7 @@ impl WorkspaceRepository {
         )
         .await?;
         transaction.commit().await?;
+        publish_chat(&self.database, workspace_id, &chat_events).await;
         Ok(AcceptanceRecord {
             workspace_id,
             membership_id,
@@ -1259,9 +1284,10 @@ impl WorkspaceRepository {
         .execute(&mut *transaction)
         .await?;
         join_public_channels(&mut transaction, workspace_id, user_id, now).await?;
-        join_invited_channels(&mut transaction, invitation_id, user_id, now)
-            .await
-            .map_err(from_chat)?;
+        let chat_events =
+            join_invited_channels(&mut transaction, workspace_id, invitation_id, user_id, now)
+                .await
+                .map_err(from_chat)?;
         sqlx::query(
             "UPDATE workspace_invitations SET accepted_at = $1 WHERE id = $2 AND workspace_id = $3",
         )
@@ -1297,6 +1323,7 @@ impl WorkspaceRepository {
         )
         .await?;
         transaction.commit().await?;
+        publish_chat(&self.database, workspace_id, &chat_events).await;
         Ok(RegisteredAcceptance {
             acceptance: AcceptanceRecord {
                 workspace_id,
@@ -2572,6 +2599,18 @@ pub(super) async fn require_permission(
         return Err(WorkspaceError::Forbidden);
     }
     Ok(())
+}
+
+/// Sends the chat events of a committed acceptance to the live sockets. A failure only costs
+/// the sockets a resync, as in `ChatState::publish`.
+async fn publish_chat(database: &Database, workspace_id: Id, events: &[Emitted]) {
+    if events.is_empty() {
+        return;
+    }
+    let events: Vec<_> = events.iter().map(Emitted::live).collect();
+    if let Err(error) = LiveHub::of(database).publish(workspace_id, &events).await {
+        tracing::warn!(error = %error, "chat events of an accepted invitation");
+    }
 }
 
 fn from_chat(error: ChatError) -> WorkspaceError {

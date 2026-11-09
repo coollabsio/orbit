@@ -3890,6 +3890,76 @@ async fn a_guest_sees_only_its_own_conversations_and_the_people_in_them() {
 }
 
 #[tokio::test]
+async fn a_dm_with_a_guest_is_gone_once_they_share_no_channel() {
+    let fixture = Fixture::new().await;
+    let owner = fixture.owner.clone();
+    let member = fixture.add_member("member").await;
+    let guest = fixture.add_guest("guest").await;
+    let shared = fixture
+        .channel(&owner, "with-guest", "private", &[&member, &guest])
+        .await;
+    let opened = fixture
+        .ok(
+            &guest,
+            "POST",
+            "/dms",
+            Some(json!({"user_ids": [member.id.to_string()]})),
+        )
+        .await;
+    let dm = opened["result"]["id"].as_str().unwrap().to_owned();
+    fixture.send(&guest, &dm, "Secret plans").await;
+    let listed = |listed: &Value| {
+        listed
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|conversation| conversation["id"] == dm.as_str())
+    };
+
+    // The guest leaves the only channel it shares with the member.
+    fixture
+        .ok(
+            &owner,
+            "DELETE",
+            &format!("/conversations/{shared}/members/{}", guest.id),
+            None,
+        )
+        .await;
+    for user in [&guest, &member] {
+        assert!(!listed(
+            &fixture.ok(user, "GET", "/conversations", None).await
+        ));
+        for (method, path, body) in [
+            ("GET", format!("/conversations/{dm}/messages"), None),
+            (
+                "POST",
+                format!("/conversations/{dm}/messages"),
+                Some(json!({"body": "still there?", "nonce": format!("n-{}", user.id)})),
+            ),
+        ] {
+            let (status, body) = fixture.call(user, method, &path, body).await;
+            assert_eq!(status, StatusCode::NOT_FOUND, "{method} {path}: {body}");
+        }
+        let found = fixture.ok(user, "GET", "/search?query=plans", None).await;
+        assert_eq!(found["items"], json!([]), "{found}");
+    }
+
+    // Back in a shared channel, the DM is back with its messages.
+    fixture
+        .ok(
+            &owner,
+            "POST",
+            &format!("/conversations/{shared}/members"),
+            Some(json!({"user_ids": [guest.id.to_string()]})),
+        )
+        .await;
+    assert!(listed(
+        &fixture.ok(&member, "GET", "/conversations", None).await
+    ));
+    fixture.send(&member, &dm, "Welcome back").await;
+}
+
+#[tokio::test]
 async fn a_guest_push_names_no_public_channel() {
     let fixture = Fixture::new().await;
     let pushes = Arc::new(RecordedPushes::default());

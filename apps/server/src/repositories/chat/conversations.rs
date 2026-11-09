@@ -1,6 +1,6 @@
 //! Channels, direct messages, their members, and the shared categories of the channel list.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use orbit_domain::{Actor, Permission};
 use orbit_platform::{Flag, Id, Row, TimestampMillis};
@@ -10,10 +10,10 @@ use super::messages::add_system_row;
 use super::state::emit_state;
 use super::{
     Access, CONVERSATION_COLUMNS, CategoryRecord, ChatError, ChatEvent, ChatRepository,
-    ConversationKind, ConversationRecord, Events, MessageKind, NotifyLevel, Written,
+    ConversationKind, ConversationRecord, Emitted, Events, MessageKind, NotifyLevel, Written,
     conversation_from_row, conversation_record, current_conversation_record, finish, guest_ids,
-    id_list, in_ids, json_values, load_access, load_actor, parse_id, public_for,
-    workspace_member_ids,
+    id_list, in_ids, json_values, load_access, load_actor, parse_id, public_for, reachable_dm,
+    resolve, workspace_member_ids,
 };
 
 const NAME_MAX_CHARS: usize = 80;
@@ -54,8 +54,9 @@ impl ChatRepository {
         let visible = format!(
             "c.workspace_id = $1 AND c.archived_at IS NULL \
              AND ({} OR EXISTS (SELECT 1 FROM chat_members \
-                  WHERE chat_members.conversation_id = c.id AND chat_members.user_id = $2))",
-            public_for("$2")
+                  WHERE chat_members.conversation_id = c.id AND chat_members.user_id = $2)) AND {}",
+            public_for("$2"),
+            reachable_dm()
         );
         let mut tx = self.database.pool().begin().await?;
         load_actor(&mut tx, workspace_id, actor_id).await?;
@@ -89,6 +90,29 @@ impl ChatRepository {
             let members = members.remove(&conversation.id).unwrap_or_default();
             Ok(conversation_record(&conversation, members))
         })
+        .collect()
+    }
+
+    /// The conversations the caller can read now, archived ones too: the checks of
+    /// `load_access` for every conversation of the workspace.
+    pub async fn readable_conversations(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+    ) -> Result<HashSet<Id>, ChatError> {
+        sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
+            "SELECT c.id FROM chat_conversations c WHERE c.workspace_id = $1 \
+             AND ({} OR EXISTS (SELECT 1 FROM chat_members \
+                  WHERE chat_members.conversation_id = c.id AND chat_members.user_id = $2)) AND {}",
+            public_for("$2"),
+            reachable_dm()
+        )))
+        .bind(workspace_id.to_string())
+        .bind(actor_id.to_string())
+        .fetch_all(self.database.pool())
+        .await?
+        .into_iter()
+        .map(parse_id)
         .collect()
     }
 
@@ -866,13 +890,15 @@ pub async fn require_guest_channels(
 }
 
 /// Puts a guest who accepted its invitation into the invitation's channels that are still
-/// private and open, with a `join` row in each, as adding a member does.
+/// private and open, with a `join` row in each, as adding a member does. Returns the events
+/// of that, for the live socket once the caller commits.
 pub async fn join_invited_channels(
     conn: &mut AnyConnection,
+    workspace_id: Id,
     invitation_id: Id,
     user_id: Id,
     now: TimestampMillis,
-) -> Result<(), ChatError> {
+) -> Result<Vec<Emitted>, ChatError> {
     let channels: Vec<String> = sqlx::query_scalar(
         "SELECT c.id FROM workspace_invitation_conversations i \
          JOIN chat_conversations c ON c.id = i.conversation_id \
@@ -882,12 +908,32 @@ pub async fn join_invited_channels(
     .bind(invitation_id.to_string())
     .fetch_all(&mut *conn)
     .await?;
+    if channels.is_empty() {
+        // Every channel of a guest invitation was archived, made public or deleted after it
+        // was sent: the guest would have nothing to see.
+        let Flag(guest) = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM workspace_invitations WHERE id = $1 AND role = 'guest')",
+        )
+        .bind(invitation_id.to_string())
+        .fetch_one(&mut *conn)
+        .await?;
+        if guest {
+            return Err(ChatError::Conflict(
+                "The invitation has no open channel left.",
+            ));
+        }
+    }
+    let mut events = Events::default();
     for channel in channels {
         let channel = parse_id(channel)?;
         add_members(conn, channel, &[user_id], NotifyLevel::Mentions, now).await?;
-        add_system_row(conn, channel, MessageKind::Join, user_id, now).await?;
+        let row = add_system_row(conn, channel, MessageKind::Join, user_id, now).await?;
+        let conversation = current_conversation_record(conn, workspace_id, channel).await?;
+        events.conversation(channel, ChatEvent::ConversationChanged { conversation });
+        events.conversation(channel, ChatEvent::MessageCreated { message: row });
+        emit_state(conn, workspace_id, channel, user_id, &mut events).await?;
     }
-    Ok(())
+    resolve(conn, events.events).await
 }
 
 /// A guest only reaches the people of its channels: in a DM, every guest must share an open

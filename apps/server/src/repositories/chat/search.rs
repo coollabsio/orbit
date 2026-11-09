@@ -9,7 +9,7 @@ use utoipa::ToSchema;
 
 use super::{
     ChatError, ChatRepository, Dialect, MESSAGE_SELECT, MessageRecord, hydrate, id_list, in_ids,
-    load_access, load_actor, parse_id, public_for,
+    load_access, load_actor, parse_id, public_for, reachable_dm,
 };
 use crate::repositories::pages::{fts_query, pg_tsquery, split_marks};
 
@@ -102,8 +102,9 @@ impl ChatRepository {
             " JOIN chat_conversations c ON c.id = m.conversation_id \
              WHERE c.workspace_id = $1 AND m.kind = 'message' AND m.deleted_at IS NULL \
              AND ({} OR EXISTS (SELECT 1 FROM chat_members \
-                  WHERE chat_members.conversation_id = c.id AND chat_members.user_id = $2))",
-            public_for("$2")
+                  WHERE chat_members.conversation_id = c.id AND chat_members.user_id = $2)) AND {}",
+            public_for("$2"),
+            reachable_dm()
         ));
         if let Some(n) = &expression_param {
             sql.push_str(&if postgres {

@@ -3074,8 +3074,10 @@ impl TaskRepository {
                 " AND (chat_conversation_id IS NULL OR EXISTS (SELECT 1 FROM chat_conversations c \
                  WHERE c.id = notifications.chat_conversation_id AND (c.kind = 'public' \
                  OR EXISTS (SELECT 1 FROM chat_members WHERE chat_members.conversation_id = c.id \
-                 AND chat_members.user_id = notifications.recipient_user_id))))",
-            );
+                 AND chat_members.user_id = notifications.recipient_user_id)) AND ",
+            )
+            .push(crate::repositories::chat::reachable_dm())
+            .push("))");
         if unread_only {
             query.push(" AND read_at IS NULL");
         }

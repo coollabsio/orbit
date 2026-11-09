@@ -34,6 +34,7 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use super::membership;
+use crate::live::NewEvent;
 pub use crate::live::Recipients;
 
 pub use blocks::{BlocksError, MessageBlock, check_message_blocks, parse_blocks};
@@ -527,6 +528,27 @@ pub struct Emitted {
     pub event: ChatEvent,
 }
 
+/// The topic of chat events on the live socket.
+const LIVE_TOPIC: &str = "chat";
+
+impl Emitted {
+    /// The event as the live socket numbers and sends it.
+    #[must_use]
+    pub fn live(&self) -> NewEvent {
+        live_event(self.recipients.clone(), &self.event)
+    }
+}
+
+/// A chat event for the live socket.
+#[must_use]
+pub fn live_event(recipients: Recipients, event: &ChatEvent) -> NewEvent {
+    NewEvent {
+        recipients,
+        topic: LIVE_TOPIC,
+        event: serde_json::to_value(event).unwrap_or_default(),
+    }
+}
+
 /// The result of a write and the events it caused.
 #[derive(Clone, Debug)]
 pub struct Written<T> {
@@ -615,9 +637,25 @@ async fn finish<T>(
     events: Events,
     value: T,
 ) -> Result<Written<T>, ChatError> {
+    let emitted = resolve(&mut tx, events.events).await?;
+    tx.commit().await?;
+    Ok(Written {
+        value,
+        events: emitted,
+        counted: events.counted,
+        replied: events.replied,
+        inbox: events.inbox,
+    })
+}
+
+/// The audiences of `events` as user ids: the readers of each conversation as `conn` sees it.
+async fn resolve(
+    conn: &mut AnyConnection,
+    events: Vec<(Audience, ChatEvent)>,
+) -> Result<Vec<Emitted>, ChatError> {
     let mut members: HashMap<Id, (bool, Vec<Id>)> = HashMap::new();
-    let mut emitted = Vec::with_capacity(events.events.len());
-    for (audience, event) in events.events {
+    let mut emitted = Vec::with_capacity(events.len());
+    for (audience, event) in events {
         let recipients = match audience {
             Audience::Workspace => Recipients::Workspace,
             Audience::User(user_id) => Recipients::Users(vec![user_id]),
@@ -629,9 +667,9 @@ async fn finish<T>(
                             "SELECT kind = 'public' FROM chat_conversations WHERE id = $1",
                         )
                         .bind(id.to_string())
-                        .fetch_optional(&mut *tx)
+                        .fetch_optional(&mut *conn)
                         .await?;
-                        let users = member_ids(&mut tx, id).await?;
+                        let users = member_ids(&mut *conn, id).await?;
                         members
                             .entry(id)
                             .or_insert((public.is_some_and(|flag| flag.0), users))
@@ -646,14 +684,7 @@ async fn finish<T>(
         };
         emitted.push(Emitted { recipients, event });
     }
-    tx.commit().await?;
-    Ok(Written {
-        value,
-        events: emitted,
-        counted: events.counted,
-        replied: events.replied,
-        inbox: events.inbox,
-    })
+    Ok(emitted)
 }
 
 #[derive(Clone)]
@@ -859,6 +890,18 @@ async fn load_access(
     if member.is_none() && (conversation.kind != ConversationKind::Public || actor.is_guest()) {
         return Err(ChatError::NotFound);
     }
+    if conversation.kind == ConversationKind::Dm {
+        let Flag(reachable) = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT EXISTS(SELECT 1 FROM chat_conversations c WHERE c.id = $1 AND {})",
+            reachable_dm()
+        )))
+        .bind(conversation_id.to_string())
+        .fetch_one(&mut *conn)
+        .await?;
+        if !reachable {
+            return Err(ChatError::NotFound);
+        }
+    }
     Ok(Access {
         actor,
         conversation,
@@ -933,6 +976,22 @@ fn public_for(user_id: &str) -> String {
          WHERE reader.workspace_id = c.workspace_id AND reader.user_id = {user_id} \
          AND reader.role <> 'guest'))"
     )
+}
+
+/// SQL: the conversation `c` is no DM, or every guest in it still shares an open channel with
+/// every other member. A DM that fails this does not exist for anyone, as in `open_dm`.
+pub(crate) fn reachable_dm() -> &'static str {
+    "(c.kind <> 'dm' OR NOT EXISTS (SELECT 1 FROM chat_members dm_guest \
+     JOIN memberships dm_role ON dm_role.workspace_id = c.workspace_id \
+          AND dm_role.user_id = dm_guest.user_id AND dm_role.role = 'guest' \
+     JOIN chat_members dm_other ON dm_other.conversation_id = dm_guest.conversation_id \
+          AND dm_other.user_id <> dm_guest.user_id \
+     WHERE dm_guest.conversation_id = c.id AND NOT EXISTS (SELECT 1 FROM chat_members dm_own \
+          JOIN chat_members dm_theirs ON dm_theirs.conversation_id = dm_own.conversation_id \
+          JOIN chat_conversations dm_shared ON dm_shared.id = dm_own.conversation_id \
+          WHERE dm_own.workspace_id = c.workspace_id AND dm_own.user_id = dm_guest.user_id \
+          AND dm_theirs.user_id = dm_other.user_id AND dm_shared.kind <> 'dm' \
+          AND dm_shared.archived_at IS NULL)))"
 }
 
 /// The guests among `user_ids`, which has no duplicates.

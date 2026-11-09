@@ -527,6 +527,52 @@ async fn a_client_that_reconnects_gets_what_it_missed_or_a_resync() {
 }
 
 #[tokio::test]
+async fn a_replay_leaves_out_conversations_the_user_lost() {
+    let (server, owner) = Server::start().await;
+    let guest = server.guest("guest").await;
+    let shared = server
+        .chat(
+            &owner,
+            "POST",
+            "/conversations",
+            Some(json!({ "name": "with-guest", "kind": "private", "member_ids": [guest.id] })),
+        )
+        .await["result"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let (mut socket, hello) = server.client(&guest).await;
+    let epoch = hello["epoch"].as_str().unwrap().to_owned();
+    drain(&mut socket).await;
+    let last = hello["seq"].as_u64().unwrap();
+    drop(socket);
+
+    // Sent while the guest could read the channel, but replayed after the guest lost it.
+    server.send(&owner, &shared, "Before removal", "n1").await;
+    server
+        .chat(
+            &owner,
+            "DELETE",
+            &format!("/conversations/{shared}/members/{}", guest.id),
+            None,
+        )
+        .await;
+
+    let mut socket = server
+        .socket(Some(&guest.token), &format!("?epoch={epoch}&after={last}"))
+        .await
+        .unwrap();
+    assert_eq!(next(&mut socket).await.unwrap()["type"], "hello");
+    let seen = drain(&mut socket).await;
+    assert_eq!(
+        seen,
+        [("chat".to_owned(), "conversation.removed".to_owned())],
+        "{seen:?}"
+    );
+    server.stop().await;
+}
+
+#[tokio::test]
 async fn a_new_or_deleted_emoji_tells_every_member_to_read_the_list_again() {
     let (server, owner) = Server::start().await;
     let ada = server.user("ada", true).await;

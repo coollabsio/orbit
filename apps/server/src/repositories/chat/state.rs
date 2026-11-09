@@ -16,6 +16,7 @@ use super::{
     ThreadMember, ThreadStateRecord, Written, conversation_from_row, current_state, finish,
     id_list, in_ids, load_access, load_actor, load_message, load_message_access,
     load_thread_member, member_from_row, member_ids, parse_id, parse_optional_id, public_for,
+    reachable_dm,
 };
 
 /// Cursors that one `restore_read` call may put back.
@@ -66,7 +67,8 @@ impl ChatRepository {
         sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT {CONVERSATION_COLUMNS}, {MEMBER_COLUMNS} FROM chat_members m \
              JOIN chat_conversations c ON c.id = m.conversation_id \
-             WHERE m.workspace_id = $1 AND m.user_id = $2 AND c.archived_at IS NULL"
+             WHERE m.workspace_id = $1 AND m.user_id = $2 AND c.archived_at IS NULL AND {}",
+            reachable_dm()
         )))
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
@@ -251,7 +253,8 @@ impl ChatRepository {
             "SELECT {CONVERSATION_COLUMNS}, {MEMBER_COLUMNS} FROM chat_members m \
              JOIN chat_conversations c ON c.id = m.conversation_id \
              WHERE m.workspace_id = $1 AND m.user_id = $2 AND c.archived_at IS NULL \
-             AND c.message_count > m.read_count"
+             AND c.message_count > m.read_count AND {}",
+            reachable_dm()
         )))
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
@@ -471,9 +474,11 @@ impl ChatRepository {
                          WHERE c.id = chat_thread_members.conversation_id \
                            AND ({} OR EXISTS ( \
                                SELECT 1 FROM chat_members m WHERE m.conversation_id = c.id \
-                                 AND m.user_id = chat_thread_members.user_id)))",
+                                 AND m.user_id = chat_thread_members.user_id)) \
+                           AND {})",
             in_ids(&*conn, 2),
-            public_for("chat_thread_members.user_id")
+            public_for("chat_thread_members.user_id"),
+            reachable_dm()
         )))
         .bind(root_id.to_string())
         .bind(id_list(user_ids.iter().copied()))

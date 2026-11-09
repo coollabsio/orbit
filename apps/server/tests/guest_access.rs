@@ -238,6 +238,7 @@ fn example(document: &Value, schema: &Value, field: &str, path: &str, records: &
                         "email" => "someone@example.com",
                         "color" => "#336699",
                         "emoji" => "👍",
+                        "page_key" => "all",
                         _ => "guest sweep",
                     }
                     .to_owned(),
@@ -358,36 +359,140 @@ fn operations(document: &Value, records: &Records) -> Vec<Operation> {
             if !query.is_empty() {
                 path = format!("{path}?{}", query.join("&"));
             }
+            let id = operation["operationId"].as_str().unwrap();
             let body = operation["requestBody"]["content"]["application/json"]["schema"]
                 .is_object()
-                .then(|| match operation["operationId"].as_str().unwrap() {
-                    "create_comment" | "update_comment" => json!({"body": "guest sweep"}),
-                    "create_page_thread" | "create_page_comment" | "update_page_comment" => {
-                        json!({"body": [{
-                            "type": "paragraph",
-                            "content": [{"type": "text", "text": "guest sweep", "styles": {}}]
-                        }]})
-                    }
-                    _ => example(
-                        document,
-                        &operation["requestBody"]["content"]["application/json"]["schema"],
-                        "",
-                        template,
-                        records,
-                    ),
+                .then(|| {
+                    body_for(id, records).unwrap_or_else(|| {
+                        example(
+                            document,
+                            &operation["requestBody"]["content"]["application/json"]["schema"],
+                            "",
+                            template,
+                            records,
+                        )
+                    })
                 });
             operations.push(Operation {
                 method: method.to_uppercase(),
                 template: template.clone(),
-                id: operation["operationId"].as_str().unwrap().to_owned(),
+                id: id.to_owned(),
                 path,
                 body,
             });
         }
     }
-    operations.sort_by_key(|operation| operation.method == "DELETE");
+    // Children before parents, so that deleting a task does not hide its comments.
+    operations.sort_by_key(|operation| {
+        let delete = operation.method == "DELETE";
+        (
+            delete,
+            std::cmp::Reverse(if delete { operation.template.len() } else { 0 }),
+        )
+    });
     operations
 }
+
+/// Bodies whose rules the schema does not state: formats, enums typed as strings, and arrays
+/// whose items must name real records.
+fn body_for(operation: &str, records: &Records) -> Option<Value> {
+    let id = |name| records.id(name, "");
+    let rich = json!([{
+        "type": "paragraph",
+        "content": [{"type": "text", "text": "guest sweep", "styles": {}}]
+    }]);
+    Some(match operation {
+        "create_comment" => json!({"body": "guest sweep"}),
+        "update_comment" => json!({"body": "guest sweep", "expected_version": 0}),
+        "create_page_thread" | "create_page_comment" | "update_page_comment" => {
+            json!({"body": rich})
+        }
+        "create_api_token" => json!({"name": "guest sweep", "scopes": ["docs:read"]}),
+        "forward_chat_message" => {
+            json!({"conversation_id": id("conversation_id"), "nonce": "sweep-forward"})
+        }
+        "create_project" => json!({"name": "Sweep", "key": "SWP", "color": "#336699"}),
+        "update_project" => {
+            json!({"name": "Sweep", "key": "SWEEP", "color": "#336699", "expected_version": 0})
+        }
+        "create_status" => json!({"name": "Sweep", "color": "#336699", "category": "unstarted"}),
+        "update_status" => json!({
+            "name": "Sweep", "color": "#336699", "category": "unstarted",
+            "position": 1, "expected_version": 0
+        }),
+        "reorder_statuses" => {
+            json!({"items": [{"id": id("status_id"), "expected_version": 0, "position": 1}]})
+        }
+        "reorder_tasks" => {
+            json!({"items": [{"id": id("task_id"), "expected_version": 0, "position": 1}]})
+        }
+        "bulk_tasks" => json!({"updates": [{"id": id("task_id"), "expected_version": 0}]}),
+        "create_task_relation" => json!({"type": "blocks", "task_id": id("other_task_id")}),
+        _ => return None,
+    })
+}
+
+/// Operations that no caller reaches past their own preconditions in this test, so the sweep
+/// cannot prove that their access check runs. Each needs an outside service, a file upload, or
+/// a record this test cannot make. The test fails when one of them becomes reachable, so that
+/// it moves out of this list, and when any other operation cannot be checked.
+const UNCHECKED: &[&str] = &[
+    // Billing routes exist only when billing is configured.
+    "get_billing",
+    "billing_checkout",
+    "billing_portal",
+    // Multipart uploads, and the records only an upload makes.
+    "create_chat_emoji",
+    "delete_chat_emoji",
+    "create_chat_sticker",
+    "delete_chat_sticker",
+    "upload_page_file",
+    "download_page_file",
+    "upload_task_attachments",
+    "download_task_attachment",
+    "delete_task_attachment",
+    "create_attachment_comment",
+    "download_comment_attachment",
+    "create_obsidian_import",
+    "delete_storage_file",
+    // Imports check their token with the outside service first.
+    "create_asana_import",
+    "get_asana_import",
+    "cancel_asana_import",
+    "start_asana_import",
+    "create_linear_import",
+    "get_linear_import",
+    "cancel_linear_import",
+    "start_linear_import",
+    "create_notion_import",
+    "get_notion_import",
+    "cancel_notion_import",
+    "start_notion_import",
+    "get_obsidian_import",
+    "cancel_obsidian_import",
+    "start_obsidian_import",
+    "create_trello_import",
+    "get_trello_import",
+    "cancel_trello_import",
+    "start_trello_import",
+    // GitHub needs a public HTTPS origin and an installed App.
+    "start_github_manifest",
+    "save_github_project_connection",
+    // S3 needs a reachable endpoint.
+    "save_workspace_bucket",
+    // Records made by background work or by other features: exports, notifications, page
+    // versions, message buttons.
+    "download_workspace_export",
+    "read_notification",
+    "get_page_version",
+    "restore_page_version",
+    "click_chat_action",
+    // A restore needs a deleted record; deletes run last.
+    "restore_page",
+    "restore_project",
+    "restore_task",
+    "restore_workspace",
+];
 
 #[tokio::test]
 async fn a_guest_reaches_only_chat() {
@@ -566,6 +671,89 @@ async fn a_guest_reaches_only_chat() {
         )
         .await);
 
+    let other_task = id_of(
+        &server
+            .ok(
+                &owner,
+                "POST",
+                &format!("{base}/tasks"),
+                json!({"project_id": project, "status_id": status, "title": "Other task"}),
+            )
+            .await,
+    );
+    let relation = id_of(
+        &server
+            .ok(
+                &owner,
+                "POST",
+                &format!("{base}/tasks/{task}/relations"),
+                json!({"type": "blocks", "task_id": other_task}),
+            )
+            .await,
+    );
+    let category = id_of(
+        &server
+            .ok(
+                &owner,
+                "POST",
+                &format!("{base}/chat/categories"),
+                json!({"name": "Secret"}),
+            )
+            .await,
+    );
+    let webhook = id_of(
+        &server
+            .ok(
+                &owner,
+                "POST",
+                &format!("{base}/chat/conversations/{general}/webhooks"),
+                json!({"name": "Secret hook"}),
+            )
+            .await,
+    );
+    let token = id_of(
+        &server
+            .ok(
+                &owner,
+                "POST",
+                &format!("{base}/api-tokens"),
+                json!({"name": "Secret token", "scopes": ["docs:read"]}),
+            )
+            .await,
+    );
+    server
+        .ok(
+            &admin,
+            "PUT",
+            &format!("{base}/views/{view}/favorite"),
+            Value::Null,
+        )
+        .await;
+    server
+        .ok(
+            &admin,
+            "PUT",
+            &format!("{base}/pages/{page}/favorite"),
+            Value::Null,
+        )
+        .await;
+    server
+        .ok(
+            &admin,
+            "PUT",
+            &format!("{base}/chat/messages/{message}/reactions/%F0%9F%91%8D"),
+            Value::Null,
+        )
+        .await;
+    server
+        .ok(
+            &admin,
+            "PUT",
+            &format!("{base}/view-preferences/all"),
+            json!({"state": view_state()}),
+        )
+        .await;
+
     let records = Records {
         ids: BTreeMap::from([
             ("workspace_id", workspace.clone()),
@@ -573,6 +761,11 @@ async fn a_guest_reaches_only_chat() {
             ("status_id", status),
             ("task_id", task.clone()),
             ("task_ids", task),
+            ("other_task_id", other_task),
+            ("relation_id", relation),
+            ("category_id", category),
+            ("webhook_id", webhook),
+            ("token_id", token),
             ("parent_task_id", Id::new_v7().to_string()),
             ("comment_id", comment),
             ("label_id", label.clone()),
@@ -588,14 +781,14 @@ async fn a_guest_reaches_only_chat() {
                     .unwrap_or_default()
                     .to_owned(),
             ),
-            ("view_id", view),
+            ("view_id", view.clone()),
+            ("view_ids", view),
             ("invitation_id", invitation),
             ("membership_id", membership),
             ("user_id", member_id.to_string()),
             ("conversation_id", general),
             ("message_id", message.clone()),
             ("root_id", message),
-            ("page_key", "tasks".to_owned()),
         ]),
     };
     // A guest sees the avatar of someone in its channel, not of someone it shares nothing with.
@@ -659,24 +852,17 @@ async fn a_guest_reaches_only_chat() {
                 operation.body.as_ref(),
             )
             .await;
-        if !(status < 400 || status == 403 || status == 409) && !guest_may_use(&operation.id) {
+        let checked = status < 400 || status == 403 || status == 409;
+        if checked == UNCHECKED.contains(&operation.id.as_str()) && !guest_may_use(&operation.id) {
             unproven.push(format!(
-                "{} {} ({status} {})",
+                "{} {} ({}): {status} {}",
                 operation.method,
                 operation.template,
+                operation.id,
                 body["code"].as_str().unwrap_or_default()
             ));
         }
     }
-    let denied = operations
-        .iter()
-        .filter(|operation| !guest_may_use(&operation.id))
-        .count();
-    eprintln!(
-        "guest sweep: {denied} operations denied, {} not reached by an admin either:\n{}",
-        unproven.len(),
-        unproven.join("\n")
-    );
     assert!(
         reached.is_empty(),
         "a guest reached {} operations:\n{}",
@@ -684,8 +870,10 @@ async fn a_guest_reaches_only_chat() {
         reached.join("\n")
     );
     assert!(
-        unproven.len() * 2 < denied,
-        "too few operations reach their access check as an admin"
+        unproven.is_empty(),
+        "an admin must reach the access check of every operation outside `UNCHECKED`, and of \
+         none inside it; fix the fixture or the list:\n{}",
+        unproven.join("\n")
     );
 
     // The guest still sees its workspace, as a guest with no permission.

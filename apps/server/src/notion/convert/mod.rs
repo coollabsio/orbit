@@ -933,7 +933,13 @@ fn database_heading(
     let mut props = default_props(&Value::Null);
     props.insert("level".into(), json!(2));
     props.insert("isToggleable".into(), json!(false));
-    out.push(make_block(ctx, "heading", props, items(content), Vec::new()));
+    out.push(make_block(
+        ctx,
+        "heading",
+        props,
+        items(content),
+        Vec::new(),
+    ));
 }
 
 /// child_page/child_database/link_to_page → `page` block when imported, else a link paragraph.
