@@ -13,8 +13,8 @@ import { DatabaseView } from '../../../components/database/DatabaseView'
 import { PropertyList } from '../../../components/database/PropertyList'
 import PageEditor, { type PageCardInfo, type PageEditorProps, type PageEditorRef } from '../../../components/docs/PageEditor.dom'
 import { ActionSheet, ConfirmDialog, type ConfirmRequest, PromptDialog, type PromptRequest, type SheetAction } from '../../../components/settings/Dialog'
-import { absoluteUrl, pageTitle, trashPrompt, validCoverUrl, visibleThreads } from '../../../data/docs'
-import { collabTicket, fileDataUrl, fileDeleted } from '../../../data/docs-api'
+import { absoluteUrl, pageTitle, subPagesOf, trashPrompt, validCoverUrl, visibleThreads } from '../../../data/docs'
+import { collabTicket, descendants, fileDataUrl, fileDeleted } from '../../../data/docs-api'
 import { keys } from '../../../data/keys'
 import * as api from '../../../data/orbit'
 import { BLOCK_KINDS, type BlockKind, type EditorCommand, type FormatState, IDLE_FORMAT, PROBLEM_RESPONSES, type ProblemResponse, whileMounted } from '../../../data/page-editor'
@@ -149,25 +149,26 @@ export default function DocScreen() {
     },
     ...(page.data?.cover_url ? [{ label: 'Remove cover', icon: 'trash' as const, destructive: true, onPress: () => save.mutate({ cover_url: null }, { onError: failed('Could not remove the cover.') }) }] : []),
   ]
+  /** A database row and its sub-pages are not in the tree: the server counts their sub-pages. */
+  const confirmTrash = async () => {
+    const target = page.data
+    if (!target) return
+    const below = await subPagesOf(pages.data ?? [], target.id, (pageId) => descendants(client, workspaceId, pageId)).catch(failed('Could not move the page to the trash.'))
+    if (!below) return
+    setConfirm({
+      ...trashPrompt(target, below.length),
+      confirmLabel: 'Move to trash',
+      danger: true,
+      onConfirm: () => trash.mutate(target, { onSuccess: () => (router.canGoBack() ? router.back() : router.navigate('/docs')), onError: failed('Could not move the page to the trash.') }),
+    })
+  }
   const pageMenu = (): SheetAction[] =>
     page.data
       ? [
           { label: favorite ? 'Remove from favorites' : 'Add to favorites', icon: 'star', onPress: () => toggleFavorite.mutate({ pageId: id, favorite: !favorite, page: page.data }) },
           { label: page.data.icon ? 'Change icon' : 'Add icon', icon: 'emojiHappy', disabled: locked, onPress: () => setChoosingIcon(true) },
           { label: page.data.cover_url ? 'Change cover' : 'Add cover', icon: 'sticker', disabled: locked, onPress: () => setMenu(coverActions()) },
-          {
-            label: 'Move to trash',
-            icon: 'trash',
-            destructive: true,
-            onPress: () =>
-              page.data &&
-              setConfirm({
-                ...trashPrompt(pages.data ?? [], page.data),
-                confirmLabel: 'Move to trash',
-                danger: true,
-                onConfirm: () => page.data && trash.mutate(page.data, { onSuccess: () => (router.canGoBack() ? router.back() : router.navigate('/docs')), onError: failed('Could not move the page to the trash.') }),
-              }),
-          },
+          { label: 'Move to trash', icon: 'trash', destructive: true, onPress: () => void confirmTrash() },
         ]
       : []
 

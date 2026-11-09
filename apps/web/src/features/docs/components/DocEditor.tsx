@@ -2,7 +2,7 @@ import { useCommand } from '@/shortcuts/useCommand'
 import { isPaymentRequired } from '@orbit/api/problem'
 import { lazy, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type Ref } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { ArrowLeft, ArrowSwapHorizontal, Check, Copy, Download, MoreH as Ellipsis, Grid, History, Lock, Star, Trash as Trash2, Unlock, People as Users } from 'reicon-react'
 import { cn } from 'cn'
@@ -33,6 +33,7 @@ import { Tip } from '@/components/common/Tip'
 import {
   conflictCurrentPage,
   conflictCurrentVersion,
+  descendantsQueryOptions,
   fetchPage,
   isPageNotFound,
   isPageVersionConflict,
@@ -167,7 +168,10 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
   /** A database page has no document: the table replaces the editor, comments and history. */
   const isDatabase = page.kind === 'database'
   const pageActions = useDocPageActions()
-  const hasChildren = pages.some((item) => item.parent_id === pageId)
+  // A database row and its sub-pages are not in the tree: the server lists their sub-pages.
+  const inTree = pages.some((item) => item.id === pageId)
+  const serverSubPages = useQuery({ ...descendantsQueryOptions(workspaceId, pageId), enabled: !inTree && !isDatabase })
+  const hasChildren = inTree ? pages.some((item) => item.parent_id === pageId) : (serverSubPages.data?.length ?? 0) > 0
 
   const [title, setTitle] = useState(page.title)
   const [icon, setIcon] = useState(page.icon)

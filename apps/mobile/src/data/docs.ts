@@ -65,9 +65,16 @@ export function descendantsOf(pages: readonly PageSummary[], pageId: string): Pa
   return out
 }
 
-/** The web's "Move to trash" confirmation. */
-export function trashPrompt(pages: readonly PageSummary[], page: PageSummary): { title: string; description: string } {
-  const below = descendantsOf(pages, page.id).length
+/**
+ * A page's live sub-pages: from the tree for a tree page; a database row and its sub-pages are not in the tree, so
+ * theirs come from `server` (`GET …/pages/{id}/descendants`).
+ */
+export async function subPagesOf(pages: readonly PageSummary[], pageId: string, server: (pageId: string) => Promise<PageSummary[]>): Promise<PageSummary[]> {
+  return pages.some((page) => page.id === pageId) ? descendantsOf(pages, pageId) : server(pageId)
+}
+
+/** The web's "Move to trash" confirmation; `below` is the number of sub-pages that go with the page. */
+export function trashPrompt(page: Pick<PageSummary, 'title'>, below: number): { title: string; description: string } {
   return {
     title: `Move “${pageTitle(page)}” to the trash?`,
     description: below > 0 ? `Its ${below} sub-page${below === 1 ? '' : 's'} move with it. You can restore them from Trash.` : 'You can restore it from Trash.',

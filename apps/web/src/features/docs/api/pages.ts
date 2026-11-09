@@ -6,6 +6,7 @@ import {
   duplicatePage,
   emptyPageTrash,
   getPage,
+  listPageDescendants,
   listPages,
   listPageTrash,
   movePage,
@@ -132,6 +133,26 @@ export function pageTreeQueryOptions(workspaceId: string, client: ApiClient = ap
 
 export function usePageTree(workspaceId: string, enabled = true) {
   return useQuery({ ...pageTreeQueryOptions(workspaceId), enabled })
+}
+
+/**
+ * A page's live sub-pages at any depth, as summaries. The tree has them for a tree page; a database row and its
+ * sub-pages are not in the tree, so their sub-pages come from the server.
+ */
+export function descendantsQueryOptions(workspaceId: string, pageId: string) {
+  return {
+    queryKey: queryKeys.pages.descendants(workspaceId, pageId),
+    queryFn: async (): Promise<PageSummary[]> => {
+      const { data } = await listPageDescendants({ client: apiClient, path: { workspace_id: workspaceId, page_id: pageId }, throwOnError: true })
+      return required(data, 'Sub-pages response was empty.').items
+    },
+  }
+}
+
+/** `pageId`'s sub-pages: from the tree when the page is in it, else from the server. */
+export async function subPagesOf(queryClient: QueryClient, workspaceId: string, tree: readonly PageSummary[], pageId: string): Promise<PageSummary[]> {
+  if (tree.some((page) => page.id === pageId)) return descendantsOf(tree, pageId)
+  return queryClient.fetchQuery(descendantsQueryOptions(workspaceId, pageId))
 }
 
 export function pageQueryOptions(workspaceId: string, pageId: string) {

@@ -558,6 +558,45 @@ impl PageRepository {
         })
     }
 
+    /// The live sub-pages of a live page the caller can see, at any depth, parents first: what
+    /// trashing, "Duplicate with sub-pages" and "Markdown with sub-pages" take along. As in the
+    /// tree, a database counts but its rows (its content) and their sub-pages do not, so a
+    /// database has none. Rows and their sub-pages are not in the tree; this is their source.
+    pub async fn descendants(
+        &self,
+        workspace_id: Id,
+        page_id: Id,
+        actor_id: Id,
+    ) -> Result<PageList, PageError> {
+        self.get_visible(workspace_id, page_id, actor_id).await?;
+        let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "WITH RECURSIVE subtree(id, kind, depth) AS ( \
+                 SELECT child.id, child.kind, 1 FROM pages AS child \
+                 JOIN pages AS root ON root.id = child.parent_id \
+                 WHERE root.id = $1 AND root.kind <> 'database' AND child.deleted_at IS NULL \
+                 UNION ALL \
+                 SELECT pages.id, pages.kind, subtree.depth + 1 FROM pages \
+                 JOIN subtree ON pages.parent_id = subtree.id \
+                 WHERE pages.deleted_at IS NULL AND subtree.kind <> 'database' \
+             ) \
+             SELECT {SUMMARY_COLUMNS} FROM pages JOIN subtree ON subtree.id = pages.id \
+             WHERE pages.workspace_id = $2 AND {visible} \
+             ORDER BY subtree.depth, pages.parent_id, pages.position, pages.id",
+            visible = visible(3)
+        )))
+        .bind(page_id.to_string())
+        .bind(workspace_id.to_string())
+        .bind(actor_id.to_string())
+        .fetch_all(self.database.pool())
+        .await?;
+        Ok(PageList {
+            items: rows
+                .into_iter()
+                .map(summary_from_row)
+                .collect::<Result<_, _>>()?,
+        })
+    }
+
     pub async fn get_page(
         &self,
         workspace_id: Id,

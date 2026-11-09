@@ -861,6 +861,7 @@ test('"Move to trash" on a favorite row (not in the tree, not open) reads the ro
     if (call.path === '/pages/favorites') return Response.json({ items: [favoriteEntry('r1', 0, 'Paper A', { id: 'db', title: 'Research' })] })
     if (call.path === '/pages/r1' && call.method === 'GET') return Response.json(rowPage('r1', 'Paper A'))
     if (call.path === '/pages/r1' && call.method === 'DELETE') return new Response(null, { status: 204 })
+    if (call.path === '/pages/r1/descendants') return Response.json({ items: [] })
   })
   const section = await view.findByRole('group', { name: 'Favorites' })
   const favorite = await waitFor(() => section.querySelector('[data-page-id="r1"]') as HTMLElement)
@@ -877,6 +878,7 @@ test('"Move to trash" on a row opened as a full page trashes it and goes back to
     if (call.path === '/databases/db') return Response.json(databaseDetail([databaseRow('r1', 'Paper A')]))
     if (call.path === '/pages/r1' && call.method === 'GET') return Response.json(rowPage('r1', 'Paper A'))
     if (call.path === '/pages/r1' && call.method === 'DELETE') return new Response(null, { status: 204 })
+    if (call.path === '/pages/r1/descendants') return Response.json({ items: [] })
     if (call.path === '/pages/db') return Response.json(fullPage('db', { title: 'Research', kind: 'database' }))
   })
   await view.findByLabelText('Page title')
@@ -888,6 +890,38 @@ test('"Move to trash" on a row opened as a full page trashes it and goes back to
   await waitFor(() => expect(location(view)).toBe('/docs/db'))
   const trash = calls.find((call) => call.method === 'DELETE' && call.path === '/pages/r1')
   expect(trash?.search).toBe('?expected_version=1')
+})
+
+test('a row with sub-pages (not in the tree) offers the sub-page copy and export', async () => {
+  const { view, calls } = setup('/docs/r1', (call) => {
+    if (call.path === '/pages') return Response.json({ items: [databaseSummary] })
+    if (call.path === '/databases/db') return Response.json(databaseDetail([databaseRow('r1', 'Paper A')]))
+    if (call.path === '/pages/r1' && call.method === 'GET') return Response.json(rowPage('r1', 'Paper A'))
+    if (call.path === '/pages/r1/descendants') return Response.json({ items: [summary('notes', 'r1', 0, 'Notes'), summary('deep', 'notes', 0, 'Deep')] })
+    if (call.path === '/pages/r1/duplicate') return Response.json(rowPage('r1-copy', 'Paper A (copy)'), { status: 201 })
+    if (call.path === '/pages/r1-copy') return Response.json(rowPage('r1-copy', 'Paper A (copy)'))
+  })
+  await view.findByLabelText('Page title')
+  fireEvent.click(within(view.container.querySelector('section:last-of-type') as HTMLElement).getAllByRole('button', { name: 'Page options' }).at(-1)!)
+  fireEvent.click(await view.findByRole('menuitem', { name: 'Export' }))
+  expect(await view.findByRole('menuitem', { name: 'Markdown with sub-pages' })).toBeTruthy()
+  await userEvent.click(view.getByRole('menuitem', { name: 'Duplicate with sub-pages' }))
+  await waitFor(() => expect(location(view)).toBe('/docs/r1-copy'))
+  expect(calls.find((call) => call.path === '/pages/r1/duplicate')?.body).toEqual({ include_children: true })
+})
+
+test('trashing a row opened as a full page counts its sub-pages', async () => {
+  const { view } = setup('/docs/r1', (call) => {
+    if (call.path === '/pages') return Response.json({ items: [databaseSummary] })
+    if (call.path === '/databases/db') return Response.json(databaseDetail([databaseRow('r1', 'Paper A')]))
+    if (call.path === '/pages/r1' && call.method === 'GET') return Response.json(rowPage('r1', 'Paper A'))
+    if (call.path === '/pages/r1/descendants') return Response.json({ items: [summary('notes', 'r1', 0, 'Notes'), summary('deep', 'notes', 0, 'Deep')] })
+  })
+  await view.findByLabelText('Page title')
+  fireEvent.click(within(view.container.querySelector('section:last-of-type') as HTMLElement).getAllByRole('button', { name: 'Page options' }).at(-1)!)
+  await userEvent.click(await view.findByRole('menuitem', { name: 'Move to trash' }))
+  const dialog = await view.findByRole('dialog')
+  expect(dialog.textContent).toContain('Its 2 sub-pages move with it.')
 })
 
 test('a thread link for a row opens the comments of the row in the peek, not on the database page', async () => {

@@ -1320,6 +1320,89 @@ async fn favorites_carry_what_the_sidebar_shows_for_rows_and_their_sub_pages() {
 }
 
 #[tokio::test]
+async fn a_row_lists_its_live_sub_pages_and_copies_them() {
+    let fixture = Fixture::new().await;
+    let db = fixture.create_database("Research").await;
+    let row = fixture.add_row(&db, json!({"title": "Paper A"})).await;
+    let row = id_of(&row).to_owned();
+    let notes = fixture
+        .create_page(json!({"parent_id": row, "title": "Notes"}))
+        .await;
+    let notes = id_of(&notes).to_owned();
+    let deep = fixture
+        .create_page(json!({"parent_id": notes, "title": "Deep"}))
+        .await;
+    let deep = id_of(&deep).to_owned();
+    let nested = fixture
+        .create_page(json!({"parent_id": row, "kind": "database", "title": "Reading list"}))
+        .await;
+    let nested = id_of(&nested).to_owned();
+    fixture
+        .add_row(&nested, json!({"title": "Nested row"}))
+        .await;
+    let gone = fixture
+        .create_page(json!({"parent_id": row, "title": "Gone"}))
+        .await;
+    fixture.trash_page(id_of(&gone)).await;
+
+    let titles = |list: Value| {
+        list["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|page| page["title"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>()
+    };
+    // Parents first; a nested database counts, its rows (its content) do not.
+    assert_eq!(
+        titles(
+            fixture
+                .ok("GET", &format!("pages/{row}/descendants"), None)
+                .await
+        ),
+        ["Notes", "Reading list", "Deep"]
+    );
+    assert_eq!(
+        titles(
+            fixture
+                .ok("GET", &format!("pages/{notes}/descendants"), None)
+                .await
+        ),
+        ["Deep"]
+    );
+    for leaf in [&deep, &db] {
+        assert_eq!(
+            fixture
+                .ok("GET", &format!("pages/{leaf}/descendants"), None)
+                .await,
+            json!({"items": []})
+        );
+    }
+    let (status, body) = fixture
+        .call("GET", &format!("pages/{}/descendants", id_of(&gone)), None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+
+    // "Duplicate with sub-pages" copies the row's sub-pages under the new row.
+    let copy = fixture
+        .ok(
+            "POST",
+            &format!("pages/{row}/duplicate"),
+            Some(json!({"include_children": true})),
+        )
+        .await;
+    assert_eq!(copy["database_id"].as_str(), Some(db.as_str()));
+    assert_eq!(
+        titles(
+            fixture
+                .ok("GET", &format!("pages/{}/descendants", id_of(&copy)), None)
+                .await
+        ),
+        ["Notes", "Reading list", "Deep"]
+    );
+}
+
+#[tokio::test]
 async fn rows_stay_out_of_the_tree_and_out_of_page_moves() {
     let fixture = Fixture::new().await;
     let db = fixture.create_database("Inbox").await;

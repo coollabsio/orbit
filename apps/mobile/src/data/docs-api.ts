@@ -12,6 +12,7 @@ import {
   deleteTeamspace,
   duplicatePage,
   emptyPageTrash,
+  listPageDescendants,
   listPageFavorites,
   listPageThreads,
   listPageTrash,
@@ -104,6 +105,12 @@ export async function fileDataUrl(server: string, token: string, url: string): P
   } catch {
     return null
   }
+}
+
+/** The page's live sub-pages at any depth (a database row's too: rows are not in the tree). */
+export async function descendants(client: OrbitClient, workspaceId: string, pageId: string): Promise<PageSummary[]> {
+  const { data } = await listPageDescendants({ client, path: pagePath(workspaceId, pageId), throwOnError: true })
+  return data.items
 }
 
 /** The favorites with what the list shows of each page, in the user's order. */

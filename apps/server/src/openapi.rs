@@ -221,6 +221,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::page_routes::empty_page_trash,
         crate::page_routes::duplicate_page,
         crate::page_routes::search_pages,
+        crate::page_routes::list_page_descendants,
         crate::page_routes::list_page_favorites,
         crate::page_routes::add_page_favorite,
         crate::page_routes::remove_page_favorite,
@@ -1590,6 +1591,7 @@ fn page_operation(operation_id: &str) -> bool {
         "list_pages"
             | "create_page"
             | "get_page"
+            | "list_page_descendants"
             | "update_page"
             | "move_page"
             | "delete_page"

@@ -20,12 +20,13 @@ import {
   useDuplicatePage,
   useMovePage,
   pageQueryOptions,
+  subPagesOf,
   usePage,
   usePageTree,
   useTrashPage,
 } from '@/features/docs/api/pages'
 import { useTeamspaces } from '@/features/docs/api/teamspaces'
-import { descendantsOf, dropOnSpace, landingPage, pageTitle, spaceKey, spaceLabel, type SpaceKey } from '@/features/docs/pageTree'
+import { dropOnSpace, landingPage, pageTitle, spaceKey, spaceLabel, type SpaceKey } from '@/features/docs/pageTree'
 import { cn } from 'cn'
 import { DocEditor, type DocEditorControl } from '@/features/docs/components/DocEditor'
 import { preloadPageEditor } from '@/features/docs/editor/loadPageEditor'
@@ -100,7 +101,11 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
   const requestTrash = async (targetId: string) => {
     const target = await findTarget(targetId)
     if (!target) return
-    const descendants = descendantsOf(pages, targetId)
+    const descendants = await subPagesOf(queryClient, workspace.id, pages, targetId).catch(() => null)
+    if (!descendants) {
+      toast.error('Could not move the page to the trash.')
+      return
+    }
     const confirmed = await confirmAction({
       title: `Move “${pageTitle(target)}” to the trash?`,
       description:
@@ -167,7 +172,8 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
   const requestDuplicate = async (targetId: string, includeChildren: boolean) => {
     const target = await findTarget(targetId)
     if (!target) return
-    const copied = new Set([targetId, ...(includeChildren ? descendantsOf(pages, targetId).map((item) => item.id) : [])])
+    const below = includeChildren ? await subPagesOf(queryClient, workspace.id, pages, targetId).catch(() => []) : []
+    const copied = new Set([targetId, ...below.map((item) => item.id)])
     if (activeIdRef.current && copied.has(activeIdRef.current) && editorControl.current) await editorControl.current.flush()
     duplicatePage.mutate(
       { pageId: targetId, includeChildren },

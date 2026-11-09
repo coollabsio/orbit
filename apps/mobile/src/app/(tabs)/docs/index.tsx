@@ -5,7 +5,7 @@ import { Pressable, ScrollView, View } from 'react-native'
 
 import { IconDialog } from '../../../components/docs/IconDialog'
 import { ActionSheet, ConfirmDialog, type ConfirmRequest, PromptDialog, type PromptRequest, type SheetAction } from '../../../components/settings/Dialog'
-import { docSpaces, type FavoriteRow, favoritePages, pageTitle, trashPrompt, type TreeRow } from '../../../data/docs'
+import { descendantsOf, docSpaces, type FavoriteRow, favoritePages, pageTitle, trashPrompt, type TreeRow } from '../../../data/docs'
 import type { PageSummary, Teamspace } from '../../../data/orbit'
 import { isFavorite, useCreatePage, useDuplicatePage, useFavorites, useTeamspaceWrites, useToggleFavorite, useTrashPage } from '../../../hooks/docs'
 import { useOrbit } from '../../../orbit-context'
@@ -91,7 +91,7 @@ export default function DocsScreen() {
           label: 'Move to trash',
           icon: 'trash',
           destructive: true,
-          onPress: () => setConfirm({ ...trashPrompt(pages.data ?? [], page), confirmLabel: 'Move to trash', danger: true, onConfirm: () => trash.mutate(page, { onError: failed('Could not move the page to the trash.') }) }),
+          onPress: () => setConfirm({ ...trashPrompt(page, descendantsOf(pages.data ?? [], page.id).length), confirmLabel: 'Move to trash', danger: true, onConfirm: () => trash.mutate(page, { onError: failed('Could not move the page to the trash.') }) }),
         },
       ],
     })

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 
 import type { PageFavorite } from '@orbit/api/generated/types.gen'
 
-import { absoluteUrl, blockId, descendantsOf, docSpaces, favoritePages, iconOf, pageTitle, paragraphBlocks, spaceRequest, trashPrompt, validCoverUrl, visibleThreads } from './docs'
+import { absoluteUrl, blockId, descendantsOf, docSpaces, favoritePages, iconOf, pageTitle, paragraphBlocks, spaceRequest, subPagesOf, trashPrompt, validCoverUrl, visibleThreads } from './docs'
 import type { PageSummary, Teamspace } from './orbit'
 
 const page = (id: string, fields: Partial<PageSummary>): PageSummary => ({
@@ -70,8 +70,20 @@ describe('writing docs', () => {
 
   test('trashing a page says how many sub-pages go with it', () => {
     expect(descendantsOf(tree, 'a').map((item) => item.id)).toEqual(['b', 'c'])
-    expect(trashPrompt(tree, tree[0])).toEqual({ title: 'Move “a” to the trash?', description: 'Its 2 sub-pages move with it. You can restore them from Trash.' })
-    expect(trashPrompt(tree, tree[3]).description).toBe('You can restore it from Trash.')
+    expect(trashPrompt(tree[0]!, 2)).toEqual({ title: 'Move “a” to the trash?', description: 'Its 2 sub-pages move with it. You can restore them from Trash.' })
+    expect(trashPrompt(tree[3]!, 0).description).toBe('You can restore it from Trash.')
+  })
+
+  test('sub-pages come from the tree, or from the server for a page outside it (a database row)', async () => {
+    const asked: string[] = []
+    const server = async (id: string) => {
+      asked.push(id)
+      return [page('notes', { parent_id: id }), page('deep', { parent_id: 'notes' })]
+    }
+    expect((await subPagesOf(tree, 'a', server)).map((item) => item.id)).toEqual(['b', 'c'])
+    expect(asked).toEqual([])
+    expect((await subPagesOf(tree, 'row', server)).map((item) => item.id)).toEqual(['notes', 'deep'])
+    expect(asked).toEqual(['row'])
   })
 
   test('favorites list in their order from the server entries; tree pages show their tree summary', () => {

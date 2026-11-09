@@ -105,6 +105,10 @@ pub fn page_router(state: PageState) -> Router {
             post(move_page),
         )
         .route(
+            "/api/v1/workspaces/{workspace_id}/pages/{page_id}/descendants",
+            get(list_page_descendants),
+        )
+        .route(
             "/api/v1/workspaces/{workspace_id}/pages/{page_id}/restore",
             post(restore_page),
         )
@@ -333,6 +337,28 @@ async fn get_page(
     state
         .pages
         .get_page(workspace_id, page_id, actor_id)
+        .await
+        .map(Json)
+        .map_err(|error| page_problem(error, instance, request_id.as_ref()))
+}
+
+/// The page's live sub-pages at any depth, parents first, for the trash prompt and the "with
+/// sub-pages" actions. Database rows and their sub-pages are not in `GET .../pages`; this lists
+/// a row's sub-pages too. A database's rows are its content, not sub-pages.
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/pages/{page_id}/descendants", params(("workspace_id" = String, Path), ("page_id" = String, Path)), responses((status = 200, body = PageList)))]
+async fn list_page_descendants(
+    State(state): State<PageState>,
+    Path((workspace, page)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<PageList>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/pages/{page}/descendants");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let page_id = parse_id(&page, &instance, request_id.as_ref())?;
+    state
+        .pages
+        .descendants(workspace_id, page_id, actor_id)
         .await
         .map(Json)
         .map_err(|error| page_problem(error, instance, request_id.as_ref()))

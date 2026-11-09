@@ -20212,6 +20212,61 @@ export type UpdatePageResponses = {
 
 export type UpdatePageResponse = UpdatePageResponses[keyof UpdatePageResponses];
 
+export type ListPageDescendantsData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/pages/{page_id}/descendants';
+};
+
+export type ListPageDescendantsErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * page_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListPageDescendantsError = ListPageDescendantsErrors[keyof ListPageDescendantsErrors];
+
+export type ListPageDescendantsResponses = {
+    200: PageList;
+};
+
+export type ListPageDescendantsResponse = ListPageDescendantsResponses[keyof ListPageDescendantsResponses];
+
 export type DuplicatePageData = {
     body: DuplicatePageBody;
     headers?: {
