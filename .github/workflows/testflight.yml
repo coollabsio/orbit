@@ -31,7 +31,7 @@ jobs:
       BUILD_NUMBER: ${{ github.run_number }}.${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v5
-      # Expo SDK 58 needs Xcode 27; the runner's default Xcode can be older.
+      # React Native needs Xcode 16.1+; App Store uploads need the iOS 26 SDK or later.
       - uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
@@ -56,6 +56,7 @@ jobs:
           security import "$RUNNER_TEMP/cert.p12" -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k "$keychain"
           security set-key-partition-list -S apple-tool:,apple: -k "$keychain_password" "$keychain" > /dev/null
           security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$keychain"
 
           profile="$RUNNER_TEMP/profile.mobileprovision"
           printf '%s' "$PROFILE" | base64 --decode > "$profile"
@@ -78,8 +79,7 @@ jobs:
               s = config.build_settings
               s["CODE_SIGN_STYLE"] = "Manual"
               s["DEVELOPMENT_TEAM"] = ENV.fetch("APPLE_TEAM_ID")
-              # "iOS Distribution" matches both "iPhone Distribution" and "Apple Distribution" certificates.
-              s["CODE_SIGN_IDENTITY"] = s["CODE_SIGN_IDENTITY[sdk=iphoneos*]"] = "iOS Distribution"
+              s["CODE_SIGN_IDENTITY"] = s["CODE_SIGN_IDENTITY[sdk=iphoneos*]"] = "Apple Distribution"
               s["PROVISIONING_PROFILE_SPECIFIER"] = ENV.fetch("PROFILE_UUID")
             end
             project.save'
@@ -104,7 +104,7 @@ jobs:
             <key>method</key><string>app-store-connect</string>
             <key>signingStyle</key><string>manual</string>
             <key>teamID</key><string>$APPLE_TEAM_ID</string>
-            <key>signingCertificate</key><string>iOS Distribution</string>
+            <key>signingCertificate</key><string>Apple Distribution</string>
             <key>provisioningProfiles</key>
             <dict><key>io.coollabs.orbit</key><string>$PROFILE_UUID</string></dict>
           </dict>
