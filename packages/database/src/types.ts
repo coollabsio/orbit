@@ -98,6 +98,13 @@ export type ViewConfig = {
   sorts: DatabaseViewSort[]
   filter: { rules: DatabaseFilterRule[] }
   wrap_cells: boolean
+  /** Board: the `select` or `status` property whose options are the columns. */
+  group_by: string | null
+  /** Board: option ids in column order; `null` is the "No <property>" column. */
+  group_order: (string | null)[]
+  hidden_groups: (string | null)[]
+  /** Board: the properties shown on each card, after the title. */
+  card_properties: string[]
 }
 
 export type ViewContext = {

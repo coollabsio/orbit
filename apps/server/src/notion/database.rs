@@ -16,7 +16,8 @@ use super::model::{NotionDataSource, NotionPage, NotionView, normalize_id, plain
 use crate::repositories::databases::{
     FilterOperator, FilterRule, MAX_CELL_ITEMS, MAX_NAME_CHARS, MAX_OPTIONS, MAX_PROPERTIES,
     MAX_RULES, MAX_SORTS, MAX_TEXT_CHARS, MAX_VIEWS, Property, PropertyType, SchemaProperty,
-    SchemaView, SortDirection, ViewColumn, ViewConfig, ViewFilter, ViewSort, accepts_value,
+    SchemaView, SortDirection, ViewColumn, ViewConfig, ViewFilter, ViewSort, ViewType,
+    accepts_value,
 };
 
 /// Orbit members by lowercase email: `(user id, display name)`.
@@ -291,6 +292,7 @@ pub fn plan_database(database: Id, source: &Source, members: &Members) -> Databa
     if schema_views.is_empty() {
         schema_views.push(SchemaView {
             name: "Table".to_owned(),
+            view_type: ViewType::Table,
             config: ViewConfig::default(),
         });
     }
@@ -556,8 +558,9 @@ fn view_columns(view: &NotionView) -> Option<Vec<(&str, &Value)>> {
     )
 }
 
-/// One Notion view as an Orbit table view: name, columns, sorts and the flat AND part of the
-/// filter. Other layouts (board, calendar, …) become tables.
+/// One Notion view as an Orbit table or board view: name, columns, sorts and the flat AND part of
+/// the filter; a board also keeps its group property (when it became a select or status) and its
+/// visible card properties. Other layouts (calendar, gallery, …) become tables.
 fn plan_view(
     view: &NotionView,
     planned: &[Planned],
@@ -565,10 +568,16 @@ fn plan_view(
     report: &mut ConvertReport,
 ) -> SchemaView {
     let kind = view.kind.as_deref().unwrap_or("table");
-    if kind != "table" {
-        lossy(report, &format!("view_type:{kind}"));
-    }
+    let view_type = match kind {
+        "board" => ViewType::Board,
+        "table" => ViewType::Table,
+        _ => {
+            lossy(report, &format!("view_type:{kind}"));
+            ViewType::Table
+        }
+    };
     let mut columns = Vec::new();
+    let mut card_properties = Vec::new();
     if let Some(list) = view_columns(view) {
         let mut seen = HashSet::new();
         for (key, entry) in list {
@@ -576,6 +585,12 @@ fn plan_view(
                 continue;
             };
             if seen.insert(property.id) {
+                if view_type == ViewType::Board
+                    && property.property_type != PropertyType::Title
+                    && entry.get("visible").and_then(Value::as_bool) != Some(false)
+                {
+                    card_properties.push(property.id);
+                }
                 columns.push(ViewColumn::new(
                     property.id,
                     property.property_type == PropertyType::Title,
@@ -666,9 +681,25 @@ fn plan_view(
     if !complete {
         lossy(report, "view_filter");
     }
+    let group_by = (view_type == ViewType::Board)
+        .then(|| view.configuration.as_ref()?.get("group_by"))
+        .flatten()
+        .and_then(|group| group.get("property_id").or(Some(group)))
+        .and_then(Value::as_str)
+        .and_then(|key| lookup(planned, key))
+        .filter(|property| {
+            matches!(
+                property.property_type,
+                PropertyType::Select | PropertyType::Status
+            )
+        })
+        .map(|property| property.id);
     SchemaView {
         name: clean_name(view.name.as_deref().unwrap_or_default(), "Table"),
+        view_type,
         config: ViewConfig {
+            group_by,
+            card_properties,
             columns,
             sorts,
             filter: ViewFilter { rules },
@@ -678,6 +709,7 @@ fn plan_view(
                 .and_then(|config| config.get("wrap_cells"))
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            ..ViewConfig::default()
         },
     }
 }

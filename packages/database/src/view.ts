@@ -7,9 +7,11 @@ const DEFAULT_WIDTH = 200
 const TITLE_WIDTH = 280
 
 /**
- * The view's config with defaults filled in. Like the server's `ViewConfig::retain_known`, it
- * drops columns, sorts and rules that name a deleted property, and repeated columns and sorts.
- * Then it appends each property missing from `columns` as a visible column, in property order.
+ * The view's config with defaults filled in. Like the server's `ViewConfig::repair`, it drops
+ * columns, sorts, rules and card properties that name a deleted property, repeats, and groups that
+ * are not options of the group property; a board whose group property is gone groups by the first
+ * status, else the first select. Then it appends each property missing from `columns` as a visible
+ * column, in property order.
  */
 export function repairConfig(view: DatabaseView, properties: readonly Property[]): ViewConfig {
   const config = view.config
@@ -35,12 +37,44 @@ export function repairConfig(view: DatabaseView, properties: readonly Property[]
     return true
   })
   const rules = (config.filter?.rules ?? []).filter((rule) => known.has(rule.property_id))
-  return { columns, sorts, filter: { rules }, wrap_cells: config.wrap_cells ?? false }
+  const kept = config.group_by != null && groupable(known.get(config.group_by)) ? config.group_by : null
+  const group_by = kept ?? (view.type === 'board' ? defaultGroupBy(properties) : null)
+  const groupProperty = group_by === null ? undefined : known.get(group_by)
+  const groups = (list: readonly (string | null)[] | undefined) =>
+    group_by !== kept || !groupProperty ? [] : [...new Set(list ?? [])].filter((id) => id === null || hasOption(groupProperty, id))
+  const card_properties = [...new Set(config.card_properties ?? [])].filter((id) => {
+    const property = known.get(id)
+    return property !== undefined && property.type !== 'title'
+  })
+  return {
+    columns,
+    sorts,
+    filter: { rules },
+    wrap_cells: config.wrap_cells ?? false,
+    group_by,
+    group_order: groups(config.group_order),
+    hidden_groups: groups(config.hidden_groups),
+    card_properties,
+  }
+}
+
+/** A board can group by a `select` or `status` property. */
+export function groupable(property: Property | undefined): boolean {
+  return property?.type === 'select' || property?.type === 'status'
+}
+
+function defaultGroupBy(properties: readonly Property[]): string | null {
+  return (properties.find((property) => property.type === 'status') ?? properties.find((property) => property.type === 'select'))?.id ?? null
+}
+
+function hasOption(property: Property | undefined, id: string): boolean {
+  return (property?.type === 'select' || property?.type === 'status') && property.config.options.some((option) => option.id === id)
 }
 
 /**
  * The rows a view shows: those that pass every filter rule, then those whose title or the
- * display text of a visible column contains `search` (ignoring case), in the view's sort order.
+ * display text of a visible column (a board: a card property) contains `search` (ignoring case),
+ * in the view's sort order.
  */
 export function applyView(database: Database, view: DatabaseView, search: string, ctx: ViewContext): Row[] {
   const config = repairConfig(view, database.properties)
@@ -49,11 +83,11 @@ export function applyView(database: Database, view: DatabaseView, search: string
   let rows = database.rows.filter((row) => rules.every(({ rule, property }) => matches(row, rule, property, ctx)))
   const term = search.trim().toLowerCase()
   if (term !== '') {
-    const searched = database.properties.filter(
-      (property) =>
-        property.type === 'title' ||
-        config.columns.some((column) => column.property_id === property.id && !column.hidden),
-    )
+    const shown = (property: Property) =>
+      view.type === 'board'
+        ? config.card_properties.includes(property.id)
+        : config.columns.some((column) => column.property_id === property.id && !column.hidden)
+    const searched = database.properties.filter((property) => property.type === 'title' || shown(property))
     rows = rows.filter((row) =>
       searched.some((property) => displayText(property, cellOf(row, property), ctx).toLowerCase().includes(term)),
     )

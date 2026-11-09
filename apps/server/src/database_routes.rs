@@ -175,6 +175,11 @@ struct MoveDatabaseRowBody {
     #[serde(deserialize_with = "required_nullable")]
     #[schema(required = true)]
     after_row_id: Option<String>,
+    /// Values written with the move, as in `PATCH …/rows/{row_id}/values` (a board card dropped
+    /// into another column sets its group value).
+    #[serde(default)]
+    #[schema(value_type = Object)]
+    values: BTreeMap<String, Value>,
 }
 
 /// The database's properties, views and live rows (at most 5,000), for clients that sort and
@@ -351,9 +356,9 @@ async fn create_database_view(
     let instance = format!("/api/v1/workspaces/{workspace}/databases/{database}/views");
     let (workspace_id, database_id, actor_id) =
         scope(&state, &headers, &workspace, &database, &instance, request).await?;
-    let ViewType::Table = body.view_type;
     let input = NewView {
         name: name(body.name, &instance, request)?,
+        view_type: body.view_type,
         config: body
             .config
             .map(|value| view_config(value, &instance, request))
@@ -569,7 +574,7 @@ async fn trash_database_rows(
         .map_err(|error| database_problem(error, instance, request))
 }
 
-/// Manual row order: puts the row first or right after another row.
+/// Manual row order: puts the row first or right after another row, and writes `values` with it.
 #[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/databases/{database_id}/rows/{row_id}/move", params(("workspace_id" = String, Path), ("database_id" = String, Path), ("row_id" = String, Path)), request_body = MoveDatabaseRowBody, responses((status = 200, body = DatabaseRow)))]
 async fn move_database_row(
     State(state): State<DatabaseState>,
@@ -590,6 +595,7 @@ async fn move_database_row(
                 .map_err(|_| validation("after_row_id", &instance, request))
         })
         .transpose()?;
+    let input = values(body.values, &instance, request)?;
     state
         .databases
         .move_row(
@@ -598,6 +604,7 @@ async fn move_database_row(
             row_id,
             actor_id,
             after,
+            input,
             request_id_value(request),
             TimestampMillis::now(),
         )

@@ -1744,15 +1744,34 @@ export type DatabaseViewColumn = {
 };
 
 /**
- * A table view's saved layout. Rules, sorts and columns that name a deleted property are
- * dropped when the view is read and saved.
+ * A view's saved layout. Rules, sorts, columns and cards that name a deleted property are dropped
+ * when the view is read and saved. The `group_*`, `hidden_groups` and `card_properties` fields
+ * belong to board views.
  */
 export type DatabaseViewConfig = {
+    /**
+     * Board: the properties shown on each card, in order. The title always shows.
+     */
+    card_properties?: Array<string>;
     /**
      * The order of the properties; properties missing here show at the end.
      */
     columns?: Array<DatabaseViewColumn>;
     filter?: DatabaseViewFilter;
+    /**
+     * Board: the `select` or `status` property whose options are the columns. A board without
+     * one falls back to the first status, else the first select property.
+     */
+    group_by?: string | null;
+    /**
+     * Board: option ids in column order, `null` for the "No <property>" column. Options missing
+     * here follow in the property's option order.
+     */
+    group_order?: Array<string | null>;
+    /**
+     * Board: option ids (or `null`) of the columns listed under "Hidden groups".
+     */
+    hidden_groups?: Array<string | null>;
     /**
      * At most 10.
      */
@@ -1772,7 +1791,7 @@ export type DatabaseViewSort = {
     property_id: string;
 };
 
-export type DatabaseViewType = 'table';
+export type DatabaseViewType = 'table' | 'board';
 
 export type DeleteAccountBody = {
     /**
@@ -2700,6 +2719,13 @@ export type MoveDatabaseRowBody = {
      * `null` moves the row first; otherwise right after that row.
      */
     after_row_id: string | null;
+    /**
+     * Values written with the move, as in `PATCH …/rows/{row_id}/values` (a board card dropped
+     * into another column sets its group value).
+     */
+    values?: {
+        [key: string]: unknown;
+    };
 };
 
 export type MoveFavoriteBody = {

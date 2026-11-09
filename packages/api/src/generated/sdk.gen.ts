@@ -2364,7 +2364,7 @@ export const trashDatabaseRows = <ThrowOnError extends boolean = false>(options:
 });
 
 /**
- * Manual row order: puts the row first or right after another row.
+ * Manual row order: puts the row first or right after another row, and writes `values` with it.
  */
 export const moveDatabaseRow = <ThrowOnError extends boolean = false>(options: Options<MoveDatabaseRowData, ThrowOnError>): RequestResult<MoveDatabaseRowResponses, MoveDatabaseRowErrors, ThrowOnError> => (options.client ?? client).post<MoveDatabaseRowResponses, MoveDatabaseRowErrors, ThrowOnError>({
     security: [{

@@ -4038,7 +4038,25 @@
     "sorts": null,
     "quick_filters": null,
     "configuration": {
-     "type": "board"
+     "type": "board",
+     "group_by": {
+      "type": "select",
+      "property_id": "s%3Bt"
+     },
+     "properties": [
+      {
+       "property_id": "title",
+       "visible": true
+      },
+      {
+       "property_id": "tg",
+       "visible": true
+      },
+      {
+       "property_id": "nt",
+       "visible": false
+      }
+     ]
     }
    },
    {
@@ -4071,6 +4089,23 @@
     "quick_filters": null,
     "configuration": {
      "type": "table"
+    }
+   },
+   {
+    "object": "view",
+    "id": "e9000000-0000-4000-8000-000000000005",
+    "parent": {
+     "type": "database_id",
+     "database_id": "d0000000-0000-4000-8000-000000000002"
+    },
+    "data_source_id": "d5000000-0000-4000-8000-000000000002",
+    "name": "Calendar",
+    "type": "calendar",
+    "filter": null,
+    "sorts": null,
+    "quick_filters": null,
+    "configuration": {
+     "type": "calendar"
     }
    }
   ],

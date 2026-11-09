@@ -47,6 +47,10 @@ describe('repairConfig', () => {
         ],
       },
       wrap_cells: false,
+      group_by: null,
+      group_order: [],
+      hidden_groups: [],
+      card_properties: [],
     })
   })
 
@@ -60,7 +64,31 @@ describe('repairConfig', () => {
       sorts: [],
       filter: { rules: [] },
       wrap_cells: true,
+      group_by: null,
+      group_order: [],
+      hidden_groups: [],
+      card_properties: [],
     })
+  })
+
+  test('a board keeps valid groups and cards, and falls back to the first status without a group property', () => {
+    const board = (config: DatabaseViewConfig) =>
+      repairConfig({ id: 'b', name: 'Board', type: 'board', config, position: 0 }, database.properties)
+    const kept = board({
+      group_by: 'p-sel',
+      group_order: ['o-c', null, 'gone', 'o-c', 's-todo'],
+      hidden_groups: [null, null],
+      card_properties: ['p-num', 'p-title', 'gone', 'p-num', 'p-text'],
+    })
+    expect([kept.group_by, kept.group_order, kept.hidden_groups, kept.card_properties]).toEqual([
+      'p-sel',
+      ['o-c', null],
+      [null],
+      ['p-num', 'p-text'],
+    ])
+    const fallback = board({ group_by: 'p-multi', group_order: ['t-x'], hidden_groups: ['t-x'] })
+    expect([fallback.group_by, fallback.group_order, fallback.hidden_groups]).toEqual(['p-status', [], []])
+    expect(repairConfig(view({ group_by: 'gone' }), database.properties).group_by).toBeNull()
   })
 })
 

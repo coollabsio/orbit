@@ -1,5 +1,5 @@
-//! Docs databases (P1): a page of kind `database` holds typed properties, saved table views and
-//! rows. A row is a page whose parent is the database page, so rows get co-editing, comments,
+//! Docs databases (P1): a page of kind `database` holds typed properties, saved table and board
+//! views and rows. A row is a page whose parent is the database page, so rows get co-editing, comments,
 //! history, trash and search as pages. A row's property values live in `page_property_values`
 //! (a missing row is an empty value); the `title`, `created_*` and `last_edited_*` properties store
 //! nothing and read the row's page columns. Access is the database page's: whoever sees the page
@@ -925,6 +925,24 @@ fn from_text(new_type: PropertyType, texts: Vec<(String, String)>) -> Conversion
 pub enum ViewType {
     #[default]
     Table,
+    Board,
+}
+
+impl ViewType {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Table => "table",
+            Self::Board => "board",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "table" => Some(Self::Table),
+            "board" => Some(Self::Board),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, ToSchema)]
@@ -1124,8 +1142,9 @@ pub struct ViewFilter {
     pub rules: Vec<FilterRule>,
 }
 
-/// A table view's saved layout. Rules, sorts and columns that name a deleted property are
-/// dropped when the view is read and saved.
+/// A view's saved layout. Rules, sorts, columns and cards that name a deleted property are dropped
+/// when the view is read and saved. The `group_*`, `hidden_groups` and `card_properties` fields
+/// belong to board views.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 #[schema(as = DatabaseViewConfig)]
@@ -1140,6 +1159,49 @@ pub struct ViewConfig {
     pub filter: ViewFilter,
     #[serde(default)]
     pub wrap_cells: bool,
+    /// Board: the `select` or `status` property whose options are the columns. A board without
+    /// one falls back to the first status, else the first select property.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub group_by: Option<Id>,
+    /// Board: option ids in column order, `null` for the "No <property>" column. Options missing
+    /// here follow in the property's option order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub group_order: Vec<Option<String>>,
+    /// Board: option ids (or `null`) of the columns listed under "Hidden groups".
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hidden_groups: Vec<Option<String>>,
+    /// Board: the properties shown on each card, in order. The title always shows.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schema(value_type = Vec<String>)]
+    pub card_properties: Vec<Id>,
+}
+
+/// Option ids, plus `null` for "no value", that a board can group by. Groups that name no option of
+/// `kind` are dropped, and repeats.
+fn retain_groups(groups: &mut Vec<Option<String>>, kind: Option<&PropertyKind>) {
+    let mut seen = HashSet::new();
+    groups.retain(|group| {
+        kind.is_some_and(|kind| group.as_deref().is_none_or(|id| kind.has_option(id)))
+            && seen.insert(group.clone())
+    });
+}
+
+const fn groupable(kind: &PropertyKind) -> bool {
+    matches!(kind, PropertyKind::Select(_) | PropertyKind::Status(_))
+}
+
+/// The property a board groups by when it names none: the first status, else the first select.
+fn default_group_by(properties: &[Property]) -> Option<Id> {
+    properties
+        .iter()
+        .find(|property| matches!(property.kind, PropertyKind::Status(_)))
+        .or_else(|| {
+            properties
+                .iter()
+                .find(|property| matches!(property.kind, PropertyKind::Select(_)))
+        })
+        .map(|property| property.id)
 }
 
 impl ViewConfig {
@@ -1149,6 +1211,36 @@ impl ViewConfig {
             columns: properties.iter().map(Property::column).collect(),
             ..Self::default()
         }
+    }
+
+    /// Drops what names a property not in `properties`, repeats, and groups that are not options of
+    /// the group property. A board whose group property is gone or no longer a select or status
+    /// groups by the default one, with the default group order.
+    fn repair(&mut self, view_type: ViewType, properties: &[Property]) {
+        self.retain_known(properties);
+        let kind = |id: Id| {
+            properties
+                .iter()
+                .find(|property| property.id == id)
+                .map(|property| &property.kind)
+        };
+        let group_by = self.group_by.filter(|id| kind(*id).is_some_and(groupable));
+        let group_by = match view_type {
+            ViewType::Board => group_by.or_else(|| default_group_by(properties)),
+            ViewType::Table => group_by,
+        };
+        if group_by != self.group_by {
+            self.group_order.clear();
+            self.hidden_groups.clear();
+            self.group_by = group_by;
+        }
+        let group_kind = self.group_by.and_then(kind);
+        retain_groups(&mut self.group_order, group_kind);
+        retain_groups(&mut self.hidden_groups, group_kind);
+        let mut cards = HashSet::new();
+        self.card_properties.retain(|id| {
+            kind(*id).is_some_and(|kind| *kind != PropertyKind::Title) && cards.insert(*id)
+        });
     }
 
     /// Drops what names a property not in `properties` and repeated columns and sorts.
@@ -1168,7 +1260,7 @@ impl ViewConfig {
 
     /// Checks limits, widths and each rule against its property's type, then drops what names
     /// unknown properties. Errors name the field path.
-    pub fn validate(&mut self, properties: &[Property]) -> Result<(), String> {
+    pub fn validate(&mut self, view_type: ViewType, properties: &[Property]) -> Result<(), String> {
         if self.sorts.len() > MAX_SORTS {
             return Err("config.sorts".to_owned());
         }
@@ -1182,6 +1274,21 @@ impl ViewConfig {
             if !(MIN_WIDTH..=MAX_WIDTH).contains(&column.width) {
                 return Err(format!("config.columns[{index}].width"));
             }
+        }
+        if self.group_order.len() > MAX_OPTIONS + 1 {
+            return Err("config.group_order".to_owned());
+        }
+        if self.hidden_groups.len() > MAX_OPTIONS + 1 {
+            return Err("config.hidden_groups".to_owned());
+        }
+        if self.card_properties.len() > MAX_PROPERTIES {
+            return Err("config.card_properties".to_owned());
+        }
+        if let Some(group_by) = self.group_by
+            && let Some(property) = properties.iter().find(|property| property.id == group_by)
+            && !groupable(&property.kind)
+        {
+            return Err("config.group_by".to_owned());
         }
         let types: HashMap<Id, PropertyType> = properties
             .iter()
@@ -1198,7 +1305,7 @@ impl ViewConfig {
                 return Err(format!("config.filter.rules[{index}].value"));
             }
         }
-        self.retain_known(properties);
+        self.repair(view_type, properties);
         Ok(())
     }
 
@@ -1234,6 +1341,10 @@ impl ViewConfig {
             .rules
             .iter_mut()
             .for_each(|rule| map(&mut rule.property_id));
+        if let Some(group_by) = &mut self.group_by {
+            map(group_by);
+        }
+        self.card_properties.iter_mut().for_each(map);
     }
 }
 
@@ -1376,6 +1487,8 @@ pub struct PropertyChanges {
 
 pub struct NewView {
     pub name: String,
+    /// Ignored with `duplicate_of`: a copy keeps its source's type.
+    pub view_type: ViewType,
     pub config: Option<ViewConfig>,
     pub duplicate_of: Option<Id>,
 }
@@ -1761,7 +1874,7 @@ impl DatabaseRepository {
         renumber_rows(&mut tx, "database_properties", &properties_ids(&properties)).await?;
         for mut view in raw_views(&mut tx, database_id).await? {
             let before = view.config.clone();
-            view.config.retain_known(&properties);
+            view.config.repair(view.view_type, &properties);
             if view.config != before {
                 write_view_config(&mut tx, view.id, &view.config, now).await?;
             }
@@ -1797,22 +1910,28 @@ impl DatabaseRepository {
         if views.len() >= MAX_VIEWS {
             return Err(DatabaseError::ViewLimit);
         }
-        let mut config = match (input.config, input.duplicate_of) {
+        let source = input
+            .duplicate_of
+            .map(|source| {
+                views
+                    .iter()
+                    .find(|view| view.id == source)
+                    .ok_or_else(|| DatabaseError::invalid("duplicate_of"))
+            })
+            .transpose()?;
+        let view_type = source.map_or(input.view_type, |view| view.view_type);
+        let mut config = match (input.config, source) {
             (Some(config), _) => config,
-            (None, Some(source)) => views
-                .iter()
-                .find(|view| view.id == source)
-                .map(|view| view.config.clone())
-                .ok_or_else(|| DatabaseError::invalid("duplicate_of"))?,
+            (None, Some(source)) => source.config.clone(),
             (None, None) => ViewConfig::for_properties(&properties),
         };
         config
-            .validate(&properties)
+            .validate(view_type, &properties)
             .map_err(DatabaseError::invalid)?;
         let view = DatabaseView {
             id: Id::new_v7(),
             name: input.name,
-            view_type: ViewType::Table,
+            view_type,
             config,
             position: views.len() as i64,
         };
@@ -1854,7 +1973,7 @@ impl DatabaseRepository {
         let mut view = views.remove(index);
         if let Some(mut config) = changes.config {
             config
-                .validate(&properties)
+                .validate(view.view_type, &properties)
                 .map_err(DatabaseError::invalid)?;
             view.config = config;
         }
@@ -1886,7 +2005,7 @@ impl DatabaseRepository {
         )
         .await?;
         tx.commit().await?;
-        view.config.retain_known(&properties);
+        view.config.repair(view.view_type, &properties);
         Ok(view)
     }
 
@@ -2053,34 +2172,7 @@ impl DatabaseRepository {
         require_row(&mut tx, database_id, row_id).await?;
         let properties = properties_in_tx(&mut tx, database_id).await?;
         let values = parse_values(&mut tx, workspace_id, &properties, &input).await?;
-        let row = row_id.to_string();
-        for (property_id, value) in &values {
-            match value {
-                Some(value) => {
-                    upsert_value(
-                        &mut tx,
-                        workspace_id,
-                        &row,
-                        *property_id,
-                        value,
-                        actor_id,
-                        now,
-                    )
-                    .await?;
-                }
-                None => delete_value(&mut tx, &row, *property_id).await?,
-            }
-        }
-        sqlx::query(
-            "UPDATE pages SET updated_by = $1, updated_at = CASE WHEN updated_at < $2 THEN $3 ELSE updated_at + 1 END \
-             WHERE id = $4",
-        )
-        .bind(actor_id.to_string())
-        .bind(now.as_millis())
-        .bind(now.as_millis())
-        .bind(&row)
-        .execute(&mut *tx)
-        .await?;
+        write_values(&mut tx, workspace_id, row_id, &values, actor_id, now).await?;
         record_with(
             &mut tx,
             workspace_id,
@@ -2088,7 +2180,7 @@ impl DatabaseRepository {
             "database.values_updated",
             database_id,
             json!({
-                "row_id": row,
+                "row_id": row_id.to_string(),
                 "property_ids": values.iter().map(|(id, _)| id.to_string()).collect::<Vec<_>>(),
             }),
             request_id,
@@ -2165,7 +2257,8 @@ impl DatabaseRepository {
         Ok(())
     }
 
-    /// Puts a row first (`None`) or right after another row (manual order).
+    /// Puts a row first (`None`) or right after another row (manual order), and writes `values`
+    /// in the same transaction (a board card moved to another column).
     #[allow(clippy::too_many_arguments)]
     pub async fn move_row(
         &self,
@@ -2174,12 +2267,18 @@ impl DatabaseRepository {
         row_id: Id,
         actor_id: Id,
         after: Option<Id>,
+        values: Vec<(Id, Value)>,
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<DatabaseRow, DatabaseError> {
         let mut tx = self.database.immediate_transaction().await?;
         let page = open(&mut tx, workspace_id, database_id, actor_id).await?;
         require_row(&mut tx, database_id, row_id).await?;
+        if !values.is_empty() {
+            let properties = properties_in_tx(&mut tx, database_id).await?;
+            let values = parse_values(&mut tx, workspace_id, &properties, &values).await?;
+            write_values(&mut tx, workspace_id, row_id, &values, actor_id, now).await?;
+        }
         let mut siblings = sibling_ids(
             &mut tx,
             workspace_id,
@@ -2304,6 +2403,37 @@ async fn parse_values(
         values.push((*property_id, value));
     }
     Ok(values)
+}
+
+/// Writes parsed values (`None` clears) and stamps the row's `updated_at` and `updated_by`.
+async fn write_values(
+    tx: &mut Transaction<'_, Any>,
+    workspace_id: Id,
+    row_id: Id,
+    values: &[(Id, Option<CellValue>)],
+    actor_id: Id,
+    now: TimestampMillis,
+) -> Result<(), DatabaseError> {
+    let row = row_id.to_string();
+    for (property_id, value) in values {
+        match value {
+            Some(value) => {
+                upsert_value(tx, workspace_id, &row, *property_id, value, actor_id, now).await?;
+            }
+            None => delete_value(tx, &row, *property_id).await?,
+        }
+    }
+    sqlx::query(
+            "UPDATE pages SET updated_by = $1, updated_at = CASE WHEN updated_at < $2 THEN $3 ELSE updated_at + 1 END \
+             WHERE id = $4",
+        )
+        .bind(actor_id.to_string())
+        .bind(now.as_millis())
+        .bind(now.as_millis())
+        .bind(&row)
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
 }
 
 async fn upsert_value(
@@ -2484,7 +2614,7 @@ async fn raw_views(
     database_id: Id,
 ) -> Result<Vec<DatabaseView>, DatabaseError> {
     let rows = sqlx::query(
-        "SELECT id, name, config_json, position FROM database_views \
+        "SELECT id, name, type, config_json, position FROM database_views \
          WHERE database_id = $1 ORDER BY position, id",
     )
     .bind(database_id.to_string())
@@ -2495,7 +2625,8 @@ async fn raw_views(
             Ok(DatabaseView {
                 id: parse_id(&row.get::<String, _>("id"))?,
                 name: row.get("name"),
-                view_type: ViewType::Table,
+                view_type: ViewType::parse(&row.get::<String, _>("type"))
+                    .ok_or(DatabaseError::Corrupt)?,
                 config: serde_json::from_str(&row.get::<String, _>("config_json"))
                     .map_err(|_| DatabaseError::Corrupt)?,
                 position: row.get("position"),
@@ -2504,7 +2635,7 @@ async fn raw_views(
         .collect()
 }
 
-/// The views as clients see them: without what names deleted properties.
+/// The views as clients see them: repaired against the current properties.
 async fn views_in_tx(
     tx: &mut Transaction<'_, Any>,
     database_id: Id,
@@ -2512,7 +2643,7 @@ async fn views_in_tx(
 ) -> Result<Vec<DatabaseView>, DatabaseError> {
     let mut views = raw_views(tx, database_id).await?;
     for view in &mut views {
-        view.config.retain_known(properties);
+        view.config.repair(view.view_type, properties);
     }
     Ok(views)
 }
@@ -2635,12 +2766,13 @@ async fn insert_view(
 ) -> Result<(), DatabaseError> {
     sqlx::query(
         "INSERT INTO database_views (id, workspace_id, database_id, name, type, config_json, position, created_at, updated_at) \
-         VALUES ($1, $2, $3, $4, 'table', $5, $6, $7, $8)",
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
     )
     .bind(view.id.to_string())
     .bind(workspace_id.to_string())
     .bind(database_id.to_string())
     .bind(&view.name)
+    .bind(view.view_type.as_str())
     .bind(serde_json::to_string(&view.config).map_err(|_| DatabaseError::Corrupt)?)
     .bind(view.position)
     .bind(now.as_millis())
@@ -2659,9 +2791,10 @@ pub struct SchemaProperty {
     pub config: Value,
 }
 
-/// A table view of a [`DatabaseSchema`]. Empty `columns` show every property.
+/// A view of a [`DatabaseSchema`]. Empty `columns` show every property.
 pub struct SchemaView {
     pub name: String,
+    pub view_type: ViewType,
     pub config: ViewConfig,
 }
 
@@ -2733,12 +2866,12 @@ impl DatabaseSchema {
                 }
                 dropped += config.drop_unfit_rules(&properties);
                 config
-                    .validate(&properties)
+                    .validate(input.view_type, &properties)
                     .map_err(|field| DatabaseError::invalid(format!("views[{index}].{field}")))?;
                 Ok(DatabaseView {
                     id: Id::new_v7(),
                     name,
-                    view_type: ViewType::Table,
+                    view_type: input.view_type,
                     config,
                     position: index as i64,
                 })

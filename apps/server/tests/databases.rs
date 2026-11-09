@@ -1490,3 +1490,173 @@ async fn database_writes_are_audited_and_emit_realtime_events() {
         ]
     );
 }
+
+#[tokio::test]
+async fn board_views_check_and_repair_their_grouping() {
+    let fixture = Fixture::new().await;
+    let db = fixture.create_database("Board").await;
+    let database = fixture.database(&db).await;
+    let tags = id_of(property(&database, "Tags")).to_owned();
+    let name = id_of(property(&database, "Name")).to_owned();
+
+    let board = fixture
+        .ok(
+            "POST",
+            &format!("databases/{db}/views"),
+            Some(json!({"name": "Board", "type": "board"})),
+        )
+        .await;
+    assert_eq!(board["type"], "board");
+    assert_eq!(
+        board["config"].get("group_by"),
+        None,
+        "no select or status property to group by"
+    );
+    let view = id_of(&board).to_owned();
+    let (status, body) = fixture
+        .call(
+            "POST",
+            &format!("databases/{db}/views"),
+            Some(json!({"name": "Gallery", "type": "gallery"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+
+    let priority = fixture
+        .add_property(
+            &db,
+            json!({"name": "Priority", "type": "select", "config": {"options": [{"name": "High"}, {"name": "Low"}]}}),
+        )
+        .await;
+    let priority_id = id_of(&priority).to_owned();
+    let high = option_id(&priority, "High");
+    let low = option_id(&priority, "Low");
+    let state = fixture
+        .add_property(&db, json!({"name": "State", "type": "status"}))
+        .await;
+    let state_id = id_of(&state).to_owned();
+    let views = fixture.database(&db).await["views"].clone();
+    assert_eq!(
+        views[1]["config"]["group_by"], state_id,
+        "a board without a group property groups by the first status"
+    );
+
+    let (status, body) = fixture
+        .call(
+            "PATCH",
+            &format!("databases/{db}/views/{view}"),
+            Some(json!({"config": {"group_by": tags}})),
+        )
+        .await;
+    assert_eq!(
+        (status, body["detail"].as_str()),
+        (StatusCode::UNPROCESSABLE_ENTITY, Some("config.group_by")),
+        "a multi-select cannot group a board"
+    );
+
+    let saved = fixture
+        .ok(
+            "PATCH",
+            &format!("databases/{db}/views/{view}"),
+            Some(json!({"config": {
+                "group_by": priority_id,
+                "group_order": [low, null, "bogus", high, low],
+                "hidden_groups": [null, "bogus"],
+                "card_properties": [tags, name, tags, Id::new_v7().to_string()],
+            }})),
+        )
+        .await;
+    assert_eq!(
+        saved["config"],
+        json!({
+            "columns": [], "sorts": [], "filter": {"rules": []}, "wrap_cells": false,
+            "group_by": priority_id, "group_order": [low, null, high], "hidden_groups": [null],
+            "card_properties": [tags],
+        }),
+        "unknown groups, repeats, the title and unknown properties are dropped"
+    );
+
+    let copy = fixture
+        .ok(
+            "POST",
+            &format!("databases/{db}/views"),
+            Some(json!({"name": "Board 2", "type": "table", "duplicate_of": view})),
+        )
+        .await;
+    assert_eq!(copy["type"], "board", "a copy keeps its source's type");
+    assert_eq!(copy["config"], saved["config"]);
+
+    fixture
+        .ok(
+            "DELETE",
+            &format!("databases/{db}/properties/{priority_id}"),
+            None,
+        )
+        .await;
+    let views = fixture.database(&db).await["views"].clone();
+    assert_eq!(
+        views[1]["config"],
+        json!({
+            "columns": [], "sorts": [], "filter": {"rules": []}, "wrap_cells": false,
+            "group_by": state_id, "card_properties": [tags],
+        }),
+        "a deleted group property falls back to the first status, with the default order"
+    );
+}
+
+#[tokio::test]
+async fn moving_a_card_sets_its_group_and_its_place_in_one_request() {
+    let fixture = Fixture::new().await;
+    let db = fixture.create_database("Cards").await;
+    let priority = fixture
+        .add_property(
+            &db,
+            json!({"name": "Priority", "type": "select", "config": {"options": [{"name": "High"}, {"name": "Low"}]}}),
+        )
+        .await;
+    let priority_id = id_of(&priority).to_owned();
+    let high = option_id(&priority, "High");
+    let low = option_id(&priority, "Low");
+    let a = fixture
+        .add_row(&db, json!({"title": "A", "values": {&priority_id: high}}))
+        .await;
+    let b = fixture
+        .add_row(&db, json!({"title": "B", "values": {&priority_id: high}}))
+        .await;
+    let c = fixture
+        .add_row(&db, json!({"title": "C", "values": {&priority_id: low}}))
+        .await;
+
+    let moved = fixture
+        .ok(
+            "POST",
+            &format!("databases/{db}/rows/{}/move", id_of(&b)),
+            Some(json!({"after_row_id": id_of(&c), "values": {&priority_id: low}})),
+        )
+        .await;
+    assert_eq!(moved["values"], json!({&priority_id: low}));
+    assert_eq!(moved["position"], 2);
+    assert_eq!(names(&fixture.database(&db).await["rows"]), ["A", "C", "B"]);
+
+    let (status, body) = fixture
+        .call(
+            "POST",
+            &format!("databases/{db}/rows/{}/move", id_of(&a)),
+            Some(json!({"after_row_id": id_of(&b), "values": {&priority_id: "bogus"}})),
+        )
+        .await;
+    assert_eq!(
+        (status, body["detail"].as_str()),
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Some(format!("values.{priority_id}").as_str())
+        )
+    );
+    let database = fixture.database(&db).await;
+    assert_eq!(
+        names(&database["rows"]),
+        ["A", "C", "B"],
+        "a bad value moves nothing"
+    );
+    assert_eq!(database["rows"][0]["values"], json!({&priority_id: high}));
+}

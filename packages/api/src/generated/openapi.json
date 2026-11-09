@@ -24189,7 +24189,7 @@
         "tags": [
           "crate::database_routes"
         ],
-        "summary": "Manual row order: puts the row first or right after another row.",
+        "summary": "Manual row order: puts the row first or right after another row, and writes `values` with it.",
         "operationId": "move_database_row",
         "parameters": [
           {
@@ -49360,8 +49360,15 @@
       },
       "DatabaseViewConfig": {
         "type": "object",
-        "description": "A table view's saved layout. Rules, sorts and columns that name a deleted property are\ndropped when the view is read and saved.",
+        "description": "A view's saved layout. Rules, sorts, columns and cards that name a deleted property are dropped\nwhen the view is read and saved. The `group_*`, `hidden_groups` and `card_properties` fields\nbelong to board views.",
         "properties": {
+          "card_properties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Board: the properties shown on each card, in order. The title always shows."
+          },
           "columns": {
             "type": "array",
             "items": {
@@ -49371,6 +49378,33 @@
           },
           "filter": {
             "$ref": "#/components/schemas/DatabaseViewFilter"
+          },
+          "group_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Board: the `select` or `status` property whose options are the columns. A board without\none falls back to the first status, else the first select property."
+          },
+          "group_order": {
+            "type": "array",
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "description": "Board: option ids in column order, `null` for the \"No <property>\" column. Options missing\nhere follow in the property's option order."
+          },
+          "hidden_groups": {
+            "type": "array",
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "description": "Board: option ids (or `null`) of the columns listed under \"Hidden groups\"."
           },
           "sorts": {
             "type": "array",
@@ -49417,7 +49451,8 @@
       "DatabaseViewType": {
         "type": "string",
         "enum": [
-          "table"
+          "table",
+          "board"
         ]
       },
       "DeleteAccountBody": {
@@ -52064,6 +52099,10 @@
               "null"
             ],
             "description": "`null` moves the row first; otherwise right after that row."
+          },
+          "values": {
+            "type": "object",
+            "description": "Values written with the move, as in `PATCH …/rows/{row_id}/values` (a board card dropped\ninto another column sets its group value)."
           }
         },
         "additionalProperties": false

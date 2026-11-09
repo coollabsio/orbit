@@ -2271,7 +2271,7 @@ async fn databases_import_with_typed_properties_values_and_views() {
         json!({
             "files_as_names": 1, "formula_values": 1, "invalid_values": 1, "number_format": 1,
             "people_as_text": 1, "relation_titles": 1, "rollup_values": 1,
-            "unmatched_people": 26, "view_filter": 2, "view_sort": 1, "view_type:board": 1,
+            "unmatched_people": 26, "view_filter": 2, "view_sort": 1, "view_type:calendar": 1,
             "views_unavailable": 1
         })
     );
@@ -2453,9 +2453,18 @@ async fn databases_import_with_typed_properties_values_and_views() {
         "26 relations: {related}"
     );
 
-    assert_eq!(coverage.views(), ["All", "Board", "Either"]);
+    assert_eq!(coverage.views(), ["All", "Board", "Either", "Calendar"]);
     let all = &coverage.detail["views"][0]["config"];
     let id_of = |name: &str| coverage.property(name)["id"].clone();
+    let board = &coverage.detail["views"][1];
+    assert_eq!(board["type"], "board");
+    assert_eq!(
+        board["config"]["group_by"],
+        id_of("Stage"),
+        "the board groups by its Notion property"
+    );
+    assert_eq!(board["config"]["card_properties"], json!([id_of("Tags")]));
+    assert_eq!(coverage.detail["views"][3]["type"], "table");
     assert_eq!(
         all["sorts"],
         json!([{"property_id": id_of("Estimate"), "direction": "desc"}])
