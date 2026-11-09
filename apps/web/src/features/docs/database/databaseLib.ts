@@ -1,6 +1,4 @@
-import type { DatabaseFilterRule, Property, Row, ViewConfig, ViewContext } from '@orbit/database/types'
-import { options } from '@orbit/database/values'
-import { OPERATOR_LABELS, RELATIVE_DATES, operatorsOf } from './propertyMeta'
+import type { Row, ViewConfig } from '@orbit/database/types'
 
 /** `config` with the column of `propertyId` moved next to `targetId` (`side` of it). */
 export function placeColumn(config: ViewConfig, propertyId: string, targetId: string, side: 'left' | 'right'): ViewConfig {
@@ -32,33 +30,6 @@ export function withPinnedRows(shown: readonly Row[], pins: readonly Pin[], all:
   const pinned = new Set(pins.map((pin) => pin.id))
   const pick = (at: Pin['at']) => pins.filter((pin) => pin.at === at).flatMap((pin) => byId.get(pin.id) ?? [])
   return [...pick('top'), ...shown.filter((row) => !pinned.has(row.id)), ...pick('bottom')]
-}
-
-/** A new filter rule on a property: its type's first operator and no value, which matches every row. */
-export function newRule(property: Property): DatabaseFilterRule {
-  return { property_id: property.id, operator: operatorsOf(property.type)[0], value: null }
-}
-
-/** The chip text after the property name (spec 7.1): `Reading`, `contains “abc”`, `is empty`. */
-export function ruleSummary(rule: DatabaseFilterRule, property: Property, ctx: ViewContext): string {
-  const operator = OPERATOR_LABELS[rule.operator]
-  if (rule.operator === 'is_empty' || rule.operator === 'is_not_empty') return operator
-  const value = rule.value
-  if (value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0)) return 'All'
-  if (property.type === 'checkbox') return value === true ? 'Checked' : 'Unchecked'
-  if (Array.isArray(value)) {
-    const names = value.map((id) =>
-      id === 'me' ? 'Me' : typeof id !== 'string' ? '' : options(property).find((option) => option.id === id)?.name ?? ctx.members.get(id) ?? '',
-    )
-    const listed = names.filter((name) => name !== '').join(', ')
-    return rule.operator === 'is' || rule.operator === 'contains' ? listed : `${operator} ${listed}`
-  }
-  if (typeof value === 'string') {
-    const relative = RELATIVE_DATES.find((date) => date.value === value)?.label
-    if (relative || /^\d{4}-\d{2}-\d{2}/.test(value)) return `${operator} ${relative ?? value.slice(0, 10)}`
-    return `${operator} “${value}”`
-  }
-  return `${operator} ${String(value)}`
 }
 
 /** The rows before and after `rowId` in the view's order (spec 7.5); null at an end, or when the view does not show it. */

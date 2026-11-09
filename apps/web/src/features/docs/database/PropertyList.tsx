@@ -10,7 +10,8 @@ import { CellEditor } from './cells/CellEditor'
 import { CellView } from './cells/CellView'
 import { NewPropertyForm } from './ColumnHeaderMenu'
 import { DatabaseEnvContext, useDatabaseEnv, useDatabaseEnvValue } from './context'
-import { isComputed, PROPERTY_TYPES } from './propertyMeta'
+import { isComputed } from '@orbit/database/meta'
+import { PROPERTY_TYPES } from './propertyMeta'
 
 interface PropertyListProps {
   workspaceId: string

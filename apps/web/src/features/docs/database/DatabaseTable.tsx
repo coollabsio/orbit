@@ -15,7 +15,7 @@ import { AddPropertyButton, ColumnHeaderMenu } from './ColumnHeaderMenu'
 import { useDatabaseEnv } from './context'
 import { dropAfterRowId } from './databaseLib'
 import { GripIcon } from './GripIcon'
-import { isComputed } from './propertyMeta'
+import { isComputed } from '@orbit/database/meta'
 
 const ROW_HEIGHT = 33
 const MIN_WIDTH = 32

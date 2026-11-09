@@ -12,7 +12,7 @@ import { UserAvatar } from '@/components/common/UserAvatar'
 import { cellOf, numberEditText, numberFromEditText, options, parseValue } from '@orbit/database/values'
 import { OPTION_COLORS, type CellValue, type DatePoint, type OptionColor, type Property, type Row, type SelectOption } from '@orbit/database/types'
 import { useDatabaseEnv } from '../context'
-import { OPTION_COLOR_LABELS } from '../propertyMeta'
+import { OPTION_COLOR_LABELS } from '@orbit/database/meta'
 import { Pill } from './Pill'
 
 export type EditEnd = 'stay' | 'down' | 'next' | 'previous'

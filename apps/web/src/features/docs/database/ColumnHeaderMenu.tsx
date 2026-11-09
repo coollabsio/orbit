@@ -26,7 +26,8 @@ import type { DatabasePropertyType, Property, ViewConfig } from '@orbit/database
 import { databaseErrorMessage, previewPropertyUpdate, useCreateProperty, useDeleteProperty, useUpdateProperty } from './api'
 import { useDatabaseEnv } from './context'
 import { placeColumn } from './databaseLib'
-import { CREATABLE_TYPES, PROPERTY_TYPES, isComputed } from './propertyMeta'
+import { isComputed } from '@orbit/database/meta'
+import { CREATABLE_TYPES, PROPERTY_TYPES } from './propertyMeta'
 
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'HUF']
 

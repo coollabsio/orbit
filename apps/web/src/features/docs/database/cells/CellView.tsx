@@ -7,7 +7,7 @@ import { UserAvatar } from '@/components/common/UserAvatar'
 import { cellOf, displayText, options } from '@orbit/database/values'
 import type { Property, Row, StatusOption } from '@orbit/database/types'
 import { useDatabaseEnv } from '../context'
-import { isComputed } from '../propertyMeta'
+import { isComputed } from '@orbit/database/meta'
 import { Pill } from './Pill'
 
 interface CellViewProps {

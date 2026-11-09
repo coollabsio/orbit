@@ -11,8 +11,8 @@ import { options } from '@orbit/database/values'
 import type { DatabaseFilterOperator, DatabaseFilterRule, Property, ViewConfig } from '@orbit/database/types'
 import { Pill } from './cells/Pill'
 import { useDatabaseEnv } from './context'
-import { newRule, ruleSummary } from './databaseLib'
-import { OPERATOR_LABELS, PROPERTY_TYPES, RELATIVE_DATES, operatorsOf } from './propertyMeta'
+import { OPERATOR_LABELS, RELATIVE_DATES, newRule, operatorsOf, ruleNeedsValue, ruleSummary } from '@orbit/database/meta'
+import { PROPERTY_TYPES } from './propertyMeta'
 
 const MAX_RULES = 20
 
@@ -171,9 +171,9 @@ function RuleChip({ rule, property, open, onOpenChange, onChange, onRemove }: {
 function RuleEditor({ rule, property, onChange }: { rule: DatabaseFilterRule; property: Property; onChange: (rule: DatabaseFilterRule) => void }) {
   const operators = operatorsOf(property.type)
   const items = operators.map((operator) => ({ value: operator, label: OPERATOR_LABELS[operator] }))
-  const needsValue = rule.operator !== 'is_empty' && rule.operator !== 'is_not_empty'
+  const needsValue = ruleNeedsValue(rule.operator)
   const setOperator = (operator: DatabaseFilterOperator) =>
-    onChange({ ...rule, operator, value: operator === 'is_empty' || operator === 'is_not_empty' ? null : rule.value })
+    onChange({ ...rule, operator, value: ruleNeedsValue(operator) ? rule.value : null })
   return (
     <>
       <div className="flex items-center gap-2">
