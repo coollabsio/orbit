@@ -42,6 +42,8 @@ export interface TaskBoardProps {
 }
 
 const COLUMN_WIDTH = 320
+/** Cards a column (or lane cell) renders before "Show more": every card mounts four pickers, so 1,800 cards froze the page. */
+export const BOARD_PAGE_SIZE = 50
 /** Kanban: columns from the grouping, optional swim lanes from the sub-grouping; drops rewrite both fields. */
 export function TaskBoard({ tasks, users, labels, statuses, projects, display, groupContext, collapseScope, activeTaskId, onOpen }: TaskBoardProps) {
   const { workspace } = useWorkspace()
@@ -78,6 +80,7 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
   // the card whose header date picker is open: it stays in the header after the first pick gives the task a date,
   // so the picker is not unmounted while a range or a time is still being picked
   const [settingDueId, setSettingDueId] = useState<string | null>(null)
+  const [shownByZone, setShownByZone] = useState<Record<string, number>>({})
 
   const dragEnabled = canDrag(display)
   const { columns, lanes } = boardGrid(tasks, display, groupContext)
@@ -191,13 +194,17 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
 
   const renderCards = (zone: string, values: GroupValues, cell: Task[], emptyLabel: boolean) => {
     const placeholderIndex = drop?.zone === zone ? drop.index : null
+    // the shown cards are a prefix of the cell, so a drop slot among them is the same slot in the whole cell
+    const limit = shownByZone[zone] ?? BOARD_PAGE_SIZE
+    const shown = cell.length > limit ? cell.slice(0, limit) : cell
+    const hidden = cell.length - shown.length
     // the dragged card stays mounted (faded): unmounting the drag source cancels the browser drag
-    const others = drag ? cell.filter((task) => task.id !== drag.taskId) : cell
+    const others = drag ? shown.filter((task) => task.id !== drag.taskId) : shown
     // held (a card owns the hover): hidden but keeps its space, so the cards under the pointer do not shift
     const placeholder = <div data-board-placeholder data-held={(drop?.zone === zone && drop.held) || undefined} className="min-h-11 rounded-md border border-dashed border-primary/40 bg-primary/10 data-held:invisible" style={{ height: dragHeight }} />
     return (
       <>
-        {cell.map((task) => {
+        {shown.map((task) => {
           const isDragged = drag?.taskId === task.id
           // placeholder slot index counts only the cards that can receive the drop
           const slot = isDragged ? -1 : others.indexOf(task)
@@ -209,6 +216,18 @@ export function TaskBoard({ tasks, users, labels, statuses, projects, display, g
           )
         })}
         {placeholderIndex !== null && placeholderIndex >= others.length ? placeholder : null}
+        {hidden > 0 ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="w-full text-xs text-muted-foreground"
+            onClick={() => setShownByZone((current) => ({ ...current, [zone]: limit + BOARD_PAGE_SIZE }))}
+          >
+            Show {Math.min(hidden, BOARD_PAGE_SIZE)} more
+            <span className="font-normal text-muted-foreground/70 tabular-nums">({hidden} hidden)</span>
+          </Button>
+        ) : null}
         {emptyLabel && others.length === 0 && drop?.zone !== zone ? <div className="flex h-[72px] items-center justify-center text-xs text-muted-foreground/70">No tasks</div> : null}
       </>
     )

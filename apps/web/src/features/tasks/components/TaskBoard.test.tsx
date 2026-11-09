@@ -7,7 +7,7 @@ import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
 import type { GroupContext } from '@/features/views/grouping'
 import { DEFAULT_DISPLAY, type DisplayOptions } from '@/features/views/viewState'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
-import { TaskBoard } from './TaskBoard'
+import { BOARD_PAGE_SIZE, TaskBoard } from './TaskBoard'
 import { waitForAbsence } from '@/test/waitForAbsence'
 import { testWorkspace } from '@/test/workspace'
 
@@ -307,4 +307,18 @@ test('nest-target cards skip the hover styles, so the tint always wins', () => {
   const hoverTokens = cardOf(view, 'Moving').className.split(' ').filter((name) => name.includes('hover:'))
   expect(hoverTokens.length).toBeGreaterThan(0)
   expect(hoverTokens.filter((name) => !name.includes('not-data-[nest=inside]:'))).toHaveLength(0)
+})
+
+test('a long column shows its first cards and the rest on "Show more"', async () => {
+  captureWrites([])
+  const tasks = Array.from({ length: BOARD_PAGE_SIZE + 10 }, (_, index) => task(`task-${index}`, 'todo', index))
+  const view = renderBoard(tasks)
+  const column = columnOf(view, 'Todo')
+
+  expect(within(column).getAllByRole('article')).toHaveLength(BOARD_PAGE_SIZE)
+  expect(within(column).getByText(String(BOARD_PAGE_SIZE + 10))).toBeTruthy()
+  fireEvent.click(within(column).getByRole('button', { name: 'Show 10 more (10 hidden)' }))
+
+  await waitFor(() => expect(within(column).getAllByRole('article')).toHaveLength(BOARD_PAGE_SIZE + 10))
+  expect(within(column).queryAllByRole('button', { name: /Show \d+ more/ })).toHaveLength(0)
 })
