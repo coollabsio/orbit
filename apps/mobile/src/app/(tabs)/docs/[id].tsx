@@ -9,6 +9,8 @@ import { TextInput } from '../../../ui/scaled'
 import { CommentsSheet } from '../../../components/docs/Comments'
 import { EditorToolbar } from '../../../components/docs/EditorToolbar'
 import { IconDialog } from '../../../components/docs/IconDialog'
+import { DatabaseView } from '../../../components/database/DatabaseView'
+import { PropertyList } from '../../../components/database/PropertyList'
 import PageEditor, { type PageCardInfo, type PageEditorProps, type PageEditorRef } from '../../../components/docs/PageEditor.dom'
 import { ActionSheet, ConfirmDialog, type ConfirmRequest, PromptDialog, type PromptRequest, type SheetAction } from '../../../components/settings/Dialog'
 import { absoluteUrl, pageTitle, trashPrompt, validCoverUrl, visibleThreads } from '../../../data/docs'
@@ -180,6 +182,58 @@ export default function DocScreen() {
         ]
       : []
 
+  /** The cover, icon and title of the page, above the body (a page) or the views (a database). */
+  const head = page.data ? (
+    <>
+      {page.data.cover_url ? (
+        <View>
+          <Image
+            accessibilityLabel="Cover"
+            source={{ uri: absoluteUrl(session.server, page.data.cover_url), headers: page.data.cover_url.startsWith('/') ? { Authorization: `Bearer ${session.token}` } : undefined }}
+            className="h-35 w-full bg-muted"
+            resizeMode="cover"
+          />
+          {!locked ? (
+            <View className="absolute right-3 bottom-2">
+              <Button label="Change cover" size="xs" variant="secondary" onPress={() => setMenu(coverActions())} />
+            </View>
+          ) : null}
+        </View>
+      ) : null}
+      <View className="px-3 pt-6">
+        {page.data.icon ? (
+          <Text accessibilityRole="button" accessibilityLabel="Change icon" onPress={locked ? undefined : () => setChoosingIcon(true)} className="text-[40px] leading-[48px] mb-2 self-start">
+            {page.data.icon}
+          </Text>
+        ) : null}
+        {!locked && (!page.data.icon || !page.data.cover_url) ? (
+          <View className="flex-row gap-2 mb-2.5">
+            {page.data.icon ? null : <Button label="😀 Add icon" variant="ghost" size="sm" muted onPress={() => setChoosingIcon(true)} />}
+            {page.data.cover_url ? null : <Button label="🖼️ Add cover" variant="ghost" size="sm" muted onPress={() => setMenu(coverActions())} />}
+          </View>
+        ) : null}
+        {locked ? (
+          <View className="flex-row items-center gap-1.5 mb-2.5">
+            <Icon name="lock" size={13} color={colors.mutedForeground} />
+            <Text className="text-[12px] text-muted-foreground">Locked. Unlock it on the web to edit.</Text>
+          </View>
+        ) : null}
+        <TextInput
+          accessibilityLabel="Page title"
+          value={title ?? page.data.title}
+          placeholder="Untitled"
+          placeholderTextColor={muted}
+          editable={!locked}
+          onChangeText={setTitle}
+          onBlur={saveTitle}
+          onSubmitEditing={saveTitle}
+          returnKeyType="done"
+          className="font-noto-bold text-[16px] leading-[20px] mb-[17px] p-0 text-foreground"
+        />
+      </View>
+    </>
+  ) : null
+
   return (
     <SafeAreaView edges={['left', 'right']} className="flex-1 bg-background">
       <PaneHeader className="min-h-12 px-3">
@@ -222,6 +276,8 @@ export default function DocScreen() {
         ) : (
           <LoadingView />
         )
+      ) : page.data.kind === 'database' ? (
+        <DatabaseView databaseId={id} header={head!} notify={setNotice} />
       ) : (
         <KeyboardAvoidingView className="flex-1" behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
           <ScrollView
@@ -233,52 +289,8 @@ export default function DocScreen() {
             onLayout={(event) => (viewportHeight.current = event.nativeEvent.layout.height)}
             refreshControl={<PullRefresh onRefresh={() => page.refetch()} />}
           >
-            {page.data.cover_url ? (
-              <View>
-                <Image
-                  accessibilityLabel="Cover"
-                  source={{ uri: absoluteUrl(session.server, page.data.cover_url), headers: page.data.cover_url.startsWith('/') ? { Authorization: `Bearer ${session.token}` } : undefined }}
-                  className="h-35 w-full bg-muted"
-                  resizeMode="cover"
-                />
-                {!locked ? (
-                  <View className="absolute right-3 bottom-2">
-                    <Button label="Change cover" size="xs" variant="secondary" onPress={() => setMenu(coverActions())} />
-                  </View>
-                ) : null}
-              </View>
-            ) : null}
-            <View className="px-3 pt-6">
-              {page.data.icon ? (
-                <Text accessibilityRole="button" accessibilityLabel="Change icon" onPress={locked ? undefined : () => setChoosingIcon(true)} className="text-[40px] leading-[48px] mb-2 self-start">
-                  {page.data.icon}
-                </Text>
-              ) : null}
-              {!locked && (!page.data.icon || !page.data.cover_url) ? (
-                <View className="flex-row gap-2 mb-2.5">
-                  {page.data.icon ? null : <Button label="😀 Add icon" variant="ghost" size="sm" muted onPress={() => setChoosingIcon(true)} />}
-                  {page.data.cover_url ? null : <Button label="🖼️ Add cover" variant="ghost" size="sm" muted onPress={() => setMenu(coverActions())} />}
-                </View>
-              ) : null}
-              {locked ? (
-                <View className="flex-row items-center gap-1.5 mb-2.5">
-                  <Icon name="lock" size={13} color={colors.mutedForeground} />
-                  <Text className="text-[12px] text-muted-foreground">Locked. Unlock it on the web to edit.</Text>
-                </View>
-              ) : null}
-              <TextInput
-                accessibilityLabel="Page title"
-                value={title ?? page.data.title}
-                placeholder="Untitled"
-                placeholderTextColor={muted}
-                editable={!locked}
-                onChangeText={setTitle}
-                onBlur={saveTitle}
-                onSubmitEditing={saveTitle}
-                returnKeyType="done"
-                className="font-noto-bold text-[16px] leading-[20px] mb-[17px] p-0 text-foreground"
-              />
-            </View>
+            {head}
+            {page.data.database_id ? <PropertyList databaseId={page.data.database_id} rowId={id} notify={setNotice} /> : null}
             <View onLayout={(event) => (editorTop.current = event.nativeEvent.layout.y)}>
               {problem?.stop ? null : (
                 <EditorView
