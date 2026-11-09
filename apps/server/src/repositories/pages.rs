@@ -17,7 +17,9 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use super::billing::{TrialCapacityError, TrialLimitReached, ensure_trial_capacity};
-use super::databases::{DatabaseSchema, copy_database_data, insert_schema};
+use super::databases::{
+    DatabaseSchema, RowCapacityError, copy_database_data, ensure_row_capacity, insert_schema,
+};
 use super::page_files::{page_file_url, page_has_file, parse_page_file_url};
 use super::page_mentions::notify_new_mentions;
 use super::page_versions::{
@@ -433,6 +435,9 @@ pub enum PageError {
     /// database, so the database comes back first.
     #[error("the row's database is in the trash")]
     DatabaseTrashed,
+    /// Restoring or duplicating a row of a database that holds the most live rows allowed.
+    #[error("database holds the most rows allowed")]
+    RowLimit,
     #[error("stored page data is invalid")]
     Corrupt,
     /// Orbit Cloud: the trial workspace holds as many pages as the trial allows.
@@ -457,6 +462,15 @@ impl From<CollabError> for PageError {
             // the memory budget is full, or another server reset the document while this write waited
             CollabError::Overloaded | CollabError::Reset => Self::Busy,
             CollabError::Corrupt(_) => Self::Corrupt,
+        }
+    }
+}
+
+impl From<RowCapacityError> for PageError {
+    fn from(error: RowCapacityError) -> Self {
+        match error {
+            RowCapacityError::Full => Self::RowLimit,
+            RowCapacityError::Database(error) => Self::Unavailable(error),
         }
     }
 }
@@ -1463,6 +1477,11 @@ impl PageRepository {
             }
             _ => None,
         };
+        if current.database_id.is_some()
+            && let Some(database_id) = parent_id
+        {
+            ensure_row_capacity(&mut tx, database_id, 1).await?;
+        }
         let mut siblings = sibling_ids(&mut tx, workspace_id, space, parent_id, page_id).await?;
         let index = insert_index(Some(current.position), siblings.len());
         siblings.insert(index, page_id);
@@ -1681,6 +1700,10 @@ impl PageRepository {
         let collab_epoch = collab_generation(&mut tx).await?;
         let actor = user_in_tx(&mut tx, actor_id).await?;
         let space = source.space(actor_id);
+        // A copied row is one more row of the same database; its sub-pages are not rows.
+        if let Some(database_id) = source.database_id {
+            ensure_row_capacity(&mut tx, database_id, 1).await?;
+        }
         // A database's rows are its content: they are always copied.
         let include_children = include_children || source.kind == PageKind::Database;
         let mut originals = vec![source];

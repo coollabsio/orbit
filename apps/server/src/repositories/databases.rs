@@ -1584,6 +1584,44 @@ impl From<TrialCapacityError> for DatabaseError {
     }
 }
 
+impl From<RowCapacityError> for DatabaseError {
+    fn from(error: RowCapacityError) -> Self {
+        match error {
+            RowCapacityError::Full => Self::RowLimit,
+            RowCapacityError::Database(error) => Self::Unavailable(error),
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum RowCapacityError {
+    #[error("database holds the most rows allowed")]
+    Full,
+    #[error(transparent)]
+    Database(#[from] sqlx::Error),
+}
+
+/// Inside the write transaction that makes `adding` rows of `database_id` live (create, restore,
+/// duplicate, backup restore): refuses when the database would then hold more than
+/// [`MAX_ROWS`] live rows. Writers serialize on `immediate_transaction`, so two of them cannot
+/// pass the cap together.
+pub(super) async fn ensure_row_capacity(
+    tx: &mut Transaction<'_, Any>,
+    database_id: Id,
+    adding: i64,
+) -> Result<(), RowCapacityError> {
+    let live: i64 = sqlx::query_scalar(
+        "SELECT CAST(COUNT(*) AS BIGINT) FROM pages WHERE parent_id = $1 AND deleted_at IS NULL",
+    )
+    .bind(database_id.to_string())
+    .fetch_one(&mut **tx)
+    .await?;
+    if live.saturating_add(adding) > MAX_ROWS {
+        return Err(RowCapacityError::Full);
+    }
+    Ok(())
+}
+
 #[derive(Clone)]
 pub struct DatabaseRepository {
     database: Database,
@@ -2086,15 +2124,7 @@ impl DatabaseRepository {
     ) -> Result<DatabaseRow, DatabaseError> {
         let mut tx = self.database.immediate_transaction().await?;
         let page = open(&mut tx, workspace_id, database_id, actor_id).await?;
-        let live: i64 = sqlx::query_scalar(
-            "SELECT CAST(COUNT(*) AS BIGINT) FROM pages WHERE parent_id = $1 AND deleted_at IS NULL",
-        )
-        .bind(database_id.to_string())
-        .fetch_one(&mut *tx)
-        .await?;
-        if live >= MAX_ROWS {
-            return Err(DatabaseError::RowLimit);
-        }
+        ensure_row_capacity(&mut tx, database_id, 1).await?;
         ensure_trial_capacity(&self.database, &mut tx, workspace_id, TrialLimit::Pages, 1).await?;
         let properties = properties_in_tx(&mut tx, database_id).await?;
         let values = parse_values(&mut tx, workspace_id, &properties, &input.values).await?;

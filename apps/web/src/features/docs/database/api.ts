@@ -226,7 +226,8 @@ async function restoreRows(queryClient: QueryClient, workspaceId: string, databa
       restorePage({ client: apiClient, path: { workspace_id: workspaceId, page_id: row.id }, body: { expected_version: row.version + 1 }, throwOnError: true }),
     ),
   )
-  if (results.some((result) => result.status === 'rejected')) toast.error('Could not restore every row. Find them in the trash.')
+  const failed = results.find((result) => result.status === 'rejected')
+  if (failed) toast.error(databaseErrorMessage(failed.reason, 'Could not restore every row. Find them in the trash.'))
   void queryClient.invalidateQueries({ queryKey: queryKeys.database(workspaceId, databaseId) })
   void queryClient.invalidateQueries({ queryKey: queryKeys.pages.trash(workspaceId) })
 }

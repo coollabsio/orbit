@@ -4050,7 +4050,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, project_missing, teamspace_missing",
+            "description": "contract_mismatch, project_missing, teamspace_missing, database_row_limit",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -32033,7 +32033,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch",
+            "description": "contract_mismatch, database_row_limit",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -33347,7 +33347,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, conflict, database_trashed",
+            "description": "contract_mismatch, conflict, database_trashed, database_row_limit",
             "content": {
               "application/problem+json": {
                 "schema": {

@@ -7767,7 +7767,7 @@ export type RestoreBackupItemErrors = {
      */
     404: WorkspaceProblem;
     /**
-     * contract_mismatch, project_missing, teamspace_missing
+     * contract_mismatch, project_missing, teamspace_missing, database_row_limit
      */
     409: WorkspaceProblem;
     /**
@@ -20238,7 +20238,7 @@ export type DuplicatePageErrors = {
      */
     404: TaskProblem;
     /**
-     * contract_mismatch
+     * contract_mismatch, database_row_limit
      */
     409: TaskProblem;
     /**
@@ -20790,7 +20790,7 @@ export type RestorePageErrors = {
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, conflict, database_trashed
+     * contract_mismatch, conflict, database_trashed, database_row_limit
      */
     409: TaskProblem;
     /**

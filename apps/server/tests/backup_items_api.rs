@@ -841,6 +841,58 @@ async fn a_row_restores_into_its_live_database_with_the_values_that_still_fit() 
 }
 
 #[tokio::test]
+async fn a_row_does_not_restore_into_a_database_that_holds_5000_rows() {
+    let fixture = Fixture::new().await;
+    let (db, ..) = fixture.create_database("Tasks").await;
+    let database = fixture.database_ok("GET", &db, None).await;
+    let first = database["rows"][0]["id"].as_str().unwrap().to_owned();
+    let backup = fixture.backup().await;
+    let teamspace = fixture.page(&db).await["teamspace_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    // Two rows exist; SQL fills the database to the cap (the API would take minutes).
+    let now = TimestampMillis::now().as_millis();
+    let mut tx = fixture.database.pool().begin().await.unwrap();
+    for position in 2..5_000_i64 {
+        sqlx::query(
+            "INSERT INTO pages (id, workspace_id, parent_id, teamspace_id, title, position, creator_id, updated_by, created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, 'Row', $5, $6, $7, $8, $9)",
+        )
+        .bind(Id::new_v7().to_string())
+        .bind(&fixture.workspace_id)
+        .bind(&db)
+        .bind(&teamspace)
+        .bind(position)
+        .bind(fixture.owner_id.to_string())
+        .bind(fixture.owner_id.to_string())
+        .bind(now)
+        .bind(now)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    }
+    tx.commit().await.unwrap();
+
+    let (status, body) = fixture
+        .restore(&backup, json!({"kind": "page", "id": first}))
+        .await;
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (StatusCode::CONFLICT, Some("database_row_limit")),
+        "{body}"
+    );
+    let live: i64 = sqlx::query_scalar(
+        "SELECT CAST(COUNT(*) AS BIGINT) FROM pages WHERE parent_id = $1 AND deleted_at IS NULL",
+    )
+    .bind(&db)
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(live, 5_000);
+}
+
+#[tokio::test]
 async fn a_file_whose_bytes_are_nowhere_is_left_out_and_counted() {
     let fixture = Fixture::new().await;
     let page = fixture.create_page("Lossy", None).await;

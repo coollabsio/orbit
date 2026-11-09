@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
+import { Toaster } from 'sonner'
 import type { DatabaseDetail, DatabaseRow, Page, PageSummary, Teamspace, WorkspaceRole } from '@orbit/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 import { ConfirmationModalHost } from '@/components/common/ConfirmationModal'
@@ -71,6 +72,8 @@ interface SetupOptions {
   /** What the collab server holds per page (default: an empty page). */
   content?: (target: CollabTarget) => unknown[]
   collab?: FakeCollab
+  /** Renders the toasts, for tests that read them. */
+  toasts?: boolean
 }
 
 function setup(path: string, handler: Handler, role: WorkspaceRole = 'owner', options: SetupOptions = {}) {
@@ -102,6 +105,7 @@ function setup(path: string, handler: Handler, role: WorkspaceRole = 'owner', op
             </Routes>
           </WorkspaceProvider>
           <Location />
+          {options.toasts ? <Toaster /> : null}
         </MemoryRouter>
       </CollabConnectContext>
     </QueryClientProvider>,
@@ -258,6 +262,27 @@ test('the trash view lists trashed pages and restores them', async () => {
   fireEvent.click(view.getByRole('button', { name: 'Restore' }))
   await waitFor(() => expect(calls.some((call) => call.path === '/pages/old/restore')).toBeTrue())
   expect(calls.find((call) => call.path === '/pages/old/restore')?.body).toEqual({ expected_version: 3 })
+})
+
+const ROW_LIMIT_TOAST = 'This database has the most rows it can hold (5,000).'
+
+test('restoring a row into a database at its 5,000-row cap says so', async () => {
+  const { view } = setup(
+    '/docs/trash',
+    (call) => {
+      if (call.path === '/pages') return Response.json({ items: [] })
+      if (call.path === '/pages/trash') {
+        return Response.json({ items: [{ ...summary('row', 'db', 0, 'Paper'), version: 3, can_purge: true, deleted_at: '2026-09-25T09:00:00Z' }] })
+      }
+      if (call.path === '/pages/row/restore') return problem(409, 'database_row_limit')
+    },
+    'owner',
+    { toasts: true },
+  )
+  const shown = () => view.queryAllByText(ROW_LIMIT_TOAST).length
+  const before = shown()
+  fireEvent.click(await view.findByRole('button', { name: 'Restore' }))
+  await waitFor(() => expect(shown()).toBe(before + 1))
 })
 
 const privatePage = (id: string, position: number, title = id): PageSummary => ({ ...summary(id, null, position, title), teamspace_id: null, private: true })
@@ -781,6 +806,28 @@ test('the page menu of a row opened as a full page duplicates the row and opens 
   await waitFor(() => expect((view.getByLabelText('Page title') as HTMLInputElement).value).toBe('Paper A (copy)'))
   const properties = await view.findByRole('group', { name: 'Properties' })
   expect(within(properties).getAllByText('Empty')).toHaveLength(1)
+})
+
+test('duplicating a row of a database at its 5,000-row cap says so', async () => {
+  const { view } = setup(
+    '/docs/r1',
+    (call) => {
+      if (call.path === '/pages') return Response.json({ items: [databaseSummary] })
+      if (call.path === '/databases/db') return Response.json(databaseDetail([databaseRow('r1', 'Paper A')]))
+      if (call.path === '/pages/r1' && call.method === 'GET') return Response.json(rowPage('r1', 'Paper A'))
+      if (call.path === '/pages/r1/duplicate') return problem(409, 'database_row_limit')
+    },
+    'owner',
+    { toasts: true },
+  )
+  await view.findByLabelText('Page title')
+  fireEvent.click(within(view.container.querySelector('section:last-of-type') as HTMLElement).getAllByRole('button', { name: 'Page options' }).at(-1)!)
+  // Sonner keeps toasts of earlier tests: count the new one.
+  const shown = () => view.queryAllByText(ROW_LIMIT_TOAST).length
+  const before = shown()
+  await userEvent.click(await view.findByRole('menuitem', { name: 'Duplicate' }))
+  await waitFor(() => expect(shown()).toBe(before + 1))
+  expect(location(view)).toBe('/docs/r1')
 })
 
 test('"Move to trash" on a row opened as a full page trashes it and goes back to its database', async () => {

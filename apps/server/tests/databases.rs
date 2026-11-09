@@ -1026,10 +1026,9 @@ async fn removing_options_and_properties_cleans_values_and_views() {
     assert_eq!(names(&fixture.database(&db).await["views"]), ["Copy"]);
 }
 
-#[tokio::test]
-async fn a_database_holds_at_most_5000_live_rows() {
-    let fixture = Fixture::new().await;
-    let db = fixture.create_database("Big").await;
+/// Inserts `count` live rows into the database with SQL (the API would take minutes); returns
+/// their ids.
+async fn seed_rows(fixture: &Fixture, db: &str, count: i64) -> Vec<String> {
     let teamspace: String = fixture
         .database
         .scalar(&format!("SELECT teamspace_id FROM pages WHERE id = '{db}'"))
@@ -1037,17 +1036,16 @@ async fn a_database_holds_at_most_5000_live_rows() {
         .unwrap();
     let now = TimestampMillis::now().as_millis();
     let mut tx = fixture.database.pool().begin().await.unwrap();
-    let mut first = None;
-    for position in 0..5_000_i64 {
+    let mut ids = Vec::new();
+    for position in 0..count {
         let id = Id::new_v7().to_string();
-        first.get_or_insert_with(|| id.clone());
         sqlx::query(
             "INSERT INTO pages (id, workspace_id, parent_id, teamspace_id, title, position, creator_id, updated_by, created_at, updated_at) \
              VALUES ($1, $2, $3, $4, 'Row', $5, $6, $7, $8, $9)",
         )
         .bind(&id)
         .bind(&fixture.workspace_id)
-        .bind(&db)
+        .bind(db)
         .bind(&teamspace)
         .bind(position)
         .bind(fixture.owner_id.to_string())
@@ -1057,21 +1055,36 @@ async fn a_database_holds_at_most_5000_live_rows() {
         .execute(&mut *tx)
         .await
         .unwrap();
+        ids.push(id);
     }
     tx.commit().await.unwrap();
-    let (status, body) = fixture
-        .call("POST", &format!("databases/{db}/rows"), Some(json!({})))
-        .await;
+    ids
+}
+
+fn assert_row_limit((status, body): (StatusCode, Value)) {
     assert_eq!(
         (status, body["code"].as_str()),
-        (StatusCode::CONFLICT, Some("database_row_limit"))
+        (StatusCode::CONFLICT, Some("database_row_limit")),
+        "{body}"
+    );
+}
+
+#[tokio::test]
+async fn a_database_holds_at_most_5000_live_rows() {
+    let fixture = Fixture::new().await;
+    let db = fixture.create_database("Big").await;
+    let rows = seed_rows(&fixture, &db, 5_000).await;
+    assert_row_limit(
+        fixture
+            .call("POST", &format!("databases/{db}/rows"), Some(json!({})))
+            .await,
     );
 
     fixture
         .ok(
             "POST",
             &format!("databases/{db}/rows/trash"),
-            Some(json!({"row_ids": [first.unwrap()]})),
+            Some(json!({"row_ids": [rows[0]]})),
         )
         .await;
     let (status, body) = fixture
@@ -1083,6 +1096,63 @@ async fn a_database_holds_at_most_5000_live_rows() {
         .await;
     assert_eq!(status, StatusCode::CREATED, "{body}");
     assert_eq!(body["position"], 0);
+}
+
+#[tokio::test]
+async fn restoring_or_duplicating_a_row_of_a_full_database_is_refused() {
+    let fixture = Fixture::new().await;
+    let db = fixture.create_database("Big").await;
+    let trashed = fixture.add_row(&db, json!({})).await;
+    let trashed = id_of(&trashed).to_owned();
+    fixture.trash_page(&trashed).await;
+    let rows = seed_rows(&fixture, &db, 5_000).await;
+
+    let (_, trash) = fixture.call("GET", "pages/trash", None).await;
+    let version = trash["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == trashed.as_str())
+        .expect("in the trash")["version"]
+        .clone();
+    assert_row_limit(
+        fixture
+            .call(
+                "POST",
+                &format!("pages/{trashed}/restore"),
+                Some(json!({"expected_version": version})),
+            )
+            .await,
+    );
+    for include_children in [false, true] {
+        assert_row_limit(
+            fixture
+                .call(
+                    "POST",
+                    &format!("pages/{}/duplicate", rows[0]),
+                    Some(json!({"include_children": include_children})),
+                )
+                .await,
+        );
+    }
+    let live: i64 = fixture
+        .database
+        .scalar(&format!(
+            "SELECT CAST(COUNT(*) AS BIGINT) FROM pages WHERE parent_id = '{db}' AND deleted_at IS NULL"
+        ))
+        .await
+        .unwrap();
+    assert_eq!(live, 5_000);
+
+    // With room again, the row comes back.
+    fixture
+        .ok(
+            "POST",
+            &format!("databases/{db}/rows/trash"),
+            Some(json!({"row_ids": [rows[0]]})),
+        )
+        .await;
+    fixture.restore_page(&trashed).await;
 }
 
 #[tokio::test]

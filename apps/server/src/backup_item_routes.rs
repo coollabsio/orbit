@@ -332,6 +332,14 @@ fn problem(
             instance,
             request_id,
         ),
+        BackupItemError::RowLimit => ApiError::new(
+            StatusCode::CONFLICT,
+            "database_row_limit",
+            "Database row limit",
+            "A database holds at most 5,000 rows.",
+            instance,
+            request_id,
+        ),
         BackupItemError::Unreadable(error) => {
             tracing::warn!(%error, "backup snapshot cannot be read");
             unreadable(instance, request_id)

@@ -18,7 +18,9 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use super::billing::{TrialCapacityError, TrialLimitReached, ensure_trial_capacity};
-use super::databases::{DatabaseData, retain_fitting_values, write_database_data};
+use super::databases::{
+    DatabaseData, RowCapacityError, ensure_row_capacity, retain_fitting_values, write_database_data,
+};
 use super::pages::{PageKind, PageSpace, Remap, content_text, is_database, renumber, sibling_ids};
 use super::tasks::description_from_blocks;
 use super::teamspaces::teamspace_exists;
@@ -97,6 +99,9 @@ pub enum BackupItemError {
     Unreadable(#[from] BackupError),
     #[error("trial limit reached")]
     TrialLimit(TrialLimitReached),
+    /// The page would become a row of a database that holds the most rows allowed.
+    #[error("database holds the most rows allowed")]
+    RowLimit,
     #[error(transparent)]
     Upload(UploadError),
     #[error("backup item repository is unavailable")]
@@ -108,6 +113,15 @@ impl From<TrialCapacityError> for BackupItemError {
         match error {
             TrialCapacityError::Reached(reached) => Self::TrialLimit(reached),
             TrialCapacityError::Database(error) => Self::Database(error),
+        }
+    }
+}
+
+impl From<RowCapacityError> for BackupItemError {
+    fn from(error: RowCapacityError) -> Self {
+        match error {
+            RowCapacityError::Full => Self::RowLimit,
+            RowCapacityError::Database(error) => Self::Database(error),
         }
     }
 }
@@ -488,6 +502,14 @@ impl BackupItemRepository {
             }
             _ => None,
         };
+        // The root is a row only under a live database: one more row, whose values must fit it.
+        let database_id = match parent_id {
+            Some(parent) if is_database(&mut tx, parent).await.map_err(page_error)? => Some(parent),
+            _ => None,
+        };
+        if let Some(database_id) = database_id {
+            ensure_row_capacity(&mut tx, database_id, 1).await?;
+        }
 
         let blobs = staging.resolve(&finalization, &mut tx, now).await?;
         let page_ids: HashMap<Id, Id> = pages.iter().map(|page| (page.id, Id::new_v7())).collect();
@@ -565,14 +587,13 @@ impl BackupItemRepository {
             .execute(&mut *tx)
             .await?;
         }
-        // The root is a row only under a live database; its values must still fit that database.
-        match parent_id {
-            Some(parent) if is_database(&mut tx, parent).await.map_err(page_error)? => {
-                retain_fitting_values(&mut tx, parent, root.id, &mut data.values)
+        match database_id {
+            Some(database_id) => {
+                retain_fitting_values(&mut tx, database_id, root.id, &mut data.values)
                     .await
                     .map_err(page_error)?;
             }
-            _ => data.values.retain(|(page, ..)| *page != root.id),
+            None => data.values.retain(|(page, ..)| *page != root.id),
         }
         write_database_data(&mut tx, workspace_id, data, &page_ids, actor_id, now)
             .await

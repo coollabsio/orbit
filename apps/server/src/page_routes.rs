@@ -1123,6 +1123,14 @@ fn page_problem(
             instance,
             request_id,
         ),
+        PageError::RowLimit => ApiError::new(
+            StatusCode::CONFLICT,
+            "database_row_limit",
+            "Database row limit",
+            "A database holds at most 5,000 rows.",
+            instance,
+            request_id,
+        ),
         PageError::Busy => ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
             "page_busy",

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { ChevronDown, ChevronUp, Copy, Link2, Maximize4, MoreH, Trash, Xmark } from 'reicon-react'
 import { isPaymentRequired } from '@orbit/api/problem'
+import { databaseErrorMessage } from '@orbit/database/errors'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Spinner } from '@/components/ui/spinner'
@@ -100,7 +101,7 @@ export function RowPeek({ workspaceId, databaseId, rowId, viewId, order, focusTi
           toast.success('Row duplicated.')
         },
         onError: (error) => {
-          if (!isPaymentRequired(error)) toast.error('Could not duplicate the row.')
+          if (!isPaymentRequired(error)) toast.error(databaseErrorMessage(error, 'Could not duplicate the row.'))
         },
       },
     )

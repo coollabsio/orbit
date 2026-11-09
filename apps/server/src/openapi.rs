@@ -996,6 +996,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
                 add_code(&mut responses, "404", "item_not_found");
                 add_code(&mut responses, "409", "project_missing");
                 add_code(&mut responses, "409", "teamspace_missing");
+                add_code(&mut responses, "409", "database_row_limit");
                 add_code(&mut responses, "413", "storage_quota_exceeded");
             }
         }
@@ -1652,6 +1653,9 @@ fn page_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
     }
     if operation_id == "restore_page" {
         add_code(responses, "409", "database_trashed");
+    }
+    if matches!(operation_id, "restore_page" | "duplicate_page") {
+        add_code(responses, "409", "database_row_limit");
     }
     if operation_id == "list_recent_pages" {
         add_code(responses, "422", "validation_failed");
