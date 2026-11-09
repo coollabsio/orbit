@@ -313,8 +313,8 @@ fn build_fake(base: String) -> Fake {
 }
 
 /// Adds `fixtures/notion_import/databases.json`: a "Coverage" database with every property
-/// type and three views, a page "Home" with an inline database, and a database with two data
-/// sources.
+/// type and three views, a page "Home" with an inline database and a full-page database with
+/// two data sources.
 fn add_database_fixture(fake: &mut Fake) {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/notion_import/databases.json");
@@ -2505,10 +2505,20 @@ async fn databases_import_with_typed_properties_values_and_views() {
         .iter()
         .map(|block| block["type"].as_str().unwrap())
         .collect();
-    assert_eq!(blocks, ["paragraph", "database", "paragraph"]);
+    assert_eq!(
+        blocks,
+        ["paragraph", "database", "page", "paragraph"],
+        "only the inline database shows its views; the full-page one is a page link"
+    );
     assert_eq!(
         home_page["content"][1]["props"],
         json!({"databaseId": inline.as_str(), "linkId": ""})
+    );
+    let multi = harness.orbit_id(&id, MULTI_A).await;
+    assert_eq!(
+        home_page["content"][2]["props"],
+        json!({"pageId": multi.as_str()}),
+        "a database with several data sources links to the first"
     );
     let (_, inline_page) = harness.page(&harness.owner_cookie, &inline).await;
     assert_eq!(inline_page["parent_id"], home.as_str());

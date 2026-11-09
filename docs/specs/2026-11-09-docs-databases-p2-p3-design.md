@@ -247,7 +247,7 @@ OQ-1.1 asks for a cleanup job.
 
 | Area | Behavior |
 |---|---|
-| Notion import | A `child_database` block becomes a `database` block (not a `page` link block). The database stays a sub-page of its page. Notion API views of linked databases: see OQ-1.2. |
+| Notion import | Notion uses a `child_database` block for inline and full-page databases. An inline database (`is_inline: true` on the database) becomes a `database` block. A full-page database becomes a `page` link block, and so does a database the import could not read. Both kinds stay sub-pages of their page. Notion API views of linked databases: see OQ-1.2. |
 | Markdown (`get_doc`, export) | The block exports as a link `[<database title>](/docs/<id>)`. The page export (item 7) also writes the view's rows as a Markdown table under the link. |
 | Markdown merge (`update_doc`) | The block is kept as is, like a `page` block. Markdown cannot create it. |
 | Search | No change. The block has no text. |

@@ -65,6 +65,7 @@ fn resolver() -> MapResolver {
     ] {
         resolver.pages.insert(notion.to_owned(), orbit.to_owned());
     }
+    resolver.inline_databases.insert(MAPPED_DB.to_owned(), true);
     resolver
         .titles
         .insert(MAPPED_RELATION.to_owned(), "Launch project".to_owned());
@@ -915,23 +916,48 @@ fn row_texts(table: &Value) -> Vec<Vec<String>> {
 }
 
 #[test]
-fn a_child_database_block_shows_the_imported_database() {
+fn only_an_inline_child_database_shows_as_a_database_block() {
+    const FULL_PAGE_DB: &str = "a1d8501e-1ac1-43e9-a6bd-ea9fe6c88200";
+    const UNKNOWN_DB: &str = "a1d8501e-1ac1-43e9-a6bd-ea9fe6c88201";
     let (page, _) = load("lists");
-    let blocks: Vec<BlockNode> = vec![
+    let child_database = |id: &str, title: &str| -> BlockNode {
         serde_json::from_value(json!({
-            "object": "block", "id": MAPPED_DB, "type": "child_database",
+            "object": "block", "id": id, "type": "child_database",
             "has_children": false, "archived": false, "in_trash": false,
-            "child_database": {"title": "Projects"}
+            "child_database": {"title": title}
         }))
-        .unwrap(),
+        .unwrap()
+    };
+    let blocks = vec![
+        child_database(MAPPED_DB, "Inline DB"),
+        child_database(FULL_PAGE_DB, "Tasks DB (full page)"),
+        child_database(UNKNOWN_DB, "Not fetched"),
     ];
-    let resolver = resolver();
+    let mut resolver = resolver();
+    for (notion, orbit) in [
+        (FULL_PAGE_DB, "01900000-0000-7000-8000-000000000005"),
+        (UNKNOWN_DB, "01900000-0000-7000-8000-000000000006"),
+    ] {
+        resolver.pages.insert(notion.to_owned(), orbit.to_owned());
+    }
+    resolver
+        .inline_databases
+        .insert(FULL_PAGE_DB.to_owned(), false);
     let mut ctx = ConvertContext::new(&resolver);
     let converted = convert_page(&page, &blocks, &mut ctx);
-    assert_eq!(types(&converted.content), ["database"]);
+    assert_eq!(types(&converted.content), ["database", "page", "page"]);
     assert_eq!(
         converted.content[0]["props"],
         json!({"databaseId": "01900000-0000-7000-8000-000000000003", "linkId": ""})
+    );
+    assert_eq!(
+        converted.content[1]["props"],
+        json!({"pageId": "01900000-0000-7000-8000-000000000005"})
+    );
+    assert_eq!(
+        converted.content[2]["props"],
+        json!({"pageId": "01900000-0000-7000-8000-000000000006"}),
+        "an unknown database shows as a page link"
     );
 }
 

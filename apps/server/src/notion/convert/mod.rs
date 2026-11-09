@@ -41,6 +41,11 @@ pub trait Resolver {
     fn page_title(&self, _notion_id: &str) -> Option<String> {
         None
     }
+    /// Whether a Notion database shows inline in its parent page (Notion's `is_inline`).
+    /// `false` when unknown: the database then shows as a page link, which hides nothing.
+    fn database_is_inline(&self, _notion_id: &str) -> bool {
+        false
+    }
     /// A display name for a Notion user id (people properties and mentions without a name).
     fn user_name(&self, _user_id: &str) -> Option<String> {
         None
@@ -65,6 +70,8 @@ pub struct MapResolver {
     pub pages: HashMap<String, String>,
     pub files: HashMap<String, ResolvedFile>,
     pub titles: HashMap<String, String>,
+    /// Notion's `is_inline` by Notion database id.
+    pub inline_databases: HashMap<String, bool>,
     pub users: HashMap<String, String>,
     /// Orbit members by lowercase email: `(user id, display name)`.
     pub members: HashMap<String, (String, String)>,
@@ -81,6 +88,13 @@ impl Resolver for MapResolver {
 
     fn page_title(&self, notion_id: &str) -> Option<String> {
         self.titles.get(notion_id).cloned()
+    }
+
+    fn database_is_inline(&self, notion_id: &str) -> bool {
+        self.inline_databases
+            .get(notion_id)
+            .copied()
+            .unwrap_or(false)
     }
 
     fn user_name(&self, user_id: &str) -> Option<String> {
@@ -467,10 +481,18 @@ fn convert_node(node: &BlockNode, ctx: &mut ConvertContext<'_>, out: &mut Vec<Va
             let title = str_at(data, &["title"]).unwrap_or_default().to_owned();
             page_reference(&block.id, &title, PageBlock::Page, ctx, out);
         }
-        // An inline database is imported as a database sub-page, shown here with its own views.
+        // Notion uses this block for inline and full-page databases alike. Both are imported as
+        // a database sub-page; only an inline one shows its views here.
         "child_database" => {
             let title = str_at(data, &["title"]).unwrap_or_default().to_owned();
-            page_reference(&block.id, &title, PageBlock::Database, ctx, out);
+            let inline =
+                normalize_id(&block.id).is_some_and(|id| ctx.resolver.database_is_inline(&id));
+            let kind = if inline {
+                PageBlock::Database
+            } else {
+                PageBlock::Page
+            };
+            page_reference(&block.id, &title, kind, ctx, out);
         }
         "link_to_page" => {
             let target = str_at(data, &["type"])

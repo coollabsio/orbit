@@ -1260,6 +1260,7 @@ impl NotionImportService {
             }
         }
         resolver.titles = titles;
+        resolver.inline_databases = std::mem::take(&mut databases.inline);
         for index in 0..items.len() {
             if items[index].status != "created" {
                 continue;
@@ -1374,13 +1375,14 @@ impl NotionImportService {
                         .map_err(|error| {
                             Failure::Page(format!("The database could not be converted: {error}."))
                         })?;
-                    databases.add(&item.notion_id, fetched.database_id, fetched.source);
+                    let title = fetched.title.clone();
+                    databases.add(&item.notion_id, fetched);
                     self.create_page(
                         context,
                         item,
                         page_id,
                         parent.map(|(page, _, _)| page),
-                        Some((&schema, &fetched.title)),
+                        Some((&schema, &title)),
                     )
                     .await?;
                     report.convert.merge(&plan.report);
@@ -1504,7 +1506,7 @@ impl NotionImportService {
         let client = context.client;
         if !databases.loaded.contains(database_item) {
             let fetched = fetch_source(client, database_item).await?;
-            databases.add(database_item, fetched.database_id, fetched.source);
+            databases.add(database_item, fetched);
         }
         let mut row = match databases.rows.remove(&item.notion_id) {
             Some(row) => row,
@@ -1597,6 +1599,26 @@ impl NotionImportService {
         let changes = {
             let page = client.retrieve_page(&item.notion_id).await?;
             let tree = client.fetch_block_tree(&item.notion_id).await?;
+            // A resumed import did not fetch the databases created by an earlier run.
+            let mut unknown = Vec::new();
+            child_database_ids(&tree.blocks, &mut unknown);
+            for id in unknown {
+                if !resolver.pages.contains_key(&id) || resolver.inline_databases.contains_key(&id)
+                {
+                    continue;
+                }
+                match client.retrieve_database(&id).await {
+                    Ok(database) => {
+                        resolver.inline_databases.insert(id, database.is_inline);
+                    }
+                    Err(error) => match Failure::from(error) {
+                        Failure::Page(_) => {
+                            resolver.inline_databases.insert(id, false);
+                        }
+                        other => return Err(other),
+                    },
+                }
+            }
             // Files an earlier attempt of this page already attached (a retry reuses them).
             let attached = self.attached_files(workspace_id, page_id).await?;
             let mut downloaded = HashSet::new();
@@ -2145,17 +2167,24 @@ struct DatabaseCache {
     properties: HashMap<Id, Vec<Property>>,
     /// Notion database id → item id, for databases whose item is one of their data sources.
     aliases: HashMap<String, String>,
+    /// Notion's `is_inline` by Notion database id.
+    inline: HashMap<String, bool>,
 }
 
 impl DatabaseCache {
-    fn add(&mut self, item_id: &str, database_id: Option<String>, source: Source) {
+    fn add(&mut self, item_id: &str, fetched: FetchedSource) {
         self.loaded.insert(item_id.to_owned());
-        if let Some(database_id) = database_id.as_deref().and_then(normalize_id)
-            && database_id != item_id
-        {
-            self.aliases.insert(database_id, item_id.to_owned());
+        if let Some(database_id) = fetched.database_id.as_deref().and_then(normalize_id) {
+            if let Some(is_inline) = fetched.is_inline {
+                self.inline.insert(database_id.clone(), is_inline);
+            }
+            if database_id != item_id {
+                self.aliases
+                    .entry(database_id)
+                    .or_insert_with(|| item_id.to_owned());
+            }
         }
-        for row in source.rows {
+        for row in fetched.source.rows {
             if let Some(id) = normalize_id(&row.id) {
                 self.rows.insert(id, row);
             }
@@ -2167,6 +2196,8 @@ impl DatabaseCache {
 struct FetchedSource {
     title: String,
     database_id: Option<String>,
+    /// The database's `is_inline`, `None` when the database could not be read.
+    is_inline: Option<bool>,
     source: Source,
 }
 
@@ -2210,6 +2241,7 @@ async fn fetch_source(client: &NotionClient, notion_id: &str) -> Result<FetchedS
     Ok(FetchedSource {
         title,
         database_id,
+        is_inline: database.as_ref().map(|database| database.is_inline),
         source: Source {
             data_source,
             views,
@@ -2277,6 +2309,17 @@ fn child_page_ids(nodes: &[BlockNode], out: &mut Vec<String>) {
             out.push(id);
         }
         child_page_ids(&node.children, out);
+    }
+}
+
+fn child_database_ids(nodes: &[BlockNode], out: &mut Vec<String>) {
+    for node in nodes {
+        if node.block.kind == "child_database"
+            && let Some(id) = normalize_id(&node.block.id)
+        {
+            out.push(id);
+        }
+        child_database_ids(&node.children, out);
     }
 }
 
