@@ -1581,6 +1581,57 @@ async fn live_tasks(fixture: &Fixture) -> i64 {
 }
 
 #[tokio::test]
+async fn github_closed_issues_prefer_the_done_status() {
+    let fixture = fixture().await;
+    let app = github_app(&fixture).await;
+    // A second completed status that sorts before Done, such as "Waiting for Merge".
+    sqlx::query(
+        "INSERT INTO task_statuses (id, workspace_id, project_id, name, description, color, category, position, version, created_at, updated_at) \
+         VALUES ($1, $2, $3, 'Waiting for Merge', '', '#8b8f98', 'completed', -1, 0, 0, 0)",
+    )
+    .bind(orbit_platform::Id::new_v7().to_string())
+    .bind(fixture.workspace_id.to_string())
+    .bind(fixture.project_id.to_string())
+    .execute(fixture.database.pool())
+    .await
+    .unwrap();
+    let status_of = |number: i64| {
+        sqlx::query_scalar::<_, String>(
+            "SELECT task_statuses.name FROM github_issue_links JOIN tasks ON tasks.id = github_issue_links.task_id JOIN task_statuses ON task_statuses.id = tasks.status_id WHERE github_issue_links.issue_number = $1",
+        )
+        .bind(number)
+        .fetch_one(fixture.database.pool())
+    };
+
+    let opened = app
+        .clone()
+        .oneshot(github_request("issues", github_issue(5), true))
+        .await
+        .unwrap();
+    assert_eq!(opened.status(), StatusCode::OK);
+    let mut closed = github_issue(5);
+    closed["action"] = json!("closed");
+    closed["issue"]["state"] = json!("closed");
+    let synced = app
+        .clone()
+        .oneshot(github_request("issues", closed.clone(), true))
+        .await
+        .unwrap();
+    assert_eq!(synced.status(), StatusCode::OK);
+    assert_eq!(status_of(5).await.unwrap(), "Done");
+
+    // An issue that is already closed when Orbit first sees it also goes to Done.
+    closed["issue"]["number"] = json!(6);
+    let created = app
+        .clone()
+        .oneshot(github_request("issues", closed, true))
+        .await
+        .unwrap();
+    assert_eq!(created.status(), StatusCode::OK);
+    assert_eq!(status_of(6).await.unwrap(), "Done");
+}
+
+#[tokio::test]
 async fn integrations_stop_at_the_trial_task_limit_without_failing() {
     let fixture = fixture().await;
     let app = github_app(&fixture).await;

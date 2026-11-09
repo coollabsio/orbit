@@ -1912,7 +1912,7 @@ impl TaskRepository {
             let current_status_id: String = row.get("status_id");
             let status_id: String = if issue.state_changed || was_deleted {
                 sqlx::query_scalar(
-                        "SELECT id FROM task_statuses WHERE workspace_id = $1 AND project_id = $2 AND category = $3 ORDER BY position, id LIMIT 1",
+                        "SELECT id FROM task_statuses WHERE workspace_id = $1 AND project_id = $2 AND category = $3 ORDER BY CASE WHEN lower(name) = 'done' THEN 0 ELSE 1 END, position, id LIMIT 1",
                     ).bind(workspace_id.to_string()).bind(row.get::<String, _>("project_id"))
                         .bind(status_category).fetch_optional(&mut *tx).await?
                         .unwrap_or_else(|| current_status_id.clone())
@@ -2074,7 +2074,7 @@ impl TaskRepository {
         }
         ensure_trial_capacity(&self.database, &mut tx, workspace_id, TrialLimit::Tasks, 1).await?;
         let status_id: String = sqlx::query_scalar(
-            "SELECT id FROM task_statuses WHERE workspace_id = $1 AND project_id = $2 AND category <> 'duplicate' ORDER BY CASE WHEN category = $3 THEN 0 WHEN category = 'unstarted' THEN 1 ELSE 2 END, position, id LIMIT 1",
+            "SELECT id FROM task_statuses WHERE workspace_id = $1 AND project_id = $2 AND category <> 'duplicate' ORDER BY CASE WHEN category = $3 THEN 0 WHEN category = 'unstarted' THEN 1 ELSE 2 END, CASE WHEN lower(name) = 'done' THEN 0 ELSE 1 END, position, id LIMIT 1",
         ).bind(workspace_id.to_string()).bind(issue.project_id.to_string())
             .bind(status_category)
             .fetch_optional(&mut *tx).await?.ok_or(TaskError::NotFound)?;
