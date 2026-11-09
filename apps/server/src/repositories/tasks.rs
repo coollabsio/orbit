@@ -4098,8 +4098,12 @@ async fn comment_content(
             Ok((description_markdown(&blocks), blocks))
         }
         CommentContent::Markdown { body, .. } => {
+            let body = body.trim();
             let blocks = imported_description(tx, workspace_id, body).await?;
-            Ok((body.clone(), sanitize_blocks_for(&blocks, &policy)))
+            Ok((
+                body.to_owned(),
+                trim_comment_blocks(sanitize_blocks_for(&blocks, &policy)),
+            ))
         }
     }
 }
