@@ -28,6 +28,7 @@ use super::page_versions;
 use super::tasks::TaskError;
 use super::teamspaces::insert_default_teamspace;
 use crate::audit::{self, AuditEvent, AuditOutcome};
+use crate::billing::TrialLimit;
 
 const INVITATION_LIFETIME_MILLIS: i64 = 7 * 24 * 60 * 60 * 1_000;
 const WORKSPACE_TRASH_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
