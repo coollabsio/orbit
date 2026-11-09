@@ -569,6 +569,7 @@ Each step ends in a state you can check.
 | D5 | The slash menu item is "Database – full page": it creates a database as a sub-page and inserts a `page` link block. The inline database block is P2. | 2026-11-09 |
 | D6 | The board view moves into P1. It groups by `select` and `status` only; `person` and sub-groups are P2. Its settings live in `config_json` next to the table settings, not in a separate table. | 2026-11-09 |
 | D7 | A card move is one request: `POST …/rows/{id}/move` takes optional `values` and writes them with the new place in one transaction, so a failed value never leaves a card half moved. | 2026-11-09 |
+| D8 | The "+" buttons in the docs tree (web) and the docs list (mobile) open a menu with "New page" and "New database". This differs from Notion on purpose: there, "+" makes an empty page at once and the empty page offers database types. Orbit keeps `pages.kind` fixed after creation. | 2026-11-09 |
 
 ## 14. P2: Notion import
 
