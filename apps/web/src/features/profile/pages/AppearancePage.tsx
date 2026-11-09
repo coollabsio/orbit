@@ -74,7 +74,7 @@ export function AppearancePage() {
                 description={option.description}
                 selected={appearance.navStyle === option.value}
                 onClick={() => setAppearance({ navStyle: option.value })}
-                previewClassName={cn('items-stretch justify-start', floating && 'gap-1.5 bg-[radial-gradient(circle,rgb(0_0_0/0.13)_1px,transparent_1.3px)] bg-size-[10px_10px] p-1.5 dark:bg-[radial-gradient(circle,rgb(255_255_255/0.09)_1px,transparent_1.3px)]')}
+                previewClassName={cn('items-stretch justify-start', floating && 'gap-1.5 p-1.5')}
               >
                 <span className={cn('flex flex-col items-center gap-1.5 bg-background px-2 py-2', floating ? 'rounded-lg border' : 'border-r')}>
                   {[User, Settings].map((Icon, index) => (
