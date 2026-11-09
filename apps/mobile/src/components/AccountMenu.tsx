@@ -98,6 +98,7 @@ export function AccountMenu({
             <Separator />
             <Row icon="user" label="Account settings" onPress={run(() => onNavigate('/settings/profile'))} />
             <Row icon="brush" label="Appearance" onPress={run(() => onNavigate('/settings/appearance'))} />
+            <Row icon="bell" label="Notifications" onPress={run(() => onNavigate('/settings/notifications'))} />
             <Separator />
             <Row
               icon="logout"
