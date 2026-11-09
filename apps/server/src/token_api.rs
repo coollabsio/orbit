@@ -310,12 +310,15 @@ impl LinkResolver for DocLinks {
     }
 }
 
-/// The ids in the `page` blocks of `blocks`, nested blocks included.
+/// The ids in the `page` and `database` blocks of `blocks`, nested blocks included.
 fn linked_pages(blocks: &[Value], ids: &mut HashSet<String>) {
     for block in blocks {
-        if block["type"] == "page"
-            && let Some(id) = block["props"]["pageId"].as_str()
-        {
+        let target = match block["type"].as_str() {
+            Some("page") => block["props"]["pageId"].as_str(),
+            Some("database") => block["props"]["databaseId"].as_str(),
+            _ => None,
+        };
+        if let Some(id) = target {
             ids.insert(id.to_owned());
         }
         if let Some(children) = block["children"].as_array() {

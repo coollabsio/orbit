@@ -13,18 +13,18 @@ use axum::{Json, Router};
 use orbit_platform::{Id, RequestId, TimestampMillis};
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 
 use crate::auth_routes::CookieMode;
 use crate::repositories::databases::{
     DatabaseDetail, DatabaseError, DatabaseProperty, DatabaseRepository, DatabaseRow, DatabaseView,
-    MAX_CELL_ITEMS, MAX_NAME_CHARS, MAX_TRASH_ROWS, NewProperty, NewRow, NewView, PropertyChanges,
-    PropertyType, PropertyUpdate, RowPlacement, ViewChanges, ViewConfig, ViewType,
+    LinkedViews, MAX_CELL_ITEMS, MAX_NAME_CHARS, MAX_TRASH_ROWS, NewProperty, NewRow, NewView,
+    PropertyChanges, PropertyType, PropertyUpdate, RowPlacement, ViewChanges, ViewConfig, ViewType,
 };
 use crate::repositories::identity::IdentityRepository;
 use crate::task_routes::{
-    ApiError, ApiJson, authenticate_session, bounded, deserialize_source_patch, request_id_value,
-    validation,
+    ApiError, ApiJson, ApiQuery, authenticate_session, bounded, deserialize_source_patch,
+    request_id_value, validation,
 };
 
 #[derive(Clone)]
@@ -57,6 +57,11 @@ pub fn database_router(state: DatabaseState) -> Router {
         .route(
             &format!("{BASE}/properties/{{property_id}}"),
             patch(update_database_property).delete(delete_database_property),
+        )
+        .route(&format!("{BASE}/links"), post(create_database_link))
+        .route(
+            &format!("{BASE}/links/{{link_id}}"),
+            axum::routing::delete(delete_database_link),
         )
         .route(&format!("{BASE}/views"), post(create_database_view))
         .route(
@@ -126,6 +131,37 @@ struct CreateDatabaseViewBody {
     config: Option<Value>,
     /// A view of this database whose config the new view copies.
     duplicate_of: Option<String>,
+    /// Adds the view to this linked view block instead of the database's own views.
+    link_id: Option<String>,
+}
+
+/// The views a request reads or changes: a linked view block's instead of the database's own.
+#[derive(Deserialize, IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+struct LinkQuery {
+    /// A `database_links` id of this database.
+    #[serde(rename = "link")]
+    #[param(rename = "link")]
+    link_id: Option<String>,
+}
+
+/// The view a request changes belongs to this linked view block.
+#[derive(Deserialize, IntoParams)]
+#[serde(deny_unknown_fields)]
+#[into_params(parameter_in = Query)]
+struct ViewLinkQuery {
+    /// A `database_links` id of this database.
+    link_id: Option<String>,
+}
+
+#[derive(Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+struct CreateDatabaseLinkBody {
+    /// The page whose block shows the link; the caller edits it.
+    host_page_id: String,
+    /// An own view whose type and config the link's first view copies (default: the first one).
+    from_view_id: Option<String>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -184,10 +220,11 @@ struct MoveDatabaseRowBody {
 
 /// The database's properties, views and live rows (at most 5,000), for clients that sort and
 /// filter themselves.
-#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/databases/{database_id}", params(("workspace_id" = String, Path), ("database_id" = String, Path)), responses((status = 200, body = DatabaseDetail)))]
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/databases/{database_id}", params(("workspace_id" = String, Path), ("database_id" = String, Path), LinkQuery), responses((status = 200, body = DatabaseDetail)))]
 async fn get_database(
     State(state): State<DatabaseState>,
     Path((workspace, database)): Path<(String, String)>,
+    ApiQuery(query): ApiQuery<LinkQuery>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
 ) -> Result<Json<DatabaseDetail>, ApiError> {
@@ -195,9 +232,10 @@ async fn get_database(
     let instance = format!("/api/v1/workspaces/{workspace}/databases/{database}");
     let (workspace_id, database_id, actor_id) =
         scope(&state, &headers, &workspace, &database, &instance, request).await?;
+    let link = link_id(query.link_id, &instance, request)?;
     state
         .databases
-        .get(workspace_id, database_id, actor_id)
+        .get(workspace_id, database_id, actor_id, link)
         .await
         .map(Json)
         .map_err(|error| database_problem(error, instance, request))
@@ -344,6 +382,77 @@ async fn delete_database_property(
         .map_err(|error| database_problem(error, instance, request))
 }
 
+/// Links the database to a block of a page (a linked view block), with one view of its own.
+/// Needs read access to the database and edit access to the host page.
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/databases/{database_id}/links", params(("workspace_id" = String, Path), ("database_id" = String, Path)), request_body = CreateDatabaseLinkBody, responses((status = 201, body = LinkedViews)))]
+async fn create_database_link(
+    State(state): State<DatabaseState>,
+    Path((workspace, database)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+    ApiJson(body): ApiJson<CreateDatabaseLinkBody>,
+) -> Result<Response, ApiError> {
+    let request = request_id.as_ref();
+    let instance = format!("/api/v1/workspaces/{workspace}/databases/{database}/links");
+    let (workspace_id, database_id, actor_id) =
+        scope(&state, &headers, &workspace, &database, &instance, request).await?;
+    let host_page_id = body
+        .host_page_id
+        .parse()
+        .map_err(|_| validation("host_page_id", &instance, request))?;
+    let from_view = body
+        .from_view_id
+        .map(|value| {
+            value
+                .parse()
+                .map_err(|_| validation("from_view_id", &instance, request))
+        })
+        .transpose()?;
+    state
+        .databases
+        .create_link(
+            workspace_id,
+            database_id,
+            actor_id,
+            host_page_id,
+            from_view,
+            request_id_value(request),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(|linked| (StatusCode::CREATED, Json(linked)).into_response())
+        .map_err(|error| database_problem(error, instance, request))
+}
+
+/// Deletes a link and its views. The editor never calls it (undo and page history can bring a
+/// deleted block back); it is for cleanup tools.
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/databases/{database_id}/links/{link_id}", params(("workspace_id" = String, Path), ("database_id" = String, Path), ("link_id" = String, Path)), responses((status = 204)))]
+async fn delete_database_link(
+    State(state): State<DatabaseState>,
+    Path((workspace, database, link)): Path<(String, String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<StatusCode, ApiError> {
+    let request = request_id.as_ref();
+    let instance = format!("/api/v1/workspaces/{workspace}/databases/{database}/links/{link}");
+    let (workspace_id, database_id, actor_id) =
+        scope(&state, &headers, &workspace, &database, &instance, request).await?;
+    let link_id = child_id(&link, DatabaseError::LinkNotFound, &instance, request)?;
+    state
+        .databases
+        .delete_link(
+            workspace_id,
+            database_id,
+            link_id,
+            actor_id,
+            request_id_value(request),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(|()| StatusCode::NO_CONTENT)
+        .map_err(|error| database_problem(error, instance, request))
+}
+
 #[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/databases/{database_id}/views", params(("workspace_id" = String, Path), ("database_id" = String, Path)), request_body = CreateDatabaseViewBody, responses((status = 201, body = DatabaseView)))]
 async fn create_database_view(
     State(state): State<DatabaseState>,
@@ -371,6 +480,7 @@ async fn create_database_view(
                     .map_err(|_| validation("duplicate_of", &instance, request))
             })
             .transpose()?,
+        link: link_id(body.link_id, &instance, request)?,
     };
     state
         .databases
@@ -387,10 +497,11 @@ async fn create_database_view(
         .map_err(|error| database_problem(error, instance, request))
 }
 
-#[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}/databases/{database_id}/views/{view_id}", params(("workspace_id" = String, Path), ("database_id" = String, Path), ("view_id" = String, Path)), request_body = UpdateDatabaseViewBody, responses((status = 200, body = DatabaseView)))]
+#[utoipa::path(patch, path = "/api/v1/workspaces/{workspace_id}/databases/{database_id}/views/{view_id}", params(("workspace_id" = String, Path), ("database_id" = String, Path), ("view_id" = String, Path), ViewLinkQuery), request_body = UpdateDatabaseViewBody, responses((status = 200, body = DatabaseView)))]
 async fn update_database_view(
     State(state): State<DatabaseState>,
     Path((workspace, database, view)): Path<(String, String, String)>,
+    ApiQuery(query): ApiQuery<ViewLinkQuery>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
     ApiJson(body): ApiJson<UpdateDatabaseViewBody>,
@@ -413,6 +524,7 @@ async fn update_database_view(
             .position
             .map(|value| position(value, &instance, request))
             .transpose()?,
+        link: link_id(query.link_id, &instance, request)?,
     };
     state
         .databases
@@ -430,11 +542,13 @@ async fn update_database_view(
         .map_err(|error| database_problem(error, instance, request))
 }
 
-/// Deletes a view; the last view of a database cannot be deleted (409 `database_last_view`).
-#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/databases/{database_id}/views/{view_id}", params(("workspace_id" = String, Path), ("database_id" = String, Path), ("view_id" = String, Path)), responses((status = 204)))]
+/// Deletes a view; the last view of a database or of a linked view block cannot be deleted
+/// (409 `database_last_view`).
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/databases/{database_id}/views/{view_id}", params(("workspace_id" = String, Path), ("database_id" = String, Path), ("view_id" = String, Path), ViewLinkQuery), responses((status = 204)))]
 async fn delete_database_view(
     State(state): State<DatabaseState>,
     Path((workspace, database, view)): Path<(String, String, String)>,
+    ApiQuery(query): ApiQuery<ViewLinkQuery>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
 ) -> Result<StatusCode, ApiError> {
@@ -443,12 +557,14 @@ async fn delete_database_view(
     let (workspace_id, database_id, actor_id) =
         scope(&state, &headers, &workspace, &database, &instance, request).await?;
     let view_id = child_id(&view, DatabaseError::ViewNotFound, &instance, request)?;
+    let link = link_id(query.link_id, &instance, request)?;
     state
         .databases
         .delete_view(
             workspace_id,
             database_id,
             view_id,
+            link,
             actor_id,
             request_id_value(request),
             TimestampMillis::now(),
@@ -668,6 +784,17 @@ fn name(
     )
 }
 
+/// A link id from a query or body: an unparseable id names no link of the database (404).
+fn link_id(
+    value: Option<String>,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> Result<Option<Id>, ApiError> {
+    value
+        .map(|value| child_id(&value, DatabaseError::LinkNotFound, instance, request_id))
+        .transpose()
+}
+
 fn position(
     value: i64,
     instance: &str,
@@ -744,6 +871,12 @@ fn database_problem(
             "Database view not found",
             "The requested view was not found in this database.",
         ),
+        DatabaseError::LinkNotFound => (
+            StatusCode::NOT_FOUND,
+            "database_link_not_found",
+            "Database link not found",
+            "The requested linked view was not found in this database.",
+        ),
         DatabaseError::Locked => (
             StatusCode::LOCKED,
             "page_locked",
@@ -767,6 +900,12 @@ fn database_problem(
             "database_view_limit",
             "Database view limit",
             "A database holds at most 50 views.",
+        ),
+        DatabaseError::LinkViewLimit => (
+            StatusCode::CONFLICT,
+            "database_link_view_limit",
+            "Linked view limit",
+            "A linked view holds at most 20 views.",
         ),
         DatabaseError::LastView => (
             StatusCode::CONFLICT,

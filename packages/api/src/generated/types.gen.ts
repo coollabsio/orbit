@@ -1426,6 +1426,17 @@ export type CreateAsanaImportBody = {
     token: string;
 };
 
+export type CreateDatabaseLinkBody = {
+    /**
+     * An own view whose type and config the link's first view copies (default: the first one).
+     */
+    from_view_id?: string | null;
+    /**
+     * The page whose block shows the link; the caller edits it.
+     */
+    host_page_id: string;
+};
+
 export type CreateDatabasePropertyBody = {
     /**
      * The type's config (see `DatabaseProperty.config`); omitted gives the default (a new
@@ -1473,6 +1484,10 @@ export type CreateDatabaseViewBody = {
      * A view of this database whose config the new view copies.
      */
     duplicate_of?: string | null;
+    /**
+     * Adds the view to this linked view block instead of the database's own views.
+     */
+    link_id?: string | null;
     /**
      * 1 to 200 characters.
      */
@@ -1658,6 +1673,24 @@ export type DatabaseHead = {
     locked: boolean;
     row_count: number;
     title: string;
+};
+
+export type DatabaseLink = {
+    created_at: string;
+    database_id: string;
+    /**
+     * The page whose block shows the link.
+     */
+    host_page_id: string;
+    id: string;
+};
+
+/**
+ * A new link and its views.
+ */
+export type DatabaseLinkedViews = {
+    link: DatabaseLink;
+    views: Array<DatabaseView>;
 };
 
 export type DatabaseProperty = {
@@ -16413,7 +16446,12 @@ export type GetDatabaseData = {
         workspace_id: string;
         database_id: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * A `database_links` id of this database.
+         */
+        link?: string;
+    };
     url: '/api/v1/workspaces/{workspace_id}/databases/{database_id}';
 };
 
@@ -16455,6 +16493,117 @@ export type GetDatabaseResponses = {
 };
 
 export type GetDatabaseResponse = GetDatabaseResponses[keyof GetDatabaseResponses];
+
+export type CreateDatabaseLinkData = {
+    body: CreateDatabaseLinkBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        database_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/databases/{database_id}/links';
+};
+
+export type CreateDatabaseLinkErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateDatabaseLinkError = CreateDatabaseLinkErrors[keyof CreateDatabaseLinkErrors];
+
+export type CreateDatabaseLinkResponses = {
+    201: DatabaseLinkedViews;
+};
+
+export type CreateDatabaseLinkResponse = CreateDatabaseLinkResponses[keyof CreateDatabaseLinkResponses];
+
+export type DeleteDatabaseLinkData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        database_id: string;
+        link_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/databases/{database_id}/links/{link_id}';
+};
+
+export type DeleteDatabaseLinkErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type DeleteDatabaseLinkError = DeleteDatabaseLinkErrors[keyof DeleteDatabaseLinkErrors];
+
+export type DeleteDatabaseLinkResponses = {
+    204: void;
+};
+
+export type DeleteDatabaseLinkResponse = DeleteDatabaseLinkResponses[keyof DeleteDatabaseLinkResponses];
 
 export type CreateDatabasePropertyData = {
     body: CreateDatabasePropertyBody;
@@ -17025,7 +17174,12 @@ export type DeleteDatabaseViewData = {
         database_id: string;
         view_id: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * A `database_links` id of this database.
+         */
+        link_id?: string;
+    };
     url: '/api/v1/workspaces/{workspace_id}/databases/{database_id}/views/{view_id}';
 };
 
@@ -17097,7 +17251,12 @@ export type UpdateDatabaseViewData = {
         database_id: string;
         view_id: string;
     };
-    query?: never;
+    query?: {
+        /**
+         * A `database_links` id of this database.
+         */
+        link_id?: string;
+    };
     url: '/api/v1/workspaces/{workspace_id}/databases/{database_id}/views/{view_id}';
 };
 

@@ -22,6 +22,10 @@ use crate::audit::{self, AuditOutcome};
 use crate::billing::TrialLimit;
 use crate::collab::CollabHub;
 
+mod links;
+pub use links::{DatabaseLink, LinkedViews, MAX_LINK_VIEWS};
+pub(super) use links::{LinkCopy, block_links, copy_links, linked_databases};
+
 pub const MAX_ROWS: i64 = 5_000;
 pub const MAX_PROPERTIES: usize = 100;
 pub const MAX_VIEWS: usize = 50;
@@ -1491,6 +1495,8 @@ pub struct NewView {
     pub view_type: ViewType,
     pub config: Option<ViewConfig>,
     pub duplicate_of: Option<Id>,
+    /// A view of this linked view block; `None` is an own view of the database.
+    pub link: Option<Id>,
 }
 
 #[derive(Default)]
@@ -1498,6 +1504,8 @@ pub struct ViewChanges {
     pub name: Option<String>,
     pub config: Option<ViewConfig>,
     pub position: Option<i64>,
+    /// The view belongs to this linked view block.
+    pub link: Option<Id>,
 }
 
 /// Where a row goes among the rows: last, first, or right after another row.
@@ -1524,6 +1532,9 @@ pub enum DatabaseError {
     PropertyNotFound,
     #[error("database view was not found")]
     ViewNotFound,
+    /// The linked view block's link is missing or belongs to another database.
+    #[error("database link was not found")]
+    LinkNotFound,
     #[error("database input is invalid: {field}")]
     Invalid { field: String },
     #[error("database is locked")]
@@ -1534,6 +1545,8 @@ pub enum DatabaseError {
     PropertyLimit,
     #[error("database holds the most views allowed")]
     ViewLimit,
+    #[error("linked view holds the most views allowed")]
+    LinkViewLimit,
     #[error("a database keeps at least one view")]
     LastView,
     /// The title property cannot be deleted or change its type.
@@ -1633,16 +1646,25 @@ impl DatabaseRepository {
         Self { database }
     }
 
+    /// The database with its own views, or with the views of `link` (a linked view block).
     pub async fn get(
         &self,
         workspace_id: Id,
         database_id: Id,
         actor_id: Id,
+        link: Option<Id>,
     ) -> Result<DatabaseDetail, DatabaseError> {
         let mut tx = self.database.transaction().await?;
         let page = open(&mut tx, workspace_id, database_id, actor_id).await?;
+        let set = match link {
+            Some(link_id) => {
+                links::require_link(&mut tx, database_id, link_id).await?;
+                Views::Link(link_id)
+            }
+            None => Views::Own,
+        };
         let properties = properties_in_tx(&mut tx, database_id).await?;
-        let views = views_in_tx(&mut tx, database_id, &properties).await?;
+        let views = views_in_tx(&mut tx, database_id, set, &properties).await?;
         let rows = rows_in_tx(&mut tx, database_id, None).await?;
         tx.rollback().await?;
         Ok(DatabaseDetail {
@@ -1746,7 +1768,7 @@ impl DatabaseRepository {
                 .await?;
             }
         }
-        for mut view in raw_views(&mut tx, database_id).await? {
+        for mut view in raw_views(&mut tx, database_id, Views::All).await? {
             let columns = &mut view.config.columns;
             match source.as_ref().and_then(|(original, _)| {
                 columns
@@ -1910,7 +1932,7 @@ impl DatabaseRepository {
             .await?;
         properties.remove(index);
         renumber_rows(&mut tx, "database_properties", &properties_ids(&properties)).await?;
-        for mut view in raw_views(&mut tx, database_id).await? {
+        for mut view in raw_views(&mut tx, database_id, Views::All).await? {
             let before = view.config.clone();
             view.config.repair(view.view_type, &properties);
             if view.config != before {
@@ -1941,12 +1963,15 @@ impl DatabaseRepository {
         now: TimestampMillis,
     ) -> Result<DatabaseView, DatabaseError> {
         let mut tx = self.database.immediate_transaction().await?;
-        let page = open(&mut tx, workspace_id, database_id, actor_id).await?;
-        unlocked(&page)?;
+        let set = writable_views(&mut tx, workspace_id, database_id, actor_id, input.link).await?;
         let properties = properties_in_tx(&mut tx, database_id).await?;
-        let views = raw_views(&mut tx, database_id).await?;
-        if views.len() >= MAX_VIEWS {
-            return Err(DatabaseError::ViewLimit);
+        let views = raw_views(&mut tx, database_id, set).await?;
+        match set {
+            Views::Link(_) if views.len() >= MAX_LINK_VIEWS => {
+                return Err(DatabaseError::LinkViewLimit);
+            }
+            _ if views.len() >= MAX_VIEWS => return Err(DatabaseError::ViewLimit),
+            _ => {}
         }
         let source = input
             .duplicate_of
@@ -1973,7 +1998,7 @@ impl DatabaseRepository {
             config,
             position: views.len() as i64,
         };
-        insert_view(&mut tx, workspace_id, database_id, &view, now).await?;
+        insert_view(&mut tx, workspace_id, database_id, set.link(), &view, now).await?;
         record(
             &mut tx,
             workspace_id,
@@ -2000,10 +2025,10 @@ impl DatabaseRepository {
         now: TimestampMillis,
     ) -> Result<DatabaseView, DatabaseError> {
         let mut tx = self.database.immediate_transaction().await?;
-        let page = open(&mut tx, workspace_id, database_id, actor_id).await?;
-        unlocked(&page)?;
+        let set =
+            writable_views(&mut tx, workspace_id, database_id, actor_id, changes.link).await?;
         let properties = properties_in_tx(&mut tx, database_id).await?;
-        let mut views = raw_views(&mut tx, database_id).await?;
+        let mut views = raw_views(&mut tx, database_id, set).await?;
         let index = views
             .iter()
             .position(|view| view.id == view_id)
@@ -2047,19 +2072,21 @@ impl DatabaseRepository {
         Ok(view)
     }
 
+    /// Deletes an own view (`link` `None`) or a view of a linked view block.
+    #[allow(clippy::too_many_arguments)]
     pub async fn delete_view(
         &self,
         workspace_id: Id,
         database_id: Id,
         view_id: Id,
+        link: Option<Id>,
         actor_id: Id,
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<(), DatabaseError> {
         let mut tx = self.database.immediate_transaction().await?;
-        let page = open(&mut tx, workspace_id, database_id, actor_id).await?;
-        unlocked(&page)?;
-        let mut views = raw_views(&mut tx, database_id).await?;
+        let set = writable_views(&mut tx, workspace_id, database_id, actor_id, link).await?;
+        let mut views = raw_views(&mut tx, database_id, set).await?;
         let index = views
             .iter()
             .position(|view| view.id == view_id)
@@ -2351,6 +2378,50 @@ async fn open(
         Ok(page)
     } else {
         Err(DatabaseError::NotFound)
+    }
+}
+
+/// A set of views of one database.
+#[derive(Clone, Copy, Debug)]
+enum Views {
+    /// The database's own views (its full page and inline blocks).
+    Own,
+    /// The views of one linked view block.
+    Link(Id),
+    /// Both, for changes every view follows (a new or deleted property).
+    All,
+}
+
+impl Views {
+    fn link(self) -> Option<Id> {
+        match self {
+            Self::Link(link_id) => Some(link_id),
+            Self::Own | Self::All => None,
+        }
+    }
+}
+
+/// The views a caller who reads the database may change: its own views when the database is
+/// not locked, or a link's views when its host page is visible to the caller and not locked.
+async fn writable_views(
+    tx: &mut Transaction<'_, Any>,
+    workspace_id: Id,
+    database_id: Id,
+    actor_id: Id,
+    link: Option<Id>,
+) -> Result<Views, DatabaseError> {
+    let page = open(tx, workspace_id, database_id, actor_id).await?;
+    match link {
+        None => {
+            unlocked(&page)?;
+            Ok(Views::Own)
+        }
+        Some(link_id) => {
+            let host_id = links::require_link(tx, database_id, link_id).await?;
+            let host = page_in_tx(tx, workspace_id, host_id, actor_id, false).await?;
+            unlocked(&host)?;
+            Ok(Views::Link(link_id))
+        }
     }
 }
 
@@ -2675,18 +2746,32 @@ impl DatabaseView {
     }
 }
 
-/// The stored views, configs as saved.
+/// The stored views of `set`, configs as saved.
 async fn raw_views(
     tx: &mut Transaction<'_, Any>,
     database_id: Id,
+    set: Views,
 ) -> Result<Vec<DatabaseView>, DatabaseError> {
-    let rows = sqlx::query(
-        "SELECT id, name, type, config_json, position FROM database_views \
-         WHERE database_id = $1 ORDER BY position, id",
-    )
-    .bind(database_id.to_string())
-    .fetch_all(&mut **tx)
-    .await?;
+    let query = match set {
+        Views::Own => sqlx::query(
+            "SELECT id, name, type, config_json, position FROM database_views \
+             WHERE database_id = $1 AND link_id IS NULL ORDER BY position, id",
+        ),
+        Views::Link(_) => sqlx::query(
+            "SELECT id, name, type, config_json, position FROM database_views \
+             WHERE database_id = $1 AND link_id = $2 ORDER BY position, id",
+        ),
+        Views::All => sqlx::query(
+            "SELECT id, name, type, config_json, position FROM database_views \
+             WHERE database_id = $1 ORDER BY position, id",
+        ),
+    };
+    let query = query.bind(database_id.to_string());
+    let query = match set {
+        Views::Link(link_id) => query.bind(link_id.to_string()),
+        Views::Own | Views::All => query,
+    };
+    let rows = query.fetch_all(&mut **tx).await?;
     rows.into_iter()
         .map(|row| {
             DatabaseView::from_stored(
@@ -2704,9 +2789,10 @@ async fn raw_views(
 async fn views_in_tx(
     tx: &mut Transaction<'_, Any>,
     database_id: Id,
+    set: Views,
     properties: &[Property],
 ) -> Result<Vec<DatabaseView>, DatabaseError> {
-    let mut views = raw_views(tx, database_id).await?;
+    let mut views = raw_views(tx, database_id, set).await?;
     for view in &mut views {
         view.config.repair(view.view_type, properties);
     }
@@ -2826,16 +2912,18 @@ async fn insert_view(
     tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     database_id: Id,
+    link: Option<Id>,
     view: &DatabaseView,
     now: TimestampMillis,
 ) -> Result<(), DatabaseError> {
     sqlx::query(
-        "INSERT INTO database_views (id, workspace_id, database_id, name, type, config_json, position, created_at, updated_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        "INSERT INTO database_views (id, workspace_id, database_id, link_id, name, type, config_json, position, created_at, updated_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
     )
     .bind(view.id.to_string())
     .bind(workspace_id.to_string())
     .bind(database_id.to_string())
+    .bind(link.map(|link_id| link_id.to_string()))
     .bind(&view.name)
     .bind(view.view_type.as_str())
     .bind(serde_json::to_string(&view.config).map_err(|_| DatabaseError::Corrupt)?)
@@ -2991,7 +3079,7 @@ pub(super) async fn insert_schema(
         insert_property(tx, workspace_id, database_id, property, now).await?;
     }
     for view in &schema.views {
-        insert_view(tx, workspace_id, database_id, view, now)
+        insert_view(tx, workspace_id, database_id, None, view, now)
             .await
             .map_err(page_error)?;
     }
@@ -3029,7 +3117,10 @@ pub(super) async fn load_database_data(
         {
             data.properties.push((*database_id, property));
         }
-        for view in raw_views(tx, *database_id).await.map_err(page_error)? {
+        for view in raw_views(tx, *database_id, Views::Own)
+            .await
+            .map_err(page_error)?
+        {
             data.views.push((*database_id, view));
         }
     }
@@ -3060,7 +3151,7 @@ pub(super) async fn write_database_data(
     pages: &HashMap<Id, Id>,
     actor_id: Id,
     now: TimestampMillis,
-) -> Result<(), PageError> {
+) -> Result<HashMap<Id, Id>, PageError> {
     let mut property_ids: HashMap<Id, Id> = HashMap::new();
     for (database_id, property) in data.properties {
         let id = Id::new_v7();
@@ -3077,7 +3168,7 @@ pub(super) async fn write_database_data(
     for (database_id, mut view) in data.views {
         view.config.remap(&property_ids);
         view.id = Id::new_v7();
-        insert_view(tx, workspace_id, pages[&database_id], &view, now)
+        insert_view(tx, workspace_id, pages[&database_id], None, &view, now)
             .await
             .map_err(page_error)?;
     }
@@ -3095,7 +3186,7 @@ pub(super) async fn write_database_data(
         .execute(&mut **tx)
         .await?;
     }
-    Ok(())
+    Ok(property_ids)
 }
 
 /// Keeps only the values of `page_id` that fit `database_id`'s live properties: the property
@@ -3123,7 +3214,8 @@ pub(super) async fn retain_fitting_values(
 }
 
 /// Copies database data for a page duplicate: the properties and views of each database in
-/// `databases` and the values of every copied page (`pages`: original id → copy id).
+/// `databases` and the values of every copied page (`pages`: original id → copy id). Returns
+/// the copied property ids (original id → copy id).
 pub(super) async fn copy_database_data(
     tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
@@ -3131,7 +3223,7 @@ pub(super) async fn copy_database_data(
     pages: &HashMap<Id, Id>,
     actor_id: Id,
     now: TimestampMillis,
-) -> Result<(), PageError> {
+) -> Result<HashMap<Id, Id>, PageError> {
     let data = load_database_data(tx, databases, pages.keys().copied()).await?;
     write_database_data(tx, workspace_id, data, pages, actor_id, now).await
 }

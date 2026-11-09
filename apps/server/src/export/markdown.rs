@@ -614,8 +614,10 @@ impl Converter<'_> {
                 };
                 joined(&join_blocks(&link, &self.caption(caption, &link)), nested())
             }
-            "page" => {
-                let page_id = prop_str(block, "pageId");
+            // A database block is a link to its database, like a sub-page.
+            "page" | "database" => {
+                let database = kind == "database";
+                let page_id = prop_str(block, if database { "databaseId" } else { "pageId" });
                 let link = match self.resolver.page(page_id) {
                     Some(link) => {
                         let title = if link.title.trim().is_empty() {
@@ -630,6 +632,7 @@ impl Converter<'_> {
                         )
                     }
                     None if page_id.is_empty() => String::new(),
+                    None if database => "*Missing database*".to_owned(),
                     None => "*Missing page*".to_owned(),
                 };
                 joined(&link, nested())

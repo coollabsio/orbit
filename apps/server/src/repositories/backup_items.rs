@@ -529,10 +529,12 @@ impl BackupItemRepository {
             file_ids.insert((old_page, old_file), copy);
             file_rows.push((copy, file, blob));
         }
+        // Links are not restored: a restored linked view block shows "View not found".
         let remap = Remap {
             workspace_id,
             pages: &page_ids,
             files: &file_ids,
+            links: &HashMap::new(),
         };
 
         let mut child_positions: HashMap<Id, i64> = HashMap::new();
@@ -1460,8 +1462,19 @@ async fn snapshot_database_data(
         data.properties
             .push((parse_snapshot_id(database_id)?, property));
     }
+    // Only the databases' own views: the views of linked view blocks went with their links.
+    let linked = reader
+        .columns("database_views")
+        .await?
+        .is_some_and(|names| names.iter().any(|name| name == "link_id"));
+    let mut view_columns = columns.to_vec();
+    if linked {
+        view_columns.push("link_id");
+    }
     for row in reader
-        .rows("database_views", &columns, of_databases)
+        .rows("database_views", &view_columns, |row| {
+            of_databases(row) && row.get("link_id").is_none()
+        })
         .await?
     {
         let (Some(id), Some(database_id)) = (row.get("id"), row.get("database_id")) else {

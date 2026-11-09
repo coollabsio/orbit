@@ -236,6 +236,8 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::database_routes::create_database_property,
         crate::database_routes::update_database_property,
         crate::database_routes::delete_database_property,
+        crate::database_routes::create_database_link,
+        crate::database_routes::delete_database_link,
         crate::database_routes::create_database_view,
         crate::database_routes::update_database_view,
         crate::database_routes::delete_database_view,

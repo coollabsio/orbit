@@ -250,11 +250,21 @@ fn moved_blocks_keep_their_id_and_sub_pages_stay_sub_pages() {
     let markdown = edit(&md(&base), "> *Quoted*\n\n", "");
     let markdown = format!("{markdown}\n> *Quoted*\n");
     // The page link's label is the sub-page's title; another label is still that sub-page.
-    let markdown = edit(&markdown, "[Untitled](/docs/", "[Renamed](/docs/");
+    let page = "/docs/0199a0b0-0000-7000-8000-000000000001)";
+    let markdown = edit(
+        &markdown,
+        &format!("[Untitled]({page}"),
+        &format!("[Renamed]({page}"),
+    );
     let merged = merge(&base, &markdown, &[], &KeepLinks);
     others_unchanged(&base, &merged, &[]);
     assert_eq!(merged.last().unwrap()["id"], "ex-quote");
     assert_eq!(find(&merged, "ex-page").unwrap()["type"], "page");
+    let database = find(&merged, "ex-database-link").unwrap();
+    assert_eq!(
+        (database["type"].as_str(), &database["props"]),
+        (Some("database"), &find(&base, "ex-database-link").unwrap()["props"])
+    );
 }
 
 #[test]

@@ -18,7 +18,8 @@ use utoipa::ToSchema;
 
 use super::billing::{TrialCapacityError, TrialLimitReached, ensure_trial_capacity};
 use super::databases::{
-    DatabaseSchema, RowCapacityError, copy_database_data, ensure_row_capacity, insert_schema,
+    DatabaseSchema, LinkCopy, RowCapacityError, block_links, copy_database_data, copy_links,
+    ensure_row_capacity, insert_schema, linked_databases,
 };
 use super::page_files::{page_file_url, page_has_file, parse_page_file_url};
 use super::page_mentions::notify_new_mentions;
@@ -1806,10 +1807,33 @@ impl PageRepository {
                 file_rows.push((copy, row));
             }
         }
+        // Each linked view block gets its own link, with copies of the link's views.
+        let mut link_copies = Vec::new();
+        for original in &originals {
+            let found = block_links(&original.content);
+            for (link_id, database_id) in linked_databases(&mut tx, workspace_id, &found).await? {
+                if !link_copies
+                    .iter()
+                    .any(|copy: &LinkCopy| copy.link_id == link_id)
+                {
+                    link_copies.push(LinkCopy {
+                        link_id,
+                        copy_id: Id::new_v7(),
+                        database_id,
+                        host_page_id: pages[&original.id],
+                    });
+                }
+            }
+        }
+        let links: HashMap<Id, Id> = link_copies
+            .iter()
+            .map(|copy| (copy.link_id, copy.copy_id))
+            .collect();
         let remap = Remap {
             workspace_id,
             pages: &pages,
             files: &files,
+            links: &links,
         };
 
         let mut child_positions: HashMap<Id, i64> = HashMap::new();
@@ -1928,7 +1952,18 @@ impl PageRepository {
             .filter(|page| page.kind == PageKind::Database)
             .map(|page| page.id)
             .collect();
-        copy_database_data(&mut tx, workspace_id, &databases, &pages, actor_id, now).await?;
+        let property_ids =
+            copy_database_data(&mut tx, workspace_id, &databases, &pages, actor_id, now).await?;
+        copy_links(
+            &mut tx,
+            workspace_id,
+            &link_copies,
+            &pages,
+            &property_ids,
+            actor_id,
+            now,
+        )
+        .await?;
 
         // The copy goes right after the original among the original's siblings.
         let mut root = root.ok_or(PageError::Corrupt)?;
@@ -2602,11 +2637,14 @@ pub(super) struct Remap<'a> {
     pub(super) pages: &'a HashMap<Id, Id>,
     /// (original page id, original file id) → (copy page id, copy file id).
     pub(super) files: &'a HashMap<(Id, Id), (Id, Id)>,
+    /// Original `database_links` id → copy id.
+    pub(super) links: &'a HashMap<Id, Id>,
 }
 
 impl Remap<'_> {
-    /// Walks block JSON: `pageId` props of `page` blocks, page-file URLs (image/file `url`
-    /// props and anything else holding one) and `/docs/<id>` link targets. Text is left alone.
+    /// Walks block JSON: `pageId` props of `page` blocks, `databaseId` and `linkId` props of
+    /// `database` blocks, page-file URLs (image/file `url` props and anything else holding one)
+    /// and `/docs/<id>` link targets. Text is left alone.
     pub(super) fn value(&self, value: &mut Value, key: Option<&str>) {
         match value {
             Value::Array(items) => {
@@ -2621,8 +2659,13 @@ impl Remap<'_> {
             }
             Value::String(text) => match key {
                 Some("text") => {}
-                Some("pageId") => {
+                Some("pageId" | "databaseId") => {
                     if let Some(copy) = text.parse::<Id>().ok().and_then(|id| self.pages.get(&id)) {
+                        *text = copy.to_string();
+                    }
+                }
+                Some("linkId") => {
+                    if let Some(copy) = text.parse::<Id>().ok().and_then(|id| self.links.get(&id)) {
                         *text = copy.to_string();
                     }
                 }

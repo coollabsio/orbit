@@ -2004,3 +2004,419 @@ async fn moving_a_card_sets_its_group_and_its_place_in_one_request() {
     );
     assert_eq!(database["rows"][0]["values"], json!({&priority_id: high}));
 }
+
+impl Fixture {
+    async fn link(&self, db: &str, host: &str) -> Value {
+        self.ok(
+            "POST",
+            &format!("databases/{db}/links"),
+            Some(json!({"host_page_id": host})),
+        )
+        .await
+    }
+
+    async fn set_content(&self, page: &str, content: Value) {
+        let version = self.page(page).await["version"].as_u64().unwrap();
+        self.ok(
+            "PATCH",
+            &format!("pages/{page}"),
+            Some(json!({"expected_version": version, "content": content})),
+        )
+        .await;
+    }
+
+    async fn purge_page(&self, id: &str) {
+        self.trash_page(id).await;
+        let (_, trash) = self.call("GET", "pages/trash", None).await;
+        let version = trash["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == id)
+            .expect("in the trash")["version"]
+            .clone();
+        self.ok(
+            "DELETE",
+            &format!("pages/{id}/permanent?expected_version={version}"),
+            None,
+        )
+        .await;
+    }
+
+    async fn count(&self, sql: &str, id: &str) -> i64 {
+        sqlx::query_scalar(sqlx::AssertSqlSafe(sql.to_owned()))
+            .bind(id)
+            .fetch_one(self.database.pool())
+            .await
+            .unwrap()
+    }
+}
+
+#[tokio::test]
+async fn a_linked_view_has_its_own_views_and_leaves_the_database_views_alone() {
+    let fixture = Fixture::new().await;
+    let db = fixture.create_database("Tasks").await;
+    let host = id_of(&fixture.create_page(json!({"title": "Host"})).await).to_owned();
+    let own = fixture.database(&db).await["views"].clone();
+    let own_view = id_of(&own[0]).to_owned();
+
+    let linked = fixture.link(&db, &host).await;
+    let link = id_of(&linked["link"]).to_owned();
+    assert_eq!(
+        (
+            linked["link"]["database_id"].as_str(),
+            linked["link"]["host_page_id"].as_str()
+        ),
+        (Some(db.as_str()), Some(host.as_str()))
+    );
+    assert_eq!(names(&linked["views"]), ["Table"]);
+    let link_view = id_of(&linked["views"][0]).to_owned();
+    assert_ne!(link_view, own_view);
+    assert_eq!(linked["views"][0]["config"], own[0]["config"]);
+
+    // Changes to the link's views stay in the link.
+    fixture
+        .ok(
+            "PATCH",
+            &format!("databases/{db}/views/{link_view}?link_id={link}"),
+            Some(json!({"name": "Mine", "config": {"wrap_cells": true}})),
+        )
+        .await;
+    fixture
+        .ok(
+            "POST",
+            &format!("databases/{db}/views"),
+            Some(json!({"name": "Board", "type": "board", "link_id": link})),
+        )
+        .await;
+    let through_link = fixture
+        .ok("GET", &format!("databases/{db}?link={link}"), None)
+        .await;
+    assert_eq!(names(&through_link["views"]), ["Mine", "Board"]);
+    assert_eq!(through_link["views"][0]["config"]["wrap_cells"], true);
+    assert_eq!(through_link["rows"], fixture.database(&db).await["rows"]);
+    let database = fixture.database(&db).await;
+    assert_eq!(database["views"], own);
+
+    // An own view id is not a view of the link, and the other way around.
+    let (status, body) = fixture
+        .call(
+            "PATCH",
+            &format!("databases/{db}/views/{own_view}?link_id={link}"),
+            Some(json!({"name": "X"})),
+        )
+        .await;
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (StatusCode::NOT_FOUND, Some("database_view_not_found"))
+    );
+    let (status, _) = fixture
+        .call("DELETE", &format!("databases/{db}/views/{link_view}"), None)
+        .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+
+    // The last view of a link stays.
+    let board = id_of(&through_link["views"][1]).to_owned();
+    fixture
+        .ok(
+            "DELETE",
+            &format!("databases/{db}/views/{board}?link_id={link}"),
+            None,
+        )
+        .await;
+    let (status, body) = fixture
+        .call(
+            "DELETE",
+            &format!("databases/{db}/views/{link_view}?link_id={link}"),
+            None,
+        )
+        .await;
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (StatusCode::CONFLICT, Some("database_last_view"))
+    );
+
+    // A new property shows in the link's views too.
+    let notes = fixture
+        .add_property(&db, json!({"name": "Notes", "type": "text"}))
+        .await;
+    let through_link = fixture
+        .ok("GET", &format!("databases/{db}?link={link}"), None)
+        .await;
+    let columns: Vec<&str> = through_link["views"][0]["config"]["columns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|column| column["property_id"].as_str().unwrap())
+        .collect();
+    assert!(columns.contains(&id_of(&notes)), "{columns:?}");
+}
+
+#[tokio::test]
+async fn a_link_of_another_database_is_not_found() {
+    let fixture = Fixture::new().await;
+    let db = fixture.create_database("Tasks").await;
+    let other = fixture.create_database("Other").await;
+    let host = id_of(&fixture.create_page(json!({"title": "Host"})).await).to_owned();
+    let link = id_of(&fixture.link(&db, &host).await["link"]).to_owned();
+    for (method, path, body) in [
+        ("GET", format!("databases/{other}?link={link}"), None),
+        (
+            "POST",
+            format!("databases/{other}/views"),
+            Some(json!({"name": "V", "type": "table", "link_id": link})),
+        ),
+        ("DELETE", format!("databases/{other}/links/{link}"), None),
+        ("GET", format!("databases/{db}?link=not-an-id"), None),
+    ] {
+        let (status, body) = fixture.call(method, &path, body).await;
+        assert_eq!(
+            (status, body["code"].as_str()),
+            (StatusCode::NOT_FOUND, Some("database_link_not_found")),
+            "{method} {path}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_link_needs_read_access_to_the_database_and_edit_access_to_the_host() {
+    let fixture = Fixture::new().await;
+    let (_, member) = fixture.add_member("member@example.com").await;
+    let shared = fixture.create_database("Shared").await;
+    let private_db = id_of(
+        &fixture
+            .create_page(json!({"kind": "database", "title": "Diary", "private": true}))
+            .await,
+    )
+    .to_owned();
+    let host = id_of(&fixture.create_page(json!({"title": "Host"})).await).to_owned();
+    let private_host = id_of(
+        &fixture
+            .create_page(json!({"title": "Mine", "private": true}))
+            .await,
+    )
+    .to_owned();
+    let link_as = |cookie: String, db: String, host: String| {
+        let fixture = &fixture;
+        async move {
+            fixture
+                .call_as(
+                    &cookie,
+                    "POST",
+                    &format!("databases/{db}/links"),
+                    Some(json!({"host_page_id": host})),
+                )
+                .await
+        }
+    };
+
+    // A database the member cannot read.
+    let (status, body) = link_as(member.clone(), private_db.clone(), host.clone()).await;
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (StatusCode::NOT_FOUND, Some("page_not_found"))
+    );
+    // A host page the member cannot see.
+    let (status, body) = link_as(member.clone(), shared.clone(), private_host.clone()).await;
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (StatusCode::UNPROCESSABLE_ENTITY, Some("validation_failed")),
+        "{body}"
+    );
+    let (status, _) = link_as(member.clone(), shared.clone(), host.clone()).await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    // A locked host freezes its linked views, not the database's own views.
+    let link = id_of(&fixture.link(&shared, &host).await["link"]).to_owned();
+    fixture
+        .ok(
+            "POST",
+            &format!("pages/{host}/lock"),
+            Some(json!({"locked": true})),
+        )
+        .await;
+    let (status, body) = fixture
+        .call(
+            "POST",
+            &format!("databases/{shared}/views"),
+            Some(json!({"name": "V", "type": "table", "link_id": link})),
+        )
+        .await;
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (StatusCode::LOCKED, Some("page_locked"))
+    );
+    let (status, _) = link_as(fixture.cookie.clone(), shared.clone(), host.clone()).await;
+    assert_eq!(status, StatusCode::LOCKED);
+    fixture
+        .ok(
+            "POST",
+            &format!("databases/{shared}/views"),
+            Some(json!({"name": "Own", "type": "table"})),
+        )
+        .await;
+
+    // A locked database freezes its own views, not a link's.
+    fixture
+        .ok(
+            "POST",
+            &format!("pages/{host}/lock"),
+            Some(json!({"locked": false})),
+        )
+        .await;
+    fixture
+        .ok(
+            "POST",
+            &format!("pages/{shared}/lock"),
+            Some(json!({"locked": true})),
+        )
+        .await;
+    fixture
+        .ok(
+            "POST",
+            &format!("databases/{shared}/views"),
+            Some(json!({"name": "Linked", "type": "table", "link_id": link})),
+        )
+        .await;
+}
+
+#[tokio::test]
+async fn deleting_the_host_forever_removes_its_links_and_their_views() {
+    let fixture = Fixture::new().await;
+    let db = fixture.create_database("Tasks").await;
+    let host = id_of(&fixture.create_page(json!({"title": "Host"})).await).to_owned();
+    let link = id_of(&fixture.link(&db, &host).await["link"]).to_owned();
+    let views = "SELECT COUNT(*) FROM database_views WHERE link_id = $1";
+    let links = "SELECT COUNT(*) FROM database_links WHERE id = $1";
+
+    // A trashed host keeps them.
+    fixture.trash_page(&host).await;
+    assert_eq!(
+        (
+            fixture.count(links, &link).await,
+            fixture.count(views, &link).await
+        ),
+        (1, 1)
+    );
+    fixture.restore_page(&host).await;
+    fixture.purge_page(&host).await;
+    assert_eq!(
+        (
+            fixture.count(links, &link).await,
+            fixture.count(views, &link).await
+        ),
+        (0, 0)
+    );
+    assert_eq!(
+        fixture.database(&db).await["views"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn duplicating_a_page_copies_its_inline_database_and_its_linked_views() {
+    let fixture = Fixture::new().await;
+    let elsewhere = fixture.create_database("Elsewhere").await;
+    let host = id_of(&fixture.create_page(json!({"title": "Host"})).await).to_owned();
+    let inline = id_of(
+        &fixture
+            .create_page(json!({"kind": "database", "title": "Inline", "parent_id": host}))
+            .await,
+    )
+    .to_owned();
+    let inline_link = fixture.link(&inline, &host).await;
+    let link = id_of(&inline_link["link"]).to_owned();
+    let inline_view = id_of(&inline_link["views"][0]).to_owned();
+    let notes = id_of(
+        &fixture
+            .add_property(&inline, json!({"name": "Notes", "type": "text"}))
+            .await,
+    )
+    .to_owned();
+    fixture
+        .ok(
+            "PATCH",
+            &format!("databases/{inline}/views/{inline_view}?link_id={link}"),
+            Some(json!({"config": {"sorts": [{"property_id": notes, "direction": "desc"}]}})),
+        )
+        .await;
+    let outside = id_of(&fixture.link(&elsewhere, &host).await["link"]).to_owned();
+    fixture
+        .set_content(
+            &host,
+            json!([
+                {"id": "a", "type": "database", "props": {"databaseId": inline, "linkId": ""}, "children": []},
+                {"id": "b", "type": "database", "props": {"databaseId": inline, "linkId": link}, "children": []},
+                {"id": "c", "type": "database", "props": {"databaseId": elsewhere, "linkId": outside}, "children": []},
+            ]),
+        )
+        .await;
+
+    let copy = fixture
+        .ok(
+            "POST",
+            &format!("pages/{host}/duplicate"),
+            Some(json!({"include_children": true})),
+        )
+        .await;
+    let blocks = copy["content"].as_array().unwrap();
+    let props: Vec<(&str, &str)> = blocks
+        .iter()
+        .map(|block| {
+            (
+                block["props"]["databaseId"].as_str().unwrap(),
+                block["props"]["linkId"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    let inline_copy = props[0].0;
+    assert_ne!(inline_copy, inline);
+    assert_eq!(props[0].1, "");
+    assert_eq!(props[1].0, inline_copy);
+    assert_ne!(props[1].1, link);
+    assert_eq!(props[2].0, elsewhere);
+    assert_ne!(props[2].1, outside);
+
+    // The copied link shows the copied database, its view sorted by the copied property.
+    let copied = fixture
+        .ok(
+            "GET",
+            &format!("databases/{inline_copy}?link={}", props[1].1),
+            None,
+        )
+        .await;
+    let copied_notes = id_of(property(&copied, "Notes")).to_owned();
+    assert_ne!(copied_notes, notes);
+    assert_eq!(
+        copied["views"][0]["config"]["sorts"],
+        json!([{"property_id": copied_notes, "direction": "desc"}])
+    );
+    assert_eq!(names(&copied["views"]), ["Table"]);
+    // The copy of the outside link still shows the original database, from the copied host.
+    let (_, outside_copy) = fixture
+        .call(
+            "GET",
+            &format!("databases/{elsewhere}?link={}", props[2].1),
+            None,
+        )
+        .await;
+    assert_eq!(names(&outside_copy["views"]), ["Table"]);
+    let host_of_copy: String =
+        sqlx::query_scalar("SELECT host_page_id FROM database_links WHERE id = $1")
+            .bind(props[2].1)
+            .fetch_one(fixture.database.pool())
+            .await
+            .unwrap();
+    assert_eq!(host_of_copy, id_of(&copy));
+    // The originals are untouched.
+    let original = fixture
+        .ok("GET", &format!("databases/{inline}?link={link}"), None)
+        .await;
+    assert_eq!(
+        original["views"][0]["config"]["sorts"],
+        json!([{"property_id": notes, "direction": "desc"}])
+    );
+}

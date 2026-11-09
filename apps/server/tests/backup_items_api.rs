@@ -687,6 +687,26 @@ async fn a_page_purged_after_the_backup_restores_with_its_file_from_the_snapshot
 async fn a_database_restores_with_its_properties_views_rows_and_values() {
     let fixture = Fixture::new().await;
     let (db, priority_id, done_id, high) = fixture.create_database("Tasks").await;
+    // A linked view block's views are the link's, not the database's.
+    let host = fixture.create_page("Host", None).await;
+    let linked = fixture
+        .database_ok(
+            "POST",
+            &format!("{db}/links"),
+            Some(json!({"host_page_id": host})),
+        )
+        .await;
+    fixture
+        .database_ok(
+            "PATCH",
+            &format!(
+                "{db}/views/{}?link_id={}",
+                linked["views"][0]["id"].as_str().unwrap(),
+                linked["link"]["id"].as_str().unwrap()
+            ),
+            Some(json!({"name": "Linked"})),
+        )
+        .await;
     let backup = fixture.backup().await;
     fixture.purge(&db).await;
 
