@@ -1,8 +1,9 @@
 import type { ReactNode } from 'react'
-import { Modal, Pressable, ScrollView, View } from 'react-native'
+import { ScrollView } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { useTheme } from '../theme'
+import { BottomSheet } from './BottomSheet'
 import { Icon } from './Icon'
 import { ListRow } from './ListRow'
 import { Text } from './Text'
@@ -39,9 +40,7 @@ export function PickerSheet({
   const { colors } = useTheme()
   const insets = useSafeAreaInsets()
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable accessibilityLabel="Close" onPress={onClose} className="flex-1 bg-foreground opacity-40 dark:bg-background" />
-      <View className={`max-h-[70%] rounded-t-xl border border-border ${SURFACE[surface]}`} style={{ paddingBottom: insets.bottom + 8 }}>
+    <BottomSheet visible={visible} onClose={onClose} maxHeight={0.7} className={`rounded-t-xl border border-border ${SURFACE[surface]}`} style={{ paddingBottom: insets.bottom + 8 }}>
         <Text className="p-4 pb-2 font-noto-semibold text-[17px] leading-[22px]">{title}</Text>
         <ScrollView>
           {options.map((option) => (
@@ -55,7 +54,6 @@ export function PickerSheet({
             />
           ))}
         </ScrollView>
-      </View>
-    </Modal>
+    </BottomSheet>
   )
 }
