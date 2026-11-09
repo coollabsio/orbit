@@ -75,7 +75,6 @@ export interface PageEditorProps {
   fileDeleted: (url: string) => Promise<boolean>
   openPage: (pageId: string) => Promise<void>
   openUrl: (url: string) => Promise<void>
-  onStatus: (state: CollabState) => Promise<void>
   onProblem: (problem: CollabProblem) => Promise<void>
   /** Handshakes keep failing: the screen checks the page over REST. */
   onProbe: () => Promise<void>
@@ -201,15 +200,11 @@ export default function PageEditor(props: PageEditorProps) {
     provider.awareness.setLocalStateField('user', actions.current.user)
     const connection = { doc, provider, fragment: doc.getXmlFragment(COLLAB_FRAGMENT) }
     const current = new CollabSession(connection, {
-      onChange: (state) => {
-        setSession((shown) => (shown?.connection === connection ? { connection, state } : shown))
-        void actions.current.onStatus(state)
-      },
+      onChange: (state) => setSession((shown) => (shown?.connection === connection ? { connection, state } : shown)),
       onProblem: (problem) => void actions.current.onProblem(problem),
       onProbe: () => void actions.current.onProbe(),
     })
     setSession({ connection, state: current.state })
-    void actions.current.onStatus(current.state)
     return () => {
       current.destroy()
       setSession(null)
