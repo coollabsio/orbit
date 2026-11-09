@@ -271,6 +271,7 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
         database={database}
         config={config}
         rows={rows}
+        viewRows={shown}
         scrollElement={page?.scrollElement ?? null}
         virtualize={!!page}
         onConfig={changeConfig}

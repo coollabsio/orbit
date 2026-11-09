@@ -11,6 +11,7 @@ import type { CellValue, Database, Property, Row, SelectOption, ViewConfig } fro
 import { useMoveRow, useUpdateProperty, useUpdateRowTitle, useUpdateValues } from './api'
 import { CellEditor, type EditEnd } from './cells/CellEditor'
 import { CellView } from './cells/CellView'
+import { CalculationFooter } from './CalculationFooter'
 import { AddPropertyButton, ColumnHeaderMenu } from './ColumnHeaderMenu'
 import { useDatabaseEnv } from './context'
 import { dropAfterRowId } from './databaseLib'
@@ -30,6 +31,8 @@ interface DatabaseTableProps {
   config: ViewConfig
   /** The rows the view shows, in order. */
   rows: Row[]
+  /** The rows the footer calculates over: the view's rows after filter and search, also those a block does not show yet. */
+  viewRows: readonly Row[]
   scrollElement: HTMLElement | null
   /** Off inside a page (a database block shows a few rows): every row renders, in the normal flow. */
   virtualize?: boolean
@@ -50,7 +53,7 @@ interface DatabaseTableProps {
 
 /** The table view (spec 7.2–7.4): a virtualized grid with a sticky header, cell editing and keyboard moves. */
 export function DatabaseTable(props: DatabaseTableProps) {
-  const { database, config, rows, scrollElement, virtualize = true, onConfig, onFilter, onAddRow, onOpenRow, filtered, onClearFilters, editRowId, onEditRowShown, selected, onSelect } = props
+  const { database, config, rows, viewRows, scrollElement, virtualize = true, onConfig, onFilter, onAddRow, onOpenRow, filtered, onClearFilters, editRowId, onEditRowShown, selected, onSelect } = props
   const { workspaceId, databaseId, ctx, canEditValues, canEditSchema } = useDatabaseEnv()
   const updateValues = useUpdateValues(workspaceId, databaseId)
   const updateTitle = useUpdateRowTitle(workspaceId, databaseId)
@@ -516,6 +519,7 @@ export function DatabaseTable(props: DatabaseTableProps) {
             New
           </button>
         ) : null}
+        <CalculationFooter columns={columns} rows={viewRows} config={config} onConfig={onConfig} />
       </div>
     </div>
   )

@@ -51,6 +51,7 @@ describe('repairConfig', () => {
       group_order: [],
       hidden_groups: [],
       card_properties: [],
+      calculations: {},
     })
   })
 
@@ -68,6 +69,7 @@ describe('repairConfig', () => {
       group_order: [],
       hidden_groups: [],
       card_properties: [],
+      calculations: {},
     })
   })
 

@@ -49482,6 +49482,32 @@
           }
         }
       },
+      "DatabaseCalculation": {
+        "type": "string",
+        "description": "A footer calculation of a table column (spec P2 4.3).",
+        "enum": [
+          "count_all",
+          "count_values",
+          "count_unique",
+          "count_empty",
+          "count_not_empty",
+          "percent_empty",
+          "percent_not_empty",
+          "sum",
+          "average",
+          "median",
+          "min",
+          "max",
+          "range",
+          "earliest_date",
+          "latest_date",
+          "date_range",
+          "checked",
+          "unchecked",
+          "percent_checked",
+          "percent_unchecked"
+        ]
+      },
       "DatabaseDetail": {
         "type": "object",
         "description": "A whole database: its properties, views and live rows.",
@@ -49840,6 +49866,16 @@
         "type": "object",
         "description": "A view's saved layout. Rules, sorts, columns and cards that name a deleted property are dropped\nwhen the view is read and saved. The `group_*`, `hidden_groups` and `card_properties` fields\nbelong to board views.",
         "properties": {
+          "calculations": {
+            "type": "object",
+            "description": "Table: the footer calculation of each property that has one. A function that does not fit\nthe property's type (after a type change) is dropped.",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DatabaseCalculation"
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
           "card_properties": {
             "type": "array",
             "items": {

@@ -1,4 +1,5 @@
 import type {
+  DatabaseCalculation,
   DatabaseDetail,
   DatabaseFilterRule,
   DatabaseProperty,
@@ -9,6 +10,7 @@ import type {
 } from '@orbit/api/generated/types.gen'
 
 export type {
+  DatabaseCalculation,
   DatabaseDetail,
   DatabaseFilterOperator,
   DatabaseFilterRule,
@@ -108,6 +110,8 @@ export type ViewConfig = {
   hidden_groups: (string | null)[]
   /** Board: the properties shown on each card, after the title. */
   card_properties: string[]
+  /** Table: the footer function of each property that has one. */
+  calculations: Readonly<Record<string, DatabaseCalculation>>
 }
 
 export type ViewContext = {

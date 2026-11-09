@@ -13,7 +13,7 @@ import { router } from 'expo-router'
 import { type ReactElement, useEffect, useState } from 'react'
 import { FlatList, Pressable, ScrollView, useWindowDimensions, View } from 'react-native'
 
-import { filledProperties, groupValues, listProperties, pickView, PROPERTY_ICONS, sortedViews, VIEW_ICONS, viewStorageKey } from '../../data/database'
+import { filledProperties, groupValues, listProperties, pickView, PROPERTY_ICONS, sortedViews, summaryLines, VIEW_ICONS, viewStorageKey } from '../../data/database'
 import { type Notify, useCreateRow, useDatabase, useUpdateValues, useViewContext, useViewDrafts, useWorkspaceReadOnly } from '../../hooks/database'
 import { storage } from '../../storage'
 import { alpha, useTheme } from '../../theme'
@@ -301,17 +301,34 @@ function RowList({ database, config, rows, ctx, header, empty, refresh }: {
   refresh: ReactElement
 }) {
   const shown = listProperties(database.properties, config)
+  const summary = summaryLines(database.properties, config, rows, ctx)
   return (
     <FlatList
       data={rows}
       keyExtractor={(row) => row.id}
       ListHeaderComponent={header}
       ListEmptyComponent={empty}
+      ListFooterComponent={summary.length > 0 ? <Summary lines={summary} /> : undefined}
       keyboardShouldPersistTaps="handled"
       contentContainerClassName="pb-8"
       refreshControl={refresh}
       renderItem={({ item }) => <ListRowItem row={item} properties={filledProperties(item, shown)} ctx={ctx} />}
     />
+  )
+}
+
+/** The web footer's calculations, read only (spec P2 4.6). */
+function Summary({ lines }: { lines: { id: string; text: string }[] }) {
+  return (
+    <View accessibilityLabel="Summary" className="mx-3 pt-4 px-1.5 gap-1">
+      <Text className="font-noto-medium text-[12px] text-muted-foreground">Summary</Text>
+      {lines.map((line) => (
+        <Text key={line.id} className="text-[13px] text-foreground">
+          {line.text}
+        </Text>
+      ))}
+      <Text className="text-[12px] text-muted-foreground">To change a calculation, edit on the web.</Text>
+    </View>
   )
 }
 

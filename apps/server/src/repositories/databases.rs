@@ -1081,6 +1081,60 @@ fn rule_value_fits(kind: RuleValue, value: &Value) -> bool {
     }
 }
 
+/// A footer calculation of a table column (spec P2 4.3).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[schema(as = DatabaseCalculation)]
+pub enum Calculation {
+    CountAll,
+    CountValues,
+    CountUnique,
+    CountEmpty,
+    CountNotEmpty,
+    PercentEmpty,
+    PercentNotEmpty,
+    Sum,
+    Average,
+    Median,
+    Min,
+    Max,
+    Range,
+    EarliestDate,
+    LatestDate,
+    DateRange,
+    Checked,
+    Unchecked,
+    PercentChecked,
+    PercentUnchecked,
+}
+
+impl Calculation {
+    /// Whether the function applies to a property of `property_type`.
+    const fn fits(self, property_type: PropertyType) -> bool {
+        use Calculation as C;
+        use PropertyType as Type;
+        match self {
+            C::CountAll => true,
+            C::CountValues
+            | C::CountUnique
+            | C::CountEmpty
+            | C::CountNotEmpty
+            | C::PercentEmpty
+            | C::PercentNotEmpty => !matches!(property_type, Type::Checkbox),
+            C::Sum | C::Average | C::Median | C::Min | C::Max | C::Range => {
+                matches!(property_type, Type::Number)
+            }
+            C::EarliestDate | C::LatestDate | C::DateRange => matches!(
+                property_type,
+                Type::Date | Type::CreatedTime | Type::LastEditedTime
+            ),
+            C::Checked | C::Unchecked | C::PercentChecked | C::PercentUnchecked => {
+                matches!(property_type, Type::Checkbox)
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 #[schema(as = DatabaseViewColumn)]
@@ -1179,6 +1233,11 @@ pub struct ViewConfig {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schema(value_type = Vec<String>)]
     pub card_properties: Vec<Id>,
+    /// Table: the footer calculation of each property that has one. A function that does not fit
+    /// the property's type (after a type change) is dropped.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[schema(value_type = HashMap<String, Calculation>)]
+    pub calculations: BTreeMap<Id, Calculation>,
 }
 
 /// Option ids, plus `null` for "no value", that a board can group by. Groups that name no option of
@@ -1245,6 +1304,9 @@ impl ViewConfig {
         self.card_properties.retain(|id| {
             kind(*id).is_some_and(|kind| *kind != PropertyKind::Title) && cards.insert(*id)
         });
+        self.calculations.retain(|id, calculation| {
+            kind(*id).is_some_and(|kind| calculation.fits(kind.property_type()))
+        });
     }
 
     /// Drops what names a property not in `properties` and repeated columns and sorts.
@@ -1298,6 +1360,17 @@ impl ViewConfig {
             .iter()
             .map(|property| (property.id, property.kind.property_type()))
             .collect();
+        if self.calculations.len() > MAX_PROPERTIES {
+            return Err("config.calculations".to_owned());
+        }
+        for (id, calculation) in &self.calculations {
+            if types
+                .get(id)
+                .is_some_and(|property_type| !calculation.fits(*property_type))
+            {
+                return Err(format!("config.calculations.{id}"));
+            }
+        }
         for (index, rule) in self.filter.rules.iter().enumerate() {
             let Some(property_type) = types.get(&rule.property_id) else {
                 continue;
@@ -1349,6 +1422,13 @@ impl ViewConfig {
             map(group_by);
         }
         self.card_properties.iter_mut().for_each(map);
+        self.calculations = std::mem::take(&mut self.calculations)
+            .into_iter()
+            .map(|(mut id, calculation)| {
+                map(&mut id);
+                (id, calculation)
+            })
+            .collect();
     }
 }
 

@@ -1644,6 +1644,11 @@ export type CustomStickerRecord = {
 };
 
 /**
+ * A footer calculation of a table column (spec P2 4.3).
+ */
+export type DatabaseCalculation = 'count_all' | 'count_values' | 'count_unique' | 'count_empty' | 'count_not_empty' | 'percent_empty' | 'percent_not_empty' | 'sum' | 'average' | 'median' | 'min' | 'max' | 'range' | 'earliest_date' | 'latest_date' | 'date_range' | 'checked' | 'unchecked' | 'percent_checked' | 'percent_unchecked';
+
+/**
  * A whole database: its properties, views and live rows.
  */
 export type DatabaseDetail = {
@@ -1782,6 +1787,13 @@ export type DatabaseViewColumn = {
  * belong to board views.
  */
 export type DatabaseViewConfig = {
+    /**
+     * Table: the footer calculation of each property that has one. A function that does not fit
+     * the property's type (after a type change) is dropped.
+     */
+    calculations?: {
+        [key: string]: DatabaseCalculation;
+    };
     /**
      * Board: the properties shown on each card, in order. The title always shows.
      */

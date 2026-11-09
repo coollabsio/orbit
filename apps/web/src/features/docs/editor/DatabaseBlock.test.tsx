@@ -98,9 +98,9 @@ describe('database block', () => {
     const { view, root } = await renderBlock(block({ databaseId: 'db-1' }), detail(30))
     expect(root().textContent).toContain('Reading list')
     expect(view.getByRole('tab', { name: 'Table' }).getAttribute('aria-selected')).toBe('true')
-    expect(root().querySelectorAll('[role="row"]:not([aria-rowindex="1"])').length).toBe(25)
+    expect(root().querySelectorAll('[role="row"][aria-rowindex]:not([aria-rowindex="1"])').length).toBe(25)
     await userEvent.click(view.getByRole('button', { name: 'Load more' }))
-    expect(root().querySelectorAll('[role="row"]:not([aria-rowindex="1"])').length).toBe(30)
+    expect(root().querySelectorAll('[role="row"][aria-rowindex]:not([aria-rowindex="1"])').length).toBe(30)
     expect(view.queryAllByRole('button', { name: 'Load more' }).length).toBe(0)
   })
 

@@ -2420,3 +2420,66 @@ async fn duplicating_a_page_copies_its_inline_database_and_its_linked_views() {
         json!([{"property_id": notes, "direction": "desc"}])
     );
 }
+
+#[tokio::test]
+async fn footer_calculations_fit_their_property_type() {
+    let fixture = Fixture::new().await;
+    let db = fixture.create_database("Footer").await;
+    let database = fixture.database(&db).await;
+    let view = id_of(&database["views"][0]).to_owned();
+    let name = id_of(property(&database, "Name")).to_owned();
+    let price = id_of(
+        &fixture
+            .add_property(&db, json!({"name": "Price", "type": "number"}))
+            .await,
+    )
+    .to_owned();
+    let path = format!("databases/{db}/views/{view}");
+
+    let saved = fixture
+        .ok(
+            "PATCH",
+            &path,
+            Some(json!({"config": {"calculations": {
+                &price: "sum",
+                &name: "count_values",
+                Id::new_v7().to_string(): "count_all",
+            }}})),
+        )
+        .await;
+    assert_eq!(
+        saved["config"]["calculations"],
+        json!({&name: "count_values", &price: "sum"}),
+        "a calculation of an unknown property is dropped"
+    );
+
+    let (status, body) = fixture
+        .call(
+            "PATCH",
+            &path,
+            Some(json!({"config": {"calculations": {&name: "sum"}}})),
+        )
+        .await;
+    assert_eq!(
+        (status, body["detail"].as_str()),
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Some(format!("config.calculations.{name}").as_str())
+        ),
+        "{body}"
+    );
+
+    // A type change to checkbox drops the sum; the title's count stays.
+    fixture
+        .ok(
+            "PATCH",
+            &format!("databases/{db}/properties/{price}"),
+            Some(json!({"type": "checkbox"})),
+        )
+        .await;
+    let database = fixture.database(&db).await;
+    assert_eq!(
+        database["views"][0]["config"]["calculations"],
+        json!({&name: "count_values"})
+    );
+}

@@ -1,9 +1,9 @@
 import { expect, test } from 'bun:test'
-import { database, property } from '@orbit/database/testing'
+import { ctx, database, property } from '@orbit/database/testing'
 import type { GroupProperty } from '@orbit/database/types'
 import { repairConfig } from '@orbit/database/view'
 
-import { filledProperties, groupValues, listProperties, parseTime, pickView } from './database'
+import { filledProperties, groupValues, listProperties, parseTime, pickView, summaryLines } from './database'
 
 const view = database.views[0]!
 
@@ -56,4 +56,22 @@ test('times are HH:MM on a 24 hour clock', () => {
   expect(parseTime(' 23:59 ')).toBe('23:59')
   expect(parseTime('24:00')).toBe(null)
   expect(parseTime('9')).toBe(null)
+})
+
+test('the summary lists the calculations of visible columns in column order', () => {
+  const view = database.views[0]
+  const config = repairConfig(
+    {
+      ...view,
+      config: {
+        columns: [{ property_id: 'p-num' }, { property_id: 'p-text', hidden: true }],
+        calculations: { 'p-title': 'count_all', 'p-num': 'sum', 'p-text': 'count_empty' },
+      },
+    },
+    database.properties,
+  )
+  expect(summaryLines(database.properties, config, database.rows, ctx)).toEqual([
+    { id: 'p-num', text: 'Score · Sum 7.5' },
+    { id: 'p-title', text: 'Name · Count 4' },
+  ])
 })

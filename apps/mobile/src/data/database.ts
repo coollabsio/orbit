@@ -2,7 +2,8 @@
  * What the database screens decide on a phone, as plain data: which view is open, which properties a row of the list
  * shows, and what a board card move sends. The view logic itself (filter, sort, groups) is `@orbit/database`.
  */
-import type { DatabasePropertyType, DatabaseView, GroupProperty, OptionColor, Property, Row, ViewConfig } from '@orbit/database/types'
+import { CALCULATION_LABELS, calculate } from '@orbit/database/calculate'
+import type { DatabasePropertyType, DatabaseView, GroupProperty, OptionColor, Property, Row, ViewConfig, ViewContext } from '@orbit/database/types'
 import { cellOf } from '@orbit/database/values'
 
 import type { IconName } from '../ui'
@@ -53,6 +54,20 @@ export function listProperties(properties: readonly Property[], config: ViewConf
       return property && !column.hidden && property.type !== 'title' ? [property] : []
     })
     .slice(0, LIST_PROPERTIES)
+}
+
+/**
+ * The web footer's calculations as read-only lines (spec P2 4.6): `<property> · <label> <value>`, in column order, for
+ * the visible columns that have one, over the view's rows.
+ */
+export function summaryLines(properties: readonly Property[], config: ViewConfig, rows: readonly Row[], ctx: ViewContext): { id: string; text: string }[] {
+  const byId = new Map(properties.map((property) => [property.id, property]))
+  return config.columns.flatMap((column) => {
+    const property = byId.get(column.property_id)
+    const fn = config.calculations[column.property_id]
+    if (!property || column.hidden || !fn) return []
+    return [{ id: property.id, text: `${property.name} · ${CALCULATION_LABELS[fn].short} ${calculate(rows, property, fn, ctx).value}` }]
+  })
 }
 
 /** Of `shown`, the properties the row has a value for: an empty one leaves no gap. */
