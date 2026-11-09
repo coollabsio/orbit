@@ -19,11 +19,11 @@ const teamspace = (id: string, name: string, position: number): Teamspace => ({
 })
 
 const page = (id: string, parent_id: string | null, position: number, teamspace_id: string | null, title = id): PageSummary => ({
-  id, parent_id, position, title, teamspace_id, private: teamspace_id === null, icon: null, version: 1, updated_at: '2026-09-25T10:00:00Z',
+  id, parent_id, position, title, teamspace_id, private: teamspace_id === null, kind: 'page', icon: null, version: 1, updated_at: '2026-09-25T10:00:00Z',
 })
 
 const fullPage = (summary: PageSummary): Page => ({
-  ...summary, workspace_id: 'workspace-1', cover_url: null, cover_position: null, content: [], creator_id: 'user-1',
+  ...summary, database_id: null, workspace_id: 'workspace-1', cover_url: null, cover_position: null, content: [], creator_id: 'user-1',
   updated_by: 'user-1', created_at: '2026-09-25T10:00:00Z', deleted_at: null, collab_epoch: 'epoch-1',
   full_width: false, locked_at: null, locked_by: null, updated_by_user: { id: 'user-1', display_name: 'Ada' },
 })

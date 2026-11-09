@@ -17,6 +17,7 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use super::billing::{TrialCapacityError, TrialLimitReached, ensure_trial_capacity};
+use super::databases::{copy_database_data, insert_default_schema};
 use super::page_files::{page_file_url, page_has_file, parse_page_file_url};
 use super::page_mentions::notify_new_mentions;
 use super::page_versions::{
@@ -51,12 +52,13 @@ const PAGE_COLUMNS: &str = "id, workspace_id, parent_id, teamspace_id, title, ic
      content_json, position, creator_id, updated_by, version, created_at, updated_at, deleted_at, \
      COALESCE((SELECT epoch FROM page_collab_docs WHERE page_collab_docs.page_id = pages.id), \
      (SELECT generation FROM page_collab_meta WHERE page_collab_meta.id = 1), '') AS collab_epoch, \
-     full_width, locked_at, locked_by, \
+     full_width, locked_at, locked_by, kind, \
+     (SELECT parent.id FROM pages AS parent WHERE parent.id = pages.parent_id AND parent.kind = 'database') AS database_id, \
      (SELECT display_name FROM users WHERE users.id = pages.updated_by) AS updated_by_name, \
      (SELECT display_name FROM users WHERE users.id = pages.locked_by) AS locked_by_name";
 const SUMMARY_COLUMNS: &str = "pages.id AS id, pages.parent_id AS parent_id, pages.teamspace_id AS teamspace_id, \
      pages.title AS title, pages.icon AS icon, pages.position AS position, pages.version AS version, \
-     pages.updated_at AS updated_at";
+     pages.updated_at AS updated_at, pages.kind AS kind";
 /// Teamspace pages plus the caller's private pages; binds the caller's user id.
 /// `param` is the placeholder number of that bind in the final query.
 pub(super) fn visible(param: usize) -> String {
@@ -68,6 +70,33 @@ pub(super) fn json_text_array(backend: Backend, param: usize) -> String {
     match backend {
         Backend::Sqlite => format!("SELECT value FROM json_each(${param})"),
         Backend::Postgres => format!("SELECT jsonb_array_elements_text(${param}::jsonb)"),
+    }
+}
+
+/// What a page holds: a block document, or a database of rows (see `repositories::databases`).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, serde::Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PageKind {
+    #[default]
+    Page,
+    Database,
+}
+
+impl PageKind {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Page => "page",
+            Self::Database => "database",
+        }
+    }
+
+    fn parse(value: &str) -> Result<Self, PageError> {
+        match value {
+            "page" => Ok(Self::Page),
+            "database" => Ok(Self::Database),
+            _ => Err(PageError::Corrupt),
+        }
     }
 }
 
@@ -125,6 +154,11 @@ pub struct PageRecord {
     pub teamspace_id: Option<Id>,
     /// True when the page is in the caller's private space (`teamspace_id` is `null`).
     pub private: bool,
+    /// A `database` page has no body; read it with `GET .../databases/{database_id}`.
+    pub kind: PageKind,
+    /// For a row of a database (a page whose parent is a database page): that database.
+    #[schema(value_type = Option<String>, required = true)]
+    pub database_id: Option<Id>,
     pub title: String,
     #[schema(required = true)]
     pub icon: Option<String>,
@@ -212,6 +246,7 @@ pub struct PageSummary {
     pub teamspace_id: Option<Id>,
     /// True when the page is in the caller's private space.
     pub private: bool,
+    pub kind: PageKind,
     pub title: String,
     #[schema(required = true)]
     pub icon: Option<String>,
@@ -316,6 +351,8 @@ pub struct PageFavoriteList {
 
 #[derive(Clone, Debug)]
 pub struct CreatePage {
+    /// A database starts with a "Name" title property, a "Tags" multi-select and a "Table" view.
+    pub kind: PageKind,
     pub parent_id: Option<Id>,
     pub space: SpaceRequest,
     pub title: String,
@@ -388,6 +425,10 @@ pub enum PageError {
     /// The page is locked: its title, icon, cover and content cannot change.
     #[error("page is locked")]
     Locked,
+    /// Pages move into or out of a database only in a later phase; rows are made and ordered
+    /// through the database routes.
+    #[error("pages cannot move into or out of a database")]
+    DatabaseMoveUnsupported,
     #[error("stored page data is invalid")]
     Corrupt,
     /// Orbit Cloud: the trial workspace holds as many pages as the trial allows.
@@ -455,14 +496,23 @@ impl PageRepository {
         Self { database }
     }
 
-    /// All live pages the caller can see, grouped by space (teamspaces by position, then the
-    /// caller's private space) and ordered `parent_id, position, id` within a space.
+    /// All live pages the caller can see, without database rows and their sub-pages, grouped by
+    /// space (teamspaces by position, then the caller's private space) and ordered
+    /// `parent_id, position, id` within a space.
     pub async fn pages(&self, workspace_id: Id, actor_id: Id) -> Result<PageList, PageError> {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
+        // A database can hold 5,000 rows; the tree would be slow and full.
         let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
-            "SELECT {SUMMARY_COLUMNS} FROM pages \
+            "WITH RECURSIVE in_database(id) AS ( \
+                 SELECT row_page.id FROM pages AS row_page JOIN pages AS db ON db.id = row_page.parent_id \
+                 WHERE db.workspace_id = $1 AND db.kind = 'database' \
+                 UNION ALL \
+                 SELECT child.id FROM pages AS child JOIN in_database ON child.parent_id = in_database.id \
+             ) \
+             SELECT {SUMMARY_COLUMNS} FROM pages \
              LEFT JOIN teamspaces ON teamspaces.id = pages.teamspace_id \
              WHERE pages.workspace_id = $1 AND pages.deleted_at IS NULL AND {visible} \
+             AND pages.id NOT IN (SELECT id FROM in_database) \
              ORDER BY pages.teamspace_id IS NULL, teamspaces.position, teamspaces.id, \
              pages.parent_id NULLS FIRST, pages.position, pages.id",
             visible = visible(2)
@@ -570,13 +620,18 @@ impl PageRepository {
             None,
         )
         .await?;
+        if let Some(parent_id) = input.parent_id
+            && is_database(&mut tx, parent_id).await?
+        {
+            return Err(PageError::DatabaseMoveUnsupported);
+        }
         let mut siblings = sibling_ids(&mut tx, workspace_id, space, input.parent_id, id).await?;
         let index = insert_index(input.position, siblings.len());
         siblings.insert(index, id);
         let position = index as i64;
         sqlx::query(
-            "INSERT INTO pages (id, workspace_id, parent_id, teamspace_id, owner_id, title, icon, position, creator_id, updated_by, version, created_at, updated_at, content_json, content_text) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 0, $11, $12, $13, $14)",
+            "INSERT INTO pages (id, workspace_id, parent_id, teamspace_id, owner_id, title, icon, position, creator_id, updated_by, version, created_at, updated_at, content_json, content_text, kind) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 0, $11, $12, $13, $14, $15)",
         )
         .bind(id.to_string())
         .bind(workspace_id.to_string())
@@ -592,8 +647,12 @@ impl PageRepository {
         .bind(now.as_millis())
         .bind(serde_json::to_string(&content).map_err(|_| PageError::Corrupt)?)
         .bind(content_text(&content))
+        .bind(input.kind.as_str())
         .execute(&mut *tx)
         .await?;
+        if input.kind == PageKind::Database {
+            insert_default_schema(&mut tx, workspace_id, id, now).await?;
+        }
         renumber(&mut tx, &siblings).await?;
         notify_new_mentions(&mut tx, id, &[], &content, Some(actor_id), request_id, now).await?;
         let collab_epoch = collab_generation(&mut tx).await?;
@@ -616,6 +675,8 @@ impl PageRepository {
             parent_id: input.parent_id,
             teamspace_id: space.teamspace_id(),
             private: space.teamspace_id().is_none(),
+            kind: input.kind,
+            database_id: None,
             title: input.title,
             icon: input.icon,
             cover_url: None,
@@ -862,6 +923,9 @@ impl PageRepository {
         if edit && current.locked_at.is_some() {
             return Err(PageError::Locked);
         }
+        if current.kind == PageKind::Database && (changes.content.is_some() || markdown.is_some()) {
+            return Err(PageError::Invalid { field: "content" });
+        }
         expected.check(&current)?;
         if reconciled
             && let Some(collab) = collab.as_mut()
@@ -1052,6 +1116,13 @@ impl PageRepository {
         check_version(expected_version, current.version, &current)?;
         if parent_id == Some(page_id) {
             return Err(PageError::Invalid { field: "parent_id" });
+        }
+        let into_database = match parent_id {
+            Some(parent_id) => is_database(&mut tx, parent_id).await?,
+            None => false,
+        };
+        if current.database_id.is_some() || into_database {
+            return Err(PageError::DatabaseMoveUnsupported);
         }
         let current_space = current.space(actor_id);
         let space = resolve_space(
@@ -1554,6 +1625,8 @@ impl PageRepository {
         let collab_epoch = collab_generation(&mut tx).await?;
         let actor = user_in_tx(&mut tx, actor_id).await?;
         let space = source.space(actor_id);
+        // A database's rows are its content: they are always copied.
+        let include_children = include_children || source.kind == PageKind::Database;
         let mut originals = vec![source];
         if include_children {
             let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
@@ -1637,8 +1710,8 @@ impl PageRepository {
             sqlx::query(
                 "INSERT INTO pages (id, workspace_id, parent_id, teamspace_id, owner_id, title, icon, \
                  cover_url, cover_position, content_json, content_text, position, creator_id, updated_by, \
-                 version, created_at, updated_at, full_width) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 0, $15, $16, $17)",
+                 version, created_at, updated_at, full_width, kind) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 0, $15, $16, $17, $18)",
             )
             .bind(id.to_string())
             .bind(workspace_id.to_string())
@@ -1657,6 +1730,7 @@ impl PageRepository {
             .bind(now.as_millis())
             .bind(now.as_millis())
             .bind(i64::from(original.full_width))
+            .bind(original.kind.as_str())
             .execute(&mut *tx)
             .await?;
             audit::record(
@@ -1679,6 +1753,8 @@ impl PageRepository {
                     parent_id,
                     teamspace_id: space.teamspace_id(),
                     private: space.teamspace_id().is_none(),
+                    kind: original.kind,
+                    database_id: original.database_id,
                     title,
                     icon: original.icon.clone(),
                     cover_url,
@@ -1717,6 +1793,13 @@ impl PageRepository {
             .execute(&mut *tx)
             .await?;
         }
+
+        let databases: Vec<Id> = originals
+            .iter()
+            .filter(|page| page.kind == PageKind::Database)
+            .map(|page| page.id)
+            .collect();
+        copy_database_data(&mut tx, workspace_id, &databases, &pages, actor_id, now).await?;
 
         // The copy goes right after the original among the original's siblings.
         let mut root = root.ok_or(PageError::Corrupt)?;
@@ -2527,6 +2610,17 @@ async fn is_ancestor(
     Ok(found)
 }
 
+/// True when `page_id` is a database page (in any state).
+async fn is_database(tx: &mut Transaction<'_, Any>, page_id: Id) -> Result<bool, PageError> {
+    let Flag(database) = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM pages WHERE id = $1 AND kind = 'database')",
+    )
+    .bind(page_id.to_string())
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(database)
+}
+
 /// The space of a live page the caller can see; `None` when it is missing, trashed, or someone
 /// else's private page.
 async fn live_page_space(
@@ -2755,7 +2849,7 @@ impl Expected {
 
 impl PageRecord {
     /// The page's space; a private page is always the caller's, since no one else can load it.
-    fn space(&self, actor_id: Id) -> PageSpace {
+    pub(super) fn space(&self, actor_id: Id) -> PageSpace {
         self.teamspace_id
             .map_or(PageSpace::Private(actor_id), PageSpace::Teamspace)
     }
@@ -2786,6 +2880,8 @@ fn page_from_row(row: sqlx::any::AnyRow) -> Result<PageRecord, PageError> {
             .map(TimestampMillis::from_millis),
         collab_epoch: row.get("collab_epoch"),
         full_width: row.get("full_width"),
+        kind: PageKind::parse(&row.get::<String, _>("kind"))?,
+        database_id: parse_optional_id(row.get("database_id"))?,
         locked_at: row
             .get::<Option<i64>, _>("locked_at")
             .map(TimestampMillis::from_millis),
@@ -2852,6 +2948,7 @@ fn summary_from_row(row: sqlx::any::AnyRow) -> Result<PageSummary, PageError> {
         parent_id: parse_optional_id(row.get("parent_id"))?,
         teamspace_id,
         private: teamspace_id.is_none(),
+        kind: PageKind::parse(&row.get::<String, _>("kind"))?,
         title: row.get("title"),
         icon: row.get("icon"),
         position: row.get("position"),

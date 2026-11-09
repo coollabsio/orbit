@@ -95,6 +95,7 @@ impl Live {
                 self.workspace(),
                 self.users.owner_id,
                 CreatePage {
+                    kind: orbit_server::repositories::pages::PageKind::Page,
                     parent_id: parent,
                     space: SpaceRequest::default(),
                     title: title.into(),

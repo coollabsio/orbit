@@ -36,6 +36,8 @@ const page = (version: number, patch: PagePatch = {}): Page => ({
   id: 'page-1',
   workspace_id: 'workspace-1',
   parent_id: null,
+  kind: 'page',
+  database_id: null,
   teamspace_id: 'teamspace-1',
   private: false,
   title: typeof patch.title === 'string' ? patch.title : '',

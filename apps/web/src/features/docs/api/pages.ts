@@ -59,8 +59,8 @@ export function conflictCurrentVersion(error: unknown): number | null {
 }
 
 export function toSummary(page: Page | PageSummary): PageSummary {
-  const { id, parent_id, teamspace_id, private: isPrivate, title, icon, position, version, updated_at } = page
-  return { id, parent_id, teamspace_id, private: isPrivate, title, icon, position, version, updated_at }
+  const { id, parent_id, teamspace_id, private: isPrivate, kind, title, icon, position, version, updated_at } = page
+  return { id, parent_id, teamspace_id, private: isPrivate, kind, title, icon, position, version, updated_at }
 }
 
 /** Writes a server page into the detail cache and its summary into the tree cache (no refetch). */

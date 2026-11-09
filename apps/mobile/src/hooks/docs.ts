@@ -16,6 +16,7 @@ function reconcile(queryClient: QueryClient, workspaceId: string, page: Page) {
     parent_id: page.parent_id,
     teamspace_id: page.teamspace_id,
     private: page.private,
+    kind: page.kind,
     title: page.title,
     icon: page.icon,
     position: page.position,

@@ -18,8 +18,8 @@ use crate::repositories::page_versions::{
     DEFAULT_VERSION_LIMIT, MAX_VERSION_LIMIT, PageVersion, PageVersionList,
 };
 use crate::repositories::pages::{
-    CreatePage, PageChanges, PageError, PageFavorite, PageFavoriteList, PageList, PageRecord,
-    PageRepository, PageSearch, PageTrash, PageTrashEmptied, RECENT_DEFAULT_LIMIT,
+    CreatePage, PageChanges, PageError, PageFavorite, PageFavoriteList, PageKind, PageList,
+    PageRecord, PageRepository, PageSearch, PageTrash, PageTrashEmptied, RECENT_DEFAULT_LIMIT,
     RECENT_MAX_LIMIT, RecentPageList, SpaceRequest,
 };
 use crate::socket_ticket::SocketTickets;
@@ -143,6 +143,10 @@ pub fn page_router(state: PageState) -> Router {
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct CreatePageBody {
+    /// `database` creates a database with a "Name" title property, a "Tags" multi-select and
+    /// one "Table" view. Defaults to `page`.
+    #[serde(default)]
+    kind: PageKind,
     /// With a parent the page joins the parent's space; contradicting `teamspace_id` or
     /// `private` values fail validation.
     parent_id: Option<String>,
@@ -280,6 +284,7 @@ async fn create_page(
     let (workspace_id, actor_id) =
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
     let input = CreatePage {
+        kind: body.kind,
         parent_id: body
             .parent_id
             .map(|value| parse_id(&value, &instance, request_id.as_ref()))
@@ -1099,6 +1104,14 @@ fn page_problem(
             "page_locked",
             "Page locked",
             "The page is locked. Unlock it to change its title, icon, cover or content.",
+            instance,
+            request_id,
+        ),
+        PageError::DatabaseMoveUnsupported => ApiError::new(
+            StatusCode::CONFLICT,
+            "database_move_unsupported",
+            "Database move unsupported",
+            "Pages cannot move into or out of a database yet. Add rows through the database.",
             instance,
             request_id,
         ),

@@ -30,7 +30,7 @@ afterEach(() => {
 
 const MINUTE = 60_000
 const summary = (id: string, title = id): PageSummary => ({
-  id, parent_id: null, teamspace_id: 'teamspace-1', private: false, position: 0, title, icon: null, version: 1,
+  id, parent_id: null, teamspace_id: 'teamspace-1', private: false, kind: 'page', position: 0, title, icon: null, version: 1,
   updated_at: '2026-09-25T10:00:00Z',
 })
 const teamspaces: Teamspace[] = [{
@@ -39,7 +39,7 @@ const teamspaces: Teamspace[] = [{
 }]
 const mia = { id: 'user-2', display_name: 'Mia Member' }
 const page = (patch: Partial<Page> = {}): Page => ({
-  ...summary('first', 'Plan'), workspace_id: 'workspace-1', cover_url: null, cover_position: null,
+  ...summary('first', 'Plan'), database_id: null, workspace_id: 'workspace-1', cover_url: null, cover_position: null,
   content: [{ id: 'b1', type: 'paragraph', props: {}, content: [{ type: 'text', text: 'Body text', styles: {} }], children: [] }],
   creator_id: 'user-1', updated_by: 'user-2', created_at: '2026-09-25T10:00:00Z', deleted_at: null, collab_epoch: 'epoch-1',
   updated_at: new Date(Date.now() - 5 * MINUTE).toISOString(),

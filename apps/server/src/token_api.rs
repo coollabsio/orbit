@@ -1039,6 +1039,7 @@ impl Authorized<'_> {
                 p.workspace_id,
                 p.actor_id,
                 CreatePage {
+                    kind: crate::repositories::pages::PageKind::Page,
                     parent_id: input.parent_id,
                     space: SpaceRequest {
                         teamspace_id: input.teamspace_id,

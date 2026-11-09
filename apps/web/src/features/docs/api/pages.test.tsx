@@ -31,13 +31,13 @@ afterEach(() => {
 })
 
 const summary = (id: string, parent_id: string | null, position: number, version = 1): PageSummary => ({
-  id, parent_id, teamspace_id: 'teamspace-1', private: false, position, version, title: id, icon: null,
+  id, parent_id, teamspace_id: 'teamspace-1', private: false, kind: 'page', position, version, title: id, icon: null,
   updated_at: '2026-09-25T10:00:00Z',
 })
 
 const fullPage = (id: string, parent_id: string | null, position: number, version = 1): Page => ({
   ...summary(id, parent_id, position, version),
-  workspace_id: 'workspace-1', cover_url: null, cover_position: null, content: [], creator_id: 'user-1',
+  database_id: null, workspace_id: 'workspace-1', cover_url: null, cover_position: null, content: [], creator_id: 'user-1',
   updated_by: 'user-1', created_at: '2026-09-25T10:00:00Z', deleted_at: null, collab_epoch: 'epoch-1',
   full_width: false, locked_at: null, locked_by: null, updated_by_user: { id: 'user-1', display_name: 'Ada' },
 })

@@ -231,6 +231,17 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::page_routes::set_page_lock,
         crate::page_routes::record_page_visit,
         crate::page_routes::list_recent_pages,
+        crate::database_routes::get_database,
+        crate::database_routes::create_database_property,
+        crate::database_routes::update_database_property,
+        crate::database_routes::delete_database_property,
+        crate::database_routes::create_database_view,
+        crate::database_routes::update_database_view,
+        crate::database_routes::delete_database_view,
+        crate::database_routes::create_database_row,
+        crate::database_routes::update_database_row_values,
+        crate::database_routes::trash_database_rows,
+        crate::database_routes::move_database_row,
         crate::page_file_routes::upload_page_file,
         crate::page_file_routes::download_page_file,
         crate::page_comment_routes::list_page_threads,
@@ -470,6 +481,7 @@ fn problem_schema(route: &str) -> &'static str {
         || route.contains("/views")
         || route.contains("/view-")
         || route.contains("/pages")
+        || route.contains("/databases")
         || route.contains("/teamspaces")
         || route.contains("/imports/")
         || route.contains("/chat/")
@@ -1036,6 +1048,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         id if task_operation(id) => task_errors(id, &mut responses),
         id if page_comment_operation(id) => page_comment_errors(id, &mut responses),
         id if page_operation(id) => page_errors(id, &mut responses),
+        id if database_operation(id) => database_errors(id, &mut responses),
         id if teamspace_operation(id) => teamspace_errors(id, &mut responses),
         id if id.contains("chat") => chat_errors(id, &mut responses),
         _ => {}
@@ -1048,6 +1061,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             | "create_page"
             | "duplicate_page"
             | "restore_page"
+            | "create_database_row"
             | "create_invitation"
     ) {
         add_code(&mut responses, "402", "trial_limit_reached");
@@ -1633,8 +1647,61 @@ fn page_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
     if matches!(operation_id, "update_page" | "restore_page_version") {
         add_code(responses, "423", "page_locked");
     }
+    if matches!(operation_id, "create_page" | "move_page") {
+        add_code(responses, "409", "database_move_unsupported");
+    }
     if operation_id == "list_recent_pages" {
         add_code(responses, "422", "validation_failed");
+    }
+}
+
+fn database_operation(operation_id: &str) -> bool {
+    matches!(
+        operation_id,
+        "get_database"
+            | "create_database_property"
+            | "update_database_property"
+            | "delete_database_property"
+            | "create_database_view"
+            | "update_database_view"
+            | "delete_database_view"
+            | "create_database_row"
+            | "update_database_row_values"
+            | "trash_database_rows"
+            | "move_database_row"
+    )
+}
+
+fn database_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'static str>>) {
+    add_code(responses, "404", "page_not_found");
+    if operation_id == "get_database" {
+        return;
+    }
+    add_code(responses, "400", "invalid_request");
+    add_code(responses, "402", "workspace_read_only");
+    add_code(responses, "422", "validation_failed");
+    if operation_id.contains("property") || operation_id.contains("view") {
+        add_code(responses, "423", "page_locked");
+    }
+    if matches!(
+        operation_id,
+        "update_database_property" | "delete_database_property"
+    ) {
+        add_code(responses, "404", "database_property_not_found");
+        add_code(responses, "409", "database_title_property");
+    }
+    if matches!(
+        operation_id,
+        "update_database_view" | "delete_database_view"
+    ) {
+        add_code(responses, "404", "database_view_not_found");
+    }
+    match operation_id {
+        "create_database_property" => add_code(responses, "409", "database_property_limit"),
+        "create_database_view" => add_code(responses, "409", "database_view_limit"),
+        "delete_database_view" => add_code(responses, "409", "database_last_view"),
+        "create_database_row" => add_code(responses, "409", "database_row_limit"),
+        _ => {}
     }
 }
 

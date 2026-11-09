@@ -1,0 +1,1330 @@
+use std::sync::Arc;
+
+use axum::body::{Body, to_bytes};
+use axum::http::{HeaderValue, Request, StatusCode, header};
+use orbit_platform::{AuthenticatedUser, Id, PasswordService, TestDatabase, TimestampMillis};
+use orbit_server::auth_routes::CookieMode;
+use orbit_server::database_routes::{DatabaseState, database_router};
+use orbit_server::page_routes::{PageState, page_router};
+use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
+use serde_json::{Value, json};
+use tokio_tungstenite::tungstenite::{self, client::IntoClientRequest};
+use tower::ServiceExt;
+
+struct Fixture {
+    database: TestDatabase,
+    identity: Arc<IdentityRepository>,
+    app: axum::Router,
+    workspace_id: String,
+    cookie: String,
+    owner_id: Id,
+}
+
+impl Fixture {
+    async fn new() -> Self {
+        let database = TestDatabase::new().await.unwrap();
+        let identity = Arc::new(IdentityRepository::new((*database).clone()));
+        let now = TimestampMillis::now();
+        identity
+            .store_setup_token(
+                "operator-secret",
+                TimestampMillis::from_millis(now.as_millis() + 60_000),
+            )
+            .await
+            .unwrap();
+        let setup = identity
+            .complete_setup(
+                SetupRequest {
+                    token: "operator-secret".to_owned(),
+                    email: "owner@example.com".to_owned(),
+                    display_name: "Owner".to_owned(),
+                    password_hash: PasswordService::default()
+                        .hash("correct horse battery")
+                        .unwrap(),
+                    workspace_name: "Orbit".to_owned(),
+                    project_name: "General".to_owned(),
+                },
+                now,
+            )
+            .await
+            .unwrap();
+        let app = page_router(PageState::new(Arc::clone(&identity), CookieMode::secure())).merge(
+            database_router(DatabaseState::new(
+                Arc::clone(&identity),
+                CookieMode::secure(),
+            )),
+        );
+        Self {
+            database,
+            identity,
+            app,
+            workspace_id: setup.workspace_id.to_string(),
+            cookie: format!("__Host-orbit_session={}", setup.session.token),
+            owner_id: setup.user_id,
+        }
+    }
+
+    fn uri(&self, path: &str) -> String {
+        format!("/api/v1/workspaces/{}/{path}", self.workspace_id)
+    }
+
+    async fn call(&self, method: &str, path: &str, body: Option<Value>) -> (StatusCode, Value) {
+        self.call_as(&self.cookie, method, path, body).await
+    }
+
+    async fn call_as(
+        &self,
+        cookie: &str,
+        method: &str,
+        path: &str,
+        body: Option<Value>,
+    ) -> (StatusCode, Value) {
+        let builder = Request::builder()
+            .method(method)
+            .uri(self.uri(path))
+            .header(header::COOKIE, cookie);
+        let request = match body {
+            Some(value) => builder
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(value.to_string())),
+            None => builder.body(Body::empty()),
+        }
+        .unwrap();
+        let response = self.app.clone().oneshot(request).await.unwrap();
+        let status = response.status();
+        let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let value = if bytes.is_empty() {
+            Value::Null
+        } else {
+            serde_json::from_slice(&bytes).unwrap()
+        };
+        (status, value)
+    }
+
+    async fn ok(&self, method: &str, path: &str, body: Option<Value>) -> Value {
+        let (status, value) = self.call(method, path, body).await;
+        assert!(status.is_success(), "{method} {path}: {status} {value}");
+        value
+    }
+
+    async fn create_page(&self, body: Value) -> Value {
+        self.ok("POST", "pages", Some(body)).await
+    }
+
+    /// A new database; returns its id.
+    async fn create_database(&self, title: &str) -> String {
+        let page = self
+            .create_page(json!({"kind": "database", "title": title}))
+            .await;
+        id_of(&page).to_owned()
+    }
+
+    async fn database(&self, id: &str) -> Value {
+        self.ok("GET", &format!("databases/{id}"), None).await
+    }
+
+    async fn add_property(&self, database: &str, body: Value) -> Value {
+        self.ok(
+            "POST",
+            &format!("databases/{database}/properties"),
+            Some(body),
+        )
+        .await
+    }
+
+    async fn add_row(&self, database: &str, body: Value) -> Value {
+        self.ok("POST", &format!("databases/{database}/rows"), Some(body))
+            .await
+    }
+
+    async fn set_values(&self, database: &str, row: &str, values: Value) -> (StatusCode, Value) {
+        self.call(
+            "PATCH",
+            &format!("databases/{database}/rows/{row}/values"),
+            Some(values),
+        )
+        .await
+    }
+
+    async fn page(&self, id: &str) -> Value {
+        self.ok("GET", &format!("pages/{id}"), None).await
+    }
+
+    async fn trash_page(&self, id: &str) {
+        let version = self.page(id).await["version"].as_u64().unwrap();
+        self.ok(
+            "DELETE",
+            &format!("pages/{id}?expected_version={version}"),
+            None,
+        )
+        .await;
+    }
+
+    async fn restore_page(&self, id: &str) {
+        let (_, trash) = self.call("GET", "pages/trash", None).await;
+        let version = trash["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == id)
+            .expect("in the trash")["version"]
+            .clone();
+        self.ok(
+            "POST",
+            &format!("pages/{id}/restore"),
+            Some(json!({"expected_version": version})),
+        )
+        .await;
+    }
+
+    async fn add_member(&self, email: &str) -> (Id, String) {
+        let id = Id::new_v7();
+        let now = TimestampMillis::now();
+        sqlx::query(
+            "INSERT INTO users (id, email, normalized_email, display_name, password_hash, created_at, updated_at) \
+             VALUES ($1, $2, $3, 'Member', 'unused', $4, $5)",
+        )
+        .bind(id.to_string())
+        .bind(email)
+        .bind(email)
+        .bind(now.as_millis())
+        .bind(now.as_millis())
+        .execute(self.database.pool())
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO memberships (id, workspace_id, user_id, role, version, created_at, updated_at) \
+             VALUES ($1, $2, $3, 'member', 0, $4, $5)",
+        )
+        .bind(Id::new_v7().to_string())
+        .bind(&self.workspace_id)
+        .bind(id.to_string())
+        .bind(now.as_millis())
+        .bind(now.as_millis())
+        .execute(self.database.pool())
+        .await
+        .unwrap();
+        let session = self
+            .identity
+            .create_session(
+                &AuthenticatedUser {
+                    id,
+                    email: email.to_owned(),
+                    display_name: "Member".to_owned(),
+                },
+                now,
+            )
+            .await
+            .unwrap();
+        (id, format!("__Host-orbit_session={}", session.token))
+    }
+}
+
+fn id_of(value: &Value) -> &str {
+    value["id"].as_str().unwrap()
+}
+
+fn property<'a>(database: &'a Value, name: &str) -> &'a Value {
+    database["properties"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|property| property["name"] == name)
+        .unwrap_or_else(|| panic!("no property {name}"))
+}
+
+fn names(items: &Value) -> Vec<&str> {
+    items
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| {
+            item["name"]
+                .as_str()
+                .unwrap_or_else(|| item["title"].as_str().unwrap())
+        })
+        .collect()
+}
+
+fn option_id(property: &Value, name: &str) -> String {
+    property["config"]["options"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|option| option["name"] == name)
+        .unwrap_or_else(|| panic!("no option {name}"))["id"]
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+#[tokio::test]
+async fn a_new_database_has_a_title_tags_and_one_table_view_and_no_body() {
+    let fixture = Fixture::new().await;
+    let page = fixture
+        .create_page(json!({"kind": "database", "title": "Research"}))
+        .await;
+    assert_eq!(page["kind"], "database");
+    assert_eq!(page["database_id"], Value::Null);
+    let id = id_of(&page);
+
+    let database = fixture.database(id).await;
+    assert_eq!(database["database"]["title"], "Research");
+    assert_eq!(database["database"]["row_count"], 0);
+    assert_eq!(database["database"]["locked"], false);
+    let properties: Vec<(&str, &str, i64)> = database["properties"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|property| {
+            (
+                property["name"].as_str().unwrap(),
+                property["type"].as_str().unwrap(),
+                property["position"].as_i64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        properties,
+        [("Name", "title", 0), ("Tags", "multi_select", 1)]
+    );
+    assert_eq!(
+        property(&database, "Tags")["config"],
+        json!({"options": []})
+    );
+    let views = database["views"].as_array().unwrap();
+    assert_eq!(views.len(), 1);
+    assert_eq!(views[0]["name"], "Table");
+    assert_eq!(views[0]["type"], "table");
+    assert_eq!(
+        views[0]["config"],
+        json!({
+            "columns": [
+                {"property_id": property(&database, "Name")["id"], "width": 280, "hidden": false},
+                {"property_id": property(&database, "Tags")["id"], "width": 200, "hidden": false},
+            ],
+            "sorts": [],
+            "filter": {"rules": []},
+            "wrap_cells": false,
+        })
+    );
+    assert_eq!(database["rows"], json!([]));
+
+    let (_, tree) = fixture.call("GET", "pages", None).await;
+    assert_eq!(tree["items"][0]["kind"], "database");
+    let (status, body) = fixture
+        .call(
+            "PATCH",
+            &format!("pages/{id}"),
+            Some(json!({"expected_version": 0, "content": []})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+
+    // A plain page is not a database.
+    let plain = fixture.create_page(json!({"title": "Plain"})).await;
+    let (status, body) = fixture
+        .call("GET", &format!("databases/{}", id_of(&plain)), None)
+        .await;
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (StatusCode::NOT_FOUND, Some("page_not_found"))
+    );
+
+    // The co-editing socket refuses the database page and opens for a plain page.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let app = fixture.app.clone();
+    let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let open = |page: String| {
+        let mut request = format!(
+            "ws://{address}/api/v1/workspaces/{}/pages/{page}/collab?v=1",
+            fixture.workspace_id
+        )
+        .into_client_request()
+        .unwrap();
+        request
+            .headers_mut()
+            .insert("cookie", HeaderValue::from_str(&fixture.cookie).unwrap());
+        async move {
+            match tokio_tungstenite::connect_async(request).await {
+                Ok(_) => 101,
+                Err(tungstenite::Error::Http(response)) => response.status().as_u16(),
+                Err(error) => panic!("handshake: {error}"),
+            }
+        }
+    };
+    assert_eq!(open(id.to_owned()).await, 409);
+    assert_eq!(open(id_of(&plain).to_owned()).await, 101);
+    server.abort();
+}
+
+#[tokio::test]
+async fn values_are_checked_against_each_property_type() {
+    let fixture = Fixture::new().await;
+    let (member_id, _) = fixture.add_member("member@example.com").await;
+    let db = fixture.create_database("Tracker").await;
+    let mut ids = std::collections::HashMap::new();
+    for (name, kind) in [
+        ("Notes", "text"),
+        ("Score", "number"),
+        ("Stage", "select"),
+        ("Status", "status"),
+        ("Due", "date"),
+        ("Owner", "person"),
+        ("Done", "checkbox"),
+        ("Link", "url"),
+        ("Created", "created_time"),
+    ] {
+        let config = (kind == "select")
+            .then(|| json!({"options": [{"id": "s1", "name": "One", "color": "blue"}]}));
+        let property = fixture
+            .add_property(&db, json!({"name": name, "type": kind, "config": config}))
+            .await;
+        ids.insert(name, id_of(&property).to_owned());
+    }
+    let database = fixture.database(&db).await;
+    let status = property(&database, "Status");
+    assert_eq!(
+        status["config"]["options"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|option| (
+                option["name"].as_str().unwrap(),
+                option["group"].as_str().unwrap()
+            ))
+            .collect::<Vec<_>>(),
+        [
+            ("Not started", "todo"),
+            ("In progress", "in_progress"),
+            ("Done", "done")
+        ]
+    );
+    let done = option_id(status, "Done");
+    let tags = id_of(property(&database, "Tags")).to_owned();
+    let name = id_of(property(&database, "Name")).to_owned();
+    // A view lists every property, the new ones appended.
+    assert_eq!(
+        database["views"][0]["config"]["columns"]
+            .as_array()
+            .unwrap()
+            .len(),
+        11
+    );
+
+    let row = fixture.add_row(&db, json!({"title": "Task"})).await;
+    assert_eq!(row["values"], json!({}));
+    let row_id = id_of(&row).to_owned();
+    let good = json!({
+        &ids["Notes"]: "plain text",
+        &ids["Score"]: 12.5,
+        &ids["Stage"]: "s1",
+        &ids["Status"]: done,
+        &ids["Due"]: {"start": "2026-11-09T14:00Z", "end": "2026-11-10T09:30:00Z"},
+        &ids["Owner"]: [member_id.to_string(), fixture.owner_id.to_string()],
+        &ids["Done"]: true,
+        &ids["Link"]: "https://example.com/a?b=c",
+    });
+    let (code, updated) = fixture.set_values(&db, &row_id, good).await;
+    assert_eq!(code, StatusCode::OK, "{updated}");
+    assert_eq!(
+        updated["values"],
+        json!({
+            &ids["Notes"]: "plain text",
+            &ids["Score"]: 12.5,
+            &ids["Stage"]: "s1",
+            &ids["Status"]: done,
+            &ids["Due"]: {"start": "2026-11-09T14:00:00Z", "end": "2026-11-10T09:30:00Z"},
+            &ids["Owner"]: [member_id.to_string(), fixture.owner_id.to_string()],
+            &ids["Done"]: true,
+            &ids["Link"]: "https://example.com/a?b=c",
+        })
+    );
+    assert_eq!(
+        updated["version"], row["version"],
+        "a value write keeps the version"
+    );
+    assert!(updated["updated_at"].as_str() >= row["updated_at"].as_str());
+
+    let stranger = Id::new_v7().to_string();
+    let long_text = "x".repeat(10_001);
+    let long_url = format!("https://example.com/{}", "a".repeat(2_000));
+    let too_many: Vec<String> = (0..101).map(|_| Id::new_v7().to_string()).collect();
+    for (key, value) in [
+        (&ids["Notes"], json!(5)),
+        (&ids["Notes"], json!(long_text)),
+        (&ids["Score"], json!("12")),
+        (&ids["Stage"], json!("missing-option")),
+        (&ids["Status"], json!(["s1"])),
+        (&ids["Due"], json!({"start": "2026-02-30"})),
+        (
+            &ids["Due"],
+            json!({"start": "2026-11-10", "end": "2026-11-09"}),
+        ),
+        (
+            &ids["Due"],
+            json!({"start": "2026-11-10", "end": "2026-11-11T10:00Z"}),
+        ),
+        (&ids["Owner"], json!([stranger])),
+        (
+            &ids["Owner"],
+            json!([member_id.to_string(), member_id.to_string()]),
+        ),
+        (&ids["Owner"], json!(too_many)),
+        (&ids["Done"], json!("yes")),
+        (&ids["Link"], json!("javascript:alert(1)")),
+        (&ids["Link"], json!(long_url)),
+        (&ids["Created"], json!("2026-11-09")),
+        (&name, json!("A title is not a value")),
+        (&tags, json!(["not-an-option"])),
+        (&stranger, json!("unknown property")),
+    ] {
+        let (code, body) = fixture
+            .set_values(&db, &row_id, json!({ key.as_str(): value }))
+            .await;
+        assert_eq!(
+            code,
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "{key} {value}: {body}"
+        );
+        assert_eq!(body["detail"], format!("values.{key}"), "{body}");
+    }
+
+    // null, false and "" clear; the rest stays.
+    let (_, cleared) = fixture
+        .set_values(
+            &db,
+            &row_id,
+            json!({&ids["Notes"]: "", &ids["Done"]: false, &ids["Score"]: null}),
+        )
+        .await;
+    let mut keys: Vec<&String> = cleared["values"].as_object().unwrap().keys().collect();
+    keys.sort();
+    let mut expected = vec![
+        &ids["Stage"],
+        &ids["Status"],
+        &ids["Due"],
+        &ids["Owner"],
+        &ids["Link"],
+    ];
+    expected.sort();
+    assert_eq!(keys, expected);
+    // Values can be given when the row is made.
+    let second = fixture
+        .add_row(
+            &db,
+            json!({"title": "Second", "values": {&ids["Score"]: 3}}),
+        )
+        .await;
+    assert_eq!(second["values"], json!({&ids["Score"]: 3.0}));
+}
+
+#[tokio::test]
+async fn type_changes_convert_values_as_the_table_says() {
+    let fixture = Fixture::new().await;
+    let db = fixture.create_database("Conversions").await;
+    let text = id_of(
+        &fixture
+            .add_property(&db, json!({"name": "Raw", "type": "text"}))
+            .await,
+    )
+    .to_owned();
+    let mut rows = Vec::new();
+    for value in [
+        "12.5",
+        "AI, Rust",
+        "yes",
+        "https://orbit.dev",
+        "2026-11-09",
+        "AI, Rust",
+    ] {
+        let row = fixture
+            .add_row(&db, json!({"title": value, "values": {&text: value}}))
+            .await;
+        rows.push(id_of(&row).to_owned());
+    }
+    let retype = |to: &'static str| {
+        let fixture = &fixture;
+        let path = format!("databases/{db}/properties/{text}");
+        async move { fixture.ok("PATCH", &path, Some(json!({"type": to}))).await }
+    };
+    let value_of = |database: &Value, row: usize| {
+        database["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == rows[row].as_str())
+            .unwrap()["values"][&text]
+            .clone()
+    };
+
+    // text → multi_select makes options from the comma-separated values.
+    let update = retype("multi_select").await;
+    assert_eq!(
+        (update["converted"].as_u64(), update["cleared"].as_u64()),
+        (Some(6), Some(0))
+    );
+    let options: Vec<&str> = update["property"]["config"]["options"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|option| option["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        options,
+        [
+            "12.5",
+            "AI",
+            "Rust",
+            "yes",
+            "https://orbit.dev",
+            "2026-11-09"
+        ]
+    );
+    let database = fixture.database(&db).await;
+    let ai = option_id(&update["property"], "AI");
+    let rust = option_id(&update["property"], "Rust");
+    assert_eq!(value_of(&database, 1), json!([ai, rust]));
+    assert_eq!(value_of(&database, 5), json!([ai, rust]));
+
+    // multi → single keeps the first option and the options.
+    let update = retype("select").await;
+    assert_eq!(
+        update["property"]["config"]["options"]
+            .as_array()
+            .unwrap()
+            .len(),
+        6
+    );
+    assert_eq!(value_of(&fixture.database(&db).await, 1), json!(ai));
+
+    // select → text writes the option names.
+    retype("text").await;
+    let database = fixture.database(&db).await;
+    assert_eq!(value_of(&database, 1), json!("AI"));
+    assert_eq!(value_of(&database, 2), json!("yes"));
+
+    // text → number keeps what parses.
+    let update = retype("number").await;
+    assert_eq!(
+        (update["converted"].as_u64(), update["cleared"].as_u64()),
+        (Some(1), Some(5))
+    );
+    assert_eq!(value_of(&fixture.database(&db).await, 0), json!(12.5));
+
+    // Back to text, then to checkbox, url and date.
+    retype("text").await;
+    for row in 1..6 {
+        let original = [
+            "12.5",
+            "AI, Rust",
+            "yes",
+            "https://orbit.dev",
+            "2026-11-09",
+            "AI, Rust",
+        ][row];
+        fixture
+            .set_values(&db, &rows[row], json!({&text: original}))
+            .await;
+    }
+    let update = retype("checkbox").await;
+    assert_eq!(update["converted"], 1);
+    assert_eq!(value_of(&fixture.database(&db).await, 2), json!(true));
+    retype("text").await;
+    assert_eq!(value_of(&fixture.database(&db).await, 2), json!("true"));
+
+    for row in 0..6 {
+        let original = [
+            "12.5",
+            "AI, Rust",
+            "yes",
+            "https://orbit.dev",
+            "2026-11-09",
+            "AI, Rust",
+        ][row];
+        fixture
+            .set_values(&db, &rows[row], json!({&text: original}))
+            .await;
+    }
+    let update = retype("url").await;
+    assert_eq!(update["converted"], 1);
+    assert_eq!(
+        value_of(&fixture.database(&db).await, 3),
+        json!("https://orbit.dev")
+    );
+    retype("text").await;
+    fixture
+        .set_values(&db, &rows[4], json!({&text: "2026-11-09"}))
+        .await;
+    let update = retype("date").await;
+    assert_eq!(update["converted"], 1);
+    assert_eq!(
+        value_of(&fixture.database(&db).await, 4),
+        json!({"start": "2026-11-09", "end": null})
+    );
+
+    // To person (and to a computed type) clears every value.
+    let update = retype("person").await;
+    assert_eq!(
+        (update["converted"].as_u64(), update["cleared"].as_u64()),
+        (Some(0), Some(1))
+    );
+    assert_eq!(fixture.database(&db).await["rows"][4]["values"], json!({}));
+
+    // A type change derives the config; sending one with it is refused, as is a second title.
+    let (status, body) = fixture
+        .call(
+            "PATCH",
+            &format!("databases/{db}/properties/{text}"),
+            Some(json!({"type": "select", "config": {"options": []}})),
+        )
+        .await;
+    assert_eq!(
+        (status, body["detail"].as_str()),
+        (StatusCode::UNPROCESSABLE_ENTITY, Some("config"))
+    );
+    let name = id_of(property(&fixture.database(&db).await, "Name")).to_owned();
+    let (status, body) = fixture
+        .call(
+            "PATCH",
+            &format!("databases/{db}/properties/{name}"),
+            Some(json!({"type": "text"})),
+        )
+        .await;
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (StatusCode::CONFLICT, Some("database_title_property"))
+    );
+    let (status, _) = fixture
+        .call(
+            "POST",
+            &format!("databases/{db}/properties"),
+            Some(json!({"name": "Second title", "type": "title"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+async fn removing_options_and_properties_cleans_values_and_views() {
+    let fixture = Fixture::new().await;
+    let db = fixture.create_database("Cleanup").await;
+    let database = fixture.database(&db).await;
+    let tags = id_of(property(&database, "Tags")).to_owned();
+    let view = id_of(&database["views"][0]).to_owned();
+    let update = fixture
+        .ok(
+            "PATCH",
+            &format!("databases/{db}/properties/{tags}"),
+            Some(
+                json!({"config": {"options": [{"name": "AI"}, {"name": "Rust", "color": "red"}]}}),
+            ),
+        )
+        .await;
+    let ai = option_id(&update["property"], "AI");
+    let rust = option_id(&update["property"], "Rust");
+    let only_ai = fixture
+        .add_row(&db, json!({"title": "A", "values": {&tags: [ai]}}))
+        .await;
+    let both = fixture
+        .add_row(&db, json!({"title": "B", "values": {&tags: [ai, rust]}}))
+        .await;
+
+    // Removing "AI" clears the row that had only it and keeps "Rust" on the other.
+    let update = fixture
+        .ok(
+            "PATCH",
+            &format!("databases/{db}/properties/{tags}"),
+            Some(json!({"config": {"options": [{"id": rust, "name": "Rust", "color": "red"}]}})),
+        )
+        .await;
+    assert_eq!(update["cleared"], 1);
+    let database = fixture.database(&db).await;
+    let values = |row: &Value| {
+        database["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["id"] == row["id"])
+            .unwrap()["values"]
+            .clone()
+    };
+    assert_eq!(values(&only_ai), json!({}));
+    assert_eq!(values(&both), json!({&tags: [rust]}));
+
+    // A view that sorts, filters and shows the property drops it when the property goes.
+    let name = id_of(property(&database, "Name")).to_owned();
+    let saved = fixture
+        .ok(
+            "PATCH",
+            &format!("databases/{db}/views/{view}"),
+            Some(json!({"config": {
+                "columns": [{"property_id": tags, "width": 120}, {"property_id": name}],
+                "sorts": [{"property_id": tags, "direction": "asc"}, {"property_id": name, "direction": "desc"}],
+                "filter": {"rules": [
+                    {"property_id": tags, "operator": "contains", "value": [rust]},
+                    {"property_id": name, "operator": "contains", "value": "B"},
+                    {"property_id": Id::new_v7().to_string(), "operator": "is_empty"}
+                ]},
+            }})),
+        )
+        .await;
+    assert_eq!(
+        saved["config"]["filter"]["rules"].as_array().unwrap().len(),
+        2,
+        "unknown property dropped"
+    );
+    fixture
+        .ok("DELETE", &format!("databases/{db}/properties/{tags}"), None)
+        .await;
+    let database = fixture.database(&db).await;
+    assert_eq!(names(&database["properties"]), ["Name"]);
+    assert_eq!(
+        database["views"][0]["config"],
+        json!({
+            "columns": [{"property_id": name, "width": 200, "hidden": false}],
+            "sorts": [{"property_id": name, "direction": "desc"}],
+            "filter": {"rules": [{"property_id": name, "operator": "contains", "value": "B"}]},
+            "wrap_cells": false,
+        })
+    );
+    assert_eq!(database["rows"][1]["values"], json!({}));
+    let stored: i64 = fixture
+        .database
+        .scalar(&format!(
+            "SELECT COUNT(*) FROM page_property_values WHERE property_id = '{tags}'"
+        ))
+        .await
+        .unwrap();
+    assert_eq!(stored, 0);
+    let (status, body) = fixture
+        .call("DELETE", &format!("databases/{db}/properties/{name}"), None)
+        .await;
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (StatusCode::CONFLICT, Some("database_title_property"))
+    );
+
+    // Bad view configs name their field; the last view stays.
+    for (config, field) in [
+        (
+            json!({"columns": [{"property_id": name, "width": 20}]}),
+            "config.columns[0].width",
+        ),
+        (
+            json!({"filter": {"rules": [{"property_id": name, "operator": ">", "value": 1}]}}),
+            "config.filter.rules[0].operator",
+        ),
+        (
+            json!({"filter": {"rules": [{"property_id": name, "operator": "contains", "value": 1}]}}),
+            "config.filter.rules[0].value",
+        ),
+        (
+            json!({"sorts": (0..11).map(|_| json!({"property_id": name, "direction": "asc"})).collect::<Vec<_>>()}),
+            "config.sorts",
+        ),
+        (
+            json!({"filter": {"rules": [{"property_id": name, "operator": "nope"}]}}),
+            "config",
+        ),
+    ] {
+        let (status, body) = fixture
+            .call(
+                "PATCH",
+                &format!("databases/{db}/views/{view}"),
+                Some(json!({"config": config})),
+            )
+            .await;
+        assert_eq!(
+            (status, body["detail"].as_str()),
+            (StatusCode::UNPROCESSABLE_ENTITY, Some(field)),
+            "{body}"
+        );
+    }
+    let (status, body) = fixture
+        .call("DELETE", &format!("databases/{db}/views/{view}"), None)
+        .await;
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (StatusCode::CONFLICT, Some("database_last_view"))
+    );
+    let copy = fixture
+        .ok(
+            "POST",
+            &format!("databases/{db}/views"),
+            Some(json!({"name": "Copy", "type": "table", "duplicate_of": view})),
+        )
+        .await;
+    assert_eq!(copy["config"], database["views"][0]["config"]);
+    assert_eq!(copy["position"], 1);
+    fixture
+        .ok("DELETE", &format!("databases/{db}/views/{view}"), None)
+        .await;
+    assert_eq!(names(&fixture.database(&db).await["views"]), ["Copy"]);
+}
+
+#[tokio::test]
+async fn a_database_holds_at_most_5000_live_rows() {
+    let fixture = Fixture::new().await;
+    let db = fixture.create_database("Big").await;
+    let teamspace: String = fixture
+        .database
+        .scalar(&format!("SELECT teamspace_id FROM pages WHERE id = '{db}'"))
+        .await
+        .unwrap();
+    let now = TimestampMillis::now().as_millis();
+    let mut tx = fixture.database.pool().begin().await.unwrap();
+    let mut first = None;
+    for position in 0..5_000_i64 {
+        let id = Id::new_v7().to_string();
+        first.get_or_insert_with(|| id.clone());
+        sqlx::query(
+            "INSERT INTO pages (id, workspace_id, parent_id, teamspace_id, title, position, creator_id, updated_by, created_at, updated_at) \
+             VALUES ($1, $2, $3, $4, 'Row', $5, $6, $7, $8, $9)",
+        )
+        .bind(&id)
+        .bind(&fixture.workspace_id)
+        .bind(&db)
+        .bind(&teamspace)
+        .bind(position)
+        .bind(fixture.owner_id.to_string())
+        .bind(fixture.owner_id.to_string())
+        .bind(now)
+        .bind(now)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    }
+    tx.commit().await.unwrap();
+    let (status, body) = fixture
+        .call("POST", &format!("databases/{db}/rows"), Some(json!({})))
+        .await;
+    assert_eq!(
+        (status, body["code"].as_str()),
+        (StatusCode::CONFLICT, Some("database_row_limit"))
+    );
+
+    fixture
+        .ok(
+            "POST",
+            &format!("databases/{db}/rows/trash"),
+            Some(json!({"row_ids": [first.unwrap()]})),
+        )
+        .await;
+    let (status, body) = fixture
+        .call(
+            "POST",
+            &format!("databases/{db}/rows"),
+            Some(json!({"after_row_id": null})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["position"], 0);
+}
+
+#[tokio::test]
+async fn the_lock_freezes_properties_and_views_but_not_rows_or_values() {
+    let fixture = Fixture::new().await;
+    let db = fixture.create_database("Locked").await;
+    let database = fixture.database(&db).await;
+    let tags = id_of(property(&database, "Tags")).to_owned();
+    let view = id_of(&database["views"][0]).to_owned();
+    fixture
+        .ok(
+            "POST",
+            &format!("pages/{db}/lock"),
+            Some(json!({"locked": true})),
+        )
+        .await;
+    assert_eq!(fixture.database(&db).await["database"]["locked"], true);
+
+    for (method, path, body) in [
+        (
+            "POST",
+            format!("databases/{db}/properties"),
+            Some(json!({"name": "Notes", "type": "text"})),
+        ),
+        (
+            "PATCH",
+            format!("databases/{db}/properties/{tags}"),
+            Some(json!({"name": "Labels"})),
+        ),
+        ("DELETE", format!("databases/{db}/properties/{tags}"), None),
+        (
+            "POST",
+            format!("databases/{db}/views"),
+            Some(json!({"name": "Second", "type": "table"})),
+        ),
+        (
+            "PATCH",
+            format!("databases/{db}/views/{view}"),
+            Some(json!({"name": "Renamed"})),
+        ),
+        ("DELETE", format!("databases/{db}/views/{view}"), None),
+    ] {
+        let (status, body) = fixture.call(method, &path, body).await;
+        assert_eq!(
+            (status, body["code"].as_str()),
+            (StatusCode::LOCKED, Some("page_locked")),
+            "{method} {path}"
+        );
+    }
+
+    let row = fixture
+        .add_row(&db, json!({"title": "Still allowed"}))
+        .await;
+    let (status, body) = fixture
+        .set_values(&db, id_of(&row), json!({&tags: []}))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let other = fixture.add_row(&db, json!({"title": "Second"})).await;
+    let moved = fixture
+        .ok(
+            "POST",
+            &format!("databases/{db}/rows/{}/move", id_of(&row)),
+            Some(json!({"after_row_id": id_of(&other)})),
+        )
+        .await;
+    assert_eq!(moved["position"], 1);
+    assert_eq!(
+        names(&fixture.database(&db).await["rows"]),
+        ["Second", "Still allowed"]
+    );
+
+    fixture
+        .ok(
+            "POST",
+            &format!("pages/{db}/lock"),
+            Some(json!({"locked": false})),
+        )
+        .await;
+    fixture
+        .add_property(&db, json!({"name": "Notes", "type": "text"}))
+        .await;
+}
+
+#[tokio::test]
+async fn rows_stay_out_of_the_tree_and_out_of_page_moves() {
+    let fixture = Fixture::new().await;
+    let db = fixture.create_database("Inbox").await;
+    let row = fixture
+        .add_row(&db, json!({"title": "Row", "icon": "📄"}))
+        .await;
+    let row_id = id_of(&row);
+    let child = fixture
+        .create_page(json!({"parent_id": row_id, "title": "Row child"}))
+        .await;
+    let other = fixture.create_page(json!({"title": "Other"})).await;
+
+    let (_, tree) = fixture.call("GET", "pages", None).await;
+    assert_eq!(names(&tree["items"]), ["Inbox", "Other"]);
+    let row_page = fixture.page(row_id).await;
+    assert_eq!(row_page["database_id"], db.as_str());
+    assert_eq!(row_page["kind"], "page");
+    assert_eq!(
+        fixture.page(id_of(&child)).await["database_id"],
+        Value::Null
+    );
+
+    let refused = |status: StatusCode, body: &Value| {
+        assert_eq!(
+            (status, body["code"].as_str()),
+            (StatusCode::CONFLICT, Some("database_move_unsupported")),
+            "{body}"
+        );
+    };
+    let (status, body) = fixture
+        .call(
+            "POST",
+            &format!("pages/{row_id}/move"),
+            Some(
+                json!({"expected_version": row_page["version"], "parent_id": null, "position": 0}),
+            ),
+        )
+        .await;
+    refused(status, &body);
+    let (status, body) = fixture
+        .call(
+            "POST",
+            &format!("pages/{}/move", id_of(&other)),
+            Some(json!({"expected_version": 0, "parent_id": db, "position": 0})),
+        )
+        .await;
+    refused(status, &body);
+    let (status, body) = fixture
+        .call(
+            "POST",
+            "pages",
+            Some(json!({"parent_id": db, "title": "Sneaky row"})),
+        )
+        .await;
+    refused(status, &body);
+
+    // The database page itself still moves.
+    let version = fixture.page(&db).await["version"].clone();
+    fixture
+        .ok(
+            "POST",
+            &format!("pages/{db}/move"),
+            Some(json!({"expected_version": version, "parent_id": id_of(&other), "position": 0})),
+        )
+        .await;
+    assert_eq!(fixture.database(&db).await["rows"][0]["icon"], "📄");
+}
+
+#[tokio::test]
+async fn duplicating_copies_properties_views_rows_and_values_with_new_ids() {
+    let fixture = Fixture::new().await;
+    let db = fixture.create_database("Original").await;
+    let database = fixture.database(&db).await;
+    let tags = id_of(property(&database, "Tags")).to_owned();
+    let update = fixture
+        .ok(
+            "PATCH",
+            &format!("databases/{db}/properties/{tags}"),
+            Some(json!({"config": {"options": [{"id": "ai", "name": "AI"}]}})),
+        )
+        .await;
+    assert_eq!(update["property"]["config"]["options"][0]["id"], "ai");
+    let notes = id_of(
+        &fixture
+            .add_property(&db, json!({"name": "Notes", "type": "text"}))
+            .await,
+    )
+    .to_owned();
+    let view = id_of(&database["views"][0]).to_owned();
+    fixture
+        .ok(
+            "PATCH",
+            &format!("databases/{db}/views/{view}"),
+            Some(json!({"config": {
+                "columns": [
+                    {"property_id": property(&database, "Name")["id"]},
+                    {"property_id": tags},
+                    {"property_id": notes},
+                ],
+                "sorts": [{"property_id": notes, "direction": "asc"}],
+            }})),
+        )
+        .await;
+    let row = fixture
+        .add_row(
+            &db,
+            json!({"title": "Paper", "values": {&tags: ["ai"], &notes: "read"}}),
+        )
+        .await;
+    fixture.add_row(&db, json!({"title": "Empty"})).await;
+
+    let copy = fixture
+        .ok("POST", &format!("pages/{db}/duplicate"), Some(json!({})))
+        .await;
+    assert_eq!(
+        (copy["kind"].as_str(), copy["title"].as_str()),
+        (Some("database"), Some("Original (copy)"))
+    );
+    let copied = fixture.database(id_of(&copy)).await;
+    let original = fixture.database(&db).await;
+    assert_eq!(names(&copied["properties"]), ["Name", "Tags", "Notes"]);
+    let copied_tags = id_of(property(&copied, "Tags")).to_owned();
+    let copied_notes = id_of(property(&copied, "Notes")).to_owned();
+    assert_ne!(copied_tags, tags);
+    assert_ne!(copied_notes, notes);
+    assert_eq!(
+        property(&copied, "Tags")["config"],
+        property(&original, "Tags")["config"]
+    );
+    assert_ne!(id_of(&copied["views"][0]), view);
+    assert_eq!(
+        copied["views"][0]["config"]["sorts"],
+        json!([{"property_id": copied_notes, "direction": "asc"}])
+    );
+    assert_eq!(
+        copied["views"][0]["config"]["columns"][2]["property_id"],
+        copied_notes.as_str()
+    );
+    assert_eq!(names(&copied["rows"]), ["Paper", "Empty"]);
+    assert_ne!(id_of(&copied["rows"][0]), id_of(&row));
+    assert_eq!(
+        copied["rows"][0]["values"],
+        json!({&copied_tags: ["ai"], &copied_notes: "read"})
+    );
+    assert_eq!(
+        original["rows"][0]["values"],
+        json!({&tags: ["ai"], &notes: "read"})
+    );
+    let (_, tree) = fixture.call("GET", "pages", None).await;
+    assert_eq!(names(&tree["items"]), ["Original", "Original (copy)"]);
+
+    // A duplicated row stays in its database with its values.
+    let row_copy = fixture
+        .ok(
+            "POST",
+            &format!("pages/{}/duplicate", id_of(&row)),
+            Some(json!({})),
+        )
+        .await;
+    assert_eq!(row_copy["database_id"], db.as_str());
+    let original = fixture.database(&db).await;
+    assert_eq!(names(&original["rows"]), ["Paper", "Paper (copy)", "Empty"]);
+    assert_eq!(
+        original["rows"][1]["values"],
+        json!({&tags: ["ai"], &notes: "read"})
+    );
+}
+
+#[tokio::test]
+async fn trash_and_restore_bring_back_rows_and_values() {
+    let fixture = Fixture::new().await;
+    let db = fixture.create_database("Restorable").await;
+    let tags = id_of(property(&fixture.database(&db).await, "Tags")).to_owned();
+    fixture
+        .ok(
+            "PATCH",
+            &format!("databases/{db}/properties/{tags}"),
+            Some(json!({"config": {"options": [{"id": "a", "name": "A"}]}})),
+        )
+        .await;
+    let first = fixture
+        .add_row(&db, json!({"title": "First", "values": {&tags: ["a"]}}))
+        .await;
+    let second = fixture.add_row(&db, json!({"title": "Second"})).await;
+    let third = fixture.add_row(&db, json!({"title": "Third"})).await;
+
+    fixture.trash_page(&db).await;
+    let (status, _) = fixture.call("GET", &format!("databases/{db}"), None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    fixture.restore_page(&db).await;
+    let database = fixture.database(&db).await;
+    assert_eq!(names(&database["rows"]), ["First", "Second", "Third"]);
+    assert_eq!(database["rows"][0]["values"], json!({&tags: ["a"]}));
+
+    // Bulk trash: one trash entry per row; unknown ids are skipped.
+    fixture
+        .ok(
+            "POST",
+            &format!("databases/{db}/rows/trash"),
+            Some(json!({"row_ids": [id_of(&first), id_of(&third), Id::new_v7().to_string()]})),
+        )
+        .await;
+    let database = fixture.database(&db).await;
+    assert_eq!(names(&database["rows"]), ["Second"]);
+    assert_eq!(database["database"]["row_count"], 1);
+    let (_, trash) = fixture.call("GET", "pages/trash", None).await;
+    let mut trashed = names(&trash["items"]);
+    trashed.sort_unstable();
+    assert_eq!(trashed, ["First", "Third"]);
+    fixture.restore_page(id_of(&first)).await;
+    let database = fixture.database(&db).await;
+    assert_eq!(names(&database["rows"]), ["First", "Second"]);
+    assert_eq!(database["rows"][0]["values"], json!({&tags: ["a"]}));
+    assert_eq!(id_of(&database["rows"][1]), id_of(&second));
+}
+
+#[tokio::test]
+async fn a_private_database_is_not_found_for_other_members() {
+    let fixture = Fixture::new().await;
+    let (_, member) = fixture.add_member("member@example.com").await;
+    let page = fixture
+        .create_page(json!({"kind": "database", "title": "Diary", "private": true}))
+        .await;
+    let db = id_of(&page).to_owned();
+    let database = fixture.database(&db).await;
+    let tags = id_of(property(&database, "Tags")).to_owned();
+    let view = id_of(&database["views"][0]).to_owned();
+    let row = id_of(&fixture.add_row(&db, json!({"title": "Entry"})).await).to_owned();
+
+    for (method, path, body) in [
+        ("GET", format!("databases/{db}"), None),
+        (
+            "POST",
+            format!("databases/{db}/properties"),
+            Some(json!({"name": "N", "type": "text"})),
+        ),
+        (
+            "PATCH",
+            format!("databases/{db}/properties/{tags}"),
+            Some(json!({"name": "N"})),
+        ),
+        ("DELETE", format!("databases/{db}/properties/{tags}"), None),
+        (
+            "POST",
+            format!("databases/{db}/views"),
+            Some(json!({"name": "V", "type": "table"})),
+        ),
+        (
+            "PATCH",
+            format!("databases/{db}/views/{view}"),
+            Some(json!({"name": "V"})),
+        ),
+        ("DELETE", format!("databases/{db}/views/{view}"), None),
+        ("POST", format!("databases/{db}/rows"), Some(json!({}))),
+        (
+            "PATCH",
+            format!("databases/{db}/rows/{row}/values"),
+            Some(json!({&tags: []})),
+        ),
+        (
+            "POST",
+            format!("databases/{db}/rows/trash"),
+            Some(json!({"row_ids": [row]})),
+        ),
+        (
+            "POST",
+            format!("databases/{db}/rows/{row}/move"),
+            Some(json!({"after_row_id": null})),
+        ),
+    ] {
+        let (status, body) = fixture.call_as(&member, method, &path, body).await;
+        assert_eq!(
+            (status, body["code"].as_str()),
+            (StatusCode::NOT_FOUND, Some("page_not_found")),
+            "{method} {path}"
+        );
+    }
+    assert_eq!(
+        fixture.database(&db).await["rows"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[tokio::test]
+async fn database_writes_are_audited_and_emit_realtime_events() {
+    let fixture = Fixture::new().await;
+    let db = fixture.create_database("Audited").await;
+    let tags = id_of(property(&fixture.database(&db).await, "Tags")).to_owned();
+    let row = fixture.add_row(&db, json!({"title": "Row"})).await;
+    fixture
+        .set_values(&db, id_of(&row), json!({&tags: []}))
+        .await;
+    fixture
+        .ok(
+            "POST",
+            &format!("databases/{db}/properties"),
+            Some(json!({"name": "Notes", "type": "text"})),
+        )
+        .await;
+
+    let rows = sqlx::query_as::<_, (String, i64)>(
+        "SELECT audit_events.action, \
+         (SELECT COUNT(*) FROM outbox_events WHERE outbox_events.id = audit_events.id AND outbox_events.topic = 'workspace.changed') \
+         FROM audit_events WHERE workspace_id = $1 AND resource_type = 'database' AND resource_id = $2 \
+         ORDER BY occurred_at, id",
+    )
+    .bind(&fixture.workspace_id)
+    .bind(&db)
+    .fetch_all(fixture.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        rows,
+        [
+            ("database.row_created".to_owned(), 1),
+            ("database.values_updated".to_owned(), 1),
+            ("database.property_created".to_owned(), 1),
+        ]
+    );
+}
