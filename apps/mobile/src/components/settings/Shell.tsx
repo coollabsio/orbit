@@ -1,11 +1,11 @@
 import { type Href, usePathname } from 'expo-router'
 import type { Permission } from '@orbit/api/generated/types.gen'
 import { type ReactNode, useState } from 'react'
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Switch, View } from 'react-native'
+import { Pressable, ScrollView, Switch, View } from 'react-native'
 
 import { useOrbit } from '../../orbit-context'
 import { alpha, cssColors, useButtonStyle, useTheme } from '../../theme'
-import { Icon, type IconName, PaneHeader, PickerSheet, type Presence, PullRefresh, SafeAreaView, StatusMark, Text } from '../../ui'
+import { Icon, type IconName, KeyboardSpace, PaneHeader, PickerSheet, type Presence, PullRefresh, SafeAreaView, StatusMark, Text } from '../../ui'
 
 export interface SettingsNavItem {
   href: Href & string
@@ -90,7 +90,7 @@ export function SettingsShell({ title, nav, children, onRefresh }: { title: stri
           </>
         ) : null}
       </PaneHeader>
-      <KeyboardAvoidingView className="flex-1" behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardSpace className="flex-1">
         <ScrollView
           contentContainerClassName="px-5 pt-5 pb-8 gap-6"
           keyboardShouldPersistTaps="handled"
@@ -98,7 +98,7 @@ export function SettingsShell({ title, nav, children, onRefresh }: { title: stri
         >
           {children}
         </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardSpace>
     </SafeAreaView>
   )
 }

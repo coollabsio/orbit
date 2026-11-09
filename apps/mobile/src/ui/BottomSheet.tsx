@@ -1,7 +1,8 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react'
-import { Animated, Easing, KeyboardAvoidingView, Modal, Platform, Pressable, type StyleProp, useWindowDimensions, View, type ViewStyle } from 'react-native'
+import { Animated, Easing, Modal, Pressable, type StyleProp, useWindowDimensions, View, type ViewStyle } from 'react-native'
 
 import { alpha, cssColors } from '../theme'
+import { KeyboardSpace } from './KeyboardSpace'
 
 /**
  * A sheet that rises from the bottom over a dimmed screen: the dim fades and only the panel slides, as the web's phone
@@ -62,9 +63,9 @@ export function BottomSheet({
   return (
     <Modal visible={mounted} transparent animationType="none" onRequestClose={onClose} statusBarTranslucent={statusBarTranslucent}>
       {avoidKeyboard ? (
-        <KeyboardAvoidingView className="flex-1 justify-end" behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <KeyboardSpace className="flex-1 justify-end">
           {panel}
-        </KeyboardAvoidingView>
+        </KeyboardSpace>
       ) : (
         <View className="flex-1 justify-end">{panel}</View>
       )}

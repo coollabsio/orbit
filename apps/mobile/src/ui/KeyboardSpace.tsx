@@ -1,20 +1,38 @@
-import { type ReactNode, useEffect, useState } from 'react'
-import { Dimensions, Keyboard, Platform, View } from 'react-native'
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { type ReactNode, useEffect, useRef, useState } from 'react'
+import { Keyboard, Platform, type StyleProp, View, type ViewInstance, type ViewProps, type ViewStyle } from 'react-native'
 
 /**
- * Keeps its content above the iOS keyboard by setting its bottom padding to the keyboard's height. Unlike
- * `KeyboardAvoidingView` it starts no `LayoutAnimation`, which animates every other layout change of that moment too
- * (the message rows, the composer). The screen's safe area already pads the home indicator, so that part is left out.
+ * Keeps its content above the iOS keyboard: its bottom padding is the part of it that the keyboard covers. Unlike
+ * `KeyboardAvoidingView` it starts no `LayoutAnimation`, which slides every other layout change of that moment up and
+ * down too. The padding changes in one step.
  */
-export function KeyboardSpace({ children }: { children: ReactNode }) {
-  const insets = useSafeAreaInsets()
-  const [keyboard, setKeyboard] = useState(0)
+export function KeyboardSpace({ className, style, pointerEvents, children }: { className?: string; style?: StyleProp<ViewStyle>; pointerEvents?: ViewProps['pointerEvents']; children: ReactNode }) {
+  const view = useRef<ViewInstance>(null)
+  // where the keyboard starts on the screen; null while it is hidden
+  const [keyboardTop, setKeyboardTop] = useState<number | null>(null)
+  // where this view ends on the screen, without the padding
+  const [bottom, setBottom] = useState<number | null>(null)
+
+  const measure = () => view.current?.measureInWindow((_x, y, _width, height) => setBottom(y + height))
+
   useEffect(() => {
     if (Platform.OS !== 'ios') return
-    // the part of the screen the keyboard will cover: 0 when it leaves (it ends below the screen)
-    const change = Keyboard.addListener('keyboardWillChangeFrame', (event) => setKeyboard(Math.max(0, Dimensions.get('window').height - event.endCoordinates.screenY)))
-    return () => change.remove()
+    const change = Keyboard.addListener('keyboardWillChangeFrame', (event) => {
+      const top = event.endCoordinates.screenY
+      setKeyboardTop(event.endCoordinates.height > 0 ? top : null)
+      measure()
+    })
+    const hide = Keyboard.addListener('keyboardWillHide', () => setKeyboardTop(null))
+    return () => {
+      change.remove()
+      hide.remove()
+    }
   }, [])
-  return <View className="flex-1" style={{ paddingBottom: Math.max(0, keyboard - insets.bottom) }}>{children}</View>
+
+  const padding = keyboardTop !== null && bottom !== null ? Math.max(0, bottom - keyboardTop) : 0
+  return (
+    <View ref={view} onLayout={measure} className={className} pointerEvents={pointerEvents} style={[style, { paddingBottom: padding }]}>
+      {children}
+    </View>
+  )
 }

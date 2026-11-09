@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { router } from 'expo-router'
 import { type ReactNode, useState } from 'react'
-import { Alert, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, useWindowDimensions, View } from 'react-native'
+import { Alert, Modal, Pressable, ScrollView, useWindowDimensions, View } from 'react-native'
 import { TextInput } from '../ui/scaled'
 
 import { keys } from '../data/keys'
@@ -27,7 +27,7 @@ import { useOrbit } from '../orbit-context'
 import { useLabels, usePeople, useProjects, useStatuses } from '../queries'
 import { errorMessage } from '../session-context'
 import { alpha, cssColors, useTheme } from '../theme'
-import { Avatar, Button, Icon, type IconName, IconButton, PriorityIcon, StatusIcon, Text } from '../ui'
+import { Avatar, Button, Icon, IconButton, type IconName, KeyboardSpace, PriorityIcon, StatusIcon, Text } from '../ui'
 import { type FileSource, pickFiles } from './tasks/files'
 import { Dot, DueDateChoices, LabelChoices, MenuChoices, PeopleChoices, PriorityChoices, StatusChoices, TaskChoices } from './tasks/pickers'
 import { Sheet, SheetList, SheetRow, useSheet } from './tasks/Sheet'
@@ -164,7 +164,7 @@ export function NewTaskDialog({ defaults, onClose }: { defaults: NewTaskDefaults
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
       <Pressable accessibilityLabel="Close" onPress={onClose} className="absolute inset-0 bg-black/10" />
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} className="flex-1" pointerEvents="box-none">
+      <KeyboardSpace className="flex-1" pointerEvents="box-none">
         <View
           accessibilityViewIsModal
           className="mx-4 rounded-xl bg-popover overflow-hidden" style={{ marginTop: Math.round(height * 0.14), maxHeight: height * 0.8, boxShadow: `0 0 0 1px ${alpha(colors.foreground, 0.1)}` }}
@@ -304,7 +304,7 @@ export function NewTaskDialog({ defaults, onClose }: { defaults: NewTaskDefaults
             <Button label={files.length > 0 && create.isPending ? 'Attaching…' : 'Create task'} loading={create.isPending} disabled={!canCreate} onPress={() => create.mutate()} />
           </View>
         </View>
-      </KeyboardAvoidingView>
+      </KeyboardSpace>
 
       <Sheet visible={sheets.visible} title={sheetTitle(sheet)} onClose={sheets.close}>
         {sheet?.kind === 'project' ? (

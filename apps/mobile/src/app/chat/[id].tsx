@@ -97,7 +97,7 @@ export default function ConversationScreen() {
           <IconButton icon="more" label={`Options for ${name}`} size={32} iconSize={16} color={colors.mutedForeground} disabled={!conversation} onPress={() => setOptions(true)} />
         </View>
       </View>
-      <KeyboardSpace>
+      <KeyboardSpace className="flex-1">
         {!messages.data ? (
           messages.isError ? (
             <ErrorView error={messages.error} onRetry={() => void messages.refetch()} />

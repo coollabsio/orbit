@@ -114,7 +114,7 @@ export default function ThreadScreen() {
         />
         <IconButton icon="more" label="Thread actions" size={32} iconSize={20} color={colors.foreground} disabled={!conversationId} onPress={() => setActions(true)} />
       </View>
-      <KeyboardSpace>
+      <KeyboardSpace className="flex-1">
         {!thread.data || !root ? (
           thread.isError ? (
             <ErrorView error={thread.error} onRetry={() => void thread.refetch()} />

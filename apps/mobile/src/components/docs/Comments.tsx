@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { KeyboardAvoidingView, Modal, Platform, ScrollView, View } from 'react-native'
+import { Modal, ScrollView, View } from 'react-native'
 import { TextInput } from '../../ui/scaled'
 
 import type { PageThread } from '../../data/docs-api'
@@ -9,7 +9,7 @@ import { useAddComment, usePageThreads } from '../../hooks/docs'
 import { useMentionPeople, usePeople } from '../../queries'
 import { errorMessage } from '../../session-context'
 import { alpha, useTheme } from '../../theme'
-import { Avatar, Button, IconButton, LoadingView, PaneHeader, SafeAreaView, Text } from '../../ui'
+import { Avatar, Button, IconButton, KeyboardSpace, LoadingView, PaneHeader, SafeAreaView, Text } from '../../ui'
 import { MentionSuggestions, useMentionField } from '../MentionSuggestions'
 
 /**
@@ -34,7 +34,7 @@ export function CommentsSheet({ pageId, visible, onClose }: { pageId: string; vi
           <Text className="font-noto-medium text-[13.5px] flex-1 pl-1">Comments</Text>
           <IconButton icon="close" label="Close comments" color={alpha(colors.mutedForeground, 0.7)} onPress={onClose} />
         </PaneHeader>
-        <KeyboardAvoidingView className="flex-1" behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <KeyboardSpace className="flex-1">
           {!threads.data ? (
             threads.isError ? (
               <View className="p-4">
@@ -68,7 +68,7 @@ export function CommentsSheet({ pageId, visible, onClose }: { pageId: string; vi
             <Button label="Comment" loading={add.isPending} disabled={!text.trim()} onPress={submit} />
           </View>
           {add.isError ? <Text className="text-[12px] px-3 pb-2 text-destructive">{errorMessage(add.error)}</Text> : null}
-        </KeyboardAvoidingView>
+        </KeyboardSpace>
       </SafeAreaView>
     </Modal>
   )

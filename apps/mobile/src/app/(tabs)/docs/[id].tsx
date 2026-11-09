@@ -3,7 +3,7 @@ import { isSafeLinkHref } from '@orbit/editor/links'
 import { useQuery } from '@tanstack/react-query'
 import { router, useLocalSearchParams } from 'expo-router'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
-import { Image, KeyboardAvoidingView, Linking, Platform, ScrollView, View } from 'react-native'
+import { Image, Linking, ScrollView, View } from 'react-native'
 import { TextInput } from '../../../ui/scaled'
 
 import { CommentsSheet } from '../../../components/docs/Comments'
@@ -22,7 +22,7 @@ import { useOrbit } from '../../../orbit-context'
 import { useMembers, usePages } from '../../../queries'
 import { errorMessage } from '../../../session-context'
 import { alpha, useTheme } from '../../../theme'
-import { Button, CountBadge, ErrorView, Icon, IconButton, LoadingView, PaneHeader, PullRefresh, SafeAreaView, Text } from '../../../ui'
+import { Button, CountBadge, ErrorView, Icon, IconButton, KeyboardSpace, LoadingView, PaneHeader, PullRefresh, SafeAreaView, Text } from '../../../ui'
 
 /** Room kept between the caret and the toolbar or the top of the screen while typing. */
 const CARET_MARGIN = 24
@@ -204,7 +204,7 @@ export default function DocScreen() {
           <LoadingView />
         )
       ) : (
-        <KeyboardAvoidingView className="flex-1" behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
+        <KeyboardSpace className="flex-1">
           <ScrollView
             ref={scroll}
             contentContainerClassName="pb-8"
@@ -276,7 +276,7 @@ export default function DocScreen() {
             </View>
           </ScrollView>
           {format.focused && editable ? <EditorToolbar format={format} onCommand={run} onBlockMenu={() => setChoosingBlock(true)} onImage={() => void addImage()} /> : null}
-        </KeyboardAvoidingView>
+        </KeyboardSpace>
       )}
       <ActionSheet visible={menu !== null} actions={menu ?? []} onClose={() => setMenu(null)} />
       <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />
