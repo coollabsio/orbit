@@ -104,12 +104,6 @@
       "@react-native-community/datetimepicker",
       "expo-web-browser"
     ],
-    "backgroundColor": "#0a0a0a",
-    "extra": {
-      "eas": {
-        "projectId": "4df3d478-66e6-4d4c-aa33-e086572be80b"
-      }
-    },
-    "owner": "heyandras"
+    "backgroundColor": "#0a0a0a"
   }
 }
