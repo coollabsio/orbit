@@ -707,6 +707,168 @@ async fn type_changes_convert_values_as_the_table_says() {
 }
 
 #[tokio::test]
+async fn a_dry_run_type_change_reports_the_counts_and_changes_nothing() {
+    let fixture = Fixture::new().await;
+    let db = fixture.create_database("Dry run").await;
+    let raw = id_of(
+        &fixture
+            .add_property(&db, json!({"name": "Raw", "type": "text"}))
+            .await,
+    )
+    .to_owned();
+    for value in ["12", "abc", "7.5"] {
+        fixture
+            .add_row(&db, json!({"title": value, "values": {&raw: value}}))
+            .await;
+    }
+    let before = fixture.database(&db).await;
+    let audit_count = || async {
+        sqlx::query_as::<_, (i64,)>("SELECT COUNT(*) FROM audit_events WHERE resource_id = $1")
+            .bind(&db)
+            .fetch_one(fixture.database.pool())
+            .await
+            .unwrap()
+            .0
+    };
+    let audited = audit_count().await;
+
+    let preview = fixture
+        .ok(
+            "PATCH",
+            &format!("databases/{db}/properties/{raw}"),
+            Some(json!({"type": "number", "dry_run": true})),
+        )
+        .await;
+    assert_eq!(
+        (
+            preview["property"]["type"].as_str(),
+            preview["converted"].as_u64(),
+            preview["cleared"].as_u64()
+        ),
+        (Some("number"), Some(2), Some(1))
+    );
+    assert_eq!(fixture.database(&db).await, before);
+    assert_eq!(audit_count().await, audited);
+
+    // A lossless change previews no cleared values.
+    let preview = fixture
+        .ok(
+            "PATCH",
+            &format!("databases/{db}/properties/{raw}"),
+            Some(json!({"type": "select", "dry_run": true})),
+        )
+        .await;
+    assert_eq!(
+        (preview["converted"].as_u64(), preview["cleared"].as_u64()),
+        (Some(3), Some(0))
+    );
+    assert_eq!(fixture.database(&db).await, before);
+}
+
+#[tokio::test]
+async fn duplicating_a_property_copies_its_options_and_values_next_to_it() {
+    let fixture = Fixture::new().await;
+    let db = fixture.create_database("Copies").await;
+    let stage = fixture
+        .add_property(
+            &db,
+            json!({"name": "Stage", "type": "select", "config": {"options": [{"name": "Idea"}, {"name": "Live", "color": "green"}]}}),
+        )
+        .await;
+    let stage_id = id_of(&stage).to_owned();
+    let notes = id_of(
+        &fixture
+            .add_property(&db, json!({"name": "Notes", "type": "text"}))
+            .await,
+    )
+    .to_owned();
+    let live = option_id(&stage, "Live");
+    let row = fixture
+        .add_row(
+            &db,
+            json!({"title": "A", "values": {&stage_id: live, &notes: "hello"}}),
+        )
+        .await;
+    fixture
+        .ok(
+            "POST",
+            &format!("databases/{db}/views"),
+            Some(json!({"name": "Second", "type": "table"})),
+        )
+        .await;
+
+    let (status, _) = fixture
+        .call(
+            "POST",
+            &format!("databases/{db}/properties"),
+            Some(json!({"duplicate_of": stage_id, "type": "text"})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    let title = id_of(property(&fixture.database(&db).await, "Name")).to_owned();
+    let (status, _) = fixture
+        .call(
+            "POST",
+            &format!("databases/{db}/properties"),
+            Some(json!({"duplicate_of": title})),
+        )
+        .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+
+    let copy = fixture
+        .add_property(&db, json!({"duplicate_of": stage_id}))
+        .await;
+    let copy_id = id_of(&copy).to_owned();
+    assert_eq!(
+        (copy["name"].as_str(), copy["type"].as_str()),
+        (Some("Stage (copy)"), Some("select"))
+    );
+    assert_eq!(
+        copy["position"].as_i64(),
+        Some(stage["position"].as_i64().unwrap() + 1)
+    );
+    let copied_live = option_id(&copy, "Live");
+    assert_ne!(copied_live, live);
+    assert_eq!(
+        names(&copy["config"]["options"]),
+        names(&stage["config"]["options"])
+    );
+
+    let database = fixture.database(&db).await;
+    assert_eq!(
+        names(&database["properties"]),
+        ["Name", "Tags", "Stage", "Stage (copy)", "Notes"]
+    );
+    let stored = database["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["id"] == row["id"])
+        .unwrap()["values"]
+        .clone();
+    assert_eq!(stored[&copy_id], json!(copied_live));
+    assert_eq!(stored[&stage_id], json!(live));
+    for view in database["views"].as_array().unwrap() {
+        let columns: Vec<&str> = view["config"]["columns"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|column| column["property_id"].as_str().unwrap())
+            .collect();
+        let at = columns.iter().position(|id| *id == stage_id).unwrap();
+        assert_eq!(columns[at + 1], copy_id, "view {}", view["name"]);
+    }
+
+    let named = fixture
+        .add_property(&db, json!({"duplicate_of": notes, "name": "More notes"}))
+        .await;
+    assert_eq!(named["name"], "More notes");
+    let database = fixture.database(&db).await;
+    let stored = &database["rows"][0]["values"];
+    assert_eq!(stored[id_of(&named)], json!("hello"));
+}
+
+#[tokio::test]
 async fn removing_options_and_properties_cleans_values_and_views() {
     let fixture = Fixture::new().await;
     let db = fixture.create_database("Cleanup").await;

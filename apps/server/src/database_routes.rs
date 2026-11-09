@@ -79,17 +79,22 @@ pub fn database_router(state: DatabaseState) -> Router {
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct CreateDatabasePropertyBody {
-    /// 1 to 200 characters.
-    name: String,
-    /// Any type but `title` (a database has exactly one).
+    /// 1 to 200 characters. Required unless `duplicate_of` is set (the copy is then named
+    /// "<name> (copy)").
+    name: Option<String>,
+    /// Any type but `title` (a database has exactly one). Required unless `duplicate_of` is set.
     #[serde(rename = "type")]
-    property_type: PropertyType,
+    property_type: Option<PropertyType>,
     /// The type's config (see `DatabaseProperty.config`); omitted gives the default (a new
     /// `status` gets "Not started", "In progress" and "Done"). Options without an `id` get one.
     #[schema(value_type = Option<Object>)]
     config: Option<Value>,
     /// Index among the properties; omitted appends it. The property is added to every view.
     position: Option<i64>,
+    /// A property of this database (not the title) to copy with its config and values; the copy
+    /// goes right after it, among the properties and in every view. Cannot be sent with `type`,
+    /// `config` or `position` (422).
+    duplicate_of: Option<String>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -104,6 +109,9 @@ struct UpdateDatabasePropertyBody {
     #[schema(value_type = Option<Object>)]
     config: Option<Value>,
     position: Option<i64>,
+    /// Returns what the change would do (`converted`, `cleared`) without saving it.
+    #[serde(default)]
+    dry_run: bool,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -202,14 +210,37 @@ async fn create_database_property(
     let instance = format!("/api/v1/workspaces/{workspace}/databases/{database}/properties");
     let (workspace_id, database_id, actor_id) =
         scope(&state, &headers, &workspace, &database, &instance, request).await?;
-    let input = NewProperty {
-        name: name(body.name, &instance, request)?,
-        property_type: body.property_type,
-        config: body.config,
-        position: body
-            .position
-            .map(|value| position(value, &instance, request))
-            .transpose()?,
+    let input = match body.duplicate_of {
+        Some(source) => {
+            if body.property_type.is_some() || body.config.is_some() || body.position.is_some() {
+                return Err(validation("duplicate_of", &instance, request));
+            }
+            NewProperty::Duplicate {
+                source: source
+                    .parse()
+                    .map_err(|_| validation("duplicate_of", &instance, request))?,
+                name: body
+                    .name
+                    .map(|value| name(value, &instance, request))
+                    .transpose()?,
+            }
+        }
+        None => NewProperty::Fresh {
+            name: name(
+                body.name
+                    .ok_or_else(|| validation("name", &instance, request))?,
+                &instance,
+                request,
+            )?,
+            property_type: body
+                .property_type
+                .ok_or_else(|| validation("type", &instance, request))?,
+            config: body.config,
+            position: body
+                .position
+                .map(|value| position(value, &instance, request))
+                .transpose()?,
+        },
     };
     state
         .databases
@@ -256,6 +287,7 @@ async fn update_database_property(
             .position
             .map(|value| position(value, &instance, request))
             .transpose()?,
+        dry_run: body.dry_run,
     };
     state
         .databases

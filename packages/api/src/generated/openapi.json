@@ -48646,10 +48646,6 @@
       },
       "CreateDatabasePropertyBody": {
         "type": "object",
-        "required": [
-          "name",
-          "type"
-        ],
         "properties": {
           "config": {
             "type": [
@@ -48658,9 +48654,19 @@
             ],
             "description": "The type's config (see `DatabaseProperty.config`); omitted gives the default (a new\n`status` gets \"Not started\", \"In progress\" and \"Done\"). Options without an `id` get one."
           },
+          "duplicate_of": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A property of this database (not the title) to copy with its config and values; the copy\ngoes right after it, among the properties and in every view. Cannot be sent with `type`,\n`config` or `position` (422)."
+          },
           "name": {
-            "type": "string",
-            "description": "1 to 200 characters."
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "1 to 200 characters. Required unless `duplicate_of` is set (the copy is then named\n\"<name> (copy)\")."
           },
           "position": {
             "type": [
@@ -48671,8 +48677,15 @@
             "description": "Index among the properties; omitted appends it. The property is added to every view."
           },
           "type": {
-            "$ref": "#/components/schemas/DatabasePropertyType",
-            "description": "Any type but `title` (a database has exactly one)."
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DatabasePropertyType",
+                "description": "Any type but `title` (a database has exactly one). Required unless `duplicate_of` is set."
+              }
+            ]
           }
         },
         "additionalProperties": false
@@ -59236,6 +59249,10 @@
               "null"
             ],
             "description": "The whole config of the current type. Options left out are removed from every value."
+          },
+          "dry_run": {
+            "type": "boolean",
+            "description": "Returns what the change would do (`converted`, `cleared`) without saving it."
           },
           "name": {
             "type": [

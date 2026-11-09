@@ -144,8 +144,9 @@ Rules:
 
 ### 4.2 Type change
 
-`PATCH` of `type` converts the values in one transaction. Conversions that lose data need a
-confirmation in the UI ("Some values cannot be converted and will be cleared").
+`PATCH` of `type` converts the values in one transaction. The UI first sends the change with
+`dry_run: true` and asks for a confirmation only when values would be cleared ("N values cannot be
+converted and will be cleared"); otherwise the type changes at once.
 
 | From → to | Rule |
 |---|---|
@@ -216,8 +217,8 @@ route to the OpenAPI document and run `just api`, so `@orbit/api` gets the gener
 | Method and path | Body | Result |
 |---|---|---|
 | `GET /databases/{database_id}` | — | The whole database (below) |
-| `POST /databases/{database_id}/properties` | `{name, type, config?, position?}` | The property; it is added to all views |
-| `PATCH /databases/{database_id}/properties/{property_id}` | `{name?, type?, config?, position?}`; `type` and `config` cannot be in the same request (422) | `{property, converted, cleared}` |
+| `POST /databases/{database_id}/properties` | `{name, type, config?, position?}`, or `{duplicate_of, name?}` (with `type`, `config` or `position`: 422) | The property; it is added to all views. A duplicate copies the config (new option ids) and the values, and goes right after its source, among the properties and in every view; its name defaults to "<name> (copy)" |
+| `PATCH /databases/{database_id}/properties/{property_id}` | `{name?, type?, config?, position?, dry_run?}`; `type` and `config` cannot be in the same request (422) | `{property, converted, cleared}`; `dry_run: true` returns them without saving (no audit event, no realtime event) |
 | `DELETE /databases/{database_id}/properties/{property_id}` | — | 204; its values go too; views drop it |
 | `POST /databases/{database_id}/views` | `{name, type: "table", config?, duplicate_of?}` | The view |
 | `PATCH /databases/{database_id}/views/{view_id}` | `{name?, config?, position?}` | The view |
@@ -327,9 +328,10 @@ shadcn-style code, inline Tailwind, `cva` for variants, reicon outline icons, fl
 └───────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Title area:** the same cover, icon and title controls as a normal page. The table uses the
-  full page width when the page is full width (`full_width` option). Otherwise the table can
-  scroll sideways past the text column, as in Notion.
+- **Title area:** the same cover, icon and title controls as a normal page. A database page is
+  always full width, as a Notion full-page database: cover, title, view tabs, toolbar and table
+  start at the same left edge (the page padding, wide enough for the row handles and checkboxes),
+  and the table scrolls sideways. The page menu has no "Full width" item.
 - **View tabs:** each tab shows the view icon and name. Click selects. Right-click or "⋯" gives
   Rename, Duplicate, Delete. "+" adds a table view. The selected view is stored per user in
   `localStorage` (`orbit:database-view:<database_id>`), and the URL holds it (`?view=<id>`).

@@ -1435,17 +1435,21 @@ export type CreateDatabasePropertyBody = {
         [key: string]: unknown;
     } | null;
     /**
-     * 1 to 200 characters.
+     * A property of this database (not the title) to copy with its config and values; the copy
+     * goes right after it, among the properties and in every view. Cannot be sent with `type`,
+     * `config` or `position` (422).
      */
-    name: string;
+    duplicate_of?: string | null;
+    /**
+     * 1 to 200 characters. Required unless `duplicate_of` is set (the copy is then named
+     * "<name> (copy)").
+     */
+    name?: string | null;
     /**
      * Index among the properties; omitted appends it. The property is added to every view.
      */
     position?: number | null;
-    /**
-     * Any type but `title` (a database has exactly one).
-     */
-    type: DatabasePropertyType;
+    type?: null | DatabasePropertyType;
 };
 
 export type CreateDatabaseRowBody = {
@@ -5581,6 +5585,10 @@ export type UpdateDatabasePropertyBody = {
     config?: {
         [key: string]: unknown;
     } | null;
+    /**
+     * Returns what the change would do (`converted`, `cleared`) without saving it.
+     */
+    dry_run?: boolean;
     name?: string | null;
     position?: number | null;
     type?: null | DatabasePropertyType;

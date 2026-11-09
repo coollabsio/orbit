@@ -352,6 +352,44 @@ impl PropertyKind {
     fn has_option(&self, id: &str) -> bool {
         self.options().iter().any(|(option, _)| *option == id)
     }
+
+    /// The same kind with a new id for each option, and the map of old id → new id.
+    fn with_new_option_ids(&self) -> (Self, HashMap<String, String>) {
+        let mut ids = HashMap::new();
+        let mut fresh = |id: &str| {
+            let next = Id::new_v7().to_string();
+            ids.insert(id.to_owned(), next.clone());
+            next
+        };
+        let mut select = |option: &SelectOption| SelectOption {
+            id: fresh(&option.id),
+            ..option.clone()
+        };
+        let kind = match self {
+            Self::Select(list) => Self::Select(list.iter().map(&mut select).collect()),
+            Self::MultiSelect(list) => Self::MultiSelect(list.iter().map(&mut select).collect()),
+            Self::Status(list) => Self::Status(
+                list.iter()
+                    .map(|option| StatusOption {
+                        id: fresh(&option.id),
+                        ..option.clone()
+                    })
+                    .collect(),
+            ),
+            other => other.clone(),
+        };
+        (kind, ids)
+    }
+}
+
+/// "<name> (copy)", within the name limit.
+fn copy_name(name: &str) -> String {
+    const SUFFIX: &str = " (copy)";
+    let kept: String = name
+        .chars()
+        .take(MAX_NAME_CHARS - SUFFIX.chars().count())
+        .collect();
+    format!("{kept}{SUFFIX}")
 }
 
 fn default_status_options() -> Vec<StatusOption> {
@@ -565,6 +603,16 @@ impl CellValue {
             }),
             Self::People(ids) => json!(ids),
             Self::Checked => json!(true),
+        }
+    }
+
+    /// The value with its option ids replaced by `ids` (old id → new id).
+    fn with_option_ids(self, ids: &HashMap<String, String>) -> Self {
+        let swap = |id: String| ids.get(&id).cloned().unwrap_or(id);
+        match self {
+            Self::Choice(id) => Self::Choice(swap(id)),
+            Self::Choices(list) => Self::Choices(list.into_iter().map(swap).collect()),
+            other => other,
         }
     }
 }
@@ -1263,11 +1311,16 @@ pub struct PropertyUpdate {
     pub cleared: u64,
 }
 
-pub struct NewProperty {
-    pub name: String,
-    pub property_type: PropertyType,
-    pub config: Option<Value>,
-    pub position: Option<i64>,
+pub enum NewProperty {
+    Fresh {
+        name: String,
+        property_type: PropertyType,
+        config: Option<Value>,
+        position: Option<i64>,
+    },
+    /// A copy of another property with its config (new option ids) and values, placed right after
+    /// it; `name` defaults to "<name> (copy)".
+    Duplicate { source: Id, name: Option<String> },
 }
 
 #[derive(Default)]
@@ -1276,6 +1329,8 @@ pub struct PropertyChanges {
     pub property_type: Option<PropertyType>,
     pub config: Option<Value>,
     pub position: Option<i64>,
+    /// Runs the change and returns its result without writing anything.
+    pub dry_run: bool,
 }
 
 pub struct NewView {
@@ -1421,11 +1476,6 @@ impl DatabaseRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<DatabaseProperty, DatabaseError> {
-        if input.property_type == PropertyType::Title {
-            return Err(DatabaseError::invalid("type"));
-        }
-        let kind = PropertyKind::parse(input.property_type, input.config.as_ref())
-            .map_err(DatabaseError::invalid)?;
         let mut tx = self.database.immediate_transaction().await?;
         let page = open(&mut tx, workspace_id, database_id, actor_id).await?;
         unlocked(&page)?;
@@ -1433,18 +1483,79 @@ impl DatabaseRepository {
         if properties.len() >= MAX_PROPERTIES {
             return Err(DatabaseError::PropertyLimit);
         }
-        let property = Property {
-            id: Id::new_v7(),
-            name: input.name,
-            kind,
-            position: 0,
+        let (property, index, source) = match input {
+            NewProperty::Fresh {
+                name,
+                property_type,
+                config,
+                position,
+            } => {
+                if property_type == PropertyType::Title {
+                    return Err(DatabaseError::invalid("type"));
+                }
+                let kind = PropertyKind::parse(property_type, config.as_ref())
+                    .map_err(DatabaseError::invalid)?;
+                let property = Property {
+                    id: Id::new_v7(),
+                    name,
+                    kind,
+                    position: 0,
+                };
+                (property, insert_index(position, properties.len()), None)
+            }
+            NewProperty::Duplicate { source, name } => {
+                let at = properties
+                    .iter()
+                    .position(|property| property.id == source)
+                    .ok_or_else(|| DatabaseError::invalid("duplicate_of"))?;
+                let original = properties[at].clone();
+                if original.kind == PropertyKind::Title {
+                    return Err(DatabaseError::invalid("duplicate_of"));
+                }
+                let (kind, option_ids) = original.kind.with_new_option_ids();
+                let property = Property {
+                    id: Id::new_v7(),
+                    name: name.unwrap_or_else(|| copy_name(&original.name)),
+                    kind,
+                    position: 0,
+                };
+                (property, at + 1, Some((original, option_ids)))
+            }
         };
         insert_property(&mut tx, workspace_id, database_id, &property, now).await?;
-        let index = insert_index(input.position, properties.len());
         properties.insert(index, property.clone());
         renumber_rows(&mut tx, "database_properties", &properties_ids(&properties)).await?;
+        if let Some((original, option_ids)) = &source {
+            for (row, value) in stored_values(&mut tx, original).await? {
+                let value = value.with_option_ids(option_ids);
+                upsert_value(
+                    &mut tx,
+                    workspace_id,
+                    &row,
+                    property.id,
+                    &value,
+                    actor_id,
+                    now,
+                )
+                .await?;
+            }
+        }
         for mut view in raw_views(&mut tx, database_id).await? {
-            view.config.columns.push(property.column());
+            let columns = &mut view.config.columns;
+            match source.as_ref().and_then(|(original, _)| {
+                columns
+                    .iter()
+                    .position(|column| column.property_id == original.id)
+            }) {
+                Some(at) => {
+                    let column = ViewColumn {
+                        property_id: property.id,
+                        ..columns[at].clone()
+                    };
+                    columns.insert(at + 1, column);
+                }
+                None => columns.push(property.column()),
+            }
             write_view_config(&mut tx, view.id, &view.config, now).await?;
         }
         record(
@@ -1539,6 +1650,19 @@ impl DatabaseRepository {
         let index = insert_index(changes.position.or(Some(index as i64)), properties.len());
         properties.insert(index, property.clone());
         renumber_rows(&mut tx, "database_properties", &properties_ids(&properties)).await?;
+        let update = PropertyUpdate {
+            property: DatabaseProperty {
+                position: index as i64,
+                ..property.output()
+            },
+            converted,
+            cleared,
+        };
+        if changes.dry_run {
+            // Nothing is kept, so nothing is audited and no realtime event goes out.
+            tx.rollback().await?;
+            return Ok(update);
+        }
         record(
             &mut tx,
             workspace_id,
@@ -1550,14 +1674,7 @@ impl DatabaseRepository {
         )
         .await?;
         tx.commit().await?;
-        Ok(PropertyUpdate {
-            property: DatabaseProperty {
-                position: index as i64,
-                ..property.output()
-            },
-            converted,
-            cleared,
-        })
+        Ok(update)
     }
 
     pub async fn delete_property(
