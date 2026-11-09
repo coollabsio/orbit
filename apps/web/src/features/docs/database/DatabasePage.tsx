@@ -1,6 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router'
-import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
 import { applyView, repairConfig } from '@orbit/database/view'
@@ -18,14 +17,12 @@ import { ViewTabs } from './ViewTabs'
 import { ViewToolbar } from './ViewToolbar'
 
 const SAVE_DELAY_MS = 500
-const TEXT_COLUMN_PX = 760
 
 interface DatabasePageProps {
   workspaceId: string
   databaseId: string
   /** The page lock: properties and views are read-only, rows and values stay writable. */
   locked: boolean
-  fullWidth: boolean
   /** The page cover, full width above the title column. */
   cover: ReactNode
   /** The icon and title controls of the page. */
@@ -47,7 +44,7 @@ function readStoredView(databaseId: string): string | null {
  * the selected view, view config drafts (saved for everyone after 500 ms, or kept local for viewers who cannot change
  * the view), the search, and the rows added since the view last changed.
  */
-export function DatabasePage({ workspaceId, databaseId, locked, fullWidth, cover, title }: DatabasePageProps) {
+export function DatabasePage({ workspaceId, databaseId, locked, cover, title }: DatabasePageProps) {
   const navigate = useNavigate()
   const query = useDatabase(workspaceId, databaseId)
   const membersQuery = useMembers(workspaceId)
@@ -84,6 +81,7 @@ export function DatabasePage({ workspaceId, databaseId, locked, fullWidth, cover
   }
 
   // The header column stays put while the table scrolls sideways: it is as wide as the scroller's content box.
+  // `left-0` keeps it at the content edge: a sticky offset already starts inside the scroller's padding.
   useLayoutEffect(() => {
     if (!scroller) return
     const measure = () => {
@@ -123,9 +121,9 @@ export function DatabasePage({ workspaceId, databaseId, locked, fullWidth, cover
   if (!database) {
     return (
       <DatabaseScroller setScroller={setScroller}>
-        <div className="sticky left-6 max-[899px]:left-3" style={{ width: viewport || undefined }}>
+        <div className="sticky left-0" style={{ width: viewport || undefined }}>
           {cover}
-          <div className={cn('mx-auto', fullWidth ? 'max-w-none px-[30px] max-[899px]:px-0' : 'max-w-[760px]')}>
+          <div className="px-[30px]">
             {title}
             {query.isError ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -194,14 +192,12 @@ export function DatabasePage({ workspaceId, databaseId, locked, fullWidth, cover
       },
     )
   }
-  const inset = fullWidth ? (viewport + 48 < 900 ? 0 : 30) : Math.max(0, (viewport - TEXT_COLUMN_PX) / 2)
-
   return (
     <DatabaseEnvContext.Provider value={env}>
       <DatabaseScroller setScroller={setScroller}>
-        <div className="sticky left-6 max-[899px]:left-3" style={{ width: viewport || undefined }}>
+        <div className="sticky left-0" style={{ width: viewport || undefined }}>
           {cover}
-          <div className={cn('mx-auto', fullWidth ? 'max-w-none px-[30px] max-[899px]:px-0' : 'max-w-[760px]')}>
+          <div className="px-[30px]">
             {title}
             <div className="flex items-center gap-2 border-b border-border pb-1">
               <ViewTabs views={views} activeId={view.id} onSelect={selectView} />
@@ -230,7 +226,9 @@ export function DatabasePage({ workspaceId, databaseId, locked, fullWidth, cover
             <FilterBar properties={database.properties} config={config} onConfig={changeConfig} openRule={openRule} onOpenRule={setOpenRule} />
           </div>
         </div>
-        <div className="pt-2" style={{ paddingLeft: inset }}>
+        {/* The row drag handles and checkboxes (40 px) sit left of the table, in this padding plus the scroller's
+            (54 px in all, 42 px below 900 px). */}
+        <div className="px-[30px] pt-2">
           <DatabaseTable
             key={view.id}
             database={database}

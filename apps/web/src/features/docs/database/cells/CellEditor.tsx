@@ -131,10 +131,19 @@ function InlineEditor({ initial, label, align, onSave, onClose }: {
   )
 }
 
-/** Closes a popover editor: Esc and outside clicks end the edit; `commit` runs first unless it was Esc. */
-function usePopoverClose(onClose: (end: EditEnd) => void, commit?: () => void) {
-  return (open: boolean, details?: { reason?: string }) => {
+/**
+ * Closes a popover editor: Esc and outside clicks end the edit; `commit` runs first unless it was Esc. A click on the
+ * editor's own cell closes it too, and stops there: reaching the cell, it would open the editor again. A touch on that
+ * cell (dismissed on touch start, before its click) keeps the editor open for the same reason.
+ */
+function usePopoverClose(anchor: HTMLElement | null, onClose: (end: EditEnd) => void, commit?: () => void) {
+  return (open: boolean, details?: { reason?: string; event?: Event }) => {
     if (open) return
+    const event = details?.event
+    if (details?.reason === 'outside-press' && event?.target instanceof Node && anchor?.contains(event.target)) {
+      if (event.type !== 'click') return
+      event.stopPropagation()
+    }
     if (details?.reason !== 'escape-key') commit?.()
     onClose('stay')
   }
@@ -146,7 +155,7 @@ function TextEditor({ property, anchor, initial, onCommit, onClose }: CellEditor
     const next = text.trim() === '' ? null : ({ kind: 'text', text } as const)
     if ((next?.text ?? '') !== initial) onCommit(next)
   }
-  const onOpenChange = usePopoverClose(onClose, save)
+  const onOpenChange = usePopoverClose(anchor, onClose, save)
   return (
     <Popover open onOpenChange={onOpenChange}>
       <PopoverContent anchor={anchor} align="start" side="bottom" sideOffset={-33} className="w-(--anchor-width) min-w-72 gap-0 p-0">
@@ -183,7 +192,7 @@ function ChoiceEditor({ property, row, anchor, onCommit, onOptions, onClose }: C
   const list = options(property)
   const trimmed = query.trim()
   const canCreate = onOptions && trimmed !== '' && !list.some((option) => option.name.toLowerCase() === trimmed.toLowerCase())
-  const onOpenChange = usePopoverClose(onClose)
+  const onOpenChange = usePopoverClose(anchor, onClose)
 
   const pick = (id: string) => {
     if (multi) {
@@ -358,7 +367,7 @@ function DateEditor({ anchor, value, onCommit, onClose }: CellEditorProps & { va
   const [startTime, setStartTime] = useState(start?.time ?? '09:00')
   const [endTime, setEndTime] = useState(end?.time ?? start?.time ?? '09:00')
   const [month, setMonth] = useState(() => (start ? localDate(start.day) : new Date()))
-  const onOpenChange = usePopoverClose(onClose)
+  const onOpenChange = usePopoverClose(anchor, onClose)
 
   const save = (next: { start: string; end: string | null; withTime: boolean; startTime: string; endTime: string }) => {
     const startPoint = pointOf(next.start, next.withTime ? next.startTime : null)
@@ -454,7 +463,7 @@ function DateEditor({ anchor, value, onCommit, onClose }: CellEditorProps & { va
 
 function PersonEditor({ property, anchor, ids, onCommit, onClose }: CellEditorProps & { ids: string[] }) {
   const { users } = useDatabaseEnv()
-  const onOpenChange = usePopoverClose(onClose)
+  const onOpenChange = usePopoverClose(anchor, onClose)
   const toggle = (id: string) => {
     const next = ids.includes(id) ? ids.filter((other) => other !== id) : [...ids, id]
     onCommit(next.length > 0 ? { kind: 'people', ids: next } : null)

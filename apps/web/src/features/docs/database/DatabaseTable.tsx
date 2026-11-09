@@ -5,7 +5,6 @@ import { toast } from 'sonner'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
-import { DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Tip } from '@/components/common/Tip'
 import { apiValue, cellOf, displayText, numberFromEditText, valueFromText } from '@orbit/database/values'
 import type { CellValue, Database, Property, Row, SelectOption, ViewConfig } from '@orbit/database/types'
@@ -16,7 +15,7 @@ import { AddPropertyButton, ColumnHeaderMenu } from './ColumnHeaderMenu'
 import { useDatabaseEnv } from './context'
 import { dropAfterRowId } from './databaseLib'
 import { GripIcon } from './GripIcon'
-import { PROPERTY_TYPES, isComputed } from './propertyMeta'
+import { isComputed } from './propertyMeta'
 
 const ROW_HEIGHT = 33
 const MIN_WIDTH = 32
@@ -339,7 +338,6 @@ export function DatabaseTable(props: DatabaseTableProps) {
             </div>
             {columns.map((column, index) => {
               const { property } = column
-              const Icon = PROPERTY_TYPES[property.type].icon
               const sort = config.sorts.find((candidate) => candidate.property_id === property.id)
               return (
                 <div
@@ -370,26 +368,7 @@ export function DatabaseTable(props: DatabaseTableProps) {
                   }}
                   onDrop={dropColumn}
                 >
-                  <ColumnHeaderMenu
-                    property={property}
-                    config={config}
-                    onConfig={onConfig}
-                    onFilter={onFilter}
-                    rows={database.rows}
-                    trigger={
-                      <DropdownMenuTrigger
-                        render={
-                          <button
-                            type="button"
-                            className="flex min-w-0 flex-1 items-center gap-1.5 px-2 text-left text-sm font-normal text-muted-foreground outline-none hover:bg-muted/60 focus-visible:bg-muted/60 aria-expanded:bg-muted/60"
-                          />
-                        }
-                      >
-                        <Icon className="size-4 shrink-0" aria-hidden="true" />
-                        <span className="truncate">{property.name}</span>
-                      </DropdownMenuTrigger>
-                    }
-                  />
+                  <ColumnHeaderMenu property={property} config={config} onConfig={onConfig} onFilter={onFilter} />
                   <div
                     role="separator"
                     aria-orientation="vertical"

@@ -870,10 +870,13 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
                 <Star className="size-[14px]" weight={favorite ? 'Filled' : 'Outline'} />
                 {favoriteLabel}
               </DropdownMenuItem>
-              <DropdownMenuCheckboxItem checked={fullWidth} onCheckedChange={toggleFullWidth}>
-                <ArrowSwapHorizontal className="size-[14px]" />
-                Full width
-              </DropdownMenuCheckboxItem>
+              {/* A database page is always full width. */}
+              {isDatabase ? null : (
+                <DropdownMenuCheckboxItem checked={fullWidth} onCheckedChange={toggleFullWidth}>
+                  <ArrowSwapHorizontal className="size-[14px]" />
+                  Full width
+                </DropdownMenuCheckboxItem>
+              )}
               <DropdownMenuItem disabled={setPageLock.isPending} onClick={() => toggleLock(!locked)}>
                 {locked ? <Unlock className="size-[14px]" /> : <Lock className="size-[14px]" />}
                 {locked ? 'Unlock page' : 'Lock page'}
@@ -981,7 +984,6 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
             workspaceId={workspaceId}
             databaseId={pageId}
             locked={locked}
-            fullWidth={fullWidth}
             cover={coverBlock}
             title={titleBlock}
           />

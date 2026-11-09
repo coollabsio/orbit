@@ -1,3 +1,4 @@
+import { useLayoutEffect, useRef, useState, type ComponentProps } from 'react'
 import { DocumentText } from 'reicon-react'
 import { cn } from 'cn'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -41,7 +42,7 @@ export function CellView({ property, row, width, wrap, onToggle }: CellViewProps
     case 'person':
     case 'created_by':
     case 'last_edited_by':
-      return value?.kind === 'people' ? <People ids={value.ids} wrap={wrap} muted={isComputed(property.type)} /> : null
+      return value?.kind === 'people' ? <People ids={value.ids} width={width} wrap={wrap} muted={isComputed(property.type)} /> : null
     case 'checkbox':
       return (
         <span className="flex w-full justify-center">
@@ -72,57 +73,93 @@ function Text({ wrap, muted = false, children }: { wrap: boolean; muted?: boolea
   )
 }
 
-export function OptionPill({ property, id, className }: { property: Property; id: string; className?: string }) {
+export function OptionPill({ property, id, ...props }: { property: Property; id: string } & Omit<ComponentProps<'span'>, 'property' | 'color' | 'id'>) {
   const option = options(property).find((candidate) => candidate.id === id)
   if (!option) return null
   return (
-    <Pill color={option.color} dot={property.type === 'status'} className={className} data-group={(option as StatusOption).group}>
+    <Pill color={option.color} dot={property.type === 'status'} data-group={(option as StatusOption).group} {...props}>
       {option.name}
     </Pill>
   )
 }
 
-/** Rough pill width at 13px: pills that do not fit the column give way to "+N". */
-const CHAR_PX = 7
-const PILL_CHROME_PX = 16
+/** Room the "+N" count keeps at the end of a line that does not show every item. */
+const COUNT_PX = 28
+/** The cell's horizontal padding (`px-2`). */
+const CELL_PADDING_PX = 16
+
+/**
+ * How many items of a one-line cell fit its width, measured from the rendered items (`data-fit-item`, each with its
+ * text as the last child). Items past the count stay rendered but out of the flow (`data-overflow`), so a wider column
+ * can measure them again. `fitKey` names what the items show; only visible rows render cells, so this stays cheap.
+ */
+function useFit(count: number, fitKey: string, width: number, wrap: boolean) {
+  const ref = useRef<HTMLSpanElement>(null)
+  const [shown, setShown] = useState(count)
+  useLayoutEffect(() => {
+    const box = ref.current
+    if (wrap || !box) return setShown(count)
+    const items = [...box.querySelectorAll<HTMLElement>(':scope > [data-fit-item]')]
+    const gap = parseFloat(getComputedStyle(box).columnGap) || 0
+    const room = width - CELL_PADDING_PX
+    let used = 0
+    let fit = 0
+    for (const [index, item] of items.entries()) {
+      // A truncated text (the first item may shrink) still counts at its full width.
+      const text = item.lastElementChild
+      const natural = item.offsetWidth + (text ? text.scrollWidth - text.clientWidth : 0)
+      const reserve = index + 1 < items.length ? COUNT_PX : 0
+      if (fit > 0 && used + natural + reserve > room) break
+      used += natural + gap
+      fit += 1
+    }
+    setShown(fit)
+  }, [count, fitKey, width, wrap])
+  return { ref, shown: wrap ? count : shown }
+}
+
+/** Classes of a fitted item: the first one shrinks (and truncates) when even it does not fit; the rest never do. */
+const fitItem = (index: number) => cn(index === 0 ? 'shrink' : 'shrink-0', 'data-overflow:invisible data-overflow:absolute data-overflow:top-0 data-overflow:left-0')
+
+function FitCount({ hidden }: { hidden: number }) {
+  return hidden > 0 ? <span className="shrink-0 text-xs text-muted-foreground">+{hidden}</span> : null
+}
 
 function OptionPills({ property, ids, width, wrap }: { property: Property; ids: string[]; width: number; wrap: boolean }) {
-  let shown = ids.length
-  if (!wrap) {
-    const room = width - 16
-    let used = 0
-    shown = 0
-    for (const id of ids) {
-      const pill = Math.min(160, options(property).find((option) => option.id === id)?.name.length ?? 0) * CHAR_PX + PILL_CHROME_PX + 4
-      const reserve = shown + 1 < ids.length ? 28 : 0
-      if (shown > 0 && used + pill + reserve > room) break
-      used += pill
-      shown += 1
-    }
-  }
+  const list = options(property)
+  const fitKey = ids.map((id) => list.find((option) => option.id === id)?.name ?? '').join('\n')
+  const { ref, shown } = useFit(ids.length, fitKey, width, wrap)
   return (
-    <span className={cn('flex min-w-0 items-center gap-1', wrap ? 'flex-wrap py-1' : 'overflow-hidden')}>
-      {ids.slice(0, shown).map((id) => (
-        <OptionPill key={id} property={property} id={id} className={shown === 1 ? 'shrink' : undefined} />
+    <span ref={ref} className={cn('flex min-w-0 items-center gap-1', wrap ? 'flex-wrap py-1' : 'overflow-hidden')}>
+      {ids.map((id, index) => (
+        <OptionPill key={id} property={property} id={id} data-fit-item="" data-overflow={index >= shown || undefined} className={fitItem(index)} />
       ))}
-      {shown < ids.length ? <span className="shrink-0 text-xs text-muted-foreground">+{ids.length - shown}</span> : null}
+      <FitCount hidden={ids.length - shown} />
     </span>
   )
 }
 
-function People({ ids, wrap, muted }: { ids: string[]; wrap: boolean; muted: boolean }) {
+function People({ ids, width, wrap, muted }: { ids: string[]; width: number; wrap: boolean; muted: boolean }) {
   const { users } = useDatabaseEnv()
+  const fitKey = ids.map((id) => users.get(id)?.name ?? '').join('\n')
+  const { ref, shown } = useFit(ids.length, fitKey, width, wrap)
   return (
-    <span className={cn('flex min-w-0 items-center gap-2', wrap ? 'flex-wrap py-1' : 'overflow-hidden', muted && 'text-muted-foreground')}>
-      {ids.map((id) => {
+    <span ref={ref} className={cn('flex min-w-0 items-center gap-2', wrap ? 'flex-wrap py-1' : 'overflow-hidden', muted && 'text-muted-foreground')}>
+      {ids.map((id, index) => {
         const user = users.get(id)
         return (
-          <span key={id} className="flex min-w-0 shrink-0 items-center gap-1.5 last:shrink">
+          <span
+            key={id}
+            data-fit-item=""
+            data-overflow={index >= shown || undefined}
+            className={cn('flex min-w-0 items-center gap-1.5', fitItem(index))}
+          >
             <UserAvatar user={user} name={user ? undefined : '?'} size={18} />
             <span className="truncate">{user?.name ?? 'Former member'}</span>
           </span>
         )
       })}
+      <FitCount hidden={ids.length - shown} />
     </span>
   )
 }

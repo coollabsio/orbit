@@ -23,7 +23,9 @@ import type {
   CreateDatabaseViewBody,
   DatabaseDetail,
   DatabaseProperty,
+  DatabasePropertyUpdate,
   DatabaseRow,
+  DatabaseView,
   DatabaseViewConfig,
   UpdateDatabasePropertyBody,
   UpdateDatabaseViewBody,
@@ -240,8 +242,13 @@ export function useCreateProperty(workspaceId: string, databaseId: string) {
       const { data } = await createDatabaseProperty({ client: apiClient, path, body, throwOnError: true })
       return required(data, 'Create property response was empty.')
     },
-    // Known at once, so a view config can place its column; the refetch brings the renumbered positions and views.
-    reconcile: (detail, property) => ({ ...detail, properties: [...detail.properties, property] }),
+    // Known at once, so a view config can place its column (a copy goes right after its source, as on the server); the
+    // refetch brings the renumbered positions and views.
+    reconcile: (detail, property, { duplicate_of: source }) => ({
+      ...detail,
+      properties: [...detail.properties, property],
+      views: source ? detail.views.map((view) => withCopiedColumn(view, source, property.id)) : detail.views,
+    }),
     refetch: true,
     error: 'Could not add the property.',
   })
@@ -267,6 +274,26 @@ export function useUpdateProperty(workspaceId: string, databaseId: string) {
     refetch: true,
     error: 'Could not change the property.',
   })
+}
+
+/** A view with the column of property `copyId` right after the column of `sourceId`, as wide and as hidden. */
+function withCopiedColumn(view: DatabaseView, sourceId: string, copyId: string): DatabaseView {
+  const columns = [...(view.config.columns ?? [])]
+  const at = columns.findIndex((column) => column.property_id === sourceId)
+  if (at === -1) return view
+  columns.splice(at + 1, 0, { ...columns[at], property_id: copyId })
+  return { ...view, config: { ...view.config, columns } }
+}
+
+/** What a property change would do (`converted`, `cleared`): the server runs it without saving it. */
+export async function previewPropertyUpdate(workspaceId: string, databaseId: string, propertyId: string, body: UpdateDatabasePropertyBody) {
+  const { data } = await updateDatabaseProperty({
+    client: apiClient,
+    path: { workspace_id: workspaceId, database_id: databaseId, property_id: propertyId },
+    body: { ...body, dry_run: true },
+    throwOnError: true,
+  })
+  return required<DatabasePropertyUpdate>(data, 'Update property response was empty.')
 }
 
 export function useDeleteProperty(workspaceId: string, databaseId: string) {
