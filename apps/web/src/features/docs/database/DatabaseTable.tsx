@@ -327,7 +327,7 @@ export function DatabaseTable(props: DatabaseTableProps) {
       >
         <div role="rowgroup" className="sticky top-0 z-10 bg-background">
           <div role="row" aria-rowindex={1} className="group/header relative flex h-[33px] border-y border-border">
-            <div className="absolute top-0 right-full flex h-full items-center pr-1.5">
+            <div data-slot="row-gutter" className="absolute top-0 right-full flex h-full items-center pr-1.5">
               {rows.length > 0 ? (
                 <Checkbox
                   aria-label="Select all rows"
@@ -413,7 +413,7 @@ export function DatabaseTable(props: DatabaseTableProps) {
                 }}
                 onDrop={dropRow}
               >
-                <div className="absolute top-0 right-full flex h-[33px] items-center gap-0.5 pr-1.5">
+                <div data-slot="row-gutter" className="absolute top-0 right-full flex h-[33px] items-center gap-0.5 pr-1.5">
                   {canEditValues ? (
                     <Tip label={sorted ? 'Remove sorts to reorder rows' : 'Drag to move'}>
                       <span

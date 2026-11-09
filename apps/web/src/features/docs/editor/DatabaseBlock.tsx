@@ -117,8 +117,11 @@ function DatabaseBlockBody({ host, blockId, databaseId, linkId, onShowOwnViews }
         <>
           <DatabaseTitle databaseId={databaseId} linked={!!linkId} title={database.database.title} icon={database.database.icon} />
           {controls}
-          {/* The row handles and checkboxes sit left of the table, inside this scroller. */}
-          <div className="overflow-x-auto overflow-y-hidden pt-2 pb-1 pl-10">{content}</div>
+          {/* The table starts at the text edge. The row handles and checkboxes (40 px) hang in the page margin, inside this
+              scroller. Below 900 px the page has no margin for them: they hide. */}
+          <div className="-ml-10 overflow-x-auto overflow-y-hidden pt-2 pb-1 pl-10 max-[899px]:ml-0 max-[899px]:pl-0 max-[899px]:[&_[data-slot=row-gutter]]:hidden">
+            {content}
+          </div>
         </>
       )}
     />
