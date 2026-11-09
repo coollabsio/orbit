@@ -8,7 +8,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Tip } from '@/components/common/Tip'
 import { apiValue, cellOf, displayText, numberFromEditText, valueFromText } from '@orbit/database/values'
 import type { CellValue, Database, Property, Row, SelectOption, ViewConfig } from '@orbit/database/types'
-import { useMoveRow, useTrashRows, useUpdateProperty, useUpdateRowTitle, useUpdateValues } from './api'
+import { useMoveRow, useUpdateProperty, useUpdateRowTitle, useUpdateValues } from './api'
 import { CellEditor, type EditEnd } from './cells/CellEditor'
 import { CellView } from './cells/CellView'
 import { AddPropertyButton, ColumnHeaderMenu } from './ColumnHeaderMenu'
@@ -37,6 +37,9 @@ interface DatabaseTableProps {
   onFilter: (propertyId: string) => void
   onAddRow: () => void
   onOpenRow: (rowId: string) => void
+  /** The checked rows: the view's controls show what to do with them. */
+  selected: ReadonlySet<string>
+  onSelect: (selected: ReadonlySet<string>) => void
   /** The view has a filter or a search: an empty result offers to clear them. */
   filtered: boolean
   onClearFilters: () => void
@@ -47,19 +50,17 @@ interface DatabaseTableProps {
 
 /** The table view (spec 7.2–7.4): a virtualized grid with a sticky header, cell editing and keyboard moves. */
 export function DatabaseTable(props: DatabaseTableProps) {
-  const { database, config, rows, scrollElement, virtualize = true, onConfig, onFilter, onAddRow, onOpenRow, filtered, onClearFilters, editRowId, onEditRowShown } = props
+  const { database, config, rows, scrollElement, virtualize = true, onConfig, onFilter, onAddRow, onOpenRow, filtered, onClearFilters, editRowId, onEditRowShown, selected, onSelect } = props
   const { workspaceId, databaseId, ctx, canEditValues, canEditSchema } = useDatabaseEnv()
   const updateValues = useUpdateValues(workspaceId, databaseId)
   const updateTitle = useUpdateRowTitle(workspaceId, databaseId)
   const updateProperty = useUpdateProperty(workspaceId, databaseId)
   const moveRow = useMoveRow(workspaceId, databaseId)
-  const trashRows = useTrashRows(workspaceId, databaseId)
 
   const [active, setActive] = useState<CellKey | null>(null)
   const [editing, setEditing] = useState(false)
   /** The cell a popover editor opens from. */
   const [editAnchor, setEditAnchor] = useState<HTMLElement | null>(null)
-  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
   const [resizing, setResizing] = useState<{ id: string; width: number } | null>(null)
   const [columnDrop, setColumnDrop] = useState<{ id: string; side: 'left' | 'right' } | null>(null)
   const [rowDrop, setRowDrop] = useState<{ id: string; side: 'before' | 'after' } | null>(null)
@@ -79,7 +80,7 @@ export function DatabaseTable(props: DatabaseTableProps) {
   const sorted = config.sorts.length > 0
   const width = columns.reduce((sum, column) => sum + column.width, 0) + ADD_COLUMN_WIDTH
   const rowIndex = new Map(rows.map((row, index) => [row.id, index]))
-  const liveSelected = rows.filter((row) => selected.has(row.id))
+  const selectedCount = rows.filter((row) => selected.has(row.id)).length
 
   // The rows start below the page header, the view toolbar and the table header: the virtualizer needs that offset.
   const [scrollMargin, setScrollMargin] = useState(0)
@@ -274,45 +275,17 @@ export function DatabaseTable(props: DatabaseTableProps) {
     moveRow.mutate({ rowId: source.id, afterRowId: dropAfterRowId(database.rows, source.id, rowDrop.id, rowDrop.side) })
   }
 
-  const toggleSelected = (rowId: string) =>
-    setSelected((current) => {
-      const next = new Set(current)
-      if (!next.delete(rowId)) next.add(rowId)
-      return next
-    })
-  const allSelected = rows.length > 0 && liveSelected.length === rows.length
+  const toggleSelected = (rowId: string) => {
+    const next = new Set(selected)
+    if (!next.delete(rowId)) next.add(rowId)
+    onSelect(next)
+  }
+  const allSelected = rows.length > 0 && selectedCount === rows.length
   const editingRow = active && editing ? rows[rowIndex.get(active.row) ?? -1] : undefined
   const editingProperty = active && editing ? byId.get(active.col) : undefined
 
   return (
     <div className="relative w-max min-w-full pb-2">
-      {liveSelected.length > 0 ? (
-        <div
-          role="toolbar"
-          aria-label="Selected rows"
-          className="absolute bottom-full left-0 z-20 mb-1.5 flex h-8 items-center gap-1 rounded-lg border border-border bg-background px-2 text-sm shadow-sm"
-        >
-          <span className="px-1 text-primary tabular-nums">{liveSelected.length} selected</span>
-          {canEditValues ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              className="text-destructive hover:text-destructive"
-              disabled={trashRows.isPending}
-              onClick={() => {
-                trashRows.trash(liveSelected)
-                setSelected(new Set())
-              }}
-            >
-              Delete
-            </Button>
-          ) : null}
-          <Button type="button" variant="ghost" size="xs" onClick={() => setSelected(new Set())}>
-            Clear
-          </Button>
-        </div>
-      ) : null}
       <div
         ref={gridRef}
         role="grid"
@@ -332,9 +305,9 @@ export function DatabaseTable(props: DatabaseTableProps) {
                 <Checkbox
                   aria-label="Select all rows"
                   checked={allSelected}
-                  indeterminate={liveSelected.length > 0 && !allSelected}
-                  className={cn(liveSelected.length === 0 && 'hover-fine:opacity-0 hover-fine:group-hover/header:opacity-100')}
-                  onCheckedChange={() => setSelected(allSelected ? new Set() : new Set(rows.map((row) => row.id)))}
+                  indeterminate={selectedCount > 0 && !allSelected}
+                  className={cn(selectedCount === 0 && 'hover-fine:opacity-0 hover-fine:group-hover/header:opacity-100')}
+                  onCheckedChange={() => onSelect(allSelected ? new Set() : new Set(rows.map((row) => row.id)))}
                 />
               ) : null}
             </div>
@@ -440,7 +413,7 @@ export function DatabaseTable(props: DatabaseTableProps) {
                   <Checkbox
                     aria-label={`Select ${row.title || 'Untitled'}`}
                     checked={selected.has(row.id)}
-                    className={cn(liveSelected.length === 0 && 'hover-fine:opacity-0 hover-fine:group-hover/row:opacity-100')}
+                    className={cn(selectedCount === 0 && 'hover-fine:opacity-0 hover-fine:group-hover/row:opacity-100')}
                     onCheckedChange={() => toggleSelected(row.id)}
                   />
                 </div>

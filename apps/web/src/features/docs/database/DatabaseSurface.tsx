@@ -6,7 +6,7 @@ import { applyView, repairConfig } from '@orbit/database/view'
 import { newRule } from '@orbit/database/meta'
 import { newRowValues } from '@orbit/database/newRow'
 import type { Database, DatabaseView, Property, ViewConfig } from '@orbit/database/types'
-import { useCreateRow, useUpdateView } from './api'
+import { useCreateRow, useTrashRows, useUpdateView } from './api'
 import { DatabaseEnvContext, type DatabaseEnv } from './context'
 import { DatabaseBoard, type NewCard } from './DatabaseBoard'
 import { DatabaseTable } from './DatabaseTable'
@@ -60,13 +60,16 @@ function readStoredView(key: string): string | null {
  * rows added since the view last changed and the row peek (`?row=`).
  */
 export function DatabaseSurface({ database, views: unsorted, env, locked, viewKey, page, block, layout }: DatabaseSurfaceProps) {
-  const { ctx, canEditViews, workspaceId, databaseId, linkId } = env
+  const { ctx, canEditViews, canEditValues, workspaceId, databaseId, linkId } = env
   const updateView = useUpdateView(workspaceId, databaseId, linkId)
   const createRow = useCreateRow(workspaceId, databaseId)
+  const trashRows = useTrashRows(workspaceId, databaseId)
   const [searchParams, setSearchParams] = useSearchParams()
   const [drafts, setDrafts] = useState<Readonly<Record<string, ViewConfig>>>({})
   const [search, setSearch] = useState('')
   const [pins, setPins] = useState<Pin[]>([])
+  /** The table's checked rows. */
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
   const [openRule, setOpenRule] = useState<number | null>(null)
   const [editRowId, setEditRowId] = useState<string | null>(null)
   /** A row created from "New": the peek focuses its title. */
@@ -129,6 +132,7 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
   // A block's table shows its first rows; a board limits each column itself.
   const rows = withPinnedRows(board ? shown : shown.slice(0, rowLimit), pins, database.rows)
   const hiddenRows = board ? 0 : Math.max(0, shown.length - rowLimit)
+  const selectedRows = board ? [] : rows.filter((row) => selected.has(row.id))
 
   const selectView = (viewId: string) => {
     try {
@@ -149,6 +153,7 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
     }
     setPins([])
     setOpenRule(null)
+    setSelected(new Set())
   }
   const changeConfig = (next: ViewConfig) => {
     setDrafts((current) => ({ ...current, [view.id]: next }))
@@ -194,18 +199,43 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
       <div className="@container/controls flex items-center gap-2 border-b border-border pb-1">
         <ViewTabs views={views} activeId={view.id} onSelect={selectView} />
         <span className="flex-1" />
-        <ViewToolbar
-          properties={database.properties}
-          config={config}
-          onConfig={changeConfig}
-          onAddFilter={addFilter}
-          search={search}
-          onSearch={setSearch}
-          locked={locked}
-          viewId={view.id}
-          viewType={view.type}
-          onNew={() => addRow('top', undefined, 'peek')}
-        />
+        {/* Checked rows replace the toolbar: a bar above the table would be clipped by a block's scroller. */}
+        {selectedRows.length > 0 ? (
+          <div role="toolbar" aria-label="Selected rows" className="flex h-7 shrink-0 items-center gap-1 text-sm">
+            <span className="px-1 text-primary tabular-nums">{selectedRows.length} selected</span>
+            {canEditValues ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-destructive hover:text-destructive"
+                disabled={trashRows.isPending}
+                onClick={() => {
+                  trashRows.trash(selectedRows)
+                  setSelected(new Set())
+                }}
+              >
+                Delete
+              </Button>
+            ) : null}
+            <Button type="button" variant="ghost" size="sm" onClick={() => setSelected(new Set())}>
+              Clear
+            </Button>
+          </div>
+        ) : (
+          <ViewToolbar
+            properties={database.properties}
+            config={config}
+            onConfig={changeConfig}
+            onAddFilter={addFilter}
+            search={search}
+            onSearch={setSearch}
+            locked={locked}
+            viewId={view.id}
+            viewType={view.type}
+            onNew={() => addRow('top', undefined, 'peek')}
+          />
+        )}
       </div>
       {draft && !canEditViews ? (
         <div role="status" className="flex items-center gap-1.5 py-1.5 text-xs text-muted-foreground">
@@ -254,6 +284,8 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
         onClearFilters={clearFilters}
         editRowId={editRowId}
         onEditRowShown={() => setEditRowId(null)}
+        selected={selected}
+        onSelect={setSelected}
       />
       {block && hiddenRows > 0 ? (
         <Button type="button" variant="ghost" size="sm" className="mt-1 text-muted-foreground" onClick={() => setRowLimit((limit) => limit + block.rowLimit)}>
