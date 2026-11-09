@@ -1,5 +1,8 @@
 import type { ComponentProps } from 'react'
+import { Add, DocumentText, Grid } from 'reicon-react'
+import type { PageKind } from '@orbit/api/generated/types.gen'
 import { Button } from '@/components/ui/button'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Tip } from '@/components/common/Tip'
 import { cn } from 'cn'
 
@@ -44,5 +47,26 @@ export function TreeIconButton({ className, tip, ...props }: ComponentProps<type
         {...props}
       />
     </Tip>
+  )
+}
+
+/** The "+" of a docs tree row or section header: a menu to create a page or a database there. */
+export function TreeCreateMenu({ tip, label, onCreate }: { tip: string; label: string; onCreate: (kind: PageKind) => void }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger render={<TreeIconButton tip={tip} aria-label={label} />}>
+        <Add className="size-[13px]" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-auto min-w-36">
+        <DropdownMenuItem onClick={() => onCreate('page')}>
+          <DocumentText className="size-[14px]" />
+          New page
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onCreate('database')}>
+          <Grid className="size-[14px]" />
+          New database
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }

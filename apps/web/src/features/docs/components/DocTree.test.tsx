@@ -154,17 +154,29 @@ test('renaming inline patches the teamspace name', async () => {
   expect(await view.findByText('Product design')).toBeTruthy()
 })
 
-test('"+" on a section creates a root page in that space', async () => {
+test('"+" on a section creates a root page or database in that space', async () => {
   const { view, calls } = setup({
     handler: (call) => (call.method === 'POST' && call.path === '/pages' ? Response.json(fullPage(page('fresh', null, 1, null)), { status: 201 }) : undefined),
   })
   const posts = () => calls.filter((call) => call.method === 'POST')
   fireEvent.click(await view.findByRole('button', { name: 'Add private page' }))
+  await userEvent.click(await view.findByRole('menuitem', { name: 'New page' }))
   await waitFor(() => expect(posts()).toHaveLength(1))
   expect(posts()[0].body).toEqual({ private: true })
   fireEvent.click(view.getByRole('button', { name: 'Add page to Design' }))
+  await userEvent.click(await view.findByRole('menuitem', { name: 'New database' }))
   await waitFor(() => expect(posts()).toHaveLength(2))
-  expect(posts()[1].body).toEqual({ teamspace_id: 't2' })
+  expect(posts()[1].body).toEqual({ teamspace_id: 't2', kind: 'database' })
+})
+
+test('a database row has no "Add child page" and no expand arrow', async () => {
+  const database = { ...page('db', null, 1, 't1', 'Reading list'), kind: 'database' as const }
+  const { view } = setup({ pages: [...tree, database, page('stray', 'db', 0, 't1', 'Stray')] })
+  await view.findByRole('group', { name: 'General' })
+  const item = pageRow(view, 'db')
+  expect(within(item).queryByRole('button', { name: 'Add child page' })).toBeNull()
+  expect(within(item).queryByRole('button', { name: 'Expand' })).toBeNull()
+  expect(within(pageRow(view, 'roadmap')).getByRole('button', { name: 'Add child page' })).toBeTruthy()
 })
 
 test('creating a teamspace from the dialog posts its name', async () => {

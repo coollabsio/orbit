@@ -69,9 +69,9 @@ export function reconcilePage(queryClient: QueryClient, workspaceId: string, pag
   queryClient.setQueryData(queryKeys.pages.tree(workspaceId), (tree: PageSummary[] | undefined) => {
     if (!tree) return tree
     const summary = toSummary(page)
-    return tree.some((item) => item.id === page.id)
-      ? tree.map((item) => (item.id === page.id ? summary : item))
-      : [...tree, summary]
+    if (tree.some((item) => item.id === page.id)) return tree.map((item) => (item.id === page.id ? summary : item))
+    // A database row is not in the tree: it lists in its database.
+    return page.database_id ? tree : [...tree, summary]
   })
 }
 
