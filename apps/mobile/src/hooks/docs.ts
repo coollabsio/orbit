@@ -1,5 +1,5 @@
 /** The Docs writes, favorites, trash and comments, over `data/docs-api.ts`. The tree lists are in `src/queries.ts`. */
-import type { DatabaseDetail, PageKind } from '@orbit/api/generated/types.gen'
+import type { DatabaseDetail, PageFavorite, PageKind } from '@orbit/api/generated/types.gen'
 import { type QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import type { UploadFile } from '../data/account-api'
@@ -87,21 +87,34 @@ export function useFavorites() {
   return useQuery({ queryKey: docs.docsKeys.favorites(workspaceId), queryFn: () => docs.favorites(client, workspaceId) })
 }
 
-/** Adds (appended last) or removes a favorite; the star moves at once and goes back on an error. */
+/** True when `pageId` is one of `favorites`. */
+export const isFavorite = (favorites: readonly PageFavorite[] | undefined, pageId: string) => favorites?.some((favorite) => favorite.page_id === pageId) ?? false
+
+/** Adds (appended last, shown with `page` at once) or removes a favorite; the star moves at once and goes back on an error. */
 export function useToggleFavorite() {
   const { client, workspaceId } = useOrbit()
   const queryClient = useQueryClient()
   const key = docs.docsKeys.favorites(workspaceId)
   return useMutation({
-    mutationFn: ({ pageId, favorite }: { pageId: string; favorite: boolean }) => docs.setFavorite(client, workspaceId, pageId, favorite),
-    onMutate: async ({ pageId, favorite }) => {
+    mutationFn: ({ pageId, favorite }: { pageId: string; favorite: boolean; page?: Pick<PageSummary, 'title' | 'icon' | 'kind'> }) =>
+      docs.setFavorite(client, workspaceId, pageId, favorite),
+    onMutate: async ({ pageId, favorite, page }) => {
       await queryClient.cancelQueries({ queryKey: key })
-      const ids = queryClient.getQueryData<string[]>(key)
-      const without = (ids ?? []).filter((id) => id !== pageId)
-      queryClient.setQueryData<string[]>(key, favorite ? [...without, pageId] : without)
-      return { ids }
+      const favorites = queryClient.getQueryData<PageFavorite[]>(key)
+      const without = (favorites ?? []).filter((item) => item.page_id !== pageId)
+      const added: PageFavorite = {
+        page_id: pageId,
+        position: without.length,
+        title: page?.title ?? '',
+        icon: page?.icon ?? null,
+        kind: page?.kind ?? 'page',
+        database_id: null,
+        database_title: null,
+      }
+      queryClient.setQueryData<PageFavorite[]>(key, favorite ? [...without, added] : without)
+      return { favorites }
     },
-    onError: (_error, _input, context) => queryClient.setQueryData(key, context?.ids),
+    onError: (_error, _input, context) => queryClient.setQueryData(key, context?.favorites),
     onSettled: () => void queryClient.invalidateQueries({ queryKey: key }),
   })
 }

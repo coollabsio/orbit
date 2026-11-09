@@ -24,7 +24,7 @@ import {
   updateTeamspace,
   uploadPageFile,
 } from '@orbit/api/generated/sdk.gen'
-import type { CreatePageBody, PageThread, PageUpdateBody, TrashedPage } from '@orbit/api/generated/types.gen'
+import type { CreatePageBody, PageFavorite, PageThread, PageUpdateBody, TrashedPage } from '@orbit/api/generated/types.gen'
 import type { TicketResult } from '@orbit/editor/collab/ticketSocket'
 
 import { multipart, type UploadFile } from './account-api'
@@ -106,10 +106,10 @@ export async function fileDataUrl(server: string, token: string, url: string): P
   }
 }
 
-/** The favorite page ids, in the user's order. */
-export async function favorites(client: OrbitClient, workspaceId: string): Promise<string[]> {
+/** The favorites with what the list shows of each page, in the user's order. */
+export async function favorites(client: OrbitClient, workspaceId: string): Promise<PageFavorite[]> {
   const { data } = await listPageFavorites({ client, path: { workspace_id: workspaceId }, throwOnError: true })
-  return [...data.items].sort((a, b) => a.position - b.position).map((item) => item.page_id)
+  return [...data.items].sort((a, b) => a.position - b.position)
 }
 
 export async function setFavorite(client: OrbitClient, workspaceId: string, pageId: string, favorite: boolean): Promise<void> {

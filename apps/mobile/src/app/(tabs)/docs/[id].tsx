@@ -19,7 +19,7 @@ import { keys } from '../../../data/keys'
 import * as api from '../../../data/orbit'
 import { BLOCK_KINDS, type BlockKind, type EditorCommand, type FormatState, IDLE_FORMAT, PROBLEM_RESPONSES, type ProblemResponse, whileMounted } from '../../../data/page-editor'
 import { pickImage } from '../../../hooks/account'
-import { useFavorites, usePageThreads, usePageTrash, useSavePage, useToggleFavorite, useTrashPage, useUploadPageImage } from '../../../hooks/docs'
+import { isFavorite, useFavorites, usePageThreads, usePageTrash, useSavePage, useToggleFavorite, useTrashPage, useUploadPageImage } from '../../../hooks/docs'
 import { useOrbit } from '../../../orbit-context'
 import { useMembers, usePages } from '../../../queries'
 import { errorMessage } from '../../../session-context'
@@ -53,7 +53,7 @@ export default function DocScreen() {
   const [commentsOpen, setCommentsOpen] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
   const muted = alpha(colors.mutedForeground, 0.7)
-  const favorite = (favorites.data ?? []).includes(id)
+  const favorite = isFavorite(favorites.data, id)
   const openThreads = visibleThreads(threads.data ?? []).filter((thread) => !thread.resolved).length
   const locked = Boolean(page.data?.locked_at)
   const failed = (what: string) => (error: unknown) => setNotice(`${what} ${errorMessage(error)}`)
@@ -152,7 +152,7 @@ export default function DocScreen() {
   const pageMenu = (): SheetAction[] =>
     page.data
       ? [
-          { label: favorite ? 'Remove from favorites' : 'Add to favorites', icon: 'star', onPress: () => toggleFavorite.mutate({ pageId: id, favorite: !favorite }) },
+          { label: favorite ? 'Remove from favorites' : 'Add to favorites', icon: 'star', onPress: () => toggleFavorite.mutate({ pageId: id, favorite: !favorite, page: page.data }) },
           { label: page.data.icon ? 'Change icon' : 'Add icon', icon: 'emojiHappy', disabled: locked, onPress: () => setChoosingIcon(true) },
           { label: page.data.cover_url ? 'Change cover' : 'Add cover', icon: 'sticker', disabled: locked, onPress: () => setMenu(coverActions()) },
           {
@@ -238,7 +238,7 @@ export default function DocScreen() {
             </View>
           ) : null}
         </View>
-        <IconButton icon="star" label={favorite ? 'Remove from favorites' : 'Add to favorites'} color={favorite ? colors.primary : muted} onPress={() => toggleFavorite.mutate({ pageId: id, favorite: !favorite })} />
+        <IconButton icon="star" label={favorite ? 'Remove from favorites' : 'Add to favorites'} color={favorite ? colors.primary : muted} onPress={() => toggleFavorite.mutate({ pageId: id, favorite: !favorite, page: page.data })} />
         <IconButton icon="more" label="Page options" color={muted} onPress={() => setMenu(pageMenu())} />
       </PaneHeader>
       {problem?.notice ? (

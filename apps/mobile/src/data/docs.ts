@@ -2,7 +2,7 @@
  * Docs as the web's sidebar tree (`features/docs/pageTree.ts`), a page's BlockNote blocks as readable lines, and the
  * plain paragraphs the app can add to a page. No React.
  */
-import type { CreatePageBody } from '@orbit/api/generated/types.gen'
+import type { CreatePageBody, PageFavorite, PageKind } from '@orbit/api/generated/types.gen'
 
 import type { PageSummary, Teamspace } from './orbit'
 
@@ -74,9 +74,27 @@ export function trashPrompt(pages: readonly PageSummary[], page: PageSummary): {
   }
 }
 
-/** The favorite pages that still exist, in the favorites' order. */
-export function favoritePages(pages: readonly PageSummary[], ids: readonly string[]): PageSummary[] {
-  return ids.flatMap((id) => pages.find((page) => page.id === id) ?? [])
+export interface FavoriteRow {
+  id: string
+  title: string
+  icon: string | null
+  kind: PageKind
+  /** The database of a favorite row. */
+  hint: string | null
+  /** The tree summary; `null` for a page outside the tree (a database row or one of its sub-pages). */
+  page: PageSummary | null
+}
+
+/**
+ * The favorites in their order, from the server's entries: rows of databases are not in the tree. A tree page shows
+ * its tree summary, which a save updates at once.
+ */
+export function favoritePages(pages: readonly PageSummary[], favorites: readonly PageFavorite[]): FavoriteRow[] {
+  return favorites.map((favorite) => {
+    const page = pages.find((item) => item.id === favorite.page_id) ?? null
+    const shown = page ?? favorite
+    return { id: favorite.page_id, title: shown.title, icon: shown.icon, kind: shown.kind, hint: favorite.database_title, page }
+  })
 }
 
 /** The web's cover URL rule: an http(s) URL up to 2048 characters. */

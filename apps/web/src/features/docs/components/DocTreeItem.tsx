@@ -23,11 +23,14 @@ export interface DocTreeDnd {
 /** The row menu's "Add to / Remove from favorites" item. */
 export interface DocTreeFavorites {
   isFavorite: (id: string) => boolean
-  onToggle: (id: string, favorite: boolean) => void
+  onToggle: (page: DocTreeItemPage, favorite: boolean) => void
 }
 
+/** What a row shows of its page: a favorite outside the tree (a database row) has no tree summary. */
+export type DocTreeItemPage = Pick<PageSummary, 'id' | 'kind' | 'title' | 'icon'>
+
 interface DocTreeItemProps {
-  page: PageSummary
+  page: DocTreeItemPage
   pages: PageSummary[]
   depth: number
   activeId: string | null
@@ -42,6 +45,8 @@ interface DocTreeItemProps {
   reorderOnly?: boolean
   /** Marks the rows of a sidebar section (`data-section`), e.g. "favorites". */
   section?: string
+  /** Muted text after the title (the database of a favorite row). */
+  hint?: string | null
 }
 
 /** Pointer position → drop zone: edges reorder among siblings, the middle nests inside. */
@@ -68,6 +73,7 @@ export function DocTreeItem({
   favorites,
   reorderOnly = false,
   section,
+  hint,
 }: DocTreeItemProps) {
   const isDatabase = page.kind === 'database'
   // A database's rows list in the database, not in the tree.
@@ -144,7 +150,10 @@ export function DocTreeItem({
         <span className="inline-flex w-[18px] shrink-0 items-center justify-center text-sm leading-none text-muted-foreground/70">
           {page.icon ? <Emoji value={page.icon} /> : isDatabase ? <Grid className="size-[15px]" /> : <FileText className="size-[15px]" />}
         </span>
-        <span className="min-w-0 flex-1 truncate">{pageTitle(page)}</span>
+        <span className="min-w-0 flex-1 truncate">
+          {pageTitle(page)}
+          {hint ? <span className="ml-1.5 font-normal text-muted-foreground/70">{hint}</span> : null}
+        </span>
         <TreeRowActions>
           <DropdownMenu>
             <DropdownMenuTrigger render={<TreeIconButton tip="Page options" aria-label="Page options" />}>
@@ -152,7 +161,7 @@ export function DocTreeItem({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-auto min-w-36">
               {favorites ? (
-                <DropdownMenuItem onClick={() => favorites.onToggle(page.id, !favorite)}>
+                <DropdownMenuItem onClick={() => favorites.onToggle(page, !favorite)}>
                   <Star className="size-[14px]" weight={favorite ? 'Filled' : 'Outline'} />
                   {favorite ? 'Remove from favorites' : 'Add to favorites'}
                 </DropdownMenuItem>

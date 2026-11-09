@@ -336,13 +336,24 @@ pub struct PageSearch {
     pub items: Vec<PageSearchResult>,
 }
 
-/// One of the caller's favorite pages. `position` is the index among the caller's visible
+/// One of the caller's favorite pages, with what the favorites list shows: rows of databases (and
+/// their sub-pages) are not in the page tree. `position` is the index among the caller's visible
 /// favorites.
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct PageFavorite {
     #[schema(value_type = String)]
     pub page_id: Id,
     pub position: i64,
+    pub title: String,
+    #[schema(required = true)]
+    pub icon: Option<String>,
+    pub kind: PageKind,
+    /// For a row of a database: that database.
+    #[schema(value_type = Option<String>, required = true)]
+    pub database_id: Option<Id>,
+    /// For a row of a database: the database's title.
+    #[schema(required = true)]
+    pub database_title: Option<String>,
 }
 
 /// The caller's favorites in this workspace, ordered by position.
@@ -2002,8 +2013,8 @@ impl PageRepository {
     ) -> Result<PageFavoriteList, PageError> {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
         let mut connection = self.database.pool().acquire().await?;
-        let ids = visible_favorite_ids(&mut connection, workspace_id, actor_id).await?;
-        Ok(favorite_list(ids))
+        let items = visible_favorites(&mut connection, workspace_id, actor_id).await?;
+        Ok(PageFavoriteList { items })
     }
 
     /// Adds the page as the caller's last favorite; an existing favorite is left in place.
@@ -2033,16 +2044,12 @@ impl PageRepository {
             order.push(page_id);
             renumber_favorites(&mut tx, actor_id, &order).await?;
         }
-        let visible = visible_favorite_ids(&mut tx, workspace_id, actor_id).await?;
+        let visible = visible_favorites(&mut tx, workspace_id, actor_id).await?;
         tx.commit().await?;
-        let position = visible
-            .iter()
-            .position(|id| *id == page_id)
-            .ok_or(PageError::NotFound)?;
-        Ok(PageFavorite {
-            page_id,
-            position: position as i64,
-        })
+        visible
+            .into_iter()
+            .find(|favorite| favorite.page_id == page_id)
+            .ok_or(PageError::NotFound)
     }
 
     /// Removes the page from the caller's favorites; removing a non-favorite is a no-op.
@@ -2089,9 +2096,10 @@ impl PageRepository {
             return Err(PageError::NotFound);
         };
         order.remove(current);
-        let visible = visible_favorite_ids(&mut tx, workspace_id, actor_id)
+        let visible = visible_favorites(&mut tx, workspace_id, actor_id)
             .await?
             .into_iter()
+            .map(|favorite| favorite.page_id)
             .filter(|id| *id != page_id)
             .collect::<Vec<_>>();
         let index = insert_index(Some(position), visible.len());
@@ -2107,9 +2115,9 @@ impl PageRepository {
         };
         order.insert(at, page_id);
         renumber_favorites(&mut tx, actor_id, &order).await?;
-        let ids = visible_favorite_ids(&mut tx, workspace_id, actor_id).await?;
+        let items = visible_favorites(&mut tx, workspace_id, actor_id).await?;
         tx.commit().await?;
-        Ok(favorite_list(ids))
+        Ok(PageFavoriteList { items })
     }
 }
 
@@ -2264,19 +2272,6 @@ impl PageRepository {
     }
 }
 
-fn favorite_list(ids: Vec<Id>) -> PageFavoriteList {
-    PageFavoriteList {
-        items: ids
-            .into_iter()
-            .enumerate()
-            .map(|(position, page_id)| PageFavorite {
-                page_id,
-                position: position as i64,
-            })
-            .collect(),
-    }
-}
-
 /// Every favorite of the caller in the workspace (hidden ones too), in order.
 async fn favorite_order(
     tx: &mut Transaction<'_, Any>,
@@ -2297,14 +2292,16 @@ async fn favorite_order(
 }
 
 /// The caller's favorites of live pages they can see, in order.
-async fn visible_favorite_ids(
+async fn visible_favorites(
     connection: &mut sqlx::AnyConnection,
     workspace_id: Id,
     actor_id: Id,
-) -> Result<Vec<Id>, PageError> {
-    sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
-        "SELECT page_favorites.page_id FROM page_favorites \
-         JOIN pages ON pages.id = page_favorites.page_id \
+) -> Result<Vec<PageFavorite>, PageError> {
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "SELECT page_favorites.page_id AS page_id, pages.title AS title, pages.icon AS icon, \
+         pages.kind AS kind, parent.id AS database_id, parent.title AS database_title \
+         FROM page_favorites JOIN pages ON pages.id = page_favorites.page_id \
+         LEFT JOIN pages AS parent ON parent.id = pages.parent_id AND parent.kind = 'database' \
          WHERE page_favorites.workspace_id = $1 AND page_favorites.user_id = $2 \
          AND pages.workspace_id = page_favorites.workspace_id AND pages.deleted_at IS NULL \
          AND {visible} ORDER BY page_favorites.position, page_favorites.page_id",
@@ -2314,10 +2311,21 @@ async fn visible_favorite_ids(
     .bind(actor_id.to_string())
     .bind(actor_id.to_string())
     .fetch_all(connection)
-    .await?
-    .into_iter()
-    .map(parse_id)
-    .collect()
+    .await?;
+    rows.into_iter()
+        .enumerate()
+        .map(|(position, row)| {
+            Ok(PageFavorite {
+                page_id: parse_id(row.get("page_id"))?,
+                position: position as i64,
+                title: row.get("title"),
+                icon: row.get("icon"),
+                kind: PageKind::parse(row.get("kind"))?,
+                database_id: parse_optional_id(row.get("database_id"))?,
+                database_title: row.get("database_title"),
+            })
+        })
+        .collect()
 }
 
 async fn renumber_favorites(

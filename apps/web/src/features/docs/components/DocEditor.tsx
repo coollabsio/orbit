@@ -43,7 +43,7 @@ import {
   uploadPageFileRequest,
   useCreatePage,
 } from '@/features/docs/api/pages'
-import { usePageFavorites, useToggleFavorite } from '@/features/docs/api/favorites'
+import { isFavorite, usePageFavorites, useToggleFavorite } from '@/features/docs/api/favorites'
 import { usePageVisit, useSetPageLock } from '@/features/docs/api/pageOptions'
 import { useLastEdited } from '@/features/docs/lastEdited'
 import { useRestorePageVersion } from '@/features/docs/api/pageVersions'
@@ -643,10 +643,10 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
   const displayTitle = title.trim() ? title : 'Untitled'
   const editedBy = lastEdited.edit.userId === selfId ? 'you' : lastEdited.edit.name.trim() || 'someone'
   const editedAt = new Date(lastEdited.edit.at).toISOString()
-  const favorite = favoritesQuery.data?.includes(pageId) ?? false
+  const favorite = isFavorite(favoritesQuery.data, pageId)
   const setFavorite = (next: boolean) =>
     toggleFavorite.mutate(
-      { pageId, favorite: next },
+      { pageId, favorite: next, page: { title, icon, kind: page.kind, database_id: page.database_id } },
       { onError: () => toast.error(next ? 'Could not add the page to favorites.' : 'Could not remove the page from favorites.') },
     )
   const favoriteLabel = favorite ? 'Remove from favorites' : 'Add to favorites'

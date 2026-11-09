@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ComponentProps } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { isPaymentRequired } from '@orbit/api/problem'
 import { databaseErrorMessage } from '@orbit/database/errors'
 import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router'
@@ -18,6 +19,7 @@ import {
   useCreatePage,
   useDuplicatePage,
   useMovePage,
+  pageQueryOptions,
   usePage,
   usePageTree,
   useTrashPage,
@@ -47,6 +49,7 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
   const { pageId, importId } = useParams()
   const navigate = useNavigate()
   const location = useLocation()
+  const queryClient = useQueryClient()
   const { workspace } = useWorkspace()
   const canDeleteTeamspaces = useCan('teamspaces.delete')
   const tree = usePageTree(workspace.id)
@@ -76,8 +79,10 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
     preloadPageEditor()
   }, [])
   const markGone = (id: string) => setGone({ id, key: locationKeyRef.current })
-  /** A tree page, or the open page when it is not in the tree (a database row). */
-  const findTarget = (id: string) => pages.find((item) => item.id === id) ?? (page.data?.id === id ? page.data : undefined)
+  /** A tree page, the open page, or (a favorite outside the tree, e.g. a database row) the page read from the server. */
+  const findTarget = async (id: string) =>
+    pages.find((item) => item.id === id) ??
+    (page.data?.id === id ? page.data : await queryClient.fetchQuery(pageQueryOptions(workspace.id, id)).catch(() => undefined))
 
   const createFirstPage = () => {
     createPage.mutate(
@@ -93,7 +98,7 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
 
   /** Confirm, save the open editor if it is affected, trash the subtree, then leave it if it was open. */
   const requestTrash = async (targetId: string) => {
-    const target = findTarget(targetId)
+    const target = await findTarget(targetId)
     if (!target) return
     const descendants = descendantsOf(pages, targetId)
     const confirmed = await confirmAction({
@@ -160,7 +165,7 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
 
   /** Save the open editor if the copy includes it, duplicate, then open the copy. */
   const requestDuplicate = async (targetId: string, includeChildren: boolean) => {
-    const target = findTarget(targetId)
+    const target = await findTarget(targetId)
     if (!target) return
     const copied = new Set([targetId, ...(includeChildren ? descendantsOf(pages, targetId).map((item) => item.id) : [])])
     if (activeIdRef.current && copied.has(activeIdRef.current) && editorControl.current) await editorControl.current.flush()

@@ -1237,6 +1237,89 @@ async fn the_lock_freezes_properties_and_views_but_not_rows_or_values() {
 }
 
 #[tokio::test]
+async fn favorites_carry_what_the_sidebar_shows_for_rows_and_their_sub_pages() {
+    let fixture = Fixture::new().await;
+    let db = fixture.create_database("Research").await;
+    let row = fixture
+        .add_row(&db, json!({"title": "Paper A", "icon": "📄"}))
+        .await;
+    let row = id_of(&row).to_owned();
+    let sub = fixture
+        .create_page(json!({"parent_id": row, "title": "Notes"}))
+        .await;
+    let sub = id_of(&sub).to_owned();
+    let page = fixture.create_page(json!({"title": "Plan"})).await;
+    let page = id_of(&page).to_owned();
+    for id in [&row, &sub, &page, &db] {
+        fixture
+            .ok("PUT", &format!("pages/{id}/favorite"), None)
+            .await;
+    }
+    let favorite = |id: &str,
+                    position: i64,
+                    title: &str,
+                    icon: Value,
+                    kind: &str,
+                    database: Value,
+                    database_title: Value| {
+        json!({"page_id": id, "position": position, "title": title, "icon": icon, "kind": kind,
+               "database_id": database, "database_title": database_title})
+    };
+    assert_eq!(
+        fixture.ok("GET", "pages/favorites", None).await,
+        json!({"items": [
+            favorite(&row, 0, "Paper A", json!("📄"), "page", json!(db), json!("Research")),
+            favorite(&sub, 1, "Notes", Value::Null, "page", Value::Null, Value::Null),
+            favorite(&page, 2, "Plan", Value::Null, "page", Value::Null, Value::Null),
+            favorite(&db, 3, "Research", Value::Null, "database", Value::Null, Value::Null),
+        ]})
+    );
+    // Adding returns the same entry.
+    assert_eq!(
+        fixture
+            .ok("PUT", &format!("pages/{row}/favorite"), None)
+            .await,
+        favorite(
+            &row,
+            0,
+            "Paper A",
+            json!("📄"),
+            "page",
+            json!(db),
+            json!("Research")
+        )
+    );
+
+    // The favorites of a trashed row (and of its sub-pages) stay hidden; reordering skips them.
+    fixture.trash_page(&row).await;
+    let ids = |list: Value| {
+        list["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["page_id"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        ids(fixture.ok("GET", "pages/favorites", None).await),
+        [page.clone(), db.clone()]
+    );
+    let moved = fixture
+        .ok(
+            "POST",
+            &format!("pages/favorites/{db}/move"),
+            Some(json!({"position": 0})),
+        )
+        .await;
+    assert_eq!(ids(moved), [db.clone(), page.clone()]);
+    fixture.restore_page(&row).await;
+    assert_eq!(
+        ids(fixture.ok("GET", "pages/favorites", None).await),
+        [row, sub, db, page]
+    );
+}
+
+#[tokio::test]
 async fn rows_stay_out_of_the_tree_and_out_of_page_moves() {
     let fixture = Fixture::new().await;
     let db = fixture.create_database("Inbox").await;

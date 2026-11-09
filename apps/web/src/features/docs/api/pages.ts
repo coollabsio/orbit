@@ -15,7 +15,7 @@ import {
   updatePage,
   uploadPageFile,
 } from '@orbit/api/generated/sdk.gen'
-import type { CreatePageBody, Page, PageFile, PageSummary, PageTrashEmptied, PageUpdateBody, TrashedPage } from '@orbit/api/generated/types.gen'
+import type { CreatePageBody, Page, PageFavorite, PageFile, PageSummary, PageTrashEmptied, PageUpdateBody, TrashedPage } from '@orbit/api/generated/types.gen'
 import { ApiProblem } from '@orbit/api/problem'
 import { queryKeys } from '@/api/queryKeys'
 import { shrinkUpload } from '@/lib/shrinkUpload'
@@ -134,15 +134,15 @@ export function usePageTree(workspaceId: string, enabled = true) {
   return useQuery({ ...pageTreeQueryOptions(workspaceId), enabled })
 }
 
+export function pageQueryOptions(workspaceId: string, pageId: string) {
+  return {
+    queryKey: queryKeys.pages.detail(workspaceId, pageId),
+    queryFn: () => fetchPage(apiClient, workspaceId, pageId),
+  }
+}
+
 export function usePage(workspaceId: string, pageId: string | undefined) {
-  return useQuery({
-    queryKey: queryKeys.pages.detail(workspaceId, pageId ?? ''),
-    enabled: Boolean(pageId),
-    queryFn: async () => {
-      const { data } = await getPage({ client: apiClient, path: { workspace_id: workspaceId, page_id: pageId! }, throwOnError: true })
-      return required(data, 'Page response was empty.')
-    },
-  })
+  return useQuery({ ...pageQueryOptions(workspaceId, pageId ?? ''), enabled: Boolean(pageId) })
 }
 
 export function usePageTrash(workspaceId: string) {
@@ -248,7 +248,8 @@ export function useMovePage(workspaceId: string) {
 export function useTrashPage(workspaceId: string) {
   const queryClient = useQueryClient()
   const treeKey = queryKeys.pages.tree(workspaceId)
-  return useMutation<void, Error, { pageId: string; version: number }, TreeSnapshot & { subtree: string[] }>({
+  const favoritesKey = queryKeys.pages.favorites(workspaceId)
+  return useMutation<void, Error, { pageId: string; version: number }, TreeSnapshot & { subtree: string[]; favorites: PageFavorite[] | undefined }>({
     mutationFn: async ({ pageId, version }) => {
       await deletePage({
         client: apiClient,
@@ -262,10 +263,15 @@ export function useTrashPage(workspaceId: string) {
       const tree = queryClient.getQueryData<PageSummary[]>(treeKey)
       const subtree = [pageId, ...descendantsOf(tree ?? [], pageId).map((page) => page.id)]
       if (tree) queryClient.setQueryData(treeKey, removeSubtree(tree, pageId))
-      return { tree, subtree }
+      // Favorites list pages outside the tree too: drop the trashed ones now, the refetch brings the rest.
+      await queryClient.cancelQueries({ queryKey: favoritesKey })
+      const favorites = queryClient.getQueryData<PageFavorite[]>(favoritesKey)
+      if (favorites) queryClient.setQueryData(favoritesKey, favorites.filter((favorite) => !subtree.includes(favorite.page_id)))
+      return { tree, subtree, favorites }
     },
     onError: (error, _input, snapshot) => {
       if (snapshot?.tree) queryClient.setQueryData(treeKey, snapshot.tree)
+      if (snapshot?.favorites) queryClient.setQueryData(favoritesKey, snapshot.favorites)
       return promptForConflict(error, () => void queryClient.invalidateQueries({ queryKey: queryKeys.pages.all(workspaceId) }))
     },
     onSuccess: (_result, { pageId }, snapshot) => {

@@ -5,9 +5,9 @@ import { Pressable, ScrollView, View } from 'react-native'
 
 import { IconDialog } from '../../../components/docs/IconDialog'
 import { ActionSheet, ConfirmDialog, type ConfirmRequest, PromptDialog, type PromptRequest, type SheetAction } from '../../../components/settings/Dialog'
-import { docSpaces, favoritePages, pageTitle, trashPrompt, type TreeRow } from '../../../data/docs'
+import { docSpaces, type FavoriteRow, favoritePages, pageTitle, trashPrompt, type TreeRow } from '../../../data/docs'
 import type { PageSummary, Teamspace } from '../../../data/orbit'
-import { useCreatePage, useDuplicatePage, useFavorites, useTeamspaceWrites, useToggleFavorite, useTrashPage } from '../../../hooks/docs'
+import { isFavorite, useCreatePage, useDuplicatePage, useFavorites, useTeamspaceWrites, useToggleFavorite, useTrashPage } from '../../../hooks/docs'
 import { useOrbit } from '../../../orbit-context'
 import { usePages, useTeamspaces } from '../../../queries'
 import { errorMessage } from '../../../session-context'
@@ -69,13 +69,22 @@ export default function DocsScreen() {
   const newTeamspace = () =>
     setPrompt({ title: 'New teamspace', label: 'Name', placeholder: 'Teamspace name', confirmLabel: 'Create', onSubmit: (name) => teamspaceWrites.create.mutateAsync(name) })
 
+  const favoriteAction = (page: Pick<PageSummary, 'id' | 'title' | 'icon' | 'kind'>): SheetAction => {
+    const favorite = isFavorite(favorites.data, page.id)
+    return {
+      label: favorite ? 'Remove from favorites' : 'Add to favorites',
+      icon: 'star',
+      onPress: () => toggleFavorite.mutate({ pageId: page.id, favorite: !favorite, page }, { onError: failed('Could not change the favorites.') }),
+    }
+  }
+  /** A favorite outside the tree (a database row or one of its sub-pages): trash it from its own page. */
+  const favoriteMenu = (row: FavoriteRow) => (row.page ? pageMenu(row.page) : setMenu({ title: pageTitle(row), actions: [favoriteAction(row)] }))
   const pageMenu = (page: PageSummary) => {
-    const favorite = (favorites.data ?? []).includes(page.id)
     const hasChildren = (pages.data ?? []).some((item) => item.parent_id === page.id)
     setMenu({
       title: pageTitle(page),
       actions: [
-        { label: favorite ? 'Remove from favorites' : 'Add to favorites', icon: 'star', onPress: () => toggleFavorite.mutate({ pageId: page.id, favorite: !favorite }, { onError: failed('Could not change the favorites.') }) },
+        favoriteAction(page),
         { label: 'Duplicate', icon: 'copy', onPress: () => duplicate.mutate({ pageId: page.id, withChildren: false }, { onError: failed('Could not duplicate the page.') }) },
         ...(hasChildren ? [{ label: 'Duplicate with sub-pages', icon: 'copy' as const, onPress: () => duplicate.mutate({ pageId: page.id, withChildren: true }, { onError: failed('Could not duplicate the page.') }) }] : []),
         {
@@ -162,14 +171,15 @@ export default function DocsScreen() {
           {favoriteRows.length > 0 ? (
             <View>
               <GroupHeader label="Favorites" icon="star" />
-              {favoriteRows.map((page) => (
+              {favoriteRows.map((row) => (
                 <TreeItem
-                  key={page.id}
-                  label={pageTitle(page)}
+                  key={row.id}
+                  label={pageTitle(row)}
+                  hint={row.hint}
                   paddingLeft={28}
-                  leading={<PageIcon page={page} color={muted} />}
-                  onPress={() => router.push(`/docs/${page.id}`)}
-                  actions={<IconButton icon="more" label={`${pageTitle(page)} options`} size={22} iconSize={13} color={muted} onPress={() => pageMenu(page)} />}
+                  leading={<PageIcon page={row} color={muted} />}
+                  onPress={() => router.push(`/docs/${row.id}`)}
+                  actions={<IconButton icon="more" label={`${pageTitle(row)} options`} size={22} iconSize={13} color={muted} onPress={() => favoriteMenu(row)} />}
                 />
               ))}
             </View>
@@ -281,6 +291,7 @@ function PageRows({
 /** One 32px tree row: an optional chevron slot, the icon, the name, and the row actions. */
 function TreeItem({
   label,
+  hint,
   leading,
   paddingLeft,
   chevron,
@@ -288,6 +299,8 @@ function TreeItem({
   actions,
 }: {
   label: string
+  /** Muted text after the label (the database of a favorite row). */
+  hint?: string | null
   leading: ReactNode
   paddingLeft: number
   chevron?: { open: boolean; onPress: () => void } | null
@@ -311,6 +324,7 @@ function TreeItem({
         <View className={`w-[15px] items-center ${chevron !== undefined ? 'mr-[7px]' : 'mr-2'}`}>{leading}</View>
         <Text numberOfLines={1} className="font-noto-medium text-[13px] flex-1">
           {label}
+          {hint ? <Text className="font-noto text-[13px] text-muted-foreground/70">{`  ${hint}`}</Text> : null}
         </Text>
       </Pressable>
       <View className="flex-row gap-0.5 pl-1 pr-1.5">{actions}</View>
@@ -319,6 +333,6 @@ function TreeItem({
 }
 
 /** The page's emoji, else a table for a database and a document for a page. */
-function PageIcon({ page, color }: { page: PageSummary; color: string }) {
+function PageIcon({ page, color }: { page: Pick<PageSummary, 'icon' | 'kind'>; color: string }) {
   return page.icon ? <Text className="text-[14px]">{page.icon}</Text> : <Icon name={page.kind === 'database' ? 'grid' : 'docs'} size={15} color={color} />
 }

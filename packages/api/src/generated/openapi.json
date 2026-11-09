@@ -53471,18 +53471,49 @@
       },
       "PageFavorite": {
         "type": "object",
-        "description": "One of the caller's favorite pages. `position` is the index among the caller's visible\nfavorites.",
+        "description": "One of the caller's favorite pages, with what the favorites list shows: rows of databases (and\ntheir sub-pages) are not in the page tree. `position` is the index among the caller's visible\nfavorites.",
         "required": [
           "page_id",
-          "position"
+          "position",
+          "title",
+          "icon",
+          "kind",
+          "database_id",
+          "database_title"
         ],
         "properties": {
+          "database_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "For a row of a database: that database."
+          },
+          "database_title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "For a row of a database: the database's title."
+          },
+          "icon": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kind": {
+            "$ref": "#/components/schemas/PageKind"
+          },
           "page_id": {
             "type": "string"
           },
           "position": {
             "type": "integer",
             "format": "int64"
+          },
+          "title": {
+            "type": "string"
           }
         }
       },

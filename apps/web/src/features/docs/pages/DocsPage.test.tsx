@@ -336,15 +336,19 @@ test('the page header shows the space and "Move to" moves the page to the end of
   await waitFor(() => expect(path.textContent).toContain('Private'))
 })
 
+const favoriteEntry = (page_id: string, position: number, title: string, database?: { id: string; title: string }) => ({
+  page_id, position, title, icon: null, kind: 'page', database_id: database?.id ?? null, database_title: database?.title ?? null,
+})
+
 test('the header star and the page menu add and remove the page from favorites', async () => {
   let favorites: string[] = []
   const { view, calls } = setup('/docs/first', (call) => {
     if (call.path === '/pages') return Response.json({ items: [summary('first', null, 0, 'Plan')] })
     if (call.path === '/pages/first' && call.method === 'GET') return Response.json(fullPage('first', { title: 'Plan' }))
-    if (call.path === '/pages/favorites') return Response.json({ items: favorites.map((page_id, position) => ({ page_id, position })) })
+    if (call.path === '/pages/favorites') return Response.json({ items: favorites.map((page_id, position) => favoriteEntry(page_id, position, 'Plan')) })
     if (call.path === '/pages/first/favorite' && call.method === 'PUT') {
       favorites = ['first']
-      return Response.json({ page_id: 'first', position: 0 })
+      return Response.json(favoriteEntry('first', 0, 'Plan'))
     }
     if (call.path === '/pages/first/favorite' && call.method === 'DELETE') {
       favorites = []
@@ -828,6 +832,43 @@ test('duplicating a row of a database at its 5,000-row cap says so', async () =>
   await userEvent.click(await view.findByRole('menuitem', { name: 'Duplicate' }))
   await waitFor(() => expect(shown()).toBe(before + 1))
   expect(location(view)).toBe('/docs/r1')
+})
+
+test('the star on a row opened as a full page lists the row in the sidebar Favorites', async () => {
+  let favorited = false
+  const { view } = setup('/docs/r1', (call) => {
+    if (call.path === '/pages') return Response.json({ items: [databaseSummary] })
+    if (call.path === '/databases/db') return Response.json(databaseDetail([databaseRow('r1', 'Paper A')]))
+    if (call.path === '/pages/r1' && call.method === 'GET') return Response.json(rowPage('r1', 'Paper A'))
+    const entry = favoriteEntry('r1', 0, 'Paper A', { id: 'db', title: 'Research' })
+    if (call.path === '/pages/favorites') return Response.json({ items: favorited ? [entry] : [] })
+    if (call.path === '/pages/r1/favorite' && call.method === 'PUT') {
+      favorited = true
+      return Response.json(entry)
+    }
+  })
+  const star = await view.findByRole('button', { name: 'Add to favorites' })
+  await waitFor(() => expect(star.hasAttribute('disabled')).toBeFalse())
+  fireEvent.click(star)
+  const section = await view.findByRole('group', { name: 'Favorites' })
+  await waitFor(() => expect(section.querySelector('[data-page-id="r1"]')?.textContent).toBe('Paper AResearch'))
+})
+
+test('"Move to trash" on a favorite row (not in the tree, not open) reads the row and trashes it', async () => {
+  const { view, calls } = setup('/docs/first', (call) => {
+    if (call.path === '/pages') return Response.json({ items: [summary('first', null, 0, 'Plan'), databaseSummary] })
+    if (call.path === '/pages/first' && call.method === 'GET') return Response.json(fullPage('first', { title: 'Plan' }))
+    if (call.path === '/pages/favorites') return Response.json({ items: [favoriteEntry('r1', 0, 'Paper A', { id: 'db', title: 'Research' })] })
+    if (call.path === '/pages/r1' && call.method === 'GET') return Response.json(rowPage('r1', 'Paper A'))
+    if (call.path === '/pages/r1' && call.method === 'DELETE') return new Response(null, { status: 204 })
+  })
+  const section = await view.findByRole('group', { name: 'Favorites' })
+  const favorite = await waitFor(() => section.querySelector('[data-page-id="r1"]') as HTMLElement)
+  fireEvent.click(within(favorite).getByRole('button', { name: 'Page options' }))
+  await userEvent.click(await view.findByRole('menuitem', { name: 'Move to trash' }))
+  await userEvent.click(await view.findByRole('button', { name: 'Move to trash' }))
+  await waitFor(() => expect(calls.some((call) => call.method === 'DELETE' && call.path === '/pages/r1')).toBeTrue())
+  expect(calls.find((call) => call.method === 'DELETE' && call.path === '/pages/r1')?.search).toBe('?expected_version=1')
 })
 
 test('"Move to trash" on a row opened as a full page trashes it and goes back to its database', async () => {

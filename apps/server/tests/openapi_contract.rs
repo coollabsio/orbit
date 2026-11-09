@@ -738,7 +738,15 @@ fn page_favorite_routes_are_documented() {
     let schemas = &document["components"]["schemas"];
     assert_eq!(
         schemas["PageFavorite"]["required"],
-        serde_json::json!(["page_id", "position"])
+        serde_json::json!([
+            "page_id",
+            "position",
+            "title",
+            "icon",
+            "kind",
+            "database_id",
+            "database_title"
+        ])
     );
 }
 

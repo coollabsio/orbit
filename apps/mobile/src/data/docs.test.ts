@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
+import type { PageFavorite } from '@orbit/api/generated/types.gen'
+
 import { absoluteUrl, blockId, descendantsOf, docSpaces, favoritePages, iconOf, pageTitle, paragraphBlocks, spaceRequest, trashPrompt, validCoverUrl, visibleThreads } from './docs'
 import type { PageSummary, Teamspace } from './orbit'
 
@@ -7,6 +9,7 @@ const page = (id: string, fields: Partial<PageSummary>): PageSummary => ({
   id,
   title: id,
   icon: null,
+  kind: 'page',
   parent_id: null,
   position: 0,
   private: false,
@@ -71,8 +74,18 @@ describe('writing docs', () => {
     expect(trashPrompt(tree, tree[3]).description).toBe('You can restore it from Trash.')
   })
 
-  test('favorites keep their order and drop pages that are gone', () => {
-    expect(favoritePages(tree, ['d', 'gone', 'b']).map((item) => item.id)).toEqual(['d', 'b'])
+  test('favorites list in their order from the server entries; tree pages show their tree summary', () => {
+    const entry = (page_id: string, position: number, patch: Partial<PageFavorite> = {}): PageFavorite => ({
+      page_id, position, title: page_id, icon: null, kind: 'page', database_id: null, database_title: null, ...patch,
+    })
+    const renamed = [...tree.slice(0, 3), page('d', { title: 'D renamed' })]
+    expect(
+      favoritePages(renamed, [entry('d', 0), entry('row', 1, { title: 'Paper', icon: '📄', database_id: 'db', database_title: 'Research' }), entry('b', 2)]),
+    ).toEqual([
+      { id: 'd', title: 'D renamed', icon: null, kind: 'page', hint: null, page: renamed[3] },
+      { id: 'row', title: 'Paper', icon: '📄', kind: 'page', hint: 'Research', page: null },
+      { id: 'b', title: 'b', icon: null, kind: 'page', hint: null, page: renamed[1] },
+    ])
   })
 
   test('typed text becomes one BlockNote paragraph per line', () => {

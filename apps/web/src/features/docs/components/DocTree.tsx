@@ -294,15 +294,17 @@ export function DocTree({
     onDrop: handleDrop,
   }
 
-  // Favorites: only pages still in the tree (a trashed page drops out before the refetch lands).
+  // Favorites list from the server's entries: database rows and their sub-pages are not in the tree. A tree page
+  // shows its tree summary, which follows a title being typed.
   const pageById = new Map(pages.map((page) => [page.id, page]))
-  const favoriteIds = (favoritesQuery.data ?? []).filter((id) => pageById.has(id))
-  const favoriteSet = new Set(favoritesQuery.data ?? [])
+  const favoriteEntries = favoritesQuery.data ?? []
+  const favoriteIds = favoriteEntries.map((favorite) => favorite.page_id)
+  const favoriteSet = new Set(favoriteIds)
   const favorites: DocTreeFavorites = {
     isFavorite: (id) => favoriteSet.has(id),
-    onToggle: (id, favorite) =>
+    onToggle: (page, favorite) =>
       toggleFavorite.mutate(
-        { pageId: id, favorite },
+        { pageId: page.id, favorite, page },
         { onError: () => toast.error(favorite ? 'Could not add the page to favorites.' : 'Could not remove the page from favorites.') },
       ),
   }
@@ -353,10 +355,10 @@ export function DocTree({
     onDrop: (e: DragEvent<HTMLElement>) => {
       e.preventDefault()
       e.stopPropagation()
-      const id = dragId
+      const dragged = pages.find((page) => page.id === dragId)
       setFavoritesDrop(false)
       endDrag()
-      if (id && !favoriteSet.has(id)) favorites.onToggle(id, true)
+      if (dragged && !favoriteSet.has(dragged.id)) favorites.onToggle(dragged, true)
     },
   }
 
@@ -595,7 +597,7 @@ export function DocTree({
           </div>
         ) : (
           <nav className="flex flex-col gap-px p-2" role="tree" aria-label="Pages">
-            {favoriteIds.length > 0 ? (
+            {favoriteEntries.length > 0 ? (
               <div className="mb-3 flex flex-col gap-px" role="group" aria-label="Favorites">
                 <SectionLabel
                   label="Favorites"
@@ -607,10 +609,11 @@ export function DocTree({
                   action={null}
                 />
                 <SpacePages open={favoritesOpen}>
-                  {favoriteIds.map((id) => (
+                  {favoriteEntries.map((favorite) => (
                       <DocTreeItem
-                        key={id}
-                        page={pageById.get(id)!}
+                        key={favorite.page_id}
+                        page={pageById.get(favorite.page_id) ?? { ...favorite, id: favorite.page_id }}
+                        hint={favorite.database_title}
                         pages={pages}
                         depth={0}
                         activeId={activeId}

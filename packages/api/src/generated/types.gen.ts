@@ -3348,12 +3348,24 @@ export type PageCommentBody = {
 export type PageExportArchive = Blob | File;
 
 /**
- * One of the caller's favorite pages. `position` is the index among the caller's visible
+ * One of the caller's favorite pages, with what the favorites list shows: rows of databases (and
+ * their sub-pages) are not in the page tree. `position` is the index among the caller's visible
  * favorites.
  */
 export type PageFavorite = {
+    /**
+     * For a row of a database: that database.
+     */
+    database_id: string | null;
+    /**
+     * For a row of a database: the database's title.
+     */
+    database_title: string | null;
+    icon: string | null;
+    kind: PageKind;
     page_id: string;
     position: number;
+    title: string;
 };
 
 /**

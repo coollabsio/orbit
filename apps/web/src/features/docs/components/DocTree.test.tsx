@@ -2,7 +2,7 @@ import { afterEach, expect, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { fireEvent, render, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { MemoryRouter } from 'react-router'
+import { MemoryRouter, useLocation } from 'react-router'
 import type { Page, PageSummary, Teamspace } from '@orbit/api/generated/types.gen'
 import { ConfirmationModalHost } from '@/components/common/ConfirmationModal'
 import { emojibaseResponse } from '@/test/emojibase'
@@ -35,6 +35,10 @@ const problem = (status: number, code: string) =>
   )
 
 type Call = { method: string; path: string; search: string; body: Record<string, unknown> | undefined }
+
+function Location() {
+  return <output data-testid="location">{useLocation().pathname}</output>
+}
 
 const tree = [
   page('roadmap', null, 0, 't1', 'Roadmap'),
@@ -90,6 +94,7 @@ function setup({
           canDeleteTeamspaces={canDelete}
           onTrash={() => {}}
         />
+        <Location />
       </MemoryRouter>
     </QueryClientProvider>
   )
@@ -234,9 +239,16 @@ test('dropping on an empty section row moves the page into that space', async ()
   })
 })
 
-const favoritesHandler = (ids: string[]) => (call: Call) =>
+type FavoriteEntry = { page_id: string; position: number; title: string; icon: string | null; kind: 'page' | 'database'; database_id: string | null; database_title: string | null }
+
+/** The server's entry for a favorite of `tree` (or a page outside it, named by its id). */
+const favoriteEntry = (page_id: string, position: number, patch: Partial<FavoriteEntry> = {}): FavoriteEntry => ({
+  page_id, position, title: tree.find((item) => item.id === page_id)?.title ?? page_id, icon: null, kind: 'page', database_id: null, database_title: null, ...patch,
+})
+
+const favoritesHandler = (ids: string[], patch: Record<string, Partial<FavoriteEntry>> = {}) => (call: Call) =>
   call.method === 'GET' && call.path === '/pages/favorites'
-    ? Response.json({ items: ids.map((page_id, position) => ({ page_id, position })) })
+    ? Response.json({ items: ids.map((id, position) => favoriteEntry(id, position, patch[id])) })
     : undefined
 
 const favoriteRow = (view: ReturnType<typeof render>, id: string) =>
@@ -250,8 +262,8 @@ test('the Favorites section is hidden without favorites', async () => {
   expect(view.queryByText('Favorites')).toBeNull()
 })
 
-test('favorites come first in their own order; rows expand to sub-pages and skip unknown pages', async () => {
-  const { view } = setup({ handler: favoritesHandler(['notes', 'gone', 'roadmap']) })
+test('favorites come first in their own order; rows expand to sub-pages', async () => {
+  const { view } = setup({ handler: favoritesHandler(['notes', 'roadmap']) })
   const section = await view.findByRole('group', { name: 'Favorites' })
   const nav = view.getByRole('tree', { name: 'Pages' })
   expect(nav.firstElementChild).toBe(section)
@@ -264,6 +276,32 @@ test('favorites come first in their own order; rows expand to sub-pages and skip
   fireEvent.click(within(favoriteRow(view, 'notes')).getByRole('button', { name: 'Expand' }))
   expect(within(section).getByText('Draft')).toBeTruthy()
   expect(within(view.getByRole('group', { name: 'Private' })).queryByText('Draft')).toBeNull()
+})
+
+test('a favorite database row (not in the tree) lists with its database, opens its page and reorders', async () => {
+  const { view, calls } = setup({
+    handler: favoritesHandler(['row-1', 'roadmap', 'row-note'], {
+      'row-1': { title: 'Paper A', icon: '📄', database_id: 'db', database_title: 'Research' },
+      'row-note': { title: 'Reading notes' },
+    }),
+  })
+  const section = await view.findByRole('group', { name: 'Favorites' })
+  const rows = [...section.querySelectorAll('[data-section="favorites"][data-page-id]')].map((row) => row.getAttribute('data-page-id'))
+  expect(rows).toEqual(['row-1', 'roadmap', 'row-note'])
+  expect(favoriteRow(view, 'row-1').textContent).toEndWith('Paper AResearch')
+  expect(favoriteRow(view, 'row-note').textContent).toBe('Reading notes')
+  // The page stays out of the spaces.
+  expect(view.container.querySelectorAll('[data-page-id="row-1"]')).toHaveLength(1)
+
+  fireEvent.click(favoriteRow(view, 'row-1'))
+  expect(view.getByTestId('location').textContent).toBe('/docs/row-1')
+
+  const transfer = dataTransfer()
+  fireEvent.dragStart(favoriteRow(view, 'row-1'), { dataTransfer: transfer })
+  fireEvent.dragOver(favoriteRow(view, 'row-note'), { dataTransfer: transfer })
+  fireEvent.drop(favoriteRow(view, 'row-note'), { dataTransfer: transfer })
+  await waitFor(() => expect(calls.some((call) => call.path === '/pages/favorites/row-1/move')).toBeTrue())
+  expect(calls.find((call) => call.path === '/pages/favorites/row-1/move')?.body).toEqual({ position: 2 })
 })
 
 test('dragging a favorite reorders the favorites without moving the page', async () => {
@@ -312,7 +350,7 @@ test('drops between Favorites and the other sections do nothing', async () => {
 test('dropping a page on the Favorites header adds it as a favorite', async () => {
   const { view, calls } = setup({
     handler: (call) =>
-      call.method === 'PUT' ? Response.json({ page_id: 'notes', position: 1 }) : favoritesHandler(['roadmap'])(call),
+      call.method === 'PUT' ? Response.json(favoriteEntry('notes', 1)) : favoritesHandler(['roadmap'])(call),
   })
   await view.findByRole('group', { name: 'Favorites' })
   const transfer = dataTransfer()
@@ -333,7 +371,7 @@ test('the row menu adds and removes favorites', async () => {
       const id = call.path.split('/')[2]
       if (call.method === 'PUT') {
         ids = [...ids, id]
-        return Response.json({ page_id: id, position: ids.length - 1 })
+        return Response.json(favoriteEntry(id, ids.length - 1))
       }
       if (call.method === 'DELETE') {
         ids = ids.filter((item) => item !== id)
