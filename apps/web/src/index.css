@@ -652,3 +652,16 @@ html .bn-mobile-formatting-toolbar {
   padding-top: env(safe-area-inset-top, 0px);
   padding-bottom: 0;
 }
+
+/* Blocks with their own UI (`data-editor-isolated`, the database block) render app components inside the editor.
+   BlockNote's unlayered `.bn-shadcn svg:not([class*=size-]) { width: revert }` and `.bn-shadcn .bn-editor a` outrank
+   the components' Tailwind sizes and colors there, so icons grow to their 24px attribute. `revert-layer` in this
+   unlayered rule drops every unlayered value, so the components' utilities apply as they do outside the editor. */
+.bn-shadcn [data-editor-isolated] svg:not([class*='size-']) {
+  width: revert-layer;
+  height: revert-layer;
+}
+.bn-shadcn .bn-editor [data-editor-isolated] a {
+  color: revert-layer;
+  text-decoration: revert-layer;
+}

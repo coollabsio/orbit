@@ -29,7 +29,14 @@ export function DatabaseBlockView({ block, editor }: DatabaseBlockViewProps) {
   const { databaseHost } = usePageEditorContext()
   const { databaseId, linkId } = block.props
   return (
-    <div {...ISOLATED} contentEditable={false} data-slot="database-block" data-database-id={databaseId} className="flex w-full min-w-0 flex-col py-1 text-sm">
+    // The app font and text settings, not the editor's (BlockNote's font, ProseMirror's ligatures and word breaks).
+    <div
+      {...ISOLATED}
+      contentEditable={false}
+      data-slot="database-block"
+      data-database-id={databaseId}
+      className="flex w-full min-w-0 flex-col py-1 font-sans text-sm wrap-normal [font-feature-settings:normal] [font-variant-ligatures:normal]"
+    >
       {!databaseId ? (
         <Notice>Database not found</Notice>
       ) : !databaseHost ? (
