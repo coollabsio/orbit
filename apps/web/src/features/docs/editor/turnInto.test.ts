@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { BlockNoteEditor } from '@blocknote/core'
 import { pageEditorSchema } from './schema'
-import { applyTurnInto, canTurnBlock, turnIntoChoices, type TurnIntoChoice } from './turnInto'
+import { applyTurnInto, canTurnBlock, databaseTurn, turnIntoChoices, type TurnIntoChoice } from './turnInto'
 
 function editor(content: unknown[]) {
   return BlockNoteEditor.create({ schema: pageEditorSchema, initialContent: content as never })
@@ -83,5 +83,27 @@ describe('turn into', () => {
       { id: 'table', type: 'table', content: { type: 'tableContent', rows: [{ cells: [['']] }] } },
     ])
     for (const block of instance.document) expect(canTurnBlock(instance, block)).toBe(false)
+  })
+})
+
+describe('databaseTurn', () => {
+  const isDatabase = (pageId: string) => pageId === 'db'
+  test('a page block that links to a database turns into an inline database block, and back', () => {
+    expect(databaseTurn({ id: 'a', type: 'page', props: { pageId: 'db' } }, isDatabase)).toEqual({
+      label: 'Inline database',
+      type: 'database',
+      props: { databaseId: 'db', linkId: '' },
+    })
+    expect(databaseTurn({ id: 'a', type: 'database', props: { databaseId: 'db', linkId: 'l1' } }, isDatabase)).toEqual({
+      label: 'Page link',
+      type: 'page',
+      props: { pageId: 'db' },
+    })
+  })
+
+  test('a link to a plain page and other blocks have no database turn', () => {
+    expect(databaseTurn({ id: 'a', type: 'page', props: { pageId: 'doc' } }, isDatabase)).toBeNull()
+    expect(databaseTurn({ id: 'a', type: 'paragraph', props: {} }, isDatabase)).toBeNull()
+    expect(databaseTurn({ id: 'a', type: 'database', props: { databaseId: '', linkId: '' } }, isDatabase)).toBeNull()
   })
 })

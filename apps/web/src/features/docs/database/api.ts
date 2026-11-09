@@ -3,6 +3,7 @@ import { toast } from 'sonner'
 import { apiClient } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
 import {
+  createDatabaseLink,
   createDatabaseProperty,
   createDatabaseRow,
   createDatabaseView,
@@ -18,10 +19,12 @@ import {
   updatePage,
 } from '@orbit/api/generated/sdk.gen'
 import type {
+  CreateDatabaseLinkBody,
   CreateDatabasePropertyBody,
   CreateDatabaseRowBody,
   CreateDatabaseViewBody,
   DatabaseDetail,
+  DatabaseLinkedViews,
   DatabaseProperty,
   DatabasePropertyUpdate,
   DatabaseRow,
@@ -39,11 +42,22 @@ function required<T>(data: T | undefined, message: string): T {
   return data
 }
 
-export function useDatabase(workspaceId: string, databaseId: string) {
+/** The cache key of a database, or of a linked view block's copy (its views are the link's; under the database's key). */
+function detailKey(workspaceId: string, databaseId: string, linkId?: string | null) {
+  return linkId ? ([...queryKeys.database(workspaceId, databaseId), 'link', linkId] as const) : queryKeys.database(workspaceId, databaseId)
+}
+
+/** A database with its own views, or with the views of the linked view block `linkId`. */
+export function useDatabase(workspaceId: string, databaseId: string, linkId?: string | null) {
   return useQuery({
-    queryKey: queryKeys.database(workspaceId, databaseId),
+    queryKey: detailKey(workspaceId, databaseId, linkId),
     queryFn: async () => {
-      const { data } = await getDatabase({ client: apiClient, path: { workspace_id: workspaceId, database_id: databaseId }, throwOnError: true })
+      const { data } = await getDatabase({
+        client: apiClient,
+        path: { workspace_id: workspaceId, database_id: databaseId },
+        ...(linkId ? { query: { link: linkId } } : {}),
+        throwOnError: true,
+      })
       return required(data, 'Database response was empty.')
     },
     // A stable function: TanStack Query parses once per fetched detail.
@@ -70,9 +84,9 @@ interface DatabaseMutation<Vars, Result> {
  * One write to a database. The optimistic change is undone on error (then the query refetches, in case another write
  * landed in between) and a toast says what failed.
  */
-function useDatabaseMutation<Vars, Result>(workspaceId: string, databaseId: string, spec: DatabaseMutation<Vars, Result>) {
+function useDatabaseMutation<Vars, Result>(workspaceId: string, databaseId: string, spec: DatabaseMutation<Vars, Result>, linkId?: string | null) {
   const queryClient = useQueryClient()
-  const key = queryKeys.database(workspaceId, databaseId)
+  const key = detailKey(workspaceId, databaseId, linkId)
   const path = { workspace_id: workspaceId, database_id: databaseId }
   return useMutation<Result, Error, Vars, Snapshot>({
     mutationFn: (vars) => spec.request(path, vars),
@@ -303,24 +317,36 @@ export function useDeleteProperty(workspaceId: string, databaseId: string) {
   })
 }
 
-export function useCreateView(workspaceId: string, databaseId: string) {
-  return useDatabaseMutation<CreateDatabaseViewBody, DatabaseDetail['views'][number]>(workspaceId, databaseId, {
-    request: async (path, body) => {
-      const { data } = await createDatabaseView({ client: apiClient, path, body, throwOnError: true })
-      return required(data, 'Create view response was empty.')
+/** View writes go to the database's own views, or to the views of the linked view block `linkId`. */
+export function useCreateView(workspaceId: string, databaseId: string, linkId?: string | null) {
+  return useDatabaseMutation<CreateDatabaseViewBody, DatabaseDetail['views'][number]>(
+    workspaceId,
+    databaseId,
+    {
+      request: async (path, body) => {
+        const { data } = await createDatabaseView({ client: apiClient, path, body: linkId ? { ...body, link_id: linkId } : body, throwOnError: true })
+        return required(data, 'Create view response was empty.')
+      },
+      reconcile: (detail, view) => ({ ...detail, views: [...detail.views, view] }),
+      refetch: true,
+      error: 'Could not add the view.',
     },
-    reconcile: (detail, view) => ({ ...detail, views: [...detail.views, view] }),
-    refetch: true,
-    error: 'Could not add the view.',
-  })
+    linkId,
+  )
 }
 
 export type ViewInput = { viewId: string; body: UpdateDatabaseViewBody }
 
-export function useUpdateView(workspaceId: string, databaseId: string) {
+export function useUpdateView(workspaceId: string, databaseId: string, linkId?: string | null) {
   return useDatabaseMutation<ViewInput, DatabaseDetail['views'][number]>(workspaceId, databaseId, {
     request: async (path, { viewId, body }) => {
-      const { data } = await updateDatabaseView({ client: apiClient, path: { ...path, view_id: viewId }, body, throwOnError: true })
+      const { data } = await updateDatabaseView({
+        client: apiClient,
+        path: { ...path, view_id: viewId },
+        ...(linkId ? { query: { link_id: linkId } } : {}),
+        body,
+        throwOnError: true,
+      })
       return required(data, 'Update view response was empty.')
     },
     optimistic: (detail, { viewId, body }) => ({
@@ -332,17 +358,23 @@ export function useUpdateView(workspaceId: string, databaseId: string) {
     reconcile: (detail, saved) => ({ ...detail, views: detail.views.map((view) => (view.id === saved.id ? saved : view)) }),
     refetch: false,
     error: 'Could not save the view.',
-  })
+  }, linkId)
 }
 
-export function useDeleteView(workspaceId: string, databaseId: string) {
+export function useDeleteView(workspaceId: string, databaseId: string, linkId?: string | null) {
   return useDatabaseMutation<string, void>(workspaceId, databaseId, {
     request: async (path, viewId) => {
-      await deleteDatabaseView({ client: apiClient, path: { ...path, view_id: viewId }, throwOnError: true })
+      await deleteDatabaseView({ client: apiClient, path: { ...path, view_id: viewId }, ...(linkId ? { query: { link_id: linkId } } : {}), throwOnError: true })
     },
     optimistic: (detail, viewId) => ({ ...detail, views: detail.views.filter((view) => view.id !== viewId) }),
     error: 'Could not delete the view.',
-  })
+  }, linkId)
+}
+
+/** Links a database to a block of `host_page_id` (a linked view block) with one view of its own. */
+export async function createLink(workspaceId: string, databaseId: string, body: CreateDatabaseLinkBody): Promise<DatabaseLinkedViews> {
+  const { data } = await createDatabaseLink({ client: apiClient, path: { workspace_id: workspaceId, database_id: databaseId }, body, throwOnError: true })
+  return required(data, 'Create link response was empty.')
 }
 
 export type { DatabaseViewConfig }

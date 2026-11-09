@@ -32,8 +32,8 @@ import { ImageZoomButton } from './ImageZoomButton'
 import { setEditableInPlace } from '@orbit/editor/editable'
 import { internalPageLinkId, isSafeLinkHref } from '@orbit/editor/links'
 import { linkMentions, pastedFilesToCopy, toEditorContent, toStoredContent, type FileScope, type FileToCopy } from './content'
-import { insertPageBlock } from './pageBlockCommands'
-import { PageEditorContext, type PageEditorContextValue, type PageRef } from './pageEditorContext'
+import { insertDatabaseBlock, insertPageBlock } from './pageBlockCommands'
+import { PageEditorContext, type DatabaseBlockHost, type PageEditorContextValue, type PageRef } from './pageEditorContext'
 import { watchDeletedFiles } from '@orbit/editor/deletedFiles'
 import type { PageEditorInstance } from '@orbit/editor/schema'
 import type { PageKind } from '@orbit/api/generated/types.gen'
@@ -53,7 +53,7 @@ import { COMMENT_POPUP_ATTR, FloatingThreadCard, NewCommentCard } from '../comme
 import { ThreadList } from '../comments/ThreadList'
 import { NoCommentsThreadStore, OrbitThreadStore, type OrbitThreadStoreOptions } from '../comments/threadStore'
 
-export type { PageRef } from './pageEditorContext'
+export type { DatabaseBlockHost, PageRef } from './pageEditorContext'
 
 export interface PageEditorHandle {
   /** Current document as sanitized JSON (same shape `onChange` receives). */
@@ -148,6 +148,12 @@ export interface PageEditorProps {
   onCreateSubpage?: (kind: PageKind) => Promise<string>
   /** Lets the user pick an existing page; resolves to its id, or null when cancelled. Page profile only. */
   onPickPage?: () => Promise<string | null>
+  /** Database blocks load their database through this page (page profile). Without it they show a plain card. */
+  databaseHost?: DatabaseBlockHost
+  /** Lets the user pick a database and links it to this page; resolves to the new linked view, or null. */
+  onLinkDatabase?: () => Promise<{ databaseId: string; linkId: string } | null>
+  /** The user deleted an inline database block; its database stays a sub-page. */
+  onDatabaseBlockRemoved?: (databaseId: string) => void
   /**
    * Uploads a file for an image/file block (slash menu, file panel, paste, drop) and resolves to its URL.
    * Reject to abort; the caller reports the error. Without it the editor offers no uploads.
@@ -189,6 +195,9 @@ function PageEditorInner({
   onOpenPage,
   onCreateSubpage = noSubpage,
   onPickPage = noPicker,
+  databaseHost,
+  onLinkDatabase,
+  onDatabaseBlockRemoved,
   uploadFile,
   comments,
   mentions,
@@ -376,7 +385,30 @@ function PageEditorInner({
     [editor, fileScope],
   )
 
-  const context = useMemo<PageEditorContextValue>(() => ({ resolvePage, onOpenPage: onOpenPage ?? (() => {}) }), [resolvePage, onOpenPage])
+  const context = useMemo<PageEditorContextValue>(
+    () => ({ resolvePage, onOpenPage: onOpenPage ?? (() => {}), databaseHost: databaseHost ?? null }),
+    [resolvePage, onOpenPage, databaseHost],
+  )
+
+  // An inline database block the user deleted (not undo, not another tab): its database is still in the tree.
+  const removedRef = useRef(onDatabaseBlockRemoved)
+  useEffect(() => {
+    removedRef.current = onDatabaseBlockRemoved
+  }, [onDatabaseBlockRemoved])
+  useEffect(
+    () =>
+      editor.onChange((changed, { getChanges }) => {
+        const notify = removedRef.current
+        if (!notify) return
+        const left = new Set(databaseIds(changed.document))
+        for (const change of getChanges()) {
+          if (change.type !== 'delete' || change.source.type !== 'local' || change.block.type !== 'database') continue
+          const { databaseId, linkId } = change.block.props
+          if (databaseId && !linkId && !left.has(databaseId)) notify(databaseId)
+        }
+      }, false),
+    [editor],
+  )
 
   /** Creates the sub-page, links it at the cursor's block, then opens it. */
   const createLinkedPage = (kind: PageKind) => {
@@ -395,6 +427,28 @@ function PageEditorInner({
   const slashActions = {
     onSubpage: () => createLinkedPage('page'),
     onDatabase: () => createLinkedPage('database'),
+    onInlineDatabase: databaseHost
+      ? () => {
+          const anchorId = editor.getTextCursorPosition().block.id
+          void onCreateSubpage('database').then(
+            (databaseId) => {
+              if (mounted.current) insertDatabaseBlock(editor, anchorId, { databaseId, linkId: '' })
+            },
+            () => {},
+          )
+        }
+      : undefined,
+    onLinkedView: onLinkDatabase
+      ? () => {
+          const anchorId = editor.getTextCursorPosition().block.id
+          void onLinkDatabase().then(
+            (linked) => {
+              if (linked && mounted.current) insertDatabaseBlock(editor, anchorId, linked)
+            },
+            () => {},
+          )
+        }
+      : undefined,
     onLinkPage: () => {
       const anchorId = editor.getTextCursorPosition().block.id
       void onPickPage().then(
@@ -563,6 +617,15 @@ function PageEditorInner({
 interface PasteContext {
   editor: PageEditorInstance
   defaultPasteHandler: () => boolean | undefined
+}
+
+/** The databases of the inline database blocks in `blocks` (nested ones too). */
+function databaseIds(blocks: readonly { type: string; props: unknown; children: readonly unknown[] }[]): string[] {
+  return blocks.flatMap((block) => {
+    const props = block.props as { databaseId?: string; linkId?: string }
+    const own = block.type === 'database' && props.databaseId && !props.linkId ? [props.databaseId] : []
+    return [...own, ...databaseIds(block.children as typeof blocks)]
+  })
 }
 
 function blockIds(blocks: readonly { id: string; children: readonly unknown[] }[]): string[] {

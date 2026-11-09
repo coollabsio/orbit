@@ -32,6 +32,8 @@ interface DatabaseBoardProps {
   /** A new card whose title field opens. */
   editRowId: string | null
   onEditRowShown: () => void
+  /** Cards a column shows at first and adds with "Show more" (default 50). */
+  pageSize?: number
 }
 
 type CardDrag = { rowId: string; from: string | null }
@@ -45,7 +47,7 @@ type CardDrop = { group: string | null; index: number | null }
  * stays mounted (faded) and a placeholder shows among the others.
  */
 export function DatabaseBoard(props: DatabaseBoardProps) {
-  const { database, config, rows, onConfig, onAddCard, onOpenRow, filtered, onClearFilters, editRowId, onEditRowShown } = props
+  const { database, config, rows, onConfig, onAddCard, onOpenRow, filtered, onClearFilters, editRowId, onEditRowShown, pageSize = PAGE } = props
   const { workspaceId, databaseId, canEditValues, canEditSchema } = useDatabaseEnv()
   const moveRow = useMoveRow(workspaceId, databaseId)
   const updateValues = useUpdateValues(workspaceId, databaseId)
@@ -171,7 +173,7 @@ export function DatabaseBoard(props: DatabaseBoardProps) {
         {visible.map((group) => {
           const key = group.id ?? ''
           const slot = columnDrag ? othersOf(columnDrag.id).indexOf(group) : -1
-          const limit = shown[key] ?? PAGE
+          const limit = shown[key] ?? pageSize
           const cards = group.rows.slice(0, limit)
           const others = cardDrag ? cards.filter((row) => row.id !== cardDrag.rowId) : cards
           const placeholderIndex = cardDrop?.group === group.id ? cardDrop.index : null
@@ -267,8 +269,8 @@ export function DatabaseBoard(props: DatabaseBoardProps) {
                   })}
                   {placeholderIndex !== null && placeholderIndex >= others.length ? placeholder : null}
                   {group.rows.length > limit ? (
-                    <Button type="button" variant="ghost" size="sm" className="justify-start text-muted-foreground" onClick={() => setShown((current) => ({ ...current, [key]: limit + PAGE }))}>
-                      Show {Math.min(PAGE, group.rows.length - limit)} more
+                    <Button type="button" variant="ghost" size="sm" className="justify-start text-muted-foreground" onClick={() => setShown((current) => ({ ...current, [key]: limit + pageSize }))}>
+                      Show {Math.min(pageSize, group.rows.length - limit)} more
                     </Button>
                   ) : null}
                   {canEditValues ? (

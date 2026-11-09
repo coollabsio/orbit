@@ -10,13 +10,44 @@ export const PAGE_ITEMS_GROUP = 'Basic blocks'
 
 export interface PageSlashActions {
   onSubpage: () => void
-  /** A database as a sub-page, linked from the current block (the inline database is not built yet). */
+  /** A database as a sub-page, linked from the current block, then opened. */
   onDatabase: () => void
+  /** A database as a sub-page, shown in the page (an inline database block). Absent: not offered. */
+  onInlineDatabase?: () => void
+  /** A database picker, then a linked view block of it. Absent: not offered. */
+  onLinkedView?: () => void
   onLinkPage: () => void
 }
 
-/** "Sub-page", "Database – full page" and "Link a page" (the first and last ported from the old docs slash menu). */
+/**
+ * "Sub-page", the database items and "Link a page" (the first and last ported from the old docs slash menu).
+ * "Database – inline" and "Linked view of database" need a docs page to load databases in.
+ */
 export function pageSlashItems(actions: PageSlashActions): DefaultReactSuggestionItem[] {
+  const inline: DefaultReactSuggestionItem[] = actions.onInlineDatabase
+    ? [
+        {
+          title: 'Database – inline',
+          subtext: 'Add a database in this page',
+          aliases: ['database', 'inline', 'table', 'db'],
+          group: PAGE_ITEMS_GROUP,
+          icon: <Grid className="size-[18px]" />,
+          onItemClick: actions.onInlineDatabase,
+        },
+      ]
+    : []
+  const linked: DefaultReactSuggestionItem[] = actions.onLinkedView
+    ? [
+        {
+          title: 'Linked view of database',
+          subtext: 'Show an existing database with its own views',
+          aliases: ['linked', 'database', 'view', 'db'],
+          group: PAGE_ITEMS_GROUP,
+          icon: <Grid className="size-[18px]" />,
+          onItemClick: actions.onLinkedView,
+        },
+      ]
+    : []
   return [
     {
       title: 'Sub-page',
@@ -34,6 +65,8 @@ export function pageSlashItems(actions: PageSlashActions): DefaultReactSuggestio
       icon: <Grid className="size-[18px]" />,
       onItemClick: actions.onDatabase,
     },
+    ...inline,
+    ...linked,
     {
       title: 'Link a page',
       subtext: 'Insert a link to an existing page',

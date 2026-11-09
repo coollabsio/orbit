@@ -65,6 +65,8 @@ const env: DatabaseEnv = {
   users: new Map(),
   canEditValues: true,
   canEditSchema: true,
+  canEditViews: true,
+  linkId: null,
 }
 
 function wrapper({ children }: { children: ReactNode }) {

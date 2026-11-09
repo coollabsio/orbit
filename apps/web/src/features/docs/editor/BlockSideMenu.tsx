@@ -20,7 +20,8 @@ import {
 import { offset } from '@floating-ui/react'
 import { useMemo } from 'react'
 import { LampOn } from 'reicon-react'
-import { applyTurnInto, canTurnBlock, choiceMatches, turnIntoChoices, type TurnIntoChoice } from './turnInto'
+import { usePageEditorContext } from './pageEditorContext'
+import { applyTurnInto, canTurnBlock, choiceMatches, databaseTurn, turnIntoChoices, type TurnIntoChoice } from './turnInto'
 
 function CalloutIcon({ size }: { size?: number }) {
   return <LampOn className="size-4" width={size} height={size} />
@@ -90,12 +91,37 @@ function TurnIntoItem({ children }: { children: string }) {
   )
 }
 
+/** "Turn into" for a page block that links to a database, and for a database block: they become each other. */
+function TurnDatabaseItem() {
+  const Components = useComponentsContext()!
+  const editor = useBlockNoteEditor()
+  const { resolvePage } = usePageEditorContext()
+  const block = useExtensionState(SideMenuExtension, {
+    editor,
+    selector: (state) => state?.block,
+  })
+  const turn = block ? databaseTurn(block, (pageId) => !!resolvePage(pageId)?.database) : null
+  if (!block || !turn) return null
+  return (
+    <Components.Generic.Menu.Item
+      className="bn-menu-item"
+      onClick={() => {
+        editor.focus()
+        editor.updateBlock(block.id, { type: turn.type, props: turn.props } as never)
+      }}
+    >
+      Turn into {turn.label.toLowerCase()}
+    </Components.Generic.Menu.Item>
+  )
+}
+
 function BlockDragMenu() {
   const Components = useComponentsContext()!
   const dict = useDictionary()
   return (
     <DragHandleMenu>
       <TurnIntoItem>Turn into</TurnIntoItem>
+      <TurnDatabaseItem />
       <BlockColorsItem>{dict.drag_handle.colors_menuitem}</BlockColorsItem>
       <TableRowHeaderItem>{dict.drag_handle.header_row_menuitem}</TableRowHeaderItem>
       <TableColumnHeaderItem>{dict.drag_handle.header_column_menuitem}</TableColumnHeaderItem>

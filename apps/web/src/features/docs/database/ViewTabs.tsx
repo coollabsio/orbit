@@ -12,13 +12,15 @@ import { useDatabaseEnv } from './context'
 import { VIEW_KINDS, uniqueViewName, viewIcon } from './viewTypes'
 
 const MAX_VIEWS = 50
+const MAX_LINK_VIEWS = 20
 
 /** The view tabs (spec 7.1): click selects; right-click or "⋯" renames, duplicates or deletes; "+" picks the type of a new view. */
 export function ViewTabs({ views, activeId, onSelect }: { views: DatabaseView[]; activeId: string; onSelect: (viewId: string) => void }) {
-  const { workspaceId, databaseId, canEditSchema } = useDatabaseEnv()
-  const createView = useCreateView(workspaceId, databaseId)
-  const updateView = useUpdateView(workspaceId, databaseId)
-  const deleteView = useDeleteView(workspaceId, databaseId)
+  const { workspaceId, databaseId, canEditViews, linkId } = useDatabaseEnv()
+  const createView = useCreateView(workspaceId, databaseId, linkId)
+  const updateView = useUpdateView(workspaceId, databaseId, linkId)
+  const deleteView = useDeleteView(workspaceId, databaseId, linkId)
+  const maxViews = linkId ? MAX_LINK_VIEWS : MAX_VIEWS
   const [menuFor, setMenuFor] = useState<string | null>(null)
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null)
   const [picking, setPicking] = useState(false)
@@ -79,11 +81,11 @@ export function ViewTabs({ views, activeId, onSelect }: { views: DatabaseView[];
               size="sm"
               aria-selected={selected}
               data-active={selected || undefined}
-              className={cn('text-muted-foreground data-active:text-foreground data-active:after:absolute data-active:after:inset-x-1.5 data-active:after:-bottom-[5px] data-active:after:h-0.5 data-active:after:bg-foreground', canEditSchema && 'pr-6')}
+              className={cn('text-muted-foreground data-active:text-foreground data-active:after:absolute data-active:after:inset-x-1.5 data-active:after:-bottom-[5px] data-active:after:h-0.5 data-active:after:bg-foreground', canEditViews && 'pr-6')}
               onClick={() => onSelect(view.id)}
-              onDoubleClick={() => canEditSchema && setRenaming({ id: view.id, name: view.name })}
+              onDoubleClick={() => canEditViews && setRenaming({ id: view.id, name: view.name })}
               onContextMenu={(event) => {
-                if (!canEditSchema) return
+                if (!canEditViews) return
                 event.preventDefault()
                 setMenuFor(view.id)
               }}
@@ -91,7 +93,7 @@ export function ViewTabs({ views, activeId, onSelect }: { views: DatabaseView[];
               <Icon className="size-3.5" aria-hidden="true" />
               <span className="max-w-40 truncate">{view.name}</span>
             </Button>
-            {canEditSchema ? (
+            {canEditViews ? (
               <DropdownMenu open={menuFor === view.id} onOpenChange={(open) => setMenuFor(open ? view.id : null)}>
                 <DropdownMenuTrigger
                   render={
@@ -111,7 +113,7 @@ export function ViewTabs({ views, activeId, onSelect }: { views: DatabaseView[];
                     <Edit2 />
                     Rename
                   </DropdownMenuItem>
-                  <DropdownMenuItem disabled={views.length >= MAX_VIEWS} onClick={() => duplicate(view)}>
+                  <DropdownMenuItem disabled={views.length >= maxViews} onClick={() => duplicate(view)}>
                     <Copy />
                     Duplicate
                   </DropdownMenuItem>
@@ -125,7 +127,7 @@ export function ViewTabs({ views, activeId, onSelect }: { views: DatabaseView[];
           </div>
         )
       })}
-      {canEditSchema && views.length < MAX_VIEWS ? (
+      {canEditViews && views.length < maxViews ? (
         <Popover open={picking} onOpenChange={setPicking}>
           <Tip label="Add a view">
             <PopoverTrigger render={<Button type="button" variant="ghost" size="icon-sm" aria-label="Add a view" className="text-muted-foreground" disabled={createView.isPending} />}>

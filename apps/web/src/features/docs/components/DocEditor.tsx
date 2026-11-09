@@ -35,6 +35,7 @@ import {
   conflictCurrentVersion,
   descendantsQueryOptions,
   fetchPage,
+  useTrashPage,
   isPageNotFound,
   isPageVersionConflict,
   pageUploadErrorMessage,
@@ -76,7 +77,7 @@ import { CoverSourcePanel } from './CoverSourcePanel'
 import { PageHistoryPane } from './PageHistoryPane'
 import { PageLinkDialog } from './PageLinkDialog'
 import { DatabasePage } from '@/features/docs/database/DatabasePage'
-import { patchDatabaseRow } from '@/features/docs/database/api'
+import { createLink, patchDatabaseRow } from '@/features/docs/database/api'
 import { PropertyList } from '@/features/docs/database/PropertyList'
 
 const PageEditor = lazy(() => loadPageEditor().then((module) => ({ default: module.PageEditor })))
@@ -180,7 +181,8 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
   const [coverPanelOpen, setCoverPanelOpen] = useState(false)
   const [iconPickerOpen, setIconPickerOpen] = useState(false)
   const [addIconOpen, setAddIconOpen] = useState(false)
-  const [linkOpen, setLinkOpen] = useState(false)
+  /** The page picker of "Link a page", or the database picker of "Linked view of database". */
+  const [linkKind, setLinkKind] = useState<'page' | 'database' | null>(null)
   const [historyOpen, setHistoryOpen] = useState(false)
   // A database has no history; the peek has no room for it (the full row page has it).
   useCommand('docs.history', () => setHistoryOpen((open) => !open), { enabled: !isDatabase && !peek })
@@ -561,7 +563,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
   // Trashed pages leave the tree, so anything not in it renders as "Missing page".
   const resolvePage = useCallback((id: string): PageRef | null => {
     const found = byId.get(id)
-    return found ? { title: found.title, icon: found.icon, trashed: false } : null
+    return found ? { title: found.title, icon: found.icon, trashed: false, database: found.kind === 'database' } : null
   }, [byId])
 
   const onOpenPage = useCallback((id: string) => navigate(`/docs/${id}`), [navigate])
@@ -610,15 +612,54 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
       new Promise<string | null>((resolve) => {
         pickResolver.current?.(null)
         pickResolver.current = resolve
-        setLinkOpen(true)
+        setLinkKind('page')
       }),
     [],
+  )
+
+  /** Picks a database, then links it to this page: a linked view block with views of its own. */
+  const onLinkDatabase = useCallback(
+    () =>
+      new Promise<string | null>((resolve) => {
+        pickResolver.current?.(null)
+        pickResolver.current = resolve
+        setLinkKind('database')
+      }).then(async (databaseId) => {
+        if (!databaseId) return null
+        try {
+          const linked = await createLink(workspaceId, databaseId, { host_page_id: pageId })
+          return { databaseId, linkId: linked.link.id }
+        } catch (error) {
+          if (!isPaymentRequired(error)) toast.error('Could not link the database. Try again.')
+          return null
+        }
+      }),
+    [workspaceId, pageId],
+  )
+
+  const databaseHost = useMemo(() => ({ workspaceId, pageId, locked }), [workspaceId, pageId, locked])
+  const trashPage = useTrashPage(workspaceId).mutate
+  /** Deleting an inline database block keeps the database (spec 3.5); the toast offers to trash it too. */
+  const onDatabaseBlockRemoved = useCallback(
+    (databaseId: string) => {
+      toast('The database is still in the page tree', {
+        action: {
+          label: 'Move to trash',
+          onClick: () =>
+            void fetchPage(apiClient, workspaceId, databaseId).then(
+              (database) => trashPage({ pageId: databaseId, version: database.version }),
+              () => toast.error('Could not move the database to the trash.'),
+            ),
+        },
+      })
+    },
+    [workspaceId, trashPage],
   )
 
   const closeLinkDialog = (picked: string | null) => {
     pickResolver.current?.(picked)
     pickResolver.current = null
-    setLinkOpen(false)
+    setLinkKind(null)
   }
 
   // A row is not in the tree: its path is its database's path, then the database.
@@ -1072,6 +1113,9 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
                       onOpenPage={onOpenPage}
                       onCreateSubpage={onCreateSubpage}
                       onPickPage={onPickPage}
+                      databaseHost={databaseHost}
+                      onLinkDatabase={onLinkDatabase}
+                      onDatabaseBlockRemoved={onDatabaseBlockRemoved}
                       uploadFile={uploadFile}
                       comments={{
                         workspaceId,
@@ -1113,6 +1157,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
                         onOpenPage={onOpenPage}
                         onCreateSubpage={onCreateSubpage}
                         onPickPage={onPickPage}
+                        databaseHost={databaseHost}
                         mentions={mentions}
                         className="-mx-[54px] min-h-40 max-[899px]:mx-0"
                       />
@@ -1135,8 +1180,14 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
           />
         ) : null}
         </div>
-        {linkOpen ? (
-          <PageLinkDialog pages={pages} excludeId={pageId} onPick={(picked) => closeLinkDialog(picked.id)} onClose={() => closeLinkDialog(null)} />
+        {linkKind ? (
+          <PageLinkDialog
+            pages={linkKind === 'database' ? pages.filter((item) => item.kind === 'database') : pages}
+            excludeId={pageId}
+            kind={linkKind}
+            onPick={(picked) => closeLinkDialog(picked.id)}
+            onClose={() => closeLinkDialog(null)}
+          />
         ) : null}
       </Pane>
       {historyOpen ? (

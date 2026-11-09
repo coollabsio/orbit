@@ -13,8 +13,12 @@ export interface DatabaseEnv {
   users: ReadonlyMap<string, User>
   /** Rows and values (a read-only workspace refuses them). */
   canEditValues: boolean
-  /** Properties and views (also refused while the database is locked). */
+  /** Properties (also refused while the database is locked). */
   canEditSchema: boolean
+  /** The views shown: the database's own follow its lock, a linked view block's follow its host page's lock. */
+  canEditViews: boolean
+  /** The views shown are a linked view block's (`database_links` id). */
+  linkId: string | null
 }
 
 export const DatabaseEnvContext = createContext<DatabaseEnv | null>(null)
@@ -25,8 +29,11 @@ export function useDatabaseEnv(): DatabaseEnv {
   return env
 }
 
-/** The env of a database for the viewer: `locked` is the database page's lock. */
-export function useDatabaseEnvValue(workspaceId: string, databaseId: string, locked: boolean): DatabaseEnv {
+/**
+ * The env of a database for the viewer: `locked` is the database page's lock. `link`: the views shown are a linked
+ * view block's, frozen by its host page's lock instead.
+ */
+export function useDatabaseEnvValue(workspaceId: string, databaseId: string, locked: boolean, link?: { id: string; hostLocked: boolean }): DatabaseEnv {
   const membersQuery = useMembers(workspaceId)
   const me = useCurrentUser()
   const workspaceReadOnly = useWorkspaceReadOnly()
@@ -40,5 +47,7 @@ export function useDatabaseEnvValue(workspaceId: string, databaseId: string, loc
     users: new Map(members.map((user) => [user.id, user])),
     canEditValues: !workspaceReadOnly,
     canEditSchema: !locked && !workspaceReadOnly,
+    canEditViews: !(link ? link.hostLocked : locked) && !workspaceReadOnly,
+    linkId: link?.id ?? null,
   }
 }

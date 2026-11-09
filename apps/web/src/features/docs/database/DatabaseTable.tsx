@@ -31,6 +31,8 @@ interface DatabaseTableProps {
   /** The rows the view shows, in order. */
   rows: Row[]
   scrollElement: HTMLElement | null
+  /** Off inside a page (a database block shows a few rows): every row renders, in the normal flow. */
+  virtualize?: boolean
   onConfig: (config: ViewConfig) => void
   onFilter: (propertyId: string) => void
   onAddRow: () => void
@@ -45,7 +47,7 @@ interface DatabaseTableProps {
 
 /** The table view (spec 7.2–7.4): a virtualized grid with a sticky header, cell editing and keyboard moves. */
 export function DatabaseTable(props: DatabaseTableProps) {
-  const { database, config, rows, scrollElement, onConfig, onFilter, onAddRow, onOpenRow, filtered, onClearFilters, editRowId, onEditRowShown } = props
+  const { database, config, rows, scrollElement, virtualize = true, onConfig, onFilter, onAddRow, onOpenRow, filtered, onClearFilters, editRowId, onEditRowShown } = props
   const { workspaceId, databaseId, ctx, canEditValues, canEditSchema } = useDatabaseEnv()
   const updateValues = useUpdateValues(workspaceId, databaseId)
   const updateTitle = useUpdateRowTitle(workspaceId, databaseId)
@@ -107,16 +109,16 @@ export function DatabaseTable(props: DatabaseTableProps) {
     if (!editRowId || !titleId || editRowIndex === undefined) return
     setActive({ row: editRowId, col: titleId })
     setEditing(true)
-    virtualizer.scrollToIndex(editRowIndex, { align: 'auto' })
+    if (virtualize) virtualizer.scrollToIndex(editRowIndex, { align: 'auto' })
     onEditRowShown()
-  }, [editRowId, titleId, editRowIndex, virtualizer, onEditRowShown])
+  }, [editRowId, titleId, editRowIndex, virtualizer, virtualize, onEditRowShown])
 
   // The active cell keeps the focus (it is the grid's one tab stop) and stays in view.
   useEffect(() => {
     if (!active || editing) return
     const index = rowIndex.get(active.row)
     if (index === undefined) return
-    virtualizer.scrollToIndex(index, { align: 'auto' })
+    if (virtualize) virtualizer.scrollToIndex(index, { align: 'auto' })
     const frame = requestAnimationFrame(() => {
       const cell = gridRef.current?.querySelector<HTMLElement>(`[data-cell="${active.row}:${active.col}"]`)
       cell?.focus({ preventScroll: true })
@@ -385,20 +387,23 @@ export function DatabaseTable(props: DatabaseTableProps) {
             </div>
           </div>
         </div>
-        <div ref={bodyRef} role="rowgroup" className="relative" style={{ height: virtualizer.getTotalSize() }}>
-          {virtualizer.getVirtualItems().map((item) => {
+        <div ref={bodyRef} role="rowgroup" className="relative" style={virtualize ? { height: virtualizer.getTotalSize() } : undefined}>
+          {(virtualize ? virtualizer.getVirtualItems() : rows.map((row, index) => ({ key: row.id, index, start: 0 }))).map((item) => {
             const row = rows[item.index]
             return (
               <div
                 key={item.key}
-                ref={virtualizer.measureElement}
+                ref={virtualize ? virtualizer.measureElement : undefined}
                 data-index={item.index}
                 role="row"
                 aria-rowindex={item.index + 2}
                 aria-selected={selected.has(row.id)}
                 data-drop={rowDrop?.id === row.id ? rowDrop.side : undefined}
-                className="group/row absolute top-0 left-0 flex w-full border-b border-border data-[drop=after]:shadow-[inset_0_-2px_0_var(--primary)] data-[drop=before]:shadow-[inset_0_2px_0_var(--primary)] aria-selected:bg-primary/5"
-                style={{ transform: `translateY(${item.start - scrollMargin}px)`, minHeight: ROW_HEIGHT }}
+                className={cn(
+                  'group/row flex w-full border-b border-border data-[drop=after]:shadow-[inset_0_-2px_0_var(--primary)] data-[drop=before]:shadow-[inset_0_2px_0_var(--primary)] aria-selected:bg-primary/5',
+                  virtualize ? 'absolute top-0 left-0' : 'relative',
+                )}
+                style={virtualize ? { transform: `translateY(${item.start - scrollMargin}px)`, minHeight: ROW_HEIGHT } : { minHeight: ROW_HEIGHT }}
                 onDragOver={(event) => {
                   if (dragging.current?.kind !== 'row') return
                   event.preventDefault()
