@@ -225,6 +225,17 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
   schema. The package also holds `codeLanguages`, `commentMarks()` (the comment mark for editors without threads),
   the framework-free `CollabSession` (status, close codes) and `ticketWebSocket` (a fresh socket ticket per connect). Custom `page` block links to a page; it greys out as "Missing page" when the target is trashed or gone.
   Slash items "Sub-page" (creates a child page, inserts the link, opens it) and "Link a page" (picker over the tree).
+  Custom `database` block `{databaseId, linkId}` (`editor/DatabaseBlock.tsx`, databases P2 spec section 3): the database's
+  title, view tabs, toolbar and table or board inside the page (`database/DatabaseSurface.tsx`, shared with the full
+  database page), 25 rows then "Load more" (25 cards per board column), rows open in the peek (`?row=&row_block=`). Its
+  root is isolated (`@orbit/editor/isolation`): keys, pastes and drags inside never reach the editor. Slash "Database –
+  inline" makes a database sub-page (shown in the tree) and the block; "Linked view of database" picks a database and
+  `POST /databases/{id}/links` gives the block views of its own (`database_views.link_id`; changes follow the host page's
+  lock, the database's own views stay as they are; `GET /databases/{id}?link=`). Deleting an inline block keeps the
+  database ("Move to trash" in the toast); "Turn into" swaps a page link to a database and a database block. States: "No
+  access to this database" (404), "Database in trash", "View not found" (offers the database's own views). Mobile shows a
+  card (icon, title, rows, first view) that opens the database screen with `link` and `view`; Markdown writes the block as
+  a link to its database; task text drops it; duplicates copy links and their views.
   Custom `callout` block (`editor/CalloutBlock.tsx`; slash "Callout" in Basic blocks after Quote, aliases callout/note/tip/
   warning/info): inline rich text, props `emoji` (default 💡; click it to pick another in the app's emoji picker),
   `backgroundColor` (BlockNote color names, default `gray`; `default` = border only) and `textColor`, both editable in the
@@ -335,7 +346,7 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
   typed properties (computed Notion types as static values), option colors, row values, one table or board view for each
   Notion view (AND filters and sorts kept), rows as row pages in Notion order (max 5,000). A database with several
   data sources is one tree node and one database for each data source. An inline database is a database sub-page,
-  and its block becomes a `page` link. Pass 1 fetches each data source before writing and creates databases and
+  and its block becomes a `database` block of the database's own views. Pass 1 fetches each data source before writing and creates databases and
   rows through the databases repository; property and option ids derive from the Notion ids, so a resumed import
   finds them. The report adds `databases_imported`, `rows_truncated`, database lossy reasons and skipped
   `property:<type>`; web and mobile render them as sentences (`@orbit/database/notionImport`).

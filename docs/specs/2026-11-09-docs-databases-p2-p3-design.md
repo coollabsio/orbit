@@ -17,7 +17,7 @@ below). This spec does not repeat P1. A reference such as "P1 4.3" points to a s
 
 | # | Item | Phase | Size | Needs | Section |
 |---|---|---|---|---|---|
-| 1 | Inline database block and linked views | P2 | L | none | 3 |
+| 1 | Inline database block and linked views (done, 3.11) | P2 | L | none | 3 |
 | 2 | Calculation footer | P2 | S | none | 4 |
 | 3 | AND/OR filter groups | P2 | M | none | 5 |
 | 4 | Property values in search | P2 | M | none | 6 |
@@ -269,6 +269,23 @@ OQ-1.1 asks for a cleanup job.
 | OQ-1.1 | Add a job that deletes links whose block is gone from the host page and from its history for 30 days? |
 | OQ-1.2 | Does the Notion API return the views of a linked database block? If yes, import them as a link. |
 | OQ-1.3 | Should the database of an inline block move with its block when the block is cut and pasted into another page? (Proposal: no. The block keeps pointing to the same database.) |
+
+### 3.11 Status
+
+Done on 2026-11-09 (migration `0080_database_links`). Decisions: D-P2-1 as written; OQ-1.1 no cleanup job; OQ-1.3 the
+block keeps pointing to the same database; OQ-1.2 see below. Differences from this section:
+
+| # | Item | Where | Why |
+|---|---|---|---|
+| 1 | `POST …/links` with a host page the caller cannot see answers 422 `validation_failed` (`host_page_id`), not 404. | `repositories/databases/links.rs` | The database was found; the body names a bad page. |
+| 2 | A link's 21st view answers 409 `database_link_view_limit`. `DELETE …/links/{id}` needs the host page like a link view write. | `database_routes.rs` | The spec names no code; cleanup should not bypass the host lock. |
+| 3 | A 404 shows "No access to this database" unless the database is in the trash. "Database not found" is only for a block without a database id. | `editor/DatabaseBlock.tsx` | The server answers 404 for both a deleted database and one the viewer cannot read. |
+| 4 | A row peek opened from a block puts `?row=<id>&row_block=<block id>` in the URL. | `database/DatabaseSurface.tsx` | Two blocks of one database must not both open the peek. |
+| 5 | "Turn into" is its own item of the block handle menu ("Turn into inline database", "Turn into page link"). | `editor/BlockSideMenu.tsx` | The "Turn into" list holds text block types only. |
+| 6 | The Markdown export writes the link only, not the rows table. | `export/markdown.rs` | Item 7 builds the database export. |
+| 7 | Notion: the current API has view endpoints (`GET /v1/views`, "including linked views"), but nothing says a linked `child_database` block id is accepted. Import keeps a `database` block of the database's own views. | `notion/convert/mod.rs` | OQ-1.2 is open: linked views could become links later. |
+| 8 | Mobile saves linked view changes and lets the server refuse them; it has no "only visible to you" drafts for a locked host. | `apps/mobile/src/components/database/` | Mobile does not know the host page lock on the database screen. |
+| 9 | The toolbar's "Copy link to view" in a linked view block copies a view id that the full page does not have (it opens the first view). | `database/ViewToolbar.tsx` | Not decided yet. |
 
 ## 4. Item 2: Calculation footer (P2, S)
 
