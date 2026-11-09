@@ -116,6 +116,11 @@ function PageCard({ block }: { block: { props: { pageId: string } } }) {
   )
 }
 
+/** A database shown in the page: a card that opens the database screen. */
+function DatabaseCard({ block }: { block: { props: { databaseId: string } } }) {
+  return <PageCard block={{ props: { pageId: block.props.databaseId } }} />
+}
+
 function Callout({ block, contentRef }: { block: { props: { emoji: string } }; contentRef: (node: HTMLElement | null) => void }) {
   return (
     <div className="orbit-callout">
@@ -152,6 +157,7 @@ const COLORED_TOKENS = new Set(['keyword', 'string', 'comment', 'class', 'proper
 
 const { pageEditorSchema } = createEditorSchemas({
   page: { render: PageCard },
+  database: { render: DatabaseCard },
   callout: { render: Callout },
   mention: { render: Mention },
   math: { render: InlineMath },

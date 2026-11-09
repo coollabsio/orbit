@@ -97,6 +97,25 @@
     }
    ]
   },
+  "database": {
+   "content": "none",
+   "attrs": [
+    {
+     "name": "databaseId",
+     "prop": true,
+     "missing": {
+      "value": ""
+     }
+    },
+    {
+     "name": "linkId",
+     "prop": true,
+     "missing": {
+      "value": ""
+     }
+    }
+   ]
+  },
   "divider": {
    "content": "none",
    "attrs": []
