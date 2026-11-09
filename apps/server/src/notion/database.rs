@@ -14,10 +14,10 @@ use sha2::{Digest, Sha256};
 use super::convert::{ConvertReport, page_icon, page_title};
 use super::model::{NotionDataSource, NotionPage, NotionView, normalize_id, plain_text};
 use crate::repositories::databases::{
-    FilterOperator, FilterRule, MAX_CELL_ITEMS, MAX_NAME_CHARS, MAX_OPTIONS, MAX_PROPERTIES,
-    MAX_RULES, MAX_SORTS, MAX_TEXT_CHARS, MAX_VIEWS, Property, PropertyType, SchemaProperty,
-    SchemaView, SortDirection, ViewColumn, ViewConfig, ViewFilter, ViewSort, ViewType,
-    accepts_value,
+    FilterGroup, FilterNode, FilterOperator, FilterRule, GroupOp, MAX_CELL_ITEMS,
+    MAX_FILTER_LEVELS, MAX_GROUP_CHILDREN, MAX_NAME_CHARS, MAX_OPTIONS, MAX_PROPERTIES, MAX_RULES,
+    MAX_SORTS, MAX_TEXT_CHARS, MAX_VIEWS, Property, PropertyType, SchemaProperty, SchemaView,
+    SortDirection, ViewColumn, ViewConfig, ViewSort, ViewType, accepts_value,
 };
 
 /// Orbit members by lowercase email: `(user id, display name)`.
@@ -648,12 +648,20 @@ fn plan_view(
         lossy(report, "view_sort");
     }
 
-    let mut leaves = Vec::new();
-    let mut complete = view
-        .filter
-        .as_ref()
-        .is_none_or(|filter| flatten_filter(filter, &mut leaves, 0));
-    let quick: Vec<Value> = view
+    let mut filters = FilterMapping {
+        planned,
+        users,
+        rules: 0,
+        complete: true,
+    };
+    let mut root = FilterGroup::default();
+    match view.filter.as_ref().map(|filter| filters.node(filter, 1)) {
+        None | Some(Ok(None)) => {}
+        Some(Ok(Some(FilterNode::Group(group)))) => root = group,
+        Some(Ok(Some(rule @ FilterNode::Rule(_)))) => root.children.push(rule),
+        Some(Err(TooDeep)) => filters.complete = false,
+    }
+    let quick: Vec<FilterNode> = view
         .quick_filters
         .iter()
         .flatten()
@@ -663,22 +671,31 @@ fn plan_view(
                 return None;
             }
             leaf.insert("property".to_owned(), json!(key));
-            Some(Value::Object(leaf))
+            filters.leaf(&Value::Object(leaf))
         })
         .collect();
-    leaves.extend(quick);
-    let mut rules = Vec::new();
-    for leaf in &leaves {
-        match filter_rule(leaf, planned, users) {
-            Some(rule) => rules.push(rule),
-            None => complete = false,
+    if !quick.is_empty() {
+        // Quick filters must all match: an `or` root goes one level down under a new `and` root.
+        if root.op == GroupOp::Or && !root.children.is_empty() {
+            if levels(&root) < MAX_FILTER_LEVELS {
+                root = FilterGroup {
+                    op: GroupOp::And,
+                    children: vec![FilterNode::Group(root)],
+                };
+            } else {
+                filters.complete = false;
+            }
+        }
+        if root.op == GroupOp::And || root.children.is_empty() {
+            root.op = GroupOp::And;
+            root.children.extend(quick);
         }
     }
-    if rules.len() > MAX_RULES {
-        rules.truncate(MAX_RULES);
-        complete = false;
+    if root.children.len() > MAX_GROUP_CHILDREN {
+        root.children.truncate(MAX_GROUP_CHILDREN);
+        filters.complete = false;
     }
-    if !complete {
+    if !filters.complete {
         lossy(report, "view_filter");
     }
     let group_by = (view_type == ViewType::Board)
@@ -702,7 +719,7 @@ fn plan_view(
             card_properties,
             columns,
             sorts,
-            filter: ViewFilter { rules },
+            filter: root,
             wrap_cells: view
                 .configuration
                 .as_ref()
@@ -714,29 +731,71 @@ fn plan_view(
     }
 }
 
-/// Collects the conditions of a filter that all must match. `and` groups (at any depth) and
-/// one-condition `or` groups flatten; an `or` of several conditions cannot be kept. Returns
-/// false when a part was dropped.
-fn flatten_filter(filter: &Value, out: &mut Vec<Value>, depth: usize) -> bool {
-    if depth > MAX_DEPTH {
-        return false;
-    }
-    if let Some(all) = filter.get("and").and_then(Value::as_array) {
-        let mut complete = true;
-        for item in all {
-            complete &= flatten_filter(item, out, depth + 1);
-        }
-        return complete;
-    }
-    if let Some(any) = filter.get("or").and_then(Value::as_array) {
-        return match any.as_slice() {
-            [] => true,
-            [only] => flatten_filter(only, out, depth + 1),
-            _ => false,
+/// A Notion filter nests deeper than Orbit's 3 group levels.
+struct TooDeep;
+
+/// Maps Notion filters to Orbit filter groups and notes whether a part was dropped.
+struct FilterMapping<'a> {
+    planned: &'a [Planned],
+    users: &'a HashMap<String, String>,
+    /// Rules kept so far; past `MAX_RULES` the rest go.
+    rules: usize,
+    complete: bool,
+}
+
+impl FilterMapping<'_> {
+    /// A Notion compound filter as a group at `level` (the root is 1), or a condition as a rule.
+    /// A condition without an Orbit operator goes, a group left empty too, and a group of more
+    /// than 10 keeps its first 10; a group deeper than 3 levels drops the whole filter.
+    fn node(&mut self, filter: &Value, level: usize) -> Result<Option<FilterNode>, TooDeep> {
+        let compound = [("and", GroupOp::And), ("or", GroupOp::Or)]
+            .into_iter()
+            .find_map(|(key, op)| Some((op, filter.get(key)?.as_array()?)));
+        let Some((op, items)) = compound else {
+            return Ok(self.leaf(filter));
         };
+        if level > MAX_FILTER_LEVELS {
+            return Err(TooDeep);
+        }
+        let mut children = Vec::new();
+        for item in items {
+            children.extend(self.node(item, level + 1)?);
+        }
+        if children.len() > MAX_GROUP_CHILDREN {
+            children.truncate(MAX_GROUP_CHILDREN);
+            self.complete = false;
+        }
+        Ok((!children.is_empty()).then_some(FilterNode::Group(FilterGroup { op, children })))
     }
-    out.push(filter.clone());
-    true
+
+    fn leaf(&mut self, leaf: &Value) -> Option<FilterNode> {
+        let rule = (self.rules < MAX_RULES)
+            .then(|| filter_rule(leaf, self.planned, self.users))
+            .flatten();
+        match rule {
+            Some(rule) => {
+                self.rules += 1;
+                Some(FilterNode::Rule(rule))
+            }
+            None => {
+                self.complete = false;
+                None
+            }
+        }
+    }
+}
+
+/// The group levels of a filter, the root included.
+fn levels(group: &FilterGroup) -> usize {
+    1 + group
+        .children
+        .iter()
+        .map(|child| match child {
+            FilterNode::Group(group) => levels(group),
+            FilterNode::Rule(_) => 0,
+        })
+        .max()
+        .unwrap_or(0)
 }
 
 /// A Notion property filter condition as an Orbit rule, when Orbit has the operator.
@@ -1274,25 +1333,46 @@ mod tests {
     }
 
     #[test]
-    fn filters_flatten_only_and_groups() {
+    fn filters_keep_and_or_groups_up_to_three_levels() {
+        let planned = [Planned {
+            notion_id: "a".to_owned(),
+            notion_type: "checkbox".to_owned(),
+            name: "A".to_owned(),
+            id: Id::new_v7(),
+            property_type: PropertyType::Checkbox,
+            config: Value::Null,
+            options: Vec::new(),
+            groups: Vec::new(),
+        }];
+        let users = HashMap::new();
+        let mut mapping = FilterMapping {
+            planned: &planned,
+            users: &users,
+            rules: 0,
+            complete: true,
+        };
         let leaf = json!({"property": "A", "checkbox": {"equals": true}});
-        let mut out = Vec::new();
-        assert!(flatten_filter(
-            &json!({"and": [leaf, {"and": [leaf]}, {"or": [leaf]}]}),
-            &mut out,
-            0
-        ));
-        assert_eq!(out.len(), 3);
-        let mut out = Vec::new();
-        assert!(!flatten_filter(&json!({"or": [leaf, leaf]}), &mut out, 0));
-        assert!(out.is_empty());
+        let unknown = json!({"property": "B", "checkbox": {"equals": true}});
+        let Ok(Some(FilterNode::Group(group))) = mapping.node(
+            &json!({"or": [leaf, {"and": [leaf, unknown]}, {"and": [unknown]}]}),
+            1,
+        ) else {
+            panic!("an or group maps to a group");
+        };
+        assert_eq!(group.op, GroupOp::Or);
+        assert_eq!(group.children.len(), 2, "a group left empty goes");
+        assert!(
+            matches!(&group.children[1], FilterNode::Group(inner) if inner.children.len() == 1)
+        );
+        assert!(!mapping.complete, "the unknown property is reported");
+
         let mut deep = leaf.clone();
-        for _ in 0..20 {
+        for _ in 0..4 {
             deep = json!({"and": [deep]});
         }
         assert!(
-            !flatten_filter(&deep, &mut Vec::new(), 0),
-            "depth is capped"
+            mapping.node(&deep, 1).is_err(),
+            "4 levels are dropped whole"
         );
     }
 

@@ -24,6 +24,7 @@ import { groupable } from '@orbit/database/view'
 import { useSetPageLock } from '@/features/docs/api/pageOptions'
 import { useDatabaseEnv } from './context'
 import { PropertyPicker } from './FilterBar'
+import { filterRules } from '@orbit/database/filter'
 import { GripIcon } from './GripIcon'
 import { PROPERTY_TYPES } from './propertyMeta'
 import { SortPopover } from './SortPopover'
@@ -34,6 +35,8 @@ interface ViewToolbarProps {
   onConfig: (config: ViewConfig) => void
   /** Adds a rule on the property and opens its editor. */
   onAddFilter: (property: Property) => void
+  /** Opens the advanced filter. */
+  onAdvancedFilter: () => void
   search: string
   onSearch: (search: string) => void
   locked: boolean
@@ -43,13 +46,13 @@ interface ViewToolbarProps {
 }
 
 /** Filter, Sort, search, "⋯" (properties or a board's group and card properties, wrap cells, lock, link) and New (spec 7.1). */
-export function ViewToolbar({ properties, config, onConfig, onAddFilter, search, onSearch, locked, viewId, viewType, onNew }: ViewToolbarProps) {
+export function ViewToolbar({ properties, config, onConfig, onAddFilter, onAdvancedFilter, search, onSearch, locked, viewId, viewType, onNew }: ViewToolbarProps) {
   const { workspaceId, databaseId, canEditValues } = useDatabaseEnv()
   const setLock = useSetPageLock(workspaceId)
   const [searching, setSearching] = useState(search !== '')
   const [propertiesOpen, setPropertiesOpen] = useState(false)
   const moreRef = useRef<HTMLButtonElement>(null)
-  const rules = config.filter.rules.length
+  const rules = filterRules(config.filter).length
   const sorts = config.sorts.length
 
   const copyLink = () => {
@@ -75,6 +78,7 @@ export function ViewToolbar({ properties, config, onConfig, onAddFilter, search,
         properties={properties}
         label="Filter by"
         onPick={onAddFilter}
+        onAdvanced={onAdvancedFilter}
         trigger={
           <Button type="button" variant="ghost" size="sm" data-active={rules > 0 || undefined} className="text-muted-foreground data-active:text-primary" aria-label={rules > 0 ? `Filter (${rules})` : 'Filter'}>
             <Filter />

@@ -7,7 +7,7 @@ describe('neighborRows', () => {
   // Score >= 0, highest first: r1 (10), r4 (0). r2 (-2.5) and r3 (no score) are filtered out; r3 was just added at the top.
   const view = {
     ...database.views[0],
-    config: { filter: { rules: [{ property_id: 'p-num', operator: '>=' as const, value: 0 }] }, sorts: [{ property_id: 'p-num', direction: 'desc' as const }] },
+    config: { filter: { op: 'and' as const, children: [{ property_id: 'p-num', operator: '>=' as const, value: 0 }] }, sorts: [{ property_id: 'p-num', direction: 'desc' as const }] },
   }
   const order = withPinnedRows(applyView(database, view, '', ctx), [{ id: 'r3', at: 'top' }], database.rows).map((row) => row.id)
 

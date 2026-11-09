@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import { matches } from './filter'
+import { matches, matchesFilter, retainRules } from './filter'
 import { ctx, database, property, row } from './testing'
-import type { DatabaseFilterOperator, ViewContext } from './types'
+import type { DatabaseFilterGroup, DatabaseFilterOperator, ViewContext } from './types'
 import { parseDatabase } from './values'
 
 function ids(propertyId: string, operator: DatabaseFilterOperator, value?: unknown, context: ViewContext = ctx) {
@@ -149,5 +149,37 @@ describe('date filters compare local days in the viewer zone (now is Nov 9, 05:0
     const context = { ...ctx, now: Date.parse('2026-03-31T12:00:00Z') }
     const due = march.properties[0]!
     expect(march.rows.filter((row) => matches(row, rule, due, context)).map((row) => row.id)).toEqual(['a'])
+  })
+})
+
+describe('filter groups', () => {
+  const byId = new Map(database.properties.map((candidate) => [candidate.id, candidate]))
+  const matching = (group: DatabaseFilterGroup) => database.rows.filter((row) => matchesFilter(row, group, byId, ctx)).map((row) => row.id)
+  const crust = { property_id: 'p-text', operator: 'contains', value: 'crust' } as const
+  const zero = { property_id: 'p-num', operator: '=', value: 0 } as const
+  const checked = { property_id: 'p-check', operator: 'is', value: true } as const
+
+  test('an or of two rules matches rows that pass either', () => {
+    expect(matching({ op: 'or', children: [crust, zero] })).toEqual(['r1', 'r2', 'r4'])
+  })
+
+  test('an and group nested in an or', () => {
+    expect(matching({ op: 'or', children: [zero, { op: 'and', children: [crust, checked] }] })).toEqual(['r1', 'r4'])
+  })
+
+  test('an empty group matches every row, at the root and nested', () => {
+    expect(matching({ op: 'or', children: [] })).toEqual(all)
+    expect(matching({ op: 'and', children: [crust, { op: 'or', children: [] }] })).toEqual(['r1', 'r2'])
+  })
+
+  test('a rule with no value in an or group matches every row, so the group does too', () => {
+    expect(matching({ op: 'or', children: [zero, { property_id: 'p-text', operator: 'contains', value: '' }] })).toEqual(all)
+  })
+
+  test('repair drops rules of deleted properties and the groups they leave empty', () => {
+    const gone = { property_id: 'gone', operator: 'is_empty' } as const
+    expect(
+      retainRules({ op: 'and', children: [crust, { op: 'or', children: [gone] }, { op: 'or', children: [gone, zero] }] }, (rule) => byId.has(rule.property_id)),
+    ).toEqual({ op: 'and', children: [crust, { op: 'or', children: [zero] }] })
   })
 })

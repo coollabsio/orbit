@@ -4088,10 +4088,20 @@
        }
       },
       {
-       "property": "Estimate",
-       "number": {
-        "greater_than": 2
-       }
+       "and": [
+        {
+         "property": "Estimate",
+         "number": {
+          "greater_than": 2
+         }
+        },
+        {
+         "property": "Stage",
+         "select": {
+          "equals": "Idea"
+         }
+        }
+       ]
       }
      ]
     },

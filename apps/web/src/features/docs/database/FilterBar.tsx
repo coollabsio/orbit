@@ -1,20 +1,20 @@
 import { useState, type ComponentProps, type ReactElement } from 'react'
-import { Add, Xmark } from 'reicon-react'
+import { Add, Filter, Xmark } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList, CommandSeparator } from '@/components/ui/command'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { UserAvatar } from '@/components/common/UserAvatar'
 import { options } from '@orbit/database/values'
+import { EMPTY_FILTER, filterRules, MAX_RULES } from '@orbit/database/filter'
 import type { DatabaseFilterOperator, DatabaseFilterRule, Property, ViewConfig } from '@orbit/database/types'
 import { Pill } from './cells/Pill'
 import { useDatabaseEnv } from './context'
-import { OPERATOR_LABELS, RELATIVE_DATES, newRule, operatorsOf, ruleNeedsValue, ruleSummary } from '@orbit/database/meta'
+import { AdvancedFilter } from './AdvancedFilter'
+import { OPERATOR_LABELS, RELATIVE_DATES, allOf, newRule, operatorsOf, ruleNeedsValue, ruleSummary, simpleRules } from '@orbit/database/meta'
 import { PROPERTY_TYPES } from './propertyMeta'
-
-const MAX_RULES = 20
 
 interface FilterBarProps {
   properties: Property[]
@@ -23,14 +23,56 @@ interface FilterBarProps {
   /** The rule whose editor is open (a rule just added opens at once). */
   openRule: number | null
   onOpenRule: (index: number | null) => void
+  /** The advanced filter popover is open. */
+  advanced: boolean
+  onAdvanced: (open: boolean) => void
 }
 
-/** One chip per filter rule and "+ Add filter" (spec 7.1). Shows only when the view has rules. */
-export function FilterBar({ properties, config, onConfig, openRule, onOpenRule }: FilterBarProps) {
-  const rules = config.filter.rules
-  if (rules.length === 0) return null
+/**
+ * The filter bar (spec 7.1, P2 5.4): one chip per rule of a simple filter (an `and` list) and "+ Add filter"; a filter
+ * with an `or` or a nested group shows one "N rules" chip that opens the advanced filter. Shows only with rules.
+ */
+export function FilterBar({ properties, config, onConfig, openRule, onOpenRule, advanced, onAdvanced }: FilterBarProps) {
+  const count = filterRules(config.filter).length
+  const rules = simpleRules(config.filter)
+  if (count === 0 && !advanced) return null
   const byId = new Map(properties.map((property) => [property.id, property]))
-  const setRules = (next: DatabaseFilterRule[]) => onConfig({ ...config, filter: { rules: next } })
+  const setRules = (next: DatabaseFilterRule[]) => onConfig({ ...config, filter: allOf(next) })
+  if (rules === null || advanced) {
+    return (
+      <div role="toolbar" aria-label="Filters" className="flex flex-wrap items-center gap-1.5 py-1.5">
+        <FilterChip>
+          <Popover open={advanced} onOpenChange={onAdvanced}>
+            <PopoverTrigger
+              render={
+                <Button type="button" variant="ghost" className="h-auto gap-1.5 rounded-none border-0 px-2 text-xs font-normal text-primary" aria-label={`Advanced filter: ${count === 1 ? '1 rule' : `${count} rules`}`} />
+              }
+            >
+              <Filter className="size-3.5" aria-hidden="true" />
+              {count === 1 ? '1 rule' : `${count} rules`}
+            </PopoverTrigger>
+            {advanced ? (
+              <PopoverContent align="start" className="w-max max-w-[92vw] min-w-96 gap-2 overflow-x-auto p-2">
+                <AdvancedFilter properties={properties} filter={config.filter} onChange={(filter) => onConfig({ ...config, filter })} />
+              </PopoverContent>
+            ) : null}
+          </Popover>
+          <Button
+            type="button"
+            variant="ghost"
+            aria-label="Remove all filters"
+            className="h-auto w-6 rounded-none border-0 border-l border-l-border px-0 text-muted-foreground"
+            onClick={() => {
+              onAdvanced(false)
+              onConfig({ ...config, filter: EMPTY_FILTER })
+            }}
+          >
+            <Xmark className="size-3" />
+          </Button>
+        </FilterChip>
+      </div>
+    )
+  }
   return (
     <div role="toolbar" aria-label="Filters" className="flex flex-wrap items-center gap-1.5 py-1.5">
       {rules.map((rule, index) => {
@@ -59,6 +101,7 @@ export function FilterBar({ properties, config, onConfig, openRule, onOpenRule }
             setRules([...rules, newRule(property)])
             onOpenRule(rules.length)
           }}
+          onAdvanced={() => onAdvanced(true)}
           trigger={
             <Button type="button" variant="ghost" size="sm" className="text-muted-foreground">
               <Add />
@@ -71,11 +114,12 @@ export function FilterBar({ properties, config, onConfig, openRule, onOpenRule }
   )
 }
 
-/** A searchable list of the properties; picking one calls `onPick`. */
-export function PropertyPicker({ properties, label, onPick, trigger, open: controlledOpen, onOpenChange }: {
+/** A searchable list of the properties; picking one calls `onPick`. `onAdvanced` adds "Add advanced filter" below them. */
+export function PropertyPicker({ properties, label, onPick, onAdvanced, trigger, open: controlledOpen, onOpenChange }: {
   properties: Property[]
   label: string
   onPick: (property: Property) => void
+  onAdvanced?: () => void
   trigger: ReactElement
   open?: boolean
   onOpenChange?: (open: boolean) => void
@@ -110,6 +154,24 @@ export function PropertyPicker({ properties, label, onPick, trigger, open: contr
                 )
               })}
             </CommandGroup>
+            {onAdvanced ? (
+              <>
+                <CommandSeparator />
+                <CommandGroup>
+                  <CommandItem
+                    value="advanced-filter"
+                    keywords={['Advanced filter']}
+                    onSelect={() => {
+                      setOpen(false)
+                      onAdvanced()
+                    }}
+                  >
+                    <Add className="text-muted-foreground" />
+                    Add advanced filter
+                  </CommandItem>
+                </CommandGroup>
+              </>
+            ) : null}
           </CommandList>
         </Command>
       </PopoverContent>
@@ -198,7 +260,7 @@ function RuleEditor({ rule, property, onChange }: { rule: DatabaseFilterRule; pr
   )
 }
 
-function RuleValue({ rule, property, onChange }: { rule: DatabaseFilterRule; property: Property; onChange: (value: unknown) => void }) {
+export function RuleValue({ rule, property, onChange }: { rule: DatabaseFilterRule; property: Property; onChange: (value: unknown) => void }) {
   const { users } = useDatabaseEnv()
   const value = rule.value
   switch (property.type) {

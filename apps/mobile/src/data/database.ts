@@ -56,6 +56,11 @@ export function listProperties(properties: readonly Property[], config: ViewConf
     .slice(0, LIST_PROPERTIES)
 }
 
+/** "Advanced filter (3 rules)": a filter with groups, which the web edits (spec P2 5.5). */
+export function advancedFilterLabel(count: number): string {
+  return `Advanced filter (${count === 1 ? '1 rule' : `${count} rules`})`
+}
+
 /**
  * The web footer's calculations as read-only lines (spec P2 4.6): `<property> · <label> <value>`, in column order, for
  * the visible columns that have one, over the view's rows.

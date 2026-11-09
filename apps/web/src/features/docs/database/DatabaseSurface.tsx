@@ -3,7 +3,9 @@ import { createPortal } from 'react-dom'
 import { useSearchParams } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { applyView, repairConfig } from '@orbit/database/view'
-import { newRule } from '@orbit/database/meta'
+import { EMPTY_FILTER, filterRules } from '@orbit/database/filter'
+import { appendChild } from '@orbit/database/filterTree'
+import { newRule, simpleRules } from '@orbit/database/meta'
 import { newRowValues } from '@orbit/database/newRow'
 import type { Database, DatabaseView, Property, ViewConfig } from '@orbit/database/types'
 import { useCreateRow, useTrashRows, useUpdateView } from './api'
@@ -71,6 +73,7 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
   /** The table's checked rows. */
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
   const [openRule, setOpenRule] = useState<number | null>(null)
+  const [advancedFilter, setAdvancedFilter] = useState(false)
   const [editRowId, setEditRowId] = useState<string | null>(null)
   /** A row created from "New": the peek focuses its title. */
   const [focusRowId, setFocusRowId] = useState<string | null>(null)
@@ -153,6 +156,7 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
     }
     setPins([])
     setOpenRule(null)
+    setAdvancedFilter(false)
     setSelected(new Set())
   }
   const changeConfig = (next: ViewConfig) => {
@@ -164,16 +168,19 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
     const viewId = view.id
     pending.current.set(viewId, { config: next, timer: setTimeout(() => saveRef.current(viewId), SAVE_DELAY_MS) })
   }
+  /** A rule at the end of the filter: a chip opens its editor, an advanced filter its popover. */
   const addFilter = (property: Property) => {
-    changeConfig({ ...config, filter: { rules: [...config.filter.rules, newRule(property)] } })
-    setOpenRule(config.filter.rules.length)
+    const rules = simpleRules(config.filter)
+    changeConfig({ ...config, filter: appendChild(config.filter, [], newRule(property)) })
+    if (rules && !advancedFilter) setOpenRule(rules.length)
+    else setAdvancedFilter(true)
   }
   /**
    * A new row with the values the filter needs; a board card also gets its column's value and place. "New" in the
    * toolbar opens it in the peek; the others edit its title in place, so typing rows stays fast.
    */
   const addRow = (at: Pin['at'], card?: Omit<NewCard, 'at'>, open: 'inline' | 'peek' = 'inline') => {
-    const fill = newRowValues(config.filter.rules, database.properties, ctx)
+    const fill = newRowValues(config.filter, database.properties, ctx)
     const after = card && 'after' in card ? card.after : at === 'top' ? null : undefined
     createRow.mutate(
       { ...(fill.title ? { title: fill.title } : {}), values: { ...fill.values, ...card?.values }, ...(after !== undefined ? { after_row_id: after } : {}) },
@@ -187,10 +194,10 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
       },
     )
   }
-  const filtered = config.filter.rules.length > 0 || search.trim() !== ''
+  const filtered = filterRules(config.filter).length > 0 || search.trim() !== ''
   const clearFilters = () => {
     setSearch('')
-    changeConfig({ ...config, filter: { rules: [] } })
+    changeConfig({ ...config, filter: EMPTY_FILTER })
   }
 
   const controls = (
@@ -228,6 +235,7 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
             config={config}
             onConfig={changeConfig}
             onAddFilter={addFilter}
+            onAdvancedFilter={() => setAdvancedFilter(true)}
             search={search}
             onSearch={setSearch}
             locked={locked}
@@ -246,7 +254,15 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
           </Button>
         </div>
       ) : null}
-      <FilterBar properties={database.properties} config={config} onConfig={changeConfig} openRule={openRule} onOpenRule={setOpenRule} />
+      <FilterBar
+        properties={database.properties}
+        config={config}
+        onConfig={changeConfig}
+        openRule={openRule}
+        onOpenRule={setOpenRule}
+        advanced={advancedFilter}
+        onAdvanced={setAdvancedFilter}
+      />
     </>
   )
   const content = board ? (

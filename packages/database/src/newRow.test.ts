@@ -5,7 +5,7 @@ import type { DatabaseFilterRule } from './types'
 import { numberEditText, numberFromEditText, parseProperty } from './values'
 
 function fill(...rules: DatabaseFilterRule[]) {
-  return newRowValues(rules, database.properties, ctx)
+  return newRowValues({ op: 'and', children: rules }, database.properties, ctx)
 }
 
 describe('a new row under a filter gets the values the filter needs', () => {
@@ -94,4 +94,18 @@ describe('percent edit text', () => {
     expect(numberFromEditText(property('p-num'), '50')).toBe(50)
     expect(numberFromEditText(property('p-num'), '50%')).toBe(null)
   })
+})
+
+test('only rules every row must pass give values: an or group gives nothing, an and group under the root does', () => {
+  const status = { property_id: 'p-status', operator: 'is', value: ['s-done'] } as const
+  const select = { property_id: 'p-sel', operator: 'is', value: ['o-b'] } as const
+  const check = { property_id: 'p-check', operator: 'is', value: true } as const
+  expect(
+    newRowValues(
+      { op: 'and', children: [status, { op: 'or', children: [select, check] }, { op: 'and', children: [check] }] },
+      database.properties,
+      ctx,
+    ),
+  ).toEqual({ title: '', values: { 'p-status': 's-done', 'p-check': true } })
+  expect(newRowValues({ op: 'or', children: [status, select] }, database.properties, ctx)).toEqual({ title: '', values: {} })
 })

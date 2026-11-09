@@ -49541,6 +49541,37 @@
           }
         }
       },
+      "DatabaseFilterGroup": {
+        "type": "object",
+        "description": "An AND/OR group of rules and groups (spec P2 5.2), as task filters. The root group is level 1;\ngroups nest 3 levels, hold at most 10 children, and a filter has at most 20 rules. An empty\ngroup matches every row.",
+        "required": [
+          "op",
+          "children"
+        ],
+        "properties": {
+          "children": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DatabaseFilterNode"
+            }
+          },
+          "op": {
+            "$ref": "#/components/schemas/GroupOp"
+          }
+        },
+        "additionalProperties": false
+      },
+      "DatabaseFilterNode": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/DatabaseFilterGroup"
+          },
+          {
+            "$ref": "#/components/schemas/DatabaseFilterRule"
+          }
+        ],
+        "description": "A nested group (it has `op` and `children`) or a rule."
+      },
       "DatabaseFilterOperator": {
         "type": "string",
         "enum": [
@@ -49891,7 +49922,7 @@
             "description": "The order of the properties; properties missing here show at the end."
           },
           "filter": {
-            "$ref": "#/components/schemas/DatabaseViewFilter"
+            "$ref": "#/components/schemas/DatabaseFilterGroup"
           },
           "group_by": {
             "type": [
@@ -49929,19 +49960,6 @@
           },
           "wrap_cells": {
             "type": "boolean"
-          }
-        },
-        "additionalProperties": false
-      },
-      "DatabaseViewFilter": {
-        "type": "object",
-        "properties": {
-          "rules": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/DatabaseFilterRule"
-            },
-            "description": "All rules must match (AND). At most 20."
           }
         },
         "additionalProperties": false

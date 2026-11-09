@@ -2272,7 +2272,7 @@ async fn databases_import_with_typed_properties_values_and_views() {
         json!({
             "files_as_names": 1, "formula_values": 1, "invalid_values": 1, "number_format": 1,
             "people_as_text": 1, "relation_titles": 1, "rollup_values": 1,
-            "unmatched_people": 26, "view_filter": 2, "view_sort": 1, "view_type:calendar": 1,
+            "unmatched_people": 26, "view_filter": 1, "view_sort": 1, "view_type:calendar": 1,
             "views_unavailable": 1
         })
     );
@@ -2471,13 +2471,13 @@ async fn databases_import_with_typed_properties_values_and_views() {
         json!([{"property_id": id_of("Estimate"), "direction": "desc"}])
     );
     assert_eq!(
-        all["filter"]["rules"],
-        json!([
+        all["filter"],
+        json!({"op": "and", "children": [
             {"property_id": id_of("Stage"), "operator": "is", "value": [stage_idea]},
             {"property_id": id_of("Done"), "operator": "is", "value": true},
             {"property_id": id_of("State"), "operator": "is",
              "value": [coverage.option("State", "In progress")["id"]]}
-        ])
+        ]})
     );
     assert_eq!(
         all["columns"][0],
@@ -2487,9 +2487,15 @@ async fn databases_import_with_typed_properties_values_and_views() {
     assert_eq!(all["columns"][2]["hidden"], true);
     assert_eq!(all["wrap_cells"], true);
     assert_eq!(
-        coverage.detail["views"][2]["config"]["filter"]["rules"],
-        json!([]),
-        "an OR of two conditions is dropped"
+        coverage.detail["views"][2]["config"]["filter"],
+        json!({"op": "or", "children": [
+            {"property_id": id_of("Done"), "operator": "is", "value": true},
+            {"op": "and", "children": [
+                {"property_id": id_of("Estimate"), "operator": ">", "value": 2.0},
+                {"property_id": id_of("Stage"), "operator": "is", "value": [stage_idea]}
+            ]}
+        ]}),
+        "a two-level OR maps intact"
     );
 
     let (_, row_page) = harness.page(&harness.owner_cookie, one).await;

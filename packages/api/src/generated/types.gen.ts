@@ -1658,6 +1658,21 @@ export type DatabaseDetail = {
     views: Array<DatabaseView>;
 };
 
+/**
+ * An AND/OR group of rules and groups (spec P2 5.2), as task filters. The root group is level 1;
+ * groups nest 3 levels, hold at most 10 children, and a filter has at most 20 rules. An empty
+ * group matches every row.
+ */
+export type DatabaseFilterGroup = {
+    children: Array<DatabaseFilterNode>;
+    op: GroupOp;
+};
+
+/**
+ * A nested group (it has `op` and `children`) or a rule.
+ */
+export type DatabaseFilterNode = DatabaseFilterGroup | DatabaseFilterRule;
+
 export type DatabaseFilterOperator = 'equals' | 'not_equals' | 'contains' | 'not_contains' | 'starts_with' | 'ends_with' | 'is_empty' | 'is_not_empty' | '=' | '!=' | '>' | '<' | '>=' | '<=' | 'is' | 'is_not' | 'before' | 'after' | 'on_or_before' | 'on_or_after';
 
 export type DatabaseFilterRule = {
@@ -1802,7 +1817,7 @@ export type DatabaseViewConfig = {
      * The order of the properties; properties missing here show at the end.
      */
     columns?: Array<DatabaseViewColumn>;
-    filter?: DatabaseViewFilter;
+    filter?: DatabaseFilterGroup;
     /**
      * Board: the `select` or `status` property whose options are the columns. A board without
      * one falls back to the first status, else the first select property.
@@ -1822,13 +1837,6 @@ export type DatabaseViewConfig = {
      */
     sorts?: Array<DatabaseViewSort>;
     wrap_cells?: boolean;
-};
-
-export type DatabaseViewFilter = {
-    /**
-     * All rules must match (AND). At most 20.
-     */
-    rules?: Array<DatabaseFilterRule>;
 };
 
 export type DatabaseViewSort = {

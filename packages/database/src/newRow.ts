@@ -1,6 +1,6 @@
 import { addDays } from './dates'
-import { matches, ruleDay } from './filter'
-import type { CellValue, DatabaseFilterRule, Property, Row, ViewContext } from './types'
+import { isGroup, matches, ruleDay } from './filter'
+import type { CellValue, DatabaseFilterGroup, DatabaseFilterRule, Property, Row, ViewContext } from './types'
 import { apiValue, parseValue } from './values'
 
 /** What `POST …/rows` needs so a new row passes the filter: its title and its values by property id. */
@@ -8,11 +8,14 @@ export type NewRowFill = { title: string; values: Record<string, unknown> }
 
 /**
  * The title and values a new row needs to match the view's filter, as in Notion: `Status is
- * Reading` gives the status "Reading", `Tags contains AI` the tag "AI". Each property takes the
- * first rule that gives a value, and keeps it only when it passes every rule on that property.
- * Rules with no single fitting value (`is_not`, `is_not_empty`, computed types) add nothing.
+ * Reading` gives the status "Reading", `Tags contains AI` the tag "AI". Only rules every row must
+ * pass count: those of an `and` root and of the `and` groups under it; an `or` group gives nothing.
+ * Each property takes the first rule that gives a value, and keeps it only when it passes every
+ * such rule on that property. Rules with no single fitting value (`is_not`, `is_not_empty`,
+ * computed types) add nothing.
  */
-export function newRowValues(rules: readonly DatabaseFilterRule[], properties: readonly Property[], ctx: ViewContext): NewRowFill {
+export function newRowValues(filter: DatabaseFilterGroup, properties: readonly Property[], ctx: ViewContext): NewRowFill {
+  const rules = requiredRules(filter)
   const byId = new Map(properties.map((property) => [property.id, property]))
   const fill: NewRowFill = { title: '', values: {} }
   const done = new Set<string>()
@@ -29,6 +32,11 @@ export function newRowValues(rules: readonly DatabaseFilterRule[], properties: r
     else fill.values[property.id] = apiValue(candidate)
   }
   return fill
+}
+
+function requiredRules(group: DatabaseFilterGroup): DatabaseFilterRule[] {
+  if (group.op !== 'and') return []
+  return group.children.flatMap((child) => (isGroup(child) ? requiredRules(child) : [child]))
 }
 
 function valueFor(rule: DatabaseFilterRule, property: Property, ctx: ViewContext): CellValue | null {

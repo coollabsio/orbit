@@ -2,14 +2,15 @@
  * The view sheets of a database screen: the filter rules (the web's `FilterBar` chips and rule editor) and the sorts
  * (the web's `SortPopover`, with up and down instead of drag). Every change goes to `onConfig`.
  */
-import { newRule, OPERATOR_LABELS, operatorsOf, RELATIVE_DATES, ruleNeedsValue, ruleSummary } from '@orbit/database/meta'
+import { EMPTY_FILTER, filterRules, MAX_RULES } from '@orbit/database/filter'
+import { allOf, newRule, OPERATOR_LABELS, operatorsOf, RELATIVE_DATES, ruleNeedsValue, ruleSummary, simpleRules } from '@orbit/database/meta'
 import type { DatabaseFilterOperator, DatabaseFilterRule, DatabaseViewSort, Property, ViewConfig, ViewContext } from '@orbit/database/types'
 import { dayOf, localDate } from '@orbit/database/dates'
 import { options } from '@orbit/database/values'
 import { type ReactNode, useState } from 'react'
 import { Pressable, ScrollView, View } from 'react-native'
 
-import { PROPERTY_ICONS } from '../../data/database'
+import { advancedFilterLabel, PROPERTY_ICONS } from '../../data/database'
 import { usePeople } from '../../queries'
 import { useTheme } from '../../theme'
 import { Avatar, Button, Icon, IconButton, Input, Text } from '../../ui'
@@ -17,7 +18,6 @@ import { DayPicker } from '../tasks/DayPicker'
 import { SheetList, SheetNote, SheetRow, SheetSearch } from '../tasks/Sheet'
 import { ChoiceRow, Pill } from './cells'
 
-const MAX_RULES = 20
 const MAX_SORTS = 10
 
 interface ConfigProps {
@@ -45,7 +45,10 @@ function PropertyChoices({ properties, onPick }: { properties: readonly Property
   )
 }
 
-/** The rules of the view; a rule opens its editor in place, and "Add filter" picks a property first. */
+/**
+ * The rules of the view; a rule opens its editor in place, and "Add filter" picks a property first. A filter with `or` or
+ * nested groups is edited on the web (spec P2 5.5); the view still applies it.
+ */
 export function FilterContent({ properties, config, onConfig, ctx, openRule, onOpenRule }: ConfigProps & {
   ctx: ViewContext
   /** The rule whose editor shows; `'add'` shows the property list. */
@@ -53,9 +56,18 @@ export function FilterContent({ properties, config, onConfig, ctx, openRule, onO
   onOpenRule: (rule: number | 'add' | null) => void
 }) {
   const { colors } = useTheme()
-  const rules = config.filter.rules
+  const rules = simpleRules(config.filter)
   const byId = new Map(properties.map((property) => [property.id, property]))
-  const setRules = (next: DatabaseFilterRule[]) => onConfig({ ...config, filter: { rules: next } })
+  const setRules = (next: DatabaseFilterRule[]) => onConfig({ ...config, filter: allOf(next) })
+
+  if (rules === null) {
+    return (
+      <SheetList>
+        <SheetNote>{advancedFilterLabel(filterRules(config.filter).length)} · Edit on the web</SheetNote>
+        <SheetRow label="Delete all filters" icon="trash" onPress={() => onConfig({ ...config, filter: EMPTY_FILTER })} />
+      </SheetList>
+    )
+  }
 
   if (openRule === 'add') {
     return (

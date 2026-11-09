@@ -46,7 +46,7 @@ const LOSSY: Record<string, (n: number) => string> = {
   properties_truncated: (n) =>
     `${count(n, "property was", "properties were")} left out: an Orbit database holds at most 100.`,
   view_filter: (n) =>
-    `${count(n, "view lost", "views lost")} part of the filter: Orbit keeps conditions that all must match, without OR groups or conditions it does not have.`,
+    `${count(n, "view lost", "views lost")} part of the filter: Orbit keeps AND and OR groups up to 3 levels deep, without conditions it does not have.`,
   view_sort: (n) =>
     `${count(n, "view lost", "views lost")} a sort by something Orbit does not sort by (such as the creation time of a row).`,
   views_unavailable: (n) =>

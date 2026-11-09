@@ -1,7 +1,7 @@
 import type {
   DatabaseCalculation,
   DatabaseDetail,
-  DatabaseFilterRule,
+  DatabaseFilterGroup,
   DatabaseProperty,
   DatabasePropertyType,
   DatabaseRow,
@@ -12,6 +12,8 @@ import type {
 export type {
   DatabaseCalculation,
   DatabaseDetail,
+  DatabaseFilterGroup,
+  DatabaseFilterNode,
   DatabaseFilterOperator,
   DatabaseFilterRule,
   DatabaseHead,
@@ -101,7 +103,8 @@ export type Database = Omit<DatabaseDetail, 'properties' | 'rows'> & {
 export type ViewConfig = {
   columns: Required<DatabaseViewColumn>[]
   sorts: DatabaseViewSort[]
-  filter: { rules: DatabaseFilterRule[] }
+  /** AND/OR groups of rules, the root group first (spec P2 5.2). */
+  filter: DatabaseFilterGroup
   wrap_cells: boolean
   /** Board: the `select` or `status` property whose options are the columns. */
   group_by: string | null

@@ -4,7 +4,8 @@
  * each. View changes save for everyone after 500 ms, or stay on this device for viewers who cannot change views (D1).
  */
 import { groupRows, type BoardGroup } from '@orbit/database/board'
-import { ruleSummary } from '@orbit/database/meta'
+import { EMPTY_FILTER, filterRules } from '@orbit/database/filter'
+import { ruleSummary, simpleRules } from '@orbit/database/meta'
 import { newRowValues } from '@orbit/database/newRow'
 import type { Database, DatabaseView as View_, GroupProperty, Property, Row, ViewConfig, ViewContext } from '@orbit/database/types'
 import { cellOf } from '@orbit/database/values'
@@ -13,7 +14,7 @@ import { router } from 'expo-router'
 import { type ReactElement, useEffect, useState } from 'react'
 import { FlatList, Pressable, ScrollView, useWindowDimensions, View } from 'react-native'
 
-import { filledProperties, groupValues, listProperties, pickView, PROPERTY_ICONS, sortedViews, summaryLines, VIEW_ICONS, viewStorageKey } from '../../data/database'
+import { advancedFilterLabel, filledProperties, groupValues, listProperties, pickView, PROPERTY_ICONS, sortedViews, summaryLines, VIEW_ICONS, viewStorageKey } from '../../data/database'
 import { type Notify, useCreateRow, useDatabase, useUpdateValues, useViewContext, useViewDrafts, useWorkspaceReadOnly } from '../../hooks/database'
 import { storage } from '../../storage'
 import { alpha, useTheme } from '../../theme'
@@ -75,7 +76,7 @@ export function DatabaseView({ databaseId, linkId = '', initialView = null, head
   const draft = views.drafts[view.id]
   const config = repairConfig({ ...view, config: draft ?? view.config }, database.properties)
   const rows = applyView(database, { ...view, config }, search, ctx)
-  const filtered = config.filter.rules.length > 0 || search.trim() !== ''
+  const filtered = filterRules(config.filter).length > 0 || search.trim() !== ''
   const onConfig = (next: ViewConfig) => views.change(view.id, next)
 
   const selectView = (viewId: string) => {
@@ -85,12 +86,12 @@ export function DatabaseView({ databaseId, linkId = '', initialView = null, head
   }
   /** A new row with the values the filter needs (and a board column's value), opened on its own page. */
   const addRow = (values: Record<string, unknown> = {}) => {
-    const fill = newRowValues(config.filter.rules, database.properties, ctx)
+    const fill = newRowValues(config.filter, database.properties, ctx)
     createRow.mutate({ ...(fill.title ? { title: fill.title } : {}), values: { ...fill.values, ...values } }, { onSuccess: (row) => router.push(`/docs/${row.id}`) })
   }
   const clearFilters = () => {
     setSearch('')
-    onConfig({ ...config, filter: { rules: [] } })
+    onConfig({ ...config, filter: EMPTY_FILTER })
   }
   const openFilters = (rule: number | 'add' | null) => {
     setOpenRule(rule)
@@ -213,7 +214,8 @@ function Toolbar(props: {
   const { colors, scheme } = useTheme()
   const muted = alpha(colors.mutedForeground, 0.7)
   const byId = new Map(database.properties.map((property) => [property.id, property]))
-  const rules = config.filter.rules
+  const count = filterRules(config.filter).length
+  const rules = simpleRules(config.filter)
   return (
     <View className="px-3 gap-2 pb-2">
       <View className="flex-row items-center gap-1 border-b border-border pb-1.5">
@@ -225,7 +227,7 @@ function Toolbar(props: {
           <Icon name="chevronDown" size={12} color={colors.mutedForeground} />
         </Pressable>
         <View className="flex-1" />
-        <IconButton icon="filter" label={rules.length > 0 ? `Filter, ${rules.length}` : 'Filter'} color={rules.length > 0 ? colors.primary : muted} onPress={() => props.onFilters(null)} />
+        <IconButton icon="filter" label={count > 0 ? `Filter, ${count}` : 'Filter'} color={count > 0 ? colors.primary : muted} onPress={() => props.onFilters(null)} />
         <IconButton icon="sort" label={config.sorts.length > 0 ? `Sort, ${config.sorts.length}` : 'Sort'} color={config.sorts.length > 0 ? colors.primary : muted} onPress={props.onSorts} />
         {props.canAdd ? <IconButton icon="plus" label="New row" size={28} variant="primary" disabled={props.adding} onPress={props.onAdd} /> : null}
       </View>
@@ -246,7 +248,21 @@ function Toolbar(props: {
         />
         {search ? <IconButton icon="close" label="Clear search" size={22} iconSize={13} color={muted} onPress={() => onSearch('')} /> : null}
       </View>
-      {rules.length > 0 ? (
+      {rules === null ? (
+        <View accessibilityLabel="Filters" className="flex-row flex-wrap gap-1.5">
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={advancedFilterLabel(count)}
+            onPress={() => props.onFilters(null)}
+            className="h-7 max-w-full flex-row items-center gap-1.5 px-2 rounded-md border border-border bg-background active:bg-muted"
+          >
+            <Icon name="filter" size={13} color={colors.primary} />
+            <Text numberOfLines={1} className="text-[12px] shrink text-primary">
+              {advancedFilterLabel(count)}
+            </Text>
+          </Pressable>
+        </View>
+      ) : rules.length > 0 ? (
         <View accessibilityLabel="Filters" className="flex-row flex-wrap gap-1.5">
           {rules.map((rule, index) => {
             const property = byId.get(rule.property_id)

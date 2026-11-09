@@ -1,5 +1,5 @@
 import { calculationsFor } from './calculate'
-import { matches } from './filter'
+import { matchesFilter, retainRules } from './filter'
 import { sortRows } from './sort'
 import type { Database, DatabaseView, GroupProperty, Property, Row, ViewConfig, ViewContext } from './types'
 import { cellOf, displayText } from './values'
@@ -9,7 +9,8 @@ const TITLE_WIDTH = 280
 
 /**
  * The view's config with defaults filled in. Like the server's `ViewConfig::repair`, it drops
- * columns, sorts, rules, card properties and calculations that name a deleted property, repeats,
+ * columns, sorts, rules, card properties and calculations that name a deleted property (and filter groups left
+ * empty), repeats,
  * calculations that do not fit their property's type, and groups that are not options of the group
  * property; a board whose group property is gone groups by the first status, else the first select.
  * Then it appends each property missing from `columns` as a visible column, in property order.
@@ -37,7 +38,7 @@ export function repairConfig(view: DatabaseView, properties: readonly Property[]
     seenSorts.add(sort.property_id)
     return true
   })
-  const rules = (config.filter?.rules ?? []).filter((rule) => known.has(rule.property_id))
+  const filter = config.filter ? retainRules(config.filter, (rule) => known.has(rule.property_id)) : { op: 'and' as const, children: [] }
   const kept = config.group_by != null && groupable(known.get(config.group_by)) ? config.group_by : null
   const group_by = kept ?? (view.type === 'board' ? defaultGroupBy(properties) : null)
   const groupProperty = group_by === null ? undefined : known.get(group_by)
@@ -56,7 +57,7 @@ export function repairConfig(view: DatabaseView, properties: readonly Property[]
   return {
     columns,
     sorts,
-    filter: { rules },
+    filter,
     wrap_cells: config.wrap_cells ?? false,
     group_by,
     group_order: groups(config.group_order),
@@ -80,15 +81,14 @@ function hasOption(property: Property | undefined, id: string): boolean {
 }
 
 /**
- * The rows a view shows: those that pass every filter rule, then those whose title or the
+ * The rows a view shows: those that pass the filter groups, then those whose title or the
  * display text of a visible column (a board: a card property) contains `search` (ignoring case),
  * in the view's sort order.
  */
 export function applyView(database: Database, view: DatabaseView, search: string, ctx: ViewContext): Row[] {
   const config = repairConfig(view, database.properties)
   const byId = new Map(database.properties.map((property) => [property.id, property]))
-  const rules = config.filter.rules.map((rule) => ({ rule, property: byId.get(rule.property_id)! }))
-  let rows = database.rows.filter((row) => rules.every(({ rule, property }) => matches(row, rule, property, ctx)))
+  let rows = database.rows.filter((row) => matchesFilter(row, config.filter, byId, ctx))
   const term = search.trim().toLowerCase()
   if (term !== '') {
     const shown = (property: Property) =>

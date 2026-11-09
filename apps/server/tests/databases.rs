@@ -304,7 +304,7 @@ async fn a_new_database_has_a_title_tags_and_one_table_view_and_no_body() {
                 {"property_id": property(&database, "Tags")["id"], "width": 200, "hidden": false},
             ],
             "sorts": [],
-            "filter": {"rules": []},
+            "filter": {"op": "and", "children": []},
             "wrap_cells": false,
         })
     );
@@ -924,7 +924,7 @@ async fn removing_options_and_properties_cleans_values_and_views() {
             Some(json!({"config": {
                 "columns": [{"property_id": tags, "width": 120}, {"property_id": name}],
                 "sorts": [{"property_id": tags, "direction": "asc"}, {"property_id": name, "direction": "desc"}],
-                "filter": {"rules": [
+                "filter": {"op": "and", "children": [
                     {"property_id": tags, "operator": "contains", "value": [rust]},
                     {"property_id": name, "operator": "contains", "value": "B"},
                     {"property_id": Id::new_v7().to_string(), "operator": "is_empty"}
@@ -933,7 +933,10 @@ async fn removing_options_and_properties_cleans_values_and_views() {
         )
         .await;
     assert_eq!(
-        saved["config"]["filter"]["rules"].as_array().unwrap().len(),
+        saved["config"]["filter"]["children"]
+            .as_array()
+            .unwrap()
+            .len(),
         2,
         "unknown property dropped"
     );
@@ -947,7 +950,7 @@ async fn removing_options_and_properties_cleans_values_and_views() {
         json!({
             "columns": [{"property_id": name, "width": 200, "hidden": false}],
             "sorts": [{"property_id": name, "direction": "desc"}],
-            "filter": {"rules": [{"property_id": name, "operator": "contains", "value": "B"}]},
+            "filter": {"op": "and", "children": [{"property_id": name, "operator": "contains", "value": "B"}]},
             "wrap_cells": false,
         })
     );
@@ -975,19 +978,19 @@ async fn removing_options_and_properties_cleans_values_and_views() {
             "config.columns[0].width",
         ),
         (
-            json!({"filter": {"rules": [{"property_id": name, "operator": ">", "value": 1}]}}),
-            "config.filter.rules[0].operator",
+            json!({"filter": {"op": "and", "children": [{"property_id": name, "operator": ">", "value": 1}]}}),
+            "config.filter.children[0].operator",
         ),
         (
-            json!({"filter": {"rules": [{"property_id": name, "operator": "contains", "value": 1}]}}),
-            "config.filter.rules[0].value",
+            json!({"filter": {"op": "and", "children": [{"property_id": name, "operator": "contains", "value": 1}]}}),
+            "config.filter.children[0].value",
         ),
         (
             json!({"sorts": (0..11).map(|_| json!({"property_id": name, "direction": "asc"})).collect::<Vec<_>>()}),
             "config.sorts",
         ),
         (
-            json!({"filter": {"rules": [{"property_id": name, "operator": "nope"}]}}),
+            json!({"filter": {"op": "and", "children": [{"property_id": name, "operator": "nope"}]}}),
             "config",
         ),
     ] {
@@ -1913,7 +1916,7 @@ async fn board_views_check_and_repair_their_grouping() {
     assert_eq!(
         saved["config"],
         json!({
-            "columns": [], "sorts": [], "filter": {"rules": []}, "wrap_cells": false,
+            "columns": [], "sorts": [], "filter": {"op": "and", "children": []}, "wrap_cells": false,
             "group_by": priority_id, "group_order": [low, null, high], "hidden_groups": [null],
             "card_properties": [tags],
         }),
@@ -1941,7 +1944,7 @@ async fn board_views_check_and_repair_their_grouping() {
     assert_eq!(
         views[1]["config"],
         json!({
-            "columns": [], "sorts": [], "filter": {"rules": []}, "wrap_cells": false,
+            "columns": [], "sorts": [], "filter": {"op": "and", "children": []}, "wrap_cells": false,
             "group_by": state_id, "card_properties": [tags],
         }),
         "a deleted group property falls back to the first status, with the default order"
@@ -2482,4 +2485,142 @@ async fn footer_calculations_fit_their_property_type() {
         database["views"][0]["config"]["calculations"],
         json!({&name: "count_values"})
     );
+}
+
+#[tokio::test]
+async fn filters_nest_and_or_groups_three_levels_deep() {
+    let fixture = Fixture::new().await;
+    let db = fixture.create_database("Groups").await;
+    let database = fixture.database(&db).await;
+    let view = id_of(&database["views"][0]).to_owned();
+    let name = id_of(property(&database, "Name")).to_owned();
+    let tags = id_of(property(&database, "Tags")).to_owned();
+    let path = format!("databases/{db}/views/{view}");
+    let rule = |property: &str, value: &str| json!({"property_id": property, "operator": "contains", "value": value});
+    let tags_rule = json!({"property_id": tags, "operator": "is_empty", "value": null});
+
+    let filter = json!({"op": "and", "children": [
+        rule(&name, "a"),
+        {"op": "or", "children": [
+            rule(&name, "b"),
+            {"op": "and", "children": [rule(&name, "c"), tags_rule]},
+        ]},
+    ]});
+    let saved = fixture
+        .ok("PATCH", &path, Some(json!({"config": {"filter": filter}})))
+        .await;
+    assert_eq!(
+        saved["config"]["filter"], filter,
+        "3 levels are kept as sent"
+    );
+
+    let deep = json!({"op": "and", "children": [
+        rule(&name, "a"),
+        {"op": "or", "children": [
+            {"op": "and", "children": [{"op": "or", "children": [rule(&name, "d")]}]},
+        ]},
+    ]});
+    let many = |count: usize| (0..count).map(|_| rule(&name, "x")).collect::<Vec<_>>();
+    for (filter, field) in [
+        (deep, "config.filter.children[1].children[0].children[0]"),
+        (
+            json!({"op": "or", "children": [{"op": "and", "children": [{"property_id": name, "operator": ">", "value": 1}]}]}),
+            "config.filter.children[0].children[0].operator",
+        ),
+        (
+            json!({"op": "and", "children": many(11)}),
+            "config.filter.children",
+        ),
+        (
+            json!({"op": "and", "children": [
+                {"op": "or", "children": many(10)},
+                {"op": "or", "children": many(10)},
+                rule(&name, "one too many"),
+            ]}),
+            "config.filter",
+        ),
+        (json!({"rules": []}), "config"),
+    ] {
+        let (status, body) = fixture
+            .call("PATCH", &path, Some(json!({"config": {"filter": filter}})))
+            .await;
+        assert_eq!(
+            (status, body["detail"].as_str()),
+            (StatusCode::UNPROCESSABLE_ENTITY, Some(field)),
+            "{body}"
+        );
+    }
+
+    // Deleting Tags drops its rule; the group it leaves with one rule stays.
+    fixture
+        .ok("DELETE", &format!("databases/{db}/properties/{tags}"), None)
+        .await;
+    let repaired = &fixture.database(&db).await["views"][0]["config"]["filter"];
+    assert_eq!(
+        repaired,
+        &json!({"op": "and", "children": [
+            rule(&name, "a"),
+            {"op": "or", "children": [
+                rule(&name, "b"),
+                {"op": "and", "children": [rule(&name, "c")]},
+            ]},
+        ]})
+    );
+    // A group whose only rule goes is dropped.
+    let lonely = fixture
+        .add_property(&db, json!({"name": "Lonely", "type": "text"}))
+        .await;
+    let lonely = id_of(&lonely).to_owned();
+    fixture
+        .ok(
+            "PATCH",
+            &path,
+            Some(json!({"config": {"filter": {"op": "and", "children": [
+                rule(&name, "a"),
+                {"op": "or", "children": [rule(&lonely, "z")]},
+            ]}}})),
+        )
+        .await;
+    fixture
+        .ok(
+            "DELETE",
+            &format!("databases/{db}/properties/{lonely}"),
+            None,
+        )
+        .await;
+    assert_eq!(
+        fixture.database(&db).await["views"][0]["config"]["filter"],
+        json!({"op": "and", "children": [rule(&name, "a")]})
+    );
+}
+
+#[tokio::test]
+async fn the_filter_migration_turns_p1_rules_into_the_root_and_group() {
+    let fixture = Fixture::new().await;
+    let db = fixture.create_database("Before groups").await;
+    let database = fixture.database(&db).await;
+    let view = id_of(&database["views"][0]).to_owned();
+    let name = id_of(property(&database, "Name")).to_owned();
+    let rules = json!([{"property_id": name, "operator": "contains", "value": "rust"}]);
+    // The view as P1 stored it, and the migration not yet run.
+    sqlx::query("UPDATE database_views SET config_json = $1 WHERE id = $2")
+        .bind(
+            json!({"columns": [], "sorts": [], "filter": {"rules": rules}, "wrap_cells": true})
+                .to_string(),
+        )
+        .bind(&view)
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM schema_migrations WHERE version = 82")
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    orbit_platform::MigrationRunner::embedded("test")
+        .run(&fixture.database)
+        .await
+        .unwrap();
+    let config = &fixture.database(&db).await["views"][0]["config"];
+    assert_eq!(config["filter"], json!({"op": "and", "children": rules}));
+    assert_eq!(config["wrap_cells"], true);
 }

@@ -108,7 +108,8 @@ const view: DatabaseView = {
       { property_id: 'text1', direction: 'asc' },
     ],
     filter: {
-      rules: [
+      op: 'and',
+      children: [
         { property_id: 'text2', operator: 'not_contains', value: 'zulu' },
         { property_id: 'num1', operator: '>=', value: 50 },
         { property_id: 'status', operator: 'is_not', value: ['done'] },

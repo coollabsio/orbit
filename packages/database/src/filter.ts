@@ -1,5 +1,5 @@
 import { addDays, addMonths, localDay, parseDatePoint, pointDay } from './dates'
-import type { CellValue, DatabaseFilterRule, Property, Row, ViewContext } from './types'
+import type { CellValue, DatabaseFilterGroup, DatabaseFilterNode, DatabaseFilterRule, Property, Row, ViewContext } from './types'
 import { cellOf, displayText, unreachable } from './values'
 
 const RELATIVE_DAYS: Record<string, (today: string) => string> = {
@@ -10,6 +10,51 @@ const RELATIVE_DAYS: Record<string, (today: string) => string> = {
   one_week_from_now: (today) => addDays(today, 7),
   one_month_ago: (today) => addMonths(today, -1),
   one_month_from_now: (today) => addMonths(today, 1),
+}
+
+/** Group levels, the root included (spec P2 5.2). */
+export const MAX_FILTER_LEVELS = 3
+export const MAX_GROUP_CHILDREN = 10
+/** Rules across the whole filter. */
+export const MAX_RULES = 20
+
+/** A filter with no rules: it matches every row. */
+export const EMPTY_FILTER: DatabaseFilterGroup = { op: 'and', children: [] }
+
+export function isGroup(node: DatabaseFilterNode): node is DatabaseFilterGroup {
+  return 'children' in node
+}
+
+/** Every rule of a filter, depth first in order. */
+export function filterRules(group: DatabaseFilterGroup): DatabaseFilterRule[] {
+  return group.children.flatMap((child) => (isGroup(child) ? filterRules(child) : [child]))
+}
+
+/**
+ * Whether `row` passes a filter: an `and` group needs every child, an `or` group one; an empty group matches every row.
+ * A rule whose property is not in `properties` matches too (repair drops it).
+ */
+export function matchesFilter(row: Row, group: DatabaseFilterGroup, properties: ReadonlyMap<string, Property>, ctx: ViewContext): boolean {
+  if (group.children.length === 0) return true
+  const passes = (child: DatabaseFilterNode) => {
+    if (isGroup(child)) return matchesFilter(row, child, properties, ctx)
+    const property = properties.get(child.property_id)
+    return property === undefined || matches(row, child, property, ctx)
+  }
+  return group.op === 'and' ? group.children.every(passes) : group.children.some(passes)
+}
+
+/**
+ * The filter with the rules `keep` accepts, as the server's `retain_rules`: a group left empty goes (a group with one
+ * child stays); the root stays.
+ */
+export function retainRules(group: DatabaseFilterGroup, keep: (rule: DatabaseFilterRule) => boolean): DatabaseFilterGroup {
+  const children = group.children.flatMap((child): DatabaseFilterNode[] => {
+    if (!isGroup(child)) return keep(child) ? [child] : []
+    const kept = retainRules(child, keep)
+    return kept.children.length > 0 ? [kept] : []
+  })
+  return { op: group.op === 'or' ? 'or' : 'and', children }
 }
 
 /**

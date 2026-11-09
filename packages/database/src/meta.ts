@@ -1,4 +1,5 @@
-import type { DatabaseFilterOperator, DatabaseFilterRule, DatabasePropertyType, OptionColor, Property, ViewContext } from './types'
+import { isGroup } from './filter'
+import type { DatabaseFilterGroup, DatabaseFilterOperator, DatabaseFilterRule, DatabasePropertyType, OptionColor, Property, ViewContext } from './types'
 import { options } from './values'
 
 /** The name of each property type, as the type menus show it. */
@@ -97,6 +98,21 @@ export const OPTION_COLOR_LABELS: Record<OptionColor, string> = {
   red: 'Red',
 }
 
+/**
+ * The rules of a filter the bar shows as chips (spec P2 5.4): an `and` root with only rules. `null` for a filter with an
+ * `or` or a nested group, which the advanced filter edits.
+ */
+export function simpleRules(filter: DatabaseFilterGroup): DatabaseFilterRule[] | null {
+  if (filter.op !== 'and' && filter.children.length > 1) return null
+  const rules = filter.children.flatMap((child) => (isGroup(child) ? [] : [child]))
+  return rules.length === filter.children.length ? rules : null
+}
+
+/** The filter of a rule list: every rule must match. */
+export function allOf(rules: DatabaseFilterRule[]): DatabaseFilterGroup {
+  return { op: 'and', children: rules }
+}
+
 /** A new filter rule on a property: its type's first operator and no value, which matches every row. */
 export function newRule(property: Property): DatabaseFilterRule {
   return { property_id: property.id, operator: operatorsOf(property.type)[0], value: null }
@@ -111,20 +127,28 @@ export function ruleNeedsValue(operator: DatabaseFilterOperator): boolean {
 export function ruleSummary(rule: DatabaseFilterRule, property: Property, ctx: ViewContext): string {
   const operator = OPERATOR_LABELS[rule.operator]
   if (!ruleNeedsValue(rule.operator)) return operator
+  const value = ruleValueText(rule, property, ctx)
+  if (value === null) return 'All'
+  if (property.type === 'checkbox') return value
+  if (Array.isArray(rule.value)) return rule.operator === 'is' || rule.operator === 'contains' ? value : `${operator} ${value}`
+  return `${operator} ${typeof rule.value === 'string' && !isDateValue(rule.value) ? `“${value}”` : value}`
+}
+
+/** A rule's value as text: option and member names, `Checked`, a relative date's label or the date. `null` without a value. */
+export function ruleValueText(rule: DatabaseFilterRule, property: Property, ctx: ViewContext): string | null {
   const value = rule.value
-  if (value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0)) return 'All'
+  if (value === null || value === undefined || value === '' || (Array.isArray(value) && value.length === 0)) return null
   if (property.type === 'checkbox') return value === true ? 'Checked' : 'Unchecked'
   if (Array.isArray(value)) {
     const names = value.map((id) =>
       id === 'me' ? 'Me' : typeof id !== 'string' ? '' : options(property).find((option) => option.id === id)?.name ?? ctx.members.get(id) ?? '',
     )
-    const listed = names.filter((name) => name !== '').join(', ')
-    return rule.operator === 'is' || rule.operator === 'contains' ? listed : `${operator} ${listed}`
+    return names.filter((name) => name !== '').join(', ')
   }
-  if (typeof value === 'string') {
-    const relative = RELATIVE_DATES.find((date) => date.value === value)?.label
-    if (relative || /^\d{4}-\d{2}-\d{2}/.test(value)) return `${operator} ${relative ?? value.slice(0, 10)}`
-    return `${operator} “${value}”`
-  }
-  return `${operator} ${String(value)}`
+  if (typeof value === 'string') return RELATIVE_DATES.find((date) => date.value === value)?.label ?? (isDateValue(value) ? value.slice(0, 10) : value)
+  return String(value)
+}
+
+function isDateValue(value: string): boolean {
+  return RELATIVE_DATES.some((date) => date.value === value) || /^\d{4}-\d{2}-\d{2}/.test(value)
 }

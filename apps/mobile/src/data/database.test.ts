@@ -3,7 +3,7 @@ import { ctx, database, property } from '@orbit/database/testing'
 import type { GroupProperty } from '@orbit/database/types'
 import { repairConfig } from '@orbit/database/view'
 
-import { filledProperties, groupValues, listProperties, parseTime, pickView, summaryLines } from './database'
+import { advancedFilterLabel, filledProperties, groupValues, listProperties, parseTime, pickView, summaryLines } from './database'
 
 const view = database.views[0]!
 
@@ -74,4 +74,8 @@ test('the summary lists the calculations of visible columns in column order', ()
     { id: 'p-num', text: 'Score · Sum 7.5' },
     { id: 'p-title', text: 'Name · Count 4' },
   ])
+})
+
+test('a filter with groups is named by its rule count', () => {
+  expect([advancedFilterLabel(1), advancedFilterLabel(3)]).toEqual(['Advanced filter (1 rule)', 'Advanced filter (3 rules)'])
 })

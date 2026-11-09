@@ -24,7 +24,8 @@ describe('repairConfig', () => {
           { property_id: 'p-num', direction: 'asc' },
         ],
         filter: {
-          rules: [
+          op: 'and',
+          children: [
             { property_id: 'gone', operator: 'contains', value: 'x' },
             { property_id: 'p-text', operator: 'contains', value: 'a' },
             { property_id: 'p-text', operator: 'not_contains', value: 'b' },
@@ -41,7 +42,8 @@ describe('repairConfig', () => {
       ],
       sorts: [{ property_id: 'p-num', direction: 'desc' }],
       filter: {
-        rules: [
+        op: 'and',
+        children: [
           { property_id: 'p-text', operator: 'contains', value: 'a' },
           { property_id: 'p-text', operator: 'not_contains', value: 'b' },
         ],
@@ -63,7 +65,7 @@ describe('repairConfig', () => {
         { property_id: 'p-num', width: 200, hidden: false },
       ],
       sorts: [],
-      filter: { rules: [] },
+      filter: { op: 'and', children: [] },
       wrap_cells: true,
       group_by: null,
       group_order: [],
@@ -123,7 +125,8 @@ describe('applyView', () => {
       ids(
         {
           filter: {
-            rules: [
+            op: 'and',
+            children: [
               { property_id: 'p-num', operator: '<=', value: 10 },
               { property_id: 'p-text', operator: 'is_not_empty' },
               { property_id: 'gone', operator: 'is_empty' },

@@ -17,6 +17,7 @@ use utoipa::ToSchema;
 
 use super::billing::{TrialCapacityError, TrialLimitReached, ensure_trial_capacity};
 use super::pages::{PageError, PageKind, PageRecord, page_in_tx, renumber, sibling_ids};
+pub use super::task_filter::GroupOp;
 use super::tasks::{TaskError, require_access_tx};
 use crate::audit::{self, AuditOutcome};
 use crate::billing::TrialLimit;
@@ -33,6 +34,9 @@ pub const MAX_OPTIONS: usize = 200;
 pub const MAX_CELL_ITEMS: usize = 100;
 pub const MAX_SORTS: usize = 10;
 pub const MAX_RULES: usize = 20;
+/// Filter group levels, the root group included.
+pub const MAX_FILTER_LEVELS: usize = 3;
+pub const MAX_GROUP_CHILDREN: usize = 10;
 pub const MAX_TEXT_CHARS: usize = 10_000;
 pub const MAX_URL_CHARS: usize = 2_000;
 pub const MAX_NAME_CHARS: usize = 200;
@@ -1191,13 +1195,102 @@ pub struct FilterRule {
     pub value: Value,
 }
 
+/// An AND/OR group of rules and groups (spec P2 5.2), as task filters. The root group is level 1;
+/// groups nest 3 levels, hold at most 10 children, and a filter has at most 20 rules. An empty
+/// group matches every row.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
-#[schema(as = DatabaseViewFilter)]
-pub struct ViewFilter {
-    /// All rules must match (AND). At most 20.
-    #[serde(default)]
-    pub rules: Vec<FilterRule>,
+#[schema(as = DatabaseFilterGroup)]
+pub struct FilterGroup {
+    pub op: GroupOp,
+    pub children: Vec<FilterNode>,
+}
+
+/// A nested group (it has `op` and `children`) or a rule.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(untagged)]
+#[schema(as = DatabaseFilterNode)]
+pub enum FilterNode {
+    #[schema(no_recursion)]
+    Group(FilterGroup),
+    Rule(FilterRule),
+}
+
+impl FilterGroup {
+    /// The root group of `rules`, all of which must match.
+    #[must_use]
+    pub fn all(rules: Vec<FilterRule>) -> Self {
+        Self {
+            op: GroupOp::And,
+            children: rules.into_iter().map(FilterNode::Rule).collect(),
+        }
+    }
+
+    /// Keeps the rules `keep` accepts; a group left empty goes (a group with one child stays).
+    /// Returns how many rules went.
+    fn retain_rules(&mut self, keep: &mut impl FnMut(&FilterRule) -> bool) -> usize {
+        let mut dropped = 0;
+        self.children.retain_mut(|child| match child {
+            FilterNode::Rule(rule) => {
+                let kept = keep(rule);
+                dropped += usize::from(!kept);
+                kept
+            }
+            FilterNode::Group(group) => {
+                dropped += group.retain_rules(keep);
+                !group.children.is_empty()
+            }
+        });
+        dropped
+    }
+
+    fn rules_mut(&mut self, change: &mut impl FnMut(&mut FilterRule)) {
+        for child in &mut self.children {
+            match child {
+                FilterNode::Rule(rule) => change(rule),
+                FilterNode::Group(group) => group.rules_mut(change),
+            }
+        }
+    }
+
+    /// Checks the limits and each rule against its property's type. `path` names this group,
+    /// `level` is its depth (the root is 1) and `rules` counts the rules seen so far.
+    fn check(
+        &self,
+        path: &str,
+        level: usize,
+        types: &HashMap<Id, PropertyType>,
+        rules: &mut usize,
+    ) -> Result<(), String> {
+        if level > MAX_FILTER_LEVELS {
+            return Err(path.to_owned());
+        }
+        if self.children.len() > MAX_GROUP_CHILDREN {
+            return Err(format!("{path}.children"));
+        }
+        for (index, child) in self.children.iter().enumerate() {
+            let path = format!("{path}.children[{index}]");
+            match child {
+                FilterNode::Group(group) => group.check(&path, level + 1, types, rules)?,
+                FilterNode::Rule(rule) => {
+                    *rules += 1;
+                    if *rules > MAX_RULES {
+                        return Err("config.filter".to_owned());
+                    }
+                    let Some(property_type) = types.get(&rule.property_id) else {
+                        continue;
+                    };
+                    let Some(kind) = rule_value(*property_type, rule.operator) else {
+                        return Err(format!("{path}.operator"));
+                    };
+                    if !rule_value_fits(kind, &rule.value) {
+                        return Err(format!("{path}.value"));
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// A view's saved layout. Rules, sorts, columns and cards that name a deleted property are dropped
@@ -1214,7 +1307,7 @@ pub struct ViewConfig {
     #[serde(default)]
     pub sorts: Vec<ViewSort>,
     #[serde(default)]
-    pub filter: ViewFilter,
+    pub filter: FilterGroup,
     #[serde(default)]
     pub wrap_cells: bool,
     /// Board: the `select` or `status` property whose options are the columns. A board without
@@ -1320,8 +1413,7 @@ impl ViewConfig {
         self.sorts
             .retain(|sort| known.contains(&sort.property_id) && sorts.insert(sort.property_id));
         self.filter
-            .rules
-            .retain(|rule| known.contains(&rule.property_id));
+            .retain_rules(&mut |rule| known.contains(&rule.property_id));
     }
 
     /// Checks limits, widths and each rule against its property's type, then drops what names
@@ -1329,9 +1421,6 @@ impl ViewConfig {
     pub fn validate(&mut self, view_type: ViewType, properties: &[Property]) -> Result<(), String> {
         if self.sorts.len() > MAX_SORTS {
             return Err("config.sorts".to_owned());
-        }
-        if self.filter.rules.len() > MAX_RULES {
-            return Err("config.filter.rules".to_owned());
         }
         if self.columns.len() > MAX_PROPERTIES * 2 {
             return Err("config.columns".to_owned());
@@ -1371,17 +1460,7 @@ impl ViewConfig {
                 return Err(format!("config.calculations.{id}"));
             }
         }
-        for (index, rule) in self.filter.rules.iter().enumerate() {
-            let Some(property_type) = types.get(&rule.property_id) else {
-                continue;
-            };
-            let Some(kind) = rule_value(*property_type, rule.operator) else {
-                return Err(format!("config.filter.rules[{index}].operator"));
-            };
-            if !rule_value_fits(kind, &rule.value) {
-                return Err(format!("config.filter.rules[{index}].value"));
-            }
-        }
+        self.filter.check("config.filter", 1, &types, &mut 0)?;
         self.repair(view_type, properties);
         Ok(())
     }
@@ -1392,14 +1471,12 @@ impl ViewConfig {
             .iter()
             .map(|property| (property.id, property.kind.property_type()))
             .collect();
-        let before = self.filter.rules.len();
-        self.filter.rules.retain(|rule| {
+        self.filter.retain_rules(&mut |rule| {
             types.get(&rule.property_id).is_none_or(|property_type| {
                 rule_value(*property_type, rule.operator)
                     .is_some_and(|kind| rule_value_fits(kind, &rule.value))
             })
-        });
-        before - self.filter.rules.len()
+        })
     }
 
     fn remap(&mut self, properties: &HashMap<Id, Id>) {
@@ -1415,9 +1492,7 @@ impl ViewConfig {
             .iter_mut()
             .for_each(|sort| map(&mut sort.property_id));
         self.filter
-            .rules
-            .iter_mut()
-            .for_each(|rule| map(&mut rule.property_id));
+            .rules_mut(&mut |rule| map(&mut rule.property_id));
         if let Some(group_by) = &mut self.group_by {
             map(group_by);
         }
