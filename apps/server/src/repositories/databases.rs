@@ -2593,19 +2593,56 @@ async fn properties_in_tx(
     .await?;
     rows.into_iter()
         .map(|row| {
-            let property_type =
-                PropertyType::parse(&row.get::<String, _>("type")).ok_or(DatabaseError::Corrupt)?;
-            let config: Value = serde_json::from_str(&row.get::<String, _>("config_json"))
-                .map_err(|_| DatabaseError::Corrupt)?;
-            Ok(Property {
-                id: parse_id(&row.get::<String, _>("id"))?,
-                name: row.get("name"),
-                kind: PropertyKind::parse(property_type, Some(&config))
-                    .map_err(|_| DatabaseError::Corrupt)?,
-                position: row.get("position"),
-            })
+            Property::from_stored(
+                &row.get::<String, _>("id"),
+                row.get("name"),
+                &row.get::<String, _>("type"),
+                &row.get::<String, _>("config_json"),
+                row.get("position"),
+            )
         })
         .collect()
+}
+
+impl Property {
+    /// A property from its `database_properties` columns.
+    pub(super) fn from_stored(
+        id: &str,
+        name: String,
+        property_type: &str,
+        config_json: &str,
+        position: i64,
+    ) -> Result<Self, DatabaseError> {
+        let property_type = PropertyType::parse(property_type).ok_or(DatabaseError::Corrupt)?;
+        let config: Value =
+            serde_json::from_str(config_json).map_err(|_| DatabaseError::Corrupt)?;
+        Ok(Self {
+            id: parse_id(id)?,
+            name,
+            kind: PropertyKind::parse(property_type, Some(&config))
+                .map_err(|_| DatabaseError::Corrupt)?,
+            position,
+        })
+    }
+}
+
+impl DatabaseView {
+    /// A view from its `database_views` columns, config as saved.
+    pub(super) fn from_stored(
+        id: &str,
+        name: String,
+        view_type: &str,
+        config_json: &str,
+        position: i64,
+    ) -> Result<Self, DatabaseError> {
+        Ok(Self {
+            id: parse_id(id)?,
+            name,
+            view_type: ViewType::parse(view_type).ok_or(DatabaseError::Corrupt)?,
+            config: serde_json::from_str(config_json).map_err(|_| DatabaseError::Corrupt)?,
+            position,
+        })
+    }
 }
 
 /// The stored views, configs as saved.
@@ -2622,15 +2659,13 @@ async fn raw_views(
     .await?;
     rows.into_iter()
         .map(|row| {
-            Ok(DatabaseView {
-                id: parse_id(&row.get::<String, _>("id"))?,
-                name: row.get("name"),
-                view_type: ViewType::parse(&row.get::<String, _>("type"))
-                    .ok_or(DatabaseError::Corrupt)?,
-                config: serde_json::from_str(&row.get::<String, _>("config_json"))
-                    .map_err(|_| DatabaseError::Corrupt)?,
-                position: row.get("position"),
-            })
+            DatabaseView::from_stored(
+                &row.get::<String, _>("id"),
+                row.get("name"),
+                &row.get::<String, _>("type"),
+                &row.get::<String, _>("config_json"),
+                row.get("position"),
+            )
         })
         .collect()
 }
@@ -2940,10 +2975,125 @@ fn page_error(error: DatabaseError) -> PageError {
     }
 }
 
+/// The database data of a set of pages, keyed by their original ids: the properties and views
+/// of each database, and the values of each page.
+#[derive(Default)]
+pub(super) struct DatabaseData {
+    pub properties: Vec<(Id, Property)>,
+    pub views: Vec<(Id, DatabaseView)>,
+    /// `(page, property, value_json)`.
+    pub values: Vec<(Id, Id, String)>,
+}
+
+/// The live data of the databases in `databases` and the values of the pages in `pages`.
+pub(super) async fn load_database_data(
+    tx: &mut Transaction<'_, Any>,
+    databases: &[Id],
+    pages: impl Iterator<Item = Id>,
+) -> Result<DatabaseData, PageError> {
+    let mut data = DatabaseData::default();
+    for database_id in databases {
+        for property in properties_in_tx(tx, *database_id)
+            .await
+            .map_err(page_error)?
+        {
+            data.properties.push((*database_id, property));
+        }
+        for view in raw_views(tx, *database_id).await.map_err(page_error)? {
+            data.views.push((*database_id, view));
+        }
+    }
+    for page_id in pages {
+        let rows = sqlx::query(
+            "SELECT property_id, value_json FROM page_property_values WHERE page_id = $1 ORDER BY property_id",
+        )
+        .bind(page_id.to_string())
+        .fetch_all(&mut **tx)
+        .await?;
+        for row in rows {
+            let property_id = parse_id(&row.get::<String, _>("property_id")).map_err(page_error)?;
+            data.values
+                .push((page_id, property_id, row.get::<String, _>("value_json")));
+        }
+    }
+    Ok(data)
+}
+
+/// Writes `data` under the copies in `pages` (original id → copy id): properties and views get
+/// new ids, views point at the copied properties, and values move to the copied property. A
+/// value of a property that was not copied (a duplicated row stays in its database) keeps its
+/// property.
+pub(super) async fn write_database_data(
+    tx: &mut Transaction<'_, Any>,
+    workspace_id: Id,
+    data: DatabaseData,
+    pages: &HashMap<Id, Id>,
+    actor_id: Id,
+    now: TimestampMillis,
+) -> Result<(), PageError> {
+    let mut property_ids: HashMap<Id, Id> = HashMap::new();
+    for (database_id, property) in data.properties {
+        let id = Id::new_v7();
+        property_ids.insert(property.id, id);
+        insert_property(
+            tx,
+            workspace_id,
+            pages[&database_id],
+            &Property { id, ..property },
+            now,
+        )
+        .await?;
+    }
+    for (database_id, mut view) in data.views {
+        view.config.remap(&property_ids);
+        view.id = Id::new_v7();
+        insert_view(tx, workspace_id, pages[&database_id], &view, now)
+            .await
+            .map_err(page_error)?;
+    }
+    for (page_id, property_id, value_json) in data.values {
+        sqlx::query(
+            "INSERT INTO page_property_values (page_id, property_id, workspace_id, value_json, updated_by, updated_at) \
+             VALUES ($1, $2, $3, $4, $5, $6)",
+        )
+        .bind(pages[&page_id].to_string())
+        .bind(property_ids.get(&property_id).unwrap_or(&property_id).to_string())
+        .bind(workspace_id.to_string())
+        .bind(value_json)
+        .bind(actor_id.to_string())
+        .bind(now.as_millis())
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
+}
+
+/// Keeps only the values of `page_id` that fit `database_id`'s live properties: the property
+/// still exists and the stored value parses against its current type (empty ones go too).
+pub(super) async fn retain_fitting_values(
+    tx: &mut Transaction<'_, Any>,
+    database_id: Id,
+    page_id: Id,
+    values: &mut Vec<(Id, Id, String)>,
+) -> Result<(), PageError> {
+    let properties = properties_in_tx(tx, database_id)
+        .await
+        .map_err(page_error)?;
+    values.retain(|(page, property_id, value_json)| {
+        *page != page_id
+            || properties
+                .iter()
+                .find(|property| property.id == *property_id)
+                .is_some_and(|property| {
+                    serde_json::from_str::<Value>(value_json)
+                        .is_ok_and(|raw| matches!(parse_value(&property.kind, &raw), Ok(Some(_))))
+                })
+    });
+    Ok(())
+}
+
 /// Copies database data for a page duplicate: the properties and views of each database in
-/// `databases` (with new ids; views point at the copied properties) and the values of every
-/// copied page (`pages`: original id → copy id). A value of a property that was not copied (a
-/// duplicated row stays in its database) keeps its property.
+/// `databases` and the values of every copied page (`pages`: original id → copy id).
 pub(super) async fn copy_database_data(
     tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
@@ -2952,49 +3102,8 @@ pub(super) async fn copy_database_data(
     actor_id: Id,
     now: TimestampMillis,
 ) -> Result<(), PageError> {
-    let mut property_ids: HashMap<Id, Id> = HashMap::new();
-    for database_id in databases {
-        let copy = pages[database_id];
-        for property in properties_in_tx(tx, *database_id)
-            .await
-            .map_err(page_error)?
-        {
-            let id = Id::new_v7();
-            property_ids.insert(property.id, id);
-            insert_property(tx, workspace_id, copy, &Property { id, ..property }, now).await?;
-        }
-        for mut view in raw_views(tx, *database_id).await.map_err(page_error)? {
-            view.config.remap(&property_ids);
-            view.id = Id::new_v7();
-            insert_view(tx, workspace_id, copy, &view, now)
-                .await
-                .map_err(page_error)?;
-        }
-    }
-    for (original, copy) in pages {
-        let rows = sqlx::query(
-            "SELECT property_id, value_json FROM page_property_values WHERE page_id = $1 ORDER BY property_id",
-        )
-        .bind(original.to_string())
-        .fetch_all(&mut **tx)
-        .await?;
-        for row in rows {
-            let property_id = parse_id(&row.get::<String, _>("property_id")).map_err(page_error)?;
-            sqlx::query(
-                "INSERT INTO page_property_values (page_id, property_id, workspace_id, value_json, updated_by, updated_at) \
-                 VALUES ($1, $2, $3, $4, $5, $6)",
-            )
-            .bind(copy.to_string())
-            .bind(property_ids.get(&property_id).unwrap_or(&property_id).to_string())
-            .bind(workspace_id.to_string())
-            .bind(row.get::<String, _>("value_json"))
-            .bind(actor_id.to_string())
-            .bind(now.as_millis())
-            .execute(&mut **tx)
-            .await?;
-        }
-    }
-    Ok(())
+    let data = load_database_data(tx, databases, pages.keys().copied()).await?;
+    write_database_data(tx, workspace_id, data, pages, actor_id, now).await
 }
 
 async fn record(

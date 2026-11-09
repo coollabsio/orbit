@@ -513,7 +513,7 @@ so it shows a list.
 |---|---|
 | Page export (`pageExport.ts`, `repositories/page_export.rs`) | A database exports as a Markdown table of its first view (visible columns, view order). Rows export as sub-pages; each row file starts with a property list. |
 | Workspace export (`workspace_export/`) | The same rules as the page export. Check that the archive code sees the new tables. |
-| Backups | The new tables are in the database snapshot. Update `SUPPORTED_SCHEMA_VERSION`. |
+| Backups | The new tables are in the database snapshot. Update `SUPPORTED_SCHEMA_VERSION`. Restoring a database page from a backup copies it as a database with its properties, views (property ids rewritten), rows and values, like duplicate. Restoring one row copies it as a row of its live database with the values whose property still exists and whose value fits the property's current type; when that database is gone, trashed, or no longer a database, the copy is a plain page at the top level with no values. |
 | Version history | Rows keep the page history for the title and body. Property values are not in history in P1. |
 | MCP and token API | No new tools in P1. The existing page tools see rows as pages. A database page reads as its title with no body. |
 | Notion import | Imports Notion data sources as databases (section 14). |

@@ -18,7 +18,8 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use super::billing::{TrialCapacityError, TrialLimitReached, ensure_trial_capacity};
-use super::pages::{PageSpace, Remap, content_text, renumber, sibling_ids};
+use super::databases::{DatabaseData, retain_fitting_values, write_database_data};
+use super::pages::{PageKind, PageSpace, Remap, content_text, is_database, renumber, sibling_ids};
 use super::tasks::description_from_blocks;
 use super::teamspaces::teamspace_exists;
 use crate::audit::{self, AuditOutcome};
@@ -335,9 +336,9 @@ impl BackupItemRepository {
             .nodes
             .get(&page_id.to_string())
             .ok_or(BackupItemError::ItemNotFound)?;
-        // Parents first, siblings in order.
+        // Parents first, siblings in order. A database always comes with its rows.
         let mut order = vec![root.id.clone()];
-        if include_children {
+        if include_children || root.database {
             let mut queue = VecDeque::from([root]);
             while let Some(node) = queue.pop_front() {
                 for child in tree.children(node) {
@@ -360,6 +361,7 @@ impl BackupItemRepository {
                     "full_width",
                     "teamspace_id",
                     "owner_id",
+                    "kind",
                 ],
             )
             .await?,
@@ -391,6 +393,7 @@ impl BackupItemRepository {
                     .as_deref()
                     .map(parse_snapshot_id)
                     .transpose()?,
+                kind: PageKind::parse(row.get("kind").unwrap_or("page")).map_err(page_error)?,
                 title: row.get("title").unwrap_or_default().to_owned(),
                 icon: row.get("icon").map(str::to_owned),
                 cover_url: row.get("cover_url").map(str::to_owned),
@@ -424,6 +427,7 @@ impl BackupItemRepository {
         } else {
             Vec::new()
         };
+        let data = snapshot_database_data(reader, &workspace, &pages).await?;
         let mut staging = BlobStaging::new(&self.uploads, workspace_id, actor_id);
         let result = match staging
             .prepare(&self.database, snapshot, reader, &files, "file_name")
@@ -431,7 +435,8 @@ impl BackupItemRepository {
         {
             Ok(()) => {
                 let meta = source_meta(snapshot, workspace_id, actor_id, request_id);
-                self.write_pages(&mut staging, &pages, &files, meta).await
+                self.write_pages(&mut staging, &pages, &files, data, meta)
+                    .await
             }
             Err(error) => Err(error),
         };
@@ -446,6 +451,7 @@ impl BackupItemRepository {
         staging: &mut BlobStaging<'_>,
         pages: &[SnapshotPage],
         files: &[SnapshotRow],
+        mut data: DatabaseData,
         meta: Meta<'_>,
     ) -> Result<RestoredItem, BackupItemError> {
         let Meta {
@@ -535,8 +541,8 @@ impl BackupItemRepository {
             sqlx::query(
                 "INSERT INTO pages (id, workspace_id, parent_id, teamspace_id, owner_id, title, icon, \
                  cover_url, cover_position, content_json, content_text, position, creator_id, updated_by, \
-                 version, created_at, updated_at, full_width) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 0, $15, $16, $17)",
+                 version, created_at, updated_at, full_width, kind) \
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 0, $15, $16, $17, $18)",
             )
             .bind(id.to_string())
             .bind(workspace_id.to_string())
@@ -555,9 +561,22 @@ impl BackupItemRepository {
             .bind(now.as_millis())
             .bind(now.as_millis())
             .bind(i64::from(page.full_width))
+            .bind(page.kind.as_str())
             .execute(&mut *tx)
             .await?;
         }
+        // The root is a row only under a live database; its values must still fit that database.
+        match parent_id {
+            Some(parent) if is_database(&mut tx, parent).await.map_err(page_error)? => {
+                retain_fitting_values(&mut tx, parent, root.id, &mut data.values)
+                    .await
+                    .map_err(page_error)?;
+            }
+            _ => data.values.retain(|(page, ..)| *page != root.id),
+        }
+        write_database_data(&mut tx, workspace_id, data, &page_ids, actor_id, now)
+            .await
+            .map_err(page_error)?;
         for ((page, file), row, blob) in &file_rows {
             sqlx::query(
                 "INSERT INTO page_files (id, workspace_id, page_id, blob_id, file_name, mime_type, \
@@ -1008,6 +1027,7 @@ fn source_meta<'a>(
 struct SnapshotPage {
     id: Id,
     parent_id: Option<Id>,
+    kind: PageKind,
     title: String,
     icon: Option<String>,
     cover_url: Option<String>,
@@ -1039,6 +1059,7 @@ struct PageNode {
     deleted: bool,
     /// The page whose delete trashed this one.
     trashed_with: Option<String>,
+    database: bool,
     position: i64,
     updated_at: i64,
 }
@@ -1060,7 +1081,9 @@ impl PageTree {
             "deleted_at",
             "updated_at",
         ];
-        columns.extend(optional_columns(reader, "pages", &["trashed_with", "position"]).await?);
+        columns.extend(
+            optional_columns(reader, "pages", &["trashed_with", "position", "kind"]).await?,
+        );
         let rows = reader
             .rows("pages", &columns, |row| {
                 row.get("workspace_id") == Some(&workspace)
@@ -1084,6 +1107,7 @@ impl PageTree {
                     title: row.get("title").unwrap_or_default().to_owned(),
                     deleted: row.get("deleted_at").is_some(),
                     trashed_with: row.get("trashed_with").map(str::to_owned),
+                    database: row.get("kind") == Some("database"),
                     position: millis(row.get("position")),
                     updated_at: millis(row.get("updated_at")),
                 },
@@ -1362,6 +1386,101 @@ async fn live_page_in(
     .fetch_one(&mut **tx)
     .await?;
     Ok(live)
+}
+
+/// The database data of `pages` in the snapshot: properties and views of its database pages,
+/// values of every page. Snapshots from before databases have none of the tables.
+async fn snapshot_database_data(
+    reader: &SnapshotReader,
+    workspace: &str,
+    pages: &[SnapshotPage],
+) -> Result<DatabaseData, BackupItemError> {
+    let mut data = DatabaseData::default();
+    if reader.columns("page_property_values").await?.is_none() {
+        return Ok(data);
+    }
+    let databases: HashSet<String> = pages
+        .iter()
+        .filter(|page| page.kind == PageKind::Database)
+        .map(|page| page.id.to_string())
+        .collect();
+    let page_ids: HashSet<String> = pages.iter().map(|page| page.id.to_string()).collect();
+    let columns = [
+        "id",
+        "workspace_id",
+        "database_id",
+        "name",
+        "type",
+        "config_json",
+        "position",
+    ];
+    let of_databases = |row: &SnapshotRow| {
+        row.get("workspace_id") == Some(workspace)
+            && row
+                .get("database_id")
+                .is_some_and(|id| databases.contains(id))
+    };
+    let corrupt = |_| unreadable("a database row is invalid");
+    for row in reader
+        .rows("database_properties", &columns, of_databases)
+        .await?
+    {
+        let (Some(id), Some(database_id)) = (row.get("id"), row.get("database_id")) else {
+            continue;
+        };
+        let property = super::databases::Property::from_stored(
+            id,
+            row.get("name").unwrap_or_default().to_owned(),
+            row.get("type").unwrap_or_default(),
+            row.get("config_json").unwrap_or("{}"),
+            millis(row.get("position")),
+        )
+        .map_err(corrupt)?;
+        data.properties
+            .push((parse_snapshot_id(database_id)?, property));
+    }
+    for row in reader
+        .rows("database_views", &columns, of_databases)
+        .await?
+    {
+        let (Some(id), Some(database_id)) = (row.get("id"), row.get("database_id")) else {
+            continue;
+        };
+        let view = super::databases::DatabaseView::from_stored(
+            id,
+            row.get("name").unwrap_or_default().to_owned(),
+            row.get("type").unwrap_or_default(),
+            row.get("config_json").unwrap_or("{}"),
+            millis(row.get("position")),
+        )
+        .map_err(corrupt)?;
+        data.views.push((parse_snapshot_id(database_id)?, view));
+    }
+    for row in reader
+        .rows(
+            "page_property_values",
+            &["workspace_id", "page_id", "property_id", "value_json"],
+            |row| {
+                row.get("workspace_id") == Some(workspace)
+                    && row.get("page_id").is_some_and(|id| page_ids.contains(id))
+            },
+        )
+        .await?
+    {
+        let (Some(page_id), Some(property_id), Some(value)) = (
+            row.get("page_id"),
+            row.get("property_id"),
+            row.get("value_json"),
+        ) else {
+            continue;
+        };
+        data.values.push((
+            parse_snapshot_id(page_id)?,
+            parse_snapshot_id(property_id)?,
+            value.to_owned(),
+        ));
+    }
+    Ok(data)
 }
 
 /// The ones of `wanted` that the snapshot's `table` has (older schemas lack some).

@@ -91,7 +91,7 @@ impl PageKind {
         }
     }
 
-    fn parse(value: &str) -> Result<Self, PageError> {
+    pub(super) fn parse(value: &str) -> Result<Self, PageError> {
         match value {
             "page" => Ok(Self::Page),
             "database" => Ok(Self::Database),
@@ -2667,7 +2667,10 @@ async fn is_ancestor(
 }
 
 /// True when `page_id` is a database page (in any state).
-async fn is_database(tx: &mut Transaction<'_, Any>, page_id: Id) -> Result<bool, PageError> {
+pub(super) async fn is_database(
+    tx: &mut Transaction<'_, Any>,
+    page_id: Id,
+) -> Result<bool, PageError> {
     let Flag(database) = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM pages WHERE id = $1 AND kind = 'database')",
     )
