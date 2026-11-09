@@ -142,10 +142,11 @@ const HANDLE_HEIGHT = 30
 /** Taller than this is a card, an image, or a table, not one line of text. */
 const ONE_LINE = 48
 
-/** The top row: a heading, a file name, a picture, a page chip, or the first text line. */
+/** The top row: a heading, a database title, a file name, a picture, a page chip, or the first text line. */
 function firstRow(reference: Element): Element {
   return (
     reference.querySelector('h1, h2, h3, h4, h5, h6') ??
+    reference.querySelector('[data-slot=database-title]') ??
     reference.querySelector('.bn-file-name-with-icon, .bn-add-file-button') ??
     reference.querySelector('.bn-visual-media') ??
     reference.querySelector('[data-page-id]') ??

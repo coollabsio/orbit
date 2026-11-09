@@ -135,9 +135,11 @@ function DatabaseTitle({ databaseId, linked, title, icon }: { databaseId: string
   const name = (title ?? page?.title ?? '').trim() || 'Untitled'
   const emoji = icon !== undefined ? icon : page?.icon
   return (
+    // The pill hangs 4 px into the margin, so the icon starts at the text edge.
     <button
       type="button"
-      className="flex w-fit max-w-full min-w-0 items-center gap-1.5 rounded-md px-1 py-1 text-left text-base font-semibold text-foreground outline-none hover:bg-foreground/[0.04] focus-visible:ring-2 focus-visible:ring-ring/50"
+      data-slot="database-title"
+      className="-ml-1 flex w-fit max-w-full min-w-0 items-center gap-1.5 rounded-md px-1 py-1 text-left text-base font-semibold text-foreground outline-none hover:bg-foreground/[0.04] focus-visible:ring-2 focus-visible:ring-ring/50"
       onClick={() => onOpenPage(databaseId)}
     >
       <span className="flex size-5 shrink-0 items-center justify-center" aria-hidden>
