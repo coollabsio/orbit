@@ -96,7 +96,7 @@ export function AccountMenu({
             <Row icon={custom ? 'edit' : 'smile'} label={custom ? 'Edit custom status' : 'Set custom status…'} onPress={run(() => setEditing(true))} />
             {custom ? <Row icon="x" label="Clear custom status" onPress={run(() => setStatus.mutate(withoutCustomStatus(status)))} /> : null}
             <Separator />
-            <Row icon="user" label="Account settings" onPress={run(() => onNavigate('/settings/profile'))} />
+            <Row icon="user" label="Account settings" onPress={run(() => onNavigate('/settings/account'))} />
             <Row icon="brush" label="Appearance" onPress={run(() => onNavigate('/settings/appearance'))} />
             <Separator />
             <Row
