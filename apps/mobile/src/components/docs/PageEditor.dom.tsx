@@ -24,6 +24,7 @@ import { createContext, type CSSProperties, type Ref, use, useEffect, useRef, us
 import { WebsocketProvider } from 'y-websocket'
 import * as Y from 'yjs'
 
+import { type DatabaseBlockRef, databaseBlocks, databaseCardKey, type DatabaseCardInfo } from '../../data/database-card'
 import { BLOCK_KINDS, blockKindOf, docsLinkPageId, type EditorCommand, type FormatState, INLINE_STYLES, parseCommand } from '../../data/page-editor'
 
 /** What a page card shows about the page it links to. */
@@ -66,6 +67,8 @@ export interface PageEditorProps {
   user: { name: string; color: string }
   /** Page cards' targets, by page id. */
   pages: Record<string, PageCardInfo>
+  /** Database cards, by `databaseCardKey`: the screen fetches the blocks `onDatabases` reports. */
+  databases: Record<string, DatabaseCardInfo>
   /** Member names for @mention chips, by user id. */
   members: Record<string, string>
   getTicket: () => Promise<TicketResult>
@@ -74,6 +77,10 @@ export interface PageEditorProps {
   /** An Orbit file an admin deleted (it answers 410): its file block says "Deleted file". */
   fileDeleted: (url: string) => Promise<boolean>
   openPage: (pageId: string) => Promise<void>
+  /** The database screen of a card, on the view it shows. */
+  openDatabase: (block: DatabaseBlockRef, viewId: string | null) => Promise<void>
+  /** The distinct database blocks of the document, whenever they change. */
+  onDatabases: (blocks: DatabaseBlockRef[]) => Promise<void>
   openUrl: (url: string) => Promise<void>
   onProblem: (problem: CollabProblem) => Promise<void>
   /** Handshakes keep failing: the screen checks the page over REST. */
@@ -87,12 +94,14 @@ export interface PageEditorProps {
 
 interface Lookups {
   pages: Record<string, PageCardInfo>
+  databases: Record<string, DatabaseCardInfo>
   members: Record<string, string>
   openPage: (pageId: string) => void
+  openDatabase: (block: DatabaseBlockRef, viewId: string | null) => void
 }
 
 // Node views render through portals inside the editor view, so they see this provider.
-const LookupsContext = createContext<Lookups>({ pages: {}, members: {}, openPage: () => {} })
+const LookupsContext = createContext<Lookups>({ pages: {}, databases: {}, members: {}, openPage: () => {}, openDatabase: () => {} })
 
 function PageCard({ block }: { block: { props: { pageId: string } } }) {
   const { pages, openPage } = use(LookupsContext)
@@ -116,9 +125,57 @@ function PageCard({ block }: { block: { props: { pageId: string } } }) {
   )
 }
 
-/** A database shown in the page: a card that opens the database screen. */
-function DatabaseCard({ block }: { block: { props: { databaseId: string } } }) {
-  return <PageCard block={{ props: { pageId: block.props.databaseId } }} />
+const DATABASE_NOTES: Record<Exclude<DatabaseCardInfo['state'], 'ready'>, string> = {
+  loading: 'Loading…',
+  trashed: 'Database in trash',
+  missing: 'Database not found',
+  'no-access': 'No access to this database',
+  'link-gone': 'View not found',
+  failed: 'Could not load the database',
+}
+
+/**
+ * A database shown in the page (spec 3.7): its icon, title, row count and first view, as a card that opens the
+ * database screen. The table itself is only on the database screen. A linked view has a "↗" after its title.
+ */
+function DatabaseCard({ block }: { block: { props: { databaseId: string; linkId: string } } }) {
+  const { databases, openDatabase } = use(LookupsContext)
+  const ref = { databaseId: block.props.databaseId, linkId: block.props.linkId }
+  const card = databases[databaseCardKey(ref)] ?? { state: 'loading' }
+  const named = card.state === 'ready' || card.state === 'trashed'
+  return (
+    <button
+      type="button"
+      contentEditable={false}
+      className="orbit-page-card orbit-database-card"
+      data-state={card.state}
+      onMouseDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.preventDefault()
+        if (card.state === 'ready') openDatabase(ref, card.view?.id ?? null)
+      }}
+    >
+      <span className="orbit-page-card-icon">{named && card.icon ? card.icon : <DatabaseIcon />}</span>
+      {named ? <span className="orbit-page-card-title">{card.title.trim() || 'Untitled'}</span> : null}
+      {named && ref.linkId ? <span className="orbit-database-card-linked" aria-label="Linked view">↗</span> : null}
+      <span className="orbit-page-card-note">{card.state === 'ready' ? readyNote(card) : DATABASE_NOTES[card.state]}</span>
+    </button>
+  )
+}
+
+function readyNote(card: Extract<DatabaseCardInfo, { state: 'ready' }>): string {
+  const rows = card.rowCount === 1 ? '1 row' : `${card.rowCount.toLocaleString('en-US')} rows`
+  return card.view ? `${rows} · ${card.view.name}` : rows
+}
+
+/** The tree's database icon (a grid), drawn in the text color. */
+function DatabaseIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <path d="M3 9h18M3 15h18M9 3v18" />
+    </svg>
+  )
 }
 
 function Callout({ block, contentRef }: { block: { props: { emoji: string } }; contentRef: (node: HTMLElement | null) => void }) {
@@ -173,7 +230,7 @@ interface Connection {
 const CONNECTING: CollabState = { status: 'connecting', problem: null, ready: false }
 
 export default function PageEditor(props: PageEditorProps) {
-  const { server, workspaceId, pageId, epoch, generation, editable, theme, colors, pages, members } = props
+  const { server, workspaceId, pageId, epoch, generation, editable, theme, colors, pages, databases, members } = props
   // Native actions arrive as new functions with every prop update; the socket and the editor read the latest.
   const actions = useRef(props)
   useEffect(() => {
@@ -244,7 +301,15 @@ export default function PageEditor(props: PageEditorProps) {
   return (
     <div ref={rootRef} className="orbit-page-editor" data-theme={theme} style={style}>
       {session && state.ready ? (
-        <LookupsContext value={{ pages, members, openPage: (id) => void actions.current.openPage(id) }}>
+        <LookupsContext
+          value={{
+            pages,
+            databases,
+            members,
+            openPage: (id) => void actions.current.openPage(id),
+            openDatabase: (block, viewId) => void actions.current.openDatabase(block, viewId),
+          }}
+        >
           <Editor
             key={`${pageId}:${epoch}:${generation}`}
             connection={session.connection}
@@ -316,6 +381,20 @@ function Editor({ connection, editable, theme, server, actions, editorRef }: Edi
   )
 
   useEffect(() => watchDeletedFiles(editor, (url) => actions.current.fileDeleted(url)), [editor])
+
+  // The screen fetches what each database card shows; tell it which databases the document holds, on each change.
+  useEffect(() => {
+    let last = ''
+    const report = () => {
+      const blocks = databaseBlocks(editor.document)
+      const json = JSON.stringify(blocks)
+      if (json === last) return
+      last = json
+      void actions.current.onDatabases(blocks)
+    }
+    report()
+    return editor.onChange(report)
+  }, [editor, actions])
 
   // The view mounts once, with the first value; later changes switch the mounted editor (see `setEditableInPlace`).
   const [mountEditable] = useState(editable)

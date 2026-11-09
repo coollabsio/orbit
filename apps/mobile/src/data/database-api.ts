@@ -7,8 +7,9 @@ import type { OrbitClient } from './orbit'
 
 const databasePath = (workspaceId: string, databaseId: string) => ({ workspace_id: workspaceId, database_id: databaseId })
 
-export async function database(client: OrbitClient, workspaceId: string, databaseId: string): Promise<DatabaseDetail> {
-  return (await getDatabase({ client, path: databasePath(workspaceId, databaseId), throwOnError: true })).data
+/** With `linkId`, `views` are the linked view block's instead of the database's own. */
+export async function database(client: OrbitClient, workspaceId: string, databaseId: string, linkId = ''): Promise<DatabaseDetail> {
+  return (await getDatabase({ client, path: databasePath(workspaceId, databaseId), query: linkId ? { link: linkId } : undefined, throwOnError: true })).data
 }
 
 /** Values by property id; `null` clears one. */
@@ -20,8 +21,9 @@ export async function addRow(client: OrbitClient, workspaceId: string, databaseI
   return (await createDatabaseRow({ client, path: databasePath(workspaceId, databaseId), body, throwOnError: true })).data
 }
 
-export async function saveView(client: OrbitClient, workspaceId: string, databaseId: string, viewId: string, config: DatabaseViewConfig): Promise<DatabaseView> {
-  return (await updateDatabaseView({ client, path: { ...databasePath(workspaceId, databaseId), view_id: viewId }, body: { config }, throwOnError: true })).data
+export async function saveView(client: OrbitClient, workspaceId: string, databaseId: string, linkId: string, viewId: string, config: DatabaseViewConfig): Promise<DatabaseView> {
+  const query = linkId ? { link_id: linkId } : undefined
+  return (await updateDatabaseView({ client, path: { ...databasePath(workspaceId, databaseId), view_id: viewId }, query, body: { config }, throwOnError: true })).data
 }
 
 /** A select, multi-select or status property's whole option list, with the rest of its config kept. */

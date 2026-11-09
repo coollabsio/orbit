@@ -19,9 +19,10 @@ const SAVE_DELAY_MS = 500
 /** Shows a failed write's message (the screen's notice line). */
 export type Notify = (message: string) => void
 
-export function useDatabase(databaseId: string) {
+/** `linkId` empty: the database's own views; else a linked view block's views (spec 3.4). */
+export function useDatabase(databaseId: string, linkId = '') {
   const { client, workspaceId } = useOrbit()
-  return useQuery({ queryKey: keys.database(workspaceId, databaseId), queryFn: () => api.database(client, workspaceId, databaseId), select: parseDatabase })
+  return useQuery({ queryKey: keys.database(workspaceId, databaseId, linkId), queryFn: () => api.database(client, workspaceId, databaseId, linkId), select: parseDatabase })
 }
 
 /** The viewer, the members and the clock that `@orbit/database` formats and filters with. */
@@ -51,10 +52,10 @@ interface WriteSpec<Vars, Result> {
   error: string
 }
 
-function useDatabaseWrite<Vars, Result>(databaseId: string, notify: Notify, spec: WriteSpec<Vars, Result>) {
+function useDatabaseWrite<Vars, Result>(databaseId: string, linkId: string, notify: Notify, spec: WriteSpec<Vars, Result>) {
   const { workspaceId } = useOrbit()
   const queryClient = useQueryClient()
-  const key = keys.database(workspaceId, databaseId)
+  const key = keys.database(workspaceId, databaseId, linkId)
   return useMutation<Result, Error, Vars, { detail: DatabaseDetail | undefined }>({
     mutationFn: spec.request,
     onMutate: async (vars) => {
@@ -80,9 +81,9 @@ function withRow(detail: DatabaseDetail, rowId: string, change: (row: DatabaseRo
   return { ...detail, rows: detail.rows.map((row) => (row.id === rowId ? change(row) : row)) }
 }
 
-export function useUpdateValues(databaseId: string, notify: Notify) {
+export function useUpdateValues(databaseId: string, notify: Notify, linkId = '') {
   const { client, workspaceId } = useOrbit()
-  return useDatabaseWrite<{ rowId: string; values: Record<string, unknown> }, DatabaseRow>(databaseId, notify, {
+  return useDatabaseWrite<{ rowId: string; values: Record<string, unknown> }, DatabaseRow>(databaseId, linkId, notify, {
     request: ({ rowId, values }) => api.saveValues(client, workspaceId, databaseId, rowId, values),
     optimistic: (detail, { rowId, values }) => withRow(detail, rowId, (row) => ({ ...row, values: patchValues(row.values, values) })),
     reconcile: (detail, row) => withRow(detail, row.id, () => row),
@@ -90,9 +91,9 @@ export function useUpdateValues(databaseId: string, notify: Notify) {
   })
 }
 
-export function useCreateRow(databaseId: string, notify: Notify) {
+export function useCreateRow(databaseId: string, notify: Notify, linkId = '') {
   const { client, workspaceId } = useOrbit()
-  return useDatabaseWrite<CreateDatabaseRowBody, DatabaseRow>(databaseId, notify, {
+  return useDatabaseWrite<CreateDatabaseRowBody, DatabaseRow>(databaseId, linkId, notify, {
     request: (body) => api.addRow(client, workspaceId, databaseId, body),
     reconcile: (detail, row) => ({
       ...detail,
@@ -103,10 +104,10 @@ export function useCreateRow(databaseId: string, notify: Notify) {
   })
 }
 
-function useUpdateView(databaseId: string, notify: Notify) {
+function useUpdateView(databaseId: string, linkId: string, notify: Notify) {
   const { client, workspaceId } = useOrbit()
-  return useDatabaseWrite<{ viewId: string; config: ViewConfig }, DatabaseDetail['views'][number]>(databaseId, notify, {
-    request: ({ viewId, config }) => api.saveView(client, workspaceId, databaseId, viewId, config),
+  return useDatabaseWrite<{ viewId: string; config: ViewConfig }, DatabaseDetail['views'][number]>(databaseId, linkId, notify, {
+    request: ({ viewId, config }) => api.saveView(client, workspaceId, databaseId, linkId, viewId, config),
     optimistic: (detail, { viewId, config }) => ({ ...detail, views: detail.views.map((view) => (view.id === viewId ? { ...view, config } : view)) }),
     reconcile: (detail, saved) => ({ ...detail, views: detail.views.map((view) => (view.id === saved.id ? saved : view)) }),
     error: 'Could not save the view.',
@@ -116,7 +117,7 @@ function useUpdateView(databaseId: string, notify: Notify) {
 /** A select, multi-select or status property's options (a created option); the refetch brings the saved config. */
 export function useSaveOptions(databaseId: string, notify: Notify) {
   const { client, workspaceId } = useOrbit()
-  return useDatabaseWrite<{ propertyId: string; config: Record<string, unknown>; options: SelectOption[] }, void>(databaseId, notify, {
+  return useDatabaseWrite<{ propertyId: string; config: Record<string, unknown>; options: SelectOption[] }, void>(databaseId, '', notify, {
     request: ({ propertyId, config, options }) => api.saveOptions(client, workspaceId, databaseId, propertyId, config, options),
     refetch: true,
     error: 'Could not change the property.',
@@ -127,8 +128,8 @@ export function useSaveOptions(databaseId: string, notify: Notify) {
  * The view config drafts of one database (spec D1). A viewer who may change views saves each change for everyone
  * after 500 ms (leaving the screen saves at once); anyone else keeps it on this device until Reset.
  */
-export function useViewDrafts(databaseId: string, canSave: boolean, notify: Notify) {
-  const updateView = useUpdateView(databaseId, notify)
+export function useViewDrafts(databaseId: string, linkId: string, canSave: boolean, notify: Notify) {
+  const updateView = useUpdateView(databaseId, linkId, notify)
   const [drafts, setDrafts] = useState<Readonly<Record<string, ViewConfig>>>({})
   const pending = useRef(new Map<string, { config: ViewConfig; timer: ReturnType<typeof setTimeout> }>())
   const save = (viewId: string) => {

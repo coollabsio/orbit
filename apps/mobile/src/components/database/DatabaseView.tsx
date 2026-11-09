@@ -31,23 +31,35 @@ const COLUMN_GAP = 10
 
 type DatabaseSheet = { kind: 'views' } | { kind: 'filters' } | { kind: 'sorts' } | { kind: 'move'; rowId: string }
 
-export function DatabaseView({ databaseId, header, notify }: { databaseId: string; header: ReactElement; notify: Notify }) {
-  const query = useDatabase(databaseId)
+/**
+ * `linkId` shows a linked view block's views instead of the database's own (spec 3.7); `initialView` opens one of them
+ * (the view a page's card showed) instead of the last one chosen on this device.
+ */
+export function DatabaseView({ databaseId, linkId = '', initialView = null, header, notify }: {
+  databaseId: string
+  linkId?: string
+  initialView?: string | null
+  header: ReactElement
+  notify: Notify
+}) {
+  const query = useDatabase(databaseId, linkId)
   const ctx = useViewContext()
   const readOnly = useWorkspaceReadOnly()
-  const locked = query.data?.database.locked ?? true
+  // The database lock guards its own views only; the server checks a linked view's host page.
+  const locked = linkId ? false : (query.data?.database.locked ?? true)
   const canEditSchema = !locked && !readOnly
-  const views = useViewDrafts(databaseId, canEditSchema, notify)
-  const createRow = useCreateRow(databaseId, notify)
-  const updateValues = useUpdateValues(databaseId, notify)
+  const views = useViewDrafts(databaseId, linkId, canEditSchema, notify)
+  const createRow = useCreateRow(databaseId, notify, linkId)
+  const updateValues = useUpdateValues(databaseId, notify, linkId)
   const sheet = useSheet<DatabaseSheet>()
   const [openRule, setOpenRule] = useState<number | 'add' | null>(null)
   const [search, setSearch] = useState('')
-  const [chosen, setChosen] = useState<string | null>(null)
+  const [chosen, setChosen] = useState<string | null>(initialView)
+  const storageKey = viewStorageKey(databaseId, linkId)
 
   useEffect(() => {
-    void storage.get(viewStorageKey(databaseId)).then((stored) => setChosen((current) => current ?? stored), () => {})
-  }, [databaseId])
+    void storage.get(storageKey).then((stored) => setChosen((current) => current ?? stored), () => {})
+  }, [storageKey])
 
   const database = query.data
   if (!database) {
@@ -68,7 +80,7 @@ export function DatabaseView({ databaseId, header, notify }: { databaseId: strin
 
   const selectView = (viewId: string) => {
     setChosen(viewId)
-    void storage.set(viewStorageKey(databaseId), viewId).catch(() => {})
+    void storage.set(storageKey, viewId).catch(() => {})
     sheet.close()
   }
   /** A new row with the values the filter needs (and a board column's value), opened on its own page. */

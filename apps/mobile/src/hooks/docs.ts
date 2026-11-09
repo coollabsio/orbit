@@ -16,7 +16,8 @@ import { useOrbit } from '../orbit-context'
 function reconcile(queryClient: QueryClient, workspaceId: string, page: Page) {
   queryClient.setQueryData(keys.page(workspaceId, page.id), page)
   if (page.database_id) {
-    queryClient.setQueryData<DatabaseDetail>(keys.database(workspaceId, page.database_id), (detail) =>
+    // the prefix holds the database's own views and each linked view
+    queryClient.setQueriesData<DatabaseDetail>({ queryKey: keys.database(workspaceId, page.database_id) }, (detail) =>
       detail && { ...detail, rows: detail.rows.map((row) => (row.id === page.id ? { ...row, title: page.title, icon: page.icon, version: page.version } : row)) },
     )
     return

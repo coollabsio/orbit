@@ -27,8 +27,8 @@ export const PROPERTY_ICONS: Record<DatabasePropertyType, IconName> = {
 
 export const VIEW_ICONS: Record<DatabaseView['type'], IconName> = { table: 'grid', board: 'kanban' }
 
-/** Where the open view of a database is kept (a secure-store key: letters, digits, `.`, `-` and `_` only). */
-export const viewStorageKey = (databaseId: string) => `orbit.database-view.${databaseId}`
+/** Where the open view of a database, or of one linked view, is kept (a secure-store key: letters, digits, `.`, `-` and `_` only). */
+export const viewStorageKey = (databaseId: string, linkId = '') => `orbit.database-view.${databaseId}${linkId ? `.${linkId}` : ''}`
 
 /** The views in tab order. */
 export function sortedViews(views: readonly DatabaseView[]): DatabaseView[] {

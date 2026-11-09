@@ -1,6 +1,8 @@
 import type { CollabProblem } from '@orbit/editor/collab/session'
 import { isSafeLinkHref } from '@orbit/editor/links'
-import { useQuery } from '@tanstack/react-query'
+import type { DatabaseDetail, PageSummary, TrashedPage } from '@orbit/api/generated/types.gen'
+import { ApiProblem } from '@orbit/api/problem'
+import { useQueries, useQuery } from '@tanstack/react-query'
 import { router, useLocalSearchParams } from 'expo-router'
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import { Image, KeyboardAvoidingView, Linking, Platform, ScrollView, View } from 'react-native'
@@ -13,6 +15,8 @@ import { DatabaseView } from '../../../components/database/DatabaseView'
 import { PropertyList } from '../../../components/database/PropertyList'
 import PageEditor, { type PageCardInfo, type PageEditorProps, type PageEditorRef } from '../../../components/docs/PageEditor.dom'
 import { ActionSheet, ConfirmDialog, type ConfirmRequest, PromptDialog, type PromptRequest, type SheetAction } from '../../../components/settings/Dialog'
+import { type DatabaseBlockRef, databaseCard, databaseCardKey, databaseHref } from '../../../data/database-card'
+import * as databaseApi from '../../../data/database-api'
 import { absoluteUrl, pageTitle, subPagesOf, trashPrompt, validCoverUrl, visibleThreads } from '../../../data/docs'
 import { collabTicket, descendants, fileDataUrl, fileDeleted } from '../../../data/docs-api'
 import { keys } from '../../../data/keys'
@@ -34,7 +38,8 @@ const CARET_MARGIN = 24
  * co-edits the page live with everyone else. A formatting bar sits above the keyboard while the body has focus.
  */
 export default function DocScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>()
+  // `link` and `view`: a database opened from a page's database card (its linked view, the view the card showed)
+  const { id, link, view } = useLocalSearchParams<{ id: string; link?: string; view?: string }>()
   const { client, workspaceId, session } = useOrbit()
   const { colors } = useTheme()
   const page = useQuery({ queryKey: keys.page(workspaceId, id), queryFn: () => api.page(client, workspaceId, id) })
@@ -259,7 +264,7 @@ export default function DocScreen() {
           <LoadingView />
         )
       ) : page.data.kind === 'database' ? (
-        <DatabaseView databaseId={id} header={head!} notify={setNotice} />
+        <DatabaseView key={link ?? ''} databaseId={id} linkId={link ?? ''} initialView={view ?? null} header={head!} notify={setNotice} />
       ) : (
         <KeyboardAvoidingView className="flex-1" behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
           <ScrollView
@@ -325,6 +330,7 @@ const EditorView = memo(function EditorView({ ref, pageId, epoch, generation, ed
   const trash = usePageTrash()
   const members = useMembers()
   const [height, setHeight] = useState(120)
+  const [databaseBlocks, setDatabaseBlocks] = useState<DatabaseBlockRef[]>([])
   const latest = useRef(callbacks)
   useEffect(() => {
     latest.current = callbacks
@@ -343,6 +349,7 @@ const EditorView = memo(function EditorView({ ref, pageId, epoch, generation, ed
     for (const item of pages.data ?? []) out[item.id] = { title: item.title, icon: item.icon, trashed: false }
     return out
   }, [pages.data, trash.data])
+  const databases = useDatabaseCards(databaseBlocks, pages.data, trash.data)
   const names = useMemo(() => Object.fromEntries((members.data ?? []).map((member) => [member.user_id, member.display_name])), [members.data])
   const editorColors = useMemo(
     () => ({ background: colors.background, foreground: colors.foreground, mutedForeground: colors.mutedForeground, muted: colors.muted, border: colors.border, primary: colors.primary }),
@@ -356,6 +363,8 @@ const EditorView = memo(function EditorView({ ref, pageId, epoch, generation, ed
       loadFile: whileMounted(mounted, (url: string) => fileDataUrl(session.server, session.token, url)),
       fileDeleted: whileMounted(mounted, (url: string) => fileDeleted(session.server, session.token, url)),
       openPage: whileMounted(mounted, async (target: string) => router.push(`/docs/${target}`)),
+      openDatabase: whileMounted(mounted, async (block: DatabaseBlockRef, viewId: string | null) => router.push(databaseHref(block, viewId))),
+      onDatabases: whileMounted(mounted, async (blocks: DatabaseBlockRef[]) => setDatabaseBlocks(blocks)),
       // the editor already filters links; the app checks again before it hands one to the OS
       openUrl: whileMounted(mounted, async (url: string) => {
         if (isSafeLinkHref(url)) void Linking.openURL(url).catch(() => {})
@@ -383,8 +392,35 @@ const EditorView = memo(function EditorView({ ref, pageId, epoch, generation, ed
       colors={editorColors}
       user={me}
       pages={cards}
+      databases={databases}
       members={names}
       {...actions}
     />
   )
 })
+
+/** A 4xx answer will not change on a retry: the card says why at once. */
+const retryUnlessRefused = (count: number, error: unknown) => !(error instanceof ApiProblem && error.status < 500) && count < 2
+
+// a module function, so `useQueries` keeps the combined list while no fetch changes
+const fetchesOf = (results: { data: DatabaseDetail | undefined; error: unknown }[]) => results.map(({ data, error }) => ({ data, error }))
+
+/** The cards of the document's database blocks: each block's database (or linked view), in the cache the database screen reads. */
+function useDatabaseCards(blocks: readonly DatabaseBlockRef[], pages: readonly PageSummary[] | undefined, trash: readonly TrashedPage[] | undefined) {
+  const { client, workspaceId } = useOrbit()
+  const fetches = useQueries({
+    queries: blocks.map((block) => ({
+      queryKey: keys.database(workspaceId, block.databaseId, block.linkId),
+      queryFn: () => databaseApi.database(client, workspaceId, block.databaseId, block.linkId),
+      retry: retryUnlessRefused,
+    })),
+    combine: fetchesOf,
+  })
+  return useMemo(() => {
+    const lookup = {
+      trashed: new Map((trash ?? []).map((item) => [item.id, { title: item.title, icon: item.icon }])),
+      readable: new Set((pages ?? []).map((item) => item.id)),
+    }
+    return Object.fromEntries(blocks.map((block, index) => [databaseCardKey(block), databaseCard(block, fetches[index], lookup)]))
+  }, [blocks, fetches, pages, trash])
+}
