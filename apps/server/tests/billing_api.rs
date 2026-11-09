@@ -1149,19 +1149,29 @@ async fn a_new_workspace_is_on_a_trial_with_limits() {
         )
         .await;
     assert_eq!(status, 200, "{channel}");
-    let (status, invitation) = server
-        .call(
-            "POST",
-            &server.workspace("/invitations"),
-            Some(
-                json!({"email": "guest@example.com", "role": "guest", "delivery": "manual",
-                        "conversation_ids": [channel["result"]["id"]]}),
-            ),
-        )
-        .await;
+    // Padded past 64 KiB: the guard reads the whole body to see the role, and keeps it.
+    let body = json!({"email": "guest@example.com", "role": "guest", "delivery": "manual",
+                      "conversation_ids": [channel["result"]["id"]]});
+    let response = server
+        .http
+        .post(format!("{}{}", server.base, server.workspace("/invitations")))
+        .header("origin", &server.base)
+        .header("cookie", format!("{COOKIE}={}", server.session))
+        .header("content-type", "application/json")
+        .body(format!("{body}{}", " ".repeat(80 * 1024)))
+        .send()
+        .await
+        .unwrap();
+    let status = response.status().as_u16();
+    let invitation: Value = response.json().await.unwrap();
     assert_eq!(status, 201, "{invitation}");
     let guest = server.add_user("guest@example.com", false).await;
-    let token = invitation["url"].as_str().unwrap().split("token=").nth(1).unwrap();
+    let token = invitation["url"]
+        .as_str()
+        .unwrap()
+        .split("token=")
+        .nth(1)
+        .unwrap();
     let (status, accepted) = server
         .call_as(
             &guest,

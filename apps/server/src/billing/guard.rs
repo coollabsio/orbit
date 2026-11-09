@@ -179,8 +179,9 @@ async fn guard(State(state): State<GuardState>, mut request: Request, next: Next
         (Check::Create(_, limit), WorkspaceAccess::Trial) => {
             // Guests do not count as members, so a guest invitation passes the members limit.
             if limit == TrialLimit::Members {
-                let Some((guest, read)) = invites_a_guest(request).await else {
-                    return invalid_body(instance);
+                let (guest, read) = match invites_a_guest(request).await {
+                    Ok(read) => read,
+                    Err(response) => return response,
                 };
                 request = read;
                 if guest {
@@ -217,15 +218,18 @@ async fn guard(State(state): State<GuardState>, mut request: Request, next: Next
     }
 }
 
-/// Whether an invitation request asks for the guest role, and the request with its body again;
-/// `None` when the body cannot be read. The platform layer already caps the body at the request
-/// limit, so the guard reads all of it.
-async fn invites_a_guest(request: Request) -> Option<(bool, Request)> {
+/// Whether an invitation request asks for the guest role, and the request with its body again.
+/// The platform layer already caps the body at the request limit, so the guard reads all of it.
+/// A body that cannot be read gets the handler's `invalid_request` answer.
+async fn invites_a_guest(request: Request) -> Result<(bool, Request), Response> {
     let (parts, body) = request.into_parts();
-    let bytes = axum::body::to_bytes(body, usize::MAX).await.ok()?;
+    let Ok(bytes) = axum::body::to_bytes(body, usize::MAX).await else {
+        let request = Request::from_parts(parts, Body::empty());
+        return Err(problem(&request, StatusCode::BAD_REQUEST, invalid_body()));
+    };
     let guest = serde_json::from_slice::<serde_json::Value>(&bytes)
         .is_ok_and(|body| body["role"] == "guest");
-    Some((guest, Request::from_parts(parts, Body::from(bytes))))
+    Ok((guest, Request::from_parts(parts, Body::from(bytes))))
 }
 
 enum Refusal {
@@ -280,6 +284,15 @@ fn trial_limit(limit: TrialLimit, trial: &TrialConfig) -> Message {
         code: "trial_limit_reached",
         title: "Trial limit reached",
         detail: reached.detail(),
+    }
+}
+
+/// The workspace handlers' answer to a body they cannot read.
+fn invalid_body() -> Message {
+    Message {
+        code: "invalid_request",
+        title: "Invalid request",
+        detail: "The request body is not valid for this endpoint.".to_owned(),
     }
 }
 
