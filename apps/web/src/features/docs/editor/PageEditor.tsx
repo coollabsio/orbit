@@ -37,6 +37,7 @@ import { PageEditorContext, type DatabaseBlockHost, type PageEditorContextValue,
 import { watchDeletedFiles } from '@orbit/editor/deletedFiles'
 import type { PageEditorInstance } from '@orbit/editor/schema'
 import type { PageKind } from '@orbit/api/generated/types.gen'
+import { isolatedDragsExtension, isolatedDropCursor } from '@orbit/editor/isolation'
 import { selectBlockExtension } from '@orbit/editor/selectBlock'
 import { EDITOR_BLOCK_TYPES, markdownToTaskBlocks, pageEditorSchema, TASK_EDITOR_BLOCK_TYPES, taskEditorSchema } from './schema'
 import { getPageSlashMenuItems, getTaskSlashMenuItems } from './slashMenu'
@@ -290,7 +291,8 @@ function PageEditorInner({
     // Tiptap would inject its base stylesheet as a <style> tag, which the production CSP (`style-src 'self'`)
     // blocks. The same rules ship statically at the end of src/index.css instead.
     _tiptapOptions: { injectCSS: false },
-    extensions: [selectBlockExtension()],
+    extensions: [selectBlockExtension(), isolatedDragsExtension()],
+    dropCursor: isolatedDropCursor,
     domAttributes: ariaLabel ? { editor: { 'aria-label': ariaLabel } } : undefined,
     dictionary,
   }
