@@ -17,7 +17,7 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use super::billing::{TrialCapacityError, TrialLimitReached, ensure_trial_capacity};
-use super::databases::{copy_database_data, insert_default_schema};
+use super::databases::{DatabaseSchema, copy_database_data, insert_schema};
 use super::page_files::{page_file_url, page_has_file, parse_page_file_url};
 use super::page_mentions::notify_new_mentions;
 use super::page_versions::{
@@ -576,8 +576,47 @@ impl PageRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<PageRecord, PageError> {
-        self.insert_page(id, workspace_id, actor_id, input, &[], request_id, now)
-            .await
+        self.insert_page(
+            id,
+            workspace_id,
+            actor_id,
+            input,
+            &[],
+            None,
+            request_id,
+            now,
+        )
+        .await
+    }
+
+    /// A database page (`input.kind` is ignored) with `schema` instead of the starter schema,
+    /// with a caller-chosen id as [`Self::create_page_with_id`].
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_database_with_id(
+        &self,
+        id: Id,
+        workspace_id: Id,
+        actor_id: Id,
+        input: CreatePage,
+        schema: &DatabaseSchema,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<PageRecord, PageError> {
+        let input = CreatePage {
+            kind: PageKind::Database,
+            ..input
+        };
+        self.insert_page(
+            id,
+            workspace_id,
+            actor_id,
+            input,
+            &[],
+            Some(schema),
+            request_id,
+            now,
+        )
+        .await
     }
 
     /// [`Self::create_page`] with its first content, in the same transaction (one audit event).
@@ -592,8 +631,17 @@ impl PageRepository {
         now: TimestampMillis,
     ) -> Result<PageRecord, PageError> {
         let id = Id::new_v7();
-        self.insert_page(id, workspace_id, actor_id, input, content, request_id, now)
-            .await
+        self.insert_page(
+            id,
+            workspace_id,
+            actor_id,
+            input,
+            content,
+            None,
+            request_id,
+            now,
+        )
+        .await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -604,6 +652,7 @@ impl PageRepository {
         actor_id: Id,
         input: CreatePage,
         content: &[Value],
+        schema: Option<&DatabaseSchema>,
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<PageRecord, PageError> {
@@ -651,7 +700,7 @@ impl PageRepository {
         .execute(&mut *tx)
         .await?;
         if input.kind == PageKind::Database {
-            insert_default_schema(&mut tx, workspace_id, id, now).await?;
+            insert_schema(&mut tx, workspace_id, id, schema, now).await?;
         }
         renumber(&mut tx, &siblings).await?;
         notify_new_mentions(&mut tx, id, &[], &content, Some(actor_id), request_id, now).await?;

@@ -700,6 +700,13 @@ fn parse_value(kind: &PropertyKind, raw: &Value) -> Result<Option<CellValue>, ()
     Ok(value)
 }
 
+/// Whether `raw` is a valid value for a property of `kind` (person ids are checked for shape
+/// only; row writes also check that they are members).
+#[must_use]
+pub fn accepts_value(kind: &PropertyKind, raw: &Value) -> bool {
+    parse_value(kind, raw).is_ok()
+}
+
 fn valid_url(url: &str) -> bool {
     url.chars().count() <= MAX_URL_CHARS
         && !url.chars().any(char::is_whitespace)
@@ -1069,6 +1076,24 @@ const fn default_width() -> u16 {
     DEFAULT_WIDTH
 }
 
+impl ViewColumn {
+    /// A column with `width` kept in 32–1,000 px; without one, the default (wider for the title).
+    #[must_use]
+    pub fn new(property_id: Id, title: bool, width: Option<u64>, hidden: bool) -> Self {
+        let width = match width {
+            Some(width) => u16::try_from(width.clamp(u64::from(MIN_WIDTH), u64::from(MAX_WIDTH)))
+                .unwrap_or(MAX_WIDTH),
+            None if title => TITLE_WIDTH,
+            None => DEFAULT_WIDTH,
+        };
+        Self {
+            property_id,
+            width,
+            hidden,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 #[schema(as = DatabaseViewSort)]
@@ -1175,6 +1200,22 @@ impl ViewConfig {
         }
         self.retain_known(properties);
         Ok(())
+    }
+
+    /// Drops filter rules whose operator or value does not fit their property; returns how many.
+    fn drop_unfit_rules(&mut self, properties: &[Property]) -> usize {
+        let types: HashMap<Id, PropertyType> = properties
+            .iter()
+            .map(|property| (property.id, property.kind.property_type()))
+            .collect();
+        let before = self.filter.rules.len();
+        self.filter.rules.retain(|rule| {
+            types.get(&rule.property_id).is_none_or(|property_type| {
+                rule_value(*property_type, rule.operator)
+                    .is_some_and(|kind| rule_value_fits(kind, &rule.value))
+            })
+        });
+        before - self.filter.rules.len()
     }
 
     fn remap(&mut self, properties: &HashMap<Id, Id>) {
@@ -1465,6 +1506,20 @@ impl DatabaseRepository {
             views,
             rows,
         })
+    }
+
+    /// The database's properties in order (the schema without views and rows).
+    pub async fn properties(
+        &self,
+        workspace_id: Id,
+        database_id: Id,
+        actor_id: Id,
+    ) -> Result<Vec<Property>, DatabaseError> {
+        let mut tx = self.database.transaction().await?;
+        open(&mut tx, workspace_id, database_id, actor_id).await?;
+        let properties = properties_in_tx(&mut tx, database_id).await?;
+        tx.rollback().await?;
+        Ok(properties)
     }
 
     pub async fn create_property(
@@ -1885,6 +1940,31 @@ impl DatabaseRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<DatabaseRow, DatabaseError> {
+        self.create_row_with_id(
+            Id::new_v7(),
+            workspace_id,
+            database_id,
+            actor_id,
+            input,
+            request_id,
+            now,
+        )
+        .await
+    }
+
+    /// [`Self::create_row`] with a caller-chosen id, so a resumable job (the Notion import) can
+    /// record the id before the row exists.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_row_with_id(
+        &self,
+        row_id: Id,
+        workspace_id: Id,
+        database_id: Id,
+        actor_id: Id,
+        input: NewRow,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<DatabaseRow, DatabaseError> {
         let mut tx = self.database.immediate_transaction().await?;
         let page = open(&mut tx, workspace_id, database_id, actor_id).await?;
         let live: i64 = sqlx::query_scalar(
@@ -1900,7 +1980,6 @@ impl DatabaseRepository {
         let properties = properties_in_tx(&mut tx, database_id).await?;
         let values = parse_values(&mut tx, workspace_id, &properties, &input.values).await?;
         let space = page.space(actor_id);
-        let row_id = Id::new_v7();
         let mut siblings =
             sibling_ids(&mut tx, workspace_id, space, Some(database_id), row_id).await?;
         let index = placement_index(&siblings, input.placement)?;
@@ -2571,39 +2650,154 @@ async fn insert_view(
     Ok(())
 }
 
-/// A new database's schema: a "Name" title, a "Tags" multi-select and one "Table" view.
-pub(super) async fn insert_default_schema(
+/// A property of a [`DatabaseSchema`], with a caller-chosen id.
+pub struct SchemaProperty {
+    pub id: Id,
+    pub name: String,
+    pub property_type: PropertyType,
+    /// The config as clients send it (`config` of `POST …/properties`).
+    pub config: Value,
+}
+
+/// A table view of a [`DatabaseSchema`]. Empty `columns` show every property.
+pub struct SchemaView {
+    pub name: String,
+    pub config: ViewConfig,
+}
+
+/// The properties and views a new database starts with, checked by the same rules as the
+/// property and view routes.
+pub struct DatabaseSchema {
+    properties: Vec<Property>,
+    views: Vec<DatabaseView>,
+}
+
+impl DatabaseSchema {
+    /// Checks names, configs, limits and exactly one `title` property. Filter rules that do not
+    /// fit their property are dropped (a view of another app can hold rules Orbit has no operator
+    /// for); the second value counts them. Errors name the field path.
+    pub fn new(
+        properties: Vec<SchemaProperty>,
+        views: Vec<SchemaView>,
+    ) -> Result<(Self, usize), DatabaseError> {
+        if properties.is_empty() || properties.len() > MAX_PROPERTIES {
+            return Err(DatabaseError::invalid("properties"));
+        }
+        if views.is_empty() || views.len() > MAX_VIEWS {
+            return Err(DatabaseError::invalid("views"));
+        }
+        let mut ids = HashSet::new();
+        let properties = properties
+            .into_iter()
+            .enumerate()
+            .map(|(index, input)| {
+                let path =
+                    |field: &str| DatabaseError::invalid(format!("properties[{index}]{field}"));
+                let name = input.name.trim().to_owned();
+                if name.is_empty() || name.chars().count() > MAX_NAME_CHARS {
+                    return Err(path(".name"));
+                }
+                if !ids.insert(input.id) {
+                    return Err(path(".id"));
+                }
+                let kind = PropertyKind::parse(input.property_type, Some(&input.config))
+                    .map_err(|field| path(&format!(".{field}")))?;
+                Ok(Property {
+                    id: input.id,
+                    name,
+                    kind,
+                    position: index as i64,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if properties
+            .iter()
+            .filter(|property| property.kind == PropertyKind::Title)
+            .count()
+            != 1
+        {
+            return Err(DatabaseError::invalid("properties"));
+        }
+        let mut dropped = 0;
+        let views = views
+            .into_iter()
+            .enumerate()
+            .map(|(index, input)| {
+                let name = input.name.trim().to_owned();
+                if name.is_empty() || name.chars().count() > MAX_NAME_CHARS {
+                    return Err(DatabaseError::invalid(format!("views[{index}].name")));
+                }
+                let mut config = input.config;
+                if config.columns.is_empty() {
+                    config.columns = ViewConfig::for_properties(&properties).columns;
+                }
+                dropped += config.drop_unfit_rules(&properties);
+                config
+                    .validate(&properties)
+                    .map_err(|field| DatabaseError::invalid(format!("views[{index}].{field}")))?;
+                Ok(DatabaseView {
+                    id: Id::new_v7(),
+                    name,
+                    view_type: ViewType::Table,
+                    config,
+                    position: index as i64,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((Self { properties, views }, dropped))
+    }
+
+    /// A new database's schema: a "Name" title, a "Tags" multi-select and one "Table" view.
+    fn starter() -> Self {
+        let properties: Vec<Property> = [
+            ("Name", PropertyKind::Title),
+            ("Tags", PropertyKind::MultiSelect(Vec::new())),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(position, (name, kind))| Property {
+            id: Id::new_v7(),
+            name: name.to_owned(),
+            kind,
+            position: position as i64,
+        })
+        .collect();
+        let views = vec![DatabaseView {
+            id: Id::new_v7(),
+            name: "Table".to_owned(),
+            view_type: ViewType::Table,
+            config: ViewConfig::for_properties(&properties),
+            position: 0,
+        }];
+        Self { properties, views }
+    }
+}
+
+/// Writes a new database's schema; `None` is the starter schema of `POST /pages`.
+pub(super) async fn insert_schema(
     tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     database_id: Id,
+    schema: Option<&DatabaseSchema>,
     now: TimestampMillis,
 ) -> Result<(), PageError> {
-    let properties = [
-        ("Name", PropertyKind::Title),
-        ("Tags", PropertyKind::MultiSelect(Vec::new())),
-    ]
-    .into_iter()
-    .enumerate()
-    .map(|(position, (name, kind))| Property {
-        id: Id::new_v7(),
-        name: name.to_owned(),
-        kind,
-        position: position as i64,
-    })
-    .collect::<Vec<_>>();
-    for property in &properties {
+    let starter;
+    let schema = match schema {
+        Some(schema) => schema,
+        None => {
+            starter = DatabaseSchema::starter();
+            &starter
+        }
+    };
+    for property in &schema.properties {
         insert_property(tx, workspace_id, database_id, property, now).await?;
     }
-    let view = DatabaseView {
-        id: Id::new_v7(),
-        name: "Table".to_owned(),
-        view_type: ViewType::Table,
-        config: ViewConfig::for_properties(&properties),
-        position: 0,
-    };
-    insert_view(tx, workspace_id, database_id, &view, now)
-        .await
-        .map_err(page_error)
+    for view in &schema.views {
+        insert_view(tx, workspace_id, database_id, view, now)
+            .await
+            .map_err(page_error)?;
+    }
+    Ok(())
 }
 
 fn page_error(error: DatabaseError) -> PageError {
