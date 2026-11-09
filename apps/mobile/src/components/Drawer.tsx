@@ -1,6 +1,6 @@
 import { type Href, router, useGlobalSearchParams, usePathname } from 'expo-router'
 import { createContext, Fragment, type ReactNode, use, useEffect, useMemo, useRef, useState } from 'react'
-import { AccessibilityInfo, Animated, Easing, Modal, PanResponder, type PanResponderGestureState, Pressable, ScrollView, useWindowDimensions, View } from 'react-native'
+import { Animated, Easing, Modal, PanResponder, type PanResponderGestureState, Pressable, ScrollView, useWindowDimensions, View } from 'react-native'
 import { NativeText as RNText } from '../ui/scaled'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg'
@@ -12,7 +12,7 @@ import { splitAlpha } from '../data/color'
 import { customSidebarTheme } from '../data/custom-theme'
 import { alpha, cssColors, mix, useButtonStyle, useCustomTheme, useTheme } from '../theme'
 import { ColorScope } from '../theme/ColorScope'
-import { CountBadge, Icon, type IconName } from '../ui'
+import { CountBadge, Icon, type IconName, useReduceMotion } from '../ui'
 import { NewProjectSheet } from './NewProjectSheet'
 import { DRAWER_AREA_TITLES, type DrawerArea, drawerAreaOf, drawerSections, TASK_PRESETS, tasksHref } from './drawerAreas'
 import { ACCOUNT_NAV, ADMIN_NAV, allowedNav, WORKSPACE_NAV } from './settings/Shell'
@@ -321,17 +321,6 @@ function SlideIn({ from, children }: { from: SlideFrom | null; children: ReactNo
       {children}
     </Animated.View>
   )
-}
-
-/** The system's Reduce motion setting. */
-function useReduceMotion(): boolean {
-  const [reduce, setReduce] = useState(false)
-  useEffect(() => {
-    void AccessibilityInfo.isReduceMotionEnabled().then(setReduce)
-    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduce)
-    return () => subscription.remove()
-  }, [])
-  return reduce
 }
 
 /**

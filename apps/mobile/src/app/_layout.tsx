@@ -16,7 +16,7 @@ import { OrbitProvider } from '../orbit-context'
 import { SessionProvider, useSession } from '../session-context'
 import { fonts, loadAppearance, palettes, type Theme, useTheme } from '../theme'
 import { AppColorScope, useAppPalette } from '../theme/ColorScope'
-import { Button, EmptyState } from '../ui'
+import { Button, EmptyState, OrbitLoader, Text } from '../ui'
 
 void SplashScreen.preventAutoHideAsync()
 
@@ -143,21 +143,24 @@ function SessionOffline({ server }: { server: string }) {
   const { retry, signOut } = useSession()
   const [retrying, setRetrying] = useState(false)
   return (
-    <View className="flex-1 bg-background">
-      <EmptyState
-        icon="danger"
-        title="Orbit is unavailable"
-        description={`${server.replace(/^https?:\/\//, '')} could not verify this session. Check your connection and retry.`}
-        action={
-          <View className="items-center gap-2">
-            <Button label="Retry" loading={retrying} onPress={() => {
-              setRetrying(true)
-              void retry().finally(() => setRetrying(false))
-            }} />
-            <Button label="Sign out" variant="ghost" muted onPress={() => void signOut()} />
-          </View>
-        }
-      />
+    // the web's `OrbitUnavailable`: the pixel "O" loader, why, and Retry
+    <View className="flex-1 items-center justify-center bg-background p-6">
+      <View accessibilityRole="alert" className="max-w-[384px] items-center gap-4">
+        <OrbitLoader />
+        <View className="items-center gap-1.5">
+          <Text className="text-center font-noto-semibold text-[18px] leading-[28px]">Orbit is unavailable</Text>
+          <Text className="text-center text-[14px] leading-[22.4px] text-muted-foreground">
+            {`${server.replace(/^https?:\/\//, '')} could not verify this session. Check your connection and retry.`}
+          </Text>
+        </View>
+        <View className="items-center gap-2">
+          <Button label="Retry" loading={retrying} onPress={() => {
+            setRetrying(true)
+            void retry().finally(() => setRetrying(false))
+          }} />
+          <Button label="Sign out" variant="ghost" muted onPress={() => void signOut()} />
+        </View>
+      </View>
     </View>
   )
 }
