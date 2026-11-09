@@ -8,6 +8,8 @@ import { ApiProblem } from '@orbit/api/problem'
 import { queryKeys } from '@/api/queryKeys'
 import {
   linearImportErrorMessage,
+  linearImportProgress,
+  linearRateLimitNotice,
   createLinearImportRequest,
   useLinearImport,
   useLinearImportTree,
@@ -22,7 +24,7 @@ afterEach(() => {
 
 const linearImport = (patch: Partial<LinearImport> = {}): LinearImport => ({
   id: 'import-1', workspace_id: 'workspace-1', status: 'scanning', linear_user_name: 'Ada', error: null,
-  progress: { total: 0, done: 0, failed: 0 }, tree: null, report: null, project_ids: [],
+  progress: { total: 0, done: 0, failed: 0, expected: 0, read: 0, created: 0, stage: null }, waiting_until: null, tree: null, report: null, project_ids: [],
   created_at: '2026-11-04T10:00:00Z', updated_at: '2026-11-04T10:00:00Z', ...patch,
 })
 
@@ -124,4 +126,25 @@ test('cancel stores the cancelled import and refreshes projects', async () => {
   expect(calls[0]).toMatchObject({ method: 'POST', path: `${base}/import-1/cancel` })
   expect(client.getQueryData<LinearImport>(queryKeys.linearImports.detail('workspace-1', 'import-1'))?.status).toBe('cancelled')
   expect(client.getQueryState(queryKeys.projects('workspace-1'))?.isInvalidated).toBe(true)
+})
+
+test('progress names each stage with its own count', () => {
+  const at = (stage: LinearImport['progress']['stage'], patch: Partial<LinearImport['progress']> = {}) =>
+    linearImportProgress(linearImport({ status: 'importing', progress: { total: 8_000, done: 0, failed: 0, expected: 8_005, read: 0, created: 0, stage, ...patch } }))
+
+  expect(linearImportProgress(linearImport({ status: 'queued' }))).toEqual({ label: 'Waiting for the import to start…', step: null, done: 0, total: 0, detail: '' })
+  expect(at('reading', { total: 605, read: 1_230 })).toEqual({ label: 'Reading issues from Linear…', step: 1, done: 1_230, total: 8_005, detail: '1,230 of about 8,005 issues read' })
+  expect(at('reading', { read: 8_100 }).total).toBe(8_100)
+  expect(at('creating', { created: 2_500 })).toEqual({ label: 'Creating tasks…', step: 2, done: 2_500, total: 8_000, detail: '2,500 of 8,000 tasks created' })
+  expect(at('details', { done: 40, failed: 2 })).toEqual({ label: 'Adding files and comments…', step: 3, done: 42, total: 8_000, detail: '40 of 8,000 issues imported' })
+  expect(at('linking', { done: 7_990, failed: 10 }).step).toBe(4)
+  expect(at(null, { done: 3 }).label).toBe('Importing issues…')
+})
+
+test('the rate-limit notice shows only while the wait lasts', () => {
+  const now = Date.parse('2026-11-09T21:00:00Z')
+  expect(linearRateLimitNotice(null, now)).toBeNull()
+  expect(linearRateLimitNotice('2026-11-09T20:59:00Z', now)).toBeNull()
+  expect(linearRateLimitNotice('2026-11-09T21:11:30Z', now)).toMatch(/^Linear's rate limit is reached\. The import goes on at .+ \(in about 12 min\)\.$/)
+  expect(linearRateLimitNotice('2026-11-09T21:00:10Z', now)).toMatch(/\(in about 1 min\)/)
 })

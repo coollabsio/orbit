@@ -228,7 +228,7 @@ async fn pages_teams_and_waits_out_a_rate_limit() {
 async fn completes_nested_connections_of_each_issue() {
     let (port, _, _) = serve().await;
     let issues = client(port, KEY)
-        .team_issues("a", usize::MAX)
+        .team_issues("a", usize::MAX, &std::sync::atomic::AtomicU64::new(0))
         .await
         .unwrap();
     assert_eq!(issues.len(), 2);
@@ -242,7 +242,10 @@ async fn completes_nested_connections_of_each_issue() {
     assert!(!issues[0].comments.page_info.has_next_page);
     assert_eq!(issues[0].labels.nodes[0].name.as_deref(), Some("Bug"));
     assert_eq!(issues[0].priority, 2.0);
-    let limited = client(port, KEY).team_issues("a", 1).await.unwrap();
+    let limited = client(port, KEY)
+        .team_issues("a", 1, &std::sync::atomic::AtomicU64::new(0))
+        .await
+        .unwrap();
     assert_eq!(limited.len(), 1, "stops at max");
 }
 

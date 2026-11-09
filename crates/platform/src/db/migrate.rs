@@ -531,6 +531,21 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0079_import_people.sql"),
                     false,
                 ),
+                Migration::new(
+                    80,
+                    include_str!("../../../../apps/server/migrations/0080_linear_import_progress.sql"),
+                    false,
+                ),
+                Migration::new(
+                    81,
+                    include_str!("../../../../apps/server/migrations/0081_import_finished_notices.sql"),
+                    false,
+                ),
+                Migration::new(
+                    82,
+                    include_str!("../../../../apps/server/migrations/0082_import_people_assigning.sql"),
+                    false,
+                ),
             ],
         );
         runner.postgres = vec![
@@ -730,6 +745,21 @@ impl MigrationRunner {
             Migration::new(
                 79,
                 include_str!("../../../../apps/server/migrations/postgres/0079_import_people.sql"),
+                false,
+            ),
+            Migration::new(
+                80,
+                include_str!("../../../../apps/server/migrations/postgres/0080_linear_import_progress.sql"),
+                false,
+            ),
+            Migration::new(
+                81,
+                include_str!("../../../../apps/server/migrations/postgres/0081_import_finished_notices.sql"),
+                false,
+            ),
+            Migration::new(
+                82,
+                include_str!("../../../../apps/server/migrations/postgres/0082_import_people_assigning.sql"),
                 false,
             ),
         ];

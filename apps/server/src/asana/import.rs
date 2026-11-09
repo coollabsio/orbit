@@ -25,6 +25,7 @@
 //! its Orbit project and its tasks, while they exist. A task the earlier import finished is
 //! counted as done and not copied again.
 
+use crate::import_notice::{ImportNotices, ImportSource};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Duration;
 
@@ -100,6 +101,7 @@ pub fn import_job_kind() -> JobKind {
 pub fn register_jobs(
     worker: Worker,
     service: AsanaImportService,
+    notices: ImportNotices,
 ) -> Result<Worker, JobKindRegistrationError> {
     let scan = service.clone();
     worker
@@ -119,6 +121,7 @@ pub fn register_jobs(
         })?
         .with_handler(import_job_kind(), move |context| {
             let service = service.clone();
+            let notices = notices.clone();
             async move {
                 let Some(import_id) = payload_import_id(&context.job.payload) else {
                     return Err(JobError::Permanent(
@@ -130,7 +133,9 @@ pub fn register_jobs(
                     last_attempt: context.claim.attempt >= context.job.max_attempts,
                 };
                 let result = service.run_import(import_id, &run).await;
-                service.after_attempt(import_id, &run, result).await
+                let result = service.after_attempt(import_id, &run, result).await;
+                notices.after_run(ImportSource::Asana, import_id).await;
+                result
             }
         })
 }
@@ -610,7 +615,7 @@ impl AsanaImportService {
         }
         let updated = sqlx::query(
             "UPDATE asana_imports SET status = 'queued', selection_json = $1, total = 0, done = 0, \
-             failed = 0, report_json = $2, updated_at = $3 \
+             failed = 0, report_json = $2, updated_at = $3, started_at = $3 \
              WHERE id = $4 AND status = 'ready' AND token_ciphertext IS NOT NULL",
         )
         .bind(serde_json::to_string(&selection).unwrap_or_default())

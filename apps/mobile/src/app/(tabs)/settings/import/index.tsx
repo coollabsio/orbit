@@ -3,13 +3,13 @@ import { useState } from 'react'
 import { View } from 'react-native'
 
 import { Note, RowIcon, RowText, Select, SettingsCard, SettingsRow, SettingsShell, WORKSPACE_NAV } from '../../../../components/settings/Shell'
-import { IMPORT_SOURCE_NAMES, type ImportPerson, mappedNote } from '../../../../data/import-api'
+import { IMPORT_SOURCE_NAMES, type ImportPerson } from '../../../../data/import-api'
 import { useImportPeople, useMapImportPerson } from '../../../../hooks/imports'
 import { useOrbit } from '../../../../orbit-context'
 import { useMembers } from '../../../../queries'
 import { errorMessage } from '../../../../session-context'
 import { useTheme } from '../../../../theme'
-import { Button, Icon, Text } from '../../../../ui'
+import { Button, Icon, Spinner, Text } from '../../../../ui'
 
 const SOURCES: readonly { name: string; description: string; href: Href }[] = [
   { name: 'Notion', description: 'Import pages and databases into Docs.', href: '/settings/import/notion' },
@@ -62,7 +62,6 @@ function ImportPeople() {
   const items = people.data ?? []
   if (items.length === 0) return null
   const active = (members.data ?? []).filter((member) => !member.suspended_at).sort((a, b) => a.display_name.localeCompare(b.display_name))
-  const memberName = (userId: string) => active.find((member) => member.user_id === userId)?.display_name ?? 'Former member'
 
   const change = (person: ImportPerson, value: string) => {
     const userId = value === UNMAPPED ? null : value
@@ -71,7 +70,6 @@ function ImportPeople() {
     mapPerson.mutate(
       { personId: person.id, userId },
       {
-        onSuccess: ({ tasks_changed }) => setNote({ text: mappedNote(person, tasks_changed, userId ? memberName(userId) : null), error: false }),
         onError: (error) => setNote({ text: errorMessage(error), error: true }),
       },
     )
@@ -89,12 +87,25 @@ function ImportPeople() {
           ...active.map((member) => ({ value: member.user_id, label: member.display_name })),
           ...(person.user_id && !active.some((member) => member.user_id === person.user_id) ? [{ value: person.user_id, label: 'Former member' }] : []),
         ]
+        const sending = mapPerson.isPending && mapPerson.variables?.personId === person.id
+        const saving = sending || person.assigning
+        const toMember = sending ? Boolean(mapPerson.variables?.userId) : Boolean(person.user_id)
+        const subtitle = saving
+          ? `${toMember ? 'Assigning' : 'Unassigning'} ${tasks(person.task_count)}…`
+          : [IMPORT_SOURCE_NAMES[person.source], person.email, tasks(person.task_count)].filter(Boolean).join(' · ')
         return (
           <SettingsRow key={person.id} first={index === 0}>
             <RowIcon icon="people" />
-            <RowText title={person.name} subtitle={[IMPORT_SOURCE_NAMES[person.source], person.email, tasks(person.task_count)].filter(Boolean).join(' · ')} />
-            <View className="w-40">
-              <Select label={`Member for ${person.name}`} size="sm" value={person.user_id ?? UNMAPPED} options={options} onChange={(value) => change(person, value)} />
+            <RowText title={person.name} subtitle={subtitle} />
+            {saving ? <Spinner /> : null}
+            <View className="w-40" pointerEvents={mapPerson.isPending || saving ? 'none' : 'auto'} style={{ opacity: saving ? 0.5 : 1 }}>
+              <Select
+                label={`Member for ${person.name}`}
+                size="sm"
+                value={sending ? (mapPerson.variables?.userId ?? UNMAPPED) : (person.user_id ?? UNMAPPED)}
+                options={options}
+                onChange={(value) => change(person, value)}
+              />
             </View>
           </SettingsRow>
         )

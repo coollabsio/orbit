@@ -9,7 +9,8 @@ import * as api from '../../data/orbit'
 import { useOrbit } from '../../orbit-context'
 import { useNotifications, usePages, usePeople } from '../../queries'
 import { errorMessage } from '../../session-context'
-import { Button, CountBadge, EmptyState, ErrorView, HeaderTitle, LoadingView, PaneHeader, PullRefresh, SafeAreaView, Text } from '../../ui'
+import { Button, CountBadge, EmptyState, ErrorView, HeaderTitle, Icon, LoadingView, PaneHeader, PullRefresh, SafeAreaView, Text } from '../../ui'
+import { useTheme } from '../../theme'
 
 type Tab = 'all' | 'unread' | 'mentions'
 const TABS: { value: Tab; label: string }[] = [
@@ -25,6 +26,7 @@ export default function ActivityScreen() {
   const [tab, setTab] = useState<Tab>('all')
   const notifications = useNotifications()
   const people = usePeople()
+  const { colors } = useTheme()
   const pages = usePages()
   // both the list and the unread list live under this prefix
   const refreshInbox = () => queryClient.invalidateQueries({ queryKey: ['notifications', workspaceId] })
@@ -98,14 +100,19 @@ export default function ActivityScreen() {
               >
                 <View className="w-2 items-center">{unread ? <View accessibilityLabel="Unread" className="size-2 rounded-full bg-primary" /> : null}</View>
                 <View className="size-7 rounded-full items-center justify-center bg-muted">
-                  <Text className="text-[14px] leading-[20px] text-muted-foreground">{(actor?.name ?? '?').charAt(0).toUpperCase()}</Text>
+                  {/* an import notice is the user's own: the import glyph, not their initial */}
+                  {item.import_id ? (
+                    <Icon name="import" size={16} color={colors.mutedForeground} />
+                  ) : (
+                    <Text className="text-[14px] leading-[20px] text-muted-foreground">{(actor?.name ?? '?').charAt(0).toUpperCase()}</Text>
+                  )}
                 </View>
                 <View className="flex-1 min-w-0 gap-0.5">
                   <Text numberOfLines={1} className={`text-[13px] leading-[18.5px] ${unread ? 'font-noto-semibold' : ''}`}>
                     {copy.title}
                   </Text>
                   <Text numberOfLines={1} className="text-[12px] leading-[16px] text-muted-foreground/70">
-                    {actor ? `${actor.name} · ${copy.body}` : copy.body}
+                    {actor && !item.import_id ? `${actor.name} · ${copy.body}` : copy.body}
                   </Text>
                 </View>
                 <Text className="text-[12px] leading-[16px] text-muted-foreground/70">{relativeTime(item.created_at)}</Text>

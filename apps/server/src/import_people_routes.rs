@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::auth_routes::CookieMode;
-use crate::import_people::{self, ImportPeopleError, ImportPerson, MappedPerson};
+use crate::import_people::{self, ImportPeopleError, ImportPerson};
 use crate::repositories::identity::IdentityRepository;
 use crate::task_routes::{ApiError, ApiJson, authenticate_session, request_id_value, validation};
 
@@ -106,14 +106,14 @@ async fn list_import_people(
 
 /// Maps a person to a member (any member; the email need not match): their tasks lose the
 /// previously mapped member and get this one, without notifications. Workspace admins only.
-#[utoipa::path(put, path = "/api/v1/workspaces/{workspace_id}/import-people/{person_id}", params(("workspace_id" = String, Path), ("person_id" = String, Path)), request_body = UpdateImportPersonBody, responses((status = 200, body = MappedPerson)))]
+#[utoipa::path(put, path = "/api/v1/workspaces/{workspace_id}/import-people/{person_id}", params(("workspace_id" = String, Path), ("person_id" = String, Path)), request_body = UpdateImportPersonBody, responses((status = 200, body = ImportPerson)))]
 async fn update_import_person(
     State(state): State<ImportPeopleState>,
     Path((workspace, person)): Path<(String, String)>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
     ApiJson(body): ApiJson<UpdateImportPersonBody>,
-) -> Result<Json<MappedPerson>, ApiError> {
+) -> Result<Json<ImportPerson>, ApiError> {
     let instance = format!("{}/{person}", collection(&workspace));
     let request = request_id.as_ref();
     let (workspace_id, actor_id) = scope(&state, &headers, &workspace, &instance, request).await?;

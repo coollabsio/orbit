@@ -1826,6 +1826,10 @@ export type ImportPeopleList = {
  */
 export type ImportPerson = {
     /**
+     * A job is still moving the tasks to `user_id`.
+     */
+    assigning: boolean;
+    /**
      * Lowercase; `null` when the source did not give one.
      */
     email?: string | null;
@@ -2028,6 +2032,10 @@ export type LinearImport = {
     status: LinearImportStatus;
     tree: null | LinearImportTree;
     updated_at: string;
+    /**
+     * Set while a Linear rate limit pauses the import: when it goes on.
+     */
+    waiting_until: string | null;
     workspace_id: string;
 };
 
@@ -2050,13 +2058,26 @@ export type LinearImportList = {
 
 export type LinearImportProgress = {
     /**
+     * Tasks created so far.
+     */
+    created: number;
+    /**
      * Issues imported with their files and comments.
      */
     done: number;
     /**
+     * Issues the selected teams had when they were scanned: the goal of the `reading` stage.
+     */
+    expected: number;
+    /**
      * Issues, teams and relations that could not be imported.
      */
     failed: number;
+    /**
+     * Issues read from Linear so far, the team being read included.
+     */
+    read: number;
+    stage: null | LinearImportStage;
     /**
      * Issues found so far (sub-issues included); grows while teams are listed.
      */
@@ -2103,6 +2124,11 @@ export type LinearImportReport = {
      */
     unmatched_assignees: number;
 };
+
+/**
+ * The steps of a running import, in order.
+ */
+export type LinearImportStage = 'reading' | 'creating' | 'details' | 'linking';
 
 /**
  * `linear_imports.status`.
@@ -2361,14 +2387,6 @@ export type LoginResponse = {
      */
     session_token?: string | null;
     user: AuthUserResponse;
-};
-
-/**
- * The person after a mapping change, and how many of their tasks changed.
- */
-export type MappedPerson = {
-    person: ImportPerson;
-    tasks_changed: number;
 };
 
 export type MemberNoteBody = {
@@ -2630,9 +2648,22 @@ export type NotificationRecord = {
     created_at: string;
     id: string;
     /**
+     * The import of an `import_finished` notification.
+     */
+    import_id?: string | null;
+    /**
+     * The importer of an `import_finished` notification: `asana`, `linear`, `trello`, `notion`
+     * or `obsidian`.
+     */
+    import_source?: string | null;
+    /**
+     * How the import ended: `completed` or `failed`.
+     */
+    import_status?: string | null;
+    /**
      * `task_assigned`, `comment_mentioned` (task comment), `description_mentioned` (task
      * description), `page_comment_mentioned`, `page_mentioned` (an @mention in a page body) or
-     * `chat_mentioned` (a chat message).
+     * `chat_mentioned` (a chat message) or `import_finished` (a long import ended).
      */
     kind: string;
     /**
@@ -3564,9 +3595,22 @@ export type PageNotificationRecord = {
         created_at: string;
         id: string;
         /**
+         * The import of an `import_finished` notification.
+         */
+        import_id?: string | null;
+        /**
+         * The importer of an `import_finished` notification: `asana`, `linear`, `trello`, `notion`
+         * or `obsidian`.
+         */
+        import_source?: string | null;
+        /**
+         * How the import ended: `completed` or `failed`.
+         */
+        import_status?: string | null;
+        /**
          * `task_assigned`, `comment_mentioned` (task comment), `description_mentioned` (task
          * description), `page_comment_mentioned`, `page_mentioned` (an @mention in a page body) or
-         * `chat_mentioned` (a chat message).
+         * `chat_mentioned` (a chat message) or `import_finished` (a long import ended).
          */
         kind: string;
         /**
@@ -16746,7 +16790,7 @@ export type UpdateImportPersonErrors = {
 export type UpdateImportPersonError = UpdateImportPersonErrors[keyof UpdateImportPersonErrors];
 
 export type UpdateImportPersonResponses = {
-    200: MappedPerson;
+    200: ImportPerson;
 };
 
 export type UpdateImportPersonResponse = UpdateImportPersonResponses[keyof UpdateImportPersonResponses];

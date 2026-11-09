@@ -16,9 +16,11 @@ use orbit_platform::{
     TestDatabase, TimestampMillis, UploadLimits, UploadService,
 };
 use orbit_server::auth_routes::CookieMode;
+use orbit_server::import_notice::{ImportNotices, ImportSource};
 use orbit_server::linear::client::LinearClientConfig;
 use orbit_server::linear::import::{JobRun, LinearImportService, LinearImportSettings};
 use orbit_server::linear_import_routes::{LinearImportState, linear_import_router};
+use orbit_server::mail::Mailer;
 use orbit_server::repositories::attachments::AttachmentRepository;
 use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
 use serde_json::{Value, json};
@@ -41,6 +43,8 @@ struct Fake {
     revoked: AtomicBool,
     /// Answer the first `states` query with a RATELIMITED error.
     rate_limit_states: AtomicBool,
+    /// Answer every `issues` query with a RATELIMITED error that asks for an hour's wait.
+    rate_limit_issues: AtomicBool,
     hits: Mutex<HashMap<String, usize>>,
     /// Cancelled when `/uploads/diagram` is requested (simulates a shutdown mid-import).
     interrupt: Mutex<Option<CancellationToken>>,
@@ -234,6 +238,17 @@ async fn handle(
         json!({"team": {"states": page(states)}})
     } else if query.contains("issues(") {
         fake.hit(&format!("issues {id}"));
+        if fake.rate_limit_issues.load(Ordering::SeqCst) {
+            let mut response = graphql_error(
+                StatusCode::BAD_REQUEST,
+                "RATELIMITED",
+                "Rate limit exceeded",
+            );
+            response
+                .headers_mut()
+                .insert(header::RETRY_AFTER, "3600".parse().unwrap());
+            return response;
+        }
         let issues = match id {
             "t-eng" => eng_issues(&fake.base),
             _ => ops_issues(),
@@ -597,8 +612,9 @@ async fn imports_teams_with_states_issues_comments_files_and_relations() {
     assert_eq!(import["status"], "completed", "{import}");
     assert_eq!(
         import["progress"],
-        json!({"total": 6, "done": 6, "failed": 0})
+        json!({"total": 6, "done": 6, "failed": 0, "expected": 7, "read": 6, "created": 6, "stage": null})
     );
+    assert_eq!(import["waiting_until"], Value::Null);
     assert_eq!(
         import["report"],
         json!({"comments_imported": 2, "files_imported": 2, "missing_files": 1, "links_added": 1,
@@ -1023,4 +1039,291 @@ async fn a_cancelled_import_stops_and_keeps_what_it_made() {
         0,
         "the job did nothing after the cancel"
     );
+}
+
+#[tokio::test]
+async fn a_long_rate_limit_queues_the_next_run_after_it_without_failing() {
+    let h = Harness::new().await;
+    h.fake.rate_limit_issues.store(true, Ordering::SeqCst);
+    let id = h.started(&["t-eng"]).await;
+    let before = TimestampMillis::now().as_millis();
+    h.service
+        .run_import(id.parse().unwrap(), &JobRun::default())
+        .await
+        .expect("the run ends without a job error");
+
+    let import = h.view(&id).await;
+    assert_eq!(import["status"], "importing", "{import}");
+    assert_eq!(import["error"], Value::Null);
+    assert_eq!(import["progress"]["stage"], "reading");
+    assert_eq!(import["progress"]["expected"], 6);
+    assert!(import["waiting_until"].is_string(), "{import}");
+    let waiting_until = h
+        .scalar(
+            "SELECT waiting_until FROM linear_imports WHERE id = $1",
+            &id,
+        )
+        .await;
+    assert!(
+        (before + 3_590_000..=before + 3_700_000).contains(&waiting_until),
+        "waits for Linear's hour: {import}"
+    );
+    // the job `start` queued is never claimed here (the test calls the handler directly)
+    let later: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM jobs WHERE kind = 'linear.import' AND state = 'queued' AND available_at >= $1",
+    )
+    .bind(before + 3_590_000)
+    .fetch_one(h.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(later, 1, "the next run is queued after the wait");
+
+    h.fake.rate_limit_issues.store(false, Ordering::SeqCst);
+    h.run(&id, &JobRun::default()).await;
+    let import = h.view(&id).await;
+    assert_eq!(import["status"], "completed", "{import}");
+    assert_eq!(import["waiting_until"], Value::Null);
+    assert_eq!(import["progress"]["stage"], Value::Null);
+    assert_eq!(
+        import["progress"]["done"], import["progress"]["total"],
+        "{import}"
+    );
+}
+
+#[tokio::test]
+async fn a_cancelled_import_shows_no_stage_or_wait() {
+    let h = Harness::new().await;
+    h.fake.rate_limit_issues.store(true, Ordering::SeqCst);
+    let id = h.started(&["t-eng"]).await;
+    h.run(&id, &JobRun::default()).await;
+    let waiting = h.view(&id).await;
+    assert_eq!(waiting["progress"]["stage"], "reading", "{waiting}");
+    assert!(waiting["waiting_until"].is_string(), "{waiting}");
+
+    let (status, cancelled) = h
+        .call("POST", &format!("{}/{id}/cancel", h.imports_uri()), None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(cancelled["status"], "cancelled");
+    assert_eq!(
+        cancelled["progress"]["stage"],
+        Value::Null,
+        "an ended import has no stage"
+    );
+    assert_eq!(
+        cancelled["waiting_until"],
+        Value::Null,
+        "and waits for nothing"
+    );
+}
+
+#[tokio::test]
+async fn a_long_import_notifies_its_user_once_by_inbox_and_email() {
+    let h = Harness::new().await;
+    let (mailer, outbox) = Mailer::recording((*h.database).clone(), "https://orbit.example");
+    let notices = ImportNotices::new((*h.database).clone(), mailer);
+    let id = h.started(&["t-eng"]).await;
+    let import_id: Id = id.parse().unwrap();
+    h.run(&id, &JobRun::default()).await;
+    assert_eq!(h.view(&id).await["status"], "completed");
+    let notify = || notices.notify(ImportSource::Linear, import_id, TimestampMillis::now());
+    assert!(
+        !notify().await.unwrap(),
+        "an import that just started notifies nobody"
+    );
+
+    sqlx::query("UPDATE linear_imports SET started_at = started_at - 360000 WHERE id = $1")
+        .bind(&id)
+        .execute(h.database.pool())
+        .await
+        .unwrap();
+    assert!(
+        notify().await.unwrap(),
+        "a six-minute import notifies its user"
+    );
+    assert!(!notify().await.unwrap(), "only once");
+
+    let rows: Vec<(String, String, String, String, String)> = sqlx::query_as(
+        "SELECT kind, import_source, import_id, import_status, workspace_id FROM notifications \
+         WHERE kind = 'import_finished'",
+    )
+    .fetch_all(h.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        rows,
+        [(
+            "import_finished".to_owned(),
+            "linear".to_owned(),
+            id.clone(),
+            "completed".to_owned(),
+            h.workspace_id.clone()
+        )]
+    );
+    // the email is sent in the background
+    for _ in 0..100 {
+        if !outbox.lock().unwrap().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let sent = outbox.lock().unwrap().clone();
+    assert_eq!(sent.len(), 1, "one email");
+    assert_eq!(sent[0].to, "owner@example.com");
+    assert_eq!(sent[0].subject, "Your Linear import is complete");
+    assert!(
+        sent[0].body.contains(": 5 issues imported.")
+            && sent[0].body.contains(&format!(
+                "https://orbit.example/tasks-import/linear/{id}?workspace={}",
+                h.workspace_id
+            )),
+        "{}",
+        sent[0].body
+    );
+}
+
+#[tokio::test]
+async fn a_cancelled_import_notifies_nobody() {
+    let h = Harness::new().await;
+    let (mailer, outbox) = Mailer::recording((*h.database).clone(), "https://orbit.example");
+    let notices = ImportNotices::new((*h.database).clone(), mailer);
+    let id = h.started(&["t-eng"]).await;
+    let (status, _) = h
+        .call("POST", &format!("{}/{id}/cancel", h.imports_uri()), None)
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    sqlx::query("UPDATE linear_imports SET started_at = started_at - 360000 WHERE id = $1")
+        .bind(&id)
+        .execute(h.database.pool())
+        .await
+        .unwrap();
+    assert!(
+        !notices
+            .notify(
+                ImportSource::Linear,
+                id.parse().unwrap(),
+                TimestampMillis::now()
+            )
+            .await
+            .unwrap()
+    );
+    assert!(outbox.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn mapping_an_imported_person_moves_their_tasks_in_a_job() {
+    use orbit_server::import_people::{run_assign_job, set_member};
+    let h = Harness::new().await;
+    let id = h.started(&["t-eng", "t-ops"]).await;
+    h.run(&id, &JobRun::default()).await;
+    let workspace: Id = h.workspace_id.parse().unwrap();
+    let text = |sql: &'static str, bind: String| {
+        let pool = h.database.pool().clone();
+        async move {
+            sqlx::query_scalar::<_, String>(sql)
+                .bind(bind)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+    let owner: Id = text(
+        "SELECT id FROM users WHERE email = $1",
+        "owner@example.com".into(),
+    )
+    .await
+    .parse()
+    .unwrap();
+    let person: Id = text(
+        "SELECT id FROM import_people WHERE workspace_id = $1",
+        h.workspace_id.clone(),
+    )
+    .await
+    .parse()
+    .unwrap();
+    let task = text(
+        "SELECT task_id FROM import_person_tasks WHERE person_id = $1",
+        person.to_string(),
+    )
+    .await;
+    let member = h.member_id.to_string();
+    let assigned = || async {
+        h.scalar(
+            &format!(
+                "SELECT COUNT(*) FROM task_assignees WHERE user_id = '{member}' AND task_id = $1"
+            ),
+            &task,
+        )
+        .await
+    };
+    let assigning = || async {
+        h.scalar(
+            "SELECT assigning FROM import_people WHERE id = $1",
+            &person.to_string(),
+        )
+        .await
+    };
+    let jobs = || async {
+        sqlx::query_scalar::<_, String>(
+            "SELECT payload_json FROM jobs WHERE kind = 'import_people.assign' ORDER BY created_at, id",
+        )
+        .fetch_all(h.database.pool())
+        .await
+        .unwrap()
+        .iter()
+        .map(|json| serde_json::from_str::<Value>(json).unwrap())
+        .collect::<Vec<_>>()
+    };
+
+    let mapped = set_member(
+        &h.database,
+        workspace,
+        owner,
+        person,
+        Some(h.member_id),
+        "map-1",
+    )
+    .await
+    .unwrap();
+    assert!(
+        mapped.assigning,
+        "the person shows the work until the job ends"
+    );
+    assert_eq!(mapped.user_id, Some(h.member_id));
+    assert_eq!(assigned().await, 0, "the request itself moves no task");
+    run_assign_job(&h.database, &jobs().await[0], false)
+        .await
+        .unwrap();
+    assert_eq!(assigned().await, 1);
+    assert_eq!(assigning().await, 0);
+
+    // unmap, then map again before the unmap's job runs: the older job stops and leaves the mark
+    set_member(&h.database, workspace, owner, person, None, "unmap")
+        .await
+        .unwrap();
+    set_member(
+        &h.database,
+        workspace,
+        owner,
+        person,
+        Some(h.member_id),
+        "map-2",
+    )
+    .await
+    .unwrap();
+    let queued = jobs().await;
+    run_assign_job(&h.database, &queued[1], false)
+        .await
+        .unwrap();
+    assert_eq!(assigned().await, 1, "the superseded unmap moved nothing");
+    assert_eq!(
+        assigning().await,
+        1,
+        "only the latest pick's job ends the work"
+    );
+    run_assign_job(&h.database, &queued[2], false)
+        .await
+        .unwrap();
+    assert_eq!(assigned().await, 1);
+    assert_eq!(assigning().await, 0);
 }

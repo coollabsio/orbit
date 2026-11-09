@@ -28,7 +28,10 @@
 //! its Orbit project and its tasks, while they exist. An issue the earlier import finished is
 //! counted as done and not copied again.
 
+use crate::import_notice::{ImportNotices, ImportSource};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::Duration;
 
 use orbit_platform::Row;
@@ -89,6 +92,8 @@ const TABLES: ImportTables = ImportTables {
     task_kind: "issue",
 };
 const OPEN: &str = "('scanning', 'ready', 'queued', 'importing')";
+/// How often a running import writes the issues read and a rate-limit wait.
+const PROGRESS_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Both job kinds: [`job_kind`], as for the Asana and Notion imports.
 #[must_use]
@@ -105,6 +110,7 @@ pub fn import_job_kind() -> JobKind {
 pub fn register_jobs(
     worker: Worker,
     service: LinearImportService,
+    notices: ImportNotices,
 ) -> Result<Worker, JobKindRegistrationError> {
     let scan = service.clone();
     worker
@@ -126,6 +132,7 @@ pub fn register_jobs(
         })?
         .with_handler(import_job_kind(), move |context| {
             let service = service.clone();
+            let notices = notices.clone();
             async move {
                 let Some(import_id) = payload_import_id(&context.job.payload) else {
                     return Err(JobError::Permanent(
@@ -137,7 +144,9 @@ pub fn register_jobs(
                     last_attempt: context.claim.attempt >= context.job.max_attempts,
                 };
                 let result = service.run_import(import_id, &run).await;
-                service.after_attempt(import_id, &run, result).await
+                let result = service.after_attempt(import_id, &run, result).await;
+                notices.after_run(ImportSource::Linear, import_id).await;
+                result
             }
         })
 }
@@ -242,6 +251,46 @@ pub struct LinearImportProgress {
     pub done: u64,
     /// Issues, teams and relations that could not be imported.
     pub failed: u64,
+    /// Issues the selected teams had when they were scanned: the goal of the `reading` stage.
+    pub expected: u64,
+    /// Issues read from Linear so far, the team being read included.
+    pub read: u64,
+    /// Tasks created so far.
+    pub created: u64,
+    /// What the job does now; `null` before the start and once the import ended.
+    #[schema(required = true)]
+    pub stage: Option<LinearImportStage>,
+}
+
+/// The steps of a running import, in order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LinearImportStage {
+    /// Reading the issue lists of the selected teams from Linear.
+    Reading,
+    /// Creating the tasks.
+    Creating,
+    /// Adding files and comments.
+    Details,
+    /// Linking blocking, related and duplicate issues.
+    Linking,
+}
+
+impl LinearImportStage {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Reading => "reading",
+            Self::Creating => "creating",
+            Self::Details => "details",
+            Self::Linking => "linking",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        [Self::Reading, Self::Creating, Self::Details, Self::Linking]
+            .into_iter()
+            .find(|stage| stage.as_str() == value)
+    }
 }
 
 /// A team, issue or relation the import could not create or fill.
@@ -304,6 +353,9 @@ pub struct LinearImport {
     #[schema(required = true)]
     pub linear_user_name: Option<String>,
     pub progress: LinearImportProgress,
+    /// Set while a Linear rate limit pauses the import: when it goes on.
+    #[schema(value_type = Option<String>, format = DateTime, required = true)]
+    pub waiting_until: Option<TimestampMillis>,
     /// Why the import failed or expired.
     #[schema(required = true)]
     pub error: Option<String>,
@@ -400,6 +452,23 @@ struct Run<'a> {
     /// Name key → member of the Linear people an admin mapped (Settings → Import).
     mapped: HashMap<String, Id>,
     teams: HashMap<String, TeamContext>,
+    reading: Arc<Reading>,
+}
+
+/// The team being listed: `total` when its listing began, and its issues read so far.
+#[derive(Default)]
+struct Reading {
+    base: AtomicI64,
+    read: AtomicU64,
+}
+
+/// Stops the progress writer of an import run when dropped.
+struct ProgressWriter(tokio::task::JoinHandle<()>);
+
+impl Drop for ProgressWriter {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 impl LinearImportService {
@@ -602,6 +671,7 @@ impl LinearImportService {
         let selection = StoredSelection {
             team_ids: teams.iter().map(|team| team.id.clone()).collect(),
         };
+        let expected: u64 = teams.iter().map(|team| team.issue_count).sum();
 
         let now = TimestampMillis::now();
         let mut tx = self.database().immediate_transaction().await?;
@@ -617,13 +687,14 @@ impl LinearImportService {
         }
         let updated = sqlx::query(
             "UPDATE linear_imports SET status = 'queued', selection_json = $1, total = 0, done = 0, \
-             failed = 0, report_json = $2, updated_at = $3 \
+             failed = 0, report_json = $2, updated_at = $3, started_at = $3, expected = $5 \
              WHERE id = $4 AND status = 'ready' AND token_ciphertext IS NOT NULL",
         )
         .bind(serde_json::to_string(&selection).unwrap_or_default())
         .bind(serde_json::to_string(&StoredReport::default()).unwrap_or_default())
         .bind(now.as_millis())
         .bind(import_id.to_string())
+        .bind(i64::try_from(expected).unwrap_or(i64::MAX))
         .execute(&mut *tx)
         .await?
         .rows_affected();
@@ -887,9 +958,12 @@ impl LinearImportService {
             mapped: import_people::mapped_members(self.database(), workspace_id, Source::Linear)
                 .await?,
             teams: HashMap::new(),
+            reading: Arc::default(),
         };
-
+        let _writer = self.write_progress(import_id, client.clone(), run.reading.clone());
+        let outcome: Result<(), Failure> = async {
         // Phase A: projects, their statuses, and the issue and relation lists.
+        self.set_stage(import_id, LinearImportStage::Reading).await?;
         let teams: Vec<Item> = self.load_items(import_id, "team").await?;
         for (index, team) in teams.iter().enumerate() {
             if team.state == "filled" || team.state == "failed" {
@@ -915,6 +989,7 @@ impl LinearImportService {
         }
 
         // Phase B: create every issue, parents first.
+        self.set_stage(import_id, LinearImportStage::Creating).await?;
         let mut issues = self.load_items(import_id, "issue").await?;
         for index in 0..issues.len() {
             if issues[index].state != "pending" {
@@ -949,6 +1024,7 @@ impl LinearImportService {
         self.save_report(&run).await?;
 
         // Phase C: files and comments.
+        self.set_stage(import_id, LinearImportStage::Details).await?;
         for item in &issues {
             if item.state != "created" {
                 continue;
@@ -989,6 +1065,7 @@ impl LinearImportService {
         }
 
         // Phase D: relations between the imported issues.
+        self.set_stage(import_id, LinearImportStage::Linking).await?;
         let created = self.created_tasks(import_id).await?;
         for item in self.load_items(import_id, "relation").await? {
             if item.state != "pending" {
@@ -1022,14 +1099,114 @@ impl LinearImportService {
         }
 
         sqlx::query(
-            "UPDATE linear_imports SET status = 'completed', token_ciphertext = NULL, updated_at = $1 \
-             WHERE id = $2 AND status = 'importing'",
+            "UPDATE linear_imports SET status = 'completed', token_ciphertext = NULL, stage = NULL, \
+             reading = 0, waiting_until = NULL, updated_at = $1 WHERE id = $2 AND status = 'importing'",
         )
         .bind(TimestampMillis::now().as_millis())
         .bind(import_id.to_string())
         .execute(self.database().pool())
         .await?;
         Ok(())
+        }
+        .await;
+        // Linear wants a longer pause than the client waits in place: run again after it, without
+        // spending one of the job's few retries.
+        if matches!(outcome, Err(Failure::Transient(_)))
+            && !job.cancel.is_cancelled()
+            && let Some(wait) = client.rate_limited_for()
+        {
+            return self.resume_after(import_id, workspace_id, wait).await;
+        }
+        outcome
+    }
+
+    /// Queues the next run of the import job after `wait` and shows the wait.
+    async fn resume_after(
+        &self,
+        import_id: Id,
+        workspace_id: Id,
+        wait: Duration,
+    ) -> Result<(), Failure> {
+        let at = TimestampMillis::from_millis(
+            TimestampMillis::now().as_millis()
+                + i64::try_from(wait.as_millis()).unwrap_or(i64::MAX / 2),
+        );
+        sqlx::query(
+            "UPDATE linear_imports SET waiting_until = $1 WHERE id = $2 AND status = 'importing'",
+        )
+        .bind(at.as_millis())
+        .bind(import_id.to_string())
+        .execute(self.database().pool())
+        .await?;
+        let job = Job::new(
+            import_job_kind(),
+            json!({"import_id": import_id.to_string()}),
+            at,
+        )
+        .with_workspace(workspace_id.to_string());
+        self.inner
+            .jobs
+            .enqueue(job)
+            .await
+            .map_err(|error| Failure::Transient(error.to_string()))?;
+        tracing::info!(import_id = %import_id, wait_s = wait.as_secs(), "Linear import waits for the rate limit");
+        Ok(())
+    }
+
+    async fn set_stage(&self, import_id: Id, stage: LinearImportStage) -> Result<(), Failure> {
+        sqlx::query("UPDATE linear_imports SET stage = $1 WHERE id = $2")
+            .bind(stage.as_str())
+            .bind(import_id.to_string())
+            .execute(self.database().pool())
+            .await?;
+        Ok(())
+    }
+
+    /// Every [`PROGRESS_INTERVAL`] while the run lasts, stores the issues read of the team being
+    /// listed and when a Linear rate limit lets the import go on. Best effort: a failed write
+    /// waits for the next tick.
+    fn write_progress(
+        &self,
+        import_id: Id,
+        client: LinearClient,
+        reading: Arc<Reading>,
+    ) -> ProgressWriter {
+        let database = self.database().clone();
+        ProgressWriter(tokio::spawn(async move {
+            let mut written: Option<(u64, Option<i64>)> = None;
+            let mut tick = tokio::time::interval(PROGRESS_INTERVAL);
+            loop {
+                tick.tick().await;
+                let waiting_until = client.rate_limit_wait().map(|wait| {
+                    // whole seconds, so a steady wait is not rewritten on every tick
+                    let at = TimestampMillis::now().as_millis()
+                        + i64::try_from(wait.as_millis()).unwrap_or(i64::MAX / 2);
+                    at - at % 1_000
+                });
+                let read = reading.read.load(Ordering::Relaxed);
+                if written == Some((read, waiting_until)) {
+                    continue;
+                }
+                // `total = base`: once the team is stored its count is in `total`, and a late tick
+                // must not add it again
+                let result = sqlx::query(
+                    "UPDATE linear_imports SET reading = CASE WHEN total = $1 THEN $2 ELSE reading END, \
+                     waiting_until = $3 WHERE id = $4 AND status = 'importing'",
+                )
+                .bind(reading.base.load(Ordering::Relaxed))
+                .bind(i64::try_from(read).unwrap_or(i64::MAX))
+                .bind(waiting_until)
+                .bind(import_id.to_string())
+                .execute(database.pool())
+                .await;
+                match result {
+                    Ok(_) => written = Some((read, waiting_until)),
+                    Err(error) => {
+                        tracing::debug!(import_id = %import_id, error = %error, "Linear import progress not written")
+                    }
+                }
+            }
+        }))
     }
 
     /// Phase A for one team: the Orbit project, a status per workflow state, and the items.
@@ -1168,9 +1345,15 @@ impl LinearImportService {
         .fetch_one(self.database().pool())
         .await?;
         let room = MAX_TASKS.saturating_sub(usize::try_from(listed).unwrap_or(MAX_TASKS));
+        let total: i64 = sqlx::query_scalar("SELECT total FROM linear_imports WHERE id = $1")
+            .bind(run.import_id.to_string())
+            .fetch_one(self.database().pool())
+            .await?;
+        run.reading.read.store(0, Ordering::Relaxed);
+        run.reading.base.store(total, Ordering::Relaxed);
         let issues: Vec<LinearIssue> = run
             .client
-            .team_issues(team_id, room + 1)
+            .team_issues(team_id, room + 1, &run.reading.read)
             .await?
             .into_iter()
             .filter(|issue| issue.trashed != Some(true))
@@ -1231,7 +1414,9 @@ impl LinearImportService {
                 .await?;
             }
         }
-        sqlx::query("UPDATE linear_imports SET total = total + $1, updated_at = $2 WHERE id = $3")
+        sqlx::query(
+            "UPDATE linear_imports SET total = total + $1, reading = 0, updated_at = $2 WHERE id = $3",
+        )
             .bind(inserted as i64)
             .bind(TimestampMillis::now().as_millis())
             .bind(run.import_id.to_string())
@@ -1912,8 +2097,8 @@ impl LinearImportService {
         error: Option<&str>,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(sqlx::AssertSqlSafe(format!(
-            "UPDATE linear_imports SET status = $1, token_ciphertext = NULL, error = $2, updated_at = $3 \
-             WHERE id = $4 AND status IN {OPEN}"
+            "UPDATE linear_imports SET status = $1, token_ciphertext = NULL, error = $2, updated_at = $3, \
+             stage = NULL, reading = 0, waiting_until = NULL WHERE id = $4 AND status IN {OPEN}"
         )))
         .bind(status)
         .bind(error.map(|error| clamp(error, 500, 2_000)))
@@ -2002,6 +2187,9 @@ impl LinearImportService {
         let row = sqlx::query(
             "SELECT id, workspace_id, status, linear_user_name, \
              CASE WHEN $1 THEN tree_json END AS tree_json, selection_json, total, done, failed, \
+             expected, reading, stage, waiting_until, \
+             (SELECT COUNT(*) FROM linear_import_items AS items WHERE items.import_id = linear_imports.id \
+                 AND items.kind = 'issue' AND items.state IN ('created', 'filled')) AS created, \
              report_json, error, created_at, updated_at FROM linear_imports \
              WHERE id = $2 AND workspace_id = $3 AND user_id = $4",
         )
@@ -2014,6 +2202,10 @@ impl LinearImportService {
         .ok_or(LinearImportError::NotFound)?;
         let invalid = |_| LinearImportError::Unavailable("invalid stored import".to_owned());
         let status = LinearImportStatus::parse(&row.get::<String, _>("status"))?;
+        let active = matches!(
+            status,
+            LinearImportStatus::Queued | LinearImportStatus::Importing
+        );
         let started = row.get::<Option<String>, _>("selection_json").is_some();
         let tree = row
             .get::<Option<String>, _>("tree_json")
@@ -2082,7 +2274,20 @@ impl LinearImportService {
                 total: count("total"),
                 done: count("done"),
                 failed: count("failed"),
+                expected: count("expected"),
+                read: count("total") + count("reading"),
+                created: count("created"),
+                // a cancel or an expiry ends the import without the job: only an active one has a stage
+                stage: row
+                    .get::<Option<String>, _>("stage")
+                    .as_deref()
+                    .and_then(LinearImportStage::parse)
+                    .filter(|_| active),
             },
+            waiting_until: row
+                .get::<Option<i64>, _>("waiting_until")
+                .filter(|_| active)
+                .map(TimestampMillis::from_millis),
             error: row.get("error"),
             tree,
             report,

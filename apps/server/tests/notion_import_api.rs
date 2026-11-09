@@ -20,7 +20,9 @@ use orbit_platform::{
     WorkerConfig,
 };
 use orbit_server::auth_routes::CookieMode;
+use orbit_server::import_notice::ImportNotices;
 use orbit_server::import_routes::{ImportState, import_router};
+use orbit_server::mail::Mailer;
 use orbit_server::notion::client::NotionClientConfig;
 use orbit_server::notion::import::{
     JobRun, NotionImportService, NotionImportSettings, register_jobs,
@@ -1504,6 +1506,10 @@ async fn jobs_scan_and_import_through_the_worker() {
                 .with_poll_interval(Duration::from_millis(10)),
         ),
         harness.service.clone(),
+        ImportNotices::new(
+            (*harness.database).clone(),
+            Mailer::recording((*harness.database).clone(), "https://orbit.example").0,
+        ),
     )
     .unwrap();
     let shutdown = CancellationToken::new();
@@ -1762,6 +1768,10 @@ async fn an_exhausted_job_fails_the_import_when_its_last_attempt_ends() {
                 .with_poll_interval(Duration::from_millis(10)),
         ),
         harness.service.clone(),
+        ImportNotices::new(
+            (*harness.database).clone(),
+            Mailer::recording((*harness.database).clone(), "https://orbit.example").0,
+        ),
     )
     .unwrap();
     let id = harness.scanned(&harness.owner_cookie).await;

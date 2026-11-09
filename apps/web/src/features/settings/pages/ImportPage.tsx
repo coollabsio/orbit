@@ -5,6 +5,7 @@ import type { ImportPerson, ImportSource } from '@orbit/api/generated/types.gen'
 import { Import, People as Users } from 'reicon-react'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { buttonVariants } from '@/components/ui/button'
+import { Spinner } from '@/components/ui/spinner'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { RowIcon, SettingsRow } from '@/features/settings/components/SettingsParts'
 import { useImportPeople, useMapImportPerson } from '@/features/settings/api/importPeople'
@@ -63,7 +64,6 @@ function ImportPeople() {
   const items = people.data ?? []
   if (items.length === 0) return null
   const active = (members.data ?? []).filter((member) => !member.suspended).sort((a, b) => a.name.localeCompare(b.name))
-  const memberName = (userId: string) => active.find((member) => member.id === userId)?.name ?? 'Former member'
 
   const change = (person: ImportPerson, value: string | null) => {
     const userId = value === null || value === UNMAPPED ? null : value
@@ -71,12 +71,6 @@ function ImportPeople() {
     mapPerson.mutate(
       { personId: person.id, userId },
       {
-        onSuccess: ({ tasks_changed }) =>
-          toast.success(
-            userId
-              ? `${person.name}: ${tasks(tasks_changed)} assigned to ${memberName(userId)}.`
-              : `${person.name} is no longer mapped: ${tasks(tasks_changed)} unassigned.`,
-          ),
         onError: (error) => toast.error(error instanceof ApiProblem ? error.detail : `${person.name}'s tasks could not be assigned.`),
       },
     )
@@ -95,7 +89,11 @@ function ImportPeople() {
           ...active.map((member) => ({ value: member.id, label: member.name })),
           ...(person.user_id && !active.some((member) => member.id === person.user_id) ? [{ value: person.user_id, label: 'Former member' }] : []),
         ]
-        const saving = mapPerson.isPending && mapPerson.variables?.personId === person.id
+        const sending = mapPerson.isPending && mapPerson.variables?.personId === person.id
+        // the pick shows at once; a job then moves the tasks, which takes a while for thousands of them
+        const shown = sending ? (mapPerson.variables?.userId ?? UNMAPPED) : value
+        const saving = sending || person.assigning
+        const toMember = sending ? Boolean(mapPerson.variables?.userId) : Boolean(person.user_id)
         return (
           <SettingsRow key={person.id} className="flex-nowrap max-[899px]:flex-wrap">
             <RowIcon>
@@ -103,11 +101,18 @@ function ImportPeople() {
             </RowIcon>
             <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[13px]">
               <span className="truncate font-medium text-foreground">{person.name}</span>
-              <span className="truncate text-xs text-muted-foreground">
-                {[SOURCE_NAMES[person.source], person.email, tasks(person.task_count)].filter(Boolean).join(' · ')}
-              </span>
+              {saving ? (
+                <span role="status" className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Spinner className="size-3" />
+                  {toMember ? 'Assigning' : 'Unassigning'} {tasks(person.task_count)}…
+                </span>
+              ) : (
+                <span className="truncate text-xs text-muted-foreground">
+                  {[SOURCE_NAMES[person.source], person.email, tasks(person.task_count)].filter(Boolean).join(' · ')}
+                </span>
+              )}
             </div>
-            <Select items={options} value={value} disabled={saving} onValueChange={(next) => change(person, next)}>
+            <Select items={options} value={shown} disabled={saving} onValueChange={(next) => change(person, next)}>
               <SelectTrigger aria-label={`Member for ${person.name}`} size="sm" className="w-48 max-[899px]:w-full">
                 <SelectValue />
               </SelectTrigger>

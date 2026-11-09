@@ -168,20 +168,36 @@ export function useConnectImport<K extends api.ImportKind>(kind: K, onCreated: (
 /** People from Asana, Linear and Trello imports, for admins (`enabled`). */
 export function useImportPeople(enabled: boolean) {
   const { client, workspaceId } = useOrbit()
-  return useQuery({ queryKey: api.importKeys.people(workspaceId), enabled, queryFn: () => api.listPeople(client, workspaceId) })
+  const queryClient = useQueryClient()
+  const query = useQuery({
+    queryKey: api.importKeys.people(workspaceId),
+    enabled,
+    queryFn: () => api.listPeople(client, workspaceId),
+    // a job moves a mapped person's tasks: poll until it ends
+    refetchInterval: (current) => (current.state.data?.some((person) => person.assigning) ? 2000 : false),
+  })
+  const assigning = (query.data ?? []).filter((person) => person.assigning).map((person) => person.id).join(',')
+  const previous = useRef(assigning)
+  useEffect(() => {
+    const before = previous.current
+    previous.current = assigning
+    if (!before || before === assigning) return
+    // the job moved tasks: the task lists and every open task detail (`keys.task` starts with this prefix)
+    void queryClient.invalidateQueries({ queryKey: keys.tasks(workspaceId) })
+    void queryClient.invalidateQueries({ queryKey: ['task', workspaceId] })
+  }, [assigning, queryClient, workspaceId])
+  return query
 }
 
-/** Maps a person to a member: their tasks change, so the tasks and the people list refresh. */
+/** Maps a person to a member; a job then moves their tasks, and the people list shows it until it ends. */
 export function useMapImportPerson() {
   const { client, workspaceId } = useOrbit()
   const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ personId, userId }: { personId: string; userId: string | null }) => api.mapPerson(client, workspaceId, personId, userId),
-    onSuccess: () => {
+    onSuccess: (person) => {
+      queryClient.setQueryData<api.ImportPerson[]>(api.importKeys.people(workspaceId), (people) => people?.map((item) => (item.id === person.id ? person : item)))
       void queryClient.invalidateQueries({ queryKey: api.importKeys.people(workspaceId) })
-      void queryClient.invalidateQueries({ queryKey: keys.tasks(workspaceId) })
-      // every open task detail (`keys.task` starts with this prefix)
-      void queryClient.invalidateQueries({ queryKey: ['task', workspaceId] })
     },
   })
 }

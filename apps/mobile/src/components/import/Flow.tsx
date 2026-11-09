@@ -1,8 +1,8 @@
 import { type Href, router } from 'expo-router'
-import { type ReactNode, useState } from 'react'
+import { type ReactNode, useEffect, useState } from 'react'
 import { Alert, View } from 'react-native'
 
-import { type ImportKind, type ImportRecord, type ImportTree, importErrorMessage, importHeadline, isFinalImport, isImportMissing } from '../../data/import-api'
+import { type ImportKind, type ImportProgressView, type ImportRecord, type ImportTree, importErrorMessage, importHeadline, isFinalImport, isImportMissing } from '../../data/import-api'
 import { useCancelImport, useImport, useImportTree } from '../../hooks/imports'
 import { useTheme } from '../../theme'
 import { Button, EmptyState, Icon, Spinner, Text } from '../../ui'
@@ -22,8 +22,17 @@ export interface FlowSource<K extends ImportKind> {
   scanning: (item: ImportRecord<K>) => { headline: string; text: string }
   /** What cancelling does before the import starts and once it runs. */
   cancel: { before: string; started: string }
-  /** The importing step: its headline for the status and total, the counted unit, the closing note. */
-  importing: { headline: (item: ImportRecord<K>) => string; unit: string; note: string }
+  /**
+   * The importing step: its headline for the status and total, the counted unit, the closing note. A source whose
+   * import reports stages gives `progress` (it replaces the headline and the count), and `notice` for a wait.
+   */
+  importing: {
+    headline: (item: ImportRecord<K>) => string
+    unit: string
+    note: string
+    progress?: (item: ImportRecord<K>) => ImportProgressView
+    notice?: { until: (item: ImportRecord<K>) => string | null; text: (until: string | null, now: number) => string | null }
+  }
   /** The chooser's fallback when the scan has no tree. */
   treeMissing: string
 }
@@ -123,24 +132,47 @@ function ChooseStep<K extends ImportKind>({ source, item, chooser }: { source: F
 
 function ImportingStep<K extends ImportKind>({ source, item }: { source: FlowSource<K>; item: ImportRecord<K> }) {
   const cancel = useCancel(source, item)
+  const { colors } = useTheme()
   const { done, total, failed } = item.progress
+  const progress = source.importing.progress?.(item) ?? {
+    label: source.importing.headline(item),
+    step: null,
+    done: done + failed,
+    total,
+    detail: `${done} of ${total} ${source.importing.unit} imported`,
+  }
+  // the poll keeps the same data while the import waits, so the minutes left need their own clock
+  const until = source.importing.notice?.until(item) ?? null
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!until) return
+    setNow(Date.now())
+    const timer = setInterval(() => setNow(Date.now()), 15_000)
+    return () => clearInterval(timer)
+  }, [until])
+  const notice = source.importing.notice?.text(until, now) ?? null
   return (
     <ImportScreen title={source.title} detail={source.detail(item)}>
       <ImportBody>
         <View accessibilityLiveRegion="polite" className="gap-4 py-10">
           <View className="flex-row items-center gap-2">
             <Spinner />
-            <Text className="font-noto-medium text-[14px] leading-[20px]">{source.importing.headline(item)}</Text>
+            <Text className="min-w-0 flex-1 font-noto-medium text-[14px] leading-[20px]">{progress.label}</Text>
+            {progress.step ? <Text className="text-[12px] leading-[16px] text-muted-foreground tabular-nums">Step {progress.step} of 4</Text> : null}
           </View>
-          <ProgressBar done={done + failed} total={total} label="Import progress" />
+          <ProgressBar done={progress.done} total={progress.total} label="Import progress" />
           <View className="flex-row flex-wrap items-center gap-4">
-            <Text className="text-[14px] leading-[20px] text-muted-foreground">
-              {done} of {total} {source.importing.unit} imported
-            </Text>
+            <Text className="text-[14px] leading-[20px] text-muted-foreground tabular-nums">{progress.detail}</Text>
             {failed > 0 ? <Text className="text-[14px] leading-[20px] text-destructive">{failed} failed</Text> : null}
             <View className="flex-1" />
             <Button label="Cancel import" variant="outline" size="sm" disabled={cancel.pending} onPress={() => cancel.ask(true)} />
           </View>
+          {notice ? (
+            <View className="flex-row items-start gap-2 rounded-md border border-border px-3 py-2">
+              <Icon name="clock" size={16} color={colors.mutedForeground} />
+              <Text className="min-w-0 flex-1 text-[14px] leading-[20px]">{notice}</Text>
+            </View>
+          ) : null}
           <Text className="text-[14px] leading-[20px] text-muted-foreground">{source.importing.note}</Text>
         </View>
       </ImportBody>

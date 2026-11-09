@@ -696,6 +696,15 @@ impl RateLimiter {
         tokio::time::sleep_until(slot).await;
     }
 
+    /// The time until the next request may go.
+    pub(crate) fn waiting(&self) -> Duration {
+        let next = *self
+            .next
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        next.saturating_duration_since(Instant::now())
+    }
+
     pub(crate) fn pause(&self, wait: Duration) {
         let mut next = self
             .next

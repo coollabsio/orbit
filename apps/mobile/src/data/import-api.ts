@@ -36,7 +36,6 @@ import type {
   CreateTrelloImportBody,
   ImportPerson,
   ImportSource,
-  MappedPerson,
   LinearImport,
   NotionImport,
   NotionImportDestination,
@@ -142,14 +141,8 @@ export async function listPeople(client: OrbitClient, workspaceId: string): Prom
 }
 
 /** Gives all tasks of a person to a member (`null` takes them off again). */
-export async function mapPerson(client: OrbitClient, workspaceId: string, personId: string, userId: string | null): Promise<MappedPerson> {
+export async function mapPerson(client: OrbitClient, workspaceId: string, personId: string, userId: string | null): Promise<ImportPerson> {
   return (await updateImportPerson({ client, path: { workspace_id: workspaceId, person_id: personId }, body: { user_id: userId }, throwOnError: true })).data
-}
-
-/** The web's toast after a person was mapped. */
-export function mappedNote(person: ImportPerson, tasksChanged: number, memberName: string | null): string {
-  const tasks = tasksChanged === 1 ? '1 task' : `${tasksChanged} tasks`
-  return memberName ? `${person.name}: ${tasks} assigned to ${memberName}.` : `${person.name} is no longer mapped: ${tasks} unassigned.`
 }
 
 // The token is sent once and never kept: these are plain calls, not mutations (whose state keeps the variables).
@@ -571,4 +564,47 @@ export function visibleRows<T extends TreeNode>(tree: SelectionTree<T>, expanded
   }
   walk(null, 0)
   return rows
+}
+
+/** The most issues one Linear import takes (`MAX_TASKS` on the server). */
+export const LINEAR_IMPORT_MAX_ISSUES = 10_000
+
+/** What the progress step of a running import shows. */
+export interface ImportProgressView {
+  label: string
+  /** 1–4 while a stage runs, else null. */
+  step: number | null
+  done: number
+  total: number
+  detail: string
+}
+
+const count = (value: number) => value.toLocaleString('en-US')
+
+/** The web's `linearImportProgress`: each stage of a queued or importing Linear import with its own count. */
+export function linearImportProgress(item: LinearImport): ImportProgressView {
+  const { done, total, failed, expected, read, created, stage } = item.progress
+  const imported = `${count(done)} of ${count(total)} issues imported`
+  if (item.status === 'queued') return { label: 'Waiting for the import to start…', step: null, done: 0, total: 0, detail: '' }
+  switch (stage) {
+    case 'reading':
+      return { label: 'Reading issues from Linear…', step: 1, done: read, total: Math.max(expected, read), detail: `${count(read)} of about ${count(expected)} issues read` }
+    case 'creating':
+      return { label: 'Creating tasks…', step: 2, done: created, total, detail: `${count(created)} of ${count(total)} tasks created` }
+    case 'details':
+      return { label: 'Adding files and comments…', step: 3, done: done + failed, total, detail: imported }
+    case 'linking':
+      return { label: 'Linking related issues…', step: 4, done: done + failed, total, detail: imported }
+    default:
+      return { label: 'Importing issues…', step: null, done: done + failed, total, detail: imported }
+  }
+}
+
+/** The rate-limit notice while Linear makes the import wait, else null. */
+export function linearRateLimitNotice(waitingUntil: string | null, now: number): string | null {
+  const until = waitingUntil ? Date.parse(waitingUntil) : NaN
+  if (!(until > now)) return null
+  const minutes = Math.max(1, Math.ceil((until - now) / 60_000))
+  const time = new Date(until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return `Linear's rate limit is reached. The import goes on at ${time} (in about ${minutes} min).`
 }

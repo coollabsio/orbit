@@ -7,8 +7,12 @@
 use std::collections::HashMap;
 
 use orbit_domain::Permission;
-use orbit_platform::{Database, Id, Row, TimestampMillis, is_transient_lock_error};
-use serde::Serialize;
+use orbit_platform::{
+    Database, Id, Job, JobError, JobKind, JobKindRegistrationError, JobQueue, JobStore, Row,
+    TimestampMillis, Worker, is_transient_lock_error,
+};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 use thiserror::Error;
 use utoipa::ToSchema;
 
@@ -183,6 +187,8 @@ pub struct ImportPerson {
     #[schema(value_type = Option<String>)]
     pub user_id: Option<Id>,
     pub task_count: u32,
+    /// A job is still moving the tasks to `user_id`.
+    pub assigning: bool,
 }
 
 #[derive(Debug, Error)]
@@ -209,7 +215,7 @@ impl From<TaskError> for ImportPeopleError {
 }
 
 const PERSON_COLUMNS: &str = "import_people.id, import_people.source, import_people.name, \
-     import_people.email, import_people.user_id, COUNT(tasks.id) AS task_count \
+     import_people.email, import_people.user_id, import_people.assigning, COUNT(tasks.id) AS task_count \
      FROM import_people \
      JOIN import_person_tasks ON import_person_tasks.person_id = import_people.id \
      JOIN tasks ON tasks.id = import_person_tasks.task_id AND tasks.workspace_id = import_people.workspace_id \
@@ -217,7 +223,7 @@ const PERSON_COLUMNS: &str = "import_people.id, import_people.source, import_peo
      JOIN projects ON projects.id = tasks.project_id AND projects.deleted_at IS NULL";
 
 const PERSON_GROUP: &str = "GROUP BY import_people.id, import_people.source, import_people.name, \
-     import_people.email, import_people.user_id, import_people.name_key";
+     import_people.email, import_people.user_id, import_people.assigning, import_people.name_key";
 
 fn person_from_row(row: &sqlx::any::AnyRow) -> Option<ImportPerson> {
     Some(ImportPerson {
@@ -229,6 +235,7 @@ fn person_from_row(row: &sqlx::any::AnyRow) -> Option<ImportPerson> {
             .get::<Option<String>, _>("user_id")
             .and_then(|id| id.parse().ok()),
         task_count: u32::try_from(row.get::<i64, _>("task_count")).unwrap_or(u32::MAX),
+        assigning: row.get::<bool, _>("assigning"),
     })
 }
 
@@ -283,7 +290,7 @@ async fn person(
         // Every task of the person was deleted meanwhile.
         None => {
             let row = sqlx::query(
-                "SELECT id, source, name, email, user_id, CAST(0 AS BIGINT) AS task_count FROM import_people \
+                "SELECT id, source, name, email, user_id, assigning, CAST(0 AS BIGINT) AS task_count FROM import_people \
                  WHERE workspace_id = $1 AND id = $2",
             )
             .bind(workspace_id.to_string())
@@ -297,15 +304,12 @@ async fn person(
     }
 }
 
-/// The person after a mapping change, and how many of their tasks changed.
-#[derive(Clone, Debug, Serialize, ToSchema)]
-pub struct MappedPerson {
-    pub person: ImportPerson,
-    pub tasks_changed: u32,
-}
+/// The job that moves a person's tasks after an admin picked a member.
+pub const ASSIGN_JOB: &str = "import_people.assign";
 
-/// Maps the person to `user_id` (`None` unmaps): each of their tasks that is not deleted loses
-/// the previous member and gets the new one, without notifications. Admins only.
+/// Maps the person to `user_id` (`None` unmaps) and queues the job that moves each of their
+/// tasks that is not deleted from the previous member to the new one, without notifications.
+/// The person is `assigning` until that job ends. Admins only.
 pub async fn set_member(
     database: &Database,
     workspace_id: Id,
@@ -313,32 +317,101 @@ pub async fn set_member(
     person_id: Id,
     user_id: Option<Id>,
     request_id: &str,
-) -> Result<MappedPerson, ImportPeopleError> {
+) -> Result<ImportPerson, ImportPeopleError> {
     require_admin(database, workspace_id, actor_id).await?;
-    let tasks_changed = assign(
-        database,
-        workspace_id,
-        actor_id,
-        person_id,
-        user_id,
-        request_id,
+    let previous = map(database, workspace_id, person_id, user_id, true).await?;
+    let job = Job::new(
+        JobKind::new(ASSIGN_JOB),
+        json!(AssignJob {
+            workspace_id,
+            actor_id,
+            person_id,
+            from: previous,
+            to: user_id,
+            request_id: request_id.to_owned(),
+        }),
+        TimestampMillis::now(),
     )
-    .await?;
-    Ok(MappedPerson {
-        person: person(database, workspace_id, person_id).await?,
-        tasks_changed,
-    })
+    .with_workspace(workspace_id.to_string());
+    if let Err(error) = JobQueue::new(JobStore::new(database.clone()))
+        .enqueue(job)
+        .await
+    {
+        tracing::warn!(person_id = %person_id, %error, "the import person job could not be queued");
+        sqlx::query("UPDATE import_people SET assigning = 0 WHERE id = $1")
+            .bind(person_id.to_string())
+            .execute(database.pool())
+            .await?;
+    }
+    person(database, workspace_id, person_id).await
 }
 
-async fn assign(
-    database: &Database,
+#[derive(Deserialize, Serialize)]
+struct AssignJob {
     workspace_id: Id,
     actor_id: Id,
     person_id: Id,
+    from: Option<Id>,
+    to: Option<Id>,
+    request_id: String,
+}
+
+/// Registers the [`ASSIGN_JOB`] handler. A failed run is retried: moving a task twice changes
+/// nothing. After the last attempt the person stops showing as `assigning`.
+pub fn register_job(
+    worker: Worker,
+    database: Database,
+) -> Result<Worker, JobKindRegistrationError> {
+    worker.with_handler(JobKind::new(ASSIGN_JOB), move |context| {
+        let database = database.clone();
+        async move {
+            let last_attempt = context.claim.attempt >= context.job.max_attempts;
+            run_assign_job(&database, &context.job.payload, last_attempt).await
+        }
+    })
+}
+
+/// One run of [`ASSIGN_JOB`] with its payload.
+pub async fn run_assign_job(
+    database: &Database,
+    payload: &serde_json::Value,
+    last_attempt: bool,
+) -> Result<(), JobError> {
+    let Ok(job) = serde_json::from_value::<AssignJob>(payload.clone()) else {
+        return Err(JobError::Permanent(format!("invalid {ASSIGN_JOB} payload")));
+    };
+    let result = move_tasks(
+        database,
+        job.workspace_id,
+        job.actor_id,
+        job.person_id,
+        (job.from, job.to),
+        &job.request_id,
+    )
+    .await;
+    if result.is_ok() || last_attempt {
+        // only the job of the latest pick ends the work: an older one sees another member
+        sqlx::query(
+            "UPDATE import_people SET assigning = 0 WHERE id = $1 AND user_id IS NOT DISTINCT FROM $2",
+        )
+        .bind(job.person_id.to_string())
+        .bind(job.to.map(|id| id.to_string()))
+        .execute(database.pool())
+        .await
+        .map_err(|error| JobError::Retryable(error.to_string()))?;
+    }
+    result.map_err(|error| JobError::Retryable(error.to_string()))
+}
+
+/// Sets the person's member and returns the previous one. `assigning` marks the tasks as not
+/// moved yet.
+async fn map(
+    database: &Database,
+    workspace_id: Id,
+    person_id: Id,
     user_id: Option<Id>,
-    request_id: &str,
-) -> Result<u32, ImportPeopleError> {
-    let now = TimestampMillis::now();
+    assigning: bool,
+) -> Result<Option<Id>, ImportPeopleError> {
     let mut tx = database.immediate_transaction().await?;
     let previous: Option<Option<String>> =
         sqlx::query_scalar("SELECT user_id FROM import_people WHERE id = $1 AND workspace_id = $2")
@@ -363,34 +436,68 @@ async fn assign(
             return Err(ImportPeopleError::InvalidMember);
         }
     }
+    sqlx::query(
+        "UPDATE import_people SET user_id = $1, assigning = $2, updated_at = $3 WHERE id = $4",
+    )
+    .bind(user_id.map(|id| id.to_string()))
+    .bind(i64::from(assigning))
+    .bind(TimestampMillis::now().as_millis())
+    .bind(person_id.to_string())
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(previous)
+}
+
+/// Tasks per transaction while a person's tasks change hands. A write transaction holds every
+/// writer of the database, and 4,000 tasks in one held them for 15 seconds.
+const ASSIGN_BATCH: usize = 200;
+
+/// Moves the person's tasks from `from` to `to` in batches. Stops when the person was mapped to
+/// someone else meanwhile: the newer pick moves every task from `to` to its own member.
+async fn move_tasks(
+    database: &Database,
+    workspace_id: Id,
+    actor_id: Id,
+    person_id: Id,
+    (from, to): (Option<Id>, Option<Id>),
+    request_id: &str,
+) -> Result<(), ImportPeopleError> {
+    let now = TimestampMillis::now();
     let task_ids: Vec<Id> = sqlx::query_scalar::<_, String>(
         "SELECT task_id FROM import_person_tasks WHERE person_id = $1 ORDER BY task_id",
     )
     .bind(person_id.to_string())
-    .fetch_all(&mut *tx)
+    .fetch_all(database.pool())
     .await?
     .into_iter()
     .filter_map(|id| id.parse().ok())
     .collect();
-    let changed = TaskRepository::new(database.clone())
-        .swap_assignee_in_tx(
-            &mut tx,
-            workspace_id,
-            actor_id,
-            &task_ids,
-            (previous, user_id),
-            request_id,
-            now,
-        )
-        .await?;
-    sqlx::query("UPDATE import_people SET user_id = $1, updated_at = $2 WHERE id = $3")
-        .bind(user_id.map(|id| id.to_string()))
-        .bind(now.as_millis())
-        .bind(person_id.to_string())
-        .execute(&mut *tx)
-        .await?;
-    tx.commit().await?;
-    Ok(changed)
+    let tasks = TaskRepository::new(database.clone());
+    for batch in task_ids.chunks(ASSIGN_BATCH) {
+        let mut tx = database.immediate_transaction().await?;
+        let current: Option<Option<String>> =
+            sqlx::query_scalar("SELECT user_id FROM import_people WHERE id = $1")
+                .bind(person_id.to_string())
+                .fetch_optional(&mut *tx)
+                .await?;
+        if current.flatten() != to.map(|id| id.to_string()) {
+            break;
+        }
+        tasks
+            .swap_assignee_in_tx(
+                &mut tx,
+                workspace_id,
+                actor_id,
+                batch,
+                (from, to),
+                request_id,
+                now,
+            )
+            .await?;
+        tx.commit().await?;
+    }
+    Ok(())
 }
 
 /// After a member joined: maps every unmapped person of the workspace with the member's email
@@ -431,12 +538,13 @@ async fn try_map_joined_member(
     .fetch_all(database.pool())
     .await?;
     for person_id in people.iter().filter_map(|id| id.parse().ok()) {
-        assign(
+        let previous = map(database, workspace_id, person_id, Some(user_id), false).await?;
+        move_tasks(
             database,
             workspace_id,
             user_id,
             person_id,
-            Some(user_id),
+            (previous, Some(user_id)),
             request_id,
         )
         .await?;

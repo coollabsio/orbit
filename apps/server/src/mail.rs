@@ -213,6 +213,36 @@ pub mod templates {
         format!("\"{short}\"")
     }
 
+    /// A long import ended. `summary` comes from counts only ("5,600 issues imported, 2 failed");
+    /// the workspace name is cleaned up as in [`invitation`].
+    #[must_use]
+    pub fn import_finished(
+        to: &str,
+        source: &str,
+        completed: bool,
+        workspace: &str,
+        summary: &str,
+        url: &str,
+    ) -> OutgoingEmail {
+        let (subject, outcome) = if completed {
+            (format!("Your {source} import is complete"), "is complete")
+        } else {
+            (
+                format!("Your {source} import failed"),
+                "stopped with an error",
+            )
+        };
+        OutgoingEmail {
+            to: to.to_owned(),
+            subject,
+            body: format!(
+                "Your {source} import into the workspace {} {outcome}: {summary}.\n\n\
+                 See the result:\n{url}\n",
+                quoted_name(workspace)
+            ),
+        }
+    }
+
     #[must_use]
     pub fn registration(to: &str, url: &str) -> OutgoingEmail {
         OutgoingEmail {

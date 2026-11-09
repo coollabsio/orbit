@@ -272,6 +272,8 @@ impl App {
         }
 
         let mailer = Mailer::new(database.clone(), app_key, &config.http.public_origin);
+        let import_notices =
+            crate::import_notice::ImportNotices::new(database.clone(), mailer.clone());
         let notion_imports = NotionImportService::new(
             database.clone(),
             PageFileRepository::new(database.clone(), attachment_state.uploads.clone()),
@@ -356,6 +358,7 @@ impl App {
             linear_imports.clone(),
             trello_imports.clone(),
             obsidian_imports.clone(),
+            import_notices,
             workspace_exports.clone(),
             billing.clone(),
             config.jobs.concurrency,
@@ -988,6 +991,7 @@ async fn initialize_production_services(
     linear_imports: LinearImportService,
     trello_imports: TrelloImportService,
     obsidian_imports: ObsidianImportService,
+    import_notices: crate::import_notice::ImportNotices,
     workspace_exports: WorkspaceExportService,
     billing: Option<crate::billing::Billing>,
     concurrency: usize,
@@ -1097,12 +1101,23 @@ async fn initialize_production_services(
                 }
             })
         })
-        .and_then(|worker| crate::notion::import::register_jobs(worker, notion_imports))
-        .and_then(|worker| crate::asana::import::register_jobs(worker, asana_imports))
-        .and_then(|worker| crate::linear::import::register_jobs(worker, linear_imports))
-        .and_then(|worker| crate::trello::import::register_jobs(worker, trello_imports))
-        .and_then(|worker| crate::obsidian::import::register_jobs(worker, obsidian_imports))
+        .and_then(|worker| {
+            crate::notion::import::register_jobs(worker, notion_imports, import_notices.clone())
+        })
+        .and_then(|worker| {
+            crate::asana::import::register_jobs(worker, asana_imports, import_notices.clone())
+        })
+        .and_then(|worker| {
+            crate::linear::import::register_jobs(worker, linear_imports, import_notices.clone())
+        })
+        .and_then(|worker| {
+            crate::trello::import::register_jobs(worker, trello_imports, import_notices.clone())
+        })
+        .and_then(|worker| {
+            crate::obsidian::import::register_jobs(worker, obsidian_imports, import_notices.clone())
+        })
         .and_then(|worker| crate::workspace_export::register_job(worker, workspace_exports))
+        .and_then(|worker| crate::import_people::register_job(worker, database.clone()))
         .and_then(|worker| match billing {
             Some(billing) => crate::billing::register_jobs(worker, billing),
             None => Ok(worker),

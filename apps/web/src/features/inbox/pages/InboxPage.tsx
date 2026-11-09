@@ -1,5 +1,5 @@
 import { useLocation, useNavigate, useSearchParams } from 'react-router'
-import { Notification as Bell } from 'reicon-react'
+import { Notification as Bell, Import } from 'reicon-react'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -105,7 +105,7 @@ export function InboxPage() {
                     if (!notification.read_at) markRead.mutate(notification.id)
                     const target = notificationTarget(notification)
                     if (!target) return
-                    if (notification.page_id || notification.chat_conversation_id) {
+                    if (notification.page_id || notification.chat_conversation_id || notification.import_id) {
                       navigate(target)
                       return
                     }
@@ -121,18 +121,24 @@ export function InboxPage() {
                     <span className="truncate text-[13px] text-foreground data-unread:font-semibold" data-unread={!notification.read_at || undefined}>
                       {copy.title}
                     </span>
-                    <span className="truncate text-xs text-muted-foreground/70">{actor ? `${actor.name} · ${copy.body}` : copy.body}</span>
+                    <span className="truncate text-xs text-muted-foreground/70">{actor && !notification.import_id ? `${actor.name} · ${copy.body}` : copy.body}</span>
                   </span>
                   <span className="shrink-0 text-xs text-muted-foreground/70">
                     {relativeTime(notification.created_at)}
                   </span>
                 </Button>
-                {/* over the spacer: 12px padding, the 8px unread column and the 10px gap */}
+                {/* over the spacer: 12px padding, the 8px unread column and the 10px gap; an import notice is the user's own */}
+                {notification.import_id ? (
+                  <span aria-hidden="true" className="pointer-events-none absolute top-1/2 left-[30px] flex size-7 -translate-y-1/2 items-center justify-center rounded-full bg-muted">
+                    <Import className="size-4 text-muted-foreground" />
+                  </span>
+                ) : (
                 <ProfileTrigger userId={actor?.id} name={actor?.name ?? 'Unknown'} kind="avatar" className="absolute top-1/2 left-[30px] flex -translate-y-1/2">
                   <Avatar className="size-7">
                     <AvatarFallback>{(actor?.name ?? '?').charAt(0).toUpperCase()}</AvatarFallback>
                   </Avatar>
                 </ProfileTrigger>
+                )}
                 </div>
               )
             }}
