@@ -742,3 +742,36 @@ async fn a_type_change_to_a_relation_is_refused_and_from_one_clears_the_links() 
     );
     assert_eq!(value(&projects, &p.p1, &p.b), Value::Null);
 }
+
+#[tokio::test]
+async fn a_row_moved_out_of_its_database_loses_its_links_on_both_sides() {
+    let fixture = Fixture::new().await;
+    let p = pair(&fixture).await;
+    link(&fixture, &p.tasks, &p.t1, &p.a, &[&p.p1]).await;
+    link(&fixture, &p.tasks, &p.t2, &p.a, &[&p.p1, &p.p2]).await;
+
+    for (row, database) in [(&p.t1, &p.tasks), (&p.p2, &p.projects)] {
+        let version = fixture.page(row).await["version"].clone();
+        let (status, body) = fixture
+            .call(
+                "POST",
+                &format!("pages/{row}/move"),
+                Some(json!({"parent_id": null, "position": 0, "expected_version": version})),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{database}: {body}");
+    }
+    let tasks = fixture.database(&p.tasks).await;
+    assert_eq!(value(&tasks, &p.t2, &p.a), ids(&[&p.p1]));
+    let projects = fixture.database(&p.projects).await;
+    assert_eq!(value(&projects, &p.p1, &p.b), ids(&[&p.t2]));
+    let stored: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM page_relations WHERE page_id IN ($1, $2) OR related_page_id IN ($1, $2)",
+    )
+    .bind(&p.t1)
+    .bind(&p.p2)
+    .fetch_one(fixture.database.pool())
+    .await
+    .unwrap();
+    assert_eq!(stored, 0);
+}
