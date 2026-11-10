@@ -17,9 +17,10 @@ use utoipa::{IntoParams, ToSchema};
 
 use crate::auth_routes::CookieMode;
 use crate::repositories::databases::{
-    DatabaseDetail, DatabaseError, DatabaseProperty, DatabaseRepository, DatabaseRow, DatabaseView,
-    LinkedViews, MAX_CELL_ITEMS, MAX_NAME_CHARS, MAX_TRASH_ROWS, NewProperty, NewRow, NewView,
-    PropertyChanges, PropertyType, PropertyUpdate, RowPlacement, ViewChanges, ViewConfig, ViewType,
+    ComputeScope, DatabaseDetail, DatabaseError, DatabaseProperty, DatabaseRepository, DatabaseRow,
+    DatabaseView, LinkedViews, MAX_CELL_ITEMS, MAX_NAME_CHARS, MAX_TRASH_ROWS, NewProperty, NewRow,
+    NewView, PropertyChanges, PropertyType, PropertyUpdate, RowPlacement, ViewChanges, ViewConfig,
+    ViewType,
 };
 use crate::repositories::identity::IdentityRepository;
 use crate::task_routes::{
@@ -156,6 +157,8 @@ struct LinkQuery {
     #[serde(rename = "link")]
     #[param(rename = "link")]
     link_id: Option<String>,
+    /// The reader's IANA time zone for computed values (rollups, formulas); default `UTC`.
+    tz: Option<String>,
 }
 
 /// The view a request changes belongs to this linked view block.
@@ -251,9 +254,11 @@ async fn get_database(
     let (workspace_id, database_id, actor_id) =
         scope(&state, &headers, &workspace, &database, &instance, request).await?;
     let link = link_id(query.link_id, &instance, request)?;
+    let scope = ComputeScope::with_tz(workspace_id, actor_id, query.tz.as_deref())
+        .ok_or_else(|| validation("tz", &instance, request))?;
     state
         .databases
-        .get(workspace_id, database_id, actor_id, link)
+        .get_with(&scope, database_id, link)
         .await
         .map(Json)
         .map_err(|error| database_problem(error, instance, request))

@@ -24,12 +24,14 @@ use crate::billing::TrialLimit;
 use crate::collab::CollabHub;
 
 mod board;
+mod computed;
 mod export;
 mod import;
 mod links;
 mod moves;
 mod search;
 mod templates;
+pub use computed::{ComputeScope, RelatedPage, is_computed};
 pub use export::{ExportDatabase, ExportRow, cell_text, is_number};
 pub use import::{
     CsvImport, ImportColumn, ImportColumnResult, ImportResult, ImportTarget, MAX_IMPORT_COLUMNS,
@@ -1579,8 +1581,13 @@ pub struct DatabaseRow {
     pub updated_by: Id,
     /// The row page has body text.
     pub has_content: bool,
-    /// Stored values by property id; a missing property is empty.
+    /// Values by property id, stored and computed (relations, rollups); a missing property is
+    /// empty.
     pub values: BTreeMap<String, Value>,
+    /// Per relation property id: links of the cell to pages the reader cannot read (they are
+    /// not in `values`). Absent: none.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub hidden_links: BTreeMap<String, u64>,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -1605,6 +1612,9 @@ pub struct DatabaseDetail {
     /// Row templates in order (at most 20); they are not rows. Absent: none.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub templates: Vec<DatabaseTemplate>,
+    /// Every page that a relation value of `rows` links to, by page id. Absent: none.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub related_pages: BTreeMap<String, RelatedPage>,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -1801,7 +1811,8 @@ impl DatabaseRepository {
         Self { database }
     }
 
-    /// The database with its own views, or with the views of `link` (a linked view block).
+    /// The database with its own views, or with the views of `link` (a linked view block), with
+    /// computed values in UTC.
     pub async fn get(
         &self,
         workspace_id: Id,
@@ -1809,6 +1820,18 @@ impl DatabaseRepository {
         actor_id: Id,
         link: Option<Id>,
     ) -> Result<DatabaseDetail, DatabaseError> {
+        let scope = ComputeScope::utc(workspace_id, actor_id);
+        self.get_with(&scope, database_id, link).await
+    }
+
+    /// [`Self::get`] with the reader's scope (its time zone for computed values).
+    pub async fn get_with(
+        &self,
+        scope: &ComputeScope,
+        database_id: Id,
+        link: Option<Id>,
+    ) -> Result<DatabaseDetail, DatabaseError> {
+        let (workspace_id, actor_id) = (scope.workspace_id, scope.actor_id);
         let mut tx = self.database.transaction().await?;
         let page = open(&mut tx, workspace_id, database_id, actor_id).await?;
         let set = match link {
@@ -1820,7 +1843,8 @@ impl DatabaseRepository {
         };
         let properties = properties_in_tx(&mut tx, database_id).await?;
         let mut views = views_in_tx(&mut tx, database_id, set, &properties).await?;
-        let rows = rows_in_tx(&mut tx, database_id, None).await?;
+        let mut rows = rows_in_tx(&mut tx, database_id, None).await?;
+        let computed = computed::fill(&mut tx, scope, database_id, &properties, &mut rows).await?;
         let templates = templates::templates_in_tx(&mut tx, database_id, &properties, None).await?;
         templates::repair_defaults(&mut views, &templates);
         tx.rollback().await?;
@@ -1836,6 +1860,7 @@ impl DatabaseRepository {
             views,
             rows,
             templates,
+            related_pages: computed.related_pages,
         })
     }
 
@@ -2458,7 +2483,8 @@ impl DatabaseRepository {
             now,
         )
         .await?;
-        let row = single_row(&mut tx, database_id, row_id).await?;
+        let scope = ComputeScope::utc(workspace_id, actor_id);
+        let row = single_row(&mut tx, &scope, database_id, row_id).await?;
         tx.commit().await?;
         Ok(row)
     }
@@ -2512,8 +2538,9 @@ impl DatabaseRepository {
             now,
         )
         .await?;
+        let scope = ComputeScope::utc(workspace_id, actor_id);
         let row = match children {
-            Children::Rows => single_row(&mut tx, database_id, row_id).await?,
+            Children::Rows => single_row(&mut tx, &scope, database_id, row_id).await?,
             Children::Templates => templates::template_row(&mut tx, database_id, row_id).await?,
         };
         tx.commit().await?;
@@ -2638,7 +2665,8 @@ impl DatabaseRepository {
             now,
         )
         .await?;
-        let row = single_row(&mut tx, database_id, row_id).await?;
+        let scope = ComputeScope::utc(workspace_id, actor_id);
+        let row = single_row(&mut tx, &scope, database_id, row_id).await?;
         tx.commit().await?;
         Ok(row)
     }
@@ -3163,20 +3191,26 @@ async fn children_in_tx(
                 updated_by: parse_id(&row.get::<String, _>("updated_by"))?,
                 has_content: row.get("has_content"),
                 values: values.remove(&id).unwrap_or_default(),
+                hidden_links: BTreeMap::new(),
             })
         })
         .collect()
 }
 
+/// One live row with its computed values (in UTC), as a write returns it.
 async fn single_row(
     tx: &mut Transaction<'_, Any>,
+    scope: &ComputeScope,
     database_id: Id,
     row_id: Id,
 ) -> Result<DatabaseRow, DatabaseError> {
-    rows_in_tx(tx, database_id, Some(row_id))
-        .await?
-        .pop()
-        .ok_or(DatabaseError::NotFound)
+    let mut rows = rows_in_tx(tx, database_id, Some(row_id)).await?;
+    if rows.is_empty() {
+        return Err(DatabaseError::NotFound);
+    }
+    let properties = properties_in_tx(tx, database_id).await?;
+    computed::fill(tx, scope, database_id, &properties, &mut rows).await?;
+    rows.pop().ok_or(DatabaseError::NotFound)
 }
 
 async fn insert_property(
