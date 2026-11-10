@@ -11,6 +11,8 @@ export const keys = {
   task: (workspaceId: string, taskId: string) => ['task', workspaceId, taskId] as const,
   comments: (workspaceId: string, taskId: string) => ['comments', workspaceId, taskId] as const,
   projects: (workspaceId: string) => ['projects', workspaceId] as const,
+  /** The member's own sidebar order of the projects. */
+  projectOrder: (workspaceId: string) => ['project-order', workspaceId] as const,
   statuses: (workspaceId: string) => ['statuses', workspaceId] as const,
   members: (workspaceId: string) => ['members', workspaceId] as const,
   labels: (workspaceId: string) => ['labels', workspaceId] as const,

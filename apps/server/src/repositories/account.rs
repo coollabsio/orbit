@@ -157,6 +157,7 @@ impl IdentityRepository {
             "DELETE FROM page_favorites WHERE user_id = $1",
             "DELETE FROM page_visits WHERE user_id = $1",
             "DELETE FROM saved_view_favorites WHERE user_id = $1",
+            "DELETE FROM project_positions WHERE user_id = $1",
             "DELETE FROM notifications WHERE recipient_user_id = $1",
         ] {
             sqlx::query(statement)

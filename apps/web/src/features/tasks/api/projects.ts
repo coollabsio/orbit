@@ -11,6 +11,8 @@ import {
   listProjectTrash,
   listTrashedProjectTasks,
   getTrashedProject,
+  getProjectOrder,
+  putProjectOrder,
   listStatuses,
   purgeProject,
   reorderStatuses,
@@ -63,6 +65,37 @@ async function fetchProjects(workspaceId: string): Promise<ProjectRecord[]> {
 
 export function useProjects(workspaceId: string, enabled = true) {
   return useQuery({ queryKey: queryKeys.projects(workspaceId), enabled, queryFn: () => fetchProjects(workspaceId) })
+}
+
+/** The ids of the member's own project order; projects not listed follow by name (see `orderProjects`). */
+export function useProjectOrder(workspaceId: string, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.projectOrder(workspaceId),
+    enabled,
+    queryFn: async () => {
+      const { data } = await getProjectOrder({ client: apiClient, path: { workspace_id: workspaceId }, throwOnError: true })
+      return required(data, 'Project order response was empty.').project_ids
+    },
+  })
+}
+
+/** Saves the member's project order; the sidebar shows it at once and rolls back on error. */
+export function useSetProjectOrder(workspaceId: string) {
+  const queryClient = useQueryClient()
+  const key = queryKeys.projectOrder(workspaceId)
+  return useMutation<void, Error, string[], { previous?: string[] }>({
+    mutationFn: async (projectIds) => {
+      await putProjectOrder({ client: apiClient, path: { workspace_id: workspaceId }, body: { project_ids: projectIds }, throwOnError: true })
+    },
+    onMutate: async (projectIds) => {
+      await queryClient.cancelQueries({ queryKey: key, exact: true })
+      const previous = queryClient.getQueryData<string[]>(key)
+      queryClient.setQueryData(key, projectIds)
+      return { previous }
+    },
+    onError: (_error, _ids, snapshot) => queryClient.setQueryData(key, snapshot?.previous),
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: key, exact: true }),
+  })
 }
 
 export function useProjectStatuses(workspaceId: string, projectId: string | undefined) {

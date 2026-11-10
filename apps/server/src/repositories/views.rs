@@ -1,4 +1,5 @@
-//! Saved task views, per-user view favorites, and per-page view preferences.
+//! Saved task views, per-user view favorites, per-page view preferences, and each member's
+//! project order.
 //!
 //! Personal views exist only for their owner; everyone else gets `NotFound`. Workspace views are
 //! readable by every member and editable by their owner or a workspace owner/admin.
@@ -441,6 +442,81 @@ impl ViewRepository {
             now,
         )
         .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    /// The caller's own order of the workspace's live projects (Tasks sidebar). Projects the
+    /// caller never placed are not listed; clients put them after these, by name.
+    pub async fn project_order(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+    ) -> Result<Vec<Id>, TaskError> {
+        load_caller(self.database.pool(), workspace_id, actor_id).await?;
+        sqlx::query_scalar::<_, String>(
+            "SELECT project_positions.project_id FROM project_positions \
+             JOIN projects ON projects.id = project_positions.project_id \
+             WHERE project_positions.workspace_id = $1 AND project_positions.user_id = $2 \
+             AND projects.deleted_at IS NULL \
+             ORDER BY project_positions.position, project_positions.project_id",
+        )
+        .bind(workspace_id.to_string())
+        .bind(actor_id.to_string())
+        .fetch_all(self.database.pool())
+        .await?
+        .into_iter()
+        .map(parse_id)
+        .collect()
+    }
+
+    /// Replaces the caller's project order. Every id must be a distinct live project of the
+    /// workspace; projects left out lose their place. Not audited and not broadcast.
+    pub async fn set_project_order(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        project_ids: &[Id],
+    ) -> Result<(), TaskError> {
+        let invalid = || TaskError::Invalid {
+            field: "project_ids",
+        };
+        let mut requested = project_ids.to_vec();
+        requested.sort_unstable();
+        if requested.windows(2).any(|pair| pair[0] == pair[1]) {
+            return Err(invalid());
+        }
+        let mut tx = self.database.immediate_transaction().await?;
+        load_caller(&mut *tx, workspace_id, actor_id).await?;
+        let live = sqlx::query_scalar::<_, String>(
+            "SELECT id FROM projects WHERE workspace_id = $1 AND deleted_at IS NULL",
+        )
+        .bind(workspace_id.to_string())
+        .fetch_all(&mut *tx)
+        .await?
+        .into_iter()
+        .map(parse_id)
+        .collect::<Result<std::collections::HashSet<_>, _>>()?;
+        if !project_ids.iter().all(|id| live.contains(id)) {
+            return Err(invalid());
+        }
+        sqlx::query("DELETE FROM project_positions WHERE workspace_id = $1 AND user_id = $2")
+            .bind(workspace_id.to_string())
+            .bind(actor_id.to_string())
+            .execute(&mut *tx)
+            .await?;
+        for (position, project_id) in project_ids.iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO project_positions (workspace_id, user_id, project_id, position) \
+                 VALUES ($1, $2, $3, $4)",
+            )
+            .bind(workspace_id.to_string())
+            .bind(actor_id.to_string())
+            .bind(project_id.to_string())
+            .bind(i64::try_from(position).map_err(|_| invalid())?)
+            .execute(&mut *tx)
+            .await?;
+        }
         tx.commit().await?;
         Ok(())
     }
