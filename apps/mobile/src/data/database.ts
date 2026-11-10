@@ -26,7 +26,7 @@ export const PROPERTY_ICONS: Record<DatabasePropertyType, IconName> = {
   last_edited_by: 'userCircle',
 }
 
-export const VIEW_ICONS: Record<DatabaseView['type'], IconName> = { table: 'grid', board: 'kanban', list: 'list', calendar: 'calendar' }
+export const VIEW_ICONS: Record<DatabaseView['type'], IconName> = { table: 'grid', board: 'kanban', list: 'list', calendar: 'calendar', gallery: 'gallery', timeline: 'rowHorizontal' }
 
 /** Where the open view of a database, or of one linked view, is kept (a secure-store key: letters, digits, `.`, `-` and `_` only). */
 export const viewStorageKey = (databaseId: string, linkId = '') => `orbit.database-view.${databaseId}${linkId ? `.${linkId}` : ''}`

@@ -1338,6 +1338,26 @@ them.
 both. Server: `previews=1` returns the first image of a body; a timeline repair with a deleted
 end property.
 
+### 16.6 Status
+
+Done on 2026-11-10 (no migration: 0081 already allows `gallery` and `timeline`). No tests in this round (the user
+asked for none; 16.5 is still to write). Code: server `repositories/databases/{gallery,timeline}.rs`, shared
+`@orbit/database/{gallery,timeline}`, web `database/DatabaseGallery.tsx` and `DatabaseTimeline.tsx`, mobile
+`components/database/Gallery.tsx` and `TimelineList.tsx`. Differences from this section:
+
+| # | Item | Where | Why |
+|---|---|---|---|
+| 1 | No `?previews=1`: `GET /databases/{id}` adds `preview: {cover_url?, cover_position?, image_url?, text?}` to each row when a view it returns is a gallery with a `cover` or `content` preview. | `repositories/databases/gallery.rs` (`fill`) | The client cannot know before the first fetch, and one cache key keeps optimistic writes simple. The cost stays zero for databases without such a gallery. |
+| 2 | `preview` carries the cover too (and its framing). A value write keeps the cached preview. | `gallery.rs`, web `database/api.ts` | `cover` needs the row page's cover, which rows do not carry. |
+| 3 | `card_preview` default is `content`; `{"files": id}` keeps the id as a string. Defaults (`content`, `medium`, `month`, `show_table` true) are absent in stored configs. | `gallery.rs`, `timeline.rs` | Notion's default; old configs and literals stay valid. |
+| 4 | A timeline's start and end must be `date` properties (not created or edited times). An end property's value uses its start date. | `timeline.rs`, `@orbit/database/timeline` | A bar drag writes both; created and edited times cannot be set. |
+| 5 | `axis(zoom, range, locale)` takes no zone; `barOf(row, timeline, timeZone)`, `moveBar(bar, days, edge, timeZone)`, `spanValues` writes only the changed properties. Bars place by whole local days at every zoom. | `@orbit/database/timeline` | Axis days are plain calendar days; a moved time keeps its local hour across DST only with the zone. |
+| 6 | The timeline has its own scroller (both ways, its axis header and table pane stick), at most the window height on the full page and 480 px in a block, and shows every row (no "Load more"). The axis reaches about 5 years from today at most. | `DatabaseTimeline.tsx`, `DatabaseSurface.tsx` | Sticky header and pane need one scroll container; a huge range would make the axis millions of pixels wide. |
+| 7 | "+ New" (gallery card, timeline row) opens the new row in the peek. A click on the empty track of a row under "No date" sets a one-day date there. No "New by drag on empty space". | gallery and timeline | As the list view; the spec does not ask for drag-to-create. |
+| 8 | Zoom and "Today" sit above the timeline, not in the axis. "Start date", "End date", "Show table" and "Table properties" are in "⋯". | `DatabaseTimeline.tsx` (`TimelineMenus`), `ViewToolbar.tsx` | The toolbar's other view settings live there. |
+| 9 | Mobile sorts the month groups by date (rows keep view order inside a month) and shows the timeline's table properties on each row. | `apps/mobile/src/components/database/TimelineList.tsx` | A list grouped by month reads in time order. |
+| 10 | Notion import: `cover` (`page_content`, `page_cover`, `property` of a files property; `null` is none), `cover_size`, `cover_aspect: contain`; a timeline's `date_property_id`, `end_date_property_id` (dates only), `preference.zoom_level` (`hours` to day, `bi_week` to week, `5_years` to year), `show_table`, `table_properties`. | `notion/database.rs` (`layout_config`) | From Notion's view reference. |
+
 ## 17. Item 15: Button property (P3, M)
 
 ### 17.1 Goal

@@ -1,7 +1,7 @@
 /**
  * A database page at phone size (spec 8): the page header, the view picker, search, Filter and Sort, then the rows of
  * a table view as a list (title and the first 3 visible properties), a list view (all its visible properties), a
- * calendar view as a month grid with a day list, or the columns of a board view, one screen wide
+ * calendar view as a month grid with a day list, a gallery as a grid of cards, a timeline as a list by month, or the columns of a board view, one screen wide
  * each (with sub-groups, a lane picker shows one lane at a time). View changes save for everyone after 500 ms, or stay on this device for viewers who cannot change views (D1).
  */
 import { groupName, groupRows, groupValues, laneRows, moveValues, type BoardGroup, type BoardLane } from '@orbit/database/board'
@@ -24,6 +24,8 @@ import { Avatar, Button, ErrorView, Icon, IconButton, LoadingView, PullRefresh, 
 import { TextInput } from '../../ui/scaled'
 import { Sheet, SheetList, SheetNote, SheetRow, useSheet } from '../tasks/Sheet'
 import { Calendar } from './Calendar'
+import { Gallery } from './Gallery'
+import { TimelineList } from './TimelineList'
 import { CellValue, ChoiceRow, OptionPill, RowTitle } from './cells'
 import { shareViewCsv } from './csvShare'
 import { FilterContent, SortContent } from './ViewSheets'
@@ -167,6 +169,10 @@ export function DatabaseView({ databaseId, linkId = '', initialView = null, head
           )}
           {rows.length === 0 && filtered ? empty : null}
         </ScrollView>
+      ) : view.type === 'gallery' ? (
+        <Gallery key={view.id} database={database} config={config} rows={rows} ctx={ctx} header={<>{header}{toolbar}</>} empty={empty} refresh={refresh} />
+      ) : view.type === 'timeline' ? (
+        <TimelineList key={view.id} database={database} config={config} rows={rows} ctx={ctx} header={<>{header}{toolbar}</>} empty={empty} refresh={refresh} />
       ) : view.type === 'calendar' ? (
         <Calendar key={view.id} database={database} config={config} rows={rows} ctx={ctx} header={<>{header}{toolbar}</>} refresh={refresh} canAdd={!readOnly} onAdd={(values) => addRow(values)} />
       ) : (

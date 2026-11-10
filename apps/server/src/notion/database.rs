@@ -14,10 +14,11 @@ use sha2::{Digest, Sha256};
 use super::convert::{ConvertReport, page_icon, page_title};
 use super::model::{NotionDataSource, NotionPage, NotionView, normalize_id, plain_text};
 use crate::repositories::databases::{
-    CalendarMode, FilterGroup, FilterNode, FilterOperator, FilterRule, GroupOp, MAX_CELL_ITEMS,
-    MAX_FILTER_LEVELS, MAX_GROUP_CHILDREN, MAX_NAME_CHARS, MAX_OPTIONS, MAX_PROPERTIES, MAX_RULES,
-    MAX_SORTS, MAX_TEXT_CHARS, MAX_VIEWS, Property, PropertyType, SchemaProperty, SchemaView,
-    SortDirection, ViewColumn, ViewConfig, ViewSort, ViewType, accepts_value,
+    CalendarMode, CardPreview, CardSize, FilterGroup, FilterNode, FilterOperator, FilterRule,
+    GroupOp, MAX_CELL_ITEMS, MAX_FILTER_LEVELS, MAX_GROUP_CHILDREN, MAX_NAME_CHARS, MAX_OPTIONS,
+    MAX_PROPERTIES, MAX_RULES, MAX_SORTS, MAX_TEXT_CHARS, MAX_VIEWS, Property, PropertyType,
+    SchemaProperty, SchemaView, SortDirection, TimelineZoom, ViewColumn, ViewConfig, ViewSort,
+    ViewType, accepts_value,
 };
 
 /// Orbit members by lowercase email: `(user id, display name)`.
@@ -562,7 +563,8 @@ fn view_columns(view: &NotionView) -> Option<Vec<(&str, &Value)>> {
 /// flat AND part of the filter; a board also keeps its group and lane properties (when they
 /// became a type that can group) and "hide empty groups"; a board and a calendar keep their
 /// visible card properties, and a calendar its date property (when it became a date) and range.
-/// Other layouts (gallery, …) become tables.
+/// A gallery keeps its card preview and size, a timeline its date properties, zoom and table
+/// pane. Other layouts (chart, form, …) become tables.
 fn plan_view(
     view: &NotionView,
     planned: &[Planned],
@@ -575,6 +577,8 @@ fn plan_view(
         "table" => ViewType::Table,
         "list" => ViewType::List,
         "calendar" => ViewType::Calendar,
+        "gallery" => ViewType::Gallery,
+        "timeline" => ViewType::Timeline,
         _ => {
             lossy(report, &format!("view_type:{kind}"));
             ViewType::Table
@@ -589,8 +593,10 @@ fn plan_view(
                 continue;
             };
             if seen.insert(property.id) {
-                if matches!(view_type, ViewType::Board | ViewType::Calendar)
-                    && property.property_type != PropertyType::Title
+                if matches!(
+                    view_type,
+                    ViewType::Board | ViewType::Calendar | ViewType::Gallery
+                ) && property.property_type != PropertyType::Title
                     && entry.get("visible").and_then(Value::as_bool) != Some(false)
                 {
                     card_properties.push(property.id);
@@ -752,10 +758,19 @@ fn plan_view(
         Some("week") => CalendarMode::Week,
         _ => CalendarMode::Month,
     };
+    let layout = layout_config(view, view_type, planned);
     SchemaView {
         name: clean_name(view.name.as_deref().unwrap_or_default(), "Table"),
         view_type,
         config: ViewConfig {
+            card_preview: layout.card_preview,
+            card_size: layout.card_size,
+            fit_image: layout.fit_image,
+            start_property_id: layout.start_property_id,
+            end_property_id: layout.end_property_id,
+            zoom: layout.zoom,
+            show_table: layout.show_table,
+            table_columns: layout.table_columns,
             group_by,
             sub_group_by,
             hide_empty_groups,
@@ -773,6 +788,71 @@ fn plan_view(
                 .unwrap_or(false),
             ..ViewConfig::default()
         },
+    }
+}
+
+/// The gallery and timeline fields of an imported view; defaults for other layouts.
+fn layout_config(view: &NotionView, view_type: ViewType, planned: &[Planned]) -> ViewConfig {
+    let field = |name: &str| view.configuration.as_ref()?.get(name);
+    let property = |key: Option<&Value>| {
+        key.and_then(Value::as_str)
+            .and_then(|key| lookup(planned, key))
+    };
+    let date = |key: Option<&Value>| {
+        property(key)
+            .filter(|property| property.property_type == PropertyType::Date)
+            .map(|property| property.id)
+    };
+    match view_type {
+        ViewType::Gallery => ViewConfig {
+            card_preview: match field("cover") {
+                None => CardPreview::Content,
+                Some(Value::Null) => CardPreview::None,
+                Some(cover) => match cover.get("type").and_then(Value::as_str) {
+                    Some("page_cover") => CardPreview::Cover,
+                    Some("property") => property(cover.get("property_id"))
+                        .filter(|property| property.property_type == PropertyType::Files)
+                        .map_or(CardPreview::Content, |property| {
+                            CardPreview::Files(property.id.to_string())
+                        }),
+                    _ => CardPreview::Content,
+                },
+            },
+            card_size: match field("cover_size").and_then(Value::as_str) {
+                Some("small") => CardSize::Small,
+                Some("large") => CardSize::Large,
+                _ => CardSize::Medium,
+            },
+            fit_image: field("cover_aspect").and_then(Value::as_str) == Some("contain"),
+            ..ViewConfig::default()
+        },
+        ViewType::Timeline => ViewConfig {
+            start_property_id: date(field("date_property_id")),
+            end_property_id: date(field("end_date_property_id")),
+            zoom: match field("preference")
+                .and_then(|preference| preference.get("zoom_level"))
+                .and_then(Value::as_str)
+            {
+                Some("hours" | "day") => TimelineZoom::Day,
+                Some("week" | "bi_week") => TimelineZoom::Week,
+                Some("quarter") => TimelineZoom::Quarter,
+                Some("year" | "5_years") => TimelineZoom::Year,
+                _ => TimelineZoom::Month,
+            },
+            show_table: (field("show_table").and_then(Value::as_bool) == Some(false))
+                .then_some(false),
+            table_columns: field("table_properties")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter(|entry| entry.get("visible").and_then(Value::as_bool) != Some(false))
+                .filter_map(|entry| property(entry.get("property_id")))
+                .filter(|property| property.property_type != PropertyType::Title)
+                .map(|property| property.id)
+                .collect(),
+            ..ViewConfig::default()
+        },
+        _ => ViewConfig::default(),
     }
 }
 

@@ -246,6 +246,18 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
   with that date (plus filter values and the default template). Week start: the locale, or "⋯ → Start week on" (this
   browser, `orbit:calendar-week-start`). Mobile: list views show all visible properties; a calendar is a month grid with
   dots and the tapped day's rows under it (`components/database/Calendar.tsx`), no drag.
+- Database gallery and timeline views (databases P2/P3 spec section 16). Gallery (`database/DatabaseGallery.tsx`, shared
+  `@orbit/database/gallery`): a grid of 180/260/340 px cards (`card_size`) with a 3:2 preview (`card_preview`: `none`,
+  `cover`, `content` = the body's first image else its first 300 characters, or `{files: id}` = a files property's
+  first image; `fit_image`), the title and `card_properties`, "New" as the last card, drag to reorder without sorts.
+  `GET /databases/{id}` adds `preview` to rows only when a returned view is a gallery that needs it. Timeline
+  (`database/DatabaseTimeline.tsx`, shared `@orbit/database/timeline`): `start_property_id` and `end_property_id`
+  (dates; no end: a range's end, else one day), `zoom` (day to year), `show_table` and `table_columns` for the left
+  pane; drag a bar to move both dates or an edge to change one (a moved time keeps its local hour); undated rows list
+  under "No date" and a click on their track sets a date; zoom and "Today" above the axis; its own scroller, rows
+  virtualized. Mobile: a gallery is a 2-column grid (1 for large cards, `components/database/Gallery.tsx`); a timeline is
+  a list grouped by month with "Timeline · Edit on the web" (`TimelineList.tsx`). Notion gallery and timeline views
+  import with their preview, size, dates, zoom and table pane.
 - Databases for API tokens and MCP (databases P2/P3 spec section 14): tools `get_database`, `query_database`,
   `create_database_row`, `update_database_row`, `trash_database_rows` and REST `GET /docs/{id}/database`, `POST
   /docs/{id}/database/query`, `POST /docs/{id}/rows`, `PATCH /docs/{id}/rows/{row}`, `POST /docs/{id}/rows/trash` under the

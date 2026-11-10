@@ -1,5 +1,7 @@
 import { calculationsFor } from './calculate'
 import { datable, defaultDateProperty } from './calendar'
+import { galleryFields } from './gallery'
+import { timelineFields } from './timeline'
 import { matchesFilter, retainRules } from './filter'
 import { sortRows } from './sort'
 import type { Database, DatabaseView, GroupProperty, LaneProperty, Property, Row, ViewConfig, ViewContext } from './types'
@@ -80,12 +82,14 @@ export function repairConfig(view: DatabaseView, properties: readonly Property[]
     ...(config.default_template_id ? { default_template_id: config.default_template_id } : {}),
     ...(date_property_id ? { date_property_id } : {}),
     ...(config.calendar_mode === 'week' ? { calendar_mode: 'week' as const } : {}),
+    ...galleryFields(config, properties),
+    ...timelineFields(view.type, config, properties),
   }
 }
 
-/** A board and a calendar show the title and `card_properties`; the other views their visible columns. */
+/** A board, a calendar and a gallery show the title and `card_properties`; the other views their visible columns. */
 export function showsCards(type: DatabaseView['type']): boolean {
-  return type === 'board' || type === 'calendar'
+  return type === 'board' || type === 'calendar' || type === 'gallery'
 }
 
 /** A board's columns can group by a `select`, `status`, `multi_select` or `person` property. */

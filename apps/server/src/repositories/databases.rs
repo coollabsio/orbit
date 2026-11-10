@@ -28,16 +28,19 @@ mod board;
 mod calendar;
 mod computed;
 mod export;
+mod gallery;
 mod import;
 mod links;
 mod moves;
 mod query;
 mod search;
 mod templates;
+mod timeline;
 pub use calendar::CalendarMode;
 pub use computed::{ComputeScope, RelatedPage, is_computed};
 pub use agent::{AgentDatabase, AgentQuery, AgentRow, AgentRowPage};
 pub use export::{ExportDatabase, ExportRow, cell_text, is_number};
+pub use gallery::{CardPreview, CardSize, RowPreview};
 pub use import::{
     CsvImport, ImportColumn, ImportColumnResult, ImportResult, ImportTarget, MAX_IMPORT_COLUMNS,
 };
@@ -48,6 +51,7 @@ pub use search::row_search_lines;
 use search::{SearchRows, refresh_search_text};
 use templates::Children;
 pub use templates::{DatabaseTemplate, NewTemplate, TemplateChanges};
+pub use timeline::TimelineZoom;
 pub(super) use templates::{NOT_TEMPLATE, TemplateCopy, is_template};
 
 pub const MAX_ROWS: i64 = 5_000;
@@ -962,6 +966,8 @@ pub enum ViewType {
     Board,
     List,
     Calendar,
+    Gallery,
+    Timeline,
 }
 
 impl ViewType {
@@ -971,6 +977,8 @@ impl ViewType {
             Self::Board => "board",
             Self::List => "list",
             Self::Calendar => "calendar",
+            Self::Gallery => "gallery",
+            Self::Timeline => "timeline",
         }
     }
 
@@ -980,6 +988,8 @@ impl ViewType {
             "board" => Some(Self::Board),
             "list" => Some(Self::List),
             "calendar" => Some(Self::Calendar),
+            "gallery" => Some(Self::Gallery),
+            "timeline" => Some(Self::Timeline),
             _ => None,
         }
     }
@@ -1392,6 +1402,35 @@ pub struct ViewConfig {
     /// Calendar: a month grid (default) or one week.
     #[serde(default, skip_serializing_if = "CalendarMode::is_month")]
     pub calendar_mode: CalendarMode,
+    /// Gallery: what a card shows above its title (default: the body's first image or text).
+    #[serde(default, skip_serializing_if = "CardPreview::is_content")]
+    pub card_preview: CardPreview,
+    /// Gallery: the card width.
+    #[serde(default, skip_serializing_if = "CardSize::is_medium")]
+    pub card_size: CardSize,
+    /// Gallery: the preview image fits its box instead of filling it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fit_image: bool,
+    /// Timeline: the `date` property where a bar starts. A timeline without one takes the first
+    /// `date` property.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub start_property_id: Option<Id>,
+    /// Timeline: the `date` property where a bar ends. Without one, a date range's end is the
+    /// end and a single date is a one-day bar.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub end_property_id: Option<Id>,
+    /// Timeline: the time scale.
+    #[serde(default, skip_serializing_if = "TimelineZoom::is_month")]
+    pub zoom: TimelineZoom,
+    /// Timeline: the table pane left of the bars shows (absent: `true`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show_table: Option<bool>,
+    /// Timeline: the properties of the table pane, after the title.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schema(value_type = Vec<String>)]
+    pub table_columns: Vec<Id>,
 }
 
 impl ViewConfig {
@@ -1415,6 +1454,8 @@ impl ViewConfig {
         };
         board::repair(self, view_type, properties);
         calendar::repair(self, view_type, properties);
+        gallery::repair(self, properties);
+        timeline::repair(self, view_type, properties);
         let mut cards = HashSet::new();
         self.card_properties.retain(|id| {
             kind(*id).is_some_and(|kind| *kind != PropertyKind::Title) && cards.insert(*id)
@@ -1457,6 +1498,8 @@ impl ViewConfig {
         }
         board::check(self, properties)?;
         calendar::check(self, properties)?;
+        gallery::check(self, properties)?;
+        timeline::check(self, properties)?;
         let types: HashMap<Id, PropertyType> = properties
             .iter()
             .map(|property| (property.id, property.kind.property_type()))
@@ -1514,6 +1557,19 @@ impl ViewConfig {
         if let Some(sub_group_by) = &mut self.sub_group_by {
             map(sub_group_by);
         }
+        if let CardPreview::Files(id) = &mut self.card_preview
+            && let Ok(mut parsed) = id.parse::<Id>()
+        {
+            map(&mut parsed);
+            *id = parsed.to_string();
+        }
+        for id in [&mut self.start_property_id, &mut self.end_property_id]
+            .into_iter()
+            .flatten()
+        {
+            map(id);
+        }
+        self.table_columns.iter_mut().for_each(map);
         self.card_properties.iter_mut().for_each(map);
         self.calculations = std::mem::take(&mut self.calculations)
             .into_iter()
@@ -1612,6 +1668,9 @@ pub struct DatabaseRow {
     /// not in `values`). Absent: none.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub hidden_links: BTreeMap<String, u64>,
+    /// What a gallery card shows of the row page; only when a view read with it is a gallery.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<RowPreview>,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -1869,6 +1928,7 @@ impl DatabaseRepository {
         let mut views = views_in_tx(&mut tx, database_id, set, &properties).await?;
         let mut rows = rows_in_tx(&mut tx, database_id, None).await?;
         let computed = computed::fill(&mut tx, scope, database_id, &properties, &mut rows).await?;
+        gallery::fill(&mut tx, database_id, &views, &mut rows).await?;
         let templates = templates::templates_in_tx(&mut tx, database_id, &properties, None).await?;
         templates::repair_defaults(&mut views, &templates);
         tx.rollback().await?;
@@ -3216,6 +3276,7 @@ async fn children_in_tx(
                 has_content: row.get("has_content"),
                 values: values.remove(&id).unwrap_or_default(),
                 hidden_links: BTreeMap::new(),
+                preview: None,
             })
         })
         .collect()

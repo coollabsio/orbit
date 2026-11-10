@@ -135,7 +135,8 @@ export function useUpdateValues(workspaceId: string, databaseId: string) {
       return required(data, 'Update values response was empty.')
     },
     optimistic: (detail, { rowId, values }) => withRow(detail, rowId, (row) => ({ ...row, values: patchValues(row.values, values) })),
-    reconcile: (detail, row) => withRow(detail, row.id, () => row),
+    // A write's row has no gallery preview (only reads of a gallery send one): the cached one stays.
+    reconcile: (detail, row) => withRow(detail, row.id, (cached) => (cached.preview ? { ...row, preview: cached.preview } : row)),
     error: 'Could not save the value.',
   })
 }

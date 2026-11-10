@@ -8,9 +8,9 @@ export const VIEW_KINDS: readonly { label: string; icon: typeof Grid; type: View
   { label: 'Table', icon: Grid, type: 'table' },
   { label: 'Board', icon: Kanban, type: 'board' },
   { label: 'List', icon: List, type: 'list' },
-  { label: 'Gallery', icon: Gallery, type: null },
+  { label: 'Gallery', icon: Gallery, type: 'gallery' },
   { label: 'Calendar', icon: Calendar, type: 'calendar' },
-  { label: 'Timeline', icon: RowHorizontal, type: null },
+  { label: 'Timeline', icon: RowHorizontal, type: 'timeline' },
   { label: 'Chart', icon: Chart, type: null },
   { label: 'Form', icon: ClipboardText, type: null },
 ]

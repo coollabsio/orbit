@@ -1,6 +1,9 @@
 import type {
   DatabaseCalculation,
   DatabaseCalendarMode,
+  DatabaseCardPreview,
+  DatabaseCardSize,
+  DatabaseTimelineZoom,
   DatabaseDetail,
   DatabaseFilterGroup,
   DatabaseProperty,
@@ -131,9 +134,29 @@ export type ViewConfig = {
   date_property_id?: string
   /** Calendar: absent is `month`. */
   calendar_mode?: 'week'
+  /** Gallery: what a card shows above its title (absent: `content`, the body's first image or text). */
+  card_preview?: CardPreview
+  /** Gallery: absent is `medium`. */
+  card_size?: CardSize
+  /** Gallery: the preview image fits its box instead of filling it. */
+  fit_image?: boolean
+  /** Timeline: the date property where a bar starts (absent: none yet). */
+  start_property_id?: string
+  /** Timeline: the date property where a bar ends (absent: a range's end, or one day). */
+  end_property_id?: string
+  /** Timeline: absent is `month`. */
+  zoom?: DatabaseTimelineZoom
+  /** Timeline: absent is `true` (the table pane shows). */
+  show_table?: boolean
+  /** Timeline: the table pane's properties after the title. */
+  table_columns?: string[]
 }
 
 export type CalendarMode = DatabaseCalendarMode
+
+/** What a gallery card shows above its title: nothing, the row's cover, its body, or a files property's first image. */
+export type CardPreview = DatabaseCardPreview
+export type CardSize = DatabaseCardSize
 
 /** A property whose value can place a row on a calendar. */
 export type DateProperty = Property & { type: 'date' | 'created_time' | 'last_edited_time' }

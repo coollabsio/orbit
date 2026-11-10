@@ -13,6 +13,8 @@ import { useCreateRow, useTrashRows, useUpdateView } from './api'
 import { DatabaseEnvContext, type DatabaseEnv } from './context'
 import { DatabaseBoard, type NewCard } from './DatabaseBoard'
 import { DatabaseCalendar } from './DatabaseCalendar'
+import { DatabaseGallery } from './DatabaseGallery'
+import { DatabaseTimeline } from './DatabaseTimeline'
 import { DatabaseList } from './DatabaseList'
 import { DatabaseTable } from './DatabaseTable'
 import { withPinnedRows, type Pin } from './databaseLib'
@@ -138,7 +140,7 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
   const templates = templatesOf(database)
   const board = view.type === 'board'
   // A block's table or list shows its first rows; a board limits each column itself and a calendar shows a month.
-  const limited = view.type === 'table' || view.type === 'list'
+  const limited = view.type === 'table' || view.type === 'list' || view.type === 'gallery'
   const rows = withPinnedRows(limited ? shown.slice(0, rowLimit) : shown, pins, database.rows)
   const hiddenRows = limited ? Math.max(0, shown.length - rowLimit) : 0
   const selectedRows = view.type === 'table' ? rows.filter((row) => selected.has(row.id)) : []
@@ -287,7 +289,34 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
         Load more
       </Button>
     ) : null
-  const content = view.type === 'list' ? (
+  const content = view.type === 'gallery' ? (
+    <>
+      <DatabaseGallery
+        key={view.id}
+        database={database}
+        config={config}
+        rows={rows}
+        onAddRow={() => addRow('bottom', undefined, 'peek')}
+        onOpenRow={(rowId) => setPeekRow(rowId)}
+        filtered={filtered}
+        onClearFilters={clearFilters}
+      />
+      {loadMore}
+    </>
+  ) : view.type === 'timeline' ? (
+    <DatabaseTimeline
+      key={view.id}
+      database={database}
+      config={config}
+      rows={rows}
+      onConfig={changeConfig}
+      onAddRow={() => addRow('bottom', undefined, 'peek')}
+      onOpenRow={(rowId) => setPeekRow(rowId)}
+      filtered={filtered}
+      onClearFilters={clearFilters}
+      page={!!page}
+    />
+  ) : view.type === 'list' ? (
     <>
       <DatabaseList
         key={view.id}

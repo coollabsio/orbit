@@ -28,6 +28,8 @@ import { useSetPageLock } from '@/features/docs/api/pageOptions'
 import { useDatabaseEnv } from './context'
 import { setWeekStart, useWeekStart } from './weekStart'
 import { MergeCsvDialog } from './CsvImport'
+import { GalleryMenus } from './DatabaseGallery'
+import { TimelineMenus } from './DatabaseTimeline'
 import { importSummary } from './csvImportText'
 import { PropertyPicker } from './FilterBar'
 import { filterRules } from '@orbit/database/filter'
@@ -154,10 +156,15 @@ export function ViewToolbar({ properties, config, onConfig, onAddFilter, onAdvan
         <DropdownMenuContent align="end" className="w-52">
           {viewType === 'board' ? <GroupMenus properties={properties} config={config} onConfig={onConfig} /> : null}
           {viewType === 'calendar' ? <CalendarMenus properties={properties} config={config} onConfig={onConfig} /> : null}
-          <DropdownMenuItem onClick={() => setPropertiesOpen(true)}>
-            <Eye />
-            {showsCards(viewType) ? 'Card properties' : 'Properties'}
-          </DropdownMenuItem>
+          {viewType === 'gallery' ? <GalleryMenus properties={properties} config={config} onConfig={onConfig} /> : null}
+          {viewType === 'timeline' ? (
+            <TimelineMenus properties={properties} config={config} onConfig={onConfig} />
+          ) : (
+            <DropdownMenuItem onClick={() => setPropertiesOpen(true)}>
+              <Eye />
+              {showsCards(viewType) ? 'Card properties' : 'Properties'}
+            </DropdownMenuItem>
+          )}
           {viewType === 'board' ? (
             <DropdownMenuCheckboxItem checked={config.hide_empty_groups} onCheckedChange={(checked) => onConfig({ ...config, hide_empty_groups: checked })}>
               <EyeSlash />
