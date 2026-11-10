@@ -46,28 +46,31 @@ export function ButtonCell({ property, row, className }: { property: ButtonPrope
         {pending ? <Spinner className="size-3" /> : null}
         <span className="truncate">{label}</span>
       </Button>
-      <AlertDialog open={confirming} onOpenChange={setConfirming}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{label}</AlertDialogTitle>
-            <AlertDialogDescription>{property.config.confirm}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <Button type="button" variant="outline" onClick={() => setConfirming(false)}>
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              onClick={() => {
-                setConfirming(false)
-                run()
-              }}
-            >
-              Continue
-            </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      {/* The dialog renders in a portal, but its React events still bubble to the cell or card (a click would open the row). */}
+      <span className="contents" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+        <AlertDialog open={confirming} onOpenChange={setConfirming}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{label}</AlertDialogTitle>
+              <AlertDialogDescription>{property.config.confirm}</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <Button type="button" variant="outline" onClick={() => setConfirming(false)}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={() => {
+                  setConfirming(false)
+                  run()
+                }}
+              >
+                Continue
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </span>
     </>
   )
 }
