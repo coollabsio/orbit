@@ -955,7 +955,7 @@ fn parse_version_id(
 }
 
 /// An unparseable teamspace id cannot name a teamspace of this workspace.
-fn space_request(
+pub(crate) fn space_request(
     teamspace_id: Option<String>,
     private: Option<bool>,
     instance: &str,
@@ -1084,7 +1084,7 @@ fn teamspace_not_found(instance: String, request_id: Option<&Extension<RequestId
     )
 }
 
-fn page_problem(
+pub(crate) fn page_problem(
     error: PageError,
     instance: String,
     request_id: Option<&Extension<RequestId>>,

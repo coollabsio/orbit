@@ -30,6 +30,11 @@ pub trait LinkResolver {
     fn member_name(&self, _user_id: &str) -> Option<String> {
         None
     }
+    /// The rows a `database` block shows (its linked view block's first view, or the database's
+    /// own first view without `link_id`) as a Markdown table; `None` writes only the link.
+    fn database_table(&self, _database_id: &str, _link_id: &str) -> Option<String> {
+        None
+    }
 }
 
 /// Keeps every URL as it is and links pages to `/docs/<id>` (titled "Untitled").
@@ -121,6 +126,12 @@ pub fn blocks_to_markdown_with_spans(
 #[must_use]
 pub fn escape_label(text: &str) -> String {
     escape_text(text, false)
+}
+
+/// Escapes text for a Markdown table cell: `|` too, and line breaks become `<br>`.
+#[must_use]
+pub fn escape_cell(text: &str) -> String {
+    escape_text(&text.replace("\r\n", "\n").replace('\r', "\n"), true).replace('\n', "<br>")
 }
 
 /// Makes a link destination safe to put between `(` and `)`: spaces, angle brackets and
@@ -635,7 +646,16 @@ impl Converter<'_> {
                     None if database => "*Missing database*".to_owned(),
                     None => "*Missing page*".to_owned(),
                 };
-                joined(&link, nested())
+                let table = database
+                    .then(|| {
+                        self.resolver
+                            .database_table(page_id, prop_str(block, "linkId"))
+                    })
+                    .flatten();
+                match table {
+                    Some(table) => joined(&join_blocks(&link, &table), nested()),
+                    None => joined(&link, nested()),
+                }
             }
             // Paragraphs and anything unknown: the text, then the children.
             _ => joined(&self.paragraph(block.get("content")), nested()),

@@ -1,0 +1,4 @@
+﻿Name,Tags,Notes,Score,Kind,Status,Due,Owner,Done,Link,Created,Created by
+Fix | login,,"'=HYPERLINK(""x"")
+second line",-0.125,'=Feature,Done,2026-11-09/2026-11-12,Owner,true,"https://example.com/a?b=c,d",<time>,Owner
+,,,,,Not started,,,false,,<time>,Owner

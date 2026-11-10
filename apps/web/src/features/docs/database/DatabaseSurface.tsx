@@ -17,6 +17,7 @@ import { RowPeek } from './RowPeek'
 import { FilterBar } from './FilterBar'
 import { ViewTabs } from './ViewTabs'
 import { ViewToolbar } from './ViewToolbar'
+import { downloadViewCsv } from './csvExport'
 
 const SAVE_DELAY_MS = 500
 /** The URL parameter that names the database block whose row the peek shows (blocks only; the full page has one). */
@@ -242,6 +243,7 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
             viewId={view.id}
             viewType={view.type}
             onNew={() => addRow('top', undefined, 'peek')}
+            onExportCsv={() => downloadViewCsv(database, { ...view, config }, shown, ctx)}
           />
         )}
       </div>

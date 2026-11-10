@@ -245,6 +245,8 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::database_routes::update_database_row_values,
         crate::database_routes::trash_database_rows,
         crate::database_routes::move_database_row,
+        crate::database_routes::import::import_database_csv,
+        crate::database_routes::import::create_database_from_csv,
         crate::page_file_routes::upload_page_file,
         crate::page_file_routes::download_page_file,
         crate::page_comment_routes::list_page_threads,
@@ -1685,6 +1687,8 @@ fn database_operation(operation_id: &str) -> bool {
             | "update_database_row_values"
             | "trash_database_rows"
             | "move_database_row"
+            | "import_database_csv"
+            | "create_database_from_csv"
     )
 }
 
@@ -1717,6 +1721,13 @@ fn database_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Ve
         "create_database_view" => add_code(responses, "409", "database_view_limit"),
         "delete_database_view" => add_code(responses, "409", "database_last_view"),
         "create_database_row" => add_code(responses, "409", "database_row_limit"),
+        "import_database_csv" => {
+            add_code(responses, "409", "database_row_limit");
+            add_code(responses, "409", "database_property_limit");
+            add_code(responses, "413", "request_too_large");
+            add_code(responses, "423", "page_locked");
+        }
+        "create_database_from_csv" => add_code(responses, "413", "request_too_large"),
         _ => {}
     }
 }

@@ -742,7 +742,15 @@ impl PageRepository {
         let content = sanitize_page_blocks(content, workspace_id, id);
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
-        ensure_trial_capacity(&self.database, &mut tx, workspace_id, TrialLimit::Pages, 1).await?;
+        let imported_rows = schema.map_or(0, DatabaseSchema::row_count) as i64;
+        ensure_trial_capacity(
+            &self.database,
+            &mut tx,
+            workspace_id,
+            TrialLimit::Pages,
+            1 + imported_rows,
+        )
+        .await?;
         let space = resolve_space(
             &mut tx,
             workspace_id,
@@ -789,7 +797,7 @@ impl PageRepository {
         .execute(&mut *tx)
         .await?;
         if input.kind == PageKind::Database {
-            insert_schema(&mut tx, workspace_id, id, schema, now).await?;
+            insert_schema(&mut tx, workspace_id, id, space, actor_id, schema, now).await?;
         }
         carry_row_values(
             &mut tx,

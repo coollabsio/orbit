@@ -16,7 +16,7 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use super::billing::{TrialCapacityError, TrialLimitReached, ensure_trial_capacity};
-use super::pages::{PageError, PageKind, PageRecord, page_in_tx, renumber, sibling_ids};
+use super::pages::{PageError, PageKind, PageRecord, PageSpace, page_in_tx, renumber, sibling_ids};
 pub use super::task_filter::GroupOp;
 use super::tasks::{TaskError, require_access_tx};
 use crate::audit::{self, AuditOutcome};
@@ -24,9 +24,15 @@ use crate::billing::TrialLimit;
 use crate::collab::CollabHub;
 
 mod board;
+mod export;
+mod import;
 mod links;
 mod moves;
 mod search;
+pub use export::{ExportDatabase, ExportRow, cell_text, is_number};
+pub use import::{
+    CsvImport, ImportColumn, ImportColumnResult, ImportResult, ImportTarget, MAX_IMPORT_COLUMNS,
+};
 pub use links::{DatabaseLink, LinkedViews, MAX_LINK_VIEWS};
 pub(super) use links::{LinkCopy, block_links, copy_links, linked_databases};
 pub(super) use moves::carry_row_values;
@@ -844,29 +850,32 @@ fn options_kind(property_type: PropertyType, options: Vec<StatusOption>) -> Prop
 }
 
 /// The `text → type` conversions of spec 4.2.
+/// The `text → type` rule of spec 4.2 for a type without options (`None` for the others).
+fn scalar_from_text(new_type: PropertyType, text: &str) -> Option<CellValue> {
+    let text = text.trim();
+    match new_type {
+        PropertyType::Text => {
+            let text: String = text.chars().take(MAX_TEXT_CHARS).collect();
+            (!text.is_empty()).then_some(CellValue::Text(text))
+        }
+        PropertyType::Number => text
+            .parse::<f64>()
+            .ok()
+            .filter(|number| number.is_finite())
+            .map(CellValue::Number),
+        PropertyType::Url => valid_url(text).then(|| CellValue::Url(text.to_owned())),
+        PropertyType::Checkbox => ["true", "yes", "1", "x"]
+            .iter()
+            .any(|truthy| text.eq_ignore_ascii_case(truthy))
+            .then_some(CellValue::Checked),
+        PropertyType::Date => DateValue::from_text(text).map(CellValue::Date),
+        _ => None,
+    }
+}
+
 fn from_text(new_type: PropertyType, texts: Vec<(String, String)>) -> Conversion {
     let kind = PropertyKind::default_for(new_type);
-    let parse = |text: &str| -> Option<CellValue> {
-        let text = text.trim();
-        match new_type {
-            PropertyType::Text => {
-                let text: String = text.chars().take(MAX_TEXT_CHARS).collect();
-                (!text.is_empty()).then_some(CellValue::Text(text))
-            }
-            PropertyType::Number => text
-                .parse::<f64>()
-                .ok()
-                .filter(|number| number.is_finite())
-                .map(CellValue::Number),
-            PropertyType::Url => valid_url(text).then(|| CellValue::Url(text.to_owned())),
-            PropertyType::Checkbox => ["true", "yes", "1", "x"]
-                .iter()
-                .any(|truthy| text.eq_ignore_ascii_case(truthy))
-                .then_some(CellValue::Checked),
-            PropertyType::Date => DateValue::from_text(text).map(CellValue::Date),
-            _ => None,
-        }
-    };
+    let parse = |text: &str| scalar_from_text(new_type, text);
     if !matches!(
         new_type,
         PropertyType::Select | PropertyType::MultiSelect | PropertyType::Status
@@ -3139,9 +3148,16 @@ pub struct SchemaView {
 pub struct DatabaseSchema {
     properties: Vec<Property>,
     views: Vec<DatabaseView>,
+    /// Rows to create with the database (a CSV import).
+    rows: Option<import::ImportRows>,
 }
 
 impl DatabaseSchema {
+    /// Rows created with the database.
+    pub(super) fn row_count(&self) -> usize {
+        self.rows.as_ref().map_or(0, import::ImportRows::len)
+    }
+
     /// Checks names, configs, limits and exactly one `title` property. Filter rules that do not
     /// fit their property are dropped (a view of another app can hold rules Orbit has no operator
     /// for); the second value counts them. Errors name the field path.
@@ -3213,7 +3229,14 @@ impl DatabaseSchema {
                 })
             })
             .collect::<Result<Vec<_>, _>>()?;
-        Ok((Self { properties, views }, dropped))
+        Ok((
+            Self {
+                properties,
+                views,
+                rows: None,
+            },
+            dropped,
+        ))
     }
 
     /// A new database's schema: a "Name" title, a "Tags" multi-select and one "Table" view.
@@ -3238,7 +3261,11 @@ impl DatabaseSchema {
             config: ViewConfig::for_properties(&properties),
             position: 0,
         }];
-        Self { properties, views }
+        Self {
+            properties,
+            views,
+            rows: None,
+        }
     }
 }
 
@@ -3247,6 +3274,8 @@ pub(super) async fn insert_schema(
     tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     database_id: Id,
+    space: PageSpace,
+    actor_id: Id,
     schema: Option<&DatabaseSchema>,
     now: TimestampMillis,
 ) -> Result<(), PageError> {
@@ -3265,6 +3294,9 @@ pub(super) async fn insert_schema(
         insert_view(tx, workspace_id, database_id, None, view, now)
             .await
             .map_err(page_error)?;
+    }
+    if let Some(rows) = &schema.rows {
+        import::insert_rows(tx, workspace_id, database_id, space, actor_id, rows, now).await?;
     }
     Ok(())
 }

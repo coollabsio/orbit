@@ -27,6 +27,8 @@ use crate::task_routes::{
     request_id_value, validation,
 };
 
+pub(crate) mod import;
+
 #[derive(Clone)]
 pub struct DatabaseState {
     identity: Arc<IdentityRepository>,
@@ -78,6 +80,7 @@ pub fn database_router(state: DatabaseState) -> Router {
             &format!("{BASE}/rows/{{row_id}}/move"),
             post(move_database_row),
         )
+        .merge(import::routes())
         .with_state(state)
 }
 

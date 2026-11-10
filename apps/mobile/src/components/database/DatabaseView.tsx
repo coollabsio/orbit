@@ -22,6 +22,7 @@ import { Avatar, Button, ErrorView, Icon, IconButton, LoadingView, PullRefresh, 
 import { TextInput } from '../../ui/scaled'
 import { Sheet, SheetList, SheetNote, SheetRow, useSheet } from '../tasks/Sheet'
 import { CellValue, ChoiceRow, OptionPill, RowTitle } from './cells'
+import { shareViewCsv } from './csvShare'
 import { FilterContent, SortContent } from './ViewSheets'
 
 /** Cards each board column shows before "Show more", as on the web. */
@@ -32,7 +33,7 @@ const COLUMN_GAP = 10
 
 /** Where a card sits: its column, and its lane (`null` on a board without lanes). */
 type Cell = { group: string | null; lane: string | null }
-type DatabaseSheet = { kind: 'views' } | { kind: 'filters' } | { kind: 'sorts' } | { kind: 'move'; rowId: string; from: Cell }
+type DatabaseSheet = { kind: 'views' } | { kind: 'filters' } | { kind: 'sorts' } | { kind: 'more' } | { kind: 'move'; rowId: string; from: Cell }
 
 /**
  * `linkId` shows a linked view block's views instead of the database's own (spec 3.7); `initialView` opens one of them
@@ -114,6 +115,7 @@ export function DatabaseView({ databaseId, linkId = '', initialView = null, head
       onViews={() => sheet.open({ kind: 'views' })}
       onFilters={openFilters}
       onSorts={() => sheet.open({ kind: 'sorts' })}
+      onMore={() => sheet.open({ kind: 'more' })}
       localOnly={draft !== undefined && !canEditSchema}
       onReset={() => views.reset(view.id)}
     />
@@ -169,6 +171,18 @@ export function DatabaseView({ databaseId, linkId = '', initialView = null, head
           <FilterContent properties={database.properties} config={config} onConfig={onConfig} ctx={ctx} openRule={openRule} onOpenRule={setOpenRule} />
         ) : sheet.sheet?.kind === 'sorts' ? (
           <SortContent properties={database.properties} config={config} onConfig={onConfig} />
+        ) : sheet.sheet?.kind === 'more' ? (
+          <SheetList>
+            <SheetRow
+              label="Export view as CSV"
+              icon="documentDownload"
+              onPress={() => {
+                sheet.close()
+                shareViewCsv(database, { ...view, config }, rows, ctx).catch(() => notify('Could not export the view.'))
+              }}
+            />
+            <SheetNote>Import a CSV or merge one into this database on the web.</SheetNote>
+          </SheetList>
         ) : open?.kind === 'move' && moving && groupable(groupProperty) ? (
           <MoveChoices
             key={moving.id}
@@ -198,6 +212,8 @@ function sheetTitle(sheet: DatabaseSheet | null, moving: Row | undefined): strin
       return 'Filter'
     case 'sorts':
       return 'Sort'
+    case 'more':
+      return 'View options'
     case 'move':
       return `Move “${moving?.title || 'Untitled'}” to…`
     case undefined:
@@ -218,6 +234,7 @@ function Toolbar(props: {
   onViews: () => void
   onFilters: (rule: number | 'add' | null) => void
   onSorts: () => void
+  onMore: () => void
   localOnly: boolean
   onReset: () => void
 }) {
@@ -240,6 +257,7 @@ function Toolbar(props: {
         <View className="flex-1" />
         <IconButton icon="filter" label={count > 0 ? `Filter, ${count}` : 'Filter'} color={count > 0 ? colors.primary : muted} onPress={() => props.onFilters(null)} />
         <IconButton icon="sort" label={config.sorts.length > 0 ? `Sort, ${config.sorts.length}` : 'Sort'} color={config.sorts.length > 0 ? colors.primary : muted} onPress={props.onSorts} />
+        <IconButton icon="more" label="View options" color={muted} onPress={props.onMore} />
         {props.canAdd ? <IconButton icon="plus" label="New row" size={28} variant="primary" disabled={props.adding} onPress={props.onAdd} /> : null}
       </View>
       <View className="h-9 flex-row items-center gap-2 px-2.5 rounded-lg border border-input">

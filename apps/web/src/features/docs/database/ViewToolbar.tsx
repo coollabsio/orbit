@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { Add, ArrowSwapHorizontal, Eye, EyeSlash, Filter, Kanban, Link, Lock, MoreH, RowHorizontal, Search, Sort, Unlock, Xmark } from 'reicon-react'
+import { Add, ArrowSwapHorizontal, DocumentDownload, DocumentUpload, Eye, EyeSlash, Filter, Kanban, Link, Lock, MoreH, RowHorizontal, Search, Sort, Unlock, Xmark } from 'reicon-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -23,6 +23,8 @@ import type { DatabaseView, Property, ViewConfig } from '@orbit/database/types'
 import { groupable, laneable } from '@orbit/database/view'
 import { useSetPageLock } from '@/features/docs/api/pageOptions'
 import { useDatabaseEnv } from './context'
+import { MergeCsvDialog } from './CsvImport'
+import { importSummary } from './csvImportText'
 import { PropertyPicker } from './FilterBar'
 import { filterRules } from '@orbit/database/filter'
 import { GripIcon } from './GripIcon'
@@ -43,11 +45,14 @@ interface ViewToolbarProps {
   viewId: string
   viewType: DatabaseView['type']
   onNew: () => void
+  /** Downloads the rows the view shows as CSV. */
+  onExportCsv: () => void
 }
 
 /** Filter, Sort, search, "⋯" (properties or a board's group and card properties, wrap cells, lock, link) and New (spec 7.1). */
-export function ViewToolbar({ properties, config, onConfig, onAddFilter, onAdvancedFilter, search, onSearch, locked, viewId, viewType, onNew }: ViewToolbarProps) {
-  const { workspaceId, databaseId, canEditValues } = useDatabaseEnv()
+export function ViewToolbar({ properties, config, onConfig, onAddFilter, onAdvancedFilter, search, onSearch, locked, viewId, viewType, onNew, onExportCsv }: ViewToolbarProps) {
+  const { workspaceId, databaseId, canEditValues, canEditSchema } = useDatabaseEnv()
+  const [merging, setMerging] = useState(false)
   const setLock = useSetPageLock(workspaceId)
   const [searching, setSearching] = useState(search !== '')
   const [propertiesOpen, setPropertiesOpen] = useState(false)
@@ -167,8 +172,32 @@ export function ViewToolbar({ properties, config, onConfig, onAddFilter, onAdvan
             <Link />
             Copy link to view
           </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={onExportCsv}>
+            <DocumentDownload />
+            Export view as CSV
+          </DropdownMenuItem>
+          {canEditValues ? (
+            <DropdownMenuItem onClick={() => setMerging(true)}>
+              <DocumentUpload />
+              Merge with CSV
+            </DropdownMenuItem>
+          ) : null}
         </DropdownMenuContent>
       </DropdownMenu>
+      {merging ? (
+        <MergeCsvDialog
+          workspaceId={workspaceId}
+          databaseId={databaseId}
+          properties={properties}
+          canAddProperties={canEditSchema}
+          onClose={() => setMerging(false)}
+          onMerged={(result) => {
+            setMerging(false)
+            toast.success(importSummary(result))
+          }}
+        />
+      ) : null}
       <Popover open={propertiesOpen} onOpenChange={setPropertiesOpen}>
         <PopoverContent anchor={moreRef} align="end" className="w-64 gap-0 p-1">
           {viewType === 'board' ? (
