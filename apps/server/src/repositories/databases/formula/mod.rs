@@ -303,6 +303,10 @@ fn references(node: &Node, out: &mut Vec<(Span, String)>) {
             references(left, out);
             references(right, out);
         }
+        NodeKind::Chain(first, rest) => {
+            references(first, out);
+            rest.iter().for_each(|(_, node)| references(node, out));
+        }
         NodeKind::Ternary(test, then, other) => {
             references(test, out);
             references(then, out);
@@ -523,6 +527,10 @@ fn mark_used(ir: &Ir, used: &mut [bool]) {
             mark_used(c, used);
         }
         Ir::Negate(inner) | Ir::Not(inner) => mark_used(inner, used),
+        Ir::Chain(first, rest) => {
+            mark_used(first, used);
+            rest.iter().for_each(|(_, ir)| mark_used(ir, used));
+        }
     }
 }
 

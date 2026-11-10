@@ -72,6 +72,8 @@ pub enum Ir {
     Negate(Box<Ir>),
     Not(Box<Ir>),
     Binary(BinaryOp, Box<Ir>, Box<Ir>),
+    /// Each operator in turn on the value so far and its operand.
+    Chain(Box<Ir>, Vec<(BinaryOp, Ir)>),
 }
 
 /// A property as the checker sees it.
@@ -166,7 +168,22 @@ impl<'a> Checker<'a> {
                 (Ir::Not(Box::new(ir)), T::Boolean)
             }
             NodeKind::Ternary(test, then, other) => self.branch(test, then, other, "`?`")?,
-            NodeKind::Binary(op, left, right) => self.binary(*op, left, right, span)?,
+            NodeKind::Binary(op, left, right) => {
+                let (left_ir, left_ty) = self.check(left)?;
+                let (right_ir, right_ty) = self.check(right)?;
+                let ty = binary_type(*op, &left_ty, &right_ty, span)?;
+                (Ir::Binary(*op, Box::new(left_ir), Box::new(right_ir)), ty)
+            }
+            NodeKind::Chain(first, rest) => {
+                let (first_ir, mut ty) = self.check(first)?;
+                let mut steps = Vec::with_capacity(rest.len());
+                for (op, right) in rest {
+                    let (right_ir, right_ty) = self.check(right)?;
+                    ty = binary_type(*op, &ty, &right_ty, first.span.to(right.span))?;
+                    steps.push((*op, right_ir));
+                }
+                (Ir::Chain(Box::new(first_ir), steps), ty)
+            }
             NodeKind::Call {
                 name,
                 name_span,
@@ -210,98 +227,6 @@ impl<'a> Checker<'a> {
             Ir::If(Box::new(test), Box::new(then_ir), Box::new(other_ir)),
             ty,
         ))
-    }
-
-    fn binary(
-        &mut self,
-        op: BinaryOp,
-        left: &Node,
-        right: &Node,
-        span: Span,
-    ) -> Result<Typed, FormulaError> {
-        let (left_ir, left_ty) = self.check(left)?;
-        let (right_ir, right_ty) = self.check(right)?;
-        let symbol = op.symbol();
-        let both = |ty: &T| left_ty.unify(ty).is_some() && right_ty.unify(ty).is_some();
-        let ty = match op {
-            BinaryOp::Add if both(&T::Number) => T::Number,
-            BinaryOp::Add if both(&T::Text) => T::Text,
-            BinaryOp::Add => {
-                let hint = if [&left_ty, &right_ty].contains(&&T::Text) {
-                    " Use format() to make text."
-                } else {
-                    ""
-                };
-                return Err(err(
-                    format!(
-                        "`+` cannot add {} and {}.{hint}",
-                        left_ty.name(),
-                        right_ty.name()
-                    ),
-                    span,
-                ));
-            }
-            BinaryOp::Subtract
-            | BinaryOp::Multiply
-            | BinaryOp::Divide
-            | BinaryOp::Remainder
-            | BinaryOp::Power => {
-                if !both(&T::Number) {
-                    return Err(err(
-                        format!(
-                            "`{symbol}` needs numbers, found {} and {}.",
-                            left_ty.name(),
-                            right_ty.name()
-                        ),
-                        span,
-                    ));
-                }
-                T::Number
-            }
-            BinaryOp::And | BinaryOp::Or => {
-                if !both(&T::Boolean) {
-                    return Err(err(
-                        format!(
-                            "`{symbol}` needs true/false values, found {} and {}.",
-                            left_ty.name(),
-                            right_ty.name()
-                        ),
-                        span,
-                    ));
-                }
-                T::Boolean
-            }
-            BinaryOp::Equal | BinaryOp::NotEqual => {
-                if left_ty.unify(&right_ty).is_none() {
-                    return Err(err(
-                        format!(
-                            "`{symbol}` cannot compare {} and {}.",
-                            left_ty.name(),
-                            right_ty.name()
-                        ),
-                        span,
-                    ));
-                }
-                T::Boolean
-            }
-            BinaryOp::Less | BinaryOp::LessEqual | BinaryOp::Greater | BinaryOp::GreaterEqual => {
-                let ordered = left_ty
-                    .unify(&right_ty)
-                    .is_some_and(|ty| matches!(ty, T::Number | T::Text | T::Date | T::Unknown));
-                if !ordered {
-                    return Err(err(
-                        format!(
-                            "`{symbol}` compares two numbers, texts or dates, found {} and {}.",
-                            left_ty.name(),
-                            right_ty.name()
-                        ),
-                        span,
-                    ));
-                }
-                T::Boolean
-            }
-        };
-        Ok((Ir::Binary(op, Box::new(left_ir), Box::new(right_ir)), ty))
     }
 
     fn call(
@@ -797,4 +722,88 @@ impl<'a> Checker<'a> {
             }
         })
     }
+}
+
+fn binary_type(op: BinaryOp, left_ty: &T, right_ty: &T, span: Span) -> Result<T, FormulaError> {
+    let symbol = op.symbol();
+    let both = |ty: &T| left_ty.unify(ty).is_some() && right_ty.unify(ty).is_some();
+    let ty = match op {
+        BinaryOp::Add if both(&T::Number) => T::Number,
+        BinaryOp::Add if both(&T::Text) => T::Text,
+        BinaryOp::Add => {
+            let hint = if [left_ty, right_ty].contains(&&T::Text) {
+                " Use format() to make text."
+            } else {
+                ""
+            };
+            return Err(err(
+                format!(
+                    "`+` cannot add {} and {}.{hint}",
+                    left_ty.name(),
+                    right_ty.name()
+                ),
+                span,
+            ));
+        }
+        BinaryOp::Subtract
+        | BinaryOp::Multiply
+        | BinaryOp::Divide
+        | BinaryOp::Remainder
+        | BinaryOp::Power => {
+            if !both(&T::Number) {
+                return Err(err(
+                    format!(
+                        "`{symbol}` needs numbers, found {} and {}.",
+                        left_ty.name(),
+                        right_ty.name()
+                    ),
+                    span,
+                ));
+            }
+            T::Number
+        }
+        BinaryOp::And | BinaryOp::Or => {
+            if !both(&T::Boolean) {
+                return Err(err(
+                    format!(
+                        "`{symbol}` needs true/false values, found {} and {}.",
+                        left_ty.name(),
+                        right_ty.name()
+                    ),
+                    span,
+                ));
+            }
+            T::Boolean
+        }
+        BinaryOp::Equal | BinaryOp::NotEqual => {
+            if left_ty.unify(right_ty).is_none() {
+                return Err(err(
+                    format!(
+                        "`{symbol}` cannot compare {} and {}.",
+                        left_ty.name(),
+                        right_ty.name()
+                    ),
+                    span,
+                ));
+            }
+            T::Boolean
+        }
+        BinaryOp::Less | BinaryOp::LessEqual | BinaryOp::Greater | BinaryOp::GreaterEqual => {
+            let ordered = left_ty
+                .unify(&right_ty)
+                .is_some_and(|ty| matches!(ty, T::Number | T::Text | T::Date | T::Unknown));
+            if !ordered {
+                return Err(err(
+                    format!(
+                        "`{symbol}` compares two numbers, texts or dates, found {} and {}.",
+                        left_ty.name(),
+                        right_ty.name()
+                    ),
+                    span,
+                ));
+            }
+            T::Boolean
+        }
+    };
+    Ok(ty)
 }

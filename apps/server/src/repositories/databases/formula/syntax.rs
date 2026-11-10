@@ -283,6 +283,9 @@ pub enum NodeKind {
     Negate(Box<Node>),
     Not(Box<Node>),
     Binary(BinaryOp, Box<Node>, Box<Node>),
+    /// A left-to-right run of `or`, `and`, `+`/`-` or `*`/`/`/`%`: flat, so its length adds no
+    /// depth and no walk recurses once per operator.
+    Chain(Box<Node>, Vec<(BinaryOp, Node)>),
     Ternary(Box<Node>, Box<Node>, Box<Node>),
 }
 
@@ -336,6 +339,10 @@ fn depth(node: &Node) -> usize {
         }
         NodeKind::Negate(inner) | NodeKind::Not(inner) => depth(inner),
         NodeKind::Binary(_, left, right) => depth(left).max(depth(right)),
+        NodeKind::Chain(first, rest) => rest
+            .iter()
+            .map(|(_, node)| depth(node))
+            .fold(depth(first), usize::max),
         NodeKind::Ternary(test, then, other) => depth(test).max(depth(then)).max(depth(other)),
     };
     children + 1
@@ -396,6 +403,11 @@ impl Parser {
     }
 
     fn node(&mut self, kind: NodeKind, span: Span) -> Result<Node, FormulaError> {
+        self.count(span)?;
+        Ok(Node { kind, span })
+    }
+
+    fn count(&mut self, span: Span) -> Result<(), FormulaError> {
         self.nodes += 1;
         if self.nodes > MAX_NODES {
             return Err(FormulaError::new(
@@ -403,7 +415,7 @@ impl Parser {
                 span,
             ));
         }
-        Ok(Node { kind, span })
+        Ok(())
     }
 
     fn enter(&mut self) -> Result<(), FormulaError> {
@@ -436,31 +448,38 @@ impl Parser {
         )
     }
 
-    fn binary(
+    /// Operands joined by the operators `op` eats, one node per operator.
+    fn chain(
         &mut self,
-        op: BinaryOp,
-        left: Node,
         operand: fn(&mut Self) -> Result<Node, FormulaError>,
+        op: fn(&mut Self) -> Option<BinaryOp>,
     ) -> Result<Node, FormulaError> {
-        let right = operand(self)?;
-        let span = left.span.to(right.span);
-        self.node(NodeKind::Binary(op, Box::new(left), Box::new(right)), span)
+        let first = operand(self)?;
+        let mut rest = Vec::new();
+        while let Some(op) = op(self) {
+            let right = operand(self)?;
+            self.count(first.span.to(right.span))?;
+            rest.push((op, right));
+        }
+        let Some(span) = rest.last().map(|(_, last)| first.span.to(last.span)) else {
+            return Ok(first);
+        };
+        Ok(Node {
+            kind: NodeKind::Chain(Box::new(first), rest),
+            span,
+        })
     }
 
     fn or(&mut self) -> Result<Node, FormulaError> {
-        let mut node = self.and()?;
-        while self.eat(&Tok::OrOr) || self.eat_name("or") {
-            node = self.binary(BinaryOp::Or, node, Self::and)?;
-        }
-        Ok(node)
+        self.chain(Self::and, |parser| {
+            (parser.eat(&Tok::OrOr) || parser.eat_name("or")).then_some(BinaryOp::Or)
+        })
     }
 
     fn and(&mut self) -> Result<Node, FormulaError> {
-        let mut node = self.not()?;
-        while self.eat(&Tok::AndAnd) || self.eat_name("and") {
-            node = self.binary(BinaryOp::And, node, Self::not)?;
-        }
-        Ok(node)
+        self.chain(Self::not, |parser| {
+            (parser.eat(&Tok::AndAnd) || parser.eat_name("and")).then_some(BinaryOp::And)
+        })
     }
 
     fn not(&mut self) -> Result<Node, FormulaError> {
@@ -488,34 +507,34 @@ impl Parser {
             _ => return Ok(left),
         };
         self.next();
-        self.binary(op, left, Self::add)
+        let right = self.add()?;
+        let span = left.span.to(right.span);
+        self.node(NodeKind::Binary(op, Box::new(left), Box::new(right)), span)
     }
 
     fn add(&mut self) -> Result<Node, FormulaError> {
-        let mut node = self.mul()?;
-        loop {
-            let op = match self.peek().tok {
+        self.chain(Self::mul, |parser| {
+            let op = match parser.peek().tok {
                 Tok::Plus => BinaryOp::Add,
                 Tok::Minus => BinaryOp::Subtract,
-                _ => return Ok(node),
+                _ => return None,
             };
-            self.next();
-            node = self.binary(op, node, Self::mul)?;
-        }
+            parser.next();
+            Some(op)
+        })
     }
 
     fn mul(&mut self) -> Result<Node, FormulaError> {
-        let mut node = self.unary()?;
-        loop {
-            let op = match self.peek().tok {
+        self.chain(Self::unary, |parser| {
+            let op = match parser.peek().tok {
                 Tok::Star => BinaryOp::Multiply,
                 Tok::Slash => BinaryOp::Divide,
                 Tok::Percent => BinaryOp::Remainder,
-                _ => return Ok(node),
+                _ => return None,
             };
-            self.next();
-            node = self.binary(op, node, Self::unary)?;
-        }
+            parser.next();
+            Some(op)
+        })
     }
 
     fn unary(&mut self) -> Result<Node, FormulaError> {

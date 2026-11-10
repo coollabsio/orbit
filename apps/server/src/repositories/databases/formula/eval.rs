@@ -244,6 +244,21 @@ impl<'a> Machine<'a> {
                 let right = self.eval(right)?;
                 self.binary(*op, left, right)
             }
+            Ir::Chain(first, rest) => {
+                self.step(rest.len())?;
+                let mut value = self.eval(first)?;
+                for (op, right) in rest {
+                    value = match op {
+                        BinaryOp::And => Val::Bool(truthy(&value) && truthy(&self.eval(right)?)),
+                        BinaryOp::Or => Val::Bool(truthy(&value) || truthy(&self.eval(right)?)),
+                        _ => {
+                            let right = self.eval(right)?;
+                            self.binary(*op, value, right)?
+                        }
+                    };
+                }
+                Ok(value)
+            }
             Ir::Lambda(func, items, body) => {
                 let items = as_list(self.eval(items)?);
                 self.lambda(*func, items, body)

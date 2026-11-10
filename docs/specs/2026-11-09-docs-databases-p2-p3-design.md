@@ -1298,7 +1298,7 @@ Names and argument orders follow Notion, so users can paste Notion formulas. Not
 | Item | Limit |
 |---|---|
 | Expression length | 2,000 characters |
-| Syntax tree | 500 nodes, depth 32 |
+| Syntax tree | 500 nodes, depth 32 (parentheses, calls, lists, `?`, `not`, `-` and `^` nest; a run of one operator such as `a + b + … + z` counts as one level, 2026-11-10) |
 | Steps per cell | 2,000 (a deterministic counter, so the same input always gives the same result) |
 | List size inside a formula | 1,000 items |
 | Text result | 10,000 characters |
