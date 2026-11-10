@@ -63999,9 +63999,18 @@
           "private",
           "title",
           "icon",
+          "kind",
+          "database_title",
           "visited_at"
         ],
         "properties": {
+          "database_title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "For a row of a database: the database's title."
+          },
           "icon": {
             "type": [
               "string",
@@ -64010,6 +64019,9 @@
           },
           "id": {
             "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/PageKind"
           },
           "parent_id": {
             "type": [

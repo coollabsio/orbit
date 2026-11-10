@@ -5459,8 +5459,13 @@ export type ReadSnapshot = {
  * A page the caller opened recently.
  */
 export type RecentPage = {
+    /**
+     * For a row of a database: the database's title.
+     */
+    database_title: string | null;
     icon: string | null;
     id: string;
+    kind: PageKind;
     parent_id: string | null;
     /**
      * True when the page is in the caller's private space.

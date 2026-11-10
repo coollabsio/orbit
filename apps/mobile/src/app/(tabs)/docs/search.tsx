@@ -43,7 +43,7 @@ export default function DocsSearchScreen() {
         titleHighlights: page.title ? page.title_highlights : [],
         snippet: page.snippet ? { text: page.snippet, highlights: page.snippet_highlights } : undefined,
       }))
-    : (recent.data ?? []).map((page) => ({ id: page.id, title: pageTitle(page), icon: page.icon, hint: searchHint({ ...page, database_title: null }, teamspaces.data) }))
+    : (recent.data ?? []).map((page) => ({ id: page.id, title: pageTitle(page), icon: page.icon, hint: searchHint(page, teamspaces.data) }))
   const active = searching ? search : recent
 
   return (

@@ -238,6 +238,10 @@ pub struct RecentPage {
     pub title: String,
     #[schema(required = true)]
     pub icon: Option<String>,
+    pub kind: PageKind,
+    /// For a row of a database: the database's title.
+    #[schema(required = true)]
+    pub database_title: Option<String>,
     /// When the caller last opened the page.
     #[schema(value_type = String, format = DateTime)]
     pub visited_at: TimestampMillis,
@@ -2510,8 +2514,10 @@ impl PageRepository {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
         let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT pages.id AS id, pages.parent_id AS parent_id, pages.teamspace_id AS teamspace_id, \
-             pages.title AS title, pages.icon AS icon, page_visits.visited_at AS visited_at \
+             pages.title AS title, pages.icon AS icon, pages.kind AS kind, \
+             parent.title AS database_title, page_visits.visited_at AS visited_at \
              FROM page_visits JOIN pages ON pages.id = page_visits.page_id \
+             LEFT JOIN pages AS parent ON parent.id = pages.parent_id AND parent.kind = 'database' \
              WHERE page_visits.workspace_id = $1 AND page_visits.user_id = $2 \
              AND pages.workspace_id = page_visits.workspace_id AND pages.deleted_at IS NULL AND {visible} \
              AND {NOT_TEMPLATE} ORDER BY page_visits.visited_at DESC, pages.id LIMIT $4", visible = visible(3)
@@ -2533,6 +2539,8 @@ impl PageRepository {
                     private: teamspace_id.is_none(),
                     title: row.get("title"),
                     icon: row.get("icon"),
+                    kind: PageKind::parse(row.get("kind"))?,
+                    database_title: row.get("database_title"),
                     visited_at: TimestampMillis::from_millis(row.get("visited_at")),
                 })
             })
