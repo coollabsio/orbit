@@ -229,6 +229,14 @@
      "type": "files",
      "files": [
       {
+       "name": "photo.png",
+       "type": "file",
+       "file": {
+        "url": "__BASE__/files/photo.png?X-Amz-Signature=3",
+        "expiry_time": "2030-01-01T00:00:00.000Z"
+       }
+      },
+      {
        "name": "brief.pdf",
        "type": "external",
        "external": {
@@ -1617,6 +1625,14 @@
      "id": "at",
      "type": "files",
      "files": [
+      {
+       "name": "photo.png",
+       "type": "file",
+       "file": {
+        "url": "__BASE__/files/photo.png?X-Amz-Signature=3",
+        "expiry_time": "2030-01-01T00:00:00.000Z"
+       }
+      },
       {
        "name": "brief.pdf",
        "type": "external",
@@ -3203,6 +3219,14 @@
       "type": "files",
       "files": [
        {
+        "name": "photo.png",
+        "type": "file",
+        "file": {
+         "url": "__BASE__/files/photo.png?X-Amz-Signature=3",
+         "expiry_time": "2030-01-01T00:00:00.000Z"
+        }
+       },
+       {
         "name": "brief.pdf",
         "type": "external",
         "external": {
@@ -4136,7 +4160,9 @@
     "sorts": null,
     "quick_filters": null,
     "configuration": {
-     "type": "calendar"
+     "type": "calendar",
+     "date_property_id": "du",
+     "view_range": "week"
     }
    }
   ],

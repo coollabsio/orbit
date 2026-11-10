@@ -318,7 +318,10 @@ fn build_fake(base: String) -> Fake {
 fn add_database_fixture(fake: &mut Fake) {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures/notion_import/databases.json");
-    let fixture: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let text = std::fs::read_to_string(path)
+        .unwrap()
+        .replace("__BASE__", &fake.base);
+    let fixture: Value = serde_json::from_str(&text).unwrap();
     let map = |key: &str| -> HashMap<String, Value> {
         fixture[key]
             .as_object()
@@ -2270,10 +2273,9 @@ async fn databases_import_with_typed_properties_values_and_views() {
     assert_eq!(
         report["lossy"],
         json!({
-            "files_as_names": 1, "formula_values": 1, "invalid_values": 1, "number_format": 1,
+            "files_dropped": 1, "invalid_values": 1, "number_format": 1,
             "people_as_text": 1, "relation_titles": 1, "rollup_values": 1,
-            "unmatched_people": 26, "view_filter": 1, "view_sort": 1, "view_type:calendar": 1,
-            "views_unavailable": 1
+            "unmatched_people": 26, "view_filter": 1, "view_sort": 1, "views_unavailable": 1
         })
     );
 
@@ -2336,17 +2338,17 @@ async fn databases_import_with_typed_properties_values_and_views() {
             ("Owner", "person", Value::Null),
             ("Done", "checkbox", Value::Null),
             ("Link", "url", Value::Null),
-            ("Email", "text", Value::Null),
-            ("Phone", "text", Value::Null),
-            ("Attachments", "text", Value::Null),
+            ("Email", "email", Value::Null),
+            ("Phone", "phone", Value::Null),
+            ("Attachments", "files", Value::Null),
             ("Created", "date", Value::Null),
             ("Edited", "date", Value::Null),
             ("Creator", "person", Value::Null),
             ("Editor", "text", Value::Null),
-            ("Double", "number", json!("number")),
+            ("Double", "formula", Value::Null),
             ("Sum", "number", json!("number")),
             ("Related", "text", Value::Null),
-            ("Ticket", "text", Value::Null),
+            ("Ticket", "unique_id", Value::Null),
         ]
     );
     assert_eq!(coverage.property("Budget")["config"]["currency"], "USD");
@@ -2416,7 +2418,6 @@ async fn databases_import_with_typed_properties_values_and_views() {
         ("Link", json!("https://example.com/1")),
         ("Email", json!("one@example.com")),
         ("Phone", json!("+36 1 234 567")),
-        ("Attachments", json!("brief.pdf")),
         (
             "Created",
             json!({"start": "2026-11-01T10:00:00Z", "end": null}),
@@ -2430,10 +2431,29 @@ async fn databases_import_with_typed_properties_values_and_views() {
         ("Double", json!(6.0)),
         ("Sum", json!(9.0)),
         ("Related", json!("Home")),
-        ("Ticket", json!("ORB-1")),
+        ("Ticket", json!(1)),
     ] {
         assert_eq!(coverage.value(one, property), expected, "{property}");
     }
+    let attachments = coverage.value(one, "Attachments");
+    let file_id = attachments[0]["file_id"].as_str().unwrap();
+    assert_eq!(
+        attachments,
+        json!([{"file_id": file_id, "name": "photo.png"}]),
+        "the hosted file imports as a file of the row; the external link is dropped"
+    );
+    let (status, bytes) = harness
+        .call_raw(
+            &harness.owner_cookie,
+            "GET",
+            &format!(
+                "/api/v1/workspaces/{}/pages/{one}/files/{file_id}",
+                harness.workspace_id
+            ),
+            None,
+        )
+        .await;
+    assert_eq!((status, bytes.as_slice()), (StatusCode::OK, PNG));
     let two = rows[1].as_str();
     assert_eq!(
         coverage.value(two, "Link"),
@@ -2441,7 +2461,7 @@ async fn databases_import_with_typed_properties_values_and_views() {
         "not a URL: left out"
     );
     assert_eq!(coverage.value(two, "Done"), Value::Null);
-    assert_eq!(coverage.value(two, "Ticket"), json!("ORB-2"));
+    assert_eq!(coverage.value(two, "Ticket"), json!(2));
     let three = rows[2].as_str();
     assert_eq!(
         coverage.value(three, "Owner"),
@@ -2469,7 +2489,16 @@ async fn databases_import_with_typed_properties_values_and_views() {
         "the board groups by its Notion people property, in lanes by its sub-group"
     );
     assert_eq!(board["config"]["card_properties"], json!([id_of("Tags")]));
-    assert_eq!(coverage.detail["views"][3]["type"], "table");
+    let calendar = &coverage.detail["views"][3];
+    assert_eq!(
+        (
+            &calendar["type"],
+            &calendar["config"]["date_property_id"],
+            &calendar["config"]["calendar_mode"]
+        ),
+        (&json!("calendar"), &id_of("Due"), &json!("week")),
+        "a calendar keeps its date property and its week range"
+    );
     assert_eq!(
         all["sorts"],
         json!([{"property_id": id_of("Estimate"), "direction": "desc"}])
