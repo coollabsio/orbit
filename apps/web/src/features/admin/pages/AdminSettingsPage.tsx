@@ -24,7 +24,7 @@ function RegistrationCard({ open, emailReady }: { open: boolean; emailReady: boo
   return (
     <SettingsCard title="Registration" description="Who can create an account on this Orbit." flush>
       <SettingsRow className="flex-nowrap">
-        <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[13px]">
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
           <span className="font-medium text-foreground">Open registration</span>
           <span className="text-xs text-muted-foreground">
             {emailReady

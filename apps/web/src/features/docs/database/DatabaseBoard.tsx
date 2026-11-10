@@ -539,7 +539,7 @@ function Card({ row, title, properties, dragging, draggable, editing, onEditShow
     >
       {editing ? <CardTitleInput row={row} onDone={onEditShown} /> : title ? <CellView property={title} row={row} width={COLUMN_WIDTH - 24} wrap /> : null}
       {filled.map((property) => (
-        <div key={property.id} className={cn('flex min-w-0 text-[13px]', property.type === 'checkbox' && '[&>span]:justify-start')}>
+        <div key={property.id} className={cn('flex min-w-0 text-[0.8125rem]', property.type === 'checkbox' && '[&>span]:justify-start')}>
           <CellView property={property} row={row} width={COLUMN_WIDTH - 24} wrap={false} />
         </div>
       ))}

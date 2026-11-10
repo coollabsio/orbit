@@ -65,7 +65,7 @@ function RailItem({ active, className, ...props }: ComponentProps<typeof Button>
     <Button
       variant="ghost"
       data-active={active || undefined}
-      className={cn('w-full min-w-0 shrink justify-start gap-2.5 text-[13px] data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground', className)}
+      className={cn('w-full min-w-0 shrink justify-start gap-2.5 text-[0.8125rem] data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground', className)}
       {...props}
     />
   )

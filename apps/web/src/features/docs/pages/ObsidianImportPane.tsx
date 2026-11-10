@@ -78,7 +78,7 @@ function UploadStep({ workspaceId }: { workspaceId: string }) {
             <h2 className="text-sm font-semibold text-foreground">Upload your vault</h2>
             <p className="text-sm text-muted-foreground">
               Zip the vault folder and upload the .zip file. Its folders become pages with their notes inside, and a note
-              named like its folder (<code className="text-[13px]">Projects/Projects.md</code>) becomes that folder’s page.
+              named like its folder (<code className="text-[0.8125rem]">Projects/Projects.md</code>) becomes that folder’s page.
               Images and files that notes link to or embed are attached to those pages.
             </p>
             <p className="text-sm text-muted-foreground">
@@ -88,7 +88,7 @@ function UploadStep({ workspaceId }: { workspaceId: string }) {
               <span className="font-medium text-foreground">Compress to ZIP file</span> (Windows).
             </p>
             <p className="text-sm text-muted-foreground">
-              The <code className="text-[13px]">.obsidian/</code> settings folder, canvases and CSV files are skipped. You
+              The <code className="text-[0.8125rem]">.obsidian/</code> settings folder, canvases and CSV files are skipped. You
               choose which notes to import after the upload.
             </p>
           </div>
@@ -362,7 +362,7 @@ function ResultStep({ workspaceId, item }: { workspaceId: string; item: Obsidian
             <ul className="flex flex-col border-t border-border">
               {report.failures.map((failure) => (
                 <li key={failure.path} className="flex flex-col gap-0.5 border-b border-border px-1 py-2">
-                  <span className="text-[13px] text-foreground">{failure.title.trim() ? failure.title : failure.path}</span>
+                  <span className="text-[0.8125rem] text-foreground">{failure.title.trim() ? failure.title : failure.path}</span>
                   <span className="text-xs text-muted-foreground">{failure.error}</span>
                 </li>
               ))}

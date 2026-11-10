@@ -24,7 +24,7 @@ export function AuthCard({ children, className }: { children: React.ReactNode; c
 
 export function AuthBrand() {
   // 22px keeps the 11-unit pixel logo on whole device pixels.
-  return <span className="flex items-center gap-2 text-[13px] font-bold tracking-[0.08em] text-primary uppercase"><img src="/logo.svg" alt="" className="size-[22px]" />Orbit</span>
+  return <span className="flex items-center gap-2 text-[0.8125rem] font-bold tracking-[0.08em] text-primary uppercase"><img src="/logo.svg" alt="" className="size-[22px]" />Orbit</span>
 }
 
 /** Header, an inset panel with the fields and actions, and an optional footer row (Coolify's sign-in layout). */
@@ -38,14 +38,14 @@ export function AuthForm({ title, description, children, error, pending, submitL
     }}>
       <header className="grid gap-1 px-6 pt-6 pb-5">
         <h1 className="text-xl font-semibold">{title}</h1>
-        {description ? <p className="text-[13px] text-muted-foreground">{description}</p> : null}
+        {description ? <p className="text-[0.8125rem] text-muted-foreground">{description}</p> : null}
       </header>
       <div className={cn('-mx-px grid gap-4 rounded-xl border bg-background/40 p-6', !footer && '-mb-px')}>
         {children}
-        {error ? <p className="text-[13px] text-destructive" role="alert">{error instanceof ApiProblem ? error.detail : 'The server could not complete the request.'}</p> : null}
+        {error ? <p className="text-[0.8125rem] text-destructive" role="alert">{error instanceof ApiProblem ? error.detail : 'The server could not complete the request.'}</p> : null}
         <div className="grid gap-3"><Button type="submit" size="lg" disabled={pending}>{pending ? 'Please wait…' : submitLabel}</Button>{actions}</div>
       </div>
-      {footer ? <div className="px-6 py-4 text-center text-[13px] text-muted-foreground">{footer}</div> : null}
+      {footer ? <div className="px-6 py-4 text-center text-[0.8125rem] text-muted-foreground">{footer}</div> : null}
     </form></AuthCard>
   )
 }

@@ -83,7 +83,7 @@ function PaletteItem({ entry, onSelect }: { entry: CommandEntry; onSelect: () =>
   const bindings = useBindings()
   const keys = entry.command ? bindings[entry.command] : null
   return (
-    <CommandItem value={entry.id} className={cn('gap-2.5 px-2.5 text-[13px]', entry.snippet ? 'min-h-10 py-1.5' : 'h-10')} onSelect={onSelect}>
+    <CommandItem value={entry.id} className={cn('gap-2.5 px-2.5 text-[0.8125rem]', entry.snippet ? 'min-h-10 py-1.5' : 'h-10')} onSelect={onSelect}>
       <entry.icon className="size-4 shrink-0 text-muted-foreground/70" />
       {entry.snippet ? (
         <span className="flex min-w-0 flex-1 flex-col">
@@ -99,7 +99,7 @@ function PaletteItem({ entry, onSelect }: { entry: CommandEntry; onSelect: () =>
           {entry.titleHighlights ? <Highlighted text={entry.title} ranges={entry.titleHighlights} /> : entry.title}
         </span>
       )}
-      <CommandShortcut className="text-[11px] tracking-normal whitespace-nowrap text-muted-foreground/70">
+      <CommandShortcut className="text-[0.6875rem] tracking-normal whitespace-nowrap text-muted-foreground/70">
         {entry.command && keys ? <ShortcutKeys keys={keys} /> : entry.meta}
       </CommandShortcut>
     </CommandItem>
@@ -277,10 +277,10 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
             value={query}
             onValueChange={setQuery}
           />
-          <Kbd className="absolute top-1/2 right-3 -translate-y-1/2 px-1.5 text-[11px] text-muted-foreground/70">esc</Kbd>
+          <Kbd className="absolute top-1/2 right-3 -translate-y-1/2 px-1.5 text-[0.6875rem] text-muted-foreground/70">esc</Kbd>
         </div>
         <CommandList className="mx-1.5 mt-1 mb-1.5 max-h-none min-h-0 flex-1 rounded-lg bg-background p-1 ring-1 ring-border dark:bg-[color-mix(in_oklab,var(--sidebar-popover),white_3%)] dark:ring-sidebar-tint/12 dark:**:data-[slot=command-item]:data-selected:bg-sidebar-tint/10">
-          <CommandEmpty className="p-6 text-[13px] text-muted-foreground">No results for “{query}”</CommandEmpty>
+          <CommandEmpty className="p-6 text-[0.8125rem] text-muted-foreground">No results for “{query}”</CommandEmpty>
           {here.length > 0 ? (
             <CommandGroup heading="Commands" className="p-0">
               {here.map((entry) => (

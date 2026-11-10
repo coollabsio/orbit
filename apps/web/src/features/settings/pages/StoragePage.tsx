@@ -36,11 +36,11 @@ export function StoragePage() {
     >
       <div className="flex flex-col divide-y">
         <SettingsRow className="justify-between">
-          <span className="text-[13px] font-medium text-foreground">Messages and conversations</span>
+          <span className="text-[0.8125rem] font-medium text-foreground">Messages and conversations</span>
           <span className="text-xs text-muted-foreground tabular-nums">{usage.data ? `${usage.data.entries} ${usage.data.entries === 1 ? 'list' : 'lists'} · ${formatBytes(usage.data.entryBytes)}` : '…'}</span>
         </SettingsRow>
         <SettingsRow className="justify-between">
-          <span className="text-[13px] font-medium text-foreground">Images</span>
+          <span className="text-[0.8125rem] font-medium text-foreground">Images</span>
           <span className="text-xs text-muted-foreground tabular-nums">
             {usage.data ? `${usage.data.mediaFiles} ${usage.data.mediaFiles === 1 ? 'file' : 'files'} · ${formatBytes(usage.data.mediaBytes)} of ${formatBytes(limit * 1_000_000)}` : '…'}
           </span>

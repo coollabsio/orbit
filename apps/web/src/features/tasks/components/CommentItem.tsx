@@ -89,11 +89,11 @@ export function CommentItem({ state, taskId, comment, reply }: CommentItemProps)
         </ProfileTrigger>
         <div className="min-w-0 flex-1">
           <div className="flex min-h-5 items-center gap-1.5">
-            <ProfileTrigger userId={author?.id} name={name} className="min-w-0 truncate text-[13px] font-semibold text-foreground">
+            <ProfileTrigger userId={author?.id} name={name} className="min-w-0 truncate text-[0.8125rem] font-semibold text-foreground">
               {name}
             </ProfileTrigger>
-            <span className="shrink-0 text-[11px] leading-none text-muted-foreground/70" aria-hidden="true">·</span>
-            <time className="shrink-0 text-[11px] font-medium text-muted-foreground" dateTime={comment.createdAt}>
+            <span className="shrink-0 text-[0.6875rem] leading-none text-muted-foreground/70" aria-hidden="true">·</span>
+            <time className="shrink-0 text-[0.6875rem] font-medium text-muted-foreground" dateTime={comment.createdAt}>
               {agoLabel(comment.createdAt)}
               {comment.editedAt ? ' (edited)' : ''}
             </time>
@@ -128,7 +128,7 @@ export function CommentItem({ state, taskId, comment, reply }: CommentItemProps)
             ) : null}
           </div>
           {editing || hasBody ? (
-            <div ref={bodyRef} data-realtime-safe={editing ? '' : undefined} className={cn('text-[13px] leading-[19px] text-foreground [overflow-wrap:anywhere]', editing ? 'mt-1.5 rounded-md border px-2 py-1' : 'mt-0.5')}>
+            <div ref={bodyRef} data-realtime-safe={editing ? '' : undefined} className={cn('text-[0.8125rem] leading-[1.1875rem] text-foreground [overflow-wrap:anywhere]', editing ? 'mt-1.5 rounded-md border px-2 py-1' : 'mt-0.5')}>
               {/* far from the screen: the markdown copy (cheap); the editor mounts once the comment comes near */}
               {!editing && !nearScreen ? renderMarkdownBlocks(comment.body, comment.id, mentionTokens) : (
               <Suspense fallback={<EditorFallback />}>
@@ -155,8 +155,8 @@ export function CommentItem({ state, taskId, comment, reply }: CommentItemProps)
             </div>
           ) : null}
           {editing ? (
-            <div className="mt-1 flex items-center gap-2 text-[11px] text-muted-foreground">
-              <span><Kbd className="h-4 text-[11px]">escape</Kbd> to <b className="text-foreground">cancel</b> · <Kbd className="h-4 text-[11px]">⌘ enter</Kbd> to <b className="text-foreground">save</b></span>
+            <div className="mt-1 flex items-center gap-2 text-[0.6875rem] text-muted-foreground">
+              <span><Kbd className="h-4 text-[0.6875rem]">escape</Kbd> to <b className="text-foreground">cancel</b> · <Kbd className="h-4 text-[0.6875rem]">⌘ enter</Kbd> to <b className="text-foreground">save</b></span>
               <Button variant="ghost" size="xs" className="ml-auto" onClick={() => setEditing(false)}>Cancel</Button>
               <Button size="xs" onClick={commitEdit}>Save</Button>
             </div>

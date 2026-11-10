@@ -439,7 +439,7 @@ export function TaskDetail({ task, project, state, onClose, onOpenTask, onOpenPr
                   href={task.sourceUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className={cn(buttonVariants({ variant: 'ghost' }), '-ml-2 max-w-full text-[13px] max-[899px]:h-7 max-[899px]:px-1.5 max-[899px]:text-xs')}
+                  className={cn(buttonVariants({ variant: 'ghost' }), '-ml-2 max-w-full text-[0.8125rem] max-[899px]:h-7 max-[899px]:px-1.5 max-[899px]:text-xs')}
                 >
                   <Link2 className="size-3.5" aria-hidden="true" />
                   <span className="truncate">{task.sourceUrl.replace(/^https?:\/\//, '').split('/')[0]}</span>
@@ -543,7 +543,7 @@ function PropertyButton({ className, ...props }: ComponentProps<typeof Button>) 
   return (
     <Button
       variant="ghost"
-      className={cn('-ml-2 text-[13px] max-[899px]:h-7 max-[899px]:max-w-full max-[899px]:px-1.5 max-[899px]:text-xs', className)}
+      className={cn('-ml-2 text-[0.8125rem] max-[899px]:h-7 max-[899px]:max-w-full max-[899px]:px-1.5 max-[899px]:text-xs', className)}
       {...props}
     />
   )

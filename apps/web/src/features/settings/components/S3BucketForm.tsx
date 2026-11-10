@@ -78,7 +78,7 @@ export function S3BucketForm({ s3, title, description, endpointPlaceholder, savi
         </FieldGrid>
         {children}
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-          <label className="flex items-center gap-2 text-[13px]">
+          <label className="flex items-center gap-2 text-[0.8125rem]">
             <Switch checked={draft.path_style} onCheckedChange={(checked: boolean) => setDraft((current) => ({ ...current, path_style: checked }))} />
             Path-style URLs (MinIO and some other S3-compatible services)
           </label>

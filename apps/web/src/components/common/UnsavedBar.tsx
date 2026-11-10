@@ -45,7 +45,7 @@ export function UnsavedBar({ onReset, onSave, saving }: { onReset: () => void; o
         mobile && 'fixed top-[calc(12px+env(safe-area-inset-top,0px))] bottom-auto w-[calc(100%-24px)] animate-relation-enter',
       )}
     >
-      <span className="min-w-0 flex-1 text-[13px] font-medium">You have unsaved changes.</span>
+      <span className="min-w-0 flex-1 text-[0.8125rem] font-medium">You have unsaved changes.</span>
       <Button variant="link" className="text-primary" onClick={onReset}>
         Reset
       </Button>

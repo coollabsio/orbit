@@ -51,7 +51,7 @@ export function InboxPage() {
       <Pane>
         <PaneHeader>
           <PaneTitle>Activity</PaneTitle>
-          {unreadCount > 0 ? <Badge className="h-4 min-w-4 px-1 text-[10px] tabular-nums">{unreadCount}</Badge> : null}
+          {unreadCount > 0 ? <Badge className="h-4 min-w-4 px-1 text-[0.625rem] tabular-nums">{unreadCount}</Badge> : null}
           <span className="flex-1" />
           <Button
             variant="ghost"
@@ -68,7 +68,7 @@ export function InboxPage() {
               <TabsTrigger
                 key={item}
                 value={item}
-                className="h-7 flex-none px-2.5 text-[13px]"
+                className="h-7 flex-none px-2.5 text-[0.8125rem]"
               >
                 {item === 'all' ? 'All' : item === 'unread' ? 'Unread' : 'Mentions'}
               </TabsTrigger>
@@ -118,7 +118,7 @@ export function InboxPage() {
                   </span>
                   <span aria-hidden="true" className="size-7 shrink-0" />
                   <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                    <span className="truncate text-[13px] text-foreground data-unread:font-semibold" data-unread={!notification.read_at || undefined}>
+                    <span className="truncate text-[0.8125rem] text-foreground data-unread:font-semibold" data-unread={!notification.read_at || undefined}>
                       {copy.title}
                     </span>
                     <span className="truncate text-xs text-muted-foreground/70">{actor && !notification.import_id ? `${actor.name} · ${copy.body}` : copy.body}</span>

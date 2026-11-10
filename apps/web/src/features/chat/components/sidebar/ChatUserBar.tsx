@@ -33,8 +33,8 @@ export function ChatUserBar() {
         >
           <UserAvatar user={{ name, color: userColor(me.id), avatarUrl: me.avatar_url }} size={28} status={status.presence} />
           <span className="flex min-w-0 flex-1 flex-col text-left leading-tight">
-            <span className="truncate text-[13px] font-medium text-foreground">{name}</span>
-            <span className="truncate text-[11px] text-muted-foreground">
+            <span className="truncate text-[0.8125rem] font-medium text-foreground">{name}</span>
+            <span className="truncate text-[0.6875rem] text-muted-foreground">
               {hasCustom ? <CustomStatusText emoji={status.emoji} text={status.text} /> : statusLabel(status.presence)}
             </span>
           </span>

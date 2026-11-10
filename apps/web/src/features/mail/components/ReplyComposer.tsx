@@ -59,7 +59,7 @@ export function ReplyComposer({ threadId, replyToName, textareaRef, onClose }: R
       <Textarea
         ref={textareaRef}
         // borderless: the reply reads as part of the thread, not a boxed field
-        className="field-sizing-fixed min-h-24 resize-y rounded-none border-0 bg-transparent px-0 py-2.5 text-[13px] leading-[1.5] focus-visible:ring-0 md:text-[13px] dark:bg-transparent"
+        className="field-sizing-fixed min-h-24 resize-y rounded-none border-0 bg-transparent px-0 py-2.5 text-[0.8125rem] leading-[1.5] focus-visible:ring-0 md:text-[0.8125rem] dark:bg-transparent"
         placeholder="Write a reply…"
         value={body}
         onChange={(e) => setBody(e.target.value)}

@@ -16,14 +16,14 @@ export function TimelineHeader({ range, pxPerDay, today }: { range: TimeRange; p
         <span
           key={tick.x}
           // weekends step back so the working week reads first
-          className={cn('absolute top-7 h-6 text-center text-[11px] leading-6 text-muted-foreground tabular-nums', [0, 6].includes(dayAt(range, Math.round(tick.x / pxPerDay)).getDay()) && 'text-muted-foreground/50')}
+          className={cn('absolute top-7 h-6 text-center text-[0.6875rem] leading-6 text-muted-foreground tabular-nums', [0, 6].includes(dayAt(range, Math.round(tick.x / pxPerDay)).getDay()) && 'text-muted-foreground/50')}
           style={{ left: tick.x, width: pxPerDay }}
         >
           {tick.label}
         </span>
       ))}
       <span
-        className="absolute top-7 mt-0.5 -translate-x-1/2 rounded-full bg-primary px-1.5 text-[11px] leading-5 font-semibold text-primary-foreground tabular-nums"
+        className="absolute top-7 mt-0.5 -translate-x-1/2 rounded-full bg-primary px-1.5 text-[0.6875rem] leading-5 font-semibold text-primary-foreground tabular-nums"
         style={{ left: todayX }}
         aria-label={`Today, ${format(today, 'MMM d')}`}
       >

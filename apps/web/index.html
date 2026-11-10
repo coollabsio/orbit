@@ -25,6 +25,8 @@
       root.classList.toggle('dark', theme === 'system' ? matchMedia('(prefers-color-scheme: dark)').matches : theme !== 'light')
       root.toggleAttribute('data-flat', localStorage.getItem('orbit:style') === 'flat')
       root.toggleAttribute('data-floating', localStorage.getItem('orbit:nav-style') === 'floating')
+      root.dataset.font = localStorage.getItem('orbit:font') || 'noto-sans'
+      root.dataset.textSize = localStorage.getItem('orbit:text-size') || 'default'
     </script>
   </head>
   <body>

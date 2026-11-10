@@ -568,6 +568,8 @@ function PageEditorInner({
             '[&_.bn-thread-mark-selected]:bg-[rgb(251_191_36/0.45)]!',
             'data-[color-scheme=dark]:[&_.bn-thread-mark:not([data-orphan=true])]:border-b-[rgb(251_191_36/0.5)] data-[color-scheme=dark]:[&_.bn-thread-mark:not([data-orphan=true])]:bg-[rgb(251_191_36/0.13)]!',
             'data-[color-scheme=dark]:[&_.bn-thread-mark-selected]:bg-[rgb(251_191_36/0.32)]!',
+            // BlockNote sets 16px; 1rem follows Account settings → Appearance → Text size.
+            '[&>.bn-editor]:text-[1rem]!',
             // Phones have no room for BlockNote's 54px side-menu gutter; blocks use the full width.
             'max-[900px]:[&>.bn-editor]:px-0!',
             // Formatting toolbar on phones: BlockNote caps it at 100vw, which runs off the right edge. Keep a margin,

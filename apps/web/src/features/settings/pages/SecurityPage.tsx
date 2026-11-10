@@ -91,7 +91,7 @@ function AuthenticatorCard() {
         <SettingsRow className="flex-nowrap">
           <RowIcon><Mobile /></RowIcon>
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <span className="flex items-center gap-2 text-[13px] font-medium text-foreground">
+            <span className="flex items-center gap-2 text-[0.8125rem] font-medium text-foreground">
               Two-factor sign-in
               {enabled ? <Badge>On</Badge> : <Badge variant="secondary">Off</Badge>}
             </span>
@@ -273,7 +273,7 @@ function RecoveryCodesStep({ codes, title, onDone }: { codes: string[]; title: s
           Save these recovery codes somewhere safe. Each one signs you in once if you lose your authenticator app. They are shown only now.
         </DialogDescription>
       </DialogHeader>
-      <ul aria-label="Recovery codes" className="grid grid-cols-2 gap-x-4 gap-y-1.5 rounded-lg bg-muted p-4 font-mono text-[13px] text-foreground">
+      <ul aria-label="Recovery codes" className="grid grid-cols-2 gap-x-4 gap-y-1.5 rounded-lg bg-muted p-4 font-mono text-[0.8125rem] text-foreground">
         {codes.map((code) => <li key={code}>{code}</li>)}
       </ul>
       <DialogFooter>
@@ -331,18 +331,18 @@ function PasskeysCard() {
       flush
     >
       <div className="flex flex-col divide-y">
-        {options.data && !available ? <SettingsRow className="text-[13px] text-muted-foreground">Passkeys need Orbit to be opened at a domain name.</SettingsRow> : null}
-        {available && !supported ? <SettingsRow className="text-[13px] text-muted-foreground">This browser does not support passkeys.</SettingsRow> : null}
-        {!adding && add.isPending ? <SettingsRow role="status" className="text-[13px] text-muted-foreground">Confirm the new passkey in your browser…</SettingsRow> : null}
-        {addError ? <SettingsRow role="alert" className="text-[13px] text-destructive">{addError}</SettingsRow> : null}
+        {options.data && !available ? <SettingsRow className="text-[0.8125rem] text-muted-foreground">Passkeys need Orbit to be opened at a domain name.</SettingsRow> : null}
+        {available && !supported ? <SettingsRow className="text-[0.8125rem] text-muted-foreground">This browser does not support passkeys.</SettingsRow> : null}
+        {!adding && add.isPending ? <SettingsRow role="status" className="text-[0.8125rem] text-muted-foreground">Confirm the new passkey in your browser…</SettingsRow> : null}
+        {addError ? <SettingsRow role="alert" className="text-[0.8125rem] text-destructive">{addError}</SettingsRow> : null}
         {passkeys.isPending ? <SettingsRow><LoadingText>Loading passkeys…</LoadingText></SettingsRow> : null}
         {passkeys.isError ? <SettingsRow role="alert">Passkeys could not be loaded. <Button variant="ghost" onClick={() => void passkeys.refetch()}>Retry</Button></SettingsRow> : null}
-        {passkeys.isSuccess && list.length === 0 && available ? <SettingsRow className="text-[13px] text-muted-foreground">No passkeys yet.</SettingsRow> : null}
+        {passkeys.isSuccess && list.length === 0 && available ? <SettingsRow className="text-[0.8125rem] text-muted-foreground">No passkeys yet.</SettingsRow> : null}
         {list.map((passkey) => (
           <SettingsRow key={passkey.id} className="flex-nowrap" data-passkey={passkey.id}>
             <RowIcon><FingerScan /></RowIcon>
             <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-              <span className="truncate text-[13px] font-medium text-foreground">{passkey.name}</span>
+              <span className="truncate text-[0.8125rem] font-medium text-foreground">{passkey.name}</span>
               <span className="text-xs text-muted-foreground/70">
                 Added {ago(passkey.created_at)} · {passkey.last_used_at ? `Last used ${ago(passkey.last_used_at)}` : 'Never used'}
               </span>
@@ -456,10 +456,10 @@ function ConnectedAccountsCard() {
   return (
     <SettingsCard title="Connected accounts" description="Sign in to Orbit with an account you already have." flush>
       <div className="flex flex-col divide-y">
-        {disconnect.isError ? <SettingsRow role="alert" className="text-[13px] text-destructive">{problemDetail(disconnect.error, 'The account could not be disconnected.')}</SettingsRow> : null}
+        {disconnect.isError ? <SettingsRow role="alert" className="text-[0.8125rem] text-destructive">{problemDetail(disconnect.error, 'The account could not be disconnected.')}</SettingsRow> : null}
         {connect.error instanceof ApiProblem && connect.error.code === 'reauthentication_required'
           ? <SettingsRow><ConfirmWithProvider returnTo={SECURITY_PATH} /></SettingsRow>
-          : connect.isError ? <SettingsRow role="alert" className="text-[13px] text-destructive">{problemDetail(connect.error, 'The connection could not start.')}</SettingsRow> : null}
+          : connect.isError ? <SettingsRow role="alert" className="text-[0.8125rem] text-destructive">{problemDetail(connect.error, 'The connection could not start.')}</SettingsRow> : null}
         {accounts.isError ? <SettingsRow role="alert">Connected accounts could not be loaded. <Button variant="ghost" onClick={() => void accounts.refetch()}>Retry</Button></SettingsRow> : null}
         {providers.map((provider) => {
           const account = connected.find((item) => item.provider === provider)
@@ -468,7 +468,7 @@ function ConnectedAccountsCard() {
             <SettingsRow key={provider} className="flex-nowrap" data-provider={provider}>
               <RowIcon className="text-foreground"><ProviderMark provider={provider} /></RowIcon>
               <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-                <span className="text-[13px] font-medium text-foreground">{name}</span>
+                <span className="text-[0.8125rem] font-medium text-foreground">{name}</span>
                 <span className="truncate text-xs text-muted-foreground/70">
                   {account ? `${account.email ? `${account.email} · ` : ''}Connected ${ago(account.created_at)}` : 'Not connected'}
                 </span>

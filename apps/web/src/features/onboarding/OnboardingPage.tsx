@@ -44,7 +44,7 @@ function StepHeader({ step, title, children }: { step: number; title: string; ch
       <AuthBrand />
       <p className="mt-4 text-xs font-medium text-muted-foreground">Step {step} of 2</p>
       <h1 className="mt-1 mb-2">{title}</h1>
-      <div className="grid gap-2 text-[13px] leading-[1.6] text-muted-foreground">{children}</div>
+      <div className="grid gap-2 text-[0.8125rem] leading-[1.6] text-muted-foreground">{children}</div>
     </>
   )
 }
@@ -68,7 +68,7 @@ function WorkspaceStep({ onCreated }: { onCreated: (workspaceId: string) => void
           <FieldLabel htmlFor="onboarding-workspace">Workspace name</FieldLabel>
           <Input id="onboarding-workspace" required autoFocus placeholder="Acme Inc." value={name} onChange={(event) => setName(event.target.value)} />
         </Field>
-        {createWorkspace.isError ? <p role="alert" className="text-[13px] text-destructive">{problemText(createWorkspace.error, 'The workspace could not be created.')}</p> : null}
+        {createWorkspace.isError ? <p role="alert" className="text-[0.8125rem] text-destructive">{problemText(createWorkspace.error, 'The workspace could not be created.')}</p> : null}
         <Button type="submit" disabled={createWorkspace.isPending || !name.trim()}>{createWorkspace.isPending ? 'Please wait…' : 'Create workspace'}</Button>
         {/* Admin and the account settings work without a workspace: there, a person can also delete their account. */}
         {isOperator
@@ -90,7 +90,7 @@ function ProjectStep({ workspaceId }: { workspaceId: string }) {
       </AuthCard>
     )
   }
-  if (!project) return <AuthCard><p className="text-[13px] text-muted-foreground"><LoadingText>Loading…</LoadingText></p></AuthCard>
+  if (!project) return <AuthCard><p className="text-[0.8125rem] text-muted-foreground"><LoadingText>Loading…</LoadingText></p></AuthCard>
   return <ProjectForm workspaceId={workspaceId} project={project} />
 }
 
@@ -146,7 +146,7 @@ function ProjectForm({ workspaceId, project }: { workspaceId: string; project: P
             ))}
           </div>
         </div>
-        {updateProject.isError ? <p role="alert" className="text-[13px] text-destructive">{problemText(updateProject.error, 'The project could not be saved.')}</p> : null}
+        {updateProject.isError ? <p role="alert" className="text-[0.8125rem] text-destructive">{problemText(updateProject.error, 'The project could not be saved.')}</p> : null}
         <Button type="submit" disabled={updateProject.isPending || !name || !key}>{updateProject.isPending ? 'Please wait…' : 'Create project'}</Button>
         <Button type="button" variant="ghost" onClick={finish}>Skip, keep “{project.name}”</Button>
       </form>

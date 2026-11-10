@@ -198,7 +198,7 @@ function RecentImports({ imports }: { imports: TrelloImport[] | undefined }) {
           <Link
             key={item.id}
             to={`${ROOT}/${item.id}`}
-            className="flex min-h-10 min-w-0 items-center gap-3 border-b border-border px-1 py-1.5 text-[13px] transition-colors duration-150 ease-out hover:bg-sidebar-accent/50"
+            className="flex min-h-10 min-w-0 items-center gap-3 border-b border-border px-1 py-1.5 text-[0.8125rem] transition-colors duration-150 ease-out hover:bg-sidebar-accent/50"
           >
             <span className="min-w-0 flex-1 truncate text-foreground">{item.trello_user_name || 'Trello'}</span>
             {item.progress.total > 0 ? (
@@ -307,7 +307,7 @@ function BoardChooser({ workspaceId, item, tree }: { workspaceId: string; item: 
             onChange={(event) => setQuery(event.target.value)}
           />
         </InputGroup>
-        <div className="flex items-center gap-2 text-[13px] text-foreground">
+        <div className="flex items-center gap-2 text-[0.8125rem] text-foreground">
           <Checkbox
             aria-label="Select all boards"
             checked={allChecked}
@@ -332,7 +332,7 @@ function BoardChooser({ workspaceId, item, tree }: { workspaceId: string; item: 
                 {group.boards.map((board) => (
                   <div
                     key={board.id}
-                    className="flex h-8 items-center gap-2 rounded-md px-2 text-[13px] text-foreground transition-colors duration-150 ease-out hover:bg-sidebar-accent/50"
+                    className="flex h-8 items-center gap-2 rounded-md px-2 text-[0.8125rem] text-foreground transition-colors duration-150 ease-out hover:bg-sidebar-accent/50"
                   >
                     <Checkbox aria-label={`Select ${board.name}`} checked={selected.has(board.id)} onCheckedChange={(checked) => toggle([board.id], checked)} />
                     {/* Clicking the name toggles the row, like the checkbox (the checkbox is the keyboard control). */}
@@ -509,7 +509,7 @@ function ResultStep({ workspaceId, item }: { workspaceId: string; item: TrelloIm
                   <li key={id} className="border-b border-border">
                     <Link
                       to={`/tasks?project=${id}`}
-                      className="flex h-9 items-center gap-2 px-1 text-[13px] text-foreground transition-colors duration-150 ease-out hover:bg-sidebar-accent/50"
+                      className="flex h-9 items-center gap-2 px-1 text-[0.8125rem] text-foreground transition-colors duration-150 ease-out hover:bg-sidebar-accent/50"
                     >
                       <span className="mx-[3px] size-2 shrink-0 rounded-[2px]" style={{ background: project?.color }} />
                       <span className="truncate">{project?.name ?? 'Imported project'}</span>
@@ -536,7 +536,7 @@ function ResultStep({ workspaceId, item }: { workspaceId: string; item: TrelloIm
             <ul className="flex flex-col border-t border-border">
               {report.failures.map((failure) => (
                 <li key={`${failure.kind}-${failure.trello_id}`} className="flex flex-col gap-0.5 border-b border-border px-1 py-2">
-                  <span className="text-[13px] text-foreground">
+                  <span className="text-[0.8125rem] text-foreground">
                     {failure.title.trim() ? failure.title : 'Untitled'}
                     {failure.kind === 'card' ? null : <span className="text-muted-foreground"> ({failure.kind})</span>}
                   </span>

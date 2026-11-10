@@ -159,7 +159,7 @@ function ProfileCard({ userId, name, action, onClose }: { userId: string; name: 
     return (
       <div data-slot="profile-card" className="flex flex-col gap-0.5 p-4">
         <p className="text-base font-semibold wrap-anywhere">{member?.name ?? name}</p>
-        <p className="text-[13px] text-muted-foreground">No longer in this workspace</p>
+        <p className="text-[0.8125rem] text-muted-foreground">No longer in this workspace</p>
       </div>
     )
   }
@@ -178,18 +178,18 @@ function ProfileCard({ userId, name, action, onClose }: { userId: string; name: 
         <div className="flex min-w-0 flex-1 flex-col gap-0.5 pt-1">
           <p className="text-base leading-snug font-semibold wrap-anywhere">
             {member.name}
-            {profile?.pronouns ? <span className="ml-1.5 text-[13px] font-normal text-muted-foreground">{profile.pronouns}</span> : null}
+            {profile?.pronouns ? <span className="ml-1.5 text-[0.8125rem] font-normal text-muted-foreground">{profile.pronouns}</span> : null}
           </p>
-          {profile?.title ? <p className="text-[13px] text-muted-foreground wrap-anywhere">{profile.title}</p> : null}
+          {profile?.title ? <p className="text-[0.8125rem] text-muted-foreground wrap-anywhere">{profile.title}</p> : null}
           {custom.emoji !== null || custom.text !== null ? (
-            <p data-slot="profile-status" className="mt-1 text-[13px] wrap-anywhere">
+            <p data-slot="profile-status" className="mt-1 text-[0.8125rem] wrap-anywhere">
               <CustomStatusText emoji={custom.emoji} text={custom.text} />
             </p>
           ) : null}
         </div>
       </div>
 
-      <ul className="flex flex-col gap-1.5 text-[13px]">
+      <ul className="flex flex-col gap-1.5 text-[0.8125rem]">
         <DetailRow icon={<StatusMark status={status} size={10} />}>{statusLabel(status)}</DetailRow>
         {localTime ? <DetailRow icon={<Clock aria-hidden="true" />}>{localTime}</DetailRow> : null}
         {/* a guest does not see the addresses of the people in its channels: the server sends none */}
@@ -219,7 +219,7 @@ function ProfileCard({ userId, name, action, onClose }: { userId: string; name: 
         <DetailRow icon={<ShieldUser aria-hidden="true" />}>{member.role === 'Guest' ? <GuestBadge /> : member.role}</DetailRow>
       </ul>
 
-      {profile?.bio ? <p data-slot="profile-bio" className="max-h-32 overflow-y-auto text-[13px] wrap-anywhere whitespace-pre-wrap text-foreground/85">{profile.bio}</p> : null}
+      {profile?.bio ? <p data-slot="profile-bio" className="max-h-32 overflow-y-auto text-[0.8125rem] wrap-anywhere whitespace-pre-wrap text-foreground/85">{profile.bio}</p> : null}
 
       {own ? (
         <Button
@@ -309,7 +309,7 @@ function ProfileNote({ workspaceId, userId, name, saved }: { workspaceId: string
       maxLength={PROFILE_LIMITS.note}
       rows={2}
       value={draft ?? saved}
-      className="max-h-32 min-h-14 resize-none border-0 bg-secondary/40 text-[13px] md:text-[13px] dark:bg-secondary/40"
+      className="max-h-32 min-h-14 resize-none border-0 bg-secondary/40 text-[0.8125rem] md:text-[0.8125rem] dark:bg-secondary/40"
       onChange={(event) => {
         latest.current = event.target.value
         setDraft(event.target.value)

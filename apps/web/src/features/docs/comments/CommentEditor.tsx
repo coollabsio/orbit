@@ -36,7 +36,7 @@ export const CommentEditor = forwardRef<HTMLDivElement, CommentEditorProps>(func
       data-kind={kind}
       className={cn(
         // App text at 13px, without BlockNote's editor padding and fill.
-        '[&_.bn-editor]:bg-transparent! [&_.bn-editor]:p-0! [&_.bn-editor]:[font-family:inherit]! [&_.bn-editor]:text-[13px]/5! [&_.bn-editor]:text-foreground!',
+        '[&_.bn-editor]:bg-transparent! [&_.bn-editor]:p-0! [&_.bn-editor]:[font-family:inherit]! [&_.bn-editor]:text-[0.8125rem]/5! [&_.bn-editor]:text-foreground!',
         '[&_.bn-block-content]:p-0! [&_.bn-block-outer+.bn-block-outer]:mt-1!',
         // Static placeholders (BlockNote's come through a runtime <style>, which the production CSP blocks): none on
         // later empty lines, the field's hint on an empty field.

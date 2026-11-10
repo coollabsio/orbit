@@ -57,7 +57,7 @@ function TaskLinkCard({ taskId }: { taskId: string }) {
   if (!linked) return null
   const { task, projects, statuses, status } = linked
   return (
-    <div data-slot="chat-link-card" data-kind="task" className="flex w-full max-w-md min-w-0 flex-col gap-0.5 rounded-lg border bg-card py-1.5 pr-2.5 pl-1.5 text-[13px] text-foreground">
+    <div data-slot="chat-link-card" data-kind="task" className="flex w-full max-w-md min-w-0 flex-col gap-0.5 rounded-lg border bg-card py-1.5 pr-2.5 pl-1.5 text-[0.8125rem] text-foreground">
       <div className="flex min-w-0 items-center gap-1.5">
         <StatusPicker task={task} statuses={statuses} />
         <Link to={taskPath(task)} className="min-w-0 flex-1 truncate rounded-sm font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring/50 hover-fine:hover:underline">
@@ -87,7 +87,7 @@ function PageLinkCard({ pageId }: { pageId: string }) {
       to={`/docs/${page.id}`}
       data-slot="chat-link-card"
       data-kind="page"
-      className="flex h-9 w-full max-w-md min-w-0 items-center gap-2 rounded-lg border bg-card px-2.5 text-[13px] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50 hover-fine:hover:bg-muted/50"
+      className="flex h-9 w-full max-w-md min-w-0 items-center gap-2 rounded-lg border bg-card px-2.5 text-[0.8125rem] text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50 hover-fine:hover:bg-muted/50"
     >
       {page.icon ? <span aria-hidden="true">{page.icon}</span> : <DocumentText className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />}
       <span className="min-w-0 flex-1 truncate font-medium">{pageTitle(page)}</span>
@@ -114,7 +114,7 @@ function ViewLinkCard({ viewId }: { viewId: string }) {
   const view = useLinkedView(viewId)
   if (!view) return null
   return (
-    <div data-slot="chat-link-card" data-kind="view" className="relative flex h-9 w-full max-w-md min-w-0 items-center gap-2 rounded-lg border bg-card pr-1.5 pl-2.5 text-[13px] text-foreground hover-fine:hover:bg-muted/50">
+    <div data-slot="chat-link-card" data-kind="view" className="relative flex h-9 w-full max-w-md min-w-0 items-center gap-2 rounded-lg border bg-card pr-1.5 pl-2.5 text-[0.8125rem] text-foreground hover-fine:hover:bg-muted/50">
       <ViewIcon icon={view.icon} color={view.color} className="size-4 shrink-0" />
       {/* the link covers the card; the star sits above it */}
       <Link to={viewPath(view.id)} className="min-w-0 shrink-0 truncate font-medium outline-none after:absolute after:inset-0 after:rounded-lg focus-visible:after:ring-2 focus-visible:after:ring-ring/50 max-[480px]:shrink">

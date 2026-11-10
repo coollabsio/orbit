@@ -42,7 +42,7 @@ export function ImportPage() {
             <RowIcon>
               <Import />
             </RowIcon>
-            <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[13px]">
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
               <span className="font-medium text-foreground">{source.name}</span>
               <span className="text-xs text-muted-foreground">{source.description}</span>
             </div>
@@ -101,7 +101,7 @@ function ImportPeople() {
             <RowIcon>
               <Users />
             </RowIcon>
-            <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[13px]">
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[0.8125rem]">
               <span className="truncate font-medium text-foreground">{person.name}</span>
               {saving ? (
                 <span role="status" className="flex items-center gap-1.5 text-xs text-muted-foreground">

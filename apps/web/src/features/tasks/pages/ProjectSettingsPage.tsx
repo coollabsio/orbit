@@ -100,7 +100,7 @@ export function ProjectSettingsPage() {
                     const own = statuses.filter((s) => s.category === category)
                     return (
                       <div key={category}>
-                        <div className="flex items-center justify-between rounded-md bg-muted px-3 py-2 text-[13px] text-muted-foreground">
+                        <div className="flex items-center justify-between rounded-md bg-muted px-3 py-2 text-[0.8125rem] text-muted-foreground">
                           <span>{CATEGORY_LABEL[category]}</span>
                           {category === 'duplicate' ? null : (
                             <Tip label="Add status">
@@ -328,13 +328,13 @@ function ProjectGeneralCard({ project, onPendingChange }: { project: Project; on
       <SettingsCard title="General">
         <div className="grid grid-cols-2 gap-4 max-[899px]:grid-cols-1">
           <div className="w-full min-w-0">
-            <Label className="mb-1.5 text-[13px] text-muted-foreground" htmlFor="project-name">
+            <Label className="mb-1.5 text-[0.8125rem] text-muted-foreground" htmlFor="project-name">
               Name
             </Label>
             <Input id="project-name" value={draft.name} onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))} />
           </div>
           <div className="w-full min-w-0">
-            <Label className="mb-1.5 text-[13px] text-muted-foreground" htmlFor="project-key">
+            <Label className="mb-1.5 text-[0.8125rem] text-muted-foreground" htmlFor="project-key">
               Tag
               <InfoTip text={`Short prefix used in task ids, for example ${project.key}-101.`} />
             </Label>
@@ -347,7 +347,7 @@ function ProjectGeneralCard({ project, onPendingChange }: { project: Project; on
             />
           </div>
           <div className="col-span-2 w-full min-w-0 max-[899px]:col-span-1">
-            <span className="mb-1.5 flex text-[13px] leading-none font-medium text-muted-foreground">Color</span>
+            <span className="mb-1.5 flex text-[0.8125rem] leading-none font-medium text-muted-foreground">Color</span>
             <div className="flex flex-wrap items-center gap-2 pt-1.5">
               {PROJECT_COLORS.map((color) => (
                 <ColorSwatch

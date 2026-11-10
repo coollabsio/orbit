@@ -282,7 +282,7 @@ function ThemePreview({ theme }: { theme: CustomTheme | null }) {
     <div
       data-slot="chat-theme-preview"
       aria-hidden="true"
-      className="flex h-[188px] overflow-hidden rounded-lg border border-border bg-background text-[13px] text-foreground dark:[--background:var(--card)]"
+      className="flex h-[188px] overflow-hidden rounded-lg border border-border bg-background text-[0.8125rem] text-foreground dark:[--background:var(--card)]"
       style={customThemeVariables(theme)}
     >
       <div className="flex w-[132px] shrink-0 flex-col gap-px border-r border-border bg-background p-1.5 text-foreground/80" style={customSidebarVariables(theme)}>
@@ -299,7 +299,7 @@ function ThemePreview({ theme }: { theme: CustomTheme | null }) {
         </span>
         <div className="flex min-h-0 flex-1 flex-col gap-1.5 p-2.5">
           <PreviewMessage name="Maya">The build is green again.</PreviewMessage>
-          <span className="flex items-center gap-1 text-[10px] font-semibold text-primary">
+          <span className="flex items-center gap-1 text-[0.625rem] font-semibold text-primary">
             <span className="size-1.5 bg-primary" />
             New
             <span className="h-px flex-1 bg-primary" />
@@ -338,7 +338,7 @@ function PreviewRow({ name, selected, unread, count }: { name: string; selected?
       <Hashtag className="size-3.5 shrink-0 opacity-70" />
       <span className={unread || count ? 'min-w-0 flex-1 truncate font-semibold text-foreground' : 'min-w-0 flex-1 truncate'}>{name}</span>
       {count ? (
-        <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] leading-none font-semibold text-primary-foreground">{count}</span>
+        <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[0.625rem] leading-none font-semibold text-primary-foreground">{count}</span>
       ) : unread ? (
         <span className="size-1.5 bg-primary" />
       ) : null}

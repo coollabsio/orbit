@@ -38,7 +38,7 @@ export function ReplySummary({ message }: { message: Message }) {
             <ProfileTrigger userId={author?.id} name={author?.name ?? 'Unknown'} tabIndex={-1} className="relative z-1 shrink-0 font-medium text-foreground/90">
               {author?.name ?? 'Unknown'}
             </ProfileTrigger>
-            <span className="truncate text-[13px]">{text || wordlessPreview(reply.sticker === true)}</span>
+            <span className="truncate text-[0.8125rem]">{text || wordlessPreview(reply.sticker === true)}</span>
           </span>
         ) : null}
         <button

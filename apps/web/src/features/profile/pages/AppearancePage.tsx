@@ -2,9 +2,10 @@ import { useState, type ReactNode } from 'react'
 import { Setting2 as Settings, TickCircle, User } from 'reicon-react'
 import { cn } from 'cn'
 import { SettingsCard } from '@/components/common/SettingsCard'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { CUSTOM_THEME_PRESETS, serializeCustomTheme, setCustomTheme, useCustomTheme } from '@/lib/customTheme'
 import { CustomThemeDialog, CustomThemeSwatch } from '@/features/profile/components/CustomThemeDialog'
-import { useTheme, type Appearance } from '@/lib/themeContext'
+import { TEXT_SIZES, useTheme, type Appearance } from '@/lib/themeContext'
 
 const THEMES: { value: Appearance['theme']; label: string; description: string; preview: string }[] = [
   { value: 'light', label: 'Light', description: 'Bright surfaces and dark text.', preview: 'bg-white' },
@@ -20,6 +21,25 @@ const NAV_STYLES: { value: Appearance['navStyle']; label: string; description: s
 const STYLES: { value: Appearance['style']; label: string; description: string }[] = [
   { value: '3d', label: '3D', description: 'Buttons and sidebar icons sit on a raised edge that lifts on hover.' },
   { value: 'flat', label: 'Flat', description: 'No raised edges. Sidebar items are plain rows with a highlight for the current page.' },
+]
+
+// each tile draws its sample in its own font: `data-font` sets `--font-ui` there (index.css)
+const FONT_OPTIONS: { value: Appearance['font']; label: string }[] = [
+  { value: 'noto-sans', label: 'Noto Sans' },
+  { value: 'geist', label: 'Geist' },
+  { value: 'inter', label: 'Inter' },
+  { value: 'ibm-plex-sans', label: 'IBM Plex Sans' },
+  { value: 'system', label: 'System' },
+  { value: 'literata', label: 'Literata' },
+  { value: 'mono', label: 'Mono' },
+]
+
+const TEXT_SIZE_OPTIONS: { value: Appearance['textSize']; label: string; sample: string }[] = [
+  { value: 'small', label: 'Small', sample: 'text-sm' },
+  { value: 'compact', label: 'Compact', sample: 'text-[0.9375rem]' },
+  { value: 'default', label: 'Default', sample: 'text-base' },
+  { value: 'large', label: 'Large', sample: 'text-lg' },
+  { value: 'extra-large', label: 'Extra large', sample: 'text-xl' },
 ]
 
 /** Coolify's Profile → Appearance: how Orbit looks in this browser. */
@@ -117,6 +137,46 @@ export function AppearancePage() {
         </div>
       </SettingsCard>
 
+      <SettingsCard title="Font" description="The typeface for the whole interface.">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          {FONT_OPTIONS.map((option) => (
+            <AppearanceOption
+              key={option.value}
+              label={option.label}
+              selected={appearance.font === option.value}
+              onClick={() => setAppearance({ font: option.value })}
+            >
+              <span data-font={option.value} className="font-(family-name:--font-ui) text-3xl text-foreground">Ag</span>
+            </AppearanceOption>
+          ))}
+        </div>
+      </SettingsCard>
+
+      <SettingsCard title="Text size" description="Scales the whole interface, text and spacing together.">
+        <ToggleGroup
+          aria-label="Text size"
+          spacing={1}
+          className="w-full rounded-[10px] border bg-card p-1"
+          value={[appearance.textSize]}
+          onValueChange={(value: string[]) => {
+            // a press on the chosen size must not leave none chosen
+            const next = TEXT_SIZES.find((size) => size === value.at(-1))
+            if (next) setAppearance({ textSize: next })
+          }}
+        >
+          {TEXT_SIZE_OPTIONS.map((option) => (
+            <ToggleGroupItem
+              key={option.value}
+              value={option.value}
+              className="h-auto min-w-0 flex-1 shrink flex-col gap-0.5 px-1 py-2 font-normal whitespace-normal text-muted-foreground aria-pressed:text-foreground"
+            >
+              <span aria-hidden="true" className={cn('leading-none', option.sample)}>Aa</span>
+              <span className="text-xs max-sm:text-[0.6875rem]">{option.label}</span>
+            </ToggleGroupItem>
+          ))}
+        </ToggleGroup>
+      </SettingsCard>
+
       {customThemeOpen ? <CustomThemeDialog open onOpenChange={setCustomThemeOpen} /> : null}
     </>
   )
@@ -132,7 +192,7 @@ function AppearanceOption({
   ...props
 }: Omit<React.ComponentProps<'button'>, 'children'> & {
   label: string
-  description: string
+  description?: string
   /** `undefined` for a card that opens a dialog instead of being chosen. */
   selected?: boolean
   previewClassName?: string
@@ -154,7 +214,7 @@ function AppearanceOption({
           <span className="truncate text-sm font-semibold text-foreground">{label}</span>
           <TickCircle className="hidden size-4 shrink-0 text-primary group-aria-pressed/option:block" />
         </span>
-        <span className="mt-1 block text-xs leading-5 text-muted-foreground">{description}</span>
+        {description ? <span className="mt-1 block text-xs leading-5 text-muted-foreground">{description}</span> : null}
       </span>
     </button>
   )

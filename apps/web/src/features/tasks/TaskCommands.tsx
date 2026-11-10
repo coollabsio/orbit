@@ -118,7 +118,7 @@ export function TaskCommands({ tasks, users, labels, statuses, groupContext, cur
         </div>
         <CommandInput autoFocus placeholder={`${FIELD_TITLE[menu.field]}…`} />
         <CommandList className="mx-1.5 mt-1 mb-1.5 max-h-none min-h-0 flex-1 rounded-lg bg-background p-1 ring-1 ring-border">
-          <CommandEmpty className="p-6 text-[13px] text-muted-foreground">No match</CommandEmpty>
+          <CommandEmpty className="p-6 text-[0.8125rem] text-muted-foreground">No match</CommandEmpty>
           {menu.field === 'status' ? statusOptions.map((group) => (
             <CommandItem key={group.key} value={group.label} data-checked={statusKeys.has(group.key)} onSelect={() => choose(statusUpdates(menuTasks, statuses, group.value))}>
               <GroupIcon group={group} context={groupContext} />

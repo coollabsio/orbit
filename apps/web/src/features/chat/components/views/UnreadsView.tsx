@@ -39,7 +39,7 @@ function UnreadGroup({ conversation, state, people }: UnreadConversation & { peo
       <div className="flex min-w-0 items-center gap-2">
         <Link
           to={conversationPath(conversation.id)}
-          className="flex min-w-0 items-center gap-2 rounded-sm text-[13px] font-semibold text-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/50"
+          className="flex min-w-0 items-center gap-2 rounded-sm text-[0.8125rem] font-semibold text-foreground outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/50"
         >
           <ConversationIcon conversation={conversation} people={people} currentUserId={currentUserId} />
           <span className="truncate">{title}</span>
@@ -59,7 +59,7 @@ function UnreadGroup({ conversation, state, people }: UnreadConversation & { peo
         </Button>
       </div>
       {messages.isError ? (
-        <p className="text-[13px] text-muted-foreground" role="alert">
+        <p className="text-[0.8125rem] text-muted-foreground" role="alert">
           Could not load these messages.{' '}
           <Button type="button" variant="link" size="sm" className="h-auto p-0" onClick={() => void messages.refetch()}>
             Try again
@@ -115,7 +115,7 @@ export function UnreadsView() {
         ) : null}
       </PaneHeader>
       {failed ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-[13px] text-muted-foreground" role="alert">
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-[0.8125rem] text-muted-foreground" role="alert">
           Could not load your unread messages.
           <Button type="button" variant="outline" size="sm" onClick={() => void Promise.all([conversations.refetch(), states.refetch()])}>
             Try again

@@ -32,7 +32,7 @@ const WORKSPACE_LINKS = [
 // Coolify tile navigation: the row never fills; the icon sits in a 3D tile and the current row shows a pink tile.
 // The Flat style (Account settings → Appearance) drops the tile: plain rows, and a filled row for the current page.
 const sidebarNavItemClass =
-  'group/nav-item relative flex h-9 w-full min-w-0 shrink-0 items-center justify-start gap-2.5 overflow-hidden pr-2.5 pl-1 text-left text-[13px] font-medium whitespace-nowrap text-sidebar-nav transition-colors duration-120 outline-none hover:text-sidebar-nav-active focus-visible:text-sidebar-nav-active data-[active=true]:text-sidebar-nav-active group-data-[collapsed=true]/sidebar-nav:justify-center group-data-[collapsed=true]/sidebar-nav:px-0 '
+  'group/nav-item relative flex h-9 w-full min-w-0 shrink-0 items-center justify-start gap-2.5 overflow-hidden pr-2.5 pl-1 text-left text-[0.8125rem] font-medium whitespace-nowrap text-sidebar-nav transition-colors duration-120 outline-none hover:text-sidebar-nav-active focus-visible:text-sidebar-nav-active data-[active=true]:text-sidebar-nav-active group-data-[collapsed=true]/sidebar-nav:justify-center group-data-[collapsed=true]/sidebar-nav:px-0 '
     + 'flat:h-8 flat:rounded-md flat:pl-2.5 flat:hover:not-disabled:bg-black/4 flat:data-[active=true]:bg-black/5 dark:flat:hover:not-disabled:bg-white/5 dark:flat:data-[active=true]:bg-white/6'
 
 const sidebarNavTileVariants = cva(
@@ -116,7 +116,7 @@ function SidebarNavItem({
           <span
             data-slot="sidebar-nav-badge"
             aria-hidden="true"
-            className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-primary px-1 text-[10px] leading-none font-semibold text-primary-foreground tabular-nums group-data-[collapsed=true]/sidebar-nav:absolute group-data-[collapsed=true]/sidebar-nav:top-0.5 group-data-[collapsed=true]/sidebar-nav:right-0.5"
+            className="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-primary px-1 text-[0.625rem] leading-none font-semibold text-primary-foreground tabular-nums group-data-[collapsed=true]/sidebar-nav:absolute group-data-[collapsed=true]/sidebar-nav:top-0.5 group-data-[collapsed=true]/sidebar-nav:right-0.5"
           >
             {badge > 99 ? '99+' : badge}
           </span>
@@ -145,7 +145,7 @@ function SidebarNavComingSoon({ icon: Icon, label }: { icon: SidebarNavIcon; lab
       >
         <SidebarNavTile icon={Icon} />
         <SidebarNavLabel>{label}</SidebarNavLabel>
-        <span className="ml-auto text-[10px] text-muted-foreground/70 group-data-[collapsed=true]/sidebar-nav:hidden">Coming soon</span>
+        <span className="ml-auto text-[0.625rem] text-muted-foreground/70 group-data-[collapsed=true]/sidebar-nav:hidden">Coming soon</span>
       </Button>
     </Tip>
   )
@@ -155,7 +155,7 @@ function SidebarSection({ label, collapsed }: { label: string; collapsed: boolea
   if (collapsed) return <Separator className="mx-2.5 my-2 bg-black/8 data-horizontal:w-auto dark:bg-sidebar-tint/10" aria-hidden="true" />
   return (
     // Coolify's section header: Title Case in light, small mono capitals in dark.
-    <div className="mt-3 px-2.5 py-1 text-[11px] leading-4 font-medium text-sidebar-nav-muted select-none dark:font-mono dark:text-[10.5px] dark:tracking-[0.08em] dark:uppercase">
+    <div className="mt-3 px-2.5 py-1 text-[0.6875rem] leading-4 font-medium text-sidebar-nav-muted select-none dark:font-mono dark:text-[0.65625rem] dark:tracking-[0.08em] dark:uppercase">
       {label}
     </div>
   )
@@ -307,7 +307,7 @@ function BackToApp({ label, onNavigate, onBack }: { label: string; onNavigate?: 
     'data-slot': 'sidebar-nav-back',
     title: 'Back to the main menu',
     'aria-label': 'Back to the main menu',
-    className: 'mb-1 flex h-9 w-full min-w-0 shrink-0 items-center gap-2.5 rounded-md pr-2.5 pl-1 text-[13px] outline-none transition-colors duration-120 hover:bg-neutral-100 focus-visible:outline-1 focus-visible:outline-primary dark:hover:bg-white/6 group-data-[collapsed=true]/sidebar-nav:justify-center group-data-[collapsed=true]/sidebar-nav:px-0 flat:h-8 flat:pl-2.5',
+    className: 'mb-1 flex h-9 w-full min-w-0 shrink-0 items-center gap-2.5 rounded-md pr-2.5 pl-1 text-[0.8125rem] outline-none transition-colors duration-120 hover:bg-neutral-100 focus-visible:outline-1 focus-visible:outline-primary dark:hover:bg-white/6 group-data-[collapsed=true]/sidebar-nav:justify-center group-data-[collapsed=true]/sidebar-nav:px-0 flat:h-8 flat:pl-2.5',
     children: (
       <>
         {/* as wide as an icon tile (16px icon, padding and border), so the chevron lines up with the icons below */}
@@ -432,14 +432,14 @@ export function SidebarNav({
             // the expanded sidebar shows Search as an input, not a tile
             <button
               type="button"
-              className="flex h-8 w-full min-w-0 items-center gap-2.5 rounded-md bg-neutral-100 pr-1.5 pl-2.5 text-[13px] font-medium text-muted-foreground transition-colors outline-none hover:bg-neutral-200 focus-visible:outline-1 focus-visible:outline-primary dark:bg-sidebar-tint/6 dark:inset-ring dark:inset-ring-sidebar-tint/10 dark:hover:bg-sidebar-tint/10"
+              className="flex h-8 w-full min-w-0 items-center gap-2.5 rounded-md bg-neutral-100 pr-1.5 pl-2.5 text-[0.8125rem] font-medium text-muted-foreground transition-colors outline-none hover:bg-neutral-200 focus-visible:outline-1 focus-visible:outline-primary dark:bg-sidebar-tint/6 dark:inset-ring dark:inset-ring-sidebar-tint/10 dark:hover:bg-sidebar-tint/10"
               aria-label="Search"
               onClick={openSearch}
             >
               <Search className="size-4 shrink-0 opacity-90" />
               <span className="min-w-0 flex-1 truncate text-left">Search</span>
               {paletteKeys ? (
-                <Kbd className="h-auto rounded-md border border-neutral-300 bg-neutral-200 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground dark:border-sidebar-tint/18 dark:bg-white/6">{shortcutText(paletteKeys)}</Kbd>
+                <Kbd className="h-auto rounded-md border border-neutral-300 bg-neutral-200 px-1.5 py-0.5 text-[0.6875rem] font-medium text-muted-foreground dark:border-sidebar-tint/18 dark:bg-white/6">{shortcutText(paletteKeys)}</Kbd>
               ) : null}
             </button>
           )}

@@ -63,7 +63,7 @@ function DeleteAccountDialog({ email, hasPassword, onClose }: { email: string; h
         </FieldGroup>
         {owned ? <OwnedWorkspaces workspaces={owned} cloud={cloud} /> : null}
         {error && !owned && problem?.status !== 401 ? (
-          <p role="alert" className="text-[13px] text-destructive">{problem ? problem.detail : 'Your account could not be deleted. Try again.'}</p>
+          <p role="alert" className="text-[0.8125rem] text-destructive">{problem ? problem.detail : 'Your account could not be deleted. Try again.'}</p>
         ) : null}
         <DialogFooter>
           <DialogClose render={<Button type="button" variant="ghost" disabled={deletion.isPending} />}>Cancel</DialogClose>
@@ -83,7 +83,7 @@ function ownedWorkspaces(problem: ApiProblem): OwnedWorkspace[] {
 /** 409 `owns_workspaces`: the account still owns these, so they go first. */
 function OwnedWorkspaces({ workspaces, cloud }: { workspaces: OwnedWorkspace[]; cloud: boolean }) {
   return (
-    <div role="alert" className="grid gap-2 text-[13px]">
+    <div role="alert" className="grid gap-2 text-[0.8125rem]">
       <p className="text-destructive">You own {workspaces.length === 1 ? 'this workspace' : 'these workspaces'}:</p>
       <ul className="grid gap-1 rounded-lg bg-muted px-4 py-3">
         {workspaces.map((workspace) => (
