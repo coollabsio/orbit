@@ -152,7 +152,7 @@ test('"Add a new view" moves with the arrow keys and creates a board with a uniq
   fireEvent.click(screen.getByRole('button', { name: 'Add a view' }))
   const table = await screen.findByRole('button', { name: 'Table' })
   await waitFor(() => expect(document.activeElement).toBe(table))
-  expect(screen.getByRole('button', { name: 'Gallery Soon' }).getAttribute('aria-disabled')).toBe('true')
+  expect(screen.getByRole('button', { name: 'Gallery' }).getAttribute('aria-disabled')).not.toBe('true')
   await userEvent.keyboard('{ArrowRight}{Enter}')
   await waitFor(() => expect(selected).toEqual(['v-new']))
   expect(calls[0]).toEqual({ method: 'POST', path: '/api/v1/workspaces/ws/databases/db/views', body: { name: 'Board 2', type: 'board' } })
