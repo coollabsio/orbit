@@ -154,8 +154,11 @@ export function ApiTokensPage() {
         {tokens.data?.length === 0 ? <SettingsRow>No active API tokens.</SettingsRow> : null}
         {tokens.data?.map((token) => <SettingsRow className="flex-nowrap" key={token.id}>
           <RowIcon><Key /></RowIcon>
-          <div className="flex min-w-0 flex-1 flex-col gap-0.5"><span className="flex items-center gap-2 text-[13px] font-medium text-foreground">{token.name}{isExpired(token.expires_at) ? <Badge variant="destructive">Expired</Badge> : null}</span><span className="text-xs text-muted-foreground/70">{token.service_account_name ? `Service account: ${token.service_account_name}` : 'Personal token'} · <code>{token.token_prefix}…</code> · {token.all_projects ? 'All projects · ' : token.project_ids.length ? `${token.project_ids.map((id) => projectNames.get(id) ?? 'Unavailable project').join(', ')} · ` : null}{token.expires_at ? `${isExpired(token.expires_at) ? 'expired' : 'expires'} ${shortDate(token.expires_at)}` : 'never expires'} · created {relativeTime(token.created_at)}</span></div>
-          <span className="flex gap-1">{token.scopes.map((scope) => <Badge variant="secondary" key={scope}>{scope}</Badge>)}</span>
+          <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+            <div className="flex min-w-0 flex-1 flex-col gap-0.5"><span className="flex items-center gap-2 text-[13px] font-medium text-foreground">{token.name}{isExpired(token.expires_at) ? <Badge variant="destructive">Expired</Badge> : null}</span><span className="text-xs text-muted-foreground/70">{token.service_account_name ? `Service account: ${token.service_account_name}` : 'Personal token'} · <code>{token.token_prefix}…</code> · {token.all_projects ? 'All projects · ' : token.project_ids.length ? `${token.project_ids.map((id) => projectNames.get(id) ?? 'Unavailable project').join(', ')} · ` : null}{token.expires_at ? `${isExpired(token.expires_at) ? 'expired' : 'expires'} ${shortDate(token.expires_at)}` : 'never expires'} · created {relativeTime(token.created_at)}</span></div>
+            {/* Phones have no room beside the text, so the badges go under it, as in the mobile app. */}
+            <span className="flex flex-wrap gap-1">{token.scopes.map((scope) => <Badge variant="secondary" key={scope}>{scope}</Badge>)}</span>
+          </div>
           <Button variant="ghost" type="button" disabled={revokeToken.isPending} onClick={async () => { if (await confirmAction({ title: `Revoke ${token.name}?`, description: 'The integration will lose access immediately.', confirmLabel: 'Revoke', danger: true })) revokeToken.mutate(token.id) }}>Revoke</Button>
         </SettingsRow>)}
       </div>
