@@ -60,7 +60,7 @@ export function ViewTabs({ views, activeId, onSelect }: { views: DatabaseView[];
 
   return (
     // The first tab's icon starts at the text edge: the tabs hang their padding and border (11 px) into the margin.
-    <div ref={strip} role="tablist" aria-label="Views" className="-ml-[11px] flex min-w-0 items-center gap-0.5 overflow-x-auto overflow-y-hidden -mb-[5px] pb-[5px]">
+    <div ref={strip} role="tablist" aria-label="Views" className="-ml-[11px] flex min-w-0 grow basis-0 items-center gap-0.5 overflow-x-auto overflow-y-hidden -mb-[5px] pb-[5px] @max-sm/controls:basis-full">
       {views.map((view) => {
         const selected = view.id === activeId
         const Icon = viewIcon(view.type)

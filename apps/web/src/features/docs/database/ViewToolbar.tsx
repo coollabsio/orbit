@@ -88,7 +88,7 @@ export function ViewToolbar({ properties, config, onConfig, onAddFilter, onAdvan
     )
 
   return (
-    <div className="flex shrink-0 items-center gap-0.5">
+    <div className="ml-auto flex min-w-0 items-center gap-0.5">
       <PropertyPicker
         properties={properties.filter((property) => filterable(property.type))}
         label="Filter by"
@@ -115,7 +115,7 @@ export function ViewToolbar({ properties, config, onConfig, onAddFilter, onAdvan
         }
       />
       {searching ? (
-        <div className="flex h-7 w-48 items-center gap-1 rounded-md @max-lg/controls:w-24 bg-secondary/40 px-2 focus-within:ring-2 focus-within:ring-ring/50">
+        <div className="flex h-7 w-48 min-w-16 items-center gap-1 rounded-md @max-lg/controls:w-24 bg-secondary/40 px-2 focus-within:ring-2 focus-within:ring-ring/50">
           <Search className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
           <input
             autoFocus

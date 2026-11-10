@@ -225,13 +225,13 @@ export function DatabaseSurface({ database, views: unsorted, env: baseEnv, locke
 
   const controls = (
     <>
-      {/* The toolbar fits the width it has (a block in a narrow page, a page next to a peek): narrow rows hide its labels. */}
-      <div className="@container/controls flex items-center gap-2 border-b border-border pb-1">
+      {/* The toolbar fits the width it has (a block in a narrow page, a page next to a peek): narrow rows hide its labels,
+          and on a phone the tabs take a row of their own above it. */}
+      <div className="@container/controls flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border pb-1">
         <ViewTabs views={views} activeId={view.id} onSelect={selectView} />
-        <span className="flex-1" />
         {/* Checked rows replace the toolbar: a bar above the table would be clipped by a block's scroller. */}
         {selectedRows.length > 0 ? (
-          <div role="toolbar" aria-label="Selected rows" className="flex h-7 shrink-0 items-center gap-1 text-sm">
+          <div role="toolbar" aria-label="Selected rows" className="ml-auto flex h-7 shrink-0 items-center gap-1 text-sm">
             <span className="px-1 text-primary tabular-nums">{selectedRows.length} selected</span>
             {canEditValues ? (
               <Button
