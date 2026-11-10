@@ -2255,7 +2255,7 @@ export type DatabaseViewSort = {
     property_id: string;
 };
 
-export type DatabaseViewType = 'table' | 'board' | 'list' | 'calendar' | 'form' | 'gallery' | 'timeline';
+export type DatabaseViewType = 'table' | 'board' | 'list' | 'calendar' | 'gallery' | 'timeline' | 'form';
 
 export type DeleteAccountBody = {
     /**

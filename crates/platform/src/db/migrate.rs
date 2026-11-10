@@ -559,9 +559,12 @@ impl MigrationRunner {
                 ),
                 Migration::new(
                     84,
-                    include_str!(
-                        "../../../../apps/server/migrations/0084_database_templates.sql"
-                    ),
+                    include_str!("../../../../apps/server/migrations/0084_database_templates.sql"),
+                    false,
+                ),
+                Migration::new(
+                    85,
+                    include_str!("../../../../apps/server/migrations/0085_page_relations.sql"),
                     false,
                 ),
             ],
@@ -796,6 +799,11 @@ impl MigrationRunner {
                 include_str!(
                     "../../../../apps/server/migrations/postgres/0084_database_templates.sql"
                 ),
+                false,
+            ),
+            Migration::new(
+                85,
+                include_str!("../../../../apps/server/migrations/postgres/0085_page_relations.sql"),
                 false,
             ),
         ];
