@@ -779,6 +779,8 @@ Move a page into a database (it becomes a row) and a row out (it becomes a page)
 | Template page | Cannot move (409 `database_template_move`). |
 
 The move route gets `dry_run: true`, which returns `{dropped_values: N}` and moves nothing.
+`N` counts a multi-select that keeps only some of its options as a removed value (fixed
+2026-11-10; it counted as kept).
 
 ### 10.3 API
 

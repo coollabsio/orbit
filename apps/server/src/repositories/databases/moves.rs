@@ -18,7 +18,8 @@ use crate::repositories::pages::PageError;
 /// `page_id` from database `from` to database `to` (`None`: not a row). A value moves when `to`
 /// has a property with the same name (case ignored) and type whose options hold it (by id or
 /// name); every other value is deleted. Refreshes the row's search text (`NULL` outside a
-/// database) and records a realtime event on each database. Returns how many values were deleted.
+/// database) and records a realtime event on each database. Returns how many values were deleted,
+/// counting a multi-select that keeps only some of its options.
 #[allow(clippy::too_many_arguments)]
 pub(in crate::repositories) async fn carry_row_values(
     tx: &mut Transaction<'_, Any>,
@@ -73,6 +74,7 @@ async fn move_values(
     .fetch_all(&mut **tx)
     .await?;
     let mut kept = Vec::new();
+    let mut dropped = 0;
     for row in &stored {
         let property_id = parse_id(&row.get::<String, _>("property_id"))?;
         let raw: Value = serde_json::from_str(&row.get::<String, _>("value_json"))
@@ -81,7 +83,13 @@ async fn move_values(
             .iter()
             .find(|property| property.id == property_id)
             .and_then(|property| carry(property, &raw, &target));
-        kept.extend(carried);
+        match carried {
+            Some((value, whole)) => {
+                kept.push(value);
+                dropped += u64::from(!whole);
+            }
+            None => dropped += 1,
+        }
     }
     sqlx::query("DELETE FROM page_property_values WHERE page_id = $1")
         .bind(page_id.to_string())
@@ -128,11 +136,12 @@ async fn move_values(
             .await?;
         }
     }
-    Ok((stored.len() - kept.len()) as u64)
+    Ok(dropped)
 }
 
-/// The value `raw` of `property` as a value of the matching property of `target`, if it has one.
-fn carry(property: &Property, raw: &Value, target: &[Property]) -> Option<(Id, CellValue)> {
+/// The value `raw` of `property` as a value of the matching property of `target`, if it has one,
+/// and whether all of it fits there (a multi-select can keep only some of its options).
+fn carry(property: &Property, raw: &Value, target: &[Property]) -> Option<((Id, CellValue), bool)> {
     let value = parse_value(&property.kind, raw).ok()??;
     let name = property.name.to_lowercase();
     let into = target.iter().find(|candidate| {
@@ -140,21 +149,23 @@ fn carry(property: &Property, raw: &Value, target: &[Property]) -> Option<(Id, C
             && candidate.name.to_lowercase() == name
     })?;
     let option = |id: &String| option_in(&property.kind, &into.kind, id);
+    let mut whole = true;
     let value = match value {
         CellValue::Choice(id) => CellValue::Choice(option(&id)?),
         CellValue::Choices(ids) => {
-            let ids: Vec<String> = ids.iter().filter_map(option).collect();
-            if ids.is_empty() {
+            let kept: Vec<String> = ids.iter().filter_map(option).collect();
+            if kept.is_empty() {
                 return None;
             }
-            CellValue::Choices(ids)
+            whole = kept.len() == ids.len();
+            CellValue::Choices(kept)
         }
         // The new database numbers the row itself.
         CellValue::UniqueId(_) => return None,
         other => other,
     };
     let value = parse_value(&into.kind, &value.to_json()).ok()??;
-    Some((into.id, value))
+    Some(((into.id, value), whole))
 }
 
 /// The option of `to` for option `id` of `from`: the same id, else the same name.

@@ -508,7 +508,8 @@ async fn a_row_moved_to_another_database_keeps_values_of_same_name_and_type() {
         .await;
 
     // Same name in another case and type: kept, options matched by name. Notes is a number
-    // there, Score is missing, and only "Rust" exists among the labels.
+    // there, Score is missing, and only "Rust" exists among the labels (a partial value counts
+    // as removed).
     let to_stage = fixture
         .add_property(
             &to,
@@ -536,7 +537,7 @@ async fn a_row_moved_to_another_database_keeps_values_of_same_name_and_type() {
             json!({"parent_id": to, "position": 0, "dry_run": true}),
         )
         .await;
-    assert_eq!(preview["dropped_values"], 2);
+    assert_eq!(preview["dropped_values"], 3);
     assert_eq!(fixture.stored_values(&row).await, 5);
 
     let moved = fixture
@@ -547,7 +548,7 @@ async fn a_row_moved_to_another_database_keeps_values_of_same_name_and_type() {
             moved["database_id"].as_str(),
             moved["dropped_values"].as_u64()
         ),
-        (Some(to.as_str()), Some(2))
+        (Some(to.as_str()), Some(3))
     );
     assert_eq!(
         fixture.row_values(&to, &row).await,

@@ -26,7 +26,7 @@ export function moveDestinations<T extends MovablePage>(pages: readonly T[], mov
   )
 }
 
-/** The confirmation line for a move that deletes `count` property values of a row. */
+/** The confirmation line for a move that deletes `count` property values of a row (a multi-select that keeps only some options counts). */
 export function droppedValuesText(count: number): string {
   return count === 1 ? '1 property value will be removed.' : `${count} property values will be removed.`
 }
