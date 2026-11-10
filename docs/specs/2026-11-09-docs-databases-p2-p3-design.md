@@ -1491,7 +1491,8 @@ Deviations:
 - The rate limit is kept in memory per server (`PressLimiter`), not shared through the database.
 - No "increment a number" action (not in 17.2).
 - A button cannot be filtered or sorted (the filter and sort pickers leave it out). Export writes
-  an empty cell.
+  an empty cell. Since 2026-11-10 saving a view with a sort on a button or a relation returns 422
+  with `config.sorts[i].property_id`, and repair drops such a sort from an old view.
 
 ## 18. Item 16: Form view (P3, members-only part M; public part out of scope)
 

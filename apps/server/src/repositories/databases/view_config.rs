@@ -111,6 +111,11 @@ enum RuleValue {
 }
 
 /// The value a rule takes, or `None` when the operator does not apply to the type.
+/// As `sortable` in `@orbit/database` `meta.ts`: a button has no value, and relations do not sort.
+fn sortable(kind: &PropertyKind) -> bool {
+    !matches!(kind, PropertyKind::Button(_) | PropertyKind::Relation(_))
+}
+
 fn rule_value(property_type: PropertyType, operator: FilterOperator) -> Option<RuleValue> {
     use FilterOperator as Op;
     use PropertyType as Type;
@@ -525,8 +530,8 @@ impl ViewConfig {
         }
     }
 
-    /// Drops what names a property not in `properties`, repeats, and the board groups that do not
-    /// fit their property (`board::repair`).
+    /// Drops what names a property not in `properties`, repeats, sorts by a type that does not
+    /// sort, and the board groups that do not fit their property (`board::repair`).
     pub(super) fn repair(&mut self, view_type: ViewType, properties: &[Property]) {
         self.retain_known(properties);
         let kind = |id: Id| {
@@ -540,6 +545,8 @@ impl ViewConfig {
         calendar::repair(self, view_type, properties);
         gallery::repair(self, properties);
         timeline::repair(self, view_type, properties);
+        self.sorts
+            .retain(|sort| kind(sort.property_id).is_some_and(sortable));
         let mut cards = HashSet::new();
         self.card_properties.retain(|id| {
             kind(*id).is_some_and(|kind| *kind != PropertyKind::Title) && cards.insert(*id)
@@ -568,6 +575,15 @@ impl ViewConfig {
     pub fn validate(&mut self, view_type: ViewType, properties: &[Property]) -> Result<(), String> {
         if self.sorts.len() > MAX_SORTS {
             return Err("config.sorts".to_owned());
+        }
+        for (index, sort) in self.sorts.iter().enumerate() {
+            let kind = properties
+                .iter()
+                .find(|property| property.id == sort.property_id)
+                .map(|property| &property.kind);
+            if kind.is_some_and(|kind| !sortable(kind)) {
+                return Err(format!("config.sorts[{index}].property_id"));
+            }
         }
         if self.columns.len() > MAX_PROPERTIES * 2 {
             return Err("config.columns".to_owned());

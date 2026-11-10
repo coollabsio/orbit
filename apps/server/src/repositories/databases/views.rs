@@ -45,7 +45,11 @@ impl DatabaseRepository {
         let view_type = source.map_or(input.view_type, |view| view.view_type);
         let mut config = match (input.config, source) {
             (Some(config), _) => config,
-            (None, Some(source)) => source.config.clone(),
+            (None, Some(source)) => {
+                let mut config = source.config.clone();
+                config.repair(view_type, &properties);
+                config
+            }
             (None, None) => ViewConfig::for_properties(&properties),
         };
         config

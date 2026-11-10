@@ -672,6 +672,14 @@ fn plan_view(
             .and_then(|key| lookup(planned, key));
         match property {
             Some(property)
+                if matches!(
+                    property.property_type,
+                    PropertyType::Button | PropertyType::Relation
+                ) =>
+            {
+                sorts_lost = true;
+            }
+            Some(property)
                 if !sorts
                     .iter()
                     .any(|sort: &ViewSort| sort.property_id == property.id) =>

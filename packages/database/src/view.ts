@@ -4,6 +4,7 @@ import { datable, defaultDateProperty } from './calendar'
 import { galleryFields } from './gallery'
 import { timelineFields } from './timeline'
 import { matchesFilter, retainRules } from './filter'
+import { sortable } from './meta'
 import { sortRows } from './sort'
 import type { Database, DatabaseView, GroupProperty, LaneProperty, Property, Row, ViewConfig, ViewContext } from './types'
 import { cellOf, displayText } from './values'
@@ -13,7 +14,7 @@ const TITLE_WIDTH = 280
 
 /**
  * The view's config with defaults filled in. Like the server's `ViewConfig::repair`, it drops
- * columns, sorts, rules, card properties and calculations that name a deleted property (and filter groups left
+ * columns, sorts, rules, card properties and calculations that name a deleted property, sorts by a type that does not sort (and filter groups left
  * empty), repeats,
  * calculations that do not fit their property's type, and board groups that are not groups of their
  * property; a board whose group property is gone groups by the first status, else the first select,
@@ -40,7 +41,8 @@ export function repairConfig(view: DatabaseView, properties: readonly Property[]
   }
   const seenSorts = new Set<string>()
   const sorts = (config.sorts ?? []).filter((sort) => {
-    if (!known.has(sort.property_id) || seenSorts.has(sort.property_id)) return false
+    const property = known.get(sort.property_id)
+    if (!property || !sortable(property.type) || seenSorts.has(sort.property_id)) return false
     seenSorts.add(sort.property_id)
     return true
   })
