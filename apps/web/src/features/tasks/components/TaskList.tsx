@@ -1,6 +1,6 @@
 import { useTaskTarget, useVirtualTaskRows } from '@/shortcuts/taskTarget'
 import { useCommand } from '@/shortcuts/useCommand'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useScrollMemory } from '@/lib/useScrollMemory'
 import { defaultRangeExtractor, useVirtualizer, type VirtualItem } from '@tanstack/react-virtual'
 import { Calendar, Copy, Danger, Flag, Hierarchy2, LinkBroken, Add as Plus, RecordCircle, TaskSquare as SquareCheck, Tag, UserAdd, Xmark as X } from 'reicon-react'
@@ -71,6 +71,19 @@ type Line = { key: string; zone: Zone; keep: number[] } & (
   | { kind: 'row'; row: TreeRow })
 /** A `<section>` over the lines `first`…`last`: a header (unless ungrouped), then rows or sub-group sections. */
 type Block = { key: string; first: number; last: number; zone: Zone; drop: boolean; className?: string; blocks?: Block[] }
+
+/**
+ * A row that renders again only when one of its `deps` changes. The React Compiler skips TaskList (it calls
+ * `useVirtualizer`), so without this every mounted row renders again each time a scroll moves the virtual range.
+ * `deps` holds everything `render` and the row's handlers read, so a row that skips a render keeps handlers that
+ * are still correct.
+ */
+const MemoRow = memo(
+  function MemoRow({ render }: { deps: unknown[]; render: () => ReactNode }) {
+    return render()
+  },
+  (previous, next) => previous.deps.length === next.deps.length && previous.deps.every((dep, index) => Object.is(dep, next.deps[index])),
+)
 
 /**
  * Grouped task list: collapsible group and sub-group headers; rows move between groups by drag and drop.
@@ -230,6 +243,8 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
     return lineShown ? { ...props, 'data-drop-over': undefined } : props
   }
 
+  // what every row reads apart from its own line: when none of these changes, a mounted row does not render again
+  const rowDeps = [tasks, tree, labels, statuses, users, projects, display.properties, selected, drag, drop, nest.nestAt, dragEnabled, manual, nested, taskTree.collapsed, groupContext, onOpen]
   const renderRow = (line: Extract<Line, { kind: 'row' }>, item: VirtualItem, origin: number, lastRowId: string | undefined) => {
     const { task, depth, hasChildren } = line.row
     const { zone } = line
@@ -244,6 +259,7 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
     const nestEdge = nest.nestAt?.id === task.id && nest.nestAt.zone !== 'inside' ? (nest.nestAt.zone === 'before' ? 'top' : 'bottom') : null
     return (
       <div key={line.key} ref={virtualizer.measureElement} data-index={item.index} className="absolute inset-x-0" style={{ top: item.start - origin }}>
+        <MemoRow deps={[...rowDeps, task, depth, hasChildren, zone.id, nestEdge ?? dropEdge]} render={() => (
         <TaskRow
           task={task}
           labels={labels}
@@ -266,6 +282,7 @@ export function TaskList({ tasks, users, labels, statuses, projects, display, gr
           showParent={!nested || !tree.nested.has(task.id)}
           nest={nest.rowProps(task)}
         />
+        )} />
       </div>
     )
   }

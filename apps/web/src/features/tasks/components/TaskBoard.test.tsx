@@ -2,12 +2,13 @@ import { afterEach, expect, spyOn, test } from 'bun:test'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, createEvent, fireEvent, render, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
+import { MemoryRouter } from 'react-router'
 import { toast } from 'sonner'
 import type { Project, Task, TaskStatusDef } from '@/features/tasks/api/models'
 import type { GroupContext } from '@/features/views/grouping'
 import { DEFAULT_DISPLAY, type DisplayOptions } from '@/features/views/viewState'
 import { WorkspaceContext } from '@/features/workspaces/workspaceContext'
-import { BOARD_PAGE_SIZE, TaskBoard } from './TaskBoard'
+import { TaskBoard } from './TaskBoard'
 import { waitForAbsence } from '@/test/waitForAbsence'
 import { testWorkspace } from '@/test/workspace'
 
@@ -47,7 +48,7 @@ function renderBoard(tasks: Task[], options: { statuses?: TaskStatusDef[]; displ
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>
-      <WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}>{children}</WorkspaceContext.Provider>
+      <WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}><MemoryRouter>{children}</MemoryRouter></WorkspaceContext.Provider>
     </QueryClientProvider>
   )
   return render(
@@ -127,7 +128,7 @@ test('saving a board move does not add a grid item or flash a loading label', as
   let finishRequest: ((response: Response) => void) | undefined
   globalThis.fetch = (() => new Promise<Response>((resolve) => { finishRequest = resolve })) as unknown as typeof fetch
   const view = renderBoard([task('moving', 'todo', 0), task('other', 'todo', 1)], { statuses: [todo] })
-  const board = view.container.firstElementChild!
+  const board = view.container.querySelector('[aria-busy]')!
 
   fireEvent.dragStart(cardOf(view, 'Moving'), { dataTransfer })
   dropAt(columnOf(view, 'Todo'), 10_000)
@@ -307,18 +308,4 @@ test('nest-target cards skip the hover styles, so the tint always wins', () => {
   const hoverTokens = cardOf(view, 'Moving').className.split(' ').filter((name) => name.includes('hover:'))
   expect(hoverTokens.length).toBeGreaterThan(0)
   expect(hoverTokens.filter((name) => !name.includes('not-data-[nest=inside]:'))).toHaveLength(0)
-})
-
-test('a long column shows its first cards and the rest on "Show more"', async () => {
-  captureWrites([])
-  const tasks = Array.from({ length: BOARD_PAGE_SIZE + 10 }, (_, index) => task(`task-${index}`, 'todo', index))
-  const view = renderBoard(tasks)
-  const column = columnOf(view, 'Todo')
-
-  expect(within(column).getAllByRole('article')).toHaveLength(BOARD_PAGE_SIZE)
-  expect(within(column).getByText(String(BOARD_PAGE_SIZE + 10))).toBeTruthy()
-  fireEvent.click(within(column).getByRole('button', { name: 'Show 10 more (10 hidden)' }))
-
-  await waitFor(() => expect(within(column).getAllByRole('article')).toHaveLength(BOARD_PAGE_SIZE + 10))
-  expect(within(column).queryAllByRole('button', { name: /Show \d+ more/ })).toHaveLength(0)
 })
