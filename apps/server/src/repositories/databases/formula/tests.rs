@@ -606,3 +606,78 @@ fn a_preview_returns_the_type_or_the_error_and_writes_samples() {
         })
     );
 }
+
+/// The evaluator part of the spec 15.9 cost check, without the database read and the JSON:
+/// `cargo test --release -p orbit-server --lib formula::tests::fill_cost -- --ignored --nocapture`
+#[test]
+#[ignore = "a benchmark; run it with --release --ignored --nocapture"]
+fn fill_cost_of_20_formulas_at_the_node_limit() {
+    let items: Vec<String> = (1..=100).map(|i| i.to_string()).collect();
+    let variants = [
+        (
+            "map body only",
+            format!(
+                "sum(map([{}], current * prop(\"Price\") + index % 7 - prop(\"Qty\") / 2))",
+                items.join(",")
+            ),
+        ),
+        (
+            "map identity",
+            format!("sum(map([{}], current))", items.join(",")),
+        ),
+        ("list literal only", format!("sum([{}])", items.join(","))),
+        (
+            "typical",
+            "if(prop(\"Qty\") > 0, prop(\"Price\") * prop(\"Qty\"), 0)".to_owned(),
+        ),
+    ];
+    let properties = fixture_properties();
+    let full = (0..=400)
+        .rev()
+        .map(|pad| {
+            let padding: Vec<String> = (0..pad).map(|i| (i % 10).to_string()).collect();
+            format!(
+                "sum(map([{}], current * prop(\"Price\") + index % 7 - prop(\"Qty\") / 2)) + sum([{}]) + 1",
+                items.join(","),
+                padding.join(",")
+            )
+        })
+        .find(|source| save(&properties, formula("F", source)).is_ok())
+        .unwrap();
+    let rows_per_run = 1_000;
+    for (label, source) in std::iter::once(("at the node limit", full)).chain(variants) {
+        let mut all = properties.clone();
+        let mut keys = Vec::new();
+        for n in 0..20 {
+            let saved = save(&all, formula(&format!("F{n}"), &source)).unwrap();
+            keys.push(saved.id.to_string());
+            all.push(saved);
+        }
+        let base: Vec<DatabaseRow> = (0..rows_per_run)
+            .map(|at| row(&properties, &json!({"Price": at % 97, "Qty": at % 13})))
+            .collect();
+        let mut times = Vec::new();
+        for _ in 0..7 {
+            let mut rows = base.clone();
+            let started = Instant::now();
+            fill_in(&all, &mut rows, "UTC");
+            times.push(started.elapsed().as_secs_f64() * 1_000.0);
+            let failed = rows
+                .iter()
+                .flat_map(|row| keys.iter().map(|key| &row.values[key]))
+                .filter(|value| !value.is_number())
+                .count();
+            assert_eq!(failed, 0, "{label}: every cell computed");
+        }
+        times.sort_by(f64::total_cmp);
+        let cells = f64::from(rows_per_run * 20);
+        println!(
+            "fill {label}: {rows_per_run} rows x 20 formulas, median {:.1} ms (range {:.1}..{:.1}), {:.2} us per cell, {:.0} ms for 5,000 rows",
+            times[3],
+            times[0],
+            times[6],
+            times[3] * 1_000.0 / cells,
+            times[3] * 5.0
+        );
+    }
+}
