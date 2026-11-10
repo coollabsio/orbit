@@ -641,7 +641,8 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
     [workspaceId, pageId],
   )
 
-  const databaseHost = useMemo(() => ({ workspaceId, pageId, locked, peekContainer: peekSlot }), [workspaceId, pageId, locked, peekSlot])
+  const inPeek = peek !== undefined
+  const databaseHost = useMemo(() => ({ workspaceId, pageId, locked, peekContainer: peekSlot, inPeek }), [workspaceId, pageId, locked, peekSlot, inPeek])
   const trashPage = useTrashPage(workspaceId).mutate
   /** Deleting an inline database block keeps the database (spec 3.5); the toast offers to trash it too. */
   const onDatabaseBlockRemoved = useCallback(

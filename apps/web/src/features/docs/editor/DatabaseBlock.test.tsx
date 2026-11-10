@@ -71,7 +71,7 @@ async function renderBlock(databaseBlock: unknown, cached?: DatabaseDetail, notF
   const onChange = mock((value: unknown[]) => void value)
   let view!: ReturnType<typeof render>
   await act(async () => {
-    view = render(<PageEditor ref={ref} pageId="host" initialContent={content(databaseBlock)} editable onChange={onChange} databaseHost={{ ...host, peekContainer: peek?.container ?? null }} onDatabaseBlockRemoved={onDatabaseBlockRemoved} />, { wrapper })
+    view = render(<PageEditor ref={ref} pageId="host" initialContent={content(databaseBlock)} editable onChange={onChange} databaseHost={{ ...host, peekContainer: peek?.container ?? null, inPeek: false }} onDatabaseBlockRemoved={onDatabaseBlockRemoved} />, { wrapper })
     await new Promise((resolve) => setTimeout(resolve, 0))
   })
   const root = () => view.container.querySelector('[data-slot="database-block"]') as HTMLElement

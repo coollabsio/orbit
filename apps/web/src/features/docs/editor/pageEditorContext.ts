@@ -17,6 +17,8 @@ export interface DatabaseBlockHost {
   locked: boolean
   /** Where a block's row peek renders: the page's right pane, outside the editor. Null until the page mounts it. */
   peekContainer: HTMLElement | null
+  /** The page is a row in a side peek: its blocks open rows as full pages, not as a peek inside the peek. */
+  inPeek: boolean
 }
 
 export interface PageEditorContextValue {

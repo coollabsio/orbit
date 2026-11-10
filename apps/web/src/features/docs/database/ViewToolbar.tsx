@@ -50,7 +50,6 @@ interface ViewToolbarProps {
   search: string
   onSearch: (search: string) => void
   locked: boolean
-  viewId: string
   viewType: DatabaseView['type']
   /** A new row from the template (`null`: empty), opened in the peek. */
   onNew: (templateId: string | null) => void
@@ -58,10 +57,12 @@ interface ViewToolbarProps {
   onEditTemplate: (templateId: string) => void
   /** Downloads the rows the view shows as CSV. */
   onExportCsv: () => void
+  /** The path "Copy link to view" copies. */
+  viewLink: string
 }
 
 /** Filter, Sort, search, "⋯" (properties or a board's group and card properties, wrap cells, lock, link) and New (spec 7.1). */
-export function ViewToolbar({ properties, config, onConfig, onAddFilter, onAdvancedFilter, search, onSearch, locked, viewId, viewType, onNew, onExportCsv, templates, onEditTemplate }: ViewToolbarProps) {
+export function ViewToolbar({ properties, config, onConfig, onAddFilter, onAdvancedFilter, search, onSearch, locked, viewType, onNew, onExportCsv, templates, onEditTemplate, viewLink }: ViewToolbarProps) {
   const { workspaceId, databaseId, canEditValues, canEditSchema } = useDatabaseEnv()
   const [merging, setMerging] = useState(false)
   const setLock = useSetPageLock(workspaceId)
@@ -72,9 +73,7 @@ export function ViewToolbar({ properties, config, onConfig, onAddFilter, onAdvan
   const sorts = config.sorts.length
 
   const copyLink = () => {
-    const url = new URL(`/docs/${databaseId}`, window.location.origin)
-    url.searchParams.set('view', viewId)
-    void navigator.clipboard.writeText(url.toString()).then(
+    void navigator.clipboard.writeText(new URL(viewLink, window.location.origin).toString()).then(
       () => toast.success('Link to the view copied.'),
       () => toast.error('Could not copy the link.'),
     )

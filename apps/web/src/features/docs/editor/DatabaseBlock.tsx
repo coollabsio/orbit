@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
+import { useSearchParams } from 'react-router'
 import { ArrowUpRight } from 'reicon-react'
 import { ApiProblem } from '@orbit/api/problem'
 import { ISOLATED_ATTR } from '@orbit/editor/isolation'
@@ -71,6 +72,9 @@ function DatabaseBlockBody({ host, blockId, databaseId, linkId, onShowOwnViews }
   const viewsQuery = useDatabase(host.workspaceId, databaseId, linkId || null)
   const database = query.data
   const env = useDatabaseEnvValue(host.workspaceId, databaseId, database?.database.locked ?? true, linkId ? { id: linkId, hostLocked: host.locked } : undefined)
+  // A view link to this block (`?block=<id>&view=<view>`, "Copy link to view"), read before the deep link drops it.
+  const [searchParams] = useSearchParams()
+  const [linkedView] = useState(() => (searchParams.get('block') === blockId ? searchParams.get('view') : null))
 
   if (query.error) {
     return query.error instanceof ApiProblem && query.error.status === 404 ? (
@@ -112,7 +116,7 @@ function DatabaseBlockBody({ host, blockId, databaseId, linkId, onShowOwnViews }
       env={env}
       locked={database.database.locked}
       viewKey={`orbit:database-view:${databaseId}:${blockId}`}
-      block={{ id: blockId, rowLimit: BLOCK_ROW_LIMIT, peekContainer: host.peekContainer }}
+      block={{ id: blockId, hostPageId: host.pageId, rowLimit: BLOCK_ROW_LIMIT, peekContainer: host.peekContainer, rowsAsPages: host.inPeek, linkedView }}
       layout={({ controls, content }) => (
         <>
           <DatabaseTitle databaseId={databaseId} linked={!!linkId} title={database.database.title} icon={database.database.icon} />

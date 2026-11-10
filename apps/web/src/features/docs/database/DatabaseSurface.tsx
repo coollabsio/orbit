@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { useSearchParams } from 'react-router'
+import { useNavigate, useSearchParams } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { applyView, repairConfig } from '@orbit/database/view'
 import { EMPTY_FILTER, filterRules } from '@orbit/database/filter'
@@ -50,10 +50,11 @@ interface DatabaseSurfaceProps {
   /** The full page: the selected view is also in `?view=`, and the table is virtualized in `scrollElement`. */
   page?: { scrollElement: HTMLElement | null }
   /**
-   * A database block: its id (for the row peek in the URL), the rows it shows before "Load more" and where its row peek
-   * renders (the host page's right pane, outside the editor).
+   * A database block: its id (for the row peek in the URL), its page, the rows it shows before "Load more" and where its
+   * row peek renders (the host page's right pane, outside the editor). `rowsAsPages`: the host page is itself in a
+   * peek, so rows open as full pages (Back returns to the peek). `linkedView`: the view a link to the block named.
    */
-  block?: { id: string; rowLimit: number; peekContainer: HTMLElement | null }
+  block?: { id: string; hostPageId: string; rowLimit: number; peekContainer: HTMLElement | null; rowsAsPages: boolean; linkedView: string | null }
   layout: (parts: SurfaceParts) => ReactNode
 }
 
@@ -78,6 +79,7 @@ export function DatabaseSurface({ database, views: unsorted, env: baseEnv, locke
   const createRow = useCreateRow(workspaceId, databaseId)
   const trashRows = useTrashRows(workspaceId, databaseId)
   const [searchParams, setSearchParams] = useSearchParams()
+  const navigate = useNavigate()
   const [drafts, setDrafts] = useState<Readonly<Record<string, ViewConfig>>>({})
   const [search, setSearch] = useState('')
   const [pins, setPins] = useState<Pin[]>([])
@@ -88,7 +90,7 @@ export function DatabaseSurface({ database, views: unsorted, env: baseEnv, locke
   const [editRowId, setEditRowId] = useState<string | null>(null)
   /** A row created from "New": the peek focuses its title. */
   const [focusRowId, setFocusRowId] = useState<string | null>(null)
-  const [selectedView, setSelectedView] = useState(() => readStoredView(viewKey))
+  const [selectedView, setSelectedView] = useState(() => block?.linkedView ?? readStoredView(viewKey))
   const [rowLimit, setRowLimit] = useState(block?.rowLimit ?? Infinity)
 
   // View configs wait 500 ms, then save for everyone (spec D1). Leaving saves at once.
@@ -122,6 +124,7 @@ export function DatabaseSurface({ database, views: unsorted, env: baseEnv, locke
    */
   const setPeekRow = (rowId: string | null) => {
     if (rowId === peekRowId) return
+    if (rowId && block?.rowsAsPages) return void navigate(`/docs/${rowId}`)
     setSearchParams(
       (current) => {
         const next = new URLSearchParams(current)
@@ -259,12 +262,15 @@ export function DatabaseSurface({ database, views: unsorted, env: baseEnv, locke
             search={search}
             onSearch={setSearch}
             locked={locked}
-            viewId={view.id}
             viewType={view.type}
             onNew={(templateId) => addRow('top', undefined, 'peek', templateId)}
             templates={templates}
             onEditTemplate={setPeekRow}
             onExportCsv={() => downloadViewCsv(database, { ...view, config }, shown, ctx)}
+            viewLink={
+              // A linked view block's views live in its page only: the link opens that block.
+              block && linkId ? `/docs/${block.hostPageId}?block=${block.id}&view=${view.id}` : `/docs/${databaseId}?view=${view.id}`
+            }
           />
         )}
       </div>

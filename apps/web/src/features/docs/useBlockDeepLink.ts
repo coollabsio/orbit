@@ -26,6 +26,8 @@ export function useBlockDeepLink(pageId: string | null) {
         (current) => {
           const next = new URLSearchParams(current)
           next.delete('block')
+          // A linked view block's view link (`&view=`): its block read the view when it mounted.
+          next.delete('view')
           return next
         },
         { replace: true },
