@@ -1,5 +1,5 @@
 import { createExtension } from '@blocknote/core'
-import { NodeSelection, Plugin } from '@tiptap/pm/state'
+import { NodeSelection, Plugin, TextSelection } from '@tiptap/pm/state'
 import type { EditorView } from '@tiptap/pm/view'
 
 /**
@@ -39,6 +39,13 @@ export function marginSelectExtension(types: readonly string[]) {
               view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, pos)))
               return true
             },
+          },
+          // With a block selected, Chrome keeps a hidden caret at the start of the next text block, so a click there
+          // changes no DOM selection and ProseMirror's own fix only covers positions up to 2 away from the block.
+          handleClick: (view, pos) => {
+            if (!(view.state.selection instanceof NodeSelection) || !view.state.doc.resolve(pos).parent.inlineContent) return false
+            view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, pos)))
+            return true
           },
         },
       }),
