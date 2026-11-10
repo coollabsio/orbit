@@ -1578,6 +1578,7 @@ All accepted by the user on 2026-11-09 as recommended.
 | D-P3-4 | The form view ships members-only. Public forms get their own design. | 2026-11-09 |
 | D-P3-5 | Two-way relations store each link once, under the primary property; the synced property reads the reverse. | 2026-11-09 |
 | D-P3-6 | Buttons v1 run only data actions (set values, add row, open URL); no notifications, mail or webhooks. | 2026-11-09 |
+| D-P3-7 | Formulas stay server-only with the 15.8 limits unchanged. The 15.9 worst case (5,000 rows × 20 maximum-size formulas, about 3.5 s) misses 300 ms; the 2 s read budget cuts it off and the cells show "Formulas took too long". Normal formulas cost about 25 ms per 5,000 rows. The benchmark (`database_formula_bench`, ignored) stays as a measurement. | 2026-11-10 |
 
 ## 21. Sources
 
