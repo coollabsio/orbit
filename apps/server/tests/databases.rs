@@ -1830,10 +1830,10 @@ async fn board_views_check_and_repair_their_grouping() {
         .call(
             "POST",
             &format!("databases/{db}/views"),
-            Some(json!({"name": "Gallery", "type": "gallery"})),
+            Some(json!({"name": "Mystery", "type": "spreadsheet"})),
         )
         .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(status, StatusCode::BAD_REQUEST, "an unknown view type: {body}");
 
     let priority = fixture
         .add_property(
