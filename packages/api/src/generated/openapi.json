@@ -59470,6 +59470,18 @@
           "created_by": {
             "$ref": "#/components/schemas/PublicDatabasePerson"
           },
+          "hidden_links": {
+            "type": "object",
+            "description": "Per relation key of `values`: links to pages the reader cannot read, which `values`\nleaves out. Absent: none.",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
           "icon": {
             "type": [
               "string",
@@ -59494,7 +59506,7 @@
           },
           "values": {
             "type": "object",
-            "description": "Every property but the title and the created and edited ones, by property name (by id\nwhen two properties share the name); `null` is empty. Options show by name, people as\n`{id, name}`, dates as `{start, end}`."
+            "description": "Every property but the title and the created and edited ones, by property name (by id\nwhen two properties share the name); `null` is empty. Options show by name, people (also\nof a formula) as `{id, name}`, related pages as `{id, title}`, dates as `{start, end}`,\nunique IDs as `\"PREFIX-12\"`."
           }
         }
       },

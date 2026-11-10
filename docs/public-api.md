@@ -385,14 +385,25 @@ Values use the same keys and names that people see:
   of them. A value never adds an option: an unknown option gets `422`.
 - **Person** takes a list of user IDs or member emails, or `"me"`.
 - **Date** takes `YYYY-MM-DD`, a UTC time (`2026-11-09T14:00:00Z`), the
-  interval `start/end`, or `{"start": …, "end": …}`.
+  interval `start/end`, or `{"start": …, "end": …}`. A time can also have a UTC
+  offset (`2026-11-10T14:00:00+01:00`): Orbit stores it as the UTC time
+  (`2026-11-10T13:00:00Z`). A date without a time stays a date. Date filters
+  take the same forms.
+- **Relation** takes a list of page IDs of rows of the related database. Titles
+  are not accepted.
 - **Text, URL and number** take their value; a percent number stores `0.5`
   for 50%. **Checkbox** takes `true` or `false`. `null` clears a value.
 - **Results** show option names, people as `{id, name}`, dates as
-  `{start, end}`, and every property except the title and the created and
-  edited ones (the row has these as its own fields). Two properties with the
-  same name show under their IDs. Rollups and formulas show as computed when
-  the database is read.
+  `{start, end}`, related pages as `{id, title}` and unique IDs as
+  `"PREFIX-12"` (`"12"` without a prefix), and every property except the title
+  and the created and edited ones (the row has these as its own fields). Two
+  properties with the same name show under their IDs. Rollups and formulas show
+  as computed when the database is read; a formula's people and pages show as
+  `{id, name}` and `{id, title}` too. A relation shows only the pages that the
+  token's creator can read; the row's `hidden_links` counts the others per
+  relation key (absent when there are none).
+- **Unique ID filters** take `"PREFIX-12"` (the prefix in any letter case),
+  `"12"` or `12`.
 
 `GET /workspaces/{workspace_id}/docs/{page_id}/database`. Scope: `docs:read`.
 The database's `title`, `url`, `locked`, `row_count`, `properties` (`id`, `name`,
@@ -417,7 +428,9 @@ Response: `{items, next_cursor, total}`. Each item is a row: `id`, `title`,
 `icon`, `url`, `created_at`, `created_by`, `updated_at`, `updated_by` and
 `values`. Orbit filters and sorts on the server with the same rules as the web
 app. A cursor works only with the same filter, sorts, view and zone; another
-query with it gets `422` (`cursor`).
+query with it gets `422` (`cursor`). A `422` names the invalid field in
+`errors`, with a message that says what the field needs, such as `limit`:
+"Send a limit from 1 to 100."
 
 ```bash
 curl -sS "$ORBIT_WS/docs/$DATABASE_ID/database/query" -H "Authorization: Bearer $ORBIT_TOKEN" \

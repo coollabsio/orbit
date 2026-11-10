@@ -342,9 +342,12 @@ with the web app's rules. `create_database_row` takes `database_id` and optional
 `trash_database_rows` takes `database_id` and 1–100 `row_ids` and returns `trashed`. Values
 use property names or IDs as keys (a name that two properties share is an error), option
 names or IDs (values never add options), user IDs, member emails or `"me"` for people, and
-`YYYY-MM-DD`, a UTC time or `start/end` for dates. Results show option names and people as
-`{id, name}`. An invalid value or filter fails with "Invalid database input" and its field,
-such as `values.Status`. A write has at most 50 values. See
+`YYYY-MM-DD`, a UTC time, a time with a UTC offset (stored as UTC) or `start/end` for dates,
+and page IDs for relations. Results show option names, people (also of a formula) as
+`{id, name}`, related pages that the token's creator can read as `{id, title}` (`hidden_links`
+counts the others) and unique IDs as `"PREFIX-12"`; a unique ID filter takes `"PREFIX-12"` or
+`12`. An invalid value or filter fails with "Invalid database input", its field, such as
+`values.Status`, and what the field needs. A write has at most 50 values. See
 [Databases in the public API](public-api.md#databases) for every value shape.
 Chat message and thread tools accept `before` and `limit` (1–100) for pagination.
 `search_messages` takes `query` (up to 500 characters; every word must match, the last one as a

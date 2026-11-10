@@ -52,7 +52,7 @@ pub use files::{FileRef, MAX_FILES, first_image_url};
 pub(super) use files::FileCopies;
 pub use unique_id::UniqueIdConfig;
 pub(super) use unique_id::renumber_copy;
-pub use agent::{AgentDatabase, AgentQuery, AgentRow, AgentRowPage};
+pub use agent::{AgentDatabase, AgentQuery, AgentRow, AgentRowPage, invalid_detail};
 pub use forms::{FormAccess, FormConfig, FormQuestion, FormSubmission, MAX_SUBMISSIONS_PER_HOUR};
 pub use formula::{
     FormulaConfig, FormulaPreview, FormulaProblem, FormulaSample, checked as check_formula,
@@ -599,7 +599,8 @@ pub enum DatePoint {
 }
 
 impl DatePoint {
-    /// Accepts `YYYY-MM-DD` and `YYYY-MM-DDTHH:MM[:SS[.fraction]]Z`.
+    /// Accepts `YYYY-MM-DD`, `YYYY-MM-DDTHH:MM[:SS[.fraction]]Z` and RFC 3339 times with an offset
+    /// (`2026-11-10T14:00:00+01:00`), which it stores as the UTC time.
     fn parse(value: &str) -> Option<Self> {
         let (day, time) = match value.split_once('T') {
             Some((day, time)) => (day, Some(time)),
@@ -609,7 +610,13 @@ impl DatePoint {
         let Some(time) = time else {
             return Some(Self::Day(day.to_owned()));
         };
-        let time = time.strip_suffix('Z')?;
+        let Some(time) = time.strip_suffix('Z') else {
+            if !time.contains(['+', '-']) {
+                return None;
+            }
+            let moment = value.parse::<jiff::Timestamp>().ok()?;
+            return Self::parse(&moment.strftime("%Y-%m-%dT%H:%M:%SZ").to_string());
+        };
         let (time, fraction) = time.split_once('.').unwrap_or((time, "0"));
         if fraction.is_empty() || !fraction.bytes().all(|byte| byte.is_ascii_digit()) {
             return None;

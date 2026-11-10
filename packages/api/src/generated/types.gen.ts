@@ -4765,6 +4765,13 @@ export type PublicDatabaseProperty = {
 export type PublicDatabaseRow = {
     created_at: string;
     created_by: PublicDatabasePerson;
+    /**
+     * Per relation key of `values`: links to pages the reader cannot read, which `values`
+     * leaves out. Absent: none.
+     */
+    hidden_links?: {
+        [key: string]: number;
+    };
     icon: string | null;
     id: string;
     title: string;
@@ -4773,8 +4780,9 @@ export type PublicDatabaseRow = {
     url: string;
     /**
      * Every property but the title and the created and edited ones, by property name (by id
-     * when two properties share the name); `null` is empty. Options show by name, people as
-     * `{id, name}`, dates as `{start, end}`.
+     * when two properties share the name); `null` is empty. Options show by name, people (also
+     * of a formula) as `{id, name}`, related pages as `{id, title}`, dates as `{start, end}`,
+     * unique IDs as `"PREFIX-12"`.
      */
     values: {
         [key: string]: unknown;

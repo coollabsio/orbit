@@ -25,7 +25,7 @@ use crate::billing::guard::READ_ONLY_DETAIL;
 use crate::repositories::api_tokens::{
     ApiTokenError, ApiTokenPrincipal, ApiTokenRepository, ApiTokenScope,
 };
-use crate::repositories::databases::DatabaseError;
+use crate::repositories::databases::{DatabaseError, invalid_detail};
 use crate::repositories::pages::PageError;
 use crate::repositories::tasks::{TaskError, TaskRepository};
 use crate::token_api::{
@@ -663,10 +663,12 @@ fn tool_error(error: TokenApiError) -> Result<CallToolResult, ErrorData> {
 }
 
 /// What a database refusal tells the agent: the field of an invalid input, such as
-/// `values.Status` (an unknown or shared property name, an unknown option) or `cursor`.
+/// `values.Status` or `cursor`, and what it needs.
 fn database_detail(error: DatabaseError) -> String {
     match error {
-        DatabaseError::Invalid { field } => format!("Invalid database input: {field}"),
+        DatabaseError::Invalid { field } => {
+            format!("Invalid database input {field}. {}", invalid_detail(&field))
+        }
         DatabaseError::ViewNotFound => "Database view is not available".to_owned(),
         DatabaseError::TemplateNotFound => "Database template is not available".to_owned(),
         DatabaseError::RowLimit => "A database holds at most 5,000 rows".to_owned(),

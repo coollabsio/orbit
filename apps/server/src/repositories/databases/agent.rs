@@ -12,12 +12,13 @@ use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
 use utoipa::ToSchema;
 
+use super::formula::FormulaType;
 use super::query::{QueryContext, query_rows};
 use super::{
     CellValue, ComputeScope, DatabaseError, DatabaseRepository, DatabaseRow, DateValue,
     FilterGroup, FilterNode, FilterOperator, FilterRule, GroupOp, MAX_SORTS, Property,
-    PropertyKind, PropertyType, SortDirection, StatusGroup, ViewSort, ViewType, open, single_row,
-    templates,
+    PropertyKind, PropertyType, RelatedPage, SortDirection, StatusGroup, ViewSort, ViewType,
+    computed, open, properties_in_tx, rows_in_tx, templates, unique_id,
 };
 
 /// Rows per query page.
@@ -35,6 +36,13 @@ pub struct AgentPerson {
     pub id: Id,
     /// Empty for someone who left the workspace.
     pub name: String,
+}
+
+/// A related page the reader can read.
+#[derive(Serialize)]
+struct AgentPage {
+    id: Id,
+    title: String,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -116,10 +124,15 @@ pub struct AgentRow {
     pub updated_at: TimestampMillis,
     pub updated_by: AgentPerson,
     /// Every property but the title and the created and edited ones, by property name (by id
-    /// when two properties share the name); `null` is empty. Options show by name, people as
-    /// `{id, name}`, dates as `{start, end}`.
+    /// when two properties share the name); `null` is empty. Options show by name, people (also
+    /// of a formula) as `{id, name}`, related pages as `{id, title}`, dates as `{start, end}`,
+    /// unique IDs as `"PREFIX-12"`.
     #[schema(value_type = Object)]
     pub values: BTreeMap<String, Value>,
+    /// Per relation key of `values`: links to pages the reader cannot read, which `values`
+    /// leaves out. Absent: none.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub hidden_links: BTreeMap<String, u64>,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -343,6 +356,12 @@ impl Names {
                 self.ids(&property.kind, &value, true)
                     .ok_or_else(|| invalid(".value"))?
             }
+            PropertyKind::UniqueId(_) => match &value {
+                Value::String(text) => unique_id_number(&property.kind, text)
+                    .map(Value::from)
+                    .ok_or_else(|| invalid(".value"))?,
+                _ => value,
+            },
             _ => value,
         };
         Ok(FilterNode::Rule(FilterRule {
@@ -391,27 +410,38 @@ impl Names {
         }
     }
 
-    fn row(&self, row: DatabaseRow, origin: &str, workspace_id: Id) -> AgentRow {
+    fn row(
+        &self,
+        row: DatabaseRow,
+        related: &BTreeMap<String, RelatedPage>,
+        origin: &str,
+        workspace_id: Id,
+    ) -> AgentRow {
         let mut names: HashMap<&str, usize> = HashMap::new();
         for property in &self.properties {
             *names.entry(property.name.as_str()).or_default() += 1;
         }
-        let values = self
+        let mut values = BTreeMap::new();
+        let mut hidden_links = BTreeMap::new();
+        for property in self
             .properties
             .iter()
             .filter(|property| !page_field(&property.kind))
-            .map(|property| {
-                let key = if names[property.name.as_str()] > 1 {
-                    property.id.to_string()
-                } else {
-                    property.name.clone()
-                };
-                (
-                    key,
-                    self.output_value(property, row.values.get(&property.id.to_string())),
-                )
-            })
-            .collect();
+        {
+            let id = property.id.to_string();
+            let key = if names[property.name.as_str()] > 1 {
+                id.clone()
+            } else {
+                property.name.clone()
+            };
+            if let Some(hidden) = row.hidden_links.get(&id) {
+                hidden_links.insert(key.clone(), *hidden);
+            }
+            values.insert(
+                key,
+                self.output_value(property, row.values.get(&id), related),
+            );
+        }
         AgentRow {
             id: row.id,
             url: row_url(origin, row.id, workspace_id),
@@ -422,10 +452,16 @@ impl Names {
             updated_at: row.updated_at,
             updated_by: self.person(row.updated_by),
             values,
+            hidden_links,
         }
     }
 
-    fn output_value(&self, property: &Property, raw: Option<&Value>) -> Value {
+    fn output_value(
+        &self,
+        property: &Property,
+        raw: Option<&Value>,
+        related: &BTreeMap<String, RelatedPage>,
+    ) -> Value {
         let parsed = || raw.and_then(|raw| super::parse_value(&property.kind, raw).ok().flatten());
         let name = |id: &str| {
             property
@@ -468,9 +504,82 @@ impl Names {
             | PropertyKind::Number(_)
             | PropertyKind::Date(_)
             | PropertyKind::Url => parsed().map_or(Value::Null, |value| value.to_json()),
-            // Computed kinds (relations, rollups, formulas) and later types: as the read path
-            // returned them.
+            PropertyKind::UniqueId(_) => match parsed() {
+                Some(CellValue::UniqueId(number)) => {
+                    json!(unique_id::text(&property.kind, number))
+                }
+                _ => Value::Null,
+            },
+            PropertyKind::Relation(_) => match raw {
+                Some(Value::Array(ids)) if !ids.is_empty() => Value::Array(
+                    ids.iter()
+                        .map(|id| self.formula_value(&FormulaType::Page, id, related))
+                        .collect(),
+                ),
+                _ => Value::Null,
+            },
+            PropertyKind::Formula(config) => raw.map_or(Value::Null, |raw| {
+                self.formula_value(&config.result_type, raw, related)
+            }),
+            // Rollups and the other later types: as the read path returned them.
             _ => raw.cloned().unwrap_or(Value::Null),
+        }
+    }
+
+    /// A computed value of `result_type` with its people as `{id, name}` and its pages as
+    /// `{id, title}`; an error (`{"error": …}`) and the other types stay as they are.
+    fn formula_value(
+        &self,
+        result_type: &FormulaType,
+        raw: &Value,
+        related: &BTreeMap<String, RelatedPage>,
+    ) -> Value {
+        match (result_type, raw) {
+            (FormulaType::List(item), Value::Array(items)) => Value::Array(
+                items
+                    .iter()
+                    .map(|raw| self.formula_value(item, raw, related))
+                    .collect(),
+            ),
+            (FormulaType::Person, Value::String(id)) => id
+                .parse()
+                .map_or_else(|_| raw.clone(), |id| json!(self.person(id))),
+            (FormulaType::Page, Value::String(id)) => id.parse().map_or_else(
+                |_| raw.clone(),
+                |page_id| {
+                    json!(AgentPage {
+                        id: page_id,
+                        title: related
+                            .get(id)
+                            .map(|page| page.title.clone())
+                            .unwrap_or_default(),
+                    })
+                },
+            ),
+            _ => raw.clone(),
+        }
+    }
+}
+
+/// What an `Invalid { field }` of an agent request means, for its error message.
+#[must_use]
+pub fn invalid_detail(field: &str) -> &'static str {
+    match field {
+        "limit" => "Send a limit from 1 to 100.",
+        "cursor" => {
+            "The cursor is not a next_cursor of this query. Send the previous page's next_cursor with the same filter, sorts, view_id and tz."
+        }
+        "tz" => "Send an IANA time zone name, such as Europe/Budapest.",
+        "row_ids" => "Send 1 to 100 row ids.",
+        "values" => "Send at most 50 values.",
+        "sorts" => "Send a list of at most 10 sorts.",
+        "title" => "Send a title of at most 500 characters.",
+        _ if field.ends_with(".property_id") => {
+            "No property has this name or id, or two properties share the name: use the property id."
+        }
+        _ if field.ends_with(".operator") => "The operator does not fit the property's type.",
+        _ => {
+            "The value is invalid for this database: an unknown or shared property name, an unknown option or member, or a value of the wrong type."
         }
     }
 }
@@ -486,6 +595,22 @@ fn page_field(kind: &PropertyKind) -> bool {
             | PropertyKind::LastEditedTime
             | PropertyKind::LastEditedBy
     )
+}
+
+/// The number of a unique ID as text: `"PREFIX-12"` (the prefix in any letter case) or `"12"`.
+fn unique_id_number(kind: &PropertyKind, text: &str) -> Option<i64> {
+    let number = match kind {
+        PropertyKind::UniqueId(super::UniqueIdConfig {
+            prefix: Some(prefix),
+            ..
+        }) => text
+            .get(..prefix.len())
+            .filter(|start| start.eq_ignore_ascii_case(prefix))
+            .and_then(|_| text[prefix.len()..].strip_prefix('-'))
+            .unwrap_or(text),
+        _ => text,
+    };
+    number.parse().ok()
 }
 
 fn row_url(origin: &str, row_id: Id, workspace_id: Id) -> String {
@@ -679,6 +804,7 @@ impl DatabaseRepository {
                 .map(|(id, page)| (id.clone(), page.title.clone()))
                 .collect(),
         };
+        let related = detail.related_pages;
         let rows = query_rows(detail.rows, &names.properties, &filter, &sorts, &ctx);
         let total = rows.len();
         let end = offset.saturating_add(limit).min(total);
@@ -686,7 +812,7 @@ impl DatabaseRepository {
             .into_iter()
             .skip(offset)
             .take(end.saturating_sub(offset))
-            .map(|row| names.row(row, origin, workspace_id))
+            .map(|row| names.row(row, &related, origin, workspace_id))
             .collect();
         Ok(AgentRowPage {
             items,
@@ -708,9 +834,12 @@ impl DatabaseRepository {
         let mut tx = self.database.transaction().await?;
         open(&mut tx, workspace_id, database_id, actor_id).await?;
         let scope = ComputeScope::utc(workspace_id, actor_id);
-        let row = single_row(&mut tx, &scope, database_id, row_id).await?;
+        let mut rows = rows_in_tx(&mut tx, database_id, Some(row_id)).await?;
+        let properties = properties_in_tx(&mut tx, database_id).await?;
+        let computed = computed::fill(&mut tx, &scope, database_id, &properties, &mut rows).await?;
         tx.rollback().await?;
-        Ok(names.row(row, origin, workspace_id))
+        let row = rows.pop().ok_or(DatabaseError::NotFound)?;
+        Ok(names.row(row, &computed.related_pages, origin, workspace_id))
     }
 
     /// Values as agents send them (names or ids as keys, option names, emails), as

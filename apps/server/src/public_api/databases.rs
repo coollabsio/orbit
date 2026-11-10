@@ -12,7 +12,7 @@ use utoipa::ToSchema;
 use super::{Ctx, PublicApiState, Responder, problem_response};
 use crate::repositories::api_tokens::ApiTokenScope;
 use crate::repositories::databases::{
-    AgentDatabase, AgentQuery, AgentRow, AgentRowPage, DatabaseError,
+    AgentDatabase, AgentQuery, AgentRow, AgentRowPage, DatabaseError, invalid_detail,
 };
 use crate::token_api::{DatabaseRowPatch, NewDatabaseRow, TokenApiError};
 
@@ -94,10 +94,7 @@ impl Responder {
                 return Problem::validation(
                     &self.request_id,
                     &self.instance,
-                    [(
-                        field,
-                        "The value is invalid for this database: an unknown or shared property name, an unknown option or member, or a value of the wrong type.",
-                    )],
+                    [(field.as_str(), invalid_detail(&field))],
                 );
             }
             DatabaseError::RowLimit => (
