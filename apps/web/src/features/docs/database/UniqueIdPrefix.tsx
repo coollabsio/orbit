@@ -17,7 +17,7 @@ export function UniqueIdPrefix({ prefix, onSave }: { prefix: string | null; onSa
     onSave(next || null)
   }
   return (
-    <div className="flex flex-col gap-1 p-1" onKeyDown={(event) => event.stopPropagation()}>
+    <div className="flex flex-col gap-1 p-1" onKeyDown={(event) => event.key !== 'Escape' && event.stopPropagation()}>
       <label className="px-1 text-xs text-muted-foreground" htmlFor="unique-id-prefix">
         Prefix
       </label>
