@@ -7,12 +7,15 @@ import { useDatabase, useViewContext, useWorkspaceReadOnly } from '../../../../.
 import { alpha, useTheme } from '../../../../../theme'
 import { ErrorView, IconButton, LoadingView, PaneHeader, SafeAreaView, Text } from '../../../../../ui'
 
-/** The native screen of a form link (the web's `/docs/<database>/form/<view>`, spec P3 18.2): fill in and submit. */
+/**
+ * The native screen of a form link (the web's `/docs/<database>/form/<view>`, spec P3 18.2): fill in and submit.
+ * `link` reads the view from a linked view block's views instead of the database's own.
+ */
 export default function FormScreen() {
   const { colors } = useTheme()
-  const params = useLocalSearchParams<{ database: string; view: string }>()
+  const params = useLocalSearchParams<{ database: string; view: string; link?: string }>()
   const databaseId = params.database ?? ''
-  const query = useDatabase(databaseId)
+  const query = useDatabase(databaseId, params.link ?? '')
   const ctx = useViewContext()
   const readOnly = useWorkspaceReadOnly()
   const database = query.data

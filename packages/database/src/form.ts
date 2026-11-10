@@ -108,7 +108,7 @@ export function answersBody(questions: readonly FormQuestion[], answers: FormAns
   return body
 }
 
-/** The in-app link of a form view (members only). */
-export function formPath(databaseId: string, viewId: string): string {
-  return `/docs/${databaseId}/form/${viewId}`
+/** The in-app link of a form view (members only); `linkId` names the linked view block whose views hold it. */
+export function formPath(databaseId: string, viewId: string, linkId?: string | null): string {
+  return `/docs/${databaseId}/form/${viewId}${linkId ? `?link=${encodeURIComponent(linkId)}` : ''}`
 }

@@ -21,13 +21,15 @@ export function formErrorMessage(error: unknown): string {
   return databaseErrorMessage(error, 'Could not send the form. Try again.')
 }
 
-/** The native form screen of a web form link on this server (`<server>/docs/<database>/form/<view>`), else `null`. */
+/** The native form screen of a web form link on this server (`<server>/docs/<database>/form/<view>`, with a linked view block's `?link=`), else `null`. */
 export function formScreenOf(url: string, server: string): string | null {
   try {
     const target = new URL(url)
     if (target.origin !== new URL(server).origin) return null
     const match = /^\/docs\/([^/]+)\/form\/([^/]+)\/?$/.exec(target.pathname)
-    return match ? `/docs/form/${match[1]}/${match[2]}` : null
+    if (!match) return null
+    const link = target.searchParams.get('link')
+    return `/docs/form/${match[1]}/${match[2]}${link ? `?link=${encodeURIComponent(link)}` : ''}`
   } catch {
     return null
   }

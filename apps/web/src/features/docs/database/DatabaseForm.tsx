@@ -1,8 +1,9 @@
 import { useState, type DragEvent, type ReactNode } from 'react'
+import { Link, useLocation } from 'react-router'
 import { toast } from 'sonner'
-import { Add, ChevronDown, ChevronUp, Edit2, Eye, Link2, TickCircle, Trash } from 'reicon-react'
+import { Add, ChevronDown, ChevronUp, Edit2, Eye, Link2, Maximize4, TickCircle, Trash } from 'reicon-react'
 import { cn } from 'cn'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { Input } from '@/components/ui/input'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -46,13 +47,15 @@ interface DatabaseFormViewProps {
 
 /**
  * A form view inside a database (spec P3 18.2): editors build it and can preview it, everyone else fills it in. "Copy
- * form link" copies the full-page form for members.
+ * form link" copies the full-page form for members; a linked view block's form link names the link.
  */
 export function DatabaseFormView({ database, viewId, form, onForm }: DatabaseFormViewProps) {
   const { databaseId, linkId } = useDatabaseEnv()
+  const location = useLocation()
   const [preview, setPreview] = useState(false)
+  const path = formPath(databaseId, viewId, linkId)
   const copyLink = () =>
-    void navigator.clipboard.writeText(new URL(formPath(databaseId, viewId), window.location.origin).toString()).then(
+    void navigator.clipboard.writeText(new URL(path, window.location.origin).toString()).then(
       () => toast.success('Form link copied. Members who can open this database can fill it in.'),
       () => toast.error('Could not copy the link.'),
     )
@@ -61,23 +64,35 @@ export function DatabaseFormView({ database, viewId, form, onForm }: DatabaseFor
   return (
     <div className="flex flex-col gap-3 [contain:inline-size]">
       <div className="flex items-center justify-end gap-1">
+        {preview ? (
+          <Link
+            className={buttonVariants({ variant: 'ghost', size: 'sm' })}
+            to={path}
+            state={{ back: `${location.pathname}${location.search}${location.hash}` } satisfies FormPageState}
+          >
+            <Maximize4 className="size-4" />
+            Open form
+          </Link>
+        ) : null}
         {onForm ? (
           <Button type="button" variant="ghost" size="sm" aria-pressed={preview} onClick={() => setPreview((current) => !current)}>
             {preview ? <Edit2 className="size-4" /> : <Eye className="size-4" />}
             {preview ? 'Edit' : 'Preview'}
           </Button>
         ) : null}
-        {/* The form page opens a database's own views; a linked view block's form is filled in place. */}
-        {linkId ? null : (
-          <Button type="button" variant="ghost" size="sm" onClick={copyLink}>
-            <Link2 className="size-4" />
-            Copy form link
-          </Button>
-        )}
+        <Button type="button" variant="ghost" size="sm" onClick={copyLink}>
+          <Link2 className="size-4" />
+          Copy form link
+        </Button>
       </div>
       {building ? <FormBuilder database={database} form={form} onForm={onForm} /> : <FormFill database={database} viewId={viewId} form={form} preview={preview} />}
     </div>
   )
+}
+
+/** The history state of a link to the full-page form: where its back link returns. */
+export interface FormPageState {
+  back: string
 }
 
 /** The form's column: the width a reader fills in comfortably. */
