@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ComponentProps } from 'react'
+import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from 'react'
 import { isPaymentRequired } from '@orbit/api/problem'
 import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router'
 import { toast } from 'sonner'
@@ -20,6 +20,7 @@ import {
   usePage,
   usePageTree,
   useTrashPage,
+  useTrashedPage,
 } from '@/features/docs/api/pages'
 import { useTeamspaces } from '@/features/docs/api/teamspaces'
 import { descendantsOf, dropOnSpace, landingPage, pageTitle, spaceKey, spaceLabel, type SpaceKey } from '@/features/docs/pageTree'
@@ -31,6 +32,7 @@ import { DocPageActionsContext, type DocPageActions } from '@/features/docs/page
 import { NotionImportPane } from './NotionImportPane'
 import { ObsidianImportPane } from './ObsidianImportPane'
 import { PageTrashPane } from './PageTrashPane'
+import { PageTrashPreview } from './PageTrashPreview'
 
 /** The docs page's main pane (hidden on phones while the page list shows). */
 function DocsPane({ className, ...props }: ComponentProps<typeof Pane>) {
@@ -180,7 +182,7 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
 
   let content
   if (view === 'trash') {
-    content = <PageTrashPane workspaceId={workspace.id} />
+    content = pageId ? <PageTrashPreview workspaceId={workspace.id} pageId={pageId} /> : <PageTrashPane workspaceId={workspace.id} />
   } else if (view === 'import') {
     content = <NotionImportPane key={importId ?? 'new'} workspaceId={workspace.id} importId={importId} />
   } else if (view === 'obsidian-import') {
@@ -234,12 +236,13 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
   } else if (page.isError) {
     const missing = isPageNotFound(page.error)
     content = (
+      <TrashedPageRedirect workspaceId={workspace.id} pageId={missing ? pageId : undefined}>
       <DocsPane>
         <div className="flex flex-1 flex-col p-6">
           <EmptyState
             icon={FileText}
             title={missing ? 'Page not found' : 'Page unavailable'}
-            description={missing ? 'This page was moved to the trash or does not exist.' : 'The server could not load this page.'}
+            description={missing ? 'This page does not exist, or you do not have access to it.' : 'The server could not load this page.'}
             action={
               <div className="flex gap-2">
                 {missing ? null : (
@@ -255,6 +258,7 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
           />
         </div>
       </DocsPane>
+      </TrashedPageRedirect>
     )
   } else {
     content = (
@@ -288,4 +292,12 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
       </div>
     </DocPageActionsContext.Provider>
   )
+}
+
+/** A link to a page in the trash opens its trash preview; `children` shows when it is not there. */
+function TrashedPageRedirect({ workspaceId, pageId, children }: { workspaceId: string; pageId: string | undefined; children: ReactNode }) {
+  const trashed = useTrashedPage(workspaceId, pageId ?? '', pageId !== undefined)
+  if (trashed.data) return <Navigate replace to={`/docs/trash/${pageId}`} />
+  if (pageId !== undefined && trashed.isPending) return null
+  return children
 }

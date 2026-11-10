@@ -20,6 +20,8 @@ export const taskKeys = {
   commentAttachments: (workspaceId: string, taskId: string, commentId: string) => [...keys.comments(workspaceId, taskId), commentId, 'attachments'] as const,
   subIssues: (workspaceId: string, parentId: string) => [...keys.tasks(workspaceId), 'sub-issues', parentId] as const,
   search: (workspaceId: string, query: string) => [...keys.tasks(workspaceId), 'search', query] as const,
+  trash: (workspaceId: string) => [...keys.tasks(workspaceId), 'trash'] as const,
+  projectTrash: (workspaceId: string) => [...keys.projects(workspaceId), 'trash'] as const,
 }
 
 export function useTaskRelations(taskId: string) {
@@ -174,4 +176,52 @@ export function useAdoptSubIssue(parentId: string) {
     onError: (error) =>
       isVersionConflict(error) ? Alert.alert('Task changed', 'Someone else changed that task. Try again.') : Alert.alert('Could not change the parent', parentErrorMessage(error)),
   })
+}
+
+/** The web's Task trash: trashed projects and the trashed tasks of live projects. */
+export function useTaskTrash() {
+  const { client, workspaceId } = useOrbit()
+  const [projects, tasks] = useQueries({
+    queries: [
+      { queryKey: taskKeys.projectTrash(workspaceId), queryFn: () => taskApi.projectTrash(client, workspaceId) },
+      { queryKey: taskKeys.trash(workspaceId), queryFn: () => taskApi.taskTrash(client, workspaceId) },
+    ],
+  })
+  return { projects, tasks }
+}
+
+/** Restore, Delete forever and Empty trash; each refreshes the projects and tasks, the trash included. */
+export function useTaskTrashWrites() {
+  const { client, workspaceId } = useOrbit()
+  const queryClient = useQueryClient()
+  const refresh = () => {
+    for (const key of [keys.projects(workspaceId), keys.statuses(workspaceId), keys.labels(workspaceId), keys.tasks(workspaceId), ['task', workspaceId]]) {
+      void queryClient.invalidateQueries({ queryKey: key })
+    }
+  }
+  return {
+    restoreProject: useMutation({ mutationFn: (project: api.ProjectRecord) => taskApi.restoreTrashedProject(client, workspaceId, project), onSettled: refresh }),
+    restoreTask: useMutation({ mutationFn: (task: api.TaskRecord) => taskApi.restoreTrashedTask(client, workspaceId, task), onSettled: refresh }),
+    purgeProject: useMutation({ mutationFn: (projectId: string) => taskApi.purgeTrashedProject(client, workspaceId, projectId), onSettled: refresh }),
+    purgeTask: useMutation({ mutationFn: (taskId: string) => taskApi.purgeTrashedTask(client, workspaceId, taskId), onSettled: refresh }),
+    empty: useMutation({ mutationFn: () => taskApi.emptyTrash(client, workspaceId), onSettled: refresh }),
+  }
+}
+
+/** A trashed task for its read-only preview. */
+export function useTrashedTask(taskId: string) {
+  const { client, workspaceId } = useOrbit()
+  return useQuery({ queryKey: [...taskKeys.trash(workspaceId), 'preview', taskId], queryFn: () => taskApi.trashedTask(client, workspaceId, taskId), retry: false })
+}
+
+/** A trashed project and its tasks for its read-only preview. */
+export function useTrashedProject(projectId: string) {
+  const { client, workspaceId } = useOrbit()
+  const [project, tasks] = useQueries({
+    queries: [
+      { queryKey: [...taskKeys.projectTrash(workspaceId), 'preview', projectId], queryFn: () => taskApi.trashedProject(client, workspaceId, projectId), retry: false },
+      { queryKey: [...taskKeys.projectTrash(workspaceId), 'preview', projectId, 'tasks'], queryFn: () => taskApi.trashedProjectTasks(client, workspaceId, projectId), retry: false },
+    ],
+  })
+  return { project, tasks }
 }

@@ -74,6 +74,8 @@ export const queryKeys = {
     tree: (workspaceId: string) => [...workspace(workspaceId), 'pages', 'tree'] as const,
     detail: (workspaceId: string, pageId: string) => [...workspace(workspaceId), 'pages', 'detail', pageId] as const,
     trash: (workspaceId: string) => [...workspace(workspaceId), 'pages', 'trash'] as const,
+    /** A trashed page's read-only preview; not under `trash`, so trash writes do not refetch it. */
+    trashed: (workspaceId: string, pageId: string) => [...workspace(workspaceId), 'pages', 'trashed', pageId] as const,
     search: (workspaceId: string, query: string) => [...workspace(workspaceId), 'pages', 'search', query] as const,
     favorites: (workspaceId: string) => [...workspace(workspaceId), 'pages', 'favorites'] as const,
     recent: (workspaceId: string) => [...workspace(workspaceId), 'pages', 'recent'] as const,

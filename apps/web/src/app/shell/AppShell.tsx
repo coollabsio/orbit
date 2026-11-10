@@ -33,6 +33,7 @@ import { Topbar } from './Topbar'
 import { UserMenu } from './UserMenu'
 import { SidebarResizeHandle, usePageListWidth } from './pageListWidth'
 import { MobileDock } from './MobileDock'
+import { DonationReminder } from './DonationReminder'
 import { ProfilePopoverProvider } from './ProfilePopover'
 import { NoWorkspaceShell } from './NoWorkspaceShell'
 import { useAppSidebarTheme } from '@/lib/customTheme'
@@ -203,6 +204,7 @@ function Shell() {
           </ErrorBoundary>
         </div>
         <MobileDock chatBadge={chatBadge} chatUnread={chatUnread} />
+        {!guest && <DonationReminder />}
       </div>
 
       <SideSheet open={drawerOpen} onOpenChange={setDrawerOpen}>

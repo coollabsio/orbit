@@ -117,12 +117,17 @@ export function usePageTrash() {
   return useQuery({ queryKey: docs.docsKeys.trash(workspaceId), queryFn: () => docs.trash(client, workspaceId) })
 }
 
+export function useTrashedPage(pageId: string, enabled = true) {
+  const { client, workspaceId } = useOrbit()
+  return useQuery({ enabled, retry: false, queryKey: docs.docsKeys.trashedPage(workspaceId, pageId), queryFn: () => docs.trashedPage(client, workspaceId, pageId) })
+}
+
 export function useTrashWrites() {
   const { client, workspaceId } = useOrbit()
   const refresh = useRefreshDocs()
   return {
-    restore: useMutation({ mutationFn: (page: docs.TrashedPage) => docs.restoreFromTrash(client, workspaceId, page), onSettled: refresh }),
-    purge: useMutation({ mutationFn: (page: docs.TrashedPage) => docs.deleteForever(client, workspaceId, page), onSettled: refresh }),
+    restore: useMutation({ mutationFn: (page: Pick<docs.TrashedPage, 'id' | 'version'>) => docs.restoreFromTrash(client, workspaceId, page), onSettled: refresh }),
+    purge: useMutation({ mutationFn: (page: Pick<docs.TrashedPage, 'id' | 'version'>) => docs.deleteForever(client, workspaceId, page), onSettled: refresh }),
     empty: useMutation({ mutationFn: () => docs.emptyTrash(client, workspaceId), onSettled: refresh }),
   }
 }

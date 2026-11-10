@@ -1,25 +1,24 @@
 import type { CollabProblem } from '@orbit/editor/collab/session'
-import { isSafeLinkHref } from '@orbit/editor/links'
 import { useQuery } from '@tanstack/react-query'
-import { router, useLocalSearchParams } from 'expo-router'
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
-import { Image, Linking, ScrollView, View } from 'react-native'
+import { Redirect, router, useLocalSearchParams } from 'expo-router'
+import { useEffect, useRef, useState } from 'react'
+import { Image, ScrollView, View } from 'react-native'
 import { TextInput } from '../../../ui/scaled'
 
 import { CommentsSheet } from '../../../components/docs/Comments'
 import { EditorToolbar } from '../../../components/docs/EditorToolbar'
 import { IconDialog } from '../../../components/docs/IconDialog'
-import PageEditor, { type PageCardInfo, type PageEditorProps, type PageEditorRef } from '../../../components/docs/PageEditor.dom'
+import { EditorView } from '../../../components/docs/EditorView'
+import type { PageEditorRef } from '../../../components/docs/PageEditor.dom'
 import { ActionSheet, ConfirmDialog, type ConfirmRequest, PromptDialog, type PromptRequest, type SheetAction } from '../../../components/settings/Dialog'
 import { absoluteUrl, pageTitle, trashPrompt, validCoverUrl, visibleThreads } from '../../../data/docs'
-import { collabTicket, fileDataUrl, fileDeleted } from '../../../data/docs-api'
 import { keys } from '../../../data/keys'
 import * as api from '../../../data/orbit'
-import { BLOCK_KINDS, type BlockKind, type EditorCommand, type FormatState, IDLE_FORMAT, PROBLEM_RESPONSES, type ProblemResponse, whileMounted } from '../../../data/page-editor'
+import { BLOCK_KINDS, type BlockKind, type EditorCommand, type FormatState, IDLE_FORMAT, PROBLEM_RESPONSES, type ProblemResponse } from '../../../data/page-editor'
 import { pickImage } from '../../../hooks/account'
-import { useFavorites, usePageThreads, usePageTrash, useSavePage, useToggleFavorite, useTrashPage, useUploadPageImage } from '../../../hooks/docs'
+import { useFavorites, usePageThreads, useSavePage, useToggleFavorite, useTrashPage, useTrashedPage, useUploadPageImage } from '../../../hooks/docs'
 import { useOrbit } from '../../../orbit-context'
-import { useMembers, usePages } from '../../../queries'
+import { usePages } from '../../../queries'
 import { errorMessage } from '../../../session-context'
 import { alpha, useTheme } from '../../../theme'
 import { Button, CountBadge, ErrorView, Icon, IconButton, KeyboardSpace, LoadingView, PaneHeader, PullRefresh, SafeAreaView, Text } from '../../../ui'
@@ -36,6 +35,8 @@ export default function DocScreen() {
   const { client, workspaceId, session } = useOrbit()
   const { colors } = useTheme()
   const page = useQuery({ queryKey: keys.page(workspaceId, id), queryFn: () => api.page(client, workspaceId, id) })
+  // a link to a page in the trash opens its trash preview
+  const trashed = useTrashedPage(id, page.isError)
   const pages = usePages()
   const favorites = useFavorites()
   const threads = usePageThreads(id)
@@ -198,7 +199,9 @@ export default function DocScreen() {
         </Text>
       ) : null}
       {!page.data ? (
-        page.isError ? (
+        trashed.data ? (
+          <Redirect href={`/docs/trash/${id}`} />
+        ) : page.isError && !trashed.isPending ? (
           <ErrorView error={page.error} onRetry={() => void page.refetch()} />
         ) : (
           <LoadingView />
@@ -292,86 +295,3 @@ export default function DocScreen() {
     </SafeAreaView>
   )
 }
-
-type EditorViewProps = Pick<PageEditorProps, 'pageId' | 'epoch' | 'generation' | 'editable'> & {
-  ref: React.Ref<PageEditorRef>
-  onProblem: (problem: CollabProblem) => void
-  onProbe: () => void
-  onFormat: (state: FormatState) => void
-}
-
-/**
- * The page editor with what it needs from the app: the session (tickets, files), the theme, page and member names.
- * Every render sends all props to the web view, so it renders only when they change: the screen re-renders on every
- * selection change (the toolbar), and the callbacks are read through a ref.
- */
-const EditorView = memo(function EditorView({ ref, pageId, epoch, generation, editable, ...callbacks }: EditorViewProps) {
-  const { client, workspaceId, session, user } = useOrbit()
-  const { scheme, colors } = useTheme()
-  const pages = usePages()
-  const trash = usePageTrash()
-  const members = useMembers()
-  const [height, setHeight] = useState(120)
-  const latest = useRef(callbacks)
-  useEffect(() => {
-    latest.current = callbacks
-  })
-  const mounted = useRef(true)
-  useEffect(() => {
-    mounted.current = true
-    return () => {
-      mounted.current = false
-    }
-  }, [])
-
-  const cards = useMemo(() => {
-    const out: Record<string, PageCardInfo> = {}
-    for (const item of trash.data ?? []) out[item.id] = { title: item.title, icon: item.icon, trashed: true }
-    for (const item of pages.data ?? []) out[item.id] = { title: item.title, icon: item.icon, trashed: false }
-    return out
-  }, [pages.data, trash.data])
-  const names = useMemo(() => Object.fromEntries((members.data ?? []).map((member) => [member.user_id, member.display_name])), [members.data])
-  const editorColors = useMemo(
-    () => ({ background: colors.background, foreground: colors.foreground, mutedForeground: colors.mutedForeground, muted: colors.muted, border: colors.border, primary: colors.primary }),
-    [colors],
-  )
-  // the server shows everyone else this session's name and a color of its own
-  const me = useMemo(() => ({ name: user.display_name, color: colors.mutedForeground }), [user.display_name, colors.mutedForeground])
-  const actions = useMemo(
-    () => ({
-      getTicket: whileMounted(mounted, () => collabTicket(client, pageId)),
-      loadFile: whileMounted(mounted, (url: string) => fileDataUrl(session.server, session.token, url)),
-      fileDeleted: whileMounted(mounted, (url: string) => fileDeleted(session.server, session.token, url)),
-      openPage: whileMounted(mounted, async (target: string) => router.push(`/docs/${target}`)),
-      // the editor already filters links; the app checks again before it hands one to the OS
-      openUrl: whileMounted(mounted, async (url: string) => {
-        if (isSafeLinkHref(url)) void Linking.openURL(url).catch(() => {})
-      }),
-      onProblem: whileMounted(mounted, async (problem: CollabProblem) => latest.current.onProblem(problem)),
-      onProbe: whileMounted(mounted, async () => latest.current.onProbe()),
-      onFormat: whileMounted(mounted, async (state: FormatState) => latest.current.onFormat(state)),
-      onHeight: whileMounted(mounted, async (next: number) => setHeight(next)),
-    }),
-    [client, pageId, session.server, session.token],
-  )
-  const dom = useMemo(() => ({ scrollEnabled: false, style: { height } }), [height])
-
-  return (
-    <PageEditor
-      ref={ref}
-      dom={dom}
-      server={session.server}
-      workspaceId={workspaceId}
-      pageId={pageId}
-      epoch={epoch}
-      generation={generation}
-      editable={editable}
-      theme={scheme}
-      colors={editorColors}
-      user={me}
-      pages={cards}
-      members={names}
-      {...actions}
-    />
-  )
-})

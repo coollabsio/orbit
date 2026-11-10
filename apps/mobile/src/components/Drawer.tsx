@@ -314,6 +314,7 @@ function TasksArea({ view, project, onTasks, onBack, go }: { view?: string; proj
         </>
       ) : <Section label="Projects" />}
       <NavRow link={{ label: 'New project', icon: 'plus', href: '/tasks', active: false }} onPress={() => setCreating(true)} />
+      <NavRow link={{ label: 'Trash', icon: 'trash', href: '/tasks/trash', active: false }} onPress={() => go('/tasks/trash')} />
       <NewProjectSheet visible={creating} onClose={() => setCreating(false)} onCreated={(created) => {
         setCreating(false)
         go(tasksHref(current, { project: created.id }))

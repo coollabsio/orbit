@@ -1,12 +1,11 @@
-import type { BillingView, PlanInterval, PlanView } from '@orbit/api/generated/types.gen'
+import type { BillingView, PlanView } from '@orbit/api/generated/types.gen'
 import { Redirect } from 'expo-router'
 import * as WebBrowser from 'expo-web-browser'
 import { type ReactNode, useEffect, useState } from 'react'
 import { View } from 'react-native'
 
 import { Note, SettingsCard, SettingsShell, WORKSPACE_NAV } from '../../../components/settings/Shell'
-import { Toggles } from '../../../components/settings/Toggles'
-import { ACCESS_LABELS, annualSaving, billingDescription, groupByProduct, money, planLabel, priced, renewal, STATUS_LABELS } from '../../../data/billing'
+import { ACCESS_LABELS, annualSaving, billingDescription, chooseLabel, groupByProduct, money, planLabel, planTitle, renewal, STATUS_LABELS } from '../../../data/billing'
 import { fullDate } from '../../../data/format'
 import { useAuthOptions } from '../../../hooks/account'
 import { useBillingLinks, useWorkspaceBilling } from '../../../hooks/workspace-settings'
@@ -125,41 +124,37 @@ function Term({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
+/** Every plan in a list: each product's monthly and annual prices one after the other, with no switch between them. */
 function PlanChooser({ plans, onChoose, disabled }: { plans: PlanView[]; onChoose?: (key: string) => void; disabled: boolean }) {
-  const [period, setPeriod] = useState<PlanInterval>('month')
-  const products = groupByProduct(plans)
-  const switchable = products.some((group) => priced(group, 'month') && priced(group, 'year'))
-  const saving = annualSaving(products)
   return (
-    <View className="gap-4">
-      {switchable ? (
-        <View className="items-start">
-          <Toggles
-            label="Billing interval"
-            value={period}
-            options={[
-              { value: 'month', label: 'Monthly' },
-              { value: 'year', label: saving ? `Annual · save ${saving}%` : 'Annual' },
-            ]}
-            onChange={setPeriod}
+    <View className="gap-3">
+      {groupByProduct(plans).flatMap((group) =>
+        group.map((plan) => (
+          <PlanCard
+            key={plan.key}
+            plan={plan}
+            saving={plan.interval === 'year' ? annualSaving(group) : null}
+            disabled={disabled}
+            onChoose={onChoose ? () => onChoose(plan.key) : undefined}
           />
-        </View>
-      ) : null}
-      <View className="gap-3">
-        {products.map((group) => {
-          const plan = group.find((candidate) => candidate.interval === period) ?? group[0]
-          return <PlanCard key={plan.key} plan={plan} disabled={disabled} onChoose={onChoose ? () => onChoose(plan.key) : undefined} />
-        })}
-      </View>
+        )),
+      )}
     </View>
   )
 }
 
-function PlanCard({ plan, onChoose, disabled }: { plan: PlanView; onChoose?: () => void; disabled: boolean }) {
+function PlanCard({ plan, saving, onChoose, disabled }: { plan: PlanView; saving: number | null; onChoose?: () => void; disabled: boolean }) {
   const price = plan.amount != null && plan.currency ? { amount: plan.amount, currency: plan.currency } : null
   return (
     <View className="gap-3 rounded-lg border border-border p-4">
-      <Text className="font-noto-medium text-[14px] leading-[20px]">{plan.name}</Text>
+      <View className="flex-row items-center gap-2">
+        <Text className="font-noto-medium text-[14px] leading-[20px]">{planTitle(plan)}</Text>
+        {saving ? (
+          <View className="rounded-full bg-primary/15 px-2 py-0.5">
+            <Text className="font-noto-medium text-[12px] leading-[16px] text-primary">Save {saving}%</Text>
+          </View>
+        ) : null}
+      </View>
       {price ? (
         <View className="gap-1">
           <View className="flex-row items-baseline gap-1.5">
@@ -170,7 +165,7 @@ function PlanCard({ plan, onChoose, disabled }: { plan: PlanView; onChoose?: () 
           <Text className="text-[12px] leading-[16px] text-muted-foreground">Unlimited tasks, pages and members</Text>
         </View>
       ) : null}
-      {onChoose ? <Button label={`Choose ${plan.name}`} block disabled={disabled} onPress={onChoose} /> : null}
+      {onChoose ? <Button label={chooseLabel(plan)} block disabled={disabled} onPress={onChoose} /> : null}
     </View>
   )
 }

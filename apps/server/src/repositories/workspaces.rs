@@ -2146,16 +2146,22 @@ impl WorkspaceRepository {
         .await?;
         // Page history: all of the last 30 days, then one per day up to a year, newest 20 always.
         page_versions::thin_versions(&mut transaction, now).await?;
-        sqlx::query(
-            "DELETE FROM projects WHERE deleted_at <= $1 AND workspace_id IN \
-             (SELECT id FROM workspaces WHERE deleted_at IS NULL)",
-        )
-        .bind(
-            now.as_millis()
-                .saturating_sub(WORKSPACE_TRASH_RETENTION_MILLIS),
-        )
-        .execute(&mut *transaction)
-        .await?;
+        let expired_projects = "SELECT id FROM projects WHERE deleted_at <= $1 AND workspace_id IN \
+             (SELECT id FROM workspaces WHERE deleted_at IS NULL)";
+        // API token grants hold their projects with ON DELETE RESTRICT.
+        for sql in [
+            format!("DELETE FROM api_token_projects WHERE project_id IN ({expired_projects})"),
+            format!("UPDATE api_tokens SET project_id = NULL WHERE project_id IN ({expired_projects})"),
+            format!("DELETE FROM projects WHERE id IN ({expired_projects})"),
+        ] {
+            sqlx::query(sqlx::AssertSqlSafe(sql))
+                .bind(
+                    now.as_millis()
+                        .saturating_sub(WORKSPACE_TRASH_RETENTION_MILLIS),
+                )
+                .execute(&mut *transaction)
+                .await?;
+        }
         for workspace_id in expired {
             let blob_rows =
                 sqlx::query("SELECT id, storage_key FROM attachment_blobs WHERE workspace_id = $1")

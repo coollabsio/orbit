@@ -20,7 +20,7 @@ use crate::repositories::page_versions::{
 use crate::repositories::pages::{
     CreatePage, PageChanges, PageError, PageFavorite, PageFavoriteList, PageList, PageRecord,
     PageRepository, PageSearch, PageTrash, PageTrashEmptied, RECENT_DEFAULT_LIMIT,
-    RECENT_MAX_LIMIT, RecentPageList, SpaceRequest,
+    RECENT_MAX_LIMIT, RecentPageList, SpaceRequest, TrashedPageDetail,
 };
 use crate::socket_ticket::SocketTickets;
 use crate::task_routes::{
@@ -71,6 +71,10 @@ pub fn page_router(state: PageState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/pages/trash/empty",
             post(empty_page_trash),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/pages/trash/{page_id}",
+            get(get_trashed_page),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/pages/search",
@@ -592,6 +596,28 @@ async fn list_page_trash(
     state
         .pages
         .page_trash(workspace_id, actor_id, TimestampMillis::now())
+        .await
+        .map(Json)
+        .map_err(|error| page_problem(error, instance, request_id.as_ref()))
+}
+
+/// A page in the trash with its content and the sub-pages trashed with it, for a read-only
+/// preview. Same visibility as the trash list (private pages for their owner, teamspace pages for
+/// members), within the 30-day retention; 404 otherwise.
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/pages/trash/{page_id}", params(("workspace_id" = String, Path), ("page_id" = String, Path)), responses((status = 200, body = TrashedPageDetail)))]
+async fn get_trashed_page(
+    State(state): State<PageState>,
+    Path((workspace, page)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<TrashedPageDetail>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/pages/trash/{page}");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let page_id = parse_id(&page, &instance, request_id.as_ref())?;
+    state
+        .pages
+        .trashed_page(workspace_id, page_id, actor_id, TimestampMillis::now())
         .await
         .map(Json)
         .map_err(|error| page_problem(error, instance, request_id.as_ref()))

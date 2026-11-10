@@ -354,6 +354,18 @@ impl Responder {
                 "Invalid parent",
                 "The parent task does not exist or is in the trash.",
             ),
+            TaskError::ProjectNotTrashed => (
+                StatusCode::CONFLICT,
+                "project_not_trashed",
+                "Project not in the trash",
+                "Only projects in the trash can be deleted forever.",
+            ),
+            TaskError::TaskNotTrashed => (
+                StatusCode::CONFLICT,
+                "task_not_trashed",
+                "Task not in the trash",
+                "Only tasks in the trash can be deleted forever.",
+            ),
             TaskError::Busy => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 "task_busy",

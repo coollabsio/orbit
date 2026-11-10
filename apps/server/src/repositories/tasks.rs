@@ -24,6 +24,43 @@ use crate::collab::{CollabError, CollabHub, CollabWrite, DocKey, DocKind, LinkPo
 use crate::export::markdown::{KeepLinks, blocks_to_markdown};
 
 const TRASH_RETENTION_MILLIS: i64 = 30 * 24 * 60 * 60 * 1_000;
+/// Tasks deleted forever per write transaction when a project or the trash is emptied: the
+/// transaction holds every writer, and imported projects have thousands of tasks.
+const PURGE_BATCH: i64 = 200;
+
+/// Result of emptying the tasks trash.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct TaskTrashEmptied {
+    /// Tasks deleted forever, also those of the purged projects.
+    pub purged_tasks: u64,
+    pub purged_projects: u64,
+}
+
+/// A task in the trash (or in a trashed project), with who moved it there. It carries its
+/// status and labels: the status and label lists leave out trashed projects.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct TrashedTask {
+    #[serde(flatten)]
+    pub task: TaskRecord,
+    pub status: StatusRecord,
+    pub labels: Vec<LabelRecord>,
+    /// The user who moved the task to the trash, from the audit log; null for an API service
+    /// account or when the audit row is gone.
+    #[schema(value_type = Option<String>, required = true)]
+    pub deleted_by: Option<Id>,
+}
+
+/// A project in the trash, with who moved it there and its statuses (the status list leaves
+/// out trashed projects).
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct TrashedProject {
+    #[serde(flatten)]
+    pub project: ProjectRecord,
+    pub statuses: Vec<StatusRecord>,
+    /// The user who moved the project to the trash, from the audit log; null when unknown.
+    #[schema(value_type = Option<String>, required = true)]
+    pub deleted_by: Option<Id>,
+}
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct ProjectRecord {
@@ -423,6 +460,10 @@ pub enum TaskError {
     ParentCycle,
     #[error("the parent task is not available")]
     ParentInvalid,
+    #[error("only a project in the trash can be deleted forever")]
+    ProjectNotTrashed,
+    #[error("only a task in the trash can be deleted forever")]
+    TaskNotTrashed,
     #[error("task repository is unavailable")]
     Unavailable(#[from] sqlx::Error),
     /// Co-editing is at its memory budget, or another server reset the document: try again.
@@ -1080,6 +1121,212 @@ impl TaskRepository {
                 project.id.to_string(),
             ]
         })
+    }
+
+    /// Deletes the trashed project `project_id` forever with all its tasks, as the trash
+    /// retention purge does after 30 days. Like [`Self::purge_task`], it takes a workspace owner
+    /// or admin.
+    pub async fn purge_project(
+        &self,
+        workspace_id: Id,
+        project_id: Id,
+        actor_id: Id,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<(), TaskError> {
+        let actor = require_access(self.database.pool(), workspace_id, actor_id).await?;
+        self.require_granted_project(project_id)?;
+        let deleted_at: Option<i64> = sqlx::query_scalar(
+            "SELECT deleted_at FROM projects WHERE id = $1 AND workspace_id = $2",
+        )
+        .bind(project_id.to_string())
+        .bind(workspace_id.to_string())
+        .fetch_optional(self.database.pool())
+        .await?
+        .ok_or(TaskError::NotFound)?;
+        let Some(deleted_at) = deleted_at else {
+            return Err(TaskError::ProjectNotTrashed);
+        };
+        if deleted_at <= now.as_millis().saturating_sub(TRASH_RETENTION_MILLIS) {
+            return Err(TaskError::NotFound);
+        }
+        if !actor.can_purge_task() {
+            return Err(TaskError::Forbidden);
+        }
+        let purged = self
+            .purge_trashed_project(workspace_id, project_id, actor_id, request_id, now)
+            .await;
+        CollabHub::revalidate_database(&self.database, Some(workspace_id));
+        match purged? {
+            Some(_) => Ok(()),
+            // Restored while its tasks were being purged.
+            None => Err(TaskError::ProjectNotTrashed),
+        }
+    }
+
+    /// Deletes forever every task and project the tasks trash shows: the trashed tasks of live
+    /// projects, then each trashed project with all its tasks. `purged_tasks` counts every task
+    /// deleted, also those of the projects.
+    pub async fn empty_trash(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<TaskTrashEmptied, TaskError> {
+        let actor = require_access(self.database.pool(), workspace_id, actor_id).await?;
+        // A grant names live projects; the trash spans the whole workspace.
+        if self.project_grant.is_some() || !actor.can_purge_task() {
+            return Err(TaskError::Forbidden);
+        }
+        let result = self
+            .empty_trash_batches(workspace_id, actor_id, request_id, now)
+            .await;
+        CollabHub::revalidate_database(&self.database, Some(workspace_id));
+        result
+    }
+
+    async fn empty_trash_batches(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<TaskTrashEmptied, TaskError> {
+        let cutoff = now.as_millis().saturating_sub(TRASH_RETENTION_MILLIS);
+        let mut purged_tasks = 0_u64;
+        loop {
+            let mut tx = self.database.immediate_transaction().await?;
+            // Selected inside the write transaction, so a task restored meanwhile is skipped.
+            let batch = sqlx::query_scalar::<_, String>(
+                "SELECT tasks.id FROM tasks JOIN projects ON projects.id = tasks.project_id \
+                 WHERE tasks.workspace_id = $1 AND tasks.deleted_at > $2 AND projects.deleted_at IS NULL \
+                 ORDER BY tasks.id LIMIT $3",
+            )
+            .bind(workspace_id.to_string())
+            .bind(cutoff)
+            .bind(PURGE_BATCH)
+            .fetch_all(&mut *tx)
+            .await?;
+            if batch.is_empty() {
+                break;
+            }
+            for id in &batch {
+                purge_task_in_tx(&mut tx, id, now).await?;
+                self.record_write(
+                    &mut tx,
+                    workspace_id,
+                    actor_id,
+                    ("task.purged", "task"),
+                    parse_id(id.clone())?,
+                    request_id,
+                    json!({"tasks": 1}),
+                    now,
+                )
+                .await?;
+            }
+            tx.commit().await?;
+            purged_tasks += batch.len() as u64;
+        }
+        let projects = sqlx::query_scalar::<_, String>(
+            "SELECT id FROM projects WHERE workspace_id = $1 AND deleted_at > $2 ORDER BY deleted_at, id",
+        )
+        .bind(workspace_id.to_string())
+        .bind(cutoff)
+        .fetch_all(self.database.pool())
+        .await?;
+        let mut purged_projects = 0_u64;
+        for project_id in projects {
+            if let Some(tasks) = self
+                .purge_trashed_project(
+                    workspace_id,
+                    parse_id(project_id)?,
+                    actor_id,
+                    request_id,
+                    now,
+                )
+                .await?
+            {
+                purged_tasks += tasks;
+                purged_projects += 1;
+            }
+        }
+        Ok(TaskTrashEmptied {
+            purged_tasks,
+            purged_projects,
+        })
+    }
+
+    /// Deletes the tasks of a trashed project, [`PURGE_BATCH`] per write transaction (whatever
+    /// their own `deleted_at`), then the project row in its own transaction. Each transaction
+    /// first checks that the project is still in the trash, so a concurrent restore stops it
+    /// (`None`), and a run that stopped midway is finished by the next. Sub-issues in other
+    /// projects lose their parent (`parent_task_id` is `ON DELETE SET NULL`), as in the
+    /// retention purge. Returns how many tasks this run deleted.
+    async fn purge_trashed_project(
+        &self,
+        workspace_id: Id,
+        project_id: Id,
+        actor_id: Id,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<Option<u64>, TaskError> {
+        let mut purged = 0_u64;
+        loop {
+            let mut tx = self.database.immediate_transaction().await?;
+            let trashed: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM projects WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NOT NULL",
+            )
+            .bind(project_id.to_string())
+            .bind(workspace_id.to_string())
+            .fetch_one(&mut *tx)
+            .await?;
+            if trashed == 0 {
+                return Ok(None);
+            }
+            let batch = sqlx::query_scalar::<_, String>(
+                "SELECT id FROM tasks WHERE project_id = $1 ORDER BY id LIMIT $2",
+            )
+            .bind(project_id.to_string())
+            .bind(PURGE_BATCH)
+            .fetch_all(&mut *tx)
+            .await?;
+            if batch.is_empty() {
+                // API token grants hold the project with ON DELETE RESTRICT; the token keeps
+                // its other projects. Statuses and labels go through the foreign keys.
+                sqlx::query("DELETE FROM api_token_projects WHERE project_id = $1")
+                    .bind(project_id.to_string())
+                    .execute(&mut *tx)
+                    .await?;
+                sqlx::query("UPDATE api_tokens SET project_id = NULL WHERE project_id = $1")
+                    .bind(project_id.to_string())
+                    .execute(&mut *tx)
+                    .await?;
+                sqlx::query("DELETE FROM projects WHERE id = $1 AND workspace_id = $2")
+                    .bind(project_id.to_string())
+                    .bind(workspace_id.to_string())
+                    .execute(&mut *tx)
+                    .await?;
+                self.record_write(
+                    &mut tx,
+                    workspace_id,
+                    actor_id,
+                    ("project.purged", "project"),
+                    project_id,
+                    request_id,
+                    json!({"tasks": purged}),
+                    now,
+                )
+                .await?;
+                tx.commit().await?;
+                return Ok(Some(purged));
+            }
+            for id in &batch {
+                purge_task_in_tx(&mut tx, id, now).await?;
+            }
+            tx.commit().await?;
+            purged += batch.len() as u64;
+        }
     }
 
     pub async fn statuses(
@@ -2615,14 +2862,15 @@ impl TaskRepository {
     /// retention purge does after 30 days. A live task needs `expected_version` and is first
     /// moved to the trash with its live sub-issues, like [`Self::delete_task`]. A task in the
     /// trash cannot change, so its version is not checked. Like teamspace pages, it takes a
-    /// workspace owner or admin.
+    /// workspace owner or admin. Without `expected_version` only a task in the trash is deleted
+    /// ([`TaskError::TaskNotTrashed`] otherwise).
     #[allow(clippy::too_many_arguments)]
     pub async fn purge_task(
         &self,
         workspace_id: Id,
         task_id: Id,
         actor_id: Id,
-        expected_version: u64,
+        expected_version: Option<u64>,
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<(), TaskError> {
@@ -2637,9 +2885,10 @@ impl TaskRepository {
         if !actor.can_purge_task() {
             return Err(TaskError::Forbidden);
         }
-        let deleted_at = match task.deleted_at {
-            Some(deleted_at) => deleted_at.as_millis(),
-            None => {
+        let deleted_at = match (task.deleted_at, expected_version) {
+            (Some(deleted_at), _) => deleted_at.as_millis(),
+            (None, None) => return Err(TaskError::TaskNotTrashed),
+            (None, Some(expected_version)) => {
                 self.trash_in_tx(
                     &mut tx,
                     workspace_id,
@@ -2878,6 +3127,188 @@ impl TaskRepository {
             task.trashed_descendant_count = Some(counts.get(&task.id).copied().unwrap_or(0));
         }
         Ok(page)
+    }
+
+    /// A task the trash shows, for its preview: trashed itself, or in a trashed project, within
+    /// the retention period.
+    pub async fn trashed_task(
+        &self,
+        workspace_id: Id,
+        task_id: Id,
+        actor_id: Id,
+        now: TimestampMillis,
+    ) -> Result<TrashedTask, TaskError> {
+        require_access(self.database.pool(), workspace_id, actor_id).await?;
+        let cutoff = now.as_millis().saturating_sub(TRASH_RETENTION_MILLIS);
+        let sql = format!(
+            "SELECT {} FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.id = $1 AND tasks.workspace_id = $2 \
+             AND ((tasks.deleted_at > $3 AND projects.deleted_at IS NULL) OR projects.deleted_at > $4)",
+            task_columns(self.database.backend(), true)
+        );
+        let row = sqlx::query(sqlx::AssertSqlSafe(sql))
+            .bind(task_id.to_string())
+            .bind(workspace_id.to_string())
+            .bind(cutoff)
+            .bind(cutoff)
+            .fetch_optional(self.database.pool())
+            .await?
+            .ok_or(TaskError::NotFound)?;
+        let task = task_from_row(self.database.pool(), row).await?;
+        self.require_granted_project(task.project_id)?;
+        let deleted_by = match task.deleted_at {
+            Some(deleted_at) => {
+                deleted_by(
+                    self.database.pool(),
+                    workspace_id,
+                    ("task.deleted", "task"),
+                    task_id,
+                    deleted_at,
+                )
+                .await?
+            }
+            None => None,
+        };
+        let pool = self.database.pool();
+        let status = status_from_row(
+            sqlx::query("SELECT id, workspace_id, project_id, name, description, color, category, position, version FROM task_statuses WHERE id = $1")
+                .bind(task.status_id.to_string())
+                .fetch_one(pool)
+                .await?,
+        )?;
+        let labels = sqlx::query(
+            "SELECT id, workspace_id, project_id, name, color, version FROM labels \
+             WHERE id IN (SELECT label_id FROM task_labels WHERE task_id = $1) ORDER BY name, id",
+        )
+        .bind(task_id.to_string())
+        .fetch_all(pool)
+        .await?
+        .into_iter()
+        .map(label_from_row)
+        .collect::<Result<_, _>>()?;
+        Ok(TrashedTask {
+            task,
+            status,
+            labels,
+            deleted_by,
+        })
+    }
+
+    /// A project in the trash within the retention period, for its preview.
+    pub async fn trashed_project(
+        &self,
+        workspace_id: Id,
+        project_id: Id,
+        actor_id: Id,
+        now: TimestampMillis,
+    ) -> Result<TrashedProject, TaskError> {
+        let project = self
+            .trashed_project_record(workspace_id, project_id, actor_id, now)
+            .await?;
+        let deleted_by = match project.deleted_at {
+            Some(deleted_at) => {
+                deleted_by(
+                    self.database.pool(),
+                    workspace_id,
+                    ("project.deleted", "project"),
+                    project_id,
+                    deleted_at,
+                )
+                .await?
+            }
+            None => None,
+        };
+        let statuses = sqlx::query(
+            "SELECT id, workspace_id, project_id, name, description, color, category, position, version \
+             FROM task_statuses WHERE project_id = $1 ORDER BY position, id",
+        )
+        .bind(project_id.to_string())
+        .fetch_all(self.database.pool())
+        .await?
+        .into_iter()
+        .map(status_from_row)
+        .collect::<Result<_, _>>()?;
+        Ok(TrashedProject {
+            project,
+            statuses,
+            deleted_by,
+        })
+    }
+
+    /// The tasks of a trashed project (whatever their own `deleted_at`), by number.
+    pub async fn trashed_project_tasks(
+        &self,
+        workspace_id: Id,
+        project_id: Id,
+        actor_id: Id,
+        cursor: Option<&str>,
+        limit: usize,
+        now: TimestampMillis,
+    ) -> Result<Page<TaskRecord>, TaskError> {
+        self.trashed_project_record(workspace_id, project_id, actor_id, now)
+            .await?;
+        let fingerprint = format!("trashed-project-tasks:{project_id}");
+        let after = cursor_i64_pair(cursor, &fingerprint)?;
+        let mut query = SqlBuilder::new(format!(
+            "SELECT {} FROM tasks JOIN projects ON projects.id = tasks.project_id WHERE tasks.project_id = ",
+            task_columns(self.database.backend(), false)
+        ));
+        query.push_bind(project_id.to_string());
+        if let Some((number, id)) = after {
+            query
+                .push(" AND (tasks.number > ")
+                .push_bind(number)
+                .push(" OR (tasks.number = ")
+                .push_bind(number)
+                .push(" AND tasks.id > ")
+                .push_bind(id.to_string())
+                .push("))");
+        }
+        let limit = limit.clamp(1, 100);
+        query
+            .push(" ORDER BY tasks.number, tasks.id LIMIT ")
+            .push_bind((limit + 1) as i64);
+        let rows = query.build().fetch_all(self.database.pool()).await?;
+        let mut items = Vec::with_capacity(rows.len());
+        for row in rows {
+            items.push(task_from_row(self.database.pool(), row).await?);
+        }
+        finish_page(items, limit, &fingerprint, |task| {
+            vec![task.number.to_string(), task.id.to_string()]
+        })
+    }
+
+    async fn trashed_project_record(
+        &self,
+        workspace_id: Id,
+        project_id: Id,
+        actor_id: Id,
+        now: TimestampMillis,
+    ) -> Result<ProjectRecord, TaskError> {
+        require_access(self.database.pool(), workspace_id, actor_id).await?;
+        self.require_granted_project(project_id)?;
+        let row = sqlx::query(
+            "SELECT id, workspace_id, name, COALESCE(restore_project_key, project_key) AS project_key, color, auto_close_parent, auto_close_sub_issues, version, deleted_at, created_at, updated_at \
+             FROM projects WHERE id = $1 AND workspace_id = $2 AND deleted_at > $3",
+        )
+        .bind(project_id.to_string())
+        .bind(workspace_id.to_string())
+        .bind(now.as_millis().saturating_sub(TRASH_RETENTION_MILLIS))
+        .fetch_optional(self.database.pool())
+        .await?
+        .ok_or(TaskError::NotFound)?;
+        project_from_row(row)
+    }
+
+    /// An API token reads only the projects it was granted.
+    fn require_granted_project(&self, project_id: Id) -> Result<(), TaskError> {
+        if self
+            .project_grant
+            .as_ref()
+            .is_some_and(|grant| !grant.contains(&project_id))
+        {
+            return Err(TaskError::NotFound);
+        }
+        Ok(())
     }
 
     pub async fn comments(
@@ -4353,6 +4784,29 @@ pub(crate) async fn project_task_description(
         .await?;
     }
     Ok(true)
+}
+
+/// Who moved a record to the trash: the actor of its trash audit row. That row is written in
+/// the same transaction with `occurred_at` equal to the record's `deleted_at`.
+async fn deleted_by(
+    pool: &sqlx::AnyPool,
+    workspace_id: Id,
+    (action, resource_type): (&str, &str),
+    resource_id: Id,
+    deleted_at: TimestampMillis,
+) -> Result<Option<Id>, TaskError> {
+    let actor: Option<Option<String>> = sqlx::query_scalar(
+        "SELECT actor_id FROM audit_events WHERE workspace_id = $1 AND occurred_at = $2 \
+         AND action = $3 AND resource_type = $4 AND resource_id = $5 ORDER BY id DESC LIMIT 1",
+    )
+    .bind(workspace_id.to_string())
+    .bind(deleted_at.as_millis())
+    .bind(action)
+    .bind(resource_type)
+    .bind(resource_id.to_string())
+    .fetch_optional(pool)
+    .await?;
+    actor.flatten().map(parse_id).transpose()
 }
 
 #[allow(clippy::too_many_arguments)]

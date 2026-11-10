@@ -5283,6 +5283,17 @@ export type TaskRelationRecord = {
 
 export type TaskRelationType = 'blocks' | 'related' | 'duplicate';
 
+/**
+ * Result of emptying the tasks trash.
+ */
+export type TaskTrashEmptied = {
+    purged_projects: number;
+    /**
+     * Tasks deleted forever, also those of the purged projects.
+     */
+    purged_tasks: number;
+};
+
 export type TaskUpdateBody = {
     assignee_ids?: Array<string> | null;
     /**
@@ -5450,6 +5461,53 @@ export type TrashedPage = {
     title: string;
     updated_at: string;
     version: number;
+};
+
+/**
+ * A page in the trash with its content, for a read-only preview before restoring it.
+ */
+export type TrashedPageDetail = {
+    /**
+     * Whether the caller may delete this page forever: only pages trashed directly (not along
+     * with an ancestor) qualify.
+     */
+    can_purge: boolean;
+    /**
+     * The user who moved the page (or the ancestor it went with) to the trash; `null` when the
+     * audit log no longer has that event.
+     */
+    deleted_by: string | null;
+    page: Page;
+    /**
+     * The sub-pages trashed along with it, ordered `parent_id, position, id`.
+     */
+    sub_pages: Array<PageSummary>;
+};
+
+/**
+ * A project in the trash, with who moved it there and its statuses (the status list leaves
+ * out trashed projects).
+ */
+export type TrashedProject = ProjectRecord & {
+    /**
+     * The user who moved the project to the trash, from the audit log; null when unknown.
+     */
+    deleted_by: string | null;
+    statuses: Array<StatusRecord>;
+};
+
+/**
+ * A task in the trash (or in a trashed project), with who moved it there. It carries its
+ * status and labels: the status and label lists leave out trashed projects.
+ */
+export type TrashedTask = TaskRecord & {
+    /**
+     * The user who moved the task to the trash, from the audit log; null for an API service
+     * account or when the audit row is gone.
+     */
+    deleted_by: string | null;
+    labels: Array<LabelRecord>;
+    status: StatusRecord;
 };
 
 /**
@@ -20131,6 +20189,61 @@ export type EmptyPageTrashResponses = {
 
 export type EmptyPageTrashResponse = EmptyPageTrashResponses[keyof EmptyPageTrashResponses];
 
+export type GetTrashedPageData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        page_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/pages/trash/{page_id}';
+};
+
+export type GetTrashedPageErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * page_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetTrashedPageError = GetTrashedPageErrors[keyof GetTrashedPageErrors];
+
+export type GetTrashedPageResponses = {
+    200: TrashedPageDetail;
+};
+
+export type GetTrashedPageResponse = GetTrashedPageResponses[keyof GetTrashedPageResponses];
+
 export type DeletePageData = {
     body?: never;
     headers?: {
@@ -21958,6 +22071,119 @@ export type ListProjectTrashResponses = {
 
 export type ListProjectTrashResponse = ListProjectTrashResponses[keyof ListProjectTrashResponses];
 
+export type GetTrashedProjectData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/trash/{project_id}';
+};
+
+export type GetTrashedProjectErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetTrashedProjectError = GetTrashedProjectErrors[keyof GetTrashedProjectErrors];
+
+export type GetTrashedProjectResponses = {
+    200: TrashedProject;
+};
+
+export type GetTrashedProjectResponse = GetTrashedProjectResponses[keyof GetTrashedProjectResponses];
+
+export type ListTrashedProjectTasksData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: {
+        cursor?: string;
+        limit?: number;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/projects/trash/{project_id}/tasks';
+};
+
+export type ListTrashedProjectTasksErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request, invalid_cursor
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ListTrashedProjectTasksError = ListTrashedProjectTasksErrors[keyof ListTrashedProjectTasksErrors];
+
+export type ListTrashedProjectTasksResponses = {
+    200: PageTaskRecord;
+};
+
+export type ListTrashedProjectTasksResponse = ListTrashedProjectTasksResponses[keyof ListTrashedProjectTasksResponses];
+
 export type DeleteProjectData = {
     body?: never;
     headers?: {
@@ -22513,6 +22739,65 @@ export type UpdateLabelResponses = {
 };
 
 export type UpdateLabelResponse = UpdateLabelResponses[keyof UpdateLabelResponses];
+
+export type PurgeProjectData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        project_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/projects/{project_id}/permanent';
+};
+
+export type PurgeProjectErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, task_action_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, project_not_trashed
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type PurgeProjectError = PurgeProjectErrors[keyof PurgeProjectErrors];
+
+export type PurgeProjectResponses = {
+    204: void;
+};
+
+export type PurgeProjectResponse = PurgeProjectResponses[keyof PurgeProjectResponses];
 
 export type RestoreProjectData = {
     body: RestoreBody;
@@ -23634,6 +23919,119 @@ export type ListTaskTrashResponses = {
 
 export type ListTaskTrashResponse = ListTaskTrashResponses[keyof ListTaskTrashResponses];
 
+export type EmptyTaskTrashData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/tasks/trash/empty';
+};
+
+export type EmptyTaskTrashErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, task_action_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type EmptyTaskTrashError = EmptyTaskTrashErrors[keyof EmptyTaskTrashErrors];
+
+export type EmptyTaskTrashResponses = {
+    200: TaskTrashEmptied;
+};
+
+export type EmptyTaskTrashResponse = EmptyTaskTrashResponses[keyof EmptyTaskTrashResponses];
+
+export type GetTrashedTaskData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        task_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/tasks/trash/{task_id}';
+};
+
+export type GetTrashedTaskErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type GetTrashedTaskError = GetTrashedTaskErrors[keyof GetTrashedTaskErrors];
+
+export type GetTrashedTaskResponses = {
+    200: TrashedTask;
+};
+
+export type GetTrashedTaskResponse = GetTrashedTaskResponses[keyof GetTrashedTaskResponses];
+
 export type DeleteTaskData = {
     body?: never;
     headers?: {
@@ -24713,6 +25111,65 @@ export type ListGithubLinksResponses = {
 };
 
 export type ListGithubLinksResponse = ListGithubLinksResponses[keyof ListGithubLinksResponses];
+
+export type PurgeTaskData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        task_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/tasks/{task_id}/permanent';
+};
+
+export type PurgeTaskErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden, task_action_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * task_resource_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, task_not_trashed
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type PurgeTaskError = PurgeTaskErrors[keyof PurgeTaskErrors];
+
+export type PurgeTaskResponses = {
+    204: void;
+};
+
+export type PurgeTaskResponse = PurgeTaskResponses[keyof PurgeTaskResponses];
 
 export type ListTaskRelationsData = {
     body?: never;
