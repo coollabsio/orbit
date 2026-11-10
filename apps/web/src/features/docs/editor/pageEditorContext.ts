@@ -5,11 +5,27 @@ export interface PageRef {
   title: string
   icon: string | null
   trashed: boolean
+  /** A database page (a `page` block linking to it can turn into a database block). */
+  database?: boolean
+}
+
+/** The page that holds database blocks: they read and change its databases through the workspace API. */
+export interface DatabaseBlockHost {
+  workspaceId: string
+  pageId: string
+  /** The page lock: the views of its linked view blocks are read-only. */
+  locked: boolean
+  /** Where a block's row peek renders: the page's right pane, outside the editor. Null until the page mounts it. */
+  peekContainer: HTMLElement | null
+  /** The page is a row in a side peek: its blocks open rows as full pages, not as a peek inside the peek. */
+  inPeek: boolean
 }
 
 export interface PageEditorContextValue {
   resolvePage: (pageId: string) => PageRef | null
   onOpenPage: (pageId: string) => void
+  /** Null where database blocks cannot load (read-only previews outside a docs page): they show a plain card. */
+  databaseHost: DatabaseBlockHost | null
 }
 
 // Custom block views render through portals inside <BlockNoteView>, so they see this provider.
@@ -17,6 +33,7 @@ export interface PageEditorContextValue {
 export const PageEditorContext = createContext<PageEditorContextValue>({
   resolvePage: () => null,
   onOpenPage: () => {},
+  databaseHost: null,
 })
 
 export function usePageEditorContext(): PageEditorContextValue {
@@ -24,8 +41,7 @@ export function usePageEditorContext(): PageEditorContextValue {
 }
 
 export type PageBlockState =
-  | { kind: 'ok'; title: string; icon: string | null }
-  | { kind: 'trashed'; title: string; icon: string | null }
+  | { kind: 'ok' | 'trashed'; title: string; icon: string | null; database: boolean }
   | { kind: 'missing' }
 
 /** Maps the resolver result to what the card renders (kept pure for tests). */
@@ -33,5 +49,5 @@ export function pageBlockState(pageId: string, resolvePage: PageEditorContextVal
   const page = pageId ? resolvePage(pageId) : null
   if (!page) return { kind: 'missing' }
   const title = page.title.trim() || 'Untitled'
-  return page.trashed ? { kind: 'trashed', title, icon: page.icon } : { kind: 'ok', title, icon: page.icon }
+  return { kind: page.trashed ? 'trashed' : 'ok', title, icon: page.icon, database: page.database ?? false }
 }

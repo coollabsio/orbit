@@ -18,9 +18,9 @@ use crate::repositories::page_versions::{
     DEFAULT_VERSION_LIMIT, MAX_VERSION_LIMIT, PageVersion, PageVersionList,
 };
 use crate::repositories::pages::{
-    CreatePage, PageChanges, PageError, PageFavorite, PageFavoriteList, PageList, PageRecord,
-    PageRepository, PageSearch, PageTrash, PageTrashEmptied, RECENT_DEFAULT_LIMIT,
-    RECENT_MAX_LIMIT, RecentPageList, SpaceRequest, TrashedPageDetail,
+    CreatePage, MovedPage, PageChanges, PageError, PageFavorite, PageFavoriteList, PageKind,
+    PageList, PageRecord, PageRepository, PageSearch, PageTrash, PageTrashEmptied,
+    RECENT_DEFAULT_LIMIT, RECENT_MAX_LIMIT, RecentPageList, SpaceRequest, TrashedPageDetail,
 };
 use crate::socket_ticket::SocketTickets;
 use crate::task_routes::{
@@ -109,6 +109,10 @@ pub fn page_router(state: PageState) -> Router {
             post(move_page),
         )
         .route(
+            "/api/v1/workspaces/{workspace_id}/pages/{page_id}/descendants",
+            get(list_page_descendants),
+        )
+        .route(
             "/api/v1/workspaces/{workspace_id}/pages/{page_id}/restore",
             post(restore_page),
         )
@@ -147,6 +151,10 @@ pub fn page_router(state: PageState) -> Router {
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct CreatePageBody {
+    /// `database` creates a database with a "Name" title property, a "Tags" multi-select and
+    /// one "Table" view. Defaults to `page`.
+    #[serde(default)]
+    kind: PageKind,
     /// With a parent the page joins the parent's space; contradicting `teamspace_id` or
     /// `private` values fail validation.
     parent_id: Option<String>,
@@ -215,8 +223,11 @@ struct MovePageBody {
     /// With `parent_id: null`: `true` moves the page into the caller's private space, `false`
     /// out of it (to the default teamspace unless `teamspace_id` is given).
     private: Option<bool>,
-    /// Index among the new siblings.
+    /// Index among the new siblings. A page that enters a database always goes last.
     position: i64,
+    /// Checks the move and counts `dropped_values`, then changes nothing.
+    #[serde(default)]
+    dry_run: bool,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -284,6 +295,7 @@ async fn create_page(
     let (workspace_id, actor_id) =
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
     let input = CreatePage {
+        kind: body.kind,
         parent_id: body
             .parent_id
             .map(|value| parse_id(&value, &instance, request_id.as_ref()))
@@ -332,6 +344,28 @@ async fn get_page(
     state
         .pages
         .get_page(workspace_id, page_id, actor_id)
+        .await
+        .map(Json)
+        .map_err(|error| page_problem(error, instance, request_id.as_ref()))
+}
+
+/// The page's live sub-pages at any depth, parents first, for the trash prompt and the "with
+/// sub-pages" actions. Database rows and their sub-pages are not in `GET .../pages`; this lists
+/// a row's sub-pages too. A database's rows are its content, not sub-pages.
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/pages/{page_id}/descendants", params(("workspace_id" = String, Path), ("page_id" = String, Path)), responses((status = 200, body = PageList)))]
+async fn list_page_descendants(
+    State(state): State<PageState>,
+    Path((workspace, page)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<PageList>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/pages/{page}/descendants");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let page_id = parse_id(&page, &instance, request_id.as_ref())?;
+    state
+        .pages
+        .descendants(workspace_id, page_id, actor_id)
         .await
         .map(Json)
         .map_err(|error| page_problem(error, instance, request_id.as_ref()))
@@ -405,14 +439,14 @@ async fn update_page(
         .map_err(|error| page_problem(error, instance, request))
 }
 
-#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/pages/{page_id}/move", params(("workspace_id" = String, Path), ("page_id" = String, Path)), request_body = MovePageBody, responses((status = 200, body = PageRecord)))]
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/pages/{page_id}/move", params(("workspace_id" = String, Path), ("page_id" = String, Path)), request_body = MovePageBody, responses((status = 200, body = MovedPage)))]
 async fn move_page(
     State(state): State<PageState>,
     Path((workspace, page)): Path<(String, String)>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
     ApiJson(body): ApiJson<MovePageBody>,
-) -> Result<Json<PageRecord>, ApiError> {
+) -> Result<Json<MovedPage>, ApiError> {
     let instance = format!("/api/v1/workspaces/{workspace}/pages/{page}/move");
     let (workspace_id, actor_id) =
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
@@ -438,6 +472,7 @@ async fn move_page(
             parent_id,
             space,
             position,
+            body.dry_run,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )
@@ -946,7 +981,7 @@ fn parse_version_id(
 }
 
 /// An unparseable teamspace id cannot name a teamspace of this workspace.
-fn space_request(
+pub(crate) fn space_request(
     teamspace_id: Option<String>,
     private: Option<bool>,
     instance: &str,
@@ -1075,7 +1110,7 @@ fn teamspace_not_found(instance: String, request_id: Option<&Extension<RequestId
     )
 }
 
-fn page_problem(
+pub(crate) fn page_problem(
     error: PageError,
     instance: String,
     request_id: Option<&Extension<RequestId>>,
@@ -1125,6 +1160,30 @@ fn page_problem(
             "page_locked",
             "Page locked",
             "The page is locked. Unlock it to change its title, icon, cover or content.",
+            instance,
+            request_id,
+        ),
+        PageError::DatabaseInDatabase => ApiError::new(
+            StatusCode::CONFLICT,
+            "database_in_database",
+            "Database in a database",
+            "A database cannot be a row.",
+            instance,
+            request_id,
+        ),
+        PageError::DatabaseTrashed => ApiError::new(
+            StatusCode::CONFLICT,
+            "database_trashed",
+            "Database in the trash",
+            "Restore the database first.",
+            instance,
+            request_id,
+        ),
+        PageError::RowLimit => ApiError::new(
+            StatusCode::CONFLICT,
+            "database_row_limit",
+            "Database row limit",
+            "A database holds at most 5,000 rows.",
             instance,
             request_id,
         ),

@@ -27,8 +27,11 @@ sub-pages (`apps/server/src/notion/scan.rs:28`).
   property type, resize, hide and reorder columns, multi-column sort, a flat AND filter, search in
   the view, manual row order (drag) when the view has no sorts, multi-row select and delete,
   keyboard navigation.
-- **Saved views:** more than one table view per database, shown as tabs. Each view has its own
-  columns, sorts and filter.
+- **Board view:** columns by a `select` or `status` property, cards with the title and chosen
+  properties, drag cards between and inside columns, reorder and hide columns (section 7.7).
+- **Saved views:** more than one table or board view per database, shown as tabs. Each view has
+  its own columns (or groups and card properties), sorts and filter. The "+" picker lists the
+  other Notion layouts as "Soon".
 - **Row page:** opens in a side peek from the table, or as a full page. A property list shows
   under the title.
 - **Mobile:** a database screen with a row list, a view picker and the row page with editable
@@ -36,9 +39,12 @@ sub-pages (`apps/server/src/notion/scan.rs:28`).
 
 ### Not in P1 (later phases)
 
+The design for these items is in [Docs databases, P2 and P3](2026-11-09-docs-databases-p2-p3-design.md)
+(build order in its section 1.1). The Notion import (section 14) is done.
+
 | Phase | Item |
 |---|---|
-| P2 | Inline database block, linked views, board view, calculation footer, AND/OR filter groups, row templates, Notion import as real databases, property values in search, CSV import and export, moving pages into and out of a database |
+| P2 | Inline database block, linked views, board grouped by `person`, sub-groups (swim lanes), calculation footer, AND/OR filter groups, row templates, property values in search, CSV import and export, moving pages into and out of a database |
 | P3 | Relation, rollup, formula, files, email, phone, unique ID, button; gallery, calendar, timeline and list views; MCP and token API tools for databases; form view |
 
 ## 3. Concepts
@@ -48,14 +54,14 @@ sub-pages (`apps/server/src/notion/scan.rs:28`).
 | Database | A page with `kind = 'database'`. It has no BlockNote body in P1. It has properties, views and rows. |
 | Row | A page whose parent is a database page. The row title is the `title` property. |
 | Property | One typed column of a database. It has a stable id, so a rename does not break views. |
-| View | A saved way to show the rows: type (`table` in P1), columns, sorts, filter. All members who can edit the database share the views. |
+| View | A saved way to show the rows: type (`table` or `board` in P1), columns or groups, sorts, filter. All members who can edit the database share the views. |
 
 A database lives in a space (teamspace or private) like any page. Its rows inherit the space and
 the access of the database page, as sub-pages do today.
 
 ## 4. Data model
 
-Migration `0078_page_databases.sql`, and the same change in
+Migration `0086_page_databases.sql`, and the same change in
 `apps/server/migrations/postgres/`. Also update the places that `.ai/lessons.md` names:
 `crates/platform/src/db/migrate.rs` (both runners), `SUPPORTED_SCHEMA_VERSION` in
 `crates/platform/src/backup.rs`, the version in `crates/platform/tests/{database,backup}.rs` and
@@ -144,8 +150,9 @@ Rules:
 
 ### 4.2 Type change
 
-`PATCH` of `type` converts the values in one transaction. Conversions that lose data need a
-confirmation in the UI ("Some values cannot be converted and will be cleared").
+`PATCH` of `type` converts the values in one transaction. The UI first sends the change with
+`dry_run: true` and asks for a confirmation only when values would be cleared ("N values cannot be
+converted and will be cleared"); otherwise the type changes at once.
 
 | From → to | Rule |
 |---|---|
@@ -175,6 +182,36 @@ confirmation in the UI ("Some values cannot be converted and will be cleared").
 - Width: 32–1,000 px, default 200 (title 280).
 - Max 10 sorts and 20 filter rules for each view. All rules must match (AND). AND/OR groups are P2.
 - A rule or sort that names a deleted property is dropped when the view loads and when it saves.
+
+A **board** view (`type = 'board'`, migration `0087_database_board_views.sql` widens the `type`
+check; SQLite rebuilds `database_views` as `0021` does) uses the same `sorts` and `filter`, and
+four more fields (a table view ignores them; empty ones are left out of the JSON):
+
+```json
+{
+  "group_by": "<select or status property id>",
+  "group_order": ["opt_2", null, "opt_1"],
+  "hidden_groups": [null],
+  "card_properties": ["<property id>", "…"]
+}
+```
+
+- `group_by` must name a `select` or `status` property (422 `config.group_by` for another type).
+  A `person` group is P2: a row can have several people, so one card would sit in several
+  columns.
+- `group_order` lists option ids in column order, with `null` for the "No <property>" column.
+  Options missing from it follow in option order; "No <property>" comes first unless it is placed.
+  A status board has no "No <property>" column: a row with no status sits in the first `todo`
+  option, as the table shows it.
+- `hidden_groups` lists the columns shown under "Hidden groups". `card_properties` lists the
+  properties on each card, after the title (which always shows).
+- **Repair** on load and save, as for the other fields: unknown options and repeats leave
+  `group_order` and `hidden_groups`, unknown properties and the title leave `card_properties`. A
+  board whose `group_by` is missing, deleted or no longer a select or status groups by the first
+  `status` property, else the first `select`, else none (the client shows "Choose a property to
+  group by"); a changed `group_by` resets `group_order` and `hidden_groups`. A new board gets its
+  group property the same way.
+- A duplicate keeps its source's type.
 
 Filter operators:
 
@@ -207,7 +244,7 @@ route to the OpenAPI document and run `just api`, so `@orbit/api` gets the gener
 | `GET /pages/{id}` | Has `kind`. For a row, also `database_id`. |
 | `POST /pages/{id}/move` | 409 `database_move_unsupported` when you move a row out of a database, or a page into a database (P2 allows it). You can still move a database page itself. |
 | `POST /pages/{id}/duplicate` | A database copies its properties, views (property ids rewritten), rows and values with new ids. |
-| Trash, restore, permanent delete | No change. Rows are sub-pages, so they go to the trash with the database and come back with it. A row trashed on its own comes back into its database. Values go with the page on permanent delete (cascade). |
+| Trash, restore, permanent delete | No change. Rows are sub-pages, so they go to the trash with the database and come back with it. A row trashed on its own comes back into its database, in the database's current space even if the database moved meanwhile; it stays in the trash when the database is trashed, and its restore returns 409 `database_trashed` ("Restore the database first.") until the database is back. When the database is deleted forever, the row comes back as a plain page at the top level of its space. Values go with the page on permanent delete (cascade). |
 | `GET/WS /pages/{id}/collab`, versions | A database page has no body: the collab endpoint returns 409 for `kind = 'database'`. Rows work as today. |
 | `GET /pages/search` | No change: row titles and bodies are pages, so they are found. A hit on a row shows "Row · <database title>". |
 
@@ -216,16 +253,16 @@ route to the OpenAPI document and run `just api`, so `@orbit/api` gets the gener
 | Method and path | Body | Result |
 |---|---|---|
 | `GET /databases/{database_id}` | — | The whole database (below) |
-| `POST /databases/{database_id}/properties` | `{name, type, config?, position?}` | The property; it is added to all views |
-| `PATCH /databases/{database_id}/properties/{property_id}` | `{name?, type?, config?, position?}` | The property, and `converted: n, cleared: n` when the type changes |
+| `POST /databases/{database_id}/properties` | `{name, type, config?, position?}`, or `{duplicate_of, name?}` (with `type`, `config` or `position`: 422) | The property; it is added to all views. A duplicate copies the config (new option ids) and the values, and goes right after its source, among the properties and in every view; its name defaults to "<name> (copy)" |
+| `PATCH /databases/{database_id}/properties/{property_id}` | `{name?, type?, config?, position?, dry_run?}`; `type` and `config` cannot be in the same request (422) | `{property, converted, cleared}`; `dry_run: true` returns them without saving (no audit event, no realtime event) |
 | `DELETE /databases/{database_id}/properties/{property_id}` | — | 204; its values go too; views drop it |
-| `POST /databases/{database_id}/views` | `{name, type: "table", config?, duplicate_of?}` | The view |
+| `POST /databases/{database_id}/views` | `{name, type: "table" \| "board", config?, duplicate_of?}` | The view; with `duplicate_of`, the source's type |
 | `PATCH /databases/{database_id}/views/{view_id}` | `{name?, config?, position?}` | The view |
 | `DELETE /databases/{database_id}/views/{view_id}` | — | 204; 409 for the last view |
-| `POST /databases/{database_id}/rows` | `{title?, icon?, values?, after_row_id?}` | The new row |
+| `POST /databases/{database_id}/rows` | `{title?, icon?, values?, after_row_id?}`; `after_row_id` omitted = last, `null` = first; `values` cannot hold the title or a computed property | The new row |
 | `PATCH /databases/{database_id}/rows/{row_id}/values` | `{"<property_id>": value \| null, …}` | The row |
 | `POST /databases/{database_id}/rows/trash` | `{row_ids: [...]}` (max 500) | 204; one trash batch for each row |
-| `POST /databases/{database_id}/rows/{row_id}/move` | `{after_row_id: id \| null}` | The row (manual order, sets `pages.position`) |
+| `POST /databases/{database_id}/rows/{row_id}/move` | `{after_row_id: id \| null, values?}`; `values` as in `PATCH …/values` | The row (manual order, sets `pages.position`). The values are written in the same transaction, so a board card dropped into another column sets its group value and its place in one request; a bad value moves nothing |
 
 `GET /databases/{database_id}` returns:
 
@@ -235,7 +272,7 @@ route to the OpenAPI document and run `just api`, so `@orbit/api` gets the gener
   "properties": [{ "id": "…", "name": "Name", "type": "title", "config": {}, "position": 0 }],
   "views": [{ "id": "…", "name": "Table", "type": "table", "config": { … }, "position": 0 }],
   "rows": [{
-    "id": "…", "title": "Paper A", "icon": null, "position": 1024,
+    "id": "…", "title": "Paper A", "icon": null, "position": 0, "version": 0,
     "created_at": "…", "created_by": "…", "updated_at": "…", "updated_by": "…",
     "has_content": true,
     "values": { "<property_id>": ["opt_1", "opt_2"] }
@@ -251,11 +288,15 @@ Rules:
   at the cap. Also max 100 properties and 50 views for each database.
 - **Writes** use `immediate_transaction()`. Validate and convert before the transaction where
   possible (see `.ai/lessons.md`, "Write transactions").
+- **Validation errors:** 422 `validation_failed` with the field path in `detail` (for example
+  `values.<property id>` or `config.filter.rules[0].value`).
+- **Row positions** are `0..n` without gaps (the page `renumber`). A row added first rewrites the
+  positions of the other rows in the same transaction.
 - **Conflicts:** a cell write is last-write-wins. It needs no version, as a Notion cell does. A
   value write updates the row's `pages.updated_at` and `updated_by` (so `last_edited_*` work) but
   not `pages.version`. Property and view writes are also last-write-wins.
 - **Lock:** the page lock (`/pages/{id}/lock`) on a database page locks its properties and views
-  (403 `page_locked`). Members can still add rows and edit values, as in Notion's "Lock database".
+  (423 `page_locked`, as for pages). Members can still add rows and edit values, as in Notion's "Lock database".
 - **Realtime:** every write records an audit event and an outbox event like a page metadata
   `PATCH` (resource type `database`, with the database id). Clients refetch the database query
   on that event. Cell edits are frequent: during implementation, check how page title edits
@@ -271,9 +312,13 @@ A new pure TypeScript package, used by web and mobile. It has no React and no ne
   they exist.
 - `values.ts`: parse a value from the API; the display text of a value; a value from typed text
   (paste).
-- `filter.ts`: `matches(row, rule, ctx)`; `ctx` has the current user id and "now" (for `me` and
-  relative dates).
-- `sort.ts`: compare two rows for a list of sorts. Empty values go last in both directions. Select
+- `filter.ts`: `matches(row, rule, property, ctx)`; `ctx` has the current user id, "now", the time
+  zone and the member names (for `me`, relative dates and person names). Rules for unclear cases:
+  a date range counts by its start for `before`/`after`/`on_or_*`, and `is` matches a day inside
+  the range; a date with a time counts as its day in the viewer's time zone; an empty number
+  matches only `!=`; empty text matches `not_equals` and `not_contains`; a status with no value is
+  its first `todo` option, so it is never empty.
+- `sort.ts`: `sortRows(rows, sorts, properties, ctx)`; it computes each row's sort keys once. Empty values go last in both directions. Select
   and status sort by option order, person by name, checkbox `false` before `true`. Ties fall back
   to manual order (`position`, then `id`).
 - `view.ts`: `applyView(database, view, search, ctx) → rows` (filter, then search over the title
@@ -282,8 +327,13 @@ A new pure TypeScript package, used by web and mobile. It has no React and no ne
 Unit tests (`bun test`) cover each operator, the empty rules, sort ties and the repair. This is
 the logic that can break silently.
 
-Client sort and filter is enough for 5,000 rows: one `applyView` runs in a few milliseconds.
-Measure it with 5,000 rows and 20 properties before the web work is done.
+Client sort and filter is enough for 5,000 rows. Measured (`bun run bench`, 5,000 rows × 20
+properties, 3 sorts, 5 rules, desktop): 8 ms without search, 27 ms for a search with no hits. Phones
+are slower; cache each row's search text if search feels slow on mobile.
+
+Display rules: `percent` shows the value × 100 (0.125 → "12.5%"), as in Notion. The `relative` date
+format shows Today, Tomorrow or Yesterday, else the short date. Paste matches existing option and
+member names only (case ignored); it never creates options.
 
 ## 7. Web UI
 
@@ -314,15 +364,21 @@ shadcn-style code, inline Tailwind, `cva` for variants, reicon outline icons, fl
 └───────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Title area:** the same cover, icon and title controls as a normal page. The table uses the
-  full page width when the page is full width (`full_width` option). Otherwise the table can
-  scroll sideways past the text column, as in Notion.
+- **Title area:** the same cover, icon and title controls as a normal page. A database page is
+  always full width, as a Notion full-page database: cover, title, view tabs, toolbar and table
+  start at the same left edge (the page padding, wide enough for the row handles and checkboxes),
+  and the table scrolls sideways. The page menu has no "Full width" item.
 - **View tabs:** each tab shows the view icon and name. Click selects. Right-click or "⋯" gives
-  Rename, Duplicate, Delete. "+" adds a table view. The selected view is stored per user in
+  Rename, Duplicate (keeps the type), Delete. "+" opens "Add a new view": a 4 × 2 grid of icon
+  tiles (Table, Board, List, Gallery, Calendar, Timeline, Chart, Form). Table and Board create a
+  view named after the type, made unique ("Board 2"); the others are disabled with a small "Soon".
+  Arrow keys move in the grid, Enter picks, Esc closes. The selected view is stored per user in
   `localStorage` (`orbit:database-view:<database_id>`), and the URL holds it (`?view=<id>`).
 - **Toolbar:** Filter and Sort show a count when they are active (pink text). Search opens an
   inline field that filters the visible rows only for this user (it is not saved). "⋯" opens
-  Properties (show, hide, reorder), Wrap cells, Lock database, Copy link to view. "New" adds a
+  Properties (show, hide, reorder), Wrap cells, Lock database, Copy link to view. On a board, "⋯"
+  has Group by (select and status properties) and Card properties instead of Properties and Wrap
+  cells. "New" adds a
   row at the top of the view and opens it in the side peek; the "▾" part is for templates (P2,
   hidden in P1).
 - **Filter bar:** one chip for each rule, `<property>: <value summary>`. Click opens a popover
@@ -413,6 +469,30 @@ Range select and paste of many cells is P2.
 - The tree shows a database with a table icon (or its own icon) and no expand arrow, because rows
   are not in the tree.
 
+### 7.7 Board
+
+- `DatabaseBoard.tsx`. The rows go through `applyView` (filter, search over the title and the card
+  properties, sort), then `groupRows` (`@orbit/database/board`).
+- **Columns:** 260 px wide, side by side; the page scrolls sideways. The header has the option
+  pill (or "No <property>"), the count, "⋯" (Hide group) and "+" (a card at the top of the
+  column). "+ New" at the bottom adds a card at the end. A new card gets the column's value and
+  the values the filter needs (`newRowValues`), and opens its title field. "Hidden groups" lists
+  the hidden columns after the last one, each with a show button.
+- **Cards:** the title, then each card property that has a value, with the table's `CellView`.
+  A click opens the row (`/docs/<row id>` until the side peek lands).
+- **Drag and drop** as the task board: native HTML5 events, the dragged card stays mounted
+  (faded), and a placeholder shows among the other cards. A drop into another column without
+  sorts is one `POST …/rows/{id}/move` with `values`; inside a column it is a plain move. With
+  sorts, the order in a column follows the sort: only drops into another column count (`PATCH
+  …/values`), and the source column says "Remove sorts to reorder cards". Column headers drag to
+  reorder the groups (`group_order`).
+- Moves are optimistic and roll back with a toast on error. Each column renders 50 cards, then
+  "Show 50 more"; there is no virtualization.
+- **Rules:** cards move and are added only with value access (not in a read-only workspace).
+  Group by, card properties, hidden groups and column order are view changes: shared at once, or
+  local with "Changes are only visible to you" for members who cannot change the view (D1).
+- No group property: "Choose a property to group by", with "Add a Status property".
+
 ## 8. Mobile (`apps/mobile`)
 
 Port the same data and logic (`@orbit/database`, the same API client). Mobile has no wide table,
@@ -436,10 +516,10 @@ so it shows a list.
 |---|---|
 | Page export (`pageExport.ts`, `repositories/page_export.rs`) | A database exports as a Markdown table of its first view (visible columns, view order). Rows export as sub-pages; each row file starts with a property list. |
 | Workspace export (`workspace_export/`) | The same rules as the page export. Check that the archive code sees the new tables. |
-| Backups | The new tables are in the database snapshot. Update `SUPPORTED_SCHEMA_VERSION`. |
+| Backups | The new tables are in the database snapshot. Update `SUPPORTED_SCHEMA_VERSION`. Restoring a database page from a backup copies it as a database with its properties, views (property ids rewritten), rows and values, like duplicate. Restoring one row copies it as a row of its live database with the values whose property still exists and whose value fits the property's current type; when that database is gone, trashed, or no longer a database, the copy is a plain page at the top level with no values. |
 | Version history | Rows keep the page history for the title and body. Property values are not in history in P1. |
 | MCP and token API | No new tools in P1. The existing page tools see rows as pages. A database page reads as its title with no body. |
-| Notion import | No change in P1. P2 maps Notion data sources to databases. |
+| Notion import | Imports Notion data sources as databases (section 14). |
 | Comments, mentions, favorites, recent | Work on rows and on the database page as on pages. |
 
 ## 10. Build order
@@ -490,3 +570,49 @@ Each step ends in a state you can check.
 | D3 | A database page has no body (no description above the table) in P1. | 2026-11-09 |
 | D4 | A `person` property holds Orbit workspace members only, no free text, as in Notion. | 2026-11-09 |
 | D5 | The slash menu item is "Database – full page": it creates a database as a sub-page and inserts a `page` link block. The inline database block is P2. | 2026-11-09 |
+| D6 | The board view moves into P1. It groups by `select` and `status` only; `person` and sub-groups are P2. Its settings live in `config_json` next to the table settings, not in a separate table. | 2026-11-09 |
+| D7 | A card move is one request: `POST …/rows/{id}/move` takes optional `values` and writes them with the new place in one transaction, so a failed value never leaves a card half moved. | 2026-11-09 |
+| D8 | The "+" buttons in the docs tree (web) and the docs list (mobile) open a menu with "New page" and "New database". This differs from Notion on purpose: there, "+" makes an empty page at once and the empty page offers database types. Orbit keeps `pages.kind` fixed after creation. | 2026-11-09 |
+
+## 14. P2: Notion import
+
+Status: built 2026-11-09. The Notion import (`apps/server/src/notion/`) imports each Notion data
+source as an Orbit database. Before, it made a static table page with the rows as sub-pages.
+
+- **Where:** `notion/scan.rs` lists one tree node for each database. A database with several data
+  sources lists one node for each data source. `notion/import.rs` pass 1 fetches the data source,
+  its views and its rows (before any write transaction), then creates the database with
+  `PageRepository::create_database_with_id` and a `DatabaseSchema`, and each row with
+  `DatabaseRepository::create_row_with_id`. These use the same rules as the API: limits, the row
+  cap, the trial limit and value checks. Pass 2 fills the row bodies as before. `notion/database.rs`
+  holds the mapping. It is pure and has no I/O.
+- **Ids:** property and option ids come from the database page id and the Notion ids. Thus a
+  resumed import finds the schema of the first attempt and stores no map.
+- **Report:** `databases_imported`, `rows_truncated`, lossy reasons (`formula_values`,
+  `rollup_values`, `relation_titles`, `files_as_names`, `number_format`, `people_as_text`,
+  `unmatched_people`, `invalid_values`, `values_truncated`, `options_truncated`,
+  `properties_truncated`, `view_type:<type>`, `view_filter`, `view_sort`, `views_unavailable`) and
+  skipped `property:<type>`. Web and mobile show them as sentences (`@orbit/database/notionImport`).
+
+| Notion | Orbit |
+|---|---|
+| Database with N data sources | One Orbit database for each data source. The title is the database title when there is one data source, else the data source title. |
+| `title` | `title` |
+| `rich_text`, `email`, `phone_number` | `text` (plain text) |
+| `number` | `number`. `number`, `number_with_commas` and `percent` (fractions, as in Notion) keep their format. A currency becomes `currency` with its ISO 4217 code. `bitcoin` becomes `number` (`number_format`). |
+| `select`, `multi_select` | The same type, with option names and colors. Unknown colors become `default`. At most 200 options. |
+| `status` | `status`. The groups To-do, In progress and Complete become `todo`, `in_progress` and `done`. |
+| `date`, `created_time`, `last_edited_time` | `date`. A time is stored in UTC. The timestamps are static values. |
+| `people` | `person`: Notion users match Orbit members by email (case ignored). Other people are left out (`unmatched_people`). More than 25 come from the property-item endpoint. |
+| `created_by`, `last_edited_by` | `person` when every user matches a member, else `text` with the names (`people_as_text`) |
+| `checkbox`, `url` | The same type. A URL that is not http(s) is left out (`invalid_values`). |
+| `files` | `text` with the file names (`files_as_names`) |
+| `formula` | A static property of the result type: number, text, checkbox or date (`formula_values`) |
+| `rollup` | Number → `number`, date → `date`, other → `text` of the values (`rollup_values`) |
+| `relation` | `text` with the titles of the related pages (`relation_titles`). More than 25 come from the property-item endpoint. |
+| `unique_id` | `text` (`PREFIX-N`) |
+| `button`, `verification`, `place`, unknown | Skipped (`property:<type>`) |
+| Views | One view for each view of the data source, with the same name and order. Columns (order, width, hidden), wrap, sorts and the AND part of the filter are kept. Filter parts in an OR group of more than one condition, or with no Orbit operator, are dropped (`view_filter`). Timestamp sorts are dropped (`view_sort`). A `board` view stays a board: it groups by the same property when that property became a `select` or `status` (else the first status or select), and its visible properties become the card properties. Other layouts become tables (`view_type:<type>`). When the views cannot be read, the database gets one "Table" view (`views_unavailable`). |
+| Rows | Rows of the database, in Notion's order (oldest first). The body converts as for pages, without the old property table. At most 5,000 rows (`rows_truncated`). |
+| Inline database | A database sub-page of its page. The `child_database` block becomes a `page` link block. |
+

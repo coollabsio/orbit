@@ -223,6 +223,34 @@ body {
   font-size: 12px;
   font-weight: 400;
 }
+.orbit-database-card {
+  padding: 8px 10px;
+  border: 1px solid var(--orbit-border);
+}
+.orbit-database-card .orbit-page-card-title {
+  text-decoration: none;
+}
+.orbit-database-card .orbit-page-card-note {
+  overflow: hidden;
+  flex-shrink: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.orbit-database-card[data-state='ready'] .orbit-page-card-note {
+  margin-left: auto;
+}
+.orbit-database-card[data-state='trashed'] .orbit-page-card-title {
+  text-decoration-line: line-through;
+}
+.orbit-database-card:not([data-state='ready']) {
+  color: var(--orbit-muted-foreground);
+}
+.orbit-database-card-linked {
+  flex-shrink: 0;
+  margin-left: -5px;
+  color: var(--orbit-muted-foreground);
+  font-size: 12px;
+}
 
 .orbit-mention {
   padding: 0 2px;

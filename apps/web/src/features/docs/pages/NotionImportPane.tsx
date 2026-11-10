@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { Import, TickCircle, Warning } from 'reicon-react'
 import type { NotionImport } from '@orbit/api/generated/types.gen'
+import { notionDatabaseNotes } from '@orbit/database/notionImport'
 import { apiClient } from '@/api/client'
 import { cn } from 'cn'
 import { Button, buttonVariants } from '@/components/ui/button'
@@ -219,8 +220,9 @@ function ResultStep({ workspaceId, item }: { workspaceId: string; item: NotionIm
         : item.status === 'cancelled'
           ? 'Import cancelled'
           : 'Import expired'
-  const skipped = countEntries(report?.skipped ?? {})
-  const lossy = countEntries(report?.lossy ?? {})
+  const database = report ? notionDatabaseNotes(report) : null
+  const skipped = countEntries(database?.skipped ?? {})
+  const lossy = countEntries(database?.lossy ?? {})
   const notes: string[] = []
   if (report) {
     if (report.missing_files > 0) notes.push(`${report.missing_files} Notion files could not be downloaded.`)
@@ -231,6 +233,7 @@ function ResultStep({ workspaceId, item }: { workspaceId: string; item: NotionIm
       notes.push(`${report.previously_imported} pages were imported before; this import created new copies.`)
     if (report.unfilled_pages_trashed > 0)
       notes.push(`${report.unfilled_pages_trashed} empty pages the import had created were moved to the trash.`)
+    notes.push(...(database?.notes ?? []))
   }
 
   return (

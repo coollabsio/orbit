@@ -18,7 +18,8 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::task_routes::ProblemBody,
         crate::workspace_routes::ProblemBody,
         crate::attachment_routes::AttachmentProblem,
-        crate::repositories::task_filter::FilterGroup
+        crate::repositories::task_filter::FilterGroup,
+        crate::repositories::databases::ButtonConfig
     )),
     modifiers(&ProblemDetails),
     paths(
@@ -148,6 +149,11 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::public_api::doc,
         crate::public_api::create_doc,
         crate::public_api::update_doc,
+        crate::public_api::databases::database,
+        crate::public_api::databases::query_database,
+        crate::public_api::databases::create_row,
+        crate::public_api::databases::update_row,
+        crate::public_api::databases::trash_rows,
         crate::public_api::create_export,
         crate::public_api::get_export,
         crate::public_api::download_export,
@@ -235,6 +241,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::page_routes::empty_page_trash,
         crate::page_routes::duplicate_page,
         crate::page_routes::search_pages,
+        crate::page_routes::list_page_descendants,
         crate::page_routes::list_page_favorites,
         crate::page_routes::add_page_favorite,
         crate::page_routes::remove_page_favorite,
@@ -245,6 +252,27 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::page_routes::set_page_lock,
         crate::page_routes::record_page_visit,
         crate::page_routes::list_recent_pages,
+        crate::database_routes::get_database,
+        crate::database_routes::create_database_property,
+        crate::database_routes::update_database_property,
+        crate::database_routes::delete_database_property,
+        crate::database_routes::create_database_link,
+        crate::database_routes::delete_database_link,
+        crate::database_routes::create_database_view,
+        crate::database_routes::update_database_view,
+        crate::database_routes::delete_database_view,
+        crate::database_routes::create_database_row,
+        crate::database_routes::update_database_row_values,
+        crate::database_routes::trash_database_rows,
+        crate::database_routes::move_database_row,
+        crate::database_routes::buttons::press_database_button,
+        crate::database_routes::import::import_database_csv,
+        crate::database_routes::forms::submit_database_form,
+        crate::database_routes::formula::preview_database_formula,
+        crate::database_routes::import::create_database_from_csv,
+        crate::database_routes::templates::create_database_template,
+        crate::database_routes::templates::update_database_template,
+        crate::database_routes::templates::delete_database_template,
         crate::page_file_routes::upload_page_file,
         crate::page_file_routes::download_page_file,
         crate::page_comment_routes::list_page_threads,
@@ -493,6 +521,7 @@ fn problem_schema(route: &str) -> &'static str {
         || route.contains("/views")
         || route.contains("/view-")
         || route.contains("/pages")
+        || route.contains("/databases")
         || route.contains("/teamspaces")
         || route.contains("/imports/")
         || route.contains("/chat/")
@@ -557,6 +586,7 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             | "public_list_tasks"
             | "public_get_task"
             | "public_list_comments"
+            | "public_query_database"
             | "public_create_export"
     ) {
         add_code(&mut responses, "400", "invalid_request");
@@ -590,6 +620,9 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             | "public_create_comment"
             | "public_create_doc"
             | "public_update_doc"
+            | "public_create_database_row"
+            | "public_update_database_row"
+            | "public_trash_database_rows"
     );
     if write {
         add_code(&mut responses, "400", "invalid_request");
@@ -597,10 +630,16 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         add_code(&mut responses, "403", "origin_forbidden");
         add_code(&mut responses, "503", "service_unavailable");
     }
-    if matches!(operation_id, "public_create_task" | "public_create_doc") {
+    if matches!(
+        operation_id,
+        "public_create_task" | "public_create_doc" | "public_create_database_row"
+    ) {
         add_code(&mut responses, "402", "trial_limit_reached");
     }
-    if matches!(operation_id, "public_create_doc" | "public_update_doc") {
+    if matches!(
+        operation_id,
+        "public_create_doc" | "public_update_doc" | "public_create_database_row"
+    ) {
         add_code(&mut responses, "413", "doc_too_large");
     }
     if matches!(
@@ -610,6 +649,10 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             | "public_create_comment"
             | "public_create_doc"
             | "public_update_doc"
+            | "public_query_database"
+            | "public_create_database_row"
+            | "public_update_database_row"
+            | "public_trash_database_rows"
     ) {
         add_code(&mut responses, "422", "validation_failed");
     }
@@ -641,6 +684,16 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         // `permanent=true` without a workspace owner or admin.
         "public_delete_task" => add_code(&mut responses, "403", "workspace_action_forbidden"),
         "public_update_doc" => {
+            add_code(&mut responses, "423", "page_locked");
+            add_code(&mut responses, "503", "page_busy");
+        }
+        "public_create_database_row" => {
+            add_code(&mut responses, "409", "database_row_limit");
+            add_code(&mut responses, "409", "conflict");
+            add_code(&mut responses, "503", "page_busy");
+        }
+        "public_update_database_row" => {
+            add_code(&mut responses, "409", "conflict");
             add_code(&mut responses, "423", "page_locked");
             add_code(&mut responses, "503", "page_busy");
         }
@@ -1025,6 +1078,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
                 add_code(&mut responses, "404", "item_not_found");
                 add_code(&mut responses, "409", "project_missing");
                 add_code(&mut responses, "409", "teamspace_missing");
+                add_code(&mut responses, "409", "database_row_limit");
                 add_code(&mut responses, "413", "storage_quota_exceeded");
             }
         }
@@ -1085,6 +1139,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         id if task_operation(id) => task_errors(id, &mut responses),
         id if page_comment_operation(id) => page_comment_errors(id, &mut responses),
         id if page_operation(id) => page_errors(id, &mut responses),
+        id if database_operation(id) => database_errors(id, &mut responses),
         id if teamspace_operation(id) => teamspace_errors(id, &mut responses),
         id if id.contains("chat") => chat_errors(id, &mut responses),
         _ => {}
@@ -1097,6 +1152,8 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             | "create_page"
             | "duplicate_page"
             | "restore_page"
+            | "create_database_row"
+            | "submit_database_form"
             | "create_invitation"
     ) {
         add_code(&mut responses, "402", "trial_limit_reached");
@@ -1695,6 +1752,7 @@ fn page_operation(operation_id: &str) -> bool {
         "list_pages"
             | "create_page"
             | "get_page"
+            | "list_page_descendants"
             | "update_page"
             | "move_page"
             | "delete_page"
@@ -1754,8 +1812,93 @@ fn page_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
     if matches!(operation_id, "update_page" | "restore_page_version") {
         add_code(responses, "423", "page_locked");
     }
+    if matches!(operation_id, "create_page" | "move_page") {
+        add_code(responses, "409", "database_in_database");
+    }
+    if operation_id == "restore_page" {
+        add_code(responses, "409", "database_trashed");
+    }
+    if matches!(
+        operation_id,
+        "restore_page" | "duplicate_page" | "create_page" | "move_page"
+    ) {
+        add_code(responses, "409", "database_row_limit");
+    }
     if operation_id == "list_recent_pages" {
         add_code(responses, "422", "validation_failed");
+    }
+}
+
+fn database_operation(operation_id: &str) -> bool {
+    matches!(
+        operation_id,
+        "get_database"
+            | "create_database_property"
+            | "update_database_property"
+            | "delete_database_property"
+            | "create_database_view"
+            | "update_database_view"
+            | "delete_database_view"
+            | "create_database_row"
+            | "update_database_row_values"
+            | "trash_database_rows"
+            | "move_database_row"
+            | "import_database_csv"
+            | "create_database_from_csv"
+            | "submit_database_form"
+            | "create_database_template"
+            | "update_database_template"
+            | "delete_database_template"
+    )
+}
+
+fn database_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'static str>>) {
+    add_code(responses, "404", "page_not_found");
+    if operation_id == "get_database" {
+        return;
+    }
+    add_code(responses, "400", "invalid_request");
+    add_code(responses, "402", "workspace_read_only");
+    add_code(responses, "422", "validation_failed");
+    if operation_id.contains("property") || operation_id.contains("view") {
+        add_code(responses, "423", "page_locked");
+    }
+    if matches!(
+        operation_id,
+        "update_database_property" | "delete_database_property"
+    ) {
+        add_code(responses, "404", "database_property_not_found");
+        add_code(responses, "409", "database_title_property");
+    }
+    if matches!(
+        operation_id,
+        "update_database_view" | "delete_database_view"
+    ) {
+        add_code(responses, "404", "database_view_not_found");
+    }
+    match operation_id {
+        "create_database_property" => add_code(responses, "409", "database_property_limit"),
+        "create_database_view" => add_code(responses, "409", "database_view_limit"),
+        "delete_database_view" => add_code(responses, "409", "database_last_view"),
+        "create_database_row" => add_code(responses, "409", "database_row_limit"),
+        "create_database_template" => add_code(responses, "409", "database_template_limit"),
+        "update_database_template" | "delete_database_template" => {
+            add_code(responses, "404", "database_template_not_found");
+        }
+        "import_database_csv" => {
+            add_code(responses, "409", "database_row_limit");
+            add_code(responses, "409", "database_property_limit");
+            add_code(responses, "413", "request_too_large");
+            add_code(responses, "423", "page_locked");
+        }
+        "create_database_from_csv" => add_code(responses, "413", "request_too_large"),
+        "submit_database_form" => {
+            add_code(responses, "404", "database_view_not_found");
+            add_code(responses, "409", "database_form_closed");
+            add_code(responses, "409", "database_row_limit");
+            add_code(responses, "429", "database_form_rate_limited");
+        }
+        _ => {}
     }
 }
 

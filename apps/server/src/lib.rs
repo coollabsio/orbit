@@ -9,6 +9,7 @@ pub mod billing;
 pub mod chat_routes;
 pub mod cluster;
 pub mod collab;
+pub mod database_routes;
 mod email_quota;
 pub mod export;
 pub mod export_routes;

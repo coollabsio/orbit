@@ -1089,6 +1089,7 @@ async fn docs_and_chat_require_explicit_scopes_and_doc_writes_need_docs_write() 
             f.workspace,
             f.user,
             CreatePage {
+                kind: orbit_server::repositories::pages::PageKind::Page,
                 parent_id: None,
                 space: SpaceRequest::default(),
                 title: "MCP document".into(),
@@ -1124,6 +1125,7 @@ async fn docs_and_chat_require_explicit_scopes_and_doc_writes_need_docs_write() 
             f.workspace,
             outsider,
             CreatePage {
+                kind: orbit_server::repositories::pages::PageKind::Page,
                 parent_id: None,
                 space: SpaceRequest {
                     private: Some(true),

@@ -30,7 +30,7 @@ export function Sheet({ visible, title, onClose, children }: { visible: boolean;
   const insets = useSafeAreaInsets()
   return (
     <BottomSheet visible={visible} onClose={onClose} avoidKeyboard className="rounded-t-xl border border-border bg-popover" style={{ paddingBottom: insets.bottom + 8 }}>
-          <Text numberOfLines={1} className="p-4 pb-2 font-noto-semibold text-[17px] leading-[22px]">
+          <Text numberOfLines={1} className="shrink-0 p-4 pb-2 font-noto-semibold text-[17px] leading-[22px]">
             {title}
           </Text>
           {children}

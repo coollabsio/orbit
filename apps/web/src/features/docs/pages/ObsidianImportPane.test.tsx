@@ -23,7 +23,7 @@ const teamspace = (id: string, name: string, position: number): Teamspace => ({
 })
 
 const summary = (id: string, parent_id: string | null, title: string, teamspace_id: string | null = 'teamspace-1'): PageSummary => ({
-  id, parent_id, teamspace_id, private: teamspace_id === null, position: 0, title, icon: null, version: 1,
+  id, parent_id, teamspace_id, private: teamspace_id === null, kind: 'page', position: 0, title, icon: null, version: 1,
   updated_at: '2026-11-05T10:00:00Z',
 })
 

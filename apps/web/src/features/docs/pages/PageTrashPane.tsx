@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
+import { databaseErrorMessage } from '@orbit/database/errors'
 import { toast } from 'sonner'
 import { ArrowLeft, DocumentText as FileText, Lock, Refresh as RotateCcw, Search, Trash as Trash2 } from 'reicon-react'
 import type { TrashedPage } from '@orbit/api/generated/types.gen'
@@ -153,7 +154,7 @@ export function PageTrashPane({ workspaceId }: { workspaceId: string }) {
                       })
                     },
                     onError: (error) => {
-                      if (!isPageVersionConflict(error)) toast.error('Could not restore the page.')
+                      if (!isPageVersionConflict(error)) toast.error(databaseErrorMessage(error, 'Could not restore the page.'))
                     },
                   },
                 )

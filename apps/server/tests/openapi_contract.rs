@@ -27,7 +27,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
 
     let document: serde_json::Value = serde_json::from_str(&first).unwrap();
     assert_eq!(document["info"]["version"], CONTRACT_ID);
-    assert_eq!(document["paths"].as_object().unwrap().len(), 266);
+    assert_eq!(document["paths"].as_object().unwrap().len(), 290);
     let operation_count: usize = document["paths"]
         .as_object()
         .unwrap()
@@ -42,7 +42,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
                 .count()
         })
         .sum();
-    assert_eq!(operation_count, 338);
+    assert_eq!(operation_count, 366);
     for path in [
         "/api/v1/setup/status",
         "/api/v1/auth/me",
@@ -740,7 +740,15 @@ fn page_favorite_routes_are_documented() {
     let schemas = &document["components"]["schemas"];
     assert_eq!(
         schemas["PageFavorite"]["required"],
-        serde_json::json!(["page_id", "position"])
+        serde_json::json!([
+            "page_id",
+            "position",
+            "title",
+            "icon",
+            "kind",
+            "database_id",
+            "database_title"
+        ])
     );
 }
 

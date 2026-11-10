@@ -92,3 +92,14 @@ export function applyTurnInto(editor: BlockNoteEditor<any, any, any>, block: Tur
     }
   })
 }
+
+/** What a `page` block linking to a database and a `database` block turn into: each other (spec 3.5 "Turn into"). */
+export function databaseTurn(block: TurnBlock, isDatabase: (pageId: string) => boolean): { label: string; type: 'page' | 'database'; props: Record<string, string> } | null {
+  if (block.type === 'page' && typeof block.props.pageId === 'string' && isDatabase(block.props.pageId)) {
+    return { label: 'Inline database', type: 'database', props: { databaseId: block.props.pageId, linkId: '' } }
+  }
+  if (block.type === 'database' && typeof block.props.databaseId === 'string' && block.props.databaseId) {
+    return { label: 'Page link', type: 'page', props: { pageId: block.props.databaseId } }
+  }
+  return null
+}

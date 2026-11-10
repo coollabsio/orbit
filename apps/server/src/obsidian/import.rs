@@ -1453,6 +1453,7 @@ impl ObsidianImportService {
                 None => (destination_parent, destination_space),
             };
             let input = CreatePage {
+                kind: crate::repositories::pages::PageKind::Page,
                 parent_id,
                 space,
                 title: clamp(&item.title, MAX_TITLE_CHARS, MAX_TITLE_BYTES),

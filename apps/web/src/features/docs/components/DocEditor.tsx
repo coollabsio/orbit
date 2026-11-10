@@ -1,14 +1,14 @@
 import { useCommand } from '@/shortcuts/useCommand'
 import { isPaymentRequired } from '@orbit/api/problem'
-import { lazy, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type Ref } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode, type Ref } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { ArrowLeft, ArrowSwapHorizontal, Check, Copy, Download, MoreH as Ellipsis, History, Lock, Star, Trash as Trash2, Unlock, People as Users } from 'reicon-react'
+import { ArrowLeft, ArrowSwapHorizontal, Check, Copy, Download, MoreH as Ellipsis, FolderMove, Grid, History, Lock, Star, Trash as Trash2, Unlock, People as Users } from 'reicon-react'
 import { cn } from 'cn'
 import { apiClient, UNAUTHORIZED_EVENT } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
-import type { Page, PageSummary, PageVersionSummary, Teamspace } from '@orbit/api/generated/types.gen'
+import type { Page, PageKind, PageSummary, PageVersionSummary, Teamspace } from '@orbit/api/generated/types.gen'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -33,7 +33,9 @@ import { Tip } from '@/components/common/Tip'
 import {
   conflictCurrentPage,
   conflictCurrentVersion,
+  descendantsQueryOptions,
   fetchPage,
+  useTrashPage,
   isPageNotFound,
   isPageVersionConflict,
   pageUploadErrorMessage,
@@ -43,7 +45,7 @@ import {
   uploadPageFileRequest,
   useCreatePage,
 } from '@/features/docs/api/pages'
-import { usePageFavorites, useToggleFavorite } from '@/features/docs/api/favorites'
+import { isFavorite, usePageFavorites, useToggleFavorite } from '@/features/docs/api/favorites'
 import { usePageVisit, useSetPageLock } from '@/features/docs/api/pageOptions'
 import { useLastEdited } from '@/features/docs/lastEdited'
 import { useRestorePageVersion } from '@/features/docs/api/pageVersions'
@@ -57,6 +59,7 @@ import { useCollabSession } from '@/features/docs/collab/useCollabSession'
 import { useDocPageActions } from '@/features/docs/pageActions'
 import { downloadPageMarkdown, printPage } from '@/features/docs/pageExport'
 import { PRIVATE_SPACE, ancestorsOf, pageTitle, removeSubtree, spaceKey, spaceLabel, teamspaceSpace, type SpaceKey } from '@/features/docs/pageTree'
+import type { MoveDestination } from '@/features/docs/useMovePageTo'
 import { dayLabel, timeOfDay } from '@/lib/format'
 import { threadCounts, usePageThreads } from '@/features/docs/comments/api'
 import { CommentsPanel, type CommentsFilter } from '@/features/docs/comments/CommentsPanel'
@@ -73,7 +76,11 @@ import type { PageRef } from '@/features/docs/editor/pageEditorContext'
 import { CoverBanner } from './CoverBanner'
 import { CoverSourcePanel } from './CoverSourcePanel'
 import { PageHistoryPane } from './PageHistoryPane'
+import { MoveToDialog } from './MoveToDialog'
 import { PageLinkDialog } from './PageLinkDialog'
+import { DatabasePage } from '@/features/docs/database/DatabasePage'
+import { createLink, patchDatabaseRow, useIsTemplate } from '@/features/docs/database/api'
+import { PropertyList } from '@/features/docs/database/PropertyList'
 
 const PageEditor = lazy(() => loadPageEditor().then((module) => ({ default: module.PageEditor })))
 
@@ -108,10 +115,26 @@ interface DocEditorProps {
   teamspaces?: Teamspace[]
   onRequestTrash: (pageId: string) => void
   /** Moves the page (with its sub-pages) to the end of another space's root. */
-  onRequestMove?: (pageId: string, space: SpaceKey) => void
+  onRequestMove?: (pageId: string, destination: MoveDestination) => void
   /** The page went away while open (trashed or out of reach elsewhere); the editor is leaving for /docs. */
   onGone?: (pageId: string) => void
   controlRef?: Ref<DocEditorControl>
+  /** Shows the page as a database row's side peek instead of the main pane. */
+  peek?: DocEditorPeek
+}
+
+/** A row page in the side peek (spec 7.5): the peek's controls replace the page path, the favorite star and the page menu. */
+export interface DocEditorPeek {
+  /** Controls at the start of the header (close, full page, previous and next row). */
+  start: ReactNode
+  /** Controls at the end of the header (copy link, the row menu). */
+  end: ReactNode
+  /** The view the peek was opened from: the property list follows its order. */
+  viewId: string
+  /** A row just created: the title takes the focus. */
+  focusTitle: boolean
+  /** The row went away (trashed, out of reach): close the peek instead of leaving for /docs. */
+  onLeave: () => void
 }
 
 type Cover = { url: string | null; position: string | null }
@@ -133,7 +156,7 @@ const STATUS_DOT: Record<CollabState['status'], string> = {
 /** Banners for sync problems the user has to act on. */
 type SyncNotice = 'too-large' | 'protocol' | 'reconnect-failed' | null
 
-export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash, onRequestMove, onGone, controlRef }: DocEditorProps) {
+export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash, onRequestMove, onGone, controlRef, peek }: DocEditorProps) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const createPage = useCreatePage(workspaceId)
@@ -145,8 +168,15 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
     navigateRef.current = navigate
   })
   const pageId = page.id
+  /** A row template opened as a page: it is never a favorite (the server refuses it). */
+  const template = useIsTemplate(workspaceId, page.database_id ?? null, pageId)
+  /** A database page has no document: the table replaces the editor, comments and history. */
+  const isDatabase = page.kind === 'database'
   const pageActions = useDocPageActions()
-  const hasChildren = pages.some((item) => item.parent_id === pageId)
+  // A database row and its sub-pages are not in the tree: the server lists their sub-pages.
+  const inTree = pages.some((item) => item.id === pageId)
+  const serverSubPages = useQuery({ ...descendantsQueryOptions(workspaceId, pageId), enabled: !inTree && !isDatabase })
+  const hasChildren = inTree ? pages.some((item) => item.parent_id === pageId) : (serverSubPages.data?.length ?? 0) > 0
 
   const [title, setTitle] = useState(page.title)
   const [icon, setIcon] = useState(page.icon)
@@ -155,9 +185,12 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
   const [coverPanelOpen, setCoverPanelOpen] = useState(false)
   const [iconPickerOpen, setIconPickerOpen] = useState(false)
   const [addIconOpen, setAddIconOpen] = useState(false)
-  const [linkOpen, setLinkOpen] = useState(false)
+  /** The page picker of "Link a page", or the database picker of "Linked view of database". */
+  const [linkKind, setLinkKind] = useState<'page' | 'database' | null>(null)
+  const [moveOpen, setMoveOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
-  useCommand('docs.history', () => setHistoryOpen((open) => !open))
+  // A database has no history; the peek has no room for it (the full row page has it).
+  useCommand('docs.history', () => setHistoryOpen((open) => !open), { enabled: !isDatabase && !peek })
   const [fullWidth, setFullWidth] = useState(page.full_width)
   const setPageLock = useSetPageLock(workspaceId)
   /** Locked pages are read-only here (the server refuses edits too, see `POST .../lock`). */
@@ -180,10 +213,13 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
   const [commentsOpen, setCommentsOpen] = useState(false)
   const [commentsFilter, setCommentsFilter] = useState<CommentsFilter>('open')
   const [commentsList, setCommentsList] = useState<HTMLDivElement | null>(null)
+  const [peekSlot, setPeekSlot] = useState<HTMLDivElement | null>(null)
   const [searchParams, setSearchParams] = useSearchParams()
-  const threadParam = searchParams.get('thread')
+  // A database page has no comments and no body: on `/docs/<database>?row=<row>&thread=<id>` the deep links belong to
+  // the row peek's editor, so the database page's editor leaves them alone.
+  const threadParam = isDatabase ? null : searchParams.get('thread')
   // Inbox page mentions link to the mentioned block (`?block=<id>`).
-  useBlockDeepLink(page.id)
+  useBlockDeepLink(isDatabase ? null : page.id)
   const [showThreadId, setShowThreadId] = useState<string | null>(null)
   useEffect(() => {
     if (!threadParam) return
@@ -226,6 +262,15 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
           reconcilePage(queryClient, workspaceId, saved)
           // The tree follows the title being typed, not the one that was just saved.
           patchTreePage(queryClient, workspaceId, pageId, { title: titleRef.current })
+          if (page.database_id) {
+            patchDatabaseRow(queryClient, workspaceId, page.database_id, pageId, {
+              title: titleRef.current,
+              icon: saved.icon,
+              version: saved.version,
+              updated_at: saved.updated_at,
+              updated_by: saved.updated_by,
+            })
+          }
         },
         onStateChange: setSaveState,
         conflictOf: (error) =>
@@ -292,6 +337,10 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
     queryClient.setQueryData(queryKeys.pages.tree(workspaceId), (tree: PageSummary[] | undefined) => tree && removeSubtree(tree, pageId))
     void queryClient.invalidateQueries({ queryKey: queryKeys.pages.tree(workspaceId) })
     void queryClient.invalidateQueries({ queryKey: queryKeys.pages.favorites(workspaceId) })
+    if (peek) {
+      peek.onLeave()
+      return
+    }
     onGone?.(pageId)
     navigateRef.current('/docs', { replace: true })
   }
@@ -353,6 +402,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
     user: collabUser,
     onProblem: onCollabProblem,
     onProbe: () => void probePage(),
+    enabled: !isDatabase,
   })
   useEffect(() => {
     sessionRef.current = collab.session
@@ -426,12 +476,14 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
     titleRef.current = next
     saver.update({ title: next })
     patchTreePage(queryClient, workspaceId, pageId, { title: next })
+    if (page.database_id) patchDatabaseRow(queryClient, workspaceId, page.database_id, pageId, { title: next })
   }
 
   const changeIcon = (next: string | null) => {
     setIcon(next)
     saver.update({ icon: next })
     patchTreePage(queryClient, workspaceId, pageId, { icon: next })
+    if (page.database_id) patchDatabaseRow(queryClient, workspaceId, page.database_id, pageId, { icon: next })
     void saver.flush()
   }
 
@@ -517,21 +569,24 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
   // Trashed pages leave the tree, so anything not in it renders as "Missing page".
   const resolvePage = useCallback((id: string): PageRef | null => {
     const found = byId.get(id)
-    return found ? { title: found.title, icon: found.icon, trashed: false } : null
+    return found ? { title: found.title, icon: found.icon, trashed: false, database: found.kind === 'database' } : null
   }, [byId])
 
   const onOpenPage = useCallback((id: string) => navigate(`/docs/${id}`), [navigate])
 
   const createSubpage = createPage.mutateAsync
-  const onCreateSubpage = useCallback(async () => {
-    try {
-      const created = await createSubpage({ parent_id: pageId })
-      return created.id
-    } catch (error) {
-      if (!isPaymentRequired(error)) toast.error('Could not create the sub-page. Try again.')
-      throw error
-    }
-  }, [createSubpage, pageId])
+  const onCreateSubpage = useCallback(
+    async (kind: PageKind) => {
+      try {
+        const created = await createSubpage(kind === 'database' ? { parent_id: pageId, kind } : { parent_id: pageId })
+        return created.id
+      } catch (error) {
+        if (!isPaymentRequired(error)) toast.error(kind === 'database' ? 'Could not create the database. Try again.' : 'Could not create the sub-page. Try again.')
+        throw error
+      }
+    },
+    [createSubpage, pageId],
+  )
 
   /** Editor image/file uploads: errors are toasted, then rethrown so BlockNote drops the empty block. */
   const uploadFile = useCallback(
@@ -563,23 +618,65 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
       new Promise<string | null>((resolve) => {
         pickResolver.current?.(null)
         pickResolver.current = resolve
-        setLinkOpen(true)
+        setLinkKind('page')
       }),
     [],
+  )
+
+  /** Picks a database, then links it to this page: a linked view block with views of its own. */
+  const onLinkDatabase = useCallback(
+    () =>
+      new Promise<string | null>((resolve) => {
+        pickResolver.current?.(null)
+        pickResolver.current = resolve
+        setLinkKind('database')
+      }).then(async (databaseId) => {
+        if (!databaseId) return null
+        try {
+          const linked = await createLink(workspaceId, databaseId, { host_page_id: pageId })
+          return { databaseId, linkId: linked.link.id }
+        } catch (error) {
+          if (!isPaymentRequired(error)) toast.error('Could not link the database. Try again.')
+          return null
+        }
+      }),
+    [workspaceId, pageId],
+  )
+
+  const inPeek = peek !== undefined
+  const databaseHost = useMemo(() => ({ workspaceId, pageId, locked, peekContainer: peekSlot, inPeek }), [workspaceId, pageId, locked, peekSlot, inPeek])
+  const trashPage = useTrashPage(workspaceId).mutate
+  /** Deleting an inline database block keeps the database (spec 3.5); the toast offers to trash it too. */
+  const onDatabaseBlockRemoved = useCallback(
+    (databaseId: string) => {
+      toast('The database is still in the page tree', {
+        action: {
+          label: 'Move to trash',
+          onClick: () =>
+            void fetchPage(apiClient, workspaceId, databaseId).then(
+              (database) => trashPage({ pageId: databaseId, version: database.version }),
+              () => toast.error('Could not move the database to the trash.'),
+            ),
+        },
+      })
+    },
+    [workspaceId, trashPage],
   )
 
   const closeLinkDialog = (picked: string | null) => {
     pickResolver.current?.(picked)
     pickResolver.current = null
-    setLinkOpen(false)
+    setLinkKind(null)
   }
 
-  const ancestors = ancestorsOf(pages, pageId)
+  // A row is not in the tree: its path is its database's path, then the database.
+  const database = page.database_id ? byId.get(page.database_id) : undefined
+  const ancestors = database ? [...ancestorsOf(pages, database.id), database] : ancestorsOf(pages, pageId)
   // The tree summary follows optimistic moves (and sub-pages moved with their root); the detail may lag.
   const space = spaceKey(byId.get(pageId) ?? page)
   const spaceTargets: SpaceKey[] = [...(teamspaces ?? []).map((teamspace) => teamspaceSpace(teamspace.id)), PRIVATE_SPACE]
   const status = saveState.status
-  const syncStatus = lost ? 'lost' : collab.state.status
+  const syncStatus = lost ? 'lost' : isDatabase ? 'live' : collab.state.status
   // Content sync is the headline; failed or conflicting title/icon/cover saves take over the label.
   const statusLabel =
     status === 'error'
@@ -598,10 +695,10 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
   const displayTitle = title.trim() ? title : 'Untitled'
   const editedBy = lastEdited.edit.userId === selfId ? 'you' : lastEdited.edit.name.trim() || 'someone'
   const editedAt = new Date(lastEdited.edit.at).toISOString()
-  const favorite = favoritesQuery.data?.includes(pageId) ?? false
+  const favorite = isFavorite(favoritesQuery.data, pageId)
   const setFavorite = (next: boolean) =>
     toggleFavorite.mutate(
-      { pageId, favorite: next },
+      { pageId, favorite: next, page: { title, icon, kind: page.kind, database_id: page.database_id } },
       { onError: () => toast.error(next ? 'Could not add the page to favorites.' : 'Could not remove the page from favorites.') },
     )
   const favoriteLabel = favorite ? 'Remove from favorites' : 'Add to favorites'
@@ -611,45 +708,170 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
     privatePage: (byId.get(pageId) ?? page).teamspace_id === null,
   }
 
+  const coverBlock = (
+    <>
+      {cover.url ? (
+        <CoverBanner
+          key={`${cover.url}:${cover.position ?? ''}`}
+          url={cover.url}
+          position={cover.position}
+          onChange={changeCover}
+          onUpload={uploadCover}
+          readOnly={readOnly}
+        />
+      ) : null}
+    </>
+  )
+  const titleBlock = (
+    <>
+      {locked ? (
+        <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground" data-lock-badge="">
+          <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-muted px-2 py-0.5">
+            <Lock className="size-3 shrink-0" aria-hidden="true" />
+            <span className="truncate">{page.locked_by ? `Locked by ${page.locked_by.id === selfId ? 'you' : page.locked_by.display_name}` : 'Locked'}</span>
+          </span>
+          <Button type="button" variant="ghost" size="xs" disabled={setPageLock.isPending} onClick={() => toggleLock(false)}>
+            Unlock
+          </Button>
+        </div>
+      ) : null}
+      {icon ? (
+        <div className="relative z-[2] w-fit data-[cover=true]:mt-[-52px]" data-cover={cover.url ? 'true' : undefined}>
+          <Popover open={iconPickerOpen} onOpenChange={setIconPickerOpen}>
+            <PopoverTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="h-auto cursor-pointer rounded-xl border-0 p-0.5 text-[60px] leading-none font-normal drop-shadow-[0_1px_2px_rgb(0_0_0/0.3)] hover:bg-foreground/[0.02] disabled:opacity-100 dark:hover:bg-foreground/[0.02]"
+                  disabled={readOnly}
+                  aria-label="Change icon"
+                />
+              }
+            >
+              <Emoji value={icon} />
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-auto gap-0 p-0">
+              <EmojiPicker
+                onPick={(emoji) => {
+                  changeIcon(emoji)
+                  setIconPickerOpen(false)
+                }}
+                onRemove={() => {
+                  changeIcon(null)
+                  setIconPickerOpen(false)
+                }}
+              />
+            </PopoverContent>
+          </Popover>
+        </div>
+      ) : null}
+      {!readOnly && (!icon || !cover.url) ? (
+        <div className="flex gap-2 pt-1.5 pb-2.5" data-print-hide="">
+          {!icon ? (
+            <Popover open={addIconOpen} onOpenChange={setAddIconOpen}>
+              <PopoverTrigger
+                render={<Button type="button" variant="ghost" size="sm" className="text-muted-foreground/70 hover:text-foreground" />}
+              >
+                😀 Add icon
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-auto gap-0 p-0">
+                <EmojiPicker
+                  onPick={(emoji) => {
+                    changeIcon(emoji)
+                    setAddIconOpen(false)
+                  }}
+                />
+              </PopoverContent>
+            </Popover>
+          ) : null}
+          {!cover.url ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-muted-foreground/70 hover:text-foreground"
+              onClick={() => setCoverPanelOpen((open) => !open)}
+            >
+              🖼️ Add cover
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+      {!readOnly && !cover.url && coverPanelOpen ? (
+        <div className="mb-3 max-w-[420px] rounded-lg border border-border p-3" data-print-hide="">
+          <CoverSourcePanel
+            onUpload={uploadCover}
+            onPicked={(url) => {
+              setCoverPanelOpen(false)
+              changeCover({ cover_url: url, cover_position: null })
+            }}
+          />
+        </div>
+      ) : null}
+      <Input
+        className="mb-5 h-auto w-full rounded-none border-0 bg-transparent p-0 text-[30px] leading-[1.25] font-bold text-foreground shadow-none outline-none placeholder:text-muted-foreground/70 focus:outline-none focus-visible:ring-0 md:text-[30px] max-[899px]:mb-3.5 max-[899px]:text-[22px]! dark:bg-transparent"
+        value={title}
+        readOnly={readOnly}
+        autoFocus={peek?.focusTitle}
+        maxLength={500}
+        placeholder="Untitled"
+        aria-label="Page title"
+        onChange={(e) => changeTitle(e.target.value)}
+        onBlur={() => void saver.flush()}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            editorRef.current?.focus()
+          }
+        }}
+      />
+    </>
+  )
+
   return (
     <>
       {/* Realtime refreshes may run while the title or editor is focused: remote titles only apply without local
           edits (see the effect above) and content syncs through Yjs, so nothing here is remounted or overwritten. */}
       <Pane data-realtime-safe="" className="max-[899px]:group-data-[view=index]/docs:hidden">
         <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 max-[899px]:border-b-0">
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-sm"
-            className="hidden text-muted-foreground/70 max-[899px]:inline-flex"
-            aria-label="Back to docs"
-            onClick={() => navigate('/docs')}
-          >
-            <ArrowLeft className="size-4" />
-          </Button>
-          <nav className="flex min-w-0 items-center gap-1.5 overflow-hidden text-[13px] text-muted-foreground/70" aria-label="Page path">
-            <span className="flex min-w-0 shrink-0 items-center gap-1.5 max-[899px]:hidden" data-space-crumb={space}>
-              <span className="flex max-w-40 min-w-0 items-center gap-1">
-                {space === PRIVATE_SPACE ? <Lock className="size-3.5 shrink-0" aria-hidden="true" /> : null}
-                <span className="truncate">{spaceLabel(space, teamspaces)}</span>
-              </span>
-              <span className="shrink-0">/</span>
-            </span>
-            {ancestors.map((ancestor) => (
-              <span key={ancestor.id} className="flex min-w-0 items-center gap-1.5 max-[899px]:hidden">
-                <Link
-                  className="block min-w-0 truncate rounded-[4px] text-muted-foreground/70 no-underline hover:text-foreground"
-                  to={`/docs/${ancestor.id}`}
-                >
-                  {pageTitle(ancestor)}
-                </Link>
-                <span className="shrink-0">/</span>
-              </span>
-            ))}
-            <span className="block min-w-0 shrink truncate font-medium text-foreground" aria-current="page">
-              {displayTitle}
-            </span>
-          </nav>
+          {peek ? peek.start : (
+            <>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="hidden text-muted-foreground/70 max-[899px]:inline-flex"
+                aria-label="Back to docs"
+                onClick={() => navigate('/docs')}
+              >
+                <ArrowLeft className="size-4" />
+              </Button>
+              <nav className="flex min-w-0 items-center gap-1.5 overflow-hidden text-[13px] text-muted-foreground/70" aria-label="Page path">
+                <span className="flex min-w-0 shrink-0 items-center gap-1.5 max-[899px]:hidden" data-space-crumb={space}>
+                  <span className="flex max-w-40 min-w-0 items-center gap-1">
+                    {space === PRIVATE_SPACE ? <Lock className="size-3.5 shrink-0" aria-hidden="true" /> : null}
+                    <span className="truncate">{spaceLabel(space, teamspaces)}</span>
+                  </span>
+                  <span className="shrink-0">/</span>
+                </span>
+                {ancestors.map((ancestor) => (
+                  <span key={ancestor.id} className="flex min-w-0 items-center gap-1.5 max-[899px]:hidden">
+                    <Link
+                      className="block min-w-0 truncate rounded-[4px] text-muted-foreground/70 no-underline hover:text-foreground"
+                      to={`/docs/${ancestor.id}`}
+                    >
+                      {pageTitle(ancestor)}
+                    </Link>
+                    <span className="shrink-0">/</span>
+                  </span>
+                ))}
+                <span className="block min-w-0 shrink truncate font-medium text-foreground" aria-current="page">
+                  {displayTitle}
+                </span>
+              </nav>
+            </>
+          )}
           <span className="flex-1" />
           <PresenceAvatars people={people} onReveal={(person) => revealCollabCursor(document, person.id)} />
           <span
@@ -679,133 +901,158 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
               </>
             ) : null}
           </span>
-          <Tip label="Comments" side="bottom">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className={cn('gap-1 px-1.5 text-muted-foreground/70', commentsOpen && 'bg-muted text-foreground')}
-              aria-label={counts.open > 0 ? `Comments (${counts.open} open)` : 'Comments'}
-              aria-pressed={commentsOpen}
-              data-comments-toggle=""
-              onClick={() => setCommentsOpen((open) => !open)}
-            >
-              <CommentIcon className="size-4" />
-              {counts.open > 0 ? (
-                <span className="min-w-4 rounded-full bg-primary px-1 text-center text-[10px] leading-4 font-semibold text-primary-foreground tabular-nums" data-comments-badge="">
-                  {counts.open}
-                </span>
-              ) : null}
-            </Button>
-          </Tip>
-          <Tip label={favoriteLabel} side="bottom">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              className={cn('text-muted-foreground/70', favorite && 'text-amber-500 hover:text-amber-500 dark:text-amber-400 dark:hover:text-amber-400')}
-              aria-label={favoriteLabel}
-              aria-pressed={favorite}
-              disabled={favoritesQuery.isPending}
-              onClick={() => setFavorite(!favorite)}
-            >
-              <Star className="size-4" weight={favorite ? 'Filled' : 'Outline'} />
-            </Button>
-          </Tip>
-          <DropdownMenu>
-            <Tip label="Page options" side="bottom">
-              <DropdownMenuTrigger
-                render={<Button type="button" variant="ghost" size="icon-sm" className="text-muted-foreground/70" aria-label="Page options" />}
+          {isDatabase ? null : (
+            <Tip label="Comments" side="bottom">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className={cn('gap-1 px-1.5 text-muted-foreground/70', commentsOpen && 'bg-muted text-foreground')}
+                aria-label={counts.open > 0 ? `Comments (${counts.open} open)` : 'Comments'}
+                aria-pressed={commentsOpen}
+                data-comments-toggle=""
+                onClick={() => setCommentsOpen((open) => !open)}
               >
-                <Ellipsis className="size-4" />
-              </DropdownMenuTrigger>
+                <CommentIcon className="size-4" />
+                {counts.open > 0 ? (
+                  <span className="min-w-4 rounded-full bg-primary px-1 text-center text-[10px] leading-4 font-semibold text-primary-foreground tabular-nums" data-comments-badge="">
+                    {counts.open}
+                  </span>
+                ) : null}
+              </Button>
             </Tip>
-            <DropdownMenuContent align="end" className="w-auto max-w-64 min-w-44">
-              {onRequestMove && teamspaces ? (
-                <>
-                  <DropdownMenuGroup>
-                    <DropdownMenuLabel>Move to</DropdownMenuLabel>
-                    {spaceTargets.map((target) => (
-                      <DropdownMenuItem
-                        key={target}
-                        disabled={target === space}
-                        onClick={() => onRequestMove(pageId, target)}
-                      >
-                        {target === PRIVATE_SPACE ? <Lock className="size-[14px]" /> : <Users className="size-[14px]" />}
-                        <span className="min-w-0 flex-1 truncate">{spaceLabel(target, teamspaces)}</span>
-                        {target === space ? <Check className="size-[14px] text-muted-foreground" aria-label="Current space" /> : null}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuGroup>
-                  <DropdownMenuSeparator />
-                </>
-              ) : null}
-              <DropdownMenuItem onClick={() => setFavorite(!favorite)}>
-                <Star className="size-[14px]" weight={favorite ? 'Filled' : 'Outline'} />
-                {favoriteLabel}
-              </DropdownMenuItem>
-              <DropdownMenuCheckboxItem checked={fullWidth} onCheckedChange={toggleFullWidth}>
-                <ArrowSwapHorizontal className="size-[14px]" />
-                Full width
-              </DropdownMenuCheckboxItem>
-              <DropdownMenuItem disabled={setPageLock.isPending} onClick={() => toggleLock(!locked)}>
-                {locked ? <Unlock className="size-[14px]" /> : <Lock className="size-[14px]" />}
-                {locked ? 'Unlock page' : 'Lock page'}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setHistoryOpen(true)}>
-                <History className="size-[14px]" />
-                Version history
-              </DropdownMenuItem>
-              {pageActions ? (
-                <DropdownMenuItem onClick={() => pageActions.duplicate(pageId, false)}>
-                  <Copy className="size-[14px]" />
-                  Duplicate
-                </DropdownMenuItem>
-              ) : null}
-              {pageActions && hasChildren ? (
-                <DropdownMenuItem onClick={() => pageActions.duplicate(pageId, true)}>
-                  <Copy className="size-[14px]" />
-                  Duplicate with sub-pages
-                </DropdownMenuItem>
-              ) : null}
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger>
-                  <Download className="size-[14px]" />
-                  Export
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="min-w-44">
-                  <DropdownMenuItem
-                    onClick={() => void downloadPageMarkdown({ workspaceId, pageId, title: displayTitle, includeChildren: false })}
+          )}
+          {peek ? peek.end : (
+            <>
+              {template ? null : (
+                <Tip label={favoriteLabel} side="bottom">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className={cn('text-muted-foreground/70', favorite && 'text-amber-500 hover:text-amber-500 dark:text-amber-400 dark:hover:text-amber-400')}
+                    aria-label={favoriteLabel}
+                    aria-pressed={favorite}
+                    disabled={favoritesQuery.isPending}
+                    onClick={() => setFavorite(!favorite)}
                   >
-                    Markdown
+                    <Star className="size-4" weight={favorite ? 'Filled' : 'Outline'} />
+                  </Button>
+                </Tip>
+              )}
+              <DropdownMenu>
+                <Tip label="Page options" side="bottom">
+                  <DropdownMenuTrigger
+                    render={<Button type="button" variant="ghost" size="icon-sm" className="text-muted-foreground/70" aria-label="Page options" />}
+                  >
+                    <Ellipsis className="size-4" />
+                  </DropdownMenuTrigger>
+                </Tip>
+                <DropdownMenuContent align="end" className="w-auto max-w-64 min-w-44">
+                  {onRequestMove && teamspaces ? (
+                    <>
+                      <DropdownMenuGroup>
+                        <DropdownMenuLabel>Move to</DropdownMenuLabel>
+                        {spaceTargets.map((target) => (
+                          <DropdownMenuItem
+                            key={target}
+                            disabled={target === space && !page.database_id}
+                            onClick={() => onRequestMove(pageId, { kind: 'space', space: target })}
+                          >
+                            {target === PRIVATE_SPACE ? <Lock className="size-[14px]" /> : <Users className="size-[14px]" />}
+                            <span className="min-w-0 flex-1 truncate">{spaceLabel(target, teamspaces)}</span>
+                            {target === space ? <Check className="size-[14px] text-muted-foreground" aria-label="Current space" /> : null}
+                          </DropdownMenuItem>
+                        ))}
+                        <DropdownMenuItem onClick={() => setMoveOpen(true)}>
+                          <FolderMove className="size-[14px]" />
+                          Page or database…
+                        </DropdownMenuItem>
+                      </DropdownMenuGroup>
+                      <DropdownMenuSeparator />
+                    </>
+                  ) : null}
+                  {template ? null : (
+                    <DropdownMenuItem onClick={() => setFavorite(!favorite)}>
+                      <Star className="size-[14px]" weight={favorite ? 'Filled' : 'Outline'} />
+                      {favoriteLabel}
+                    </DropdownMenuItem>
+                  )}
+                  {/* A database page is always full width. */}
+                  {isDatabase ? null : (
+                    <DropdownMenuCheckboxItem checked={fullWidth} onCheckedChange={toggleFullWidth}>
+                      <ArrowSwapHorizontal className="size-[14px]" />
+                      Full width
+                    </DropdownMenuCheckboxItem>
+                  )}
+                  <DropdownMenuItem disabled={setPageLock.isPending} onClick={() => toggleLock(!locked)}>
+                    {locked ? <Unlock className="size-[14px]" /> : <Lock className="size-[14px]" />}
+                    {locked ? 'Unlock page' : 'Lock page'}
                   </DropdownMenuItem>
-                  {hasChildren ? (
-                    <DropdownMenuItem
-                      onClick={() => void downloadPageMarkdown({ workspaceId, pageId, title: displayTitle, includeChildren: true })}
-                    >
-                      Markdown with sub-pages
+                  {isDatabase ? null : (
+                    <DropdownMenuItem onClick={() => setHistoryOpen(true)}>
+                      <History className="size-[14px]" />
+                      Version history
+                    </DropdownMenuItem>
+                  )}
+                  {isDatabase ? null : (
+                    <DropdownMenuItem disabled={readOnly} onClick={() => void onCreateSubpage('database').then(onOpenPage, () => {})}>
+                      <Grid className="size-[14px]" />
+                      New database
+                    </DropdownMenuItem>
+                  )}
+                  {pageActions ? (
+                    <DropdownMenuItem onClick={() => pageActions.duplicate(pageId, false)}>
+                      <Copy className="size-[14px]" />
+                      Duplicate
                     </DropdownMenuItem>
                   ) : null}
-                  <DropdownMenuItem onClick={() => printPage(displayTitle)}>
-                    PDF
+                  {pageActions && hasChildren ? (
+                    <DropdownMenuItem onClick={() => pageActions.duplicate(pageId, true)}>
+                      <Copy className="size-[14px]" />
+                      Duplicate with sub-pages
+                    </DropdownMenuItem>
+                  ) : null}
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger>
+                      <Download className="size-[14px]" />
+                      Export
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent className="min-w-44">
+                      <DropdownMenuItem
+                        onClick={() => void downloadPageMarkdown({ workspaceId, pageId, title: displayTitle, includeChildren: false })}
+                      >
+                        Markdown
+                      </DropdownMenuItem>
+                      {hasChildren ? (
+                        <DropdownMenuItem
+                          onClick={() => void downloadPageMarkdown({ workspaceId, pageId, title: displayTitle, includeChildren: true })}
+                        >
+                          Markdown with sub-pages
+                        </DropdownMenuItem>
+                      ) : null}
+                      <DropdownMenuItem onClick={() => printPage(displayTitle)}>
+                        PDF
+                      </DropdownMenuItem>
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                  <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => onRequestTrash(pageId)}>
+                    <Trash2 className="size-[14px]" />
+                    Move to trash
                   </DropdownMenuItem>
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
-              <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => onRequestTrash(pageId)}>
-                <Trash2 className="size-[14px]" />
-                Move to trash
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <div className="px-1.5 py-1 text-xs leading-5 text-muted-foreground" title={new Date(lastEdited.edit.at).toLocaleString()}>
-                <p className="truncate" data-last-edited="">
-                  Last edited by {editedBy}
-                </p>
-                <p>
-                  {dayLabel(editedAt)} at {timeOfDay(editedAt)}
-                </p>
-              </div>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                  <DropdownMenuSeparator />
+                  <div className="px-1.5 py-1 text-xs leading-5 text-muted-foreground" title={new Date(lastEdited.edit.at).toLocaleString()}>
+                    <p className="truncate" data-last-edited="">
+                      Last edited by {editedBy}
+                    </p>
+                    <p>
+                      {dayLabel(editedAt)} at {timeOfDay(editedAt)}
+                    </p>
+                  </div>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </>
+          )}
         </div>
         {status === 'conflict' ? (
           <div
@@ -848,183 +1095,96 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
           </div>
         ) : null}
         <div className="relative flex min-h-0 min-w-0 flex-1">
-        <div data-print-root="" className="min-h-0 flex-1 overflow-y-auto px-6 pt-8 pb-24 max-[899px]:px-3 max-[899px]:pt-[18px] max-[899px]:pb-14">
-          {cover.url ? (
-            <CoverBanner
-              key={`${cover.url}:${cover.position ?? ''}`}
-              url={cover.url}
-              position={cover.position}
-              onChange={changeCover}
-              onUpload={uploadCover}
-              readOnly={readOnly}
-            />
-          ) : null}
-          <div className={cn('mx-auto', fullWidth ? 'max-w-none px-[30px] max-[899px]:px-0' : 'max-w-[760px]')} data-full-width={fullWidth || undefined}>
-            {locked ? (
-              <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground" data-lock-badge="">
-                <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-muted px-2 py-0.5">
-                  <Lock className="size-3 shrink-0" aria-hidden="true" />
-                  <span className="truncate">{page.locked_by ? `Locked by ${page.locked_by.id === selfId ? 'you' : page.locked_by.display_name}` : 'Locked'}</span>
-                </span>
-                <Button type="button" variant="ghost" size="xs" disabled={setPageLock.isPending} onClick={() => toggleLock(false)}>
-                  Unlock
-                </Button>
-              </div>
-            ) : null}
-            {icon ? (
-              <div className="relative z-[2] w-fit data-[cover=true]:mt-[-52px]" data-cover={cover.url ? 'true' : undefined}>
-                <Popover open={iconPickerOpen} onOpenChange={setIconPickerOpen}>
-                  <PopoverTrigger
-                    render={
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        className="h-auto cursor-pointer rounded-xl border-0 p-0.5 text-[60px] leading-none font-normal drop-shadow-[0_1px_2px_rgb(0_0_0/0.3)] hover:bg-foreground/[0.02] disabled:opacity-100 dark:hover:bg-foreground/[0.02]"
-                        disabled={readOnly}
-                        aria-label="Change icon"
-                      />
-                    }
-                  >
-                    <Emoji value={icon} />
-                  </PopoverTrigger>
-                  <PopoverContent align="start" className="w-auto gap-0 p-0">
-                    <EmojiPicker
-                      onPick={(emoji) => {
-                        changeIcon(emoji)
-                        setIconPickerOpen(false)
-                      }}
-                      onRemove={() => {
-                        changeIcon(null)
-                        setIconPickerOpen(false)
-                      }}
-                    />
-                  </PopoverContent>
-                </Popover>
-              </div>
-            ) : null}
-            {!readOnly && (!icon || !cover.url) ? (
-              <div className="flex gap-2 pt-1.5 pb-2.5" data-print-hide="">
-                {!icon ? (
-                  <Popover open={addIconOpen} onOpenChange={setAddIconOpen}>
-                    <PopoverTrigger
-                      render={<Button type="button" variant="ghost" size="sm" className="text-muted-foreground/70 hover:text-foreground" />}
-                    >
-                      😀 Add icon
-                    </PopoverTrigger>
-                    <PopoverContent align="start" className="w-auto gap-0 p-0">
-                      <EmojiPicker
-                        onPick={(emoji) => {
-                          changeIcon(emoji)
-                          setAddIconOpen(false)
-                        }}
-                      />
-                    </PopoverContent>
-                  </Popover>
-                ) : null}
-                {!cover.url ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="text-muted-foreground/70 hover:text-foreground"
-                    onClick={() => setCoverPanelOpen((open) => !open)}
-                  >
-                    🖼️ Add cover
-                  </Button>
-                ) : null}
-              </div>
-            ) : null}
-            {!readOnly && !cover.url && coverPanelOpen ? (
-              <div className="mb-3 max-w-[420px] rounded-lg border border-border p-3" data-print-hide="">
-                <CoverSourcePanel
-                  onUpload={uploadCover}
-                  onPicked={(url) => {
-                    setCoverPanelOpen(false)
-                    changeCover({ cover_url: url, cover_position: null })
-                  }}
-                />
-              </div>
-            ) : null}
-            <Input
-              className="mb-5 h-auto w-full rounded-none border-0 bg-transparent p-0 text-[30px] leading-[1.25] font-bold text-foreground shadow-none outline-none placeholder:text-muted-foreground/70 focus:outline-none focus-visible:ring-0 md:text-[30px] max-[899px]:mb-3.5 max-[899px]:text-[22px]! dark:bg-transparent"
-              value={title}
-              readOnly={readOnly}
-              maxLength={500}
-              placeholder="Untitled"
-              aria-label="Page title"
-              onChange={(e) => changeTitle(e.target.value)}
-              onBlur={() => void saver.flush()}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  editorRef.current?.focus()
-                }
-              }}
-            />
-            <div onBlur={() => void saver.flush()}>
-              {collab.connection && collab.state.ready ? (
-                <Suspense fallback={editorSpinner}>
-                  <PageEditor
-                    // A new document (page switch, reset) needs a new editor instance.
-                    key={collab.key}
-                    ref={editorRef}
-                    pageId={pageId}
-                    collab={{ provider: collab.connection.provider, fragment: collab.connection.fragment, user: collabUser }}
-                    editable={!lost && syncStatus !== 'error' && !readOnly}
-                    resolvePage={resolvePage}
-                    onOpenPage={onOpenPage}
-                    onCreateSubpage={onCreateSubpage}
-                    onPickPage={onPickPage}
-                    uploadFile={uploadFile}
-                    comments={{
-                      workspaceId,
-                      pageId,
-                      userId: selfId,
-                      members: membersQuery.data ?? null,
-                      mentionable: mentionableMembers(membersQuery.data ?? [], byId.get(pageId) ?? page, selfId),
-                      panel: commentsOpen && commentsList ? { container: commentsList, filter: commentsFilter } : null,
-                      showThreadId,
-                      onThreadShown: () => setShowThreadId(null),
-                      onError: (action) =>
-                        toast.error(
-                          action === 'create'
-                            ? 'Could not add the comment.'
-                            : action === 'reply'
-                              ? 'Could not send the reply.'
-                              : action === 'edit'
-                                ? 'Could not save the comment.'
-                                : action === 'delete'
-                                  ? 'Could not delete the comment.'
-                                  : 'Could not update the thread.',
-                        ),
-                    }}
-                    mentions={mentions}
-                    className="-mx-[54px] min-h-40 max-[899px]:mx-0"
-                  />
-                </Suspense>
-              ) : (
-                // Never bind an editor to a document before its first sync (it would be empty). Until then, show the
-                // REST content read-only; the live editor replaces it with the same blocks.
-                <div data-testid="editor-preview">
+        {isDatabase ? (
+          <DatabasePage
+            workspaceId={workspaceId}
+            databaseId={pageId}
+            locked={locked}
+            cover={coverBlock}
+            title={titleBlock}
+          />
+        ) : (
+          <div
+            data-print-root=""
+            onMouseDown={(event) => editorRef.current?.selectBlockBeside(event.nativeEvent)}
+            // The peek is narrow: room for the editor's block handles (-54px) on both sides.
+            className={cn('min-h-0 flex-1 overflow-y-auto px-6 pt-8 pb-24 max-[899px]:px-3 max-[899px]:pt-[18px] max-[899px]:pb-14', peek && 'px-[60px]')}
+          >
+            {coverBlock}
+            <div className={cn('mx-auto', fullWidth ? 'max-w-none px-[30px] max-[899px]:px-0' : 'max-w-[760px]')} data-full-width={fullWidth || undefined}>
+              {titleBlock}
+              {page.database_id ? <PropertyList workspaceId={workspaceId} databaseId={page.database_id} rowId={pageId} viewId={peek?.viewId} /> : null}
+              <div onBlur={() => void saver.flush()}>
+                {collab.connection && collab.state.ready ? (
                   <Suspense fallback={editorSpinner}>
                     <PageEditor
-                      key={`preview:${collab.key}`}
-                      pageId={`preview:${pageId}`}
-                      initialContent={page.content}
-                      editable={false}
+                      // A new document (page switch, reset) needs a new editor instance.
+                      key={collab.key}
+                      ref={editorRef}
+                      pageId={pageId}
+                      collab={{ provider: collab.connection.provider, fragment: collab.connection.fragment, user: collabUser }}
+                      editable={!lost && syncStatus !== 'error' && !readOnly}
                       resolvePage={resolvePage}
                       onOpenPage={onOpenPage}
                       onCreateSubpage={onCreateSubpage}
                       onPickPage={onPickPage}
+                      databaseHost={databaseHost}
+                      onLinkDatabase={onLinkDatabase}
+                      onDatabaseBlockRemoved={onDatabaseBlockRemoved}
+                      uploadFile={uploadFile}
+                      comments={{
+                        workspaceId,
+                        pageId,
+                        userId: selfId,
+                        members: membersQuery.data ?? null,
+                        mentionable: mentionableMembers(membersQuery.data ?? [], byId.get(pageId) ?? page, selfId),
+                        panel: commentsOpen && commentsList ? { container: commentsList, filter: commentsFilter } : null,
+                        showThreadId,
+                        onThreadShown: () => setShowThreadId(null),
+                        onError: (action) =>
+                          toast.error(
+                            action === 'create'
+                              ? 'Could not add the comment.'
+                              : action === 'reply'
+                                ? 'Could not send the reply.'
+                                : action === 'edit'
+                                  ? 'Could not save the comment.'
+                                  : action === 'delete'
+                                    ? 'Could not delete the comment.'
+                                    : 'Could not update the thread.',
+                          ),
+                      }}
                       mentions={mentions}
                       className="-mx-[54px] min-h-40 max-[899px]:mx-0"
                     />
                   </Suspense>
-                </div>
-              )}
+                ) : (
+                  // Never bind an editor to a document before its first sync (it would be empty). Until then, show the
+                  // REST content read-only; the live editor replaces it with the same blocks.
+                  <div data-testid="editor-preview">
+                    <Suspense fallback={editorSpinner}>
+                      <PageEditor
+                        key={`preview:${collab.key}`}
+                        pageId={`preview:${pageId}`}
+                        initialContent={page.content}
+                        editable={false}
+                        resolvePage={resolvePage}
+                        onOpenPage={onOpenPage}
+                        onCreateSubpage={onCreateSubpage}
+                        onPickPage={onPickPage}
+                        databaseHost={databaseHost}
+                        mentions={mentions}
+                        className="-mx-[54px] min-h-40 max-[899px]:mx-0"
+                      />
+                    </Suspense>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-        </div>
+        )}
+        {/* The row peek of a database block in the page, a flex item of this row (as on a database page). */}
+        <div ref={setPeekSlot} className="contents" />
         {commentsOpen ? (
           <CommentsPanel
             filter={commentsFilter}
@@ -1037,8 +1197,26 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
           />
         ) : null}
         </div>
-        {linkOpen ? (
-          <PageLinkDialog pages={pages} excludeId={pageId} onPick={(picked) => closeLinkDialog(picked.id)} onClose={() => closeLinkDialog(null)} />
+        {linkKind ? (
+          <PageLinkDialog
+            pages={linkKind === 'database' ? pages.filter((item) => item.kind === 'database') : pages}
+            excludeId={pageId}
+            kind={linkKind}
+            onPick={(picked) => closeLinkDialog(picked.id)}
+            onClose={() => closeLinkDialog(null)}
+          />
+        ) : null}
+        {moveOpen && onRequestMove && teamspaces ? (
+          <MoveToDialog
+            pages={pages}
+            teamspaces={teamspaces}
+            moving={page}
+            onPick={(destination) => {
+              setMoveOpen(false)
+              onRequestMove(pageId, destination)
+            }}
+            onClose={() => setMoveOpen(false)}
+          />
         ) : null}
       </Pane>
       {historyOpen ? (

@@ -569,6 +569,47 @@ impl MigrationRunner {
                     include_str!("../../../../apps/server/migrations/0085_orbit_imports.sql"),
                     false,
                 ),
+                Migration::new(
+                    86,
+                    include_str!("../../../../apps/server/migrations/0086_page_databases.sql"),
+                    false,
+                ),
+                Migration::new(
+                    87,
+                    include_str!(
+                        "../../../../apps/server/migrations/0087_database_board_views.sql"
+                    ),
+                    false,
+                ),
+                Migration::new(
+                    88,
+                    include_str!("../../../../apps/server/migrations/0088_database_links.sql"),
+                    false,
+                ),
+                Migration::new(
+                    89,
+                    include_str!(
+                        "../../../../apps/server/migrations/0089_database_filter_groups.sql"
+                    ),
+                    false,
+                ),
+                Migration::new(
+                    90,
+                    include_str!(
+                        "../../../../apps/server/migrations/0090_page_property_search.sql"
+                    ),
+                    false,
+                ),
+                Migration::new(
+                    91,
+                    include_str!("../../../../apps/server/migrations/0091_database_templates.sql"),
+                    false,
+                ),
+                Migration::new(
+                    92,
+                    include_str!("../../../../apps/server/migrations/0092_page_relations.sql"),
+                    false,
+                ),
             ],
         );
         runner.postgres = vec![
@@ -806,6 +847,49 @@ impl MigrationRunner {
             Migration::new(
                 85,
                 include_str!("../../../../apps/server/migrations/postgres/0085_orbit_imports.sql"),
+                false,
+            ),
+            Migration::new(
+                86,
+                include_str!("../../../../apps/server/migrations/postgres/0086_page_databases.sql"),
+                false,
+            ),
+            Migration::new(
+                87,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0087_database_board_views.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                88,
+                include_str!("../../../../apps/server/migrations/postgres/0088_database_links.sql"),
+                false,
+            ),
+            Migration::new(
+                89,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0089_database_filter_groups.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                90,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0090_page_property_search.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                91,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0091_database_templates.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                92,
+                include_str!("../../../../apps/server/migrations/postgres/0092_page_relations.sql"),
                 false,
             ),
         ];

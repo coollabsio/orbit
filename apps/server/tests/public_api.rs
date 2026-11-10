@@ -702,6 +702,7 @@ async fn docs_need_their_scope_and_a_personal_token_and_unserved_paths_are_not_f
             f.workspace,
             f.user,
             CreatePage {
+                kind: orbit_server::repositories::pages::PageKind::Page,
                 parent_id: None,
                 space: SpaceRequest::default(),
                 title: "Runbook".into(),
@@ -2336,6 +2337,7 @@ async fn doc_markdown_names_visible_sub_pages_and_hides_the_others() {
             f.workspace,
             member,
             CreatePage {
+                kind: orbit_server::repositories::pages::PageKind::Page,
                 parent_id: None,
                 space: SpaceRequest {
                     private: Some(true),

@@ -10,6 +10,7 @@ import {
 } from '@blocknote/react'
 import { codeBlockSpec, type CodeBlockOptions } from './codeHighlight'
 import { FileExternalHtml, FilePreview } from './FilePreview'
+import { isolateEvents } from './isolation'
 import { linkEmbedExtension } from './linkEmbed'
 
 /**
@@ -56,6 +57,20 @@ const pageBlockConfig = {
 } as const
 
 /**
+ * A database shown inside the page: its rows, views and toolbar. `databaseId` is the database page. `linkId` empty
+ * shows the database's own views (an inline database); otherwise it is a `database_links` id whose views belong to
+ * this block only (a linked view). The host draws its UI inside an `ISOLATED_ATTR` root.
+ */
+const databaseBlockConfig = {
+  type: 'database',
+  propSchema: {
+    databaseId: { default: '' },
+    linkId: { default: '' },
+  },
+  content: 'none',
+} as const
+
+/**
  * A Notion-style callout: an emoji next to rich text, in a rounded colored box; nested blocks sit inside the box.
  * `backgroundColor`/`textColor` are BlockNote color names.
  */
@@ -89,6 +104,7 @@ const mathConfig = {
 } as const
 
 type PageBlockImplementation = ReactCustomBlockImplementation<typeof pageBlockConfig>
+type DatabaseBlockImplementation = ReactCustomBlockImplementation<typeof databaseBlockConfig>
 type CalloutImplementation = ReactCustomBlockImplementation<typeof calloutBlockConfig>
 type MentionImplementation = ReactInlineContentImplementation<typeof mentionConfig, StyleSchemaFromSpecs<typeof defaultStyleSpecs>>
 type MathImplementation = ReactInlineContentImplementation<typeof mathConfig, StyleSchemaFromSpecs<typeof defaultStyleSpecs>>
@@ -96,6 +112,7 @@ type MathImplementation = ReactInlineContentImplementation<typeof mathConfig, St
 /** How a host draws the custom blocks. Views never change the schema, so every host edits the same documents. */
 export interface EditorViews {
   page: { render: PageBlockImplementation['render']; toExternalHTML?: PageBlockImplementation['toExternalHTML'] }
+  database: { render: DatabaseBlockImplementation['render']; toExternalHTML?: DatabaseBlockImplementation['toExternalHTML'] }
   callout: { render: CalloutImplementation['render']; toExternalHTML?: CalloutImplementation['toExternalHTML'] }
   mention: { render: MentionImplementation['render'] }
   math: { render: MathImplementation['render'] }
@@ -115,14 +132,15 @@ export function createEditorSchemas(views: EditorViews) {
       paragraph: paragraphWithEmbed,
       codeBlock,
       page: createReactBlockSpec(pageBlockConfig, views.page)(),
+      database: isolateEvents(createReactBlockSpec(databaseBlockConfig, views.database)()),
       callout: callout(),
     },
     inlineContentSpecs: { ...defaultInlineContentSpecs, mention, math },
   })
 
   /**
-   * Task descriptions and comments: the page editor's blocks without `page` (a link to a docs page is a plain link
-   * there). The server's converter shares the page schema; its task sanitizer drops `page` blocks.
+   * Task descriptions and comments: the page editor's blocks without `page` and `database` (a link to a docs page is
+   * a plain link there). The server's converter shares the page schema; its task sanitizer drops both.
    */
   const taskEditorSchema = BlockNoteSchema.create({
     blockSpecs: {

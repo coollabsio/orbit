@@ -23,6 +23,7 @@ export interface IconButtonProps {
   icon: IconName
   label: string
   onPress?: () => void
+  onLongPress?: () => void
   /** 28 is the web's `icon-sm`, 32 its `icon`, 22 the row pickers. */
   size?: number
   iconSize?: number
@@ -32,7 +33,7 @@ export interface IconButtonProps {
   disabled?: boolean
 }
 
-export function IconButton({ icon, label, onPress, size = 28, iconSize = 16, color, variant = 'ghost', disabled }: IconButtonProps) {
+export function IconButton({ icon, label, onPress, onLongPress, size = 28, iconSize = 16, color, variant = 'ghost', disabled }: IconButtonProps) {
   const { colors } = useTheme()
   const primary = variant === 'primary'
   return (
@@ -41,6 +42,7 @@ export function IconButton({ icon, label, onPress, size = 28, iconSize = 16, col
       accessibilityLabel={label}
       disabled={disabled || !onPress}
       onPress={onPress}
+      onLongPress={onLongPress}
       hitSlop={size < 32 ? (32 - size) / 2 + 4 : 4}
       className={`items-center justify-center ${size >= 32 ? 'rounded-lg' : 'rounded-md'} ${primary ? 'bg-primary active:bg-primary/80' : 'active:bg-muted'} ${disabled ? 'opacity-50' : ''}`}
       // the size is a prop, and the primary edge a computed color

@@ -36,6 +36,9 @@ use crate::repositories::tasks::{
 };
 use crate::repositories::workspaces::{WorkspaceError, WorkspaceRepository};
 
+mod databases;
+pub use databases::{DatabaseRowPatch, NewDatabaseRow};
+
 const PRIORITIES: [&str; 5] = ["none", "low", "medium", "high", "urgent"];
 /// The web app's second project color, indigo.
 const DEFAULT_PROJECT_COLOR: &str = "#6366f1";
@@ -57,6 +60,8 @@ pub enum TokenApiError {
     AllProjectsRequired,
     Task(TaskError),
     Page(PageError),
+    /// A database refusal other than not found (see `databases`).
+    Database(crate::repositories::databases::DatabaseError),
     Internal,
 }
 
@@ -296,6 +301,10 @@ pub struct DocView {
     pub page: PageRecord,
     /// The content as GitHub-flavored Markdown, the format that doc writes take.
     pub markdown: String,
+    /// A row of a database: its values, as `POST /docs/{page_id}/database/query` shows them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<Object>)]
+    pub values: Option<std::collections::BTreeMap<String, Value>>,
 }
 
 /// Links pages to `/docs/<id>` under the titles of the pages that the actor can see; any other
@@ -315,12 +324,15 @@ impl LinkResolver for DocLinks {
     }
 }
 
-/// The ids in the `page` blocks of `blocks`, nested blocks included.
+/// The ids in the `page` and `database` blocks of `blocks`, nested blocks included.
 fn linked_pages(blocks: &[Value], ids: &mut HashSet<String>) {
     for block in blocks {
-        if block["type"] == "page"
-            && let Some(id) = block["props"]["pageId"].as_str()
-        {
+        let target = match block["type"].as_str() {
+            Some("page") => block["props"]["pageId"].as_str(),
+            Some("database") => block["props"]["databaseId"].as_str(),
+            _ => None,
+        };
+        if let Some(id) = target {
             ids.insert(id.to_owned());
         }
         if let Some(children) = block["children"].as_array() {
@@ -1066,8 +1078,13 @@ impl Authorized<'_> {
             }
         }
         let markdown = blocks_to_markdown(&page.content, &DocLinks(titles));
+        let values = self.row_values(&page).await?;
         page.version = revision(page.version, page.updated_at);
-        Ok(DocView { page, markdown })
+        Ok(DocView {
+            page,
+            markdown,
+            values,
+        })
     }
 
     pub async fn create_doc(&self, input: NewDoc) -> Result<DocView> {
@@ -1090,6 +1107,7 @@ impl Authorized<'_> {
                 p.workspace_id,
                 p.actor_id,
                 CreatePage {
+                    kind: crate::repositories::pages::PageKind::Page,
                     parent_id: input.parent_id,
                     space: SpaceRequest {
                         teamspace_id: input.teamspace_id,

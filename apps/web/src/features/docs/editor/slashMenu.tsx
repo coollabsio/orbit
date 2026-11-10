@@ -1,6 +1,6 @@
 import { filterSuggestionItems, insertOrUpdateBlockForSlashMenu } from '@blocknote/core/extensions'
 import { getDefaultReactSlashMenuItems, type DefaultReactSuggestionItem } from '@blocknote/react'
-import { DocumentText, Hierarchy, LampOn, Link2, Math as MathIcon } from 'reicon-react'
+import { DocumentText, Grid, Hierarchy, LampOn, Link2, Math as MathIcon } from 'reicon-react'
 import { MATH_LANGUAGE, MERMAID_LANGUAGE } from '@orbit/editor/codeLanguages'
 import { CALLOUT_DEFAULT_BACKGROUND } from '@orbit/editor/schema'
 import type { PageEditorInstance } from '@orbit/editor/schema'
@@ -10,11 +10,44 @@ export const PAGE_ITEMS_GROUP = 'Basic blocks'
 
 export interface PageSlashActions {
   onSubpage: () => void
+  /** A database as a sub-page, linked from the current block, then opened. */
+  onDatabase: () => void
+  /** A database as a sub-page, shown in the page (an inline database block). Absent: not offered. */
+  onInlineDatabase?: () => void
+  /** A database picker, then a linked view block of it. Absent: not offered. */
+  onLinkedView?: () => void
   onLinkPage: () => void
 }
 
-/** "Sub-page" and "Link a page" — titles, subtexts and aliases ported from the old docs slash menu. */
+/**
+ * "Sub-page", the database items and "Link a page" (the first and last ported from the old docs slash menu).
+ * "Database – inline" and "Linked view of database" need a docs page to load databases in.
+ */
 export function pageSlashItems(actions: PageSlashActions): DefaultReactSuggestionItem[] {
+  const inline: DefaultReactSuggestionItem[] = actions.onInlineDatabase
+    ? [
+        {
+          title: 'Database – inline',
+          subtext: 'Add a database in this page',
+          aliases: ['database', 'inline', 'table', 'db'],
+          group: PAGE_ITEMS_GROUP,
+          icon: <Grid className="size-[18px]" />,
+          onItemClick: actions.onInlineDatabase,
+        },
+      ]
+    : []
+  const linked: DefaultReactSuggestionItem[] = actions.onLinkedView
+    ? [
+        {
+          title: 'Linked view of database',
+          subtext: 'Show an existing database with its own views',
+          aliases: ['linked', 'database', 'view', 'db'],
+          group: PAGE_ITEMS_GROUP,
+          icon: <Grid className="size-[18px]" />,
+          onItemClick: actions.onLinkedView,
+        },
+      ]
+    : []
   return [
     {
       title: 'Sub-page',
@@ -24,6 +57,16 @@ export function pageSlashItems(actions: PageSlashActions): DefaultReactSuggestio
       icon: <DocumentText className="size-[18px]" />,
       onItemClick: actions.onSubpage,
     },
+    {
+      title: 'Database – full page',
+      subtext: 'Create a database under this page',
+      aliases: ['database', 'table', 'db'],
+      group: PAGE_ITEMS_GROUP,
+      icon: <Grid className="size-[18px]" />,
+      onItemClick: actions.onDatabase,
+    },
+    ...inline,
+    ...linked,
     {
       title: 'Link a page',
       subtext: 'Insert a link to an existing page',

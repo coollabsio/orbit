@@ -74,8 +74,8 @@ not use.
 | --- | --- | --- |
 | `tasks:read` | Tasks: **Read** | `GET` projects, statuses, labels, members, tasks and comments |
 | `tasks:write` | Tasks: **Write** | Create, update and delete tasks, add comments, `POST /integrations/discord/events` |
-| `docs:read` | Docs: **Read** | `GET /docs`, `GET /docs/{page_id}` |
-| `docs:write` | Docs: **Write** | `POST /docs`, `PATCH /docs/{page_id}` |
+| `docs:read` | Docs: **Read** | `GET /docs`, `GET /docs/{page_id}`, `GET /docs/{page_id}/database`, `POST /docs/{page_id}/database/query` |
+| `docs:write` | Docs: **Write** | `POST /docs`, `PATCH /docs/{page_id}`, `POST /docs/{page_id}/rows`, `PATCH /docs/{page_id}/rows/{row_id}`, `POST /docs/{page_id}/rows/trash` |
 | `chat:read` | Chat: **Read** | None. Chat is available through MCP only. |
 | `workspace:export` | **Workspace export** | `POST /exports` with `mode: "full"`, `GET /exports/{export_id}`, `GET /exports/{export_id}/download` |
 | `workspace:export:personal` | **Personal export** | The same, with `mode: "personal"` |
@@ -392,6 +392,100 @@ curl -sS -X PATCH "$ORBIT_WS/docs/$PAGE_ID" -H "Authorization: Bearer $ORBIT_TOK
   -H 'Content-Type: application/json' -d '{"expected_version":4503599627370495,"markdown":"Updated."}'
 ```
 
+### Databases
+
+A database is a doc with `"kind": "database"` in the doc list. Its rows are docs
+too: `GET /docs/{row_id}` returns a row's body, its `database_id` and its
+`values`. The database endpoints use the docs scopes and show only the
+databases that the token's creator can see. Writes act as the token's creator.
+
+Values use the same keys and names that people see:
+
+- **Keys** are property names or property IDs. A name matches in any letter case
+  when no property has the exact name. A name that two properties share gets
+  `422`: use the ID.
+- **Select and status** take an option name or ID. **Multi-select** takes a list
+  of them. A value never adds an option: an unknown option gets `422`.
+- **Person** takes a list of user IDs or member emails, or `"me"`.
+- **Date** takes `YYYY-MM-DD`, a UTC time (`2026-11-09T14:00:00Z`), the
+  interval `start/end`, or `{"start": …, "end": …}`. A time can also have a UTC
+  offset (`2026-11-10T14:00:00+01:00`): Orbit stores it as the UTC time
+  (`2026-11-10T13:00:00Z`). A date without a time stays a date. Date filters
+  take the same forms.
+- **Relation** takes a list of page IDs of rows of the related database. Titles
+  are not accepted.
+- **Text, URL and number** take their value; a percent number stores `0.5`
+  for 50%. **Checkbox** takes `true` or `false`. `null` clears a value.
+- **Results** show option names, people as `{id, name}`, dates as
+  `{start, end}`, related pages as `{id, title}` and unique IDs as
+  `"PREFIX-12"` (`"12"` without a prefix), and every property except the title
+  and the created and edited ones (the row has these as its own fields). Two
+  properties with the same name show under their IDs. Rollups and formulas show
+  as computed when the database is read; a formula's people and pages show as
+  `{id, name}` and `{id, title}` too. A relation shows only the pages that the
+  token's creator can read; the row's `hidden_links` counts the others per
+  relation key (absent when there are none).
+- **Unique ID filters** take `"PREFIX-12"` (the prefix in any letter case),
+  `"12"` or `12`.
+
+`GET /workspaces/{workspace_id}/docs/{page_id}/database`. Scope: `docs:read`.
+The database's `title`, `url`, `locked`, `row_count`, `properties` (`id`, `name`,
+`type`, `options` with names, and the rest of the `config`), `views` (`id`,
+`name`, `type`) and `templates` (`id`, `name`).
+
+`POST /workspaces/{workspace_id}/docs/{page_id}/database/query`. Scope:
+`docs:read`. Body (all optional):
+
+- `filter`: an AND/OR group, as a view's filter: up to 3 levels, 10 children
+  per group and 20 rules. A rule is `{property_id, operator, value}`, with a
+  property name or ID. A rule without a value matches every row.
+- `sorts`: up to 10 `{property_id, direction}`, `direction` `asc` (default) or
+  `desc`. Empty values sort last.
+- `view_id`: starts from this view's filter and sorts. `filter` must then match
+  too, and `sorts` replace the view's.
+- `limit` (1 to 100, default 50), `cursor` (the `next_cursor` of the previous
+  page), and `tz` (an IANA zone such as `Europe/Budapest` for relative dates
+  and computed values; default `UTC`).
+
+Response: `{items, next_cursor, total}`. Each item is a row: `id`, `title`,
+`icon`, `url`, `created_at`, `created_by`, `updated_at`, `updated_by` and
+`values`. Orbit filters and sorts on the server with the same rules as the web
+app. A cursor works only with the same filter, sorts, view and zone; another
+query with it gets `422` (`cursor`). A `422` names the invalid field in
+`errors`, with a message that says what the field needs, such as `limit`:
+"Send a limit from 1 to 100."
+
+```bash
+curl -sS "$ORBIT_WS/docs/$DATABASE_ID/database/query" -H "Authorization: Bearer $ORBIT_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"filter":{"op":"and","children":[{"property_id":"Status","operator":"is","value":["In progress"]},{"property_id":"Due","operator":"on_or_before","value":"today"}]},"sorts":[{"property_id":"Due","direction":"asc"}],"tz":"Europe/Budapest"}'
+```
+
+`POST /workspaces/{workspace_id}/docs/{page_id}/rows`. Scope: `docs:write`.
+Body (all optional): `title` (up to 500 characters), `values` (up to 50),
+`markdown` (the row's body) and `template_id` (a template of the database, which
+fills the title, values and body; `title` and `values` in the body win, and
+`markdown` replaces the template's body). The row goes last. Response: `201`
+with the row. A database holds at most 5,000 rows (`409`
+`database_row_limit`).
+
+`PATCH /workspaces/{workspace_id}/docs/{page_id}/rows/{row_id}`. Scope:
+`docs:write`. Body: `values` (up to 50), `title`, or both. The last write wins,
+as in the web app: there is no `expected_version`. A locked database still takes
+value writes; the lock covers its properties and views. Response: `200` with the
+row.
+
+`POST /workspaces/{workspace_id}/docs/{page_id}/rows/trash`. Scope:
+`docs:write`. Body: `row_ids` (1 to 100). Each row goes to the trash for 30
+days with its sub-pages. IDs that are not live rows of the database are
+skipped. Response: `{"trashed": n}`.
+
+```bash
+curl -sS -X PATCH "$ORBIT_WS/docs/$DATABASE_ID/rows/$ROW_ID" -H "Authorization: Bearer $ORBIT_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"values":{"Status":"Done","Owner":["ada@example.com"],"Due":"2026-11-20"}}'
+```
+
 ### Exports
 
 An export is a ZIP archive that another Orbit instance can import. The export
@@ -512,6 +606,8 @@ cannot use. Thus a token cannot find out which other resources exist.
   unknown token or a wrong method cannot use it up. Each server counts on its
   own: with N servers, the limits are N times the setting.
 - The usual request body limit and request timeout of the Orbit server apply.
+- Databases: 100 rows per query page, 100 rows per trash request, and 50 values
+  per row write.
 - The token's expiry, its revocation and the projects in its grant apply
   immediately. A deleted project leaves the grant.
 

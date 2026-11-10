@@ -17,6 +17,11 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use super::billing::{TrialCapacityError, TrialLimitReached, ensure_trial_capacity};
+use super::databases::{
+    DatabaseSchema, LinkCopy, NOT_TEMPLATE, RowCapacityError, block_links, carry_row_values,
+    copy_database_data, copy_links, ensure_row_capacity, insert_schema, is_template,
+    linked_databases, renumber_copy, row_search_lines,
+};
 use super::page_files::{page_file_url, page_has_file, parse_page_file_url};
 use super::page_mentions::notify_new_mentions;
 use super::page_versions::{
@@ -51,12 +56,13 @@ const PAGE_COLUMNS: &str = "id, workspace_id, parent_id, teamspace_id, title, ic
      content_json, position, creator_id, updated_by, version, created_at, updated_at, deleted_at, \
      COALESCE((SELECT epoch FROM page_collab_docs WHERE page_collab_docs.page_id = pages.id), \
      (SELECT generation FROM page_collab_meta WHERE page_collab_meta.id = 1), '') AS collab_epoch, \
-     full_width, locked_at, locked_by, \
+     full_width, locked_at, locked_by, kind, \
+     (SELECT parent.id FROM pages AS parent WHERE parent.id = pages.parent_id AND parent.kind = 'database') AS database_id, \
      (SELECT display_name FROM users WHERE users.id = pages.updated_by) AS updated_by_name, \
      (SELECT display_name FROM users WHERE users.id = pages.locked_by) AS locked_by_name";
 const SUMMARY_COLUMNS: &str = "pages.id AS id, pages.parent_id AS parent_id, pages.teamspace_id AS teamspace_id, \
      pages.title AS title, pages.icon AS icon, pages.position AS position, pages.version AS version, \
-     pages.updated_at AS updated_at";
+     pages.updated_at AS updated_at, pages.kind AS kind";
 /// Teamspace pages plus the caller's private pages; binds the caller's user id.
 /// `param` is the placeholder number of that bind in the final query.
 pub(super) fn visible(param: usize) -> String {
@@ -68,6 +74,33 @@ pub(super) fn json_text_array(backend: Backend, param: usize) -> String {
     match backend {
         Backend::Sqlite => format!("SELECT value FROM json_each(${param})"),
         Backend::Postgres => format!("SELECT jsonb_array_elements_text(${param}::jsonb)"),
+    }
+}
+
+/// What a page holds: a block document, or a database of rows (see `repositories::databases`).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, serde::Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PageKind {
+    #[default]
+    Page,
+    Database,
+}
+
+impl PageKind {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Page => "page",
+            Self::Database => "database",
+        }
+    }
+
+    pub(super) fn parse(value: &str) -> Result<Self, PageError> {
+        match value {
+            "page" => Ok(Self::Page),
+            "database" => Ok(Self::Database),
+            _ => Err(PageError::Corrupt),
+        }
     }
 }
 
@@ -110,6 +143,17 @@ pub struct SpaceRequest {
     pub private: Option<bool>,
 }
 
+/// A moved page (as it is after the move, or would be after a dry run).
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[schema(as = MovedPage)]
+pub struct MovedPage {
+    #[serde(flatten)]
+    pub page: PageRecord,
+    /// Property values the move deletes: the page left its database, or the new database has no
+    /// property of the same name and type (or no such option) for them.
+    pub dropped_values: u64,
+}
+
 /// A page with its content.
 #[derive(Clone, Debug, Serialize, ToSchema)]
 #[schema(as = Page)]
@@ -125,6 +169,11 @@ pub struct PageRecord {
     pub teamspace_id: Option<Id>,
     /// True when the page is in the caller's private space (`teamspace_id` is `null`).
     pub private: bool,
+    /// A `database` page has no body; read it with `GET .../databases/{database_id}`.
+    pub kind: PageKind,
+    /// For a row of a database (a page whose parent is a database page): that database.
+    #[schema(value_type = Option<String>, required = true)]
+    pub database_id: Option<Id>,
     pub title: String,
     #[schema(required = true)]
     pub icon: Option<String>,
@@ -189,6 +238,10 @@ pub struct RecentPage {
     pub title: String,
     #[schema(required = true)]
     pub icon: Option<String>,
+    pub kind: PageKind,
+    /// For a row of a database: the database's title.
+    #[schema(required = true)]
+    pub database_title: Option<String>,
     /// When the caller last opened the page.
     #[schema(value_type = String, format = DateTime)]
     pub visited_at: TimestampMillis,
@@ -212,6 +265,7 @@ pub struct PageSummary {
     pub teamspace_id: Option<Id>,
     /// True when the page is in the caller's private space.
     pub private: bool,
+    pub kind: PageKind,
     pub title: String,
     #[schema(required = true)]
     pub icon: Option<String>,
@@ -238,6 +292,7 @@ pub struct TrashedPage {
     pub title: String,
     #[schema(required = true)]
     pub icon: Option<String>,
+    pub kind: PageKind,
     pub position: i64,
     pub version: u64,
     #[schema(value_type = String, format = DateTime)]
@@ -261,12 +316,16 @@ pub struct PageSearchResult {
     #[schema(required = true)]
     pub icon: Option<String>,
     /// Plain body text around the best match (about 24 words, `…` where text was cut), or the
-    /// start of the body when only the title matched.
+    /// start of the body when only the title matched. A row found by a property value and not by
+    /// its body shows that value: `Status: Reading`.
     pub snippet: String,
     /// Matched words in `snippet`.
     pub snippet_highlights: Vec<TextRange>,
     /// Matched words in `title`.
     pub title_highlights: Vec<TextRange>,
+    /// For a row of a database: the database's title.
+    #[schema(required = true)]
+    pub database_title: Option<String>,
 }
 
 /// A span of a string in UTF-16 code units (JavaScript string indices): `start` inclusive, `end`
@@ -314,13 +373,24 @@ pub struct PageSearch {
     pub items: Vec<PageSearchResult>,
 }
 
-/// One of the caller's favorite pages. `position` is the index among the caller's visible
+/// One of the caller's favorite pages, with what the favorites list shows: rows of databases (and
+/// their sub-pages) are not in the page tree. `position` is the index among the caller's visible
 /// favorites.
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct PageFavorite {
     #[schema(value_type = String)]
     pub page_id: Id,
     pub position: i64,
+    pub title: String,
+    #[schema(required = true)]
+    pub icon: Option<String>,
+    pub kind: PageKind,
+    /// For a row of a database: that database.
+    #[schema(value_type = Option<String>, required = true)]
+    pub database_id: Option<Id>,
+    /// For a row of a database: the database's title.
+    #[schema(required = true)]
+    pub database_title: Option<String>,
 }
 
 /// The caller's favorites in this workspace, ordered by position.
@@ -331,6 +401,8 @@ pub struct PageFavoriteList {
 
 #[derive(Clone, Debug)]
 pub struct CreatePage {
+    /// A database starts with a "Name" title property, a "Tags" multi-select and a "Table" view.
+    pub kind: PageKind,
     pub parent_id: Option<Id>,
     pub space: SpaceRequest,
     pub title: String,
@@ -403,6 +475,16 @@ pub enum PageError {
     /// The page is locked: its title, icon, cover and content cannot change.
     #[error("page is locked")]
     Locked,
+    /// A database page cannot be created or moved directly under a database (become a row).
+    #[error("a database cannot be a row")]
+    DatabaseInDatabase,
+    /// Restoring a row whose database is in the trash (or gone): a row cannot live outside its
+    /// database, so the database comes back first.
+    #[error("the row's database is in the trash")]
+    DatabaseTrashed,
+    /// Restoring or duplicating a row of a database that holds the most live rows allowed.
+    #[error("database holds the most rows allowed")]
+    RowLimit,
     #[error("stored page data is invalid")]
     Corrupt,
     /// Orbit Cloud: the trial workspace holds as many pages as the trial allows.
@@ -427,6 +509,15 @@ impl From<CollabError> for PageError {
             // the memory budget is full, or another server reset the document while this write waited
             CollabError::Overloaded | CollabError::Reset => Self::Busy,
             CollabError::Corrupt(_) => Self::Corrupt,
+        }
+    }
+}
+
+impl From<RowCapacityError> for PageError {
+    fn from(error: RowCapacityError) -> Self {
+        match error {
+            RowCapacityError::Full => Self::RowLimit,
+            RowCapacityError::Database(error) => Self::Unavailable(error),
         }
     }
 }
@@ -470,18 +561,66 @@ impl PageRepository {
         Self { database }
     }
 
-    /// All live pages the caller can see, grouped by space (teamspaces by position, then the
-    /// caller's private space) and ordered `parent_id, position, id` within a space.
+    /// All live pages the caller can see, without database rows and their sub-pages, grouped by
+    /// space (teamspaces by position, then the caller's private space) and ordered
+    /// `parent_id, position, id` within a space.
     pub async fn pages(&self, workspace_id: Id, actor_id: Id) -> Result<PageList, PageError> {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
+        // A database can hold 5,000 rows; the tree would be slow and full.
         let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
-            "SELECT {SUMMARY_COLUMNS} FROM pages \
+            "WITH RECURSIVE in_database(id) AS ( \
+                 SELECT row_page.id FROM pages AS row_page JOIN pages AS db ON db.id = row_page.parent_id \
+                 WHERE db.workspace_id = $1 AND db.kind = 'database' \
+                 UNION ALL \
+                 SELECT child.id FROM pages AS child JOIN in_database ON child.parent_id = in_database.id \
+             ) \
+             SELECT {SUMMARY_COLUMNS} FROM pages \
              LEFT JOIN teamspaces ON teamspaces.id = pages.teamspace_id \
              WHERE pages.workspace_id = $1 AND pages.deleted_at IS NULL AND {visible} \
+             AND pages.id NOT IN (SELECT id FROM in_database) \
              ORDER BY pages.teamspace_id IS NULL, teamspaces.position, teamspaces.id, \
              pages.parent_id NULLS FIRST, pages.position, pages.id",
             visible = visible(2)
         )))
+        .bind(workspace_id.to_string())
+        .bind(actor_id.to_string())
+        .fetch_all(self.database.pool())
+        .await?;
+        Ok(PageList {
+            items: rows
+                .into_iter()
+                .map(summary_from_row)
+                .collect::<Result<_, _>>()?,
+        })
+    }
+
+    /// The live sub-pages of a live page the caller can see, at any depth, parents first: what
+    /// trashing, "Duplicate with sub-pages" and "Markdown with sub-pages" take along. As in the
+    /// tree, a database counts but its rows (its content) and their sub-pages do not, so a
+    /// database has none. Rows and their sub-pages are not in the tree; this is their source.
+    pub async fn descendants(
+        &self,
+        workspace_id: Id,
+        page_id: Id,
+        actor_id: Id,
+    ) -> Result<PageList, PageError> {
+        self.get_visible(workspace_id, page_id, actor_id).await?;
+        let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "WITH RECURSIVE subtree(id, kind, depth) AS ( \
+                 SELECT child.id, child.kind, 1 FROM pages AS child \
+                 JOIN pages AS root ON root.id = child.parent_id \
+                 WHERE root.id = $1 AND root.kind <> 'database' AND child.deleted_at IS NULL \
+                 UNION ALL \
+                 SELECT pages.id, pages.kind, subtree.depth + 1 FROM pages \
+                 JOIN subtree ON pages.parent_id = subtree.id \
+                 WHERE pages.deleted_at IS NULL AND subtree.kind <> 'database' \
+             ) \
+             SELECT {SUMMARY_COLUMNS} FROM pages JOIN subtree ON subtree.id = pages.id \
+             WHERE pages.workspace_id = $2 AND {visible} \
+             ORDER BY subtree.depth, pages.parent_id, pages.position, pages.id",
+            visible = visible(3)
+        )))
+        .bind(page_id.to_string())
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
         .fetch_all(self.database.pool())
@@ -541,8 +680,47 @@ impl PageRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<PageRecord, PageError> {
-        self.insert_page(id, workspace_id, actor_id, input, &[], request_id, now)
-            .await
+        self.insert_page(
+            id,
+            workspace_id,
+            actor_id,
+            input,
+            &[],
+            None,
+            request_id,
+            now,
+        )
+        .await
+    }
+
+    /// A database page (`input.kind` is ignored) with `schema` instead of the starter schema,
+    /// with a caller-chosen id as [`Self::create_page_with_id`].
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_database_with_id(
+        &self,
+        id: Id,
+        workspace_id: Id,
+        actor_id: Id,
+        input: CreatePage,
+        schema: &DatabaseSchema,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<PageRecord, PageError> {
+        let input = CreatePage {
+            kind: PageKind::Database,
+            ..input
+        };
+        self.insert_page(
+            id,
+            workspace_id,
+            actor_id,
+            input,
+            &[],
+            Some(schema),
+            request_id,
+            now,
+        )
+        .await
     }
 
     /// [`Self::create_page`] with its first content, in the same transaction (one audit event).
@@ -557,8 +735,17 @@ impl PageRepository {
         now: TimestampMillis,
     ) -> Result<PageRecord, PageError> {
         let id = Id::new_v7();
-        self.insert_page(id, workspace_id, actor_id, input, content, request_id, now)
-            .await
+        self.insert_page(
+            id,
+            workspace_id,
+            actor_id,
+            input,
+            content,
+            None,
+            request_id,
+            now,
+        )
+        .await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -569,13 +756,22 @@ impl PageRepository {
         actor_id: Id,
         input: CreatePage,
         content: &[Value],
+        schema: Option<&DatabaseSchema>,
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<PageRecord, PageError> {
         let content = sanitize_page_blocks(content, workspace_id, id);
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
-        ensure_trial_capacity(&self.database, &mut tx, workspace_id, TrialLimit::Pages, 1).await?;
+        let imported_rows = schema.map_or(0, DatabaseSchema::row_count) as i64;
+        ensure_trial_capacity(
+            &self.database,
+            &mut tx,
+            workspace_id,
+            TrialLimit::Pages,
+            1 + imported_rows,
+        )
+        .await?;
         let space = resolve_space(
             &mut tx,
             workspace_id,
@@ -585,13 +781,24 @@ impl PageRepository {
             None,
         )
         .await?;
+        // A page created under a database is a row with no values.
+        let row_of = match input.parent_id {
+            Some(parent_id) if is_database(&mut tx, parent_id).await? => Some(parent_id),
+            _ => None,
+        };
+        if let Some(database_id) = row_of {
+            if input.kind == PageKind::Database {
+                return Err(PageError::DatabaseInDatabase);
+            }
+            ensure_row_capacity(&mut tx, database_id, 1).await?;
+        }
         let mut siblings = sibling_ids(&mut tx, workspace_id, space, input.parent_id, id).await?;
         let index = insert_index(input.position, siblings.len());
         siblings.insert(index, id);
         let position = index as i64;
         sqlx::query(
-            "INSERT INTO pages (id, workspace_id, parent_id, teamspace_id, owner_id, title, icon, position, creator_id, updated_by, version, created_at, updated_at, content_json, content_text) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 0, $11, $12, $13, $14)",
+            "INSERT INTO pages (id, workspace_id, parent_id, teamspace_id, owner_id, title, icon, position, creator_id, updated_by, version, created_at, updated_at, content_json, content_text, kind) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 0, $11, $12, $13, $14, $15)",
         )
         .bind(id.to_string())
         .bind(workspace_id.to_string())
@@ -607,7 +814,22 @@ impl PageRepository {
         .bind(now.as_millis())
         .bind(serde_json::to_string(&content).map_err(|_| PageError::Corrupt)?)
         .bind(content_text(&content))
+        .bind(input.kind.as_str())
         .execute(&mut *tx)
+        .await?;
+        if input.kind == PageKind::Database {
+            insert_schema(&mut tx, workspace_id, id, space, actor_id, schema, now).await?;
+        }
+        carry_row_values(
+            &mut tx,
+            workspace_id,
+            id,
+            None,
+            row_of,
+            actor_id,
+            request_id,
+            now,
+        )
         .await?;
         renumber(&mut tx, &siblings).await?;
         notify_new_mentions(&mut tx, id, &[], &content, Some(actor_id), request_id, now).await?;
@@ -631,6 +853,8 @@ impl PageRepository {
             parent_id: input.parent_id,
             teamspace_id: space.teamspace_id(),
             private: space.teamspace_id().is_none(),
+            kind: input.kind,
+            database_id: row_of,
             title: input.title,
             icon: input.icon,
             cover_url: None,
@@ -877,6 +1101,9 @@ impl PageRepository {
         if edit && current.locked_at.is_some() {
             return Err(PageError::Locked);
         }
+        if current.kind == PageKind::Database && (changes.content.is_some() || markdown.is_some()) {
+            return Err(PageError::Invalid { field: "content" });
+        }
         expected.check(&current)?;
         if reconciled
             && let Some(collab) = collab.as_mut()
@@ -1047,7 +1274,9 @@ impl PageRepository {
     /// siblings. With a parent the page joins the parent's space; at the root it goes to the
     /// requested space, or stays in its own. The whole subtree follows a space change. Sibling
     /// positions are renumbered without bumping their versions, so a reorder never makes a
-    /// concurrent content save conflict.
+    /// concurrent content save conflict. A page that enters a database becomes its last row; a
+    /// row that changes database keeps only the values the new one can hold (see
+    /// [`carry_row_values`]). `dry_run` does all of it, then rolls back.
     #[allow(clippy::too_many_arguments)]
     pub async fn move_page(
         &self,
@@ -1058,15 +1287,30 @@ impl PageRepository {
         parent_id: Option<Id>,
         space: SpaceRequest,
         position: i64,
+        dry_run: bool,
         request_id: &str,
         now: TimestampMillis,
-    ) -> Result<PageRecord, PageError> {
+    ) -> Result<MovedPage, PageError> {
         let mut tx = self.database.immediate_transaction().await?;
         let actor = require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let current = page_in_tx(&mut tx, workspace_id, page_id, actor_id, false).await?;
         check_version(expected_version, current.version, &current)?;
-        if parent_id == Some(page_id) {
+        // A row template stays a hidden page of its database.
+        if parent_id == Some(page_id) || is_template(&mut tx, page_id).await? {
             return Err(PageError::Invalid { field: "parent_id" });
+        }
+        let database_id = match parent_id {
+            Some(parent_id) if is_database(&mut tx, parent_id).await? => Some(parent_id),
+            _ => None,
+        };
+        let joins_database = database_id.is_some() && database_id != current.database_id;
+        if let Some(database_id) = database_id {
+            if current.kind == PageKind::Database {
+                return Err(PageError::DatabaseInDatabase);
+            }
+            if joins_database {
+                ensure_row_capacity(&mut tx, database_id, 1).await?;
+            }
         }
         let current_space = current.space(actor_id);
         let space = resolve_space(
@@ -1103,7 +1347,8 @@ impl PageRepository {
         .await?;
         renumber(&mut tx, &old_siblings).await?;
         let mut siblings = sibling_ids(&mut tx, workspace_id, space, parent_id, page_id).await?;
-        let index = insert_index(Some(position), siblings.len());
+        // A new row goes last in the database's manual order.
+        let index = insert_index((!joins_database).then_some(position), siblings.len());
         siblings.insert(index, page_id);
         sqlx::query(
             "UPDATE pages SET parent_id = $1, teamspace_id = $2, owner_id = $3, position = $4, \
@@ -1125,6 +1370,17 @@ impl PageRepository {
             move_descendants(&mut tx, page_id, space).await?;
         }
         renumber(&mut tx, &siblings).await?;
+        let dropped_values = carry_row_values(
+            &mut tx,
+            workspace_id,
+            page_id,
+            current.database_id,
+            database_id,
+            actor_id,
+            request_id,
+            now,
+        )
+        .await?;
         record_mutation(
             &mut tx,
             workspace_id,
@@ -1152,19 +1408,29 @@ impl PageRepository {
             .await?;
         }
         let updated_by_user = user_in_tx(&mut tx, actor_id).await?;
-        tx.commit().await?;
-        // A page (and its subtree) moved into someone's private space closes other editors.
-        CollabHub::revalidate_database(&self.database, Some(workspace_id));
-        Ok(PageRecord {
+        let page = PageRecord {
             parent_id,
             teamspace_id: space.teamspace_id(),
             private: space.teamspace_id().is_none(),
+            database_id,
             position: index as i64,
             version: current.version + 1,
             updated_by: actor_id,
             updated_by_user,
             updated_at: now,
             ..current
+        };
+        if dry_run {
+            // Nothing is kept, so nothing is audited and no realtime event goes out.
+            tx.rollback().await?;
+        } else {
+            tx.commit().await?;
+            // A page (and its subtree) moved into someone's private space closes other editors.
+            CollabHub::revalidate_database(&self.database, Some(workspace_id));
+        }
+        Ok(MovedPage {
+            page,
+            dropped_values,
         })
     }
 
@@ -1349,8 +1615,16 @@ impl PageRepository {
             {
                 Some(parent_id)
             }
+            Some(parent_id) if is_database(&mut tx, parent_id).await? => {
+                return Err(PageError::DatabaseTrashed);
+            }
             _ => None,
         };
+        if current.database_id.is_some()
+            && let Some(database_id) = parent_id
+        {
+            ensure_row_capacity(&mut tx, database_id, 1).await?;
+        }
         let mut siblings = sibling_ids(&mut tx, workspace_id, space, parent_id, page_id).await?;
         let index = insert_index(Some(current.position), siblings.len());
         siblings.insert(index, page_id);
@@ -1434,6 +1708,7 @@ impl PageRepository {
                     can_purge: actor.can_purge_page(summary.private),
                     title: summary.title,
                     icon: summary.icon,
+                    kind: summary.kind,
                     position: summary.position,
                     version: summary.version,
                     updated_at: summary.updated_at,
@@ -1631,27 +1906,17 @@ impl PageRepository {
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let source = page_in_tx(&mut tx, workspace_id, page_id, actor_id, false).await?;
-        let collab_epoch = collab_generation(&mut tx).await?;
-        let actor = user_in_tx(&mut tx, actor_id).await?;
         let space = source.space(actor_id);
+        // A copied row is one more row of the same database; its sub-pages are not rows.
+        let row_of = source.database_id;
+        if let Some(database_id) = row_of {
+            ensure_row_capacity(&mut tx, database_id, 1).await?;
+        }
+        // A database's rows are its content: they are always copied.
+        let include_children = include_children || source.kind == PageKind::Database;
         let mut originals = vec![source];
         if include_children {
-            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
-                "WITH RECURSIVE subtree(page_id, depth) AS ( \
-                     SELECT $1, 0 \
-                     UNION ALL \
-                     SELECT pages.id, subtree.depth + 1 FROM pages \
-                     JOIN subtree ON pages.parent_id = subtree.page_id WHERE pages.deleted_at IS NULL \
-                 ) \
-                 SELECT {PAGE_COLUMNS} FROM pages JOIN subtree ON subtree.page_id = pages.id \
-                 WHERE subtree.depth > 0 ORDER BY subtree.depth, pages.parent_id, pages.position, pages.id"
-            )))
-            .bind(page_id.to_string())
-            .fetch_all(&mut *tx)
-            .await?;
-            for row in rows {
-                originals.push(page_from_row(row)?);
-            }
+            originals.extend(live_subtree(&mut tx, page_id).await?);
         }
         let copies = i64::try_from(originals.len()).unwrap_or(i64::MAX);
         ensure_trial_capacity(
@@ -1666,140 +1931,31 @@ impl PageRepository {
             .iter()
             .map(|page| (page.id, Id::new_v7()))
             .collect();
-        let mut files = HashMap::new();
-        let mut file_rows = Vec::new();
-        for page in &originals {
-            let rows = sqlx::query(
-                "SELECT id, blob_id, file_name, mime_type, size_bytes FROM page_files \
-                 WHERE page_id = $1 AND workspace_id = $2 ORDER BY created_at, id",
-            )
-            .bind(page.id.to_string())
-            .bind(workspace_id.to_string())
-            .fetch_all(&mut *tx)
-            .await?;
-            for row in rows {
-                let file_id = parse_id(row.get("id"))?;
-                let copy = (pages[&page.id], Id::new_v7());
-                files.insert((page.id, file_id), copy);
-                file_rows.push((copy, row));
-            }
-        }
-        let remap = Remap {
+        copy_pages(
+            &mut tx,
             workspace_id,
-            pages: &pages,
-            files: &files,
-        };
-
-        let mut child_positions: HashMap<Id, i64> = HashMap::new();
-        let mut root = None;
-        for (index, original) in originals.iter().enumerate() {
-            let id = pages[&original.id];
-            let (parent_id, title, position) = if index == 0 {
-                (original.parent_id, copy_title(&original.title), 0)
-            } else {
-                let parent = original
-                    .parent_id
-                    .and_then(|parent| pages.get(&parent).copied());
-                let parent = parent.ok_or(PageError::Corrupt)?;
-                let next = child_positions.entry(parent).or_default();
-                *next += 1;
-                (Some(parent), original.title.clone(), *next - 1)
-            };
-            let mut content = Value::Array(original.content.clone());
-            remap.value(&mut content, None);
-            let Value::Array(content) = content else {
-                return Err(PageError::Corrupt);
-            };
-            let cover_url = original
-                .cover_url
-                .as_ref()
-                .map(|url| remap.url(url).unwrap_or_else(|| url.clone()));
-            sqlx::query(
-                "INSERT INTO pages (id, workspace_id, parent_id, teamspace_id, owner_id, title, icon, \
-                 cover_url, cover_position, content_json, content_text, position, creator_id, updated_by, \
-                 version, created_at, updated_at, full_width) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 0, $15, $16, $17)",
-            )
-            .bind(id.to_string())
-            .bind(workspace_id.to_string())
-            .bind(parent_id.map(|parent| parent.to_string()))
-            .bind(space.teamspace_column())
-            .bind(space.owner_column())
-            .bind(&title)
-            .bind(&original.icon)
-            .bind(&cover_url)
-            .bind(&original.cover_position)
-            .bind(serde_json::to_string(&content).map_err(|_| PageError::Corrupt)?)
-            .bind(content_text(&content))
-            .bind(position)
-            .bind(actor_id.to_string())
-            .bind(actor_id.to_string())
-            .bind(now.as_millis())
-            .bind(now.as_millis())
-            .bind(i64::from(original.full_width))
-            .execute(&mut *tx)
-            .await?;
-            audit::record(
+            &originals,
+            &pages,
+            space,
+            actor_id,
+            request_id,
+            now,
+        )
+        .await?;
+        if let Some(database_id) = row_of {
+            renumber_copy(
                 &mut tx,
                 workspace_id,
-                Some(actor_id),
-                "page.duplicated",
-                AuditOutcome::Success,
-                "page",
-                Some(id),
-                request_id,
-                json!({"source_page_id": original.id}),
+                database_id,
+                pages[&page_id],
+                actor_id,
                 now,
             )
-            .await?;
-            if index == 0 {
-                root = Some(PageRecord {
-                    id,
-                    workspace_id,
-                    parent_id,
-                    teamspace_id: space.teamspace_id(),
-                    private: space.teamspace_id().is_none(),
-                    title,
-                    icon: original.icon.clone(),
-                    cover_url,
-                    cover_position: original.cover_position.clone(),
-                    content,
-                    position,
-                    version: 0,
-                    creator_id: actor_id,
-                    updated_by: actor_id,
-                    created_at: now,
-                    updated_at: now,
-                    deleted_at: None,
-                    collab_epoch: collab_epoch.clone(),
-                    // A copy keeps the layout but is never locked.
-                    full_width: original.full_width,
-                    locked_at: None,
-                    locked_by: None,
-                    updated_by_user: actor.clone(),
-                });
-            }
-        }
-        for ((page, file), row) in file_rows {
-            sqlx::query(
-                "INSERT INTO page_files (id, workspace_id, page_id, blob_id, file_name, mime_type, \
-                 size_bytes, uploaded_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
-            )
-            .bind(file.to_string())
-            .bind(workspace_id.to_string())
-            .bind(page.to_string())
-            .bind(row.get::<String, _>("blob_id"))
-            .bind(row.get::<String, _>("file_name"))
-            .bind(row.get::<String, _>("mime_type"))
-            .bind(row.get::<i64, _>("size_bytes"))
-            .bind(actor_id.to_string())
-            .bind(now.as_millis())
-            .execute(&mut *tx)
             .await?;
         }
 
         // The copy goes right after the original among the original's siblings.
-        let mut root = root.ok_or(PageError::Corrupt)?;
+        let mut root = page_in_tx(&mut tx, workspace_id, pages[&page_id], actor_id, false).await?;
         let mut siblings =
             sibling_ids(&mut tx, workspace_id, space, root.parent_id, root.id).await?;
         let index = siblings
@@ -1813,9 +1969,10 @@ impl PageRepository {
         Ok(root)
     }
 
-    /// Full-text search (FTS5, migration 0027) over the titles and body text of live pages the
-    /// caller can see. Every word must match (the last one as a prefix); case and diacritics are
-    /// ignored. Ranked by BM25 with title matches weighted 10x body matches.
+    /// Full-text search (FTS5, migrations 0027 and 0083) over the titles, body text and property
+    /// values of live pages the caller can see. Every word must match (the last one as a prefix);
+    /// case and diacritics are ignored. Ranked by BM25 with title matches weighted 10x and
+    /// property values 2x body matches.
     pub async fn search_pages(
         &self,
         workspace_id: Id,
@@ -1841,14 +1998,18 @@ impl PageRepository {
                  ts_headline('orbit_search', page_search.body, q.query, \
                  'MaxWords=' || $1 || ', MinWords=' || greatest($1 / 2, 1) \
                  || ', ShortWord=0, StartSel=' || chr(2) || ', StopSel=' || chr(3)) AS marked_snippet, \
-                 page_search.body AS body \
+                 page_search.body AS body, \
+                 ts_headline('orbit_search', coalesce(page_search.props, ''), q.query, \
+                 'HighlightAll=true, StartSel=' || chr(2) || ', StopSel=' || chr(3)) AS marked_props, \
+                 parent.title AS database_title \
                  FROM page_search \
                  CROSS JOIN LATERAL (SELECT to_tsquery('orbit_search', $2) AS query) AS q \
                  JOIN page_search_rows ON page_search_rows.id = page_search.rowid \
                  JOIN pages ON pages.id = page_search_rows.page_id \
+                 LEFT JOIN pages AS parent ON parent.id = pages.parent_id AND parent.kind = 'database' \
                  WHERE page_search.search_vector @@ q.query \
-                 AND pages.workspace_id = $3 AND pages.deleted_at IS NULL AND {visible} \
-                 ORDER BY ts_rank('{{0, 0, 0.1, 1}}', page_search.search_vector, q.query) DESC, \
+                 AND pages.workspace_id = $3 AND pages.deleted_at IS NULL AND {visible} AND {NOT_TEMPLATE} \
+                 ORDER BY ts_rank('{{0, 0.2, 0.1, 1}}', page_search.search_vector, q.query) DESC, \
                  pages.updated_at DESC, pages.id DESC LIMIT $5",
                 visible = visible(4)
             )
@@ -1857,13 +2018,16 @@ impl PageRepository {
                 "SELECT pages.id AS id, pages.parent_id AS parent_id, pages.teamspace_id AS teamspace_id, \
              pages.title AS title, pages.icon AS icon, \
              highlight(page_search, 0, char(2), char(3)) AS marked_title, \
-             snippet(page_search, 1, char(2), char(3), '…', $1) AS marked_snippet \
+             snippet(page_search, 1, char(2), char(3), '…', $1) AS marked_snippet, \
+             highlight(page_search, 2, char(2), char(3)) AS marked_props, \
+             parent.title AS database_title \
              FROM page_search \
              JOIN page_search_rows ON page_search_rows.id = page_search.rowid \
              JOIN pages ON pages.id = page_search_rows.page_id \
+             LEFT JOIN pages AS parent ON parent.id = pages.parent_id AND parent.kind = 'database' \
              WHERE page_search MATCH $2 AND pages.workspace_id = $3 AND pages.deleted_at IS NULL \
-             AND {visible} \
-             ORDER BY bm25(page_search, 10.0, 1.0), pages.updated_at DESC, pages.id DESC LIMIT $5",
+             AND {visible} AND {NOT_TEMPLATE} \
+             ORDER BY bm25(page_search, 10.0, 1.0, 2.0), pages.updated_at DESC, pages.id DESC LIMIT $5",
                 visible = visible(4)
             )
         };
@@ -1875,10 +2039,23 @@ impl PageRepository {
             .bind(SEARCH_LIMIT)
             .fetch_all(self.database.pool())
             .await?;
+        // A row found by a value and not by its body shows that value, named by its property.
+        let mut property_hits = Vec::new();
+        for row in &rows {
+            let marked_props: String = row.get("marked_props");
+            let marked_snippet: String = row.get("marked_snippet");
+            if !marked_snippet.contains(MARK_OPEN) && marked_props.contains(MARK_OPEN) {
+                property_hits.push(parse_id(row.get("id"))?);
+            }
+        }
+        let property_lines = row_search_lines(&self.database, &property_hits)
+            .await
+            .map_err(|_| PageError::Corrupt)?;
         let items = rows
             .into_iter()
             .map(|row| {
                 let teamspace_id = parse_optional_id(row.get("teamspace_id"))?;
+                let id = parse_id(row.get("id"))?;
                 let title: String = row.get("title");
                 let (marked_title, title_highlights) =
                     split_marks(&row.get::<String, _>("marked_title"));
@@ -1886,9 +2063,15 @@ impl PageRepository {
                 if postgres {
                     marked_snippet = with_ellipses(marked_snippet, &row.get::<String, _>("body"));
                 }
-                let (snippet, snippet_highlights) = split_marks(&marked_snippet);
+                let (mut snippet, mut snippet_highlights) = split_marks(&marked_snippet);
+                if let Some(lines) = property_lines.get(&id)
+                    && let Some((value, snippet_value)) =
+                        property_snippet(&row.get::<String, _>("marked_props"), lines)
+                {
+                    (snippet, snippet_highlights) = (value, snippet_value);
+                }
                 Ok(PageSearchResult {
-                    id: parse_id(row.get("id"))?,
+                    id,
                     parent_id: parse_optional_id(row.get("parent_id"))?,
                     teamspace_id,
                     private: teamspace_id.is_none(),
@@ -1902,6 +2085,7 @@ impl PageRepository {
                     icon: row.get("icon"),
                     snippet,
                     snippet_highlights,
+                    database_title: row.get("database_title"),
                 })
             })
             .collect::<Result<_, PageError>>()?;
@@ -1920,11 +2104,12 @@ impl PageRepository {
     ) -> Result<PageFavoriteList, PageError> {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
         let mut connection = self.database.pool().acquire().await?;
-        let ids = visible_favorite_ids(&mut connection, workspace_id, actor_id).await?;
-        Ok(favorite_list(ids))
+        let items = visible_favorites(&mut connection, workspace_id, actor_id).await?;
+        Ok(PageFavoriteList { items })
     }
 
-    /// Adds the page as the caller's last favorite; an existing favorite is left in place.
+    /// Adds the page as the caller's last favorite; an existing favorite is left in place. A row
+    /// template is not a favorite (the list leaves it out): not found, and nothing is stored.
     pub async fn add_favorite(
         &self,
         workspace_id: Id,
@@ -1935,6 +2120,9 @@ impl PageRepository {
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         page_in_tx(&mut tx, workspace_id, page_id, actor_id, false).await?;
+        if is_template(&mut tx, page_id).await? {
+            return Err(PageError::NotFound);
+        }
         let mut order = favorite_order(&mut tx, workspace_id, actor_id).await?;
         if !order.contains(&page_id) {
             sqlx::query(
@@ -1951,16 +2139,12 @@ impl PageRepository {
             order.push(page_id);
             renumber_favorites(&mut tx, actor_id, &order).await?;
         }
-        let visible = visible_favorite_ids(&mut tx, workspace_id, actor_id).await?;
+        let visible = visible_favorites(&mut tx, workspace_id, actor_id).await?;
         tx.commit().await?;
-        let position = visible
-            .iter()
-            .position(|id| *id == page_id)
-            .ok_or(PageError::NotFound)?;
-        Ok(PageFavorite {
-            page_id,
-            position: position as i64,
-        })
+        visible
+            .into_iter()
+            .find(|favorite| favorite.page_id == page_id)
+            .ok_or(PageError::NotFound)
     }
 
     /// Removes the page from the caller's favorites; removing a non-favorite is a no-op.
@@ -2007,9 +2191,10 @@ impl PageRepository {
             return Err(PageError::NotFound);
         };
         order.remove(current);
-        let visible = visible_favorite_ids(&mut tx, workspace_id, actor_id)
+        let visible = visible_favorites(&mut tx, workspace_id, actor_id)
             .await?
             .into_iter()
+            .map(|favorite| favorite.page_id)
             .filter(|id| *id != page_id)
             .collect::<Vec<_>>();
         let index = insert_index(Some(position), visible.len());
@@ -2025,9 +2210,9 @@ impl PageRepository {
         };
         order.insert(at, page_id);
         renumber_favorites(&mut tx, actor_id, &order).await?;
-        let ids = visible_favorite_ids(&mut tx, workspace_id, actor_id).await?;
+        let items = visible_favorites(&mut tx, workspace_id, actor_id).await?;
         tx.commit().await?;
-        Ok(favorite_list(ids))
+        Ok(PageFavoriteList { items })
     }
 }
 
@@ -2151,11 +2336,13 @@ impl PageRepository {
         require_access(self.database.pool(), workspace_id, actor_id).await?;
         let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
             "SELECT pages.id AS id, pages.parent_id AS parent_id, pages.teamspace_id AS teamspace_id, \
-             pages.title AS title, pages.icon AS icon, page_visits.visited_at AS visited_at \
+             pages.title AS title, pages.icon AS icon, pages.kind AS kind, \
+             parent.title AS database_title, page_visits.visited_at AS visited_at \
              FROM page_visits JOIN pages ON pages.id = page_visits.page_id \
+             LEFT JOIN pages AS parent ON parent.id = pages.parent_id AND parent.kind = 'database' \
              WHERE page_visits.workspace_id = $1 AND page_visits.user_id = $2 \
              AND pages.workspace_id = page_visits.workspace_id AND pages.deleted_at IS NULL AND {visible} \
-             ORDER BY page_visits.visited_at DESC, pages.id LIMIT $4", visible = visible(3)
+             AND {NOT_TEMPLATE} ORDER BY page_visits.visited_at DESC, pages.id LIMIT $4", visible = visible(3)
         )))
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
@@ -2174,24 +2361,13 @@ impl PageRepository {
                     private: teamspace_id.is_none(),
                     title: row.get("title"),
                     icon: row.get("icon"),
+                    kind: PageKind::parse(row.get("kind"))?,
+                    database_title: row.get("database_title"),
                     visited_at: TimestampMillis::from_millis(row.get("visited_at")),
                 })
             })
             .collect::<Result<_, PageError>>()?;
         Ok(RecentPageList { items })
-    }
-}
-
-fn favorite_list(ids: Vec<Id>) -> PageFavoriteList {
-    PageFavoriteList {
-        items: ids
-            .into_iter()
-            .enumerate()
-            .map(|(position, page_id)| PageFavorite {
-                page_id,
-                position: position as i64,
-            })
-            .collect(),
     }
 }
 
@@ -2215,27 +2391,40 @@ async fn favorite_order(
 }
 
 /// The caller's favorites of live pages they can see, in order.
-async fn visible_favorite_ids(
+async fn visible_favorites(
     connection: &mut sqlx::AnyConnection,
     workspace_id: Id,
     actor_id: Id,
-) -> Result<Vec<Id>, PageError> {
-    sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(format!(
-        "SELECT page_favorites.page_id FROM page_favorites \
-         JOIN pages ON pages.id = page_favorites.page_id \
+) -> Result<Vec<PageFavorite>, PageError> {
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "SELECT page_favorites.page_id AS page_id, pages.title AS title, pages.icon AS icon, \
+         pages.kind AS kind, parent.id AS database_id, parent.title AS database_title \
+         FROM page_favorites JOIN pages ON pages.id = page_favorites.page_id \
+         LEFT JOIN pages AS parent ON parent.id = pages.parent_id AND parent.kind = 'database' \
          WHERE page_favorites.workspace_id = $1 AND page_favorites.user_id = $2 \
          AND pages.workspace_id = page_favorites.workspace_id AND pages.deleted_at IS NULL \
-         AND {visible} ORDER BY page_favorites.position, page_favorites.page_id",
+         AND {visible} AND {NOT_TEMPLATE} ORDER BY page_favorites.position, page_favorites.page_id",
         visible = visible(3)
     )))
     .bind(workspace_id.to_string())
     .bind(actor_id.to_string())
     .bind(actor_id.to_string())
     .fetch_all(connection)
-    .await?
-    .into_iter()
-    .map(parse_id)
-    .collect()
+    .await?;
+    rows.into_iter()
+        .enumerate()
+        .map(|(position, row)| {
+            Ok(PageFavorite {
+                page_id: parse_id(row.get("page_id"))?,
+                position: position as i64,
+                title: row.get("title"),
+                icon: row.get("icon"),
+                kind: PageKind::parse(row.get("kind"))?,
+                database_id: parse_optional_id(row.get("database_id"))?,
+                database_title: row.get("database_title"),
+            })
+        })
+        .collect()
 }
 
 async fn renumber_favorites(
@@ -2398,6 +2587,28 @@ fn with_ellipses(marked: String, body: &str) -> String {
     format!("{start}{marked}{end}")
 }
 
+/// The first property value with a match in a row's marked `props` index text, as `Name: value`
+/// with the matched words' ranges. `lines` are the row's search lines, which name the property of
+/// each line of the index text.
+fn property_snippet(
+    marked_props: &str,
+    lines: &[(String, String)],
+) -> Option<(String, Vec<TextRange>)> {
+    let marked = marked_props.lines().find(|line| line.contains(MARK_OPEN))?;
+    let (value, ranges) = split_marks(marked);
+    let (name, _) = lines.iter().find(|(_, text)| *text == value)?;
+    let prefix = format!("{name}: ");
+    let shift = prefix.encode_utf16().count() as u32;
+    let ranges = ranges
+        .into_iter()
+        .map(|range| TextRange {
+            start: range.start + shift,
+            end: range.end + shift,
+        })
+        .collect();
+    Some((format!("{prefix}{value}"), ranges))
+}
+
 /// Removes the highlight markers from FTS output and returns the plain text with the marked
 /// spans as UTF-16 ranges.
 pub(crate) fn split_marks(marked: &str) -> (String, Vec<TextRange>) {
@@ -2473,11 +2684,14 @@ pub(super) struct Remap<'a> {
     pub(super) pages: &'a HashMap<Id, Id>,
     /// (original page id, original file id) → (copy page id, copy file id).
     pub(super) files: &'a HashMap<(Id, Id), (Id, Id)>,
+    /// Original `database_links` id → copy id.
+    pub(super) links: &'a HashMap<Id, Id>,
 }
 
 impl Remap<'_> {
-    /// Walks block JSON: `pageId` props of `page` blocks, page-file URLs (image/file `url`
-    /// props and anything else holding one) and `/docs/<id>` link targets. Text is left alone.
+    /// Walks block JSON: `pageId` props of `page` blocks, `databaseId` and `linkId` props of
+    /// `database` blocks, page-file URLs (image/file `url` props and anything else holding one)
+    /// and `/docs/<id>` link targets. Text is left alone.
     pub(super) fn value(&self, value: &mut Value, key: Option<&str>) {
         match value {
             Value::Array(items) => {
@@ -2492,8 +2706,13 @@ impl Remap<'_> {
             }
             Value::String(text) => match key {
                 Some("text") => {}
-                Some("pageId") => {
+                Some("pageId" | "databaseId") => {
                     if let Some(copy) = text.parse::<Id>().ok().and_then(|id| self.pages.get(&id)) {
+                        *text = copy.to_string();
+                    }
+                }
+                Some("linkId") => {
+                    if let Some(copy) = text.parse::<Id>().ok().and_then(|id| self.links.get(&id)) {
                         *text = copy.to_string();
                     }
                 }
@@ -2605,6 +2824,20 @@ async fn is_ancestor(
     .fetch_one(&mut **tx)
     .await?;
     Ok(found)
+}
+
+/// True when `page_id` is a database page (in any state).
+pub(super) async fn is_database(
+    tx: &mut Transaction<'_, Any>,
+    page_id: Id,
+) -> Result<bool, PageError> {
+    let Flag(database) = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM pages WHERE id = $1 AND kind = 'database')",
+    )
+    .bind(page_id.to_string())
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(database)
 }
 
 /// The space of a live page the caller can see; `None` when it is missing, trashed, or someone
@@ -2748,6 +2981,198 @@ async fn move_descendants(
     Ok(())
 }
 
+/// The live sub-pages of `page_id`, all levels deep: parents first, siblings in order.
+pub(in crate::repositories) async fn live_subtree(
+    tx: &mut Transaction<'_, Any>,
+    page_id: Id,
+) -> Result<Vec<PageRecord>, PageError> {
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "WITH RECURSIVE subtree(page_id, depth) AS ( \
+             SELECT $1, 0 \
+             UNION ALL \
+             SELECT pages.id, subtree.depth + 1 FROM pages \
+             JOIN subtree ON pages.parent_id = subtree.page_id WHERE pages.deleted_at IS NULL \
+         ) \
+         SELECT {PAGE_COLUMNS} FROM pages JOIN subtree ON subtree.page_id = pages.id \
+         WHERE subtree.depth > 0 ORDER BY subtree.depth, pages.parent_id, pages.position, pages.id"
+    )))
+    .bind(page_id.to_string())
+    .fetch_all(&mut **tx)
+    .await?;
+    rows.into_iter().map(page_from_row).collect()
+}
+
+/// Writes a copy of each of `originals` (parents first) with the id `pages` gives it, in
+/// `space`. A page goes under its parent's copy, after the siblings copied before it; a page
+/// whose parent is not in `pages` keeps its parent at position 0, titled "<title> (copy)".
+/// Files are shared: each copy gets its own `page_files` rows for the same blobs. Linked view
+/// blocks get their own links, databases come with their properties, views and templates, and
+/// file URLs, `page` blocks and `/docs/<id>` links that point at a page of `pages` point at its
+/// copy.
+#[allow(clippy::too_many_arguments)]
+pub(in crate::repositories) async fn copy_pages(
+    tx: &mut Transaction<'_, Any>,
+    workspace_id: Id,
+    originals: &[PageRecord],
+    pages: &HashMap<Id, Id>,
+    space: PageSpace,
+    actor_id: Id,
+    request_id: &str,
+    now: TimestampMillis,
+) -> Result<(), PageError> {
+    let mut files = HashMap::new();
+    let mut file_rows = Vec::new();
+    for page in originals {
+        let rows = sqlx::query(
+            "SELECT id, blob_id, file_name, mime_type, size_bytes FROM page_files \
+             WHERE page_id = $1 AND workspace_id = $2 ORDER BY created_at, id",
+        )
+        .bind(page.id.to_string())
+        .bind(workspace_id.to_string())
+        .fetch_all(&mut **tx)
+        .await?;
+        for row in rows {
+            let file_id = parse_id(row.get("id"))?;
+            let copy = (pages[&page.id], Id::new_v7());
+            files.insert((page.id, file_id), copy);
+            file_rows.push((copy, row));
+        }
+    }
+    // Each linked view block gets its own link, with copies of the link's views.
+    let mut link_copies = Vec::new();
+    for original in originals {
+        let found = block_links(&original.content);
+        for (link_id, database_id) in linked_databases(tx, workspace_id, &found).await? {
+            if !link_copies
+                .iter()
+                .any(|copy: &LinkCopy| copy.link_id == link_id)
+            {
+                link_copies.push(LinkCopy {
+                    link_id,
+                    copy_id: Id::new_v7(),
+                    database_id,
+                    host_page_id: pages[&original.id],
+                });
+            }
+        }
+    }
+    let links: HashMap<Id, Id> = link_copies
+        .iter()
+        .map(|copy| (copy.link_id, copy.copy_id))
+        .collect();
+    let remap = Remap {
+        workspace_id,
+        pages,
+        files: &files,
+        links: &links,
+    };
+
+    let mut child_positions: HashMap<Id, i64> = HashMap::new();
+    for original in originals {
+        let id = pages[&original.id];
+        let copied_parent = original
+            .parent_id
+            .and_then(|parent| pages.get(&parent).copied());
+        let (parent_id, title, position) = match copied_parent {
+            Some(parent) => {
+                let next = child_positions.entry(parent).or_default();
+                *next += 1;
+                (Some(parent), original.title.clone(), *next - 1)
+            }
+            None => (original.parent_id, copy_title(&original.title), 0),
+        };
+        let mut content = Value::Array(original.content.clone());
+        remap.value(&mut content, None);
+        let Value::Array(content) = content else {
+            return Err(PageError::Corrupt);
+        };
+        let cover_url = original
+            .cover_url
+            .as_ref()
+            .map(|url| remap.url(url).unwrap_or_else(|| url.clone()));
+        sqlx::query(
+            "INSERT INTO pages (id, workspace_id, parent_id, teamspace_id, owner_id, title, icon, \
+             cover_url, cover_position, content_json, content_text, position, creator_id, updated_by, \
+             version, created_at, updated_at, full_width, kind) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 0, $15, $16, $17, $18)",
+        )
+        .bind(id.to_string())
+        .bind(workspace_id.to_string())
+        .bind(parent_id.map(|parent| parent.to_string()))
+        .bind(space.teamspace_column())
+        .bind(space.owner_column())
+        .bind(&title)
+        .bind(&original.icon)
+        .bind(&cover_url)
+        .bind(&original.cover_position)
+        .bind(serde_json::to_string(&content).map_err(|_| PageError::Corrupt)?)
+        .bind(content_text(&content))
+        .bind(position)
+        .bind(actor_id.to_string())
+        .bind(actor_id.to_string())
+        .bind(now.as_millis())
+        .bind(now.as_millis())
+        .bind(i64::from(original.full_width))
+        .bind(original.kind.as_str())
+        .execute(&mut **tx)
+        .await?;
+        audit::record(
+            tx,
+            workspace_id,
+            Some(actor_id),
+            "page.duplicated",
+            AuditOutcome::Success,
+            "page",
+            Some(id),
+            request_id,
+            json!({"source_page_id": original.id}),
+            now,
+        )
+        .await?;
+    }
+    for ((page, file), row) in file_rows {
+        sqlx::query(
+            "INSERT INTO page_files (id, workspace_id, page_id, blob_id, file_name, mime_type, \
+             size_bytes, uploaded_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        )
+        .bind(file.to_string())
+        .bind(workspace_id.to_string())
+        .bind(page.to_string())
+        .bind(row.get::<String, _>("blob_id"))
+        .bind(row.get::<String, _>("file_name"))
+        .bind(row.get::<String, _>("mime_type"))
+        .bind(row.get::<i64, _>("size_bytes"))
+        .bind(actor_id.to_string())
+        .bind(now.as_millis())
+        .execute(&mut **tx)
+        .await?;
+    }
+
+    let databases: Vec<Id> = originals
+        .iter()
+        .filter(|page| page.kind == PageKind::Database)
+        .map(|page| page.id)
+        .collect();
+    // Only the copied pages bring their values (a template's own go through its row).
+    let copied: HashMap<Id, Id> = originals
+        .iter()
+        .map(|page| (page.id, pages[&page.id]))
+        .collect();
+    let property_ids =
+        copy_database_data(tx, workspace_id, &databases, &copied, &files, actor_id, now).await?;
+    copy_links(
+        tx,
+        workspace_id,
+        &link_copies,
+        pages,
+        &property_ids,
+        actor_id,
+        now,
+    )
+    .await?;
+    Ok(())
+}
+
 pub(super) async fn page_in_tx(
     tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
@@ -2835,7 +3260,7 @@ impl Expected {
 
 impl PageRecord {
     /// The page's space; a private page is always the caller's, since no one else can load it.
-    fn space(&self, actor_id: Id) -> PageSpace {
+    pub(super) fn space(&self, actor_id: Id) -> PageSpace {
         self.teamspace_id
             .map_or(PageSpace::Private(actor_id), PageSpace::Teamspace)
     }
@@ -2866,6 +3291,8 @@ fn page_from_row(row: sqlx::any::AnyRow) -> Result<PageRecord, PageError> {
             .map(TimestampMillis::from_millis),
         collab_epoch: row.get("collab_epoch"),
         full_width: row.get("full_width"),
+        kind: PageKind::parse(&row.get::<String, _>("kind"))?,
+        database_id: parse_optional_id(row.get("database_id"))?,
         locked_at: row
             .get::<Option<i64>, _>("locked_at")
             .map(TimestampMillis::from_millis),
@@ -2932,6 +3359,7 @@ fn summary_from_row(row: sqlx::any::AnyRow) -> Result<PageSummary, PageError> {
         parent_id: parse_optional_id(row.get("parent_id"))?,
         teamspace_id,
         private: teamspace_id.is_none(),
+        kind: PageKind::parse(&row.get::<String, _>("kind"))?,
         title: row.get("title"),
         icon: row.get("icon"),
         position: row.get("position"),

@@ -5,6 +5,8 @@
 //! unique per folder (ignoring case). Links between exported pages are relative; links to other
 //! pages and page files become absolute app URLs; external links stay.
 
+pub mod csv;
+pub mod database;
 pub mod markdown;
 pub mod names;
 
@@ -17,6 +19,7 @@ use tokio::io::AsyncReadExt;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
+use crate::repositories::databases::{DatabaseView, ExportDatabase};
 use crate::repositories::page_export::{ExportFile, ExportSource, PageExportError};
 use crate::repositories::page_files::{PageFileError, PageFileRepository, parse_page_file_url};
 use markdown::{LinkResolver, PageLink, blocks_to_markdown, escape_label, link_destination};
@@ -44,6 +47,7 @@ impl Default for ExportLimits {
 /// One file in the archive.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ExportEntry {
+    /// A text file: a page's Markdown or a database's CSV.
     Markdown {
         path: String,
         text: String,
@@ -118,6 +122,15 @@ impl Resolver<'_> {
         format!("{}{path}", self.origin)
     }
 
+    /// A database's rows under `view`, titles linking to the exported row pages (else the app).
+    fn rows_table(&self, database: &ExportDatabase, view: &DatabaseView) -> String {
+        let link = |row: Id| match self.planned.get(&row) {
+            Some(page) => relative_link(self.from_dir, &page.md_path()),
+            None => self.absolute(&format!("/docs/{row}")),
+        };
+        database::markdown_table(database, view, &self.source.members, &link)
+    }
+
     fn asset(&self, file: &ExportFile) -> Vec<String> {
         let key = (file.page_id, file.id);
         let mut assets = self.assets.borrow_mut();
@@ -156,6 +169,16 @@ impl LinkResolver for Resolver<'_> {
             title: title.clone(),
             href,
         })
+    }
+
+    fn database_table(&self, database_id: &str, link_id: &str) -> Option<String> {
+        let id: Id = database_id.parse().ok()?;
+        let database = self.source.databases.get(&id)?;
+        let view = match link_id.parse::<Id>() {
+            Ok(link) => database.link_views.get(&link)?,
+            Err(_) => database.view.as_ref()?,
+        };
+        Some(self.rows_table(database, view))
     }
 
     fn url(&self, url: &str) -> String {
@@ -230,9 +253,15 @@ pub fn plan(
                 NameSet::default()
             }
         });
+        // A database also writes `<stem>.csv`.
+        let extensions: &[&str] = if source.databases.contains_key(&page.id) {
+            &["md", "csv", ""]
+        } else {
+            &["md", ""]
+        };
         let stem = names.claim(
             &sanitize_segment(&page.title, STEM_MAX_CHARS, "Untitled"),
-            &["md", ""],
+            extensions,
         );
         planned.insert(page.id, PlannedPage { dir, stem });
     }
@@ -270,16 +299,50 @@ pub fn plan(
                 link_destination(&resolver.url(cover))
             ));
         }
+        let row = page.parent_id.and_then(|parent| {
+            let database = source.databases.get(&parent)?;
+            let row = database.rows.iter().find(|row| row.id == page.id)?;
+            Some((database, row))
+        });
+        if let Some((database, row)) = row {
+            let list = database::property_list(database, row, &source.members);
+            if !list.is_empty() {
+                text.push('\n');
+                text.push_str(&list);
+                text.push('\n');
+            }
+        }
         let body = blocks_to_markdown(&page.content, &resolver);
         if !body.is_empty() {
             text.push('\n');
             text.push_str(&body);
+        }
+        let mut csv_entry = None;
+        if let Some(database) = source.databases.get(&page.id) {
+            if let Some(view) = &database.view {
+                let table = resolver.rows_table(database, view);
+                if !table.is_empty() {
+                    text.push('\n');
+                    text.push_str(&table);
+                    text.push('\n');
+                }
+            }
+            let properties: Vec<_> = database.properties.iter().collect();
+            let csv = csv::database_csv(database, &properties, &source.members);
+            let mut path = layout.dir.clone();
+            path.push(format!("{}.csv", layout.stem));
+            total = total.saturating_add(csv.len() as u64);
+            csv_entry = Some(ExportEntry::Markdown {
+                path: path.join("/"),
+                text: csv,
+            });
         }
         total = total.saturating_add(text.len() as u64);
         entries.push(ExportEntry::Markdown {
             path: layout.md_path().join("/"),
             text,
         });
+        entries.extend(csv_entry);
     }
     let assets = assets.into_inner();
     for key in &assets.order {

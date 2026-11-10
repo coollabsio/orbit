@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState, type ComponentProps, type ReactNode } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { isPaymentRequired } from '@orbit/api/problem'
+import { databaseErrorMessage } from '@orbit/database/errors'
 import { Link, Navigate, useLocation, useNavigate, useParams } from 'react-router'
 import { toast } from 'sonner'
 import { DocumentText as FileText, Add as Plus } from 'reicon-react'
@@ -13,17 +15,18 @@ import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import {
   isPageNotFound,
   isPageVersionConflict,
-  movePageErrorMessage,
   useCreatePage,
   useDuplicatePage,
-  useMovePage,
+  pageQueryOptions,
+  subPagesOf,
   usePage,
   usePageTree,
   useTrashPage,
   useTrashedPage,
 } from '@/features/docs/api/pages'
 import { useTeamspaces } from '@/features/docs/api/teamspaces'
-import { descendantsOf, dropOnSpace, landingPage, pageTitle, spaceKey, spaceLabel, type SpaceKey } from '@/features/docs/pageTree'
+import { landingPage, pageTitle } from '@/features/docs/pageTree'
+import { useMovePageTo, type MoveDestination } from '@/features/docs/useMovePageTo'
 import { cn } from 'cn'
 import { DocEditor, type DocEditorControl } from '@/features/docs/components/DocEditor'
 import { preloadPageEditor } from '@/features/docs/editor/loadPageEditor'
@@ -31,7 +34,9 @@ import { DocTree } from '@/features/docs/components/DocTree'
 import { DocPageActionsContext, type DocPageActions } from '@/features/docs/pageActions'
 import { NotionImportPane } from './NotionImportPane'
 import { ObsidianImportPane } from './ObsidianImportPane'
+import { CsvImportPane } from './CsvImportPane'
 import { PageTrashPane } from './PageTrashPane'
+import { DatabaseFormPage } from '@/features/docs/database/DatabaseFormPage'
 import { PageTrashPreview } from './PageTrashPreview'
 
 /** The docs page's main pane (hidden on phones while the page list shows). */
@@ -44,10 +49,11 @@ function landsOnFirstPage() {
   return typeof window.matchMedia !== 'function' || window.matchMedia('(min-width: 900px)').matches
 }
 
-export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import' | 'obsidian-import' }) {
-  const { pageId, importId } = useParams()
+export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import' | 'obsidian-import' | 'csv-import' | 'form' }) {
+  const { pageId, importId, viewId } = useParams()
   const navigate = useNavigate()
   const location = useLocation()
+  const queryClient = useQueryClient()
   const { workspace } = useWorkspace()
   const canDeleteTeamspaces = useCan('teamspaces.delete')
   const tree = usePageTree(workspace.id)
@@ -60,11 +66,11 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
   const page = usePage(workspace.id, view === 'page' && !leaving ? pageId : undefined)
   const createPage = useCreatePage(workspace.id)
   const trashPage = useTrashPage(workspace.id)
-  const movePage = useMovePage(workspace.id)
+  const moveTo = useMovePageTo(workspace.id, tree.data ?? [], teamspaces.data)
   const duplicatePage = useDuplicatePage(workspace.id)
   const editorControl = useRef<DocEditorControl>(null)
   const pages = tree.data ?? []
-  const activeId = view === 'page' ? (pageId ?? null) : null
+  const activeId = view === 'page' || view === 'form' ? (pageId ?? null) : null
   // The trash request is async: read the open page when it finishes, not when it started.
   const activeIdRef = useRef(activeId)
   const locationKeyRef = useRef(location.key)
@@ -77,6 +83,10 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
     preloadPageEditor()
   }, [])
   const markGone = (id: string) => setGone({ id, key: locationKeyRef.current })
+  /** A tree page, the open page, or (a favorite outside the tree, e.g. a database row) the page read from the server. */
+  const findTarget = async (id: string) =>
+    pages.find((item) => item.id === id) ??
+    (page.data?.id === id ? page.data : await queryClient.fetchQuery(pageQueryOptions(workspace.id, id)).catch(() => undefined))
 
   const createFirstPage = () => {
     createPage.mutate(
@@ -92,9 +102,13 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
 
   /** Confirm, save the open editor if it is affected, trash the subtree, then leave it if it was open. */
   const requestTrash = async (targetId: string) => {
-    const target = pages.find((item) => item.id === targetId)
+    const target = await findTarget(targetId)
     if (!target) return
-    const descendants = descendantsOf(pages, targetId)
+    const descendants = await subPagesOf(queryClient, workspace.id, pages, targetId).catch(() => null)
+    if (!descendants) {
+      toast.error('Could not move the page to the trash.')
+      return
+    }
     const confirmed = await confirmAction({
       title: `Move “${pageTitle(target)}” to the trash?`,
       description:
@@ -136,32 +150,26 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
     )
   }
 
-  /** Page menu "Move to": the page (and its sub-pages) becomes the last root page of `space`. */
-  const requestMoveToSpace = async (targetId: string, space: SpaceKey) => {
-    const target = pages.find((item) => item.id === targetId)
-    const move = target ? dropOnSpace(pages, targetId, space) : null
-    if (!target || !move) return
+  /** Page menu "Move to": the page (and its sub-pages) goes to a space root, under a page, or into a database. */
+  const requestMoveTo = async (targetId: string, destination: MoveDestination) => {
+    // The open page has its detail (a row is not in the tree); any other page is a tree page, never a row.
+    const detail = page.data?.id === targetId ? page.data : undefined
+    const summary = pages.find((item) => item.id === targetId)
+    const moving = detail
+      ? { id: detail.id, version: detail.version, database_id: detail.database_id }
+      : summary && { id: summary.id, version: summary.version, database_id: null }
+    if (!moving) return
     // Save pending edits first so the move is sent on the page's latest version.
-    let version = target.version
-    if (activeIdRef.current === targetId && editorControl.current) version = await editorControl.current.flush()
-    movePage.mutate(
-      { pageId: targetId, version, ...move },
-      {
-        onSuccess: () => {
-          if (spaceKey(target) !== space) toast.success(`Moved to ${spaceLabel(space, teamspaces.data)}`)
-        },
-        onError: (error) => {
-          if (!isPageVersionConflict(error)) toast.error(movePageErrorMessage(error))
-        },
-      },
-    )
+    const control = activeIdRef.current === targetId ? editorControl.current : null
+    await moveTo(moving, destination, control ? () => control.flush() : undefined)
   }
 
   /** Save the open editor if the copy includes it, duplicate, then open the copy. */
   const requestDuplicate = async (targetId: string, includeChildren: boolean) => {
-    const target = pages.find((item) => item.id === targetId)
+    const target = await findTarget(targetId)
     if (!target) return
-    const copied = new Set([targetId, ...(includeChildren ? descendantsOf(pages, targetId).map((item) => item.id) : [])])
+    const below = includeChildren ? await subPagesOf(queryClient, workspace.id, pages, targetId).catch(() => []) : []
+    const copied = new Set([targetId, ...below.map((item) => item.id)])
     if (activeIdRef.current && copied.has(activeIdRef.current) && editorControl.current) await editorControl.current.flush()
     duplicatePage.mutate(
       { pageId: targetId, includeChildren },
@@ -171,7 +179,7 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
           toast.success(`Duplicated “${pageTitle(target)}”`)
         },
         onError: (error) => {
-          if (!isPaymentRequired(error)) toast.error('Could not duplicate the page.')
+          if (!isPaymentRequired(error)) toast.error(databaseErrorMessage(error, 'Could not duplicate the page.'))
         },
       },
     )
@@ -187,6 +195,14 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
     content = <NotionImportPane key={importId ?? 'new'} workspaceId={workspace.id} importId={importId} />
   } else if (view === 'obsidian-import') {
     content = <ObsidianImportPane key={importId ?? 'new'} workspaceId={workspace.id} importId={importId} />
+  } else if (view === 'csv-import') {
+    content = <CsvImportPane workspaceId={workspace.id} />
+  } else if (view === 'form' && pageId && viewId) {
+    content = (
+      <DocsPane>
+        <DatabaseFormPage workspaceId={workspace.id} databaseId={pageId} viewId={viewId} />
+      </DocsPane>
+    )
   } else if (!pageId) {
     // The landing order needs the default teamspace; a failed teamspace list falls back to private / any page.
     const spacesKnown = !teamspaces.isPending
@@ -229,7 +245,7 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
         teamspaces={teamspaces.data}
         controlRef={editorControl}
         onRequestTrash={(id) => void requestTrash(id)}
-        onRequestMove={(id, space) => void requestMoveToSpace(id, space)}
+        onRequestMove={(id, destination) => void requestMoveTo(id, destination)}
         onGone={markGone}
       />
     )

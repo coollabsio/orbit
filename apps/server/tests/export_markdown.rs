@@ -184,7 +184,7 @@ fn tables_escape_pipes_span_columns_and_break_lines() {
 }
 
 #[test]
-fn media_and_page_blocks_use_the_resolver() {
+fn media_page_and_database_blocks_use_the_resolver() {
     struct Links;
     impl LinkResolver for Links {
         fn page(&self, page_id: &str) -> Option<PageLink> {
@@ -203,12 +203,14 @@ fn media_and_page_blocks_use_the_resolver() {
         {"type": "file", "props": {"url": "https://e.com/r (1).pdf"}},
         {"type": "page", "props": {"pageId": "known"}},
         {"type": "page", "props": {"pageId": "gone"}},
+        {"type": "database", "props": {"databaseId": "known", "linkId": "l"}},
+        {"type": "database", "props": {"databaseId": "gone", "linkId": ""}},
         {"type": "paragraph", "content": [{"type": "link", "href": "/files/x", "content": [{"type": "text", "text": "see", "styles": {"code": true}}]}]},
     ]);
     let text = blocks_to_markdown(blocks.as_array().unwrap(), &Links);
     assert_eq!(
         text,
-        "![a.png](/p/assets/a.png)\n\n*The \\*cap\\**\n\n[r (1).pdf](https://e.com/r%20%281%29.pdf)\n\n[Child \\[1\\]](Parent/Child%20page.md)\n\n*Missing page*\n\n[`see`](/assets/x)\n"
+        "![a.png](/p/assets/a.png)\n\n*The \\*cap\\**\n\n[r (1).pdf](https://e.com/r%20%281%29.pdf)\n\n[Child \\[1\\]](Parent/Child%20page.md)\n\n*Missing page*\n\n[Child \\[1\\]](Parent/Child%20page.md)\n\n*Missing database*\n\n[`see`](/assets/x)\n"
     );
 }
 

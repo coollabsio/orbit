@@ -78,12 +78,16 @@ export const queryKeys = {
     trashed: (workspaceId: string, pageId: string) => [...workspace(workspaceId), 'pages', 'trashed', pageId] as const,
     search: (workspaceId: string, query: string) => [...workspace(workspaceId), 'pages', 'search', query] as const,
     favorites: (workspaceId: string) => [...workspace(workspaceId), 'pages', 'favorites'] as const,
+    /** A page's live sub-pages from the server: database rows and their sub-pages are not in the tree. */
+    descendants: (workspaceId: string, pageId: string) => [...workspace(workspaceId), 'pages', 'descendants', pageId] as const,
     recent: (workspaceId: string) => [...workspace(workspaceId), 'pages', 'recent'] as const,
     versions: (workspaceId: string, pageId: string) => [...workspace(workspaceId), 'pages', 'versions', pageId] as const,
     threads: (workspaceId: string, pageId: string) => [...workspace(workspaceId), 'pages', 'threads', pageId] as const,
     version: (workspaceId: string, pageId: string, versionId: string) =>
       [...workspace(workspaceId), 'pages', 'versions', pageId, versionId] as const,
   },
+  /** A database page's properties, views and rows (`GET /databases/{id}`); realtime refetches it with the workspace. */
+  database: (workspaceId: string, databaseId: string) => [...workspace(workspaceId), 'databases', databaseId] as const,
   /**
    * Deliberately outside the workspace prefix: realtime events invalidate that whole prefix, and an import creates
    * thousands of pages. The import views poll these keys instead of refetching a (large) scan tree on every event.

@@ -51,6 +51,8 @@ enum Denied {
     Session,
     Forbidden,
     Gone,
+    /// A database page has no body to co-edit.
+    NoDocument,
 }
 
 impl Denied {
@@ -58,7 +60,7 @@ impl Denied {
         match self {
             Self::Session => (close::SESSION, "session ended"),
             Self::Forbidden => (close::FORBIDDEN, "no access"),
-            Self::Gone => (close::GONE, "document not found"),
+            Self::Gone | Self::NoDocument => (close::GONE, "document not found"),
         }
     }
 }
@@ -112,6 +114,7 @@ pub async fn upgrade(
             return StatusCode::NOT_FOUND.into_response();
         }
         Ok(Some(Denied::Session)) => return StatusCode::UNAUTHORIZED.into_response(),
+        Ok(Some(Denied::NoDocument)) => return StatusCode::CONFLICT.into_response(),
         Err(error) => {
             tracing::warn!(error = %error, "co-editing access check failed");
             return StatusCode::SERVICE_UNAVAILABLE.into_response();
@@ -329,7 +332,8 @@ async fn check_access(
     let state = match key.kind {
         DocKind::Page => {
             "(SELECT CASE WHEN deleted_at IS NOT NULL THEN 2 \
-                          WHEN teamspace_id IS NULL AND owner_id IS DISTINCT FROM $2 THEN 1 ELSE 0 END \
+                          WHEN teamspace_id IS NULL AND owner_id IS DISTINCT FROM $2 THEN 1 \
+                          WHEN kind = 'database' THEN 3 ELSE 0 END \
               FROM pages WHERE id = $4 AND workspace_id = $3)"
         }
         DocKind::Task => {
@@ -364,6 +368,7 @@ async fn check_access(
         match row.get::<Option<i64>, _>("doc_state") {
             Some(0) => None,
             Some(1) => Some(Denied::Forbidden),
+            Some(3) => Some(Denied::NoDocument),
             _ => Some(Denied::Gone),
         }
     })

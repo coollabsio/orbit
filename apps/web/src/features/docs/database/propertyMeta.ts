@@ -1,0 +1,76 @@
+import {
+  ArrowCircleDown,
+  ArrowRightUp,
+  Search,
+  Calculator,
+  Barcode,
+  Call,
+  Paperclip,
+  Sms,
+  Calendar,
+  CheckSquare,
+  Clock,
+  Hashtag,
+  Link,
+  List,
+  Flash,
+  RecordCircle,
+  Text,
+  TextalignJustifyleft,
+  User,
+  UserCircle,
+  type IconComponent,
+} from 'reicon-react'
+import { PROPERTY_TYPE_LABELS } from '@orbit/database/meta'
+import type { DatabasePropertyType } from '@orbit/database/types'
+
+export const PROPERTY_TYPES: Record<DatabasePropertyType, { label: string; icon: IconComponent }> = {
+  title: { label: PROPERTY_TYPE_LABELS.title, icon: Text },
+  text: { label: PROPERTY_TYPE_LABELS.text, icon: TextalignJustifyleft },
+  number: { label: PROPERTY_TYPE_LABELS.number, icon: Hashtag },
+  select: { label: PROPERTY_TYPE_LABELS.select, icon: ArrowCircleDown },
+  multi_select: { label: PROPERTY_TYPE_LABELS.multi_select, icon: List },
+  status: { label: PROPERTY_TYPE_LABELS.status, icon: RecordCircle },
+  date: { label: PROPERTY_TYPE_LABELS.date, icon: Calendar },
+  person: { label: PROPERTY_TYPE_LABELS.person, icon: User },
+  checkbox: { label: PROPERTY_TYPE_LABELS.checkbox, icon: CheckSquare },
+  url: { label: PROPERTY_TYPE_LABELS.url, icon: Link },
+  email: { label: PROPERTY_TYPE_LABELS.email, icon: Sms },
+  phone: { label: PROPERTY_TYPE_LABELS.phone, icon: Call },
+  files: { label: PROPERTY_TYPE_LABELS.files, icon: Paperclip },
+  unique_id: { label: PROPERTY_TYPE_LABELS.unique_id, icon: Barcode },
+  created_time: { label: PROPERTY_TYPE_LABELS.created_time, icon: Clock },
+  created_by: { label: PROPERTY_TYPE_LABELS.created_by, icon: UserCircle },
+  last_edited_time: { label: PROPERTY_TYPE_LABELS.last_edited_time, icon: Clock },
+  last_edited_by: { label: PROPERTY_TYPE_LABELS.last_edited_by, icon: UserCircle },
+  button: { label: PROPERTY_TYPE_LABELS.button, icon: Flash },
+  formula: { label: PROPERTY_TYPE_LABELS.formula, icon: Calculator },
+  relation: { label: PROPERTY_TYPE_LABELS.relation, icon: ArrowRightUp },
+  rollup: { label: PROPERTY_TYPE_LABELS.rollup, icon: Search },
+}
+
+/** The types a user can give a property, in menu order (a database has exactly one title). */
+export const CREATABLE_TYPES: DatabasePropertyType[] = [
+  'text',
+  'number',
+  'select',
+  'multi_select',
+  'status',
+  'date',
+  'person',
+  'checkbox',
+  'url',
+  'email',
+  'phone',
+  'files',
+  'unique_id',
+  'formula',
+  'created_time',
+  'created_by',
+  'last_edited_time',
+  'last_edited_by',
+  'button',
+]
+
+/** Types offered only for a new property: the server refuses a type change to them (their config names other properties). */
+export const NEW_ONLY_TYPES: DatabasePropertyType[] = ['relation', 'rollup']

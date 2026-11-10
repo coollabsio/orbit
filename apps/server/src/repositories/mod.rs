@@ -4,6 +4,7 @@ pub mod attachments;
 pub mod backup_items;
 pub mod billing;
 pub mod chat;
+pub mod databases;
 pub mod identity;
 pub mod instance_settings;
 pub(crate) mod membership;

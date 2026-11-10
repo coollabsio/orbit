@@ -9,6 +9,8 @@ use orbit_platform::{Database, Id};
 use serde_json::Value;
 use thiserror::Error;
 
+use super::databases::NOT_TEMPLATE;
+use super::databases::{ComputeScope, DatabaseError, DatabaseRepository, ExportDatabase};
 use super::pages::{json_text_array, parse_id, visible};
 use super::tasks::{TaskError, require_access};
 use crate::collab::CollabHub;
@@ -52,6 +54,8 @@ pub struct ExportSource {
     pub members: HashMap<Id, String>,
     /// Archive folder of a root page (path segments); a root without one goes to the archive root.
     pub root_dirs: HashMap<Id, Vec<String>>,
+    /// The exported database pages and the databases of exported `database` blocks.
+    pub databases: HashMap<Id, ExportDatabase>,
 }
 
 #[derive(Debug, Error)]
@@ -115,6 +119,7 @@ impl PageExportRepository {
                  UNION \
                  SELECT pages.id FROM pages JOIN subtree ON pages.parent_id = subtree.id \
                  WHERE $4 = 1 AND pages.workspace_id = $5 AND pages.deleted_at IS NULL AND {visible6} \
+                 AND {NOT_TEMPLATE} \
              ) \
              SELECT id FROM subtree LIMIT $7",
             visible3 = visible(3),
@@ -231,12 +236,15 @@ impl PageExportRepository {
 
         let files = self.load_files(workspace_id, &pages).await?;
         let members = self.load_members(workspace_id).await?;
+        let scope = ComputeScope::utc(workspace_id, actor_id);
+        let databases = self.load_databases(&pages, &titles, &scope).await?;
         Ok(ExportSource {
             pages,
             titles,
             files,
             members,
             root_dirs: HashMap::new(),
+            databases,
         })
     }
 
@@ -257,8 +265,9 @@ impl PageExportRepository {
         } else {
             visible(2)
         };
-        let visible_pages =
-            format!("FROM pages WHERE workspace_id = $1 AND deleted_at IS NULL AND {visible}");
+        let visible_pages = format!(
+            "FROM pages WHERE workspace_id = $1 AND deleted_at IS NULL AND {visible} AND {NOT_TEMPLATE}"
+        );
         if let Some(hub) = CollabHub::existing(&self.database) {
             let ids: Vec<String> =
                 sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT id {visible_pages}")))
@@ -368,12 +377,15 @@ impl PageExportRepository {
             .collect();
         let files = self.load_files(workspace_id, &pages).await?;
         let members = self.load_members(workspace_id).await?;
+        let scope = ComputeScope::utc(workspace_id, actor_id);
+        let databases = self.load_databases(&pages, &titles, &scope).await?;
         Ok(ExportSource {
             pages,
             titles,
             files,
             members,
             root_dirs,
+            databases,
         })
     }
 
@@ -416,6 +428,49 @@ impl PageExportRepository {
         Ok(files)
     }
 
+    /// The exported database pages, and the databases that `database` blocks of exported pages
+    /// show when the actor sees them (`titles`), with the linked view blocks they use.
+    async fn load_databases(
+        &self,
+        pages: &[ExportPage],
+        titles: &HashMap<Id, String>,
+        scope: &ComputeScope,
+    ) -> Result<HashMap<Id, ExportDatabase>, PageExportError> {
+        let mut wanted: HashMap<Id, HashSet<Id>> = HashMap::new();
+        let exported: Vec<String> = pages.iter().map(|page| page.id.to_string()).collect();
+        let exported = serde_json::to_string(&exported).map_err(|_| PageExportError::Corrupt)?;
+        let database_pages: Vec<String> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+            "SELECT id FROM pages WHERE kind = 'database' AND id IN ({ids})",
+            ids = json_text_array(self.database.backend(), 1)
+        )))
+        .bind(&exported)
+        .fetch_all(self.database.pool())
+        .await?;
+        for id in database_pages {
+            wanted
+                .entry(parse_id(id).map_err(|_| PageExportError::Corrupt)?)
+                .or_default();
+        }
+        for page in pages {
+            for (database_id, link_id) in database_blocks(&page.content) {
+                if titles.contains_key(&database_id) {
+                    let links = wanted.entry(database_id).or_default();
+                    links.extend(link_id);
+                }
+            }
+        }
+        if wanted.is_empty() {
+            return Ok(HashMap::new());
+        }
+        DatabaseRepository::new(self.database.clone())
+            .export_data(&wanted, scope)
+            .await
+            .map_err(|error| match error {
+                DatabaseError::Unavailable(error) => PageExportError::Unavailable(error),
+                _ => PageExportError::Corrupt,
+            })
+    }
+
     async fn load_members(&self, workspace_id: Id) -> Result<HashMap<Id, String>, PageExportError> {
         let pool = self.database.pool();
         let member_rows = sqlx::query(
@@ -432,4 +487,28 @@ impl PageExportRepository {
         }
         Ok(members)
     }
+}
+
+/// `(databaseId, linkId)` of every `database` block in `content`, nested ones too.
+fn database_blocks(content: &[Value]) -> Vec<(Id, Option<Id>)> {
+    let mut found = Vec::new();
+    let mut stack: Vec<&Value> = content.iter().collect();
+    while let Some(block) = stack.pop() {
+        if block.get("type").and_then(Value::as_str) == Some("database") {
+            let prop = |name: &str| {
+                block
+                    .get("props")
+                    .and_then(|props| props.get(name))
+                    .and_then(Value::as_str)
+                    .and_then(|value| value.parse::<Id>().ok())
+            };
+            if let Some(database_id) = prop("databaseId") {
+                found.push((database_id, prop("linkId")));
+            }
+        }
+        if let Some(children) = block.get("children").and_then(Value::as_array) {
+            stack.extend(children);
+        }
+    }
+    found
 }

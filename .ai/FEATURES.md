@@ -248,6 +248,98 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
   schema. The package also holds `codeLanguages`, `commentMarks()` (the comment mark for editors without threads),
   the framework-free `CollabSession` (status, close codes) and `ticketWebSocket` (a fresh socket ticket per connect). Custom `page` block links to a page; it greys out as "Missing page" when the target is trashed or gone.
   Slash items "Sub-page" (creates a child page, inserts the link, opens it) and "Link a page" (picker over the tree).
+  Custom `database` block `{databaseId, linkId}` (`editor/DatabaseBlock.tsx`, databases P2 spec section 3): the database's
+  title, view tabs, toolbar and table or board inside the page (`database/DatabaseSurface.tsx`, shared with the full
+  database page), 25 rows then "Load more" (25 cards per board column), rows open in the peek (`?row=&row_block=`). Its
+  root is isolated (`@orbit/editor/isolation`): keys, pastes and drags inside never reach the editor. Slash "Database –
+  inline" makes a database sub-page (shown in the tree) and the block; "Linked view of database" picks a database and
+  `POST /databases/{id}/links` gives the block views of its own (`database_views.link_id`; changes follow the host page's
+  lock, the database's own views stay as they are; `GET /databases/{id}?link=`). Deleting an inline block keeps the
+  database ("Move to trash" in the toast); "Turn into" swaps a page link to a database and a database block. States: "No
+  access to this database" (404), "Database in trash", "View not found" (offers the database's own views). Mobile shows a
+  card (icon, title, rows, first view) that opens the database screen with `link` and `view`; Markdown writes the block as
+  a link to its database; task text drops it; duplicates copy links and their views.
+- Database list and calendar views (databases P2/P3 spec section 13). List (`database/DatabaseList.tsx`): one 36 px line
+  per row (icon, title, then the visible columns that have a value, right-aligned); drag to reorder without sorts; click
+  opens the peek. Calendar (`database/DatabaseCalendar.tsx`, shared logic `@orbit/database/calendar`): config
+  `date_property_id` (a date, created time or last edited time; repair takes the first date property) and
+  `calendar_mode` (`month` 6-week grid, or `week`); a range is a bar across its days, a month cell shows 3 cards then
+  "+N more", "No date (N)" lists undated rows. Cards of a date property drag to another day (start and end move by the
+  same days, times kept in the viewer's zone) and a range's right edge drags to change the end; "+" on a day adds a row
+  with that date (plus filter values and the default template). Week start: the locale, or "⋯ → Start week on" (this
+  browser, `orbit:calendar-week-start`). Mobile: list views show all visible properties; a calendar is a month grid with
+  dots and the tapped day's rows under it (`components/database/Calendar.tsx`), no drag.
+- Database form views, members only (databases P2/P3 spec section 18, `database/DatabaseForm.tsx`, shared logic
+  `@orbit/database/form`). Config `form` `{questions: [{property_id, label?, description?, required}], title?,
+  description?, submit_label?, confirmation?, access: members|closed}`; a form view without one asks for the title.
+  Editors (view edit rules) build it: texts, question cards (drag or arrows to reorder, label, help text, Required),
+  "Add question" (a property not asked yet, or a new property), "Accepting answers"; "Preview" tries it without
+  sending. "Copy form link" copies `/docs/<database>/form/<view>`, a full-page form (`DatabaseFormPage.tsx`) for members
+  who can open the database. `POST /databases/{id}/forms/{view}/submit` `{answers}` adds the row as the submitter in
+  one transaction (row cap, `database.row_created` and `database.form_submitted` audit events); closed is 409, more
+  than 30 submissions per member per hour in a workspace is 429 (counted from the audit events). No computed,
+  unique ID, files, relation or button questions. Mobile fills and submits form views (`components/database/
+  FormFill.tsx`; screen `/docs/form/<database>/<view>`, which a web form link in a page opens); the builder is on the web.
+- Database email, phone, files and unique ID properties (databases P2/P3 spec section 12). Email and phone are checked
+  text shown as `mailto:`/`tel:` links. Files hold `[{file_id, name}]` (max 20) of the row page's own files: the web
+  popover uploads (button or drop), reorders and removes; mobile uploads from the photo library or files app. Unique ID
+  (`{prefix, next}`, one per database) numbers existing rows by creation when added and each new row in its create
+  transaction (also CSV import, template, duplicate, move-in, restore); numbers are never reused and only the Notion
+  import may set them. Notion email, phone, unique ID and uploaded files import as these types.
+- Database button property (databases P2/P3 spec section 17, server `repositories/databases/buttons.rs`, shared
+  `@orbit/database/buttons`). Config `{label, actions (max 5), confirm}`; actions `set_values` (this row), `add_row` (this
+  or another database the presser can open, appended) and `open_url` (one, client side). Values take `"me"` (person),
+  `"today"`/`"now"` (date), and in `add_row` a title string and `"this_row"`. `POST /databases/{id}/rows/{row}/press/
+  {property}` `{today?}` runs the server actions in one transaction (any failure rolls back all; 422 names
+  `actions[i]`), records `database.button_pressed` (plus `database.row_created` per added row) and returns `{row,
+  created_rows, open_url?}`; 10 presses per user per second per server (429 `database_button_rate_limit`). A button
+  stores no value, cannot be filtered or sorted, and is skipped by search, CSV import and forms. Web: the cell button
+  (confirm dialog, spinner, error toast; Enter presses it in the table), "Edit property → Edit button…" opens
+  `ButtonConfigDialog`. Mobile presses in the row's property list and in list, gallery, timeline and calendar rows
+  (`components/database/ButtonCell.tsx`); its config is edited on the web. Notion buttons stay skipped.
+- Database gallery and timeline views (databases P2/P3 spec section 16). Gallery (`database/DatabaseGallery.tsx`, shared
+  `@orbit/database/gallery`): a grid of 180/260/340 px cards (`card_size`) with a 3:2 preview (`card_preview`: `none`,
+  `cover`, `content` = the body's first image else its first 300 characters, or `{files: id}` = a files property's
+  first image; `fit_image`), the title and `card_properties`, "New" as the last card, drag to reorder without sorts.
+  `GET /databases/{id}` adds `preview` to rows only when a returned view is a gallery that needs it. Timeline
+  (`database/DatabaseTimeline.tsx`, shared `@orbit/database/timeline`): `start_property_id` and `end_property_id`
+  (dates; no end: a range's end, else one day), `zoom` (day to year), `show_table` and `table_columns` for the left
+  pane; drag a bar to move both dates or an edge to change one (a moved time keeps its local hour); undated rows list
+  under "No date" and a click on their track sets a date; zoom and "Today" above the axis; its own scroller, rows
+  virtualized. Mobile: a gallery is a 2-column grid (1 for large cards, `components/database/Gallery.tsx`); a timeline is
+  a list grouped by month with "Timeline · Edit on the web" (`TimelineList.tsx`). Notion gallery and timeline views
+  import with their preview, size, dates, zoom and table pane.
+- Database relation and rollup properties (databases P2/P3 spec section 11, D-P3-1/D-P3-5). A relation links rows to
+  rows of a target database (any space the user can open, or the same one); each link is one `page_relations` row under
+  the pair's primary property, and the synced property of a two-way pair ("Show on <database>") reads the same rows
+  from the other side. `GET /databases/{id}?tz=` fills relation values (visible page ids), `hidden_links` counts and
+  `related_pages` titles, and computes rollups (`repositories/databases/computed.rs`, the shared computed-value layer
+  that formulas also use); a write replaces the cell's visible links (max 100) and keeps hidden ones. Rollup functions
+  as Notion's (show, counts, percents, number, date and checkbox functions). Trashed pages are left out, permanent
+  deletes and moves out of a database drop links, a duplicated database keeps links one-way. Web: pills, a target-row
+  picker and relation/rollup setup in "New property"; mobile shows and edits links (search sheet) and edits their
+  configs on the web. Notion relations stay relations when both databases are imported (dual = two-way), outside
+  links stay as "<name> (titles)" text, rollups over them stay rollups.
+- Database formula property (databases P2/P3 spec section 15, D-P3-1/D-P3-3). Only the server runs formulas
+  (`repositories/databases/formula/`: `syntax` lexer and parser, `check` type checker to IR, `eval` with a step counter,
+  `dates` on jiff in the reader's `?tz=` zone), on every read as the formula pass of the computed-value layer. Config
+  `{expression, result_type}`; clients send `prop("Name")` or ids, the server stores ids and infers the type. A failed
+  cell is `{"error": message}` (`row.formulaErrors` on clients). Limits: 2,000 characters, 500 nodes, depth 32, 2,000
+  steps per cell, lists 1,000, text 10,000, 20 formulas, 15 formula layers, 2 s per read. `POST
+  …/formula/preview` checks an expression and computes the first 10 rows; save errors are 422 `formula_invalid` with
+  `formula: {message, start, end}` (UTF-16). Filters, sorts and calculations follow the result type
+  (`@orbit/database/formula/values`). Web: "Edit property → Edit formula…" (`FormulaDialog`: highlight, completion,
+  error, preview); cells show results or a muted "Error" with the message on hover (`cells/FormulaCell.tsx`). Mobile
+  shows results, taps show errors, editing says "Edit this formula on the web". Notion formulas that parse and type
+  check import live (`notion/formula.rs`), others keep static values.
+- Databases for API tokens and MCP (databases P2/P3 spec section 14): tools `get_database`, `query_database`,
+  `create_database_row`, `update_database_row`, `trash_database_rows` and REST `GET /docs/{id}/database`, `POST
+  /docs/{id}/database/query`, `POST /docs/{id}/rows`, `PATCH /docs/{id}/rows/{row}`, `POST /docs/{id}/rows/trash` under the
+  docs scopes (personal tokens only). Keys are property names or ids, options go by name, people by id, email or "me";
+  results name options and show people as `{id, name}`. Queries filter and sort in Rust in memory
+  (`repositories/databases/query.rs`, the rules of `@orbit/database` filter/sort; shared cases in
+  `packages/database/cases/`), 100 rows per page with an opaque cursor; name translation is
+  `repositories/databases/agent.rs`. `get_doc` of a row adds `values`.
   Custom `callout` block (`editor/CalloutBlock.tsx`; slash "Callout" in Basic blocks after Quote, aliases callout/note/tip/
   warning/info): inline rich text, props `emoji` (default 💡; click it to pick another in the app's emoji picker),
   `backgroundColor` (BlockNote color names, default `gray`; `default` = border only) and `textColor`, both editable in the
@@ -354,6 +446,14 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
   the light detail every 2 s only while scanning/queued/importing and fetches the tree once, under its own query key, when
   the import is `ready`. Notion callouts become `callout` blocks (emoji icon, color, nested children; a non-emoji icon
   becomes 💡 and counts as `callout_icon` in the report).
+  A Notion data source becomes an Orbit database (`notion/database.rs`, mapping in the databases spec section 14):
+  typed properties (computed Notion types as static values), option colors, row values, one table, board, list or calendar view for
+  each Notion view (AND filters and sorts kept), rows as row pages in Notion order (max 5,000). A database with several
+  data sources is one tree node and one database for each data source. An inline database is a database sub-page,
+  and its block becomes a `database` block of the database's own views. Pass 1 fetches each data source before writing and creates databases and
+  rows through the databases repository; property and option ids derive from the Notion ids, so a resumed import
+  finds them. The report adds `databases_imported`, `rows_truncated`, database lossy reasons and skipped
+  `property:<type>`; web and mobile render them as sentences (`@orbit/database/notionImport`).
   When an import fails (e.g. revoked token) or is cancelled, the pages it had created but not filled go to the trash (one
   audited batch per top-level page; a subtree is kept if anything in it has content or is not from the import) and the report
   counts them (`unfilled_pages_trashed`). Filled pages stay.

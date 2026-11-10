@@ -70,7 +70,7 @@ describe('schema', () => {
 })
 
 describe('getPageSlashMenuItems', () => {
-  const actions = { onSubpage: mock(() => {}), onLinkPage: mock(() => {}) }
+  const actions = { onSubpage: mock(() => {}), onDatabase: mock(() => {}), onLinkPage: mock(() => {}) }
 
   test('offers the page items inside a single "Basic blocks" group, Image and File, but no Video or Audio', () => {
     const items = getPageSlashMenuItems(editor(), actions, '')
@@ -96,6 +96,30 @@ describe('getPageSlashMenuItems', () => {
     linkItems[0].onItemClick()
     expect(actions.onLinkPage).toHaveBeenCalledTimes(1)
     expect(actions.onSubpage).not.toHaveBeenCalled()
+
+    for (const alias of ['database', 'db']) {
+      expect(getPageSlashMenuItems(e, actions, alias).map((item) => item.title)).toEqual(['Database – full page'])
+    }
+    const tableItems = getPageSlashMenuItems(e, actions, 'table')
+    expect(tableItems.map((item) => item.title)).toContain('Database – full page')
+    tableItems.find((item) => item.title === 'Database – full page')!.onItemClick()
+    expect(actions.onDatabase).toHaveBeenCalledTimes(1)
+    expect(actions.onSubpage).not.toHaveBeenCalled()
+  })
+
+  test('offers the inline and linked database items only when the page can load databases', () => {
+    const e = editor()
+    const onInlineDatabase = mock(() => {})
+    const onLinkedView = mock(() => {})
+    const titles = (query: string, extra = {}) => getPageSlashMenuItems(e, { ...actions, ...extra }, query).map((item) => item.title)
+    expect(titles('database', { onInlineDatabase, onLinkedView })).toEqual(['Database – full page', 'Database – inline', 'Linked view of database'])
+    expect(titles('linked', { onInlineDatabase, onLinkedView })).toEqual(['Linked view of database'])
+    getPageSlashMenuItems(e, { ...actions, onInlineDatabase, onLinkedView }, 'inline')
+      .find((item) => item.title === 'Database – inline')!
+      .onItemClick()
+    expect(onInlineDatabase).toHaveBeenCalledTimes(1)
+    expect(onLinkedView).not.toHaveBeenCalled()
+    expect(titles('database')).toEqual(['Database – full page'])
   })
 
   test('offers Callout right after Quote in Basic blocks; it turns the empty line into a callout', () => {
@@ -180,8 +204,8 @@ describe('preferTitleMatches', () => {
 })
 
 describe('task profile', () => {
-  test('the task schema has the page block types minus page', () => {
-    const page = Object.keys(pageEditorSchema.blockSpecs).filter((type) => type !== 'page').sort()
+  test('the task schema has the page block types minus page and database', () => {
+    const page = Object.keys(pageEditorSchema.blockSpecs).filter((type) => type !== 'page' && type !== 'database').sort()
     expect(Object.keys(taskEditorSchema.blockSpecs).sort()).toEqual(page)
   })
 

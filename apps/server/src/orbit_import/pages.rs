@@ -17,7 +17,7 @@ use crate::notion::import::clamp;
 use crate::repositories::page_comments::{CommentBody, PageCommentError};
 use crate::repositories::page_files::{page_file_url, parse_page_file_url};
 use crate::repositories::page_versions::SaveOrigin;
-use crate::repositories::pages::{CreatePage, PageChanges, PageError, SpaceRequest};
+use crate::repositories::pages::{CreatePage, PageChanges, PageError, PageKind, SpaceRequest};
 use crate::task_import::Failure;
 use crate::workspace_export::ExportMode;
 
@@ -250,6 +250,7 @@ async fn create_page(
         },
         icon: page.icon.clone().filter(|icon| icon.chars().count() <= 64),
         position: None,
+        kind: PageKind::Page,
     };
     match service
         .inner

@@ -1,27 +1,34 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient, type createApiClient } from '@/api/client'
 import { addPageFavorite, listPageFavorites, movePageFavorite, removePageFavorite } from '@orbit/api/generated/sdk.gen'
+import type { PageFavorite } from '@orbit/api/generated/types.gen'
 import { queryKeys } from '@/api/queryKeys'
 
 type ApiClient = ReturnType<typeof createApiClient>
 
 /**
- * The caller's favorite page ids in order. Personal (other members never see them); the server lists
- * only live pages the caller can see, so trashed favorites drop out and come back on restore.
+ * The caller's favorites in order, with what the list shows of each page: database rows (and their sub-pages) are
+ * not in the tree. Personal (other members never see them); the server lists only live pages the caller can see, so
+ * trashed favorites drop out and come back on restore.
  */
 export function favoritesQueryOptions(workspaceId: string, client: ApiClient = apiClient) {
   return {
     queryKey: queryKeys.pages.favorites(workspaceId),
-    queryFn: async (): Promise<string[]> => {
+    queryFn: async (): Promise<PageFavorite[]> => {
       const { data } = await listPageFavorites({ client, path: { workspace_id: workspaceId }, throwOnError: true })
       if (!data) throw new Error('Favorites response was empty.')
-      return [...data.items].sort((a, b) => a.position - b.position).map((item) => item.page_id)
+      return [...data.items].sort((a, b) => a.position - b.position)
     },
   }
 }
 
 export function usePageFavorites(workspaceId: string, enabled = true) {
   return useQuery({ ...favoritesQueryOptions(workspaceId), enabled })
+}
+
+/** True when `pageId` is one of `favorites`. */
+export function isFavorite(favorites: readonly PageFavorite[] | undefined, pageId: string): boolean {
+  return favorites?.some((favorite) => favorite.page_id === pageId) ?? false
 }
 
 /** `ids` with `pageId` moved to index `position` (clamped); unchanged when `pageId` is not in it. */
@@ -45,11 +52,24 @@ export function favoriteDropIndex(ids: readonly string[], dragId: string, target
   return index === from ? null : index
 }
 
-type FavoritesSnapshot = { ids: string[] | undefined }
+const renumbered = (favorites: readonly PageFavorite[]) => favorites.map((favorite, position) => ({ ...favorite, position }))
+
+/** `favorites` in the order of `ids`, renumbered. */
+function inOrder(favorites: readonly PageFavorite[], ids: readonly string[]): PageFavorite[] {
+  const byId = new Map(favorites.map((favorite) => [favorite.page_id, favorite]))
+  return renumbered(ids.flatMap((id) => byId.get(id) ?? []))
+}
+
+type FavoritesSnapshot = { favorites: PageFavorite[] | undefined }
+
+/** What the list shows of a page added to the favorites until the server's entry replaces it. */
+export type FavoritePage = Pick<PageFavorite, 'title' | 'icon' | 'kind'> & { database_id?: string | null }
 
 export interface ToggleFavoriteInput {
   pageId: string
   favorite: boolean
+  /** Shown at once when adding. */
+  page?: FavoritePage
 }
 
 /** Adds (`favorite: true`, appended last) or removes a favorite; optimistic with rollback. */
@@ -62,15 +82,25 @@ export function useToggleFavorite(workspaceId: string) {
       if (favorite) await addPageFavorite({ client: apiClient, path, throwOnError: true })
       else await removePageFavorite({ client: apiClient, path, throwOnError: true })
     },
-    onMutate: async ({ pageId, favorite }) => {
+    onMutate: async ({ pageId, favorite, page }) => {
       await queryClient.cancelQueries({ queryKey: key })
-      const ids = queryClient.getQueryData<string[]>(key)
-      const without = (ids ?? []).filter((id) => id !== pageId)
-      queryClient.setQueryData<string[]>(key, favorite ? (ids?.includes(pageId) ? ids : [...without, pageId]) : without)
-      return { ids }
+      const favorites = queryClient.getQueryData<PageFavorite[]>(key)
+      const without = (favorites ?? []).filter((item) => item.page_id !== pageId)
+      const added: PageFavorite = {
+        page_id: pageId,
+        position: without.length,
+        title: page?.title ?? '',
+        icon: page?.icon ?? null,
+        kind: page?.kind ?? 'page',
+        database_id: page?.database_id ?? null,
+        database_title: null,
+      }
+      const next = favorite ? (isFavorite(favorites, pageId) ? favorites : [...without, added]) : renumbered(without)
+      queryClient.setQueryData<PageFavorite[]>(key, next)
+      return { favorites }
     },
     onError: (_error, _input, snapshot) => {
-      queryClient.setQueryData(key, snapshot?.ids)
+      queryClient.setQueryData(key, snapshot?.favorites)
     },
     onSettled: () => void queryClient.invalidateQueries({ queryKey: key }),
   })
@@ -80,7 +110,7 @@ export function useToggleFavorite(workspaceId: string) {
 export function useMoveFavorite(workspaceId: string) {
   const queryClient = useQueryClient()
   const key = queryKeys.pages.favorites(workspaceId)
-  return useMutation<string[], Error, { pageId: string; position: number }, FavoritesSnapshot>({
+  return useMutation<PageFavorite[], Error, { pageId: string; position: number }, FavoritesSnapshot>({
     mutationFn: async ({ pageId, position }) => {
       const { data } = await movePageFavorite({
         client: apiClient,
@@ -89,18 +119,21 @@ export function useMoveFavorite(workspaceId: string) {
         throwOnError: true,
       })
       if (!data) throw new Error('Move favorite response was empty.')
-      return data.items.map((item) => item.page_id)
+      return data.items
     },
     onMutate: async ({ pageId, position }) => {
       await queryClient.cancelQueries({ queryKey: key })
-      const ids = queryClient.getQueryData<string[]>(key)
-      if (ids) queryClient.setQueryData(key, moveFavoriteId(ids, pageId, position))
-      return { ids }
+      const favorites = queryClient.getQueryData<PageFavorite[]>(key)
+      if (favorites) {
+        const ids = favorites.map((favorite) => favorite.page_id)
+        queryClient.setQueryData(key, inOrder(favorites, moveFavoriteId(ids, pageId, position)))
+      }
+      return { favorites }
     },
     onError: (_error, _input, snapshot) => {
-      if (snapshot?.ids) queryClient.setQueryData(key, snapshot.ids)
+      if (snapshot?.favorites) queryClient.setQueryData(key, snapshot.favorites)
       void queryClient.invalidateQueries({ queryKey: key })
     },
-    onSuccess: (ids) => queryClient.setQueryData(key, ids),
+    onSuccess: (favorites) => queryClient.setQueryData(key, favorites),
   })
 }

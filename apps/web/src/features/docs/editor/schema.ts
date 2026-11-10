@@ -2,12 +2,14 @@ import { BlockNoteEditor as BlockNoteEditorClass, type BlockNoteEditor } from '@
 import { createEditorSchemas, type TaskEditorSchema } from '@orbit/editor/schema'
 import { CalloutExternalView, CalloutView } from './CalloutBlock'
 import { codeBlockOptions } from './codeBlock'
+import { DatabaseBlockExternalView, DatabaseBlockView } from './DatabaseBlock'
 import { PageBlockExternalView, PageBlockView } from './PageBlockCard'
 import { MathInlineView } from './MathInline'
 import { PageMentionView } from './PageMentionChip'
 
 export const { pageEditorSchema, taskEditorSchema } = createEditorSchemas({
   page: { render: PageBlockView, toExternalHTML: PageBlockExternalView },
+  database: { render: DatabaseBlockView, toExternalHTML: DatabaseBlockExternalView },
   callout: { render: CalloutView, toExternalHTML: CalloutExternalView },
   mention: { render: PageMentionView },
   math: { render: MathInlineView },

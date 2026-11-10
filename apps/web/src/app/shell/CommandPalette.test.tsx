@@ -53,11 +53,15 @@ function setup(onClose = () => {}, target = false) {
         items: [
           {
             id: 'page-handbook', parent_id: null, teamspace_id: 'teamspace-1', private: false, title: 'Team handbook', icon: null,
-            snippet: 'How we onboard new people', snippet_highlights: [{ start: 7, end: 14 }], title_highlights: [],
+            snippet: 'How we onboard new people', snippet_highlights: [{ start: 7, end: 14 }], title_highlights: [], database_title: null,
           },
           {
             id: 'page-diary', parent_id: null, teamspace_id: null, private: true, title: 'Onboarding diary', icon: null,
-            snippet: 'My <b>onboard</b> notes', snippet_highlights: [{ start: 6, end: 13 }], title_highlights: [{ start: 0, end: 10 }],
+            snippet: 'My <b>onboard</b> notes', snippet_highlights: [{ start: 6, end: 13 }], title_highlights: [{ start: 0, end: 10 }], database_title: null,
+          },
+          {
+            id: 'row-paper', parent_id: 'db-research', teamspace_id: 'teamspace-1', private: false, title: 'Onboard paper', icon: null,
+            snippet: 'Status: Onboarding', snippet_highlights: [{ start: 8, end: 18 }], title_highlights: [{ start: 0, end: 7 }], database_title: 'Research',
           },
         ],
       })
@@ -175,6 +179,10 @@ test('page search runs only for a non-empty query and opens the page', async () 
   // The secondary text names the page's space.
   await waitFor(() => expect(page.textContent).toContain('Page · General'))
   expect(view.getByRole('option', { name: /Onboarding diary/ }).textContent).toContain('Page · Private')
+  // A row names its database, and a row found by a property value shows it.
+  const row = view.getByRole('option', { name: /Onboard paper/ })
+  expect(row.textContent).toContain('Row · Research')
+  expect(row.querySelector('[data-snippet]')!.textContent).toBe('Status: Onboarding')
   fireEvent.click(page)
   expect(view.getByTestId('location').textContent).toBe('/docs/page-handbook')
 })
@@ -213,8 +221,8 @@ test('page hits show the snippet with the matched words in bold, as text', async
 
 test('an empty query lists recently opened pages first; typing hides them', async () => {
   recentPages = [
-    { id: 'page-roadmap', parent_id: null, teamspace_id: 'teamspace-1', private: false, title: 'Roadmap', icon: null, visited_at: '2026-09-25T10:00:00Z' },
-    { id: 'page-notes', parent_id: null, teamspace_id: null, private: true, title: '', icon: null, visited_at: '2026-09-25T09:00:00Z' },
+    { id: 'page-roadmap', parent_id: null, teamspace_id: 'teamspace-1', private: false, title: 'Roadmap', icon: null, kind: 'page', database_title: null, visited_at: '2026-09-25T10:00:00Z' },
+    { id: 'page-notes', parent_id: null, teamspace_id: null, private: true, title: '', icon: null, kind: 'page', database_title: null, visited_at: '2026-09-25T09:00:00Z' },
   ]
   try {
     const view = setup()

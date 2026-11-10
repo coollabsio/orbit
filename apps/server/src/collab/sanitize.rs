@@ -400,7 +400,8 @@ fn keep_known_blocks(blocks: &[Value], task: bool) -> Vec<Value> {
                 .get("type")
                 .and_then(Value::as_str)
                 .is_some_and(|block_type| {
-                    schema().blocks.contains_key(block_type) && !(task && block_type == "page")
+                    schema().blocks.contains_key(block_type)
+                        && !(task && matches!(block_type, "page" | "database"))
                 })
         })
         .map(|block| {
@@ -1047,9 +1048,10 @@ mod tests {
     }
 
     #[test]
-    fn task_policy_drops_page_block() {
+    fn task_policy_drops_page_and_database_blocks() {
         let blocks = [
             json!({"type": "page", "props": {"pageId": PAGE}}),
+            json!({"type": "database", "props": {"databaseId": PAGE, "linkId": ""}}),
             json!({"type": "paragraph", "content": [{"type": "text", "text": "kept", "styles": {}}]}),
         ];
         let sanitized = sanitize_blocks_for(&blocks, &task_policy());

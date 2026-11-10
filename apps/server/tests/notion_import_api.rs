@@ -10,7 +10,7 @@ use std::time::Duration;
 use axum::Json;
 use axum::Router;
 use axum::body::{Body, to_bytes};
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::{HeaderMap, Request, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -20,6 +20,7 @@ use orbit_platform::{
     WorkerConfig,
 };
 use orbit_server::auth_routes::CookieMode;
+use orbit_server::database_routes::{DatabaseState, database_router};
 use orbit_server::import_notice::ImportNotices;
 use orbit_server::import_routes::{ImportState, import_router};
 use orbit_server::mail::Mailer;
@@ -67,6 +68,15 @@ struct Fake {
     endless: AtomicBool,
     /// Every API call answers 503.
     unavailable: AtomicBool,
+    databases: HashMap<String, Value>,
+    data_sources: HashMap<String, Value>,
+    /// Data source id → rows.
+    queries: HashMap<String, Vec<Value>>,
+    /// Database id → views; databases in `missing_views` answer 404 to the views list.
+    views: HashMap<String, Vec<Value>>,
+    missing_views: Vec<String>,
+    /// `(page id, property id)` → property items.
+    property_items: HashMap<(String, String), Vec<Value>>,
 }
 
 impl Fake {
@@ -137,16 +147,26 @@ fn block_id(n: u32) -> String {
     format!("e0000000-0000-4000-8000-{n:012}")
 }
 
-async fn serve_fake() -> Arc<Fake> {
+async fn serve_fake(with_databases: bool) -> Arc<Fake> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
-    let fake = Arc::new(build_fake(base));
+    let mut fake = build_fake(base);
+    if with_databases {
+        add_database_fixture(&mut fake);
+    }
+    let fake = Arc::new(fake);
     let router = Router::new()
         .route("/v1/users/me", get(me))
         .route("/v1/search", post(search))
         .route("/v1/pages/{id}", get(retrieve_page))
         .route("/v1/blocks/{id}", get(retrieve_block))
         .route("/v1/blocks/{id}/children", get(block_children))
+        .route("/v1/databases/{id}", get(retrieve_database))
+        .route("/v1/data_sources/{id}", get(retrieve_data_source))
+        .route("/v1/data_sources/{id}/query", post(query_data_source))
+        .route("/v1/views", get(list_views))
+        .route("/v1/views/{id}", get(retrieve_view))
+        .route("/v1/pages/{id}/properties/{property}", get(property_items))
         .route("/files/{name}", get(file))
         .with_state(Arc::clone(&fake));
     tokio::spawn(async move { axum::serve(listener, router).await.unwrap() });
@@ -172,7 +192,7 @@ fn build_fake(base: String) -> Fake {
     );
     row_one["properties"] = json!({
         "Name": {"id": "title", "type": "title", "title": rich("Row one")},
-        "Status": {"id": "st", "type": "select", "select": {"name": "Done", "color": "green"}}
+        "Status": {"id": "st", "type": "select", "select": {"id": "opt-done", "name": "Done", "color": "green"}}
     });
     let mut in_trash = page(
         block_id(99).as_str(),
@@ -264,6 +284,7 @@ fn build_fake(base: String) -> Fake {
         json!({"object": "block", "id": TOGGLE_OUTER, "type": "toggle", "has_children": true,
                "parent": {"type": "page_id", "page_id": ALPHA}, "toggle": {"rich_text": []}}),
     );
+    let rows = vec![pages[5].clone(), pages[6].clone()];
     Fake {
         base,
         pages: pages
@@ -273,8 +294,180 @@ fn build_fake(base: String) -> Fake {
         children,
         blocks,
         search,
+        databases: HashMap::from([(
+            DATABASE.to_owned(),
+            json!({"object": "database", "id": DATABASE, "title": rich("Tasks"), "is_inline": true,
+                   "data_sources": [{"id": DATA_SOURCE, "name": "Tasks"}]}),
+        )]),
+        data_sources: HashMap::from([(
+            DATA_SOURCE.to_owned(),
+            json!({"object": "data_source", "id": DATA_SOURCE, "title": rich("Tasks"),
+            "parent": {"type": "database_id", "database_id": DATABASE},
+            "properties": {
+                "Name": {"id": "title", "type": "title", "title": {}},
+                "Status": {"id": "st", "type": "select", "select": {"options": [
+                    {"id": "opt-done", "name": "Done", "color": "green"}]}}
+            }}),
+        )]),
+        queries: HashMap::from([(DATA_SOURCE.to_owned(), rows)]),
         ..Fake::default()
     }
+}
+
+/// Adds `fixtures/notion_import/databases.json`: a "Coverage" database with every property
+/// type and three views, a page "Home" with an inline database and a full-page database with
+/// two data sources.
+fn add_database_fixture(fake: &mut Fake) {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/notion_import/databases.json");
+    let text = std::fs::read_to_string(path)
+        .unwrap()
+        .replace("__BASE__", &fake.base);
+    let fixture: Value = serde_json::from_str(&text).unwrap();
+    let map = |key: &str| -> HashMap<String, Value> {
+        fixture[key]
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(id, value)| (id.clone(), value.clone()))
+            .collect()
+    };
+    let lists = |key: &str| -> HashMap<String, Vec<Value>> {
+        map(key)
+            .into_iter()
+            .map(|(id, value)| (id, value.as_array().unwrap().clone()))
+            .collect()
+    };
+    fake.search
+        .extend(fixture["search"].as_array().unwrap().iter().cloned());
+    fake.pages.extend(map("pages"));
+    fake.children.extend(lists("children"));
+    fake.databases.extend(map("databases"));
+    fake.data_sources.extend(map("data_sources"));
+    fake.queries.extend(lists("queries"));
+    fake.views.extend(lists("views"));
+    fake.missing_views = fixture["missing_views"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|id| id.as_str().unwrap().to_owned())
+        .collect();
+    for entry in fixture["property_items"].as_array().unwrap() {
+        fake.property_items.insert(
+            (
+                entry["page"].as_str().unwrap().to_owned(),
+                entry["property"].as_str().unwrap().to_owned(),
+            ),
+            entry["items"].as_array().unwrap().clone(),
+        );
+    }
+}
+
+/// Answers with the object, after counting the hit and running a hook registered for `key`.
+async fn serve_object(
+    fake: &Fake,
+    headers: &HeaderMap,
+    key: String,
+    object: Option<Value>,
+) -> Response {
+    if fake.unavailable.load(Ordering::SeqCst) {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
+    if !fake.authorized(headers) {
+        return unauthorized();
+    }
+    *fake.hits.lock().unwrap().entry(key.clone()).or_default() += 1;
+    let hook = fake.hooks.lock().unwrap().remove(&key);
+    if let Some(hook) = hook {
+        hook().await;
+    }
+    object.map_or_else(not_found, |object| Json(object).into_response())
+}
+
+async fn retrieve_database(
+    State(fake): State<Arc<Fake>>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let object = fake.databases.get(&id).cloned();
+    serve_object(&fake, &headers, format!("database:{id}"), object).await
+}
+
+async fn retrieve_data_source(
+    State(fake): State<Arc<Fake>>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let object = fake.data_sources.get(&id).cloned();
+    serve_object(&fake, &headers, format!("data_source:{id}"), object).await
+}
+
+async fn query_data_source(
+    State(fake): State<Arc<Fake>>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let object = fake.queries.get(&id).map(
+        |rows| json!({"object": "list", "results": rows, "next_cursor": null, "has_more": false}),
+    );
+    serve_object(&fake, &headers, format!("query:{id}"), object).await
+}
+
+async fn list_views(
+    State(fake): State<Arc<Fake>>,
+    Query(query): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Response {
+    let database = query.get("database_id").cloned().unwrap_or_default();
+    let object = (!fake.missing_views.contains(&database)).then(|| {
+        let ids: Vec<Value> = fake
+            .views
+            .get(&database)
+            .into_iter()
+            .flatten()
+            .map(|view| json!({"object": "view", "id": view["id"]}))
+            .collect();
+        json!({"object": "list", "results": ids, "next_cursor": null, "has_more": false})
+    });
+    serve_object(&fake, &headers, format!("views:{database}"), object).await
+}
+
+async fn retrieve_view(
+    State(fake): State<Arc<Fake>>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let object = fake
+        .views
+        .values()
+        .flatten()
+        .find(|view| view["id"] == id.as_str())
+        .cloned();
+    serve_object(&fake, &headers, format!("view:{id}"), object).await
+}
+
+/// Property items in pages of 10 (`start_cursor` is the offset).
+async fn property_items(
+    State(fake): State<Arc<Fake>>,
+    Path((id, property)): Path<(String, String)>,
+    Query(query): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+) -> Response {
+    let start: usize = query
+        .get("start_cursor")
+        .and_then(|cursor| cursor.parse().ok())
+        .unwrap_or(0);
+    let object = fake
+        .property_items
+        .get(&(id.clone(), property.clone()))
+        .map(|items| {
+            let end = (start + 10).min(items.len());
+            let more = end < items.len();
+            json!({"object": "list", "type": "property_item", "results": items[start..end],
+                   "next_cursor": more.then(|| end.to_string()), "has_more": more,
+                   "property_item": {"id": property, "type": items[0]["type"]}})
+        });
+    serve_object(&fake, &headers, format!("property:{id}:{property}"), object).await
 }
 
 async fn me(State(fake): State<Arc<Fake>>, headers: HeaderMap) -> Response {
@@ -398,10 +591,19 @@ struct Harness {
 
 impl Harness {
     async fn new() -> Self {
-        Self::with_key(Some([7u8; 32])).await
+        Self::build(Some([7u8; 32]), false).await
     }
 
     async fn with_key(app_key: Option<[u8; 32]>) -> Self {
+        Self::build(app_key, false).await
+    }
+
+    /// With the database fixture (`add_database_fixture`) next to the basic pages.
+    async fn with_databases() -> Self {
+        Self::build(Some([7u8; 32]), true).await
+    }
+
+    async fn build(app_key: Option<[u8; 32]>, with_databases: bool) -> Self {
         let root = tempfile::tempdir().unwrap();
         let database = TestDatabase::new().await.unwrap();
         let identity = Arc::new(IdentityRepository::new((*database).clone()));
@@ -435,7 +637,7 @@ impl Harness {
             AttachmentMutationCoordinator::default(),
             UploadLimits::new(1024 * 1024, 4 * 1024 * 1024).unwrap(),
         );
-        let fake = serve_fake().await;
+        let fake = serve_fake(with_databases).await;
         let port = fake.base.rsplit(':').next().unwrap().parse().unwrap();
         let service = NotionImportService::new(
             (*database).clone(),
@@ -460,6 +662,10 @@ impl Harness {
             CookieMode::secure(),
         ))
         .merge(page_router(PageState::new(
+            Arc::clone(&identity),
+            CookieMode::secure(),
+        )))
+        .merge(database_router(DatabaseState::new(
             Arc::clone(&identity),
             CookieMode::secure(),
         )))
@@ -687,6 +893,23 @@ impl Harness {
             .fetch_one(self.database.pool())
             .await
             .unwrap()
+    }
+
+    /// `GET …/databases/{id}` as the owner.
+    async fn database_detail(&self, database: &str) -> Value {
+        let (status, detail) = self
+            .call(
+                &self.owner_cookie,
+                "GET",
+                &format!(
+                    "/api/v1/workspaces/{}/databases/{database}",
+                    self.workspace_id
+                ),
+                None,
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{detail}");
+        detail
     }
 
     async fn children_titles(&self, parent: &str) -> Vec<String> {
@@ -938,23 +1161,41 @@ async fn import_all_creates_pages_with_content_files_links_and_order() {
 
     let (_, tasks_page) = harness.page(&harness.owner_cookie, &tasks).await;
     assert_eq!(tasks_page["title"], "Tasks");
-    let rows: Vec<&Value> = tasks_page["content"]
+    assert_eq!(tasks_page["kind"], "database");
+    let database = harness.database_detail(&tasks).await;
+    let row_one = harness.orbit_id(&id, ROW_ONE).await;
+    let rows: Vec<&str> = database["rows"]
         .as_array()
         .unwrap()
         .iter()
-        .map(|block| &block["props"]["pageId"])
+        .map(|row| row["id"].as_str().unwrap())
         .collect();
-    assert_eq!(rows.len(), 2);
-    let row_one = harness.orbit_id(&id, ROW_ONE).await;
-    assert_eq!(rows[0], row_one.as_str());
+    assert_eq!(
+        rows,
+        [row_one.as_str(), &harness.orbit_id(&id, ROW_TWO).await]
+    );
+    let status = &database["properties"][1];
+    assert_eq!(status["name"], "Status");
+    let done = status["config"]["options"][0]["id"].clone();
+    assert_eq!(
+        database["rows"][0]["values"][status["id"].as_str().unwrap()],
+        done
+    );
+    let (_, beta_page) = harness.page(&harness.owner_cookie, &beta).await;
+    assert_eq!(beta_page["content"][0]["type"], "database");
+    assert_eq!(
+        beta_page["content"][0]["props"],
+        json!({"databaseId": tasks.as_str(), "linkId": ""}),
+        "the inline database block shows the database's own views"
+    );
     let (_, row_page) = harness.page(&harness.owner_cookie, &row_one).await;
     assert_eq!(
-        row_page["content"][0]["type"], "table",
-        "row properties come first"
+        row_page["content"][0]["type"], "paragraph",
+        "the values live in the database, not in a table on the row page"
     );
-    assert!(text_of(&row_page["content"][0]).contains("Done"));
 
     let report = &import["report"];
+    assert_eq!(report["databases_imported"], 1);
     assert_eq!(report["files_imported"], 2);
     assert_eq!(report["missing_files"], 0);
     assert!(report["unresolved_page_links"].as_u64().unwrap() >= 1);
@@ -1452,8 +1693,9 @@ async fn a_revoked_token_fails_the_import_and_page_errors_are_reported() {
     assert_eq!(import["status"], "failed");
     assert!(import["error"].as_str().unwrap().contains("revoked"));
     assert!(!harness.token_stored(&second).await);
-    // Pass 1 created all 8 pages, none was filled: all go to the trash, the first import's stay.
-    assert_eq!(import["report"]["unfilled_pages_trashed"], 8);
+    // Pass 1 stops at the database (it reads Notion); the 4 pages it created before are empty
+    // and go to the trash, the first import's stay.
+    assert_eq!(import["report"]["unfilled_pages_trashed"], 4);
     assert_eq!(import["root_page_ids"], json!([]));
     assert_eq!(harness.page_count().await, before);
     let (status, trash) = harness
@@ -1467,8 +1709,8 @@ async fn a_revoked_token_fails_the_import_and_page_errors_are_reported() {
     assert_eq!(status, StatusCode::OK);
     assert_eq!(
         trash["items"].as_array().unwrap().len(),
-        2,
-        "one trash entry per top-level page (Handbook, Orphan)"
+        1,
+        "one trash entry per top-level page (Handbook; Orphan was not created)"
     );
 }
 
@@ -1920,4 +2162,535 @@ async fn an_import_into_a_read_only_cloud_workspace_stops() {
     );
     assert!(!harness.token_stored(&id).await);
     assert_eq!(harness.page_count().await, before);
+}
+
+const HOME: &str = "a0000000-0000-4000-8000-000000000010";
+const COVERAGE_DB: &str = "d0000000-0000-4000-8000-000000000002";
+const COVERAGE_DS: &str = "d5000000-0000-4000-8000-000000000002";
+const INLINE_DB: &str = "d0000000-0000-4000-8000-000000000003";
+const MULTI_A: &str = "d5000000-0000-4000-8000-000000000004";
+const MULTI_B: &str = "d5000000-0000-4000-8000-000000000005";
+const COVERAGE_ROWS: [&str; 3] = [
+    "c1000000-0000-4000-8000-000000000001",
+    "c1000000-0000-4000-8000-000000000002",
+    "c1000000-0000-4000-8000-000000000003",
+];
+
+/// A database detail with properties and values by name.
+struct Imported {
+    detail: Value,
+}
+
+impl Imported {
+    fn property(&self, name: &str) -> &Value {
+        self.detail["properties"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|property| property["name"] == name)
+            .unwrap_or_else(|| panic!("no property {name}"))
+    }
+
+    fn names(&self) -> Vec<&str> {
+        self.detail["properties"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|property| property["name"].as_str().unwrap())
+            .collect()
+    }
+
+    fn option(&self, property: &str, name: &str) -> &Value {
+        self.property(property)["config"]["options"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|option| option["name"] == name)
+            .unwrap_or_else(|| panic!("no option {name}"))
+    }
+
+    fn value(&self, row: &str, property: &str) -> Value {
+        let row = self.detail["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|candidate| candidate["id"] == row)
+            .unwrap_or_else(|| panic!("no row {row}"));
+        row["values"][self.property(property)["id"].as_str().unwrap()].clone()
+    }
+
+    fn views(&self) -> Vec<&str> {
+        self.detail["views"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|view| view["name"].as_str().unwrap())
+            .collect()
+    }
+}
+
+impl Harness {
+    async fn imported(&self, import_id: &str, notion_id: &str) -> Imported {
+        Imported {
+            detail: self
+                .database_detail(&self.orbit_id(import_id, notion_id).await)
+                .await,
+        }
+    }
+}
+
+#[tokio::test]
+async fn databases_import_with_typed_properties_values_and_views() {
+    let harness = Harness::with_databases().await;
+    let id = harness.scanned(&harness.owner_cookie).await;
+    let tree = harness.detail_with_tree(&harness.owner_cookie, &id).await;
+    let node = |notion_id: &str| {
+        tree["tree"]["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|node| node["notion_id"] == notion_id)
+            .cloned()
+            .unwrap_or_else(|| panic!("no node {notion_id}"))
+    };
+    assert_eq!(
+        node(MULTI_A)["kind"],
+        "database",
+        "one node per data source"
+    );
+    assert_eq!(node(MULTI_B)["title"], "Beta source");
+    assert_eq!(node(INLINE_DB)["parent_id"], HOME);
+    let (status, started) = harness
+        .start(
+            &harness.owner_cookie,
+            &id,
+            json!({"selection": {"notion_ids": [HOME, COVERAGE_DB, MULTI_A, MULTI_B]},
+                   "destination": {"private": true}}),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{started}");
+    harness.run_import(&id).await;
+    let import = harness.detail(&harness.owner_cookie, &id).await;
+    assert_eq!(import["status"], "completed", "{import}");
+    assert_eq!(import["progress"]["failed"], 0, "{import}");
+    let report = &import["report"];
+    assert_eq!(report["databases_imported"], 4);
+    assert_eq!(report["rows_truncated"], 0);
+    assert_eq!(
+        report["skipped"],
+        json!({"property:button": 1, "property:place": 1, "property:verification": 1})
+    );
+    assert_eq!(
+        report["lossy"],
+        json!({
+            "files_dropped": 1, "invalid_values": 1, "number_format": 1,
+            "people_as_text": 1, "relation_titles": 1,
+            "unmatched_people": 26, "view_filter": 1, "view_sort": 1, "views_unavailable": 1
+        })
+    );
+
+    let coverage = harness.imported(&id, COVERAGE_DB).await;
+    assert_eq!(coverage.detail["database"]["title"], "Coverage");
+    let names = coverage.names();
+    assert_eq!(names.len(), 25, "{names:?}");
+    assert_eq!(
+        names[..4],
+        ["Name", "Stage", "Notes", "Attachments"],
+        "the first view's columns lead"
+    );
+    let types: Vec<(&str, &str, Value)> = [
+        "Notes",
+        "Estimate",
+        "Budget",
+        "Ratio",
+        "Coins",
+        "Stage",
+        "Tags",
+        "State",
+        "Due",
+        "Owner",
+        "Done",
+        "Link",
+        "Email",
+        "Phone",
+        "Attachments",
+        "Created",
+        "Edited",
+        "Creator",
+        "Editor",
+        "Double",
+        "Sum",
+        "Related",
+        "Related (titles)",
+        "Ticket",
+    ]
+    .into_iter()
+    .map(|name| {
+        let property = coverage.property(name);
+        let number = property["config"]
+            .get("format")
+            .cloned()
+            .unwrap_or(Value::Null);
+        (name, property["type"].as_str().unwrap(), number)
+    })
+    .collect();
+    assert_eq!(
+        types,
+        [
+            ("Notes", "text", Value::Null),
+            ("Estimate", "number", json!("number")),
+            ("Budget", "number", json!("currency")),
+            ("Ratio", "number", json!("percent")),
+            ("Coins", "number", json!("number")),
+            ("Stage", "select", Value::Null),
+            ("Tags", "multi_select", Value::Null),
+            ("State", "status", Value::Null),
+            ("Due", "date", Value::Null),
+            ("Owner", "person", Value::Null),
+            ("Done", "checkbox", Value::Null),
+            ("Link", "url", Value::Null),
+            ("Email", "email", Value::Null),
+            ("Phone", "phone", Value::Null),
+            ("Attachments", "files", Value::Null),
+            ("Created", "date", Value::Null),
+            ("Edited", "date", Value::Null),
+            ("Creator", "person", Value::Null),
+            ("Editor", "text", Value::Null),
+            ("Double", "formula", Value::Null),
+            ("Sum", "rollup", Value::Null),
+            ("Related", "relation", Value::Null),
+            ("Related (titles)", "text", Value::Null),
+            ("Ticket", "unique_id", Value::Null),
+        ]
+    );
+    assert_eq!(coverage.property("Budget")["config"]["currency"], "USD");
+    assert_eq!(coverage.option("Stage", "Idea")["color"], "gray");
+    assert_eq!(coverage.option("Stage", "Building")["color"], "blue");
+    assert_eq!(
+        coverage.option("Tags", "odd")["color"],
+        "default",
+        "names are trimmed, unknown colors become default"
+    );
+    let groups: Vec<(&str, &str)> = coverage.property("State")["config"]["options"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|option| {
+            (
+                option["name"].as_str().unwrap(),
+                option["group"].as_str().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        groups,
+        [
+            ("Not started", "todo"),
+            ("In progress", "in_progress"),
+            ("In review", "in_progress"),
+            ("Done", "done")
+        ]
+    );
+
+    let owner = harness.owner_id.to_string();
+    let rows: Vec<String> = {
+        let mut rows = Vec::new();
+        for notion_id in COVERAGE_ROWS {
+            rows.push(harness.orbit_id(&id, notion_id).await);
+        }
+        rows
+    };
+    let order: Vec<&str> = coverage.detail["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(order, rows, "rows keep Notion's order");
+    let one = rows[0].as_str();
+    let stage_idea = coverage.option("Stage", "Idea")["id"].clone();
+    for (property, expected) in [
+        ("Notes", json!("note one")),
+        ("Estimate", json!(3.0)),
+        ("Budget", json!(12.5)),
+        ("Ratio", json!(0.25)),
+        ("Coins", json!(0.001)),
+        ("Stage", stage_idea.clone()),
+        (
+            "Tags",
+            json!([
+                coverage.option("Tags", "bug")["id"],
+                coverage.option("Tags", "docs")["id"]
+            ]),
+        ),
+        ("State", coverage.option("State", "In review")["id"].clone()),
+        ("Due", json!({"start": "2026-11-09T13:00:00Z", "end": null})),
+        ("Owner", json!([owner])),
+        ("Done", json!(true)),
+        ("Link", json!("https://example.com/1")),
+        ("Email", json!("one@example.com")),
+        ("Phone", json!("+36 1 234 567")),
+        (
+            "Created",
+            json!({"start": "2026-11-01T10:00:00Z", "end": null}),
+        ),
+        (
+            "Edited",
+            json!({"start": "2026-11-02T11:30:00Z", "end": null}),
+        ),
+        ("Creator", json!([owner])),
+        ("Editor", json!("Importer bot")),
+        ("Double", json!(6.0)),
+        ("Sum", json!(4.0)),
+        ("Related", json!([rows[1]])),
+        ("Related (titles)", json!("Home")),
+        ("Ticket", json!(1)),
+    ] {
+        assert_eq!(coverage.value(one, property), expected, "{property}");
+    }
+    let attachments = coverage.value(one, "Attachments");
+    let file_id = attachments[0]["file_id"].as_str().unwrap();
+    assert_eq!(
+        attachments,
+        json!([{"file_id": file_id, "name": "photo.png"}]),
+        "the hosted file imports as a file of the row; the external link is dropped"
+    );
+    let (status, bytes) = harness
+        .call_raw(
+            &harness.owner_cookie,
+            "GET",
+            &format!(
+                "/api/v1/workspaces/{}/pages/{one}/files/{file_id}",
+                harness.workspace_id
+            ),
+            None,
+        )
+        .await;
+    assert_eq!((status, bytes.as_slice()), (StatusCode::OK, PNG));
+    let two = rows[1].as_str();
+    assert_eq!(
+        coverage.value(two, "Link"),
+        Value::Null,
+        "not a URL: left out"
+    );
+    assert_eq!(coverage.value(two, "Done"), Value::Null);
+    assert_eq!(coverage.value(two, "Ticket"), json!(2));
+    let three = rows[2].as_str();
+    assert_eq!(
+        coverage.value(three, "Owner"),
+        json!([owner]),
+        "people beyond the first 25 come from the property-item endpoint"
+    );
+    let related = coverage.value(three, "Related (titles)");
+    assert!(
+        related.as_str().unwrap().ends_with(", Home"),
+        "26 relations: {related}"
+    );
+
+    assert_eq!(coverage.views(), ["All", "Board", "Either", "Calendar"]);
+    let all = &coverage.detail["views"][0]["config"];
+    let id_of = |name: &str| coverage.property(name)["id"].clone();
+    let board = &coverage.detail["views"][1];
+    assert_eq!(board["type"], "board");
+    assert_eq!(
+        (
+            &board["config"]["group_by"],
+            &board["config"]["sub_group_by"],
+            &board["config"]["hide_empty_groups"]
+        ),
+        (&id_of("Owner"), &id_of("Stage"), &json!(true)),
+        "the board groups by its Notion people property, in lanes by its sub-group"
+    );
+    assert_eq!(board["config"]["card_properties"], json!([id_of("Tags")]));
+    let calendar = &coverage.detail["views"][3];
+    assert_eq!(
+        (
+            &calendar["type"],
+            &calendar["config"]["date_property_id"],
+            &calendar["config"]["calendar_mode"]
+        ),
+        (&json!("calendar"), &id_of("Due"), &json!("week")),
+        "a calendar keeps its date property and its week range"
+    );
+    assert_eq!(
+        all["sorts"],
+        json!([{"property_id": id_of("Estimate"), "direction": "desc"}])
+    );
+    assert_eq!(
+        all["filter"],
+        json!({"op": "and", "children": [
+            {"property_id": id_of("Stage"), "operator": "is", "value": [stage_idea]},
+            {"property_id": id_of("Done"), "operator": "is", "value": true},
+            {"property_id": id_of("State"), "operator": "is",
+             "value": [coverage.option("State", "In progress")["id"]]}
+        ]})
+    );
+    assert_eq!(
+        all["columns"][0],
+        json!({"property_id": id_of("Name"), "width": 320, "hidden": false})
+    );
+    assert_eq!(all["columns"][1]["width"], 32, "widths are clamped");
+    assert_eq!(all["columns"][2]["hidden"], true);
+    assert_eq!(all["wrap_cells"], true);
+    assert_eq!(
+        coverage.detail["views"][2]["config"]["filter"],
+        json!({"op": "or", "children": [
+            {"property_id": id_of("Done"), "operator": "is", "value": true},
+            {"op": "and", "children": [
+                {"property_id": id_of("Estimate"), "operator": ">", "value": 2.0},
+                {"property_id": id_of("Stage"), "operator": "is", "value": [stage_idea]}
+            ]}
+        ]}),
+        "a two-level OR maps intact"
+    );
+
+    let (_, row_page) = harness.page(&harness.owner_cookie, one).await;
+    assert_eq!(row_page["content"][0]["type"], "paragraph");
+    assert!(text_of(&row_page["content"][0]).contains("Row body"));
+
+    let home = harness.orbit_id(&id, HOME).await;
+    let inline = harness.orbit_id(&id, INLINE_DB).await;
+    let (_, home_page) = harness.page(&harness.owner_cookie, &home).await;
+    let blocks: Vec<&str> = home_page["content"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|block| block["type"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        blocks,
+        ["paragraph", "database", "page", "paragraph"],
+        "only the inline database shows its views; the full-page one is a page link"
+    );
+    assert_eq!(
+        home_page["content"][1]["props"],
+        json!({"databaseId": inline.as_str(), "linkId": ""})
+    );
+    let multi = harness.orbit_id(&id, MULTI_A).await;
+    assert_eq!(
+        home_page["content"][2]["props"],
+        json!({"pageId": multi.as_str()}),
+        "a database with several data sources links to the first"
+    );
+    let (_, inline_page) = harness.page(&harness.owner_cookie, &inline).await;
+    assert_eq!(inline_page["parent_id"], home.as_str());
+    let inline = harness.imported(&id, INLINE_DB).await;
+    assert_eq!(
+        inline.views(),
+        ["Table"],
+        "no views from Notion: a default table"
+    );
+    let inline_row = harness
+        .orbit_id(&id, "c2000000-0000-4000-8000-000000000001")
+        .await;
+    assert_eq!(inline.value(&inline_row, "Count"), json!(7.0));
+
+    let alpha = harness.imported(&id, MULTI_A).await;
+    let beta = harness.imported(&id, MULTI_B).await;
+    assert_eq!(alpha.detail["database"]["title"], "Alpha source");
+    assert_eq!(beta.detail["database"]["title"], "Beta source");
+    assert_eq!(alpha.views(), ["Only A"]);
+    assert_eq!(beta.views(), ["Table"]);
+    assert_eq!(alpha.detail["rows"][0]["title"], "From A");
+    assert_eq!(beta.detail["rows"][0]["title"], "From B");
+    let (partner, partner_of) = (alpha.property("Partner"), beta.property("Partner of"));
+    let (alpha_id, beta_id) = (
+        harness.orbit_id(&id, MULTI_A).await,
+        harness.orbit_id(&id, MULTI_B).await,
+    );
+    let pair: Vec<(&Value, &Value, &Value)> = [(partner, &beta_id), (partner_of, &alpha_id)]
+        .iter()
+        .map(|(property, target)| {
+            assert_eq!(property["type"], "relation");
+            assert_eq!(property["config"]["database_id"], target.as_str());
+            (
+                &property["id"],
+                &property["config"]["synced_property_id"],
+                &property["config"]["primary"],
+            )
+        })
+        .collect();
+    assert_eq!(
+        (pair[0].1, pair[1].1),
+        (pair[1].0, pair[0].0),
+        "a dual property becomes one two-way pair"
+    );
+    assert_ne!(pair[0].2, pair[1].2, "one side is primary");
+    let (from_a, from_b) = (
+        harness
+            .orbit_id(&id, "c3000000-0000-4000-8000-000000000001")
+            .await,
+        harness
+            .orbit_id(&id, "c3000000-0000-4000-8000-000000000002")
+            .await,
+    );
+    assert_eq!(alpha.value(&from_a, "Partner"), json!([from_b]));
+    assert_eq!(beta.value(&from_b, "Partner of"), json!([from_a]));
+    assert_eq!(
+        (alpha.names(), beta.names()),
+        (vec!["Name", "Partner"], vec!["Name", "Partner of"]),
+        "every link was inside: no titles property"
+    );
+}
+
+#[tokio::test]
+async fn a_database_import_resumes_its_rows_after_a_crash() {
+    let harness = Harness::with_databases().await;
+    let id = harness.scanned(&harness.owner_cookie).await;
+    harness
+        .start(
+            &harness.owner_cookie,
+            &id,
+            json!({"selection": {"notion_ids": [COVERAGE_DB]}}),
+        )
+        .await;
+    let shutdown = CancellationToken::new();
+    let trigger = shutdown.clone();
+    harness.fake.on_children(
+        &format!("query:{COVERAGE_DS}"),
+        Box::new(move || {
+            let trigger = trigger.clone();
+            Box::pin(async move { trigger.cancel() })
+        }),
+    );
+    let run = JobRun {
+        cancel: shutdown,
+        last_attempt: false,
+    };
+    assert!(
+        harness
+            .service
+            .run_import(id.parse().unwrap(), &run)
+            .await
+            .is_err()
+    );
+    let coverage = harness.imported(&id, COVERAGE_DB).await;
+    assert_eq!(
+        coverage.detail["rows"],
+        json!([]),
+        "stopped after the database"
+    );
+
+    harness.run_import(&id).await;
+    let import = harness.detail(&harness.owner_cookie, &id).await;
+    assert_eq!(import["status"], "completed", "{import}");
+    assert_eq!(import["report"]["databases_imported"], 1, "counted once");
+    let coverage = harness.imported(&id, COVERAGE_DB).await;
+    assert_eq!(
+        coverage.names().len(),
+        24,
+        "the schema is not created twice"
+    );
+    assert_eq!(coverage.detail["rows"].as_array().unwrap().len(), 3);
+    let one = harness.orbit_id(&id, COVERAGE_ROWS[0]).await;
+    assert_eq!(
+        coverage.value(&one, "Stage"),
+        coverage.option("Stage", "Idea")["id"],
+        "the resumed rows find the options of the first attempt"
+    );
+    assert_eq!(
+        coverage.value(&one, "Owner"),
+        json!([harness.owner_id.to_string()])
+    );
+    assert_eq!(harness.fake.hits(&format!("query:{COVERAGE_DS}")), 2);
 }

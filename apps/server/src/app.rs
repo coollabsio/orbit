@@ -76,6 +76,9 @@ const OWNERSHIP_CHECK_INTERVAL: Duration = Duration::from_secs(5);
 const NOTION_CLEANUP: &str = "notion.cleanup";
 /// Hourly: creates a backup when the saved schedule (Admin → Storage) says one is due.
 const SCHEDULED_BACKUP: &str = "backup.scheduled";
+/// Hourly, and first at startup: computes the searchable property values of database rows that
+/// have none yet (after migration 0083 or a restore), a batch per transaction.
+const SEARCH_TEXT_FILL: &str = "docs.search_text";
 
 pub struct App {
     config: Config,
@@ -1141,6 +1144,20 @@ async fn initialize_production_services(
             })
         })
         .and_then(|worker| {
+            let databases =
+                crate::repositories::databases::DatabaseRepository::new(database.clone());
+            worker.with_handler(maintenance_kind(SEARCH_TEXT_FILL), move |_| {
+                let databases = databases.clone();
+                async move {
+                    while databases.fill_search_text().await.map_err(|error| {
+                        JobError::Retryable(format!("filling search text failed: {error}"))
+                    })? > 0
+                    {}
+                    Ok(())
+                }
+            })
+        })
+        .and_then(|worker| {
             crate::notion::import::register_jobs(worker, notion_imports, import_notices.clone())
         })
         .and_then(|worker| {
@@ -1200,6 +1217,13 @@ async fn initialize_production_services(
     ensure_schedule(
         &scheduler,
         NOTION_CLEANUP,
+        Duration::from_secs(60 * 60),
+        now,
+    )
+    .await?;
+    ensure_schedule(
+        &scheduler,
+        SEARCH_TEXT_FILL,
         Duration::from_secs(60 * 60),
         now,
     )

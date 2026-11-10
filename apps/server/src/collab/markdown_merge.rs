@@ -283,7 +283,7 @@ fn class(block: &Value) -> &'static str {
         "divider" => "divider",
         "table" => "table",
         "image" => "image",
-        "file" | "video" | "audio" | "page" => "link",
+        "file" | "video" | "audio" | "page" | "database" => "link",
         "paragraph" if only_link(block).is_some() => "link",
         _ => "paragraph",
     }
@@ -716,10 +716,16 @@ impl Context<'_> {
         let kind = block_type(old);
         let props = |name: &str| new["props"].get(name).cloned();
         match kind {
-            "page" => {
+            // Kept as is while Markdown keeps its link; Markdown cannot create a database block.
+            "page" | "database" => {
+                let target = if kind == "page" {
+                    "pageId"
+                } else {
+                    "databaseId"
+                };
                 let href = self
                     .resolver
-                    .page(old["props"]["pageId"].as_str().unwrap_or(""))
+                    .page(old["props"][target].as_str().unwrap_or(""))
                     .map(|link| link.href);
                 let same =
                     only_link(new).is_some_and(|link| link["href"].as_str() == href.as_deref());

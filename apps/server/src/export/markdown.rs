@@ -30,6 +30,11 @@ pub trait LinkResolver {
     fn member_name(&self, _user_id: &str) -> Option<String> {
         None
     }
+    /// The rows a `database` block shows (its linked view block's first view, or the database's
+    /// own first view without `link_id`) as a Markdown table; `None` writes only the link.
+    fn database_table(&self, _database_id: &str, _link_id: &str) -> Option<String> {
+        None
+    }
 }
 
 /// Keeps every URL as it is and links pages to `/docs/<id>` (titled "Untitled").
@@ -121,6 +126,12 @@ pub fn blocks_to_markdown_with_spans(
 #[must_use]
 pub fn escape_label(text: &str) -> String {
     escape_text(text, false)
+}
+
+/// Escapes text for a Markdown table cell: `|` too, and line breaks become `<br>`.
+#[must_use]
+pub fn escape_cell(text: &str) -> String {
+    escape_text(&text.replace("\r\n", "\n").replace('\r', "\n"), true).replace('\n', "<br>")
 }
 
 /// Makes a link destination safe to put between `(` and `)`: spaces, angle brackets and
@@ -614,8 +625,10 @@ impl Converter<'_> {
                 };
                 joined(&join_blocks(&link, &self.caption(caption, &link)), nested())
             }
-            "page" => {
-                let page_id = prop_str(block, "pageId");
+            // A database block is a link to its database, like a sub-page.
+            "page" | "database" => {
+                let database = kind == "database";
+                let page_id = prop_str(block, if database { "databaseId" } else { "pageId" });
                 let link = match self.resolver.page(page_id) {
                     Some(link) => {
                         let title = if link.title.trim().is_empty() {
@@ -630,9 +643,19 @@ impl Converter<'_> {
                         )
                     }
                     None if page_id.is_empty() => String::new(),
+                    None if database => "*Missing database*".to_owned(),
                     None => "*Missing page*".to_owned(),
                 };
-                joined(&link, nested())
+                let table = database
+                    .then(|| {
+                        self.resolver
+                            .database_table(page_id, prop_str(block, "linkId"))
+                    })
+                    .flatten();
+                match table {
+                    Some(table) => joined(&join_blocks(&link, &table), nested()),
+                    None => joined(&link, nested()),
+                }
             }
             // Paragraphs and anything unknown: the text, then the children.
             _ => joined(&self.paragraph(block.get("content")), nested()),

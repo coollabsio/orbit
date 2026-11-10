@@ -7,6 +7,7 @@ import { createEditorSchemas } from './schema'
 function editor() {
   const { pageEditorSchema } = createEditorSchemas({
     page: { render: () => null },
+    database: { render: () => null },
     callout: { render: () => null },
     mention: { render: () => null },
     math: { render: () => null },

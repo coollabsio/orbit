@@ -117,8 +117,10 @@ export default function App() {
                 <Route path="views/:viewId/:taskId" element={<TasksPage />} />
                 <Route path="docs/trash" element={<DocsPage view="trash" />} />
                 <Route path="docs/trash/:pageId" element={<DocsPage view="trash" />} />
+                <Route path="docs/import/csv" element={<DocsPage view="csv-import" />} />
                 <Route path="docs/import/obsidian/:importId?" element={<DocsPage view="obsidian-import" />} />
                 <Route path="docs/import/:importId?" element={<DocsPage view="import" />} />
+                <Route path="docs/:pageId/form/:viewId" element={<DocsPage view="form" />} />
                 <Route path="docs/:pageId?" element={<DocsPage />} />
                 <Route path="mail/*" element={<Navigate to="/tasks" replace />} />
                 {chatEnabled ? (

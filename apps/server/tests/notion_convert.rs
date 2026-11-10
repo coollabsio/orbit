@@ -8,9 +8,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 use orbit_server::notion::convert::{
-    ConvertContext, ConvertReport, ConvertedPage, DatabaseRows, MapResolver, PageCover,
-    ResolvedFile, collect_file_refs, convert_page, database_row_properties_table, database_table,
-    format_number_as, page_cover, page_icon, page_title,
+    ConvertContext, ConvertOptions, ConvertReport, ConvertedPage, MapResolver, PageCover,
+    ResolvedFile, collect_file_refs, convert_page, database_row_properties_table, page_cover,
+    page_icon, page_title,
 };
 use orbit_server::notion::model::{BlockNode, FileSource, NotionPage};
 use serde_json::{Value, json};
@@ -65,6 +65,7 @@ fn resolver() -> MapResolver {
     ] {
         resolver.pages.insert(notion.to_owned(), orbit.to_owned());
     }
+    resolver.inline_databases.insert(MAPPED_DB.to_owned(), true);
     resolver
         .titles
         .insert(MAPPED_RELATION.to_owned(), "Launch project".to_owned());
@@ -183,6 +184,7 @@ fn props_for(kind: &str) -> (&'static [&'static str], &'static [&'static str]) {
         ),
         "file" => (&["backgroundColor", "name", "url", "caption"], &[]),
         "page" => (&["pageId"], &[]),
+        "database" => (&["databaseId", "linkId"], &[]),
         other => panic!("block type {other} is not in Orbit's editor schema"),
     }
 }
@@ -192,7 +194,7 @@ const COLORS: &[&str] = &[
 ];
 
 /// Checks every block against Orbit's editor schema (BlockNote 0.55 defaults + `page` +
-/// `callout`).
+/// `database` + `callout`).
 fn assert_blocknote_schema(blocks: &[Value]) {
     let mut ids = HashSet::new();
     check_blocks(blocks, &mut ids);
@@ -653,7 +655,7 @@ fn child_pages_and_page_links() {
             "page",
             "paragraph",
             "paragraph",
-            "page",
+            "database",
             "page",
             "paragraph",
             "page"
@@ -671,8 +673,8 @@ fn child_pages_and_page_links() {
     assert_eq!(texts(&c[1]["content"]), "Not imported");
     assert_eq!(texts(&c[2]["content"]), "Untitled");
     assert_eq!(
-        c[3]["props"]["pageId"],
-        "01900000-0000-7000-8000-000000000003"
+        c[3]["props"],
+        json!({"databaseId": "01900000-0000-7000-8000-000000000003", "linkId": ""})
     );
     assert_eq!(
         c[4]["props"]["pageId"],
@@ -897,18 +899,6 @@ fn user_mentions_with_a_member_email_become_orbit_mentions() {
     );
 }
 
-const DATA_SOURCE: &str = "1a44be12-0953-4631-b498-9e5817518db8";
-
-/// A database row of [`DATA_SOURCE`].
-fn db_row(id: &str, properties: Value) -> NotionPage {
-    serde_json::from_value(json!({
-        "id": id,
-        "parent": {"type": "data_source_id", "data_source_id": DATA_SOURCE, "database_id": MAPPED_DB},
-        "properties": properties,
-    }))
-    .unwrap()
-}
-
 fn row_texts(table: &Value) -> Vec<Vec<String>> {
     table["content"]["rows"]
         .as_array()
@@ -925,126 +915,56 @@ fn row_texts(table: &Value) -> Vec<Vec<String>> {
         .collect()
 }
 
-fn formats(resolver: &mut MapResolver, formats: &[(&str, &str)]) {
-    resolver.number_formats.insert(
-        DATA_SOURCE.to_owned(),
-        formats
-            .iter()
-            .map(|(name, format)| ((*name).to_owned(), (*format).to_owned()))
-            .collect(),
-    );
-}
-
-fn two_rows() -> Vec<NotionPage> {
-    vec![
-        db_row(
-            MAPPED_CHILD,
-            json!({
-                "Name": {"type": "title", "title": [{"type": "text", "text": {"content": "Alpha"}, "plain_text": "Alpha"}]},
-                "Budget": {"type": "number", "number": 1234.5},
-                "Stage": {"type": "select", "select": {"name": "Idea"}},
-                "Run": {"type": "button", "button": {}}
-            }),
-        ),
-        db_row(
-            "22222222-2222-4222-8222-222222222222",
-            json!({
-                "Name": {"type": "title", "title": []},
-                "Budget": {"type": "number", "number": null},
-                "Stage": {"type": "select", "select": null}
-            }),
-        ),
-    ]
-}
-
 #[test]
-fn database_table_shows_rows_like_notion() {
-    let mut resolver = resolver();
-    formats(&mut resolver, &[("Budget", "dollar")]);
-    let mut ctx = ConvertContext::new(&resolver);
-    let mut rows = two_rows();
-    let mut trashed = rows[0].clone();
-    trashed.in_trash = true;
-    rows.push(trashed);
-    let table = database_table(&rows, &mut ctx).unwrap();
-
-    assert_eq!(table["type"], "table");
-    assert_eq!(table["content"]["headerRows"], 1);
-    assert_eq!(
-        row_texts(&table),
-        [
-            vec!["Name", "Budget", "Stage"],
-            vec!["Alpha", "$1,234.50", "Idea"],
-            vec!["Untitled", "", ""],
-        ],
-        "title first, buttons and trashed rows left out, empty values as empty cells"
-    );
-    let title = &table["content"]["rows"][1]["cells"][0]["content"][0];
-    assert_eq!(title["href"], "/docs/01900000-0000-7000-8000-000000000002");
-    assert_eq!(
-        table["content"]["rows"][2]["cells"][0]["content"][0]["type"], "text",
-        "a row that was not imported has no link"
-    );
-    assert!(database_table(&[], &mut ctx).is_none());
-}
-
-fn child_database_block() -> BlockNode {
-    serde_json::from_value(json!({
-        "object": "block", "id": MAPPED_DB, "type": "child_database",
-        "has_children": false, "archived": false, "in_trash": false,
-        "child_database": {"title": "Projects"}
-    }))
-    .unwrap()
-}
-
-#[test]
-fn inline_database_shows_its_table_in_the_parent_page() {
+fn only_an_inline_child_database_shows_as_a_database_block() {
+    const FULL_PAGE_DB: &str = "a1d8501e-1ac1-43e9-a6bd-ea9fe6c88200";
+    const UNKNOWN_DB: &str = "a1d8501e-1ac1-43e9-a6bd-ea9fe6c88201";
     let (page, _) = load("lists");
-    let blocks = vec![child_database_block()];
-    for (inline, expected) in [(true, vec!["heading", "table"]), (false, vec!["page"])] {
-        let mut resolver = resolver();
-        resolver.databases.insert(
-            MAPPED_DB.to_owned(),
-            DatabaseRows {
-                inline,
-                rows: two_rows(),
-            },
-        );
-        let mut ctx = ConvertContext::new(&resolver);
-        let converted = convert_page(&page, &blocks, &mut ctx);
-        assert_eq!(types(&converted.content), expected, "inline: {inline}");
-        if inline {
-            let heading = &converted.content[0];
-            assert_eq!(heading["props"]["level"], 2);
-            assert_eq!(
-                heading["content"][0]["href"],
-                "/docs/01900000-0000-7000-8000-000000000003"
-            );
-            assert_eq!(heading["content"][0]["content"][0]["text"], "Projects");
-        }
-    }
+    let child_database = |id: &str, title: &str| -> BlockNode {
+        serde_json::from_value(json!({
+            "object": "block", "id": id, "type": "child_database",
+            "has_children": false, "archived": false, "in_trash": false,
+            "child_database": {"title": title}
+        }))
+        .unwrap()
+    };
+    let blocks = vec![
+        child_database(MAPPED_DB, "Inline DB"),
+        child_database(FULL_PAGE_DB, "Tasks DB (full page)"),
+        child_database(UNKNOWN_DB, "Not fetched"),
+    ];
     let mut resolver = resolver();
-    resolver.databases.insert(
-        MAPPED_DB.to_owned(),
-        DatabaseRows {
-            inline: true,
-            rows: Vec::new(),
-        },
-    );
+    for (notion, orbit) in [
+        (FULL_PAGE_DB, "01900000-0000-7000-8000-000000000005"),
+        (UNKNOWN_DB, "01900000-0000-7000-8000-000000000006"),
+    ] {
+        resolver.pages.insert(notion.to_owned(), orbit.to_owned());
+    }
+    resolver
+        .inline_databases
+        .insert(FULL_PAGE_DB.to_owned(), false);
     let mut ctx = ConvertContext::new(&resolver);
     let converted = convert_page(&page, &blocks, &mut ctx);
+    assert_eq!(types(&converted.content), ["database", "page", "page"]);
     assert_eq!(
-        types(&converted.content),
-        ["page"],
-        "an inline database with no rows stays a page card"
+        converted.content[0]["props"],
+        json!({"databaseId": "01900000-0000-7000-8000-000000000003", "linkId": ""})
+    );
+    assert_eq!(
+        converted.content[1]["props"],
+        json!({"pageId": "01900000-0000-7000-8000-000000000005"})
+    );
+    assert_eq!(
+        converted.content[2]["props"],
+        json!({"pageId": "01900000-0000-7000-8000-000000000006"}),
+        "an unknown database shows as a page link"
     );
 }
 
 #[test]
-fn row_page_properties_use_number_formats() {
-    let (page, _) = load("database_row");
-    let mut resolver = resolver();
-    formats(&mut resolver, &[("Estimate", "euro"), ("Ratio", "percent")]);
+fn row_properties_table_shows_plain_values_and_can_be_left_out() {
+    let (page, blocks) = load("database_row");
+    let resolver = resolver();
     let mut ctx = ConvertContext::new(&resolver);
     let table = database_row_properties_table(&page, &mut ctx).unwrap();
     let rows = row_texts(&table);
@@ -1053,41 +973,17 @@ fn row_page_properties_use_number_formats() {
             .find(|row| row[0] == name)
             .map(|row| row[1].as_str())
     };
-    assert_eq!(value("Estimate"), Some("€8.00"));
-    assert_eq!(value("Ratio"), Some("25%"));
-    assert_eq!(
-        value("Double estimate"),
-        Some("16"),
-        "formulas keep plain numbers"
-    );
-}
+    assert_eq!(value("Estimate"), Some("8"));
+    assert_eq!(value("Double estimate"), Some("16"));
 
-#[test]
-fn number_formats_match_notion() {
-    let n = |value: Value| value.as_number().unwrap().clone();
-    for (value, format, expected) in [
-        (json!(1234567), None, "1234567"),
-        (json!(1234567), Some("number"), "1234567"),
-        (
-            json!(1234567.25),
-            Some("number_with_commas"),
-            "1,234,567.25",
-        ),
-        (json!(-1234), Some("number_with_commas"), "-1,234"),
-        (json!(0.07), Some("percent"), "7%"),
-        (json!(1.5), Some("percent"), "150%"),
-        (json!(100.5), Some("dollar"), "$100.50"),
-        (json!(-1234.5), Some("dollar"), "-$1,234.50"),
-        (json!(1000), Some("euro"), "€1,000.00"),
-        (json!(1234.6), Some("yen"), "¥1,235"),
-        (json!(0.00012), Some("bitcoin"), "₿0.00012"),
-        (json!(12), Some("forint"), "Ft12.00"),
-        (json!(12), Some("future_currency"), "12"),
-    ] {
-        assert_eq!(
-            format_number_as(&n(value.clone()), format),
-            expected,
-            "{value} {format:?}"
-        );
-    }
+    let mut ctx = ConvertContext::new(&resolver).with_options(ConvertOptions {
+        row_properties: false,
+        ..ConvertOptions::default()
+    });
+    let converted = convert_page(&page, &blocks, &mut ctx);
+    assert_ne!(
+        converted.content.first().map(|block| block["type"].clone()),
+        Some(json!("table")),
+        "a row imported into an Orbit database keeps its values there"
+    );
 }

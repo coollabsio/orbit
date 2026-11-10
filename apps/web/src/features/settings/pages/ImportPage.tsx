@@ -16,6 +16,7 @@ import { useWorkspace } from '@/features/workspaces/workspaceContext'
 const SOURCES = [
   { name: 'Notion', description: 'Import pages and databases into Docs.', to: '/docs/import' },
   { name: 'Obsidian', description: 'Import a vault (.zip) into Docs.', to: '/docs/import/obsidian' },
+  { name: 'CSV', description: 'Create a Docs database from a .csv file.', to: '/docs/import/csv' },
   { name: 'Asana', description: 'Import projects and their tasks into Tasks.', to: '/tasks-import' },
   { name: 'Linear', description: 'Import teams and their issues into Tasks.', to: '/tasks-import/linear' },
   { name: 'Trello', description: 'Import boards and their cards into Tasks.', to: '/tasks-import/trello' },

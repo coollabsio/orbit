@@ -2640,6 +2640,10 @@ pub(crate) struct ProblemBody {
     /// for `invalid_filter`.
     #[serde(skip_serializing_if = "Option::is_none")]
     path: Option<String>,
+    /// The message and place (UTF-16 offsets into the expression) of a formula error. Only set
+    /// for `formula_invalid`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    formula: Option<crate::repositories::databases::FormulaProblem>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -2689,8 +2693,28 @@ impl ApiError {
                     .unwrap_or_else(|| "unknown".to_owned()),
                 conflict: None,
                 path: None,
+                formula: None,
             }),
         }
+    }
+
+    /// 422 `formula_invalid`: a database formula that does not parse or type check.
+    pub(crate) fn formula_invalid(
+        problem: crate::repositories::databases::FormulaProblem,
+        instance: impl Into<String>,
+        request_id: Option<&Extension<RequestId>>,
+    ) -> Self {
+        let mut error = Self::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "formula_invalid",
+            "Formula invalid",
+            "",
+            instance,
+            request_id,
+        );
+        error.body.detail = problem.message.clone().into();
+        error.body.formula = Some(problem);
+        error
     }
 
     /// 402 `trial_limit_reached`, as the billing guard words it.

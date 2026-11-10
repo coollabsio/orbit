@@ -21,7 +21,7 @@ const teamspace = (id: string, name: string, position: number): Teamspace => ({
 })
 
 const summary = (id: string, parent_id: string | null, title: string, teamspace_id: string | null = 'teamspace-1'): PageSummary => ({
-  id, parent_id, teamspace_id, private: teamspace_id === null, position: 0, title, icon: null, version: 1,
+  id, parent_id, teamspace_id, private: teamspace_id === null, kind: 'page', position: 0, title, icon: null, version: 1,
   updated_at: '2026-09-25T10:00:00Z',
 })
 
@@ -48,7 +48,7 @@ const item = (patch: Partial<NotionImport> = {}): NotionImport => ({
 
 const report = (patch: Partial<NonNullable<NotionImport['report']>> = {}): NonNullable<NotionImport['report']> => ({
   skipped: {}, lossy: {}, unresolved_page_links: 0, missing_files: 0, truncated_blocks: 0, files_imported: 0,
-  previously_imported: 0, unfilled_pages_trashed: 0, failures: [], ...patch,
+  previously_imported: 0, databases_imported: 0, rows_truncated: 0, unfilled_pages_trashed: 0, failures: [], ...patch,
 })
 
 const problem = (status: number, code: string) =>
@@ -316,6 +316,32 @@ test('done: summary with files, skipped and lossy blocks, failures, and links to
   expect(view.getByRole('link', { name: 'Import more' }).getAttribute('href')).toBe('/docs/import')
   fireEvent.click(view.getByRole('button', { name: 'Open imported pages' }))
   await waitFor(() => expect(location(view)).toBe('/docs/page-roadmap'))
+})
+
+test('done: database notes read as sentences; other kinds stay in the lists', async () => {
+  const { view } = setup('/docs/import/import-1', (call) => {
+    if (call.path === '/imports/notion/import-1')
+      return Response.json(
+        item({
+          status: 'completed',
+          progress: { total: 5, done: 5, failed: 0 },
+          report: report({
+            databases_imported: 2,
+            rows_truncated: 1,
+            skipped: { 'property:button': 1, 'property:place': 2, embed: 1 },
+            lossy: { formula_values: 1, unmatched_people: 3, 'view_type:gallery': 1, 'view_type:calendar': 2, view_filter: 1, column_list: 1 },
+          }),
+        }),
+      )
+  })
+  expect(await view.findByText('2 Notion databases became Orbit databases with properties, views and rows.')).toBeTruthy()
+  expect(view.getByText('1 row was not imported: an Orbit database holds at most 5,000 rows.')).toBeTruthy()
+  expect(view.getByText('1 formula property was imported as fixed values (Orbit does not recompute them).')).toBeTruthy()
+  expect(view.getByText('3 people in person properties have no Orbit member with the same email and were left out.')).toBeTruthy()
+  expect(view.getByText('Views imported as tables (Orbit has table and board views only): calendar (2), gallery (1).')).toBeTruthy()
+  expect(view.getByText('Skipped database properties (not supported in Orbit): place (2), button (1).')).toBeTruthy()
+  expect(view.getByText('embed (1)')).toBeTruthy()
+  expect(view.getByText('column list (1)')).toBeTruthy()
 })
 
 test('failed: shows the error; an unknown import shows "Import not found"', async () => {

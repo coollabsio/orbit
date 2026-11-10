@@ -41,6 +41,7 @@ function editor() {
 }
 
 const EXERCISE_PAGE = '0199a0b0-0000-7000-8000-000000000001'
+const EXERCISE_DATABASE = '0199a0b0-0000-7000-8000-0000000000d0'
 const EXERCISE_FILE = `/api/v1/workspaces/0199a0b0-0000-7000-8000-00000000000a/pages/${EXERCISE_PAGE}/files/0199a0b0-0000-7000-8000-00000000000f`
 
 /** Everything the editor can produce: styles, links, hard breaks, nesting, every block type, tables with spans. */
@@ -87,6 +88,8 @@ const EDITOR_EXERCISE: Json[] = [
   { id: 'ex-file', type: 'file', props: { url: EXERCISE_FILE, name: 'report.pdf' } },
   { id: 'ex-file-empty', type: 'file' },
   { id: 'ex-page', type: 'page', props: { pageId: EXERCISE_PAGE } },
+  { id: 'ex-database', type: 'database', props: { databaseId: EXERCISE_DATABASE } },
+  { id: 'ex-database-link', type: 'database', props: { databaseId: EXERCISE_DATABASE, linkId: '0199a0b0-0000-7000-8000-0000000000d1' } },
   {
     id: 'ex-callout',
     type: 'callout',

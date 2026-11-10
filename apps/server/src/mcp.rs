@@ -26,11 +26,14 @@ use crate::public_api::CommentOut;
 use crate::repositories::api_tokens::{
     ApiTokenError, ApiTokenPrincipal, ApiTokenRepository, ApiTokenScope,
 };
+use crate::repositories::databases::{DatabaseError, invalid_detail};
 use crate::repositories::pages::PageError;
 use crate::repositories::tasks::{TaskError, TaskRepository};
 use crate::token_api::{
     DOC_TOO_LARGE_DETAIL, DocPatch, NewDoc, NewTask, TaskPatch, TaskQuery, TokenApi, TokenApiError,
 };
+
+mod databases;
 
 #[derive(Clone)]
 pub struct McpState {
@@ -359,6 +362,9 @@ fn write_definition<T: JsonSchema>(
 }
 /// The scope a tool needs; `None` for `get_me`, which every connection may call.
 fn required_scope(name: &str) -> Option<ApiTokenScope> {
+    if let Some(scope) = databases::scope(name) {
+        return Some(scope);
+    }
     Some(match name {
         "get_me" => return None,
         "create_task" | "update_task" | "delete_task" | "create_comment" | "create_project" => {
@@ -373,7 +379,7 @@ fn required_scope(name: &str) -> Option<ApiTokenScope> {
     })
 }
 fn tools() -> Vec<Tool> {
-    vec![
+    let mut tools = vec![
         write_definition::<CreateArgs>(
             "create_task",
             "Create a task in an approved project. With parent_task_id, the task is a sub-issue of that task. assignee_ids takes member user IDs.",
@@ -449,7 +455,9 @@ fn tools() -> Vec<Tool> {
             "Search and list live tasks in approved projects. Includes completed tasks and sub-issues; parent_task_id lists the sub-issues of one task.",
         ),
         definition::<TaskArgs>("get_task", "Read one live task from an approved project."),
-    ]
+    ];
+    tools.extend(databases::tools());
+    tools
 }
 
 fn arguments<T: serde::de::DeserializeOwned>(
@@ -532,6 +540,12 @@ impl TaskTools {
             Ok(api) => api,
             Err(error) => return tool_error(error),
         };
+        if let Some(result) = databases::call(&api, &request).await {
+            return match result? {
+                Ok(value) => Ok(CallToolResult::structured(value)),
+                Err(error) => tool_error(error),
+            };
+        }
         let result = match request.name.as_ref() {
             "create_task" => {
                 let a: CreateArgs = arguments(&request)?;
@@ -761,6 +775,7 @@ fn tool_error(error: TokenApiError) -> Result<CallToolResult, ErrorData> {
             _ => "Task service is unavailable",
         }),
         TokenApiError::Page(PageError::TrialLimit(reached)) => text(&reached.detail()),
+        TokenApiError::Database(error) => text(&database_detail(error)),
         TokenApiError::Page(error) => text(match error {
             PageError::Invalid { .. } | PageError::TeamspaceNotFound => "Invalid document input",
             PageError::VersionConflict { .. } => {
@@ -771,5 +786,20 @@ fn tool_error(error: TokenApiError) -> Result<CallToolResult, ErrorData> {
             PageError::TooLarge => DOC_TOO_LARGE_DETAIL,
             _ => "Document is not available",
         }),
+    }
+}
+
+/// What a database refusal tells the agent: the field of an invalid input, such as
+/// `values.Status` or `cursor`, and what it needs.
+fn database_detail(error: DatabaseError) -> String {
+    match error {
+        DatabaseError::Invalid { field } => {
+            format!("Invalid database input {field}. {}", invalid_detail(&field))
+        }
+        DatabaseError::ViewNotFound => "Database view is not available".to_owned(),
+        DatabaseError::TemplateNotFound => "Database template is not available".to_owned(),
+        DatabaseError::RowLimit => "A database holds at most 5,000 rows".to_owned(),
+        DatabaseError::Locked => "Database is locked".to_owned(),
+        _ => "Database is not available".to_owned(),
     }
 }
