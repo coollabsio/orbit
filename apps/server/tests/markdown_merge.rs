@@ -263,7 +263,10 @@ fn moved_blocks_keep_their_id_and_sub_pages_stay_sub_pages() {
     let database = find(&merged, "ex-database-link").unwrap();
     assert_eq!(
         (database["type"].as_str(), &database["props"]),
-        (Some("database"), &find(&base, "ex-database-link").unwrap()["props"])
+        (
+            Some("database"),
+            &find(&base, "ex-database-link").unwrap()["props"]
+        )
     );
 }
 
