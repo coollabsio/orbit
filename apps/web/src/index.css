@@ -665,3 +665,10 @@ html .bn-mobile-formatting-toolbar {
   color: revert-layer;
   text-decoration: revert-layer;
 }
+/* `.bn-default-styles :is(p, h1…h6, li) { font-size: inherit; margin: 0; padding: 0 }` would also strip the padding of
+   a list line or a form question card and the size of a form or calendar heading. */
+.bn-default-styles [data-editor-isolated] :is(p, h1, h2, h3, h4, h5, h6, li) {
+  font-size: revert-layer;
+  margin: revert-layer;
+  padding: revert-layer;
+}
