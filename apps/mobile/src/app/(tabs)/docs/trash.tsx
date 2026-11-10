@@ -71,7 +71,7 @@ export default function DocsTrashScreen() {
         <EmptyState icon="trash" title="Trash is empty" description="Pages you move to the trash show here." />
       ) : (
         <ScrollView contentContainerClassName="pb-6" refreshControl={<PullRefresh onRefresh={() => trash.refetch()} />}>
-          {trash.data.map((page, index) => (
+          {trash.data.map((page) => (
             <View key={page.id} className="min-h-10 flex-row items-center gap-2.5 border-b border-border px-3 py-1.5">
               <View className="w-[18px] items-center">{page.icon ? <Text className="text-[15px]">{page.icon}</Text> : <Icon name="docs" size={15} color={alpha(colors.mutedForeground, 0.7)} />}</View>
               <Text numberOfLines={1} className="flex-1 min-w-0 text-[13px]">
