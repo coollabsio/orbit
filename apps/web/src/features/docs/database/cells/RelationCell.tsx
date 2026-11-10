@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { useQueryClient } from '@tanstack/react-query'
-import { Check, DocumentText } from 'reicon-react'
+import { DocumentText } from 'reicon-react'
 import { toast } from 'sonner'
 import { cn } from 'cn'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
@@ -166,7 +166,6 @@ export function RelationEditor({ property, row, anchor, onCommit, onClose }: Cel
                   <CommandItem key={id} value={id} data-checked onSelect={() => toggle(id)}>
                     <PageIcon icon={byId.get(id)?.icon ?? ctx.relatedPages?.[id]?.icon} />
                     <span className="min-w-0 flex-1 truncate">{titleOf(id)}</span>
-                    <Check className="text-muted-foreground" aria-label="Linked" />
                   </CommandItem>
                 ))}
               </CommandGroup>
