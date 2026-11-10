@@ -1,11 +1,12 @@
 import type { DatabasePropertyType, Property } from '../types'
+import { parseRelationConfig, rollupBase, rollupFilterType } from '../relations'
 
 /** A formula's config: the expression with property ids in `prop("…")`, and the result type the server inferred. */
 export type FormulaConfig = { expression: string; result_type: string }
 
 export type FormulaProperty = Property & { type: 'formula' }
 
-/** The formula types that filter, sort and show as a stored type; any other result (a list, a page) shows as text. */
+/** The formula types that filter, sort and show as a stored type; any other result (a list of texts, numbers or dates) shows as text. */
 const BASES = {
   number: 'number',
   text: 'text',
@@ -13,6 +14,8 @@ const BASES = {
   date: 'date',
   person: 'person',
   'list<person>': 'person',
+  page: 'relation',
+  'list<page>': 'relation',
 } as const
 
 export function parseFormulaConfig(config: Record<string, unknown>): FormulaConfig {
@@ -34,6 +37,8 @@ export function formulaBase(property: FormulaProperty): Property {
       return { ...rest, type: base, config: { format: 'number' } }
     case 'date':
       return { ...rest, type: base, config: { date_format: 'short', time_format: '24h' } }
+    case 'relation':
+      return { ...rest, type: base, config: parseRelationConfig({}) }
     default:
       return { ...rest, type: base, config: {} }
   }
@@ -57,11 +62,13 @@ export function formulaFilterType(property: FormulaProperty): 'number' | 'text' 
 
 /** The type whose filter operators and calculations fit a property: a formula's follows its result type. */
 export function filterTypeOf(property: Property): DatabasePropertyType {
+  if (property.type === 'rollup') return rollupFilterType(property)
   return property.type === 'formula' ? formulaFilterType(property) : property.type
 }
 
 /** The property a filter rule edits and matches: a formula whose result filters as a stored type reads as that type. */
 export function filterProperty(property: Property): Property {
+  if (property.type === 'rollup') return rollupFilterType(property) === 'rollup' ? property : rollupBase(property)
   return property.type === 'formula' && formulaFilterType(property) !== 'formula' ? formulaBase(property) : property
 }
 
@@ -72,11 +79,11 @@ export function formulaError(raw: unknown): string | null {
   return typeof message === 'string' ? message : null
 }
 
-/** A result in the stored shape of its base type: one person becomes a list of one, other lists their items as text. */
+/** A result in the stored shape of its base type: one person or page becomes a list of one, other lists their items as text. */
 export function formulaRaw(property: FormulaProperty, raw: unknown): unknown {
   if (formulaError(raw) !== null) return null
   const base = formulaBase(property).type
-  if (base !== 'text' || property.config.result_type === 'text') return base === 'person' && typeof raw === 'string' ? [raw] : raw
+  if (base !== 'text' || property.config.result_type === 'text') return (base === 'person' || base === 'relation') && typeof raw === 'string' ? [raw] : raw
   return itemText(raw)
 }
 

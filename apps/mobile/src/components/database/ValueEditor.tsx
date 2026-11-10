@@ -17,6 +17,7 @@ import { DayPicker } from '../tasks/DayPicker'
 import { SheetList, SheetNote, SheetRow, SheetSearch } from '../tasks/Sheet'
 import { ChoiceRow, Pill } from './cells'
 import { FilesEditor } from './FilesEditor'
+import { RelationEditor } from './Relation'
 
 export interface ValueEditorProps {
   property: Property
@@ -119,7 +120,10 @@ export function ValueEditor(props: ValueEditorProps) {
     case 'created_by':
     case 'last_edited_time':
     case 'last_edited_by':
+    case 'rollup':
       return null
+    case 'relation':
+      return <RelationEditor property={property} row={row} onCommit={onCommit} onDone={onDone} />
   }
 }
 

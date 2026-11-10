@@ -30,6 +30,8 @@ export const PROPERTY_ICONS: Record<DatabasePropertyType, IconName> = {
   last_edited_by: 'userCircle',
   button: 'flash',
   formula: 'math',
+  relation: 'arrowUpRight',
+  rollup: 'search',
 }
 
 export const VIEW_ICONS: Record<DatabaseView['type'], IconName> = { table: 'grid', board: 'kanban', list: 'list', calendar: 'calendar', form: 'clipboardText', gallery: 'gallery', timeline: 'rowHorizontal' }

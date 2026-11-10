@@ -1,6 +1,6 @@
 /** The database queries and writes, as on the web (`features/docs/database/api.ts`): optimistic, rolled back on error. */
 import { isPaymentRequired } from '@orbit/api/problem'
-import type { CreateDatabaseRowBody, DatabaseDetail, DatabaseRow } from '@orbit/api/generated/types.gen'
+import type { CreateDatabaseRowBody, DatabaseDetail, DatabaseRelatedPage, DatabaseRow } from '@orbit/api/generated/types.gen'
 import { databaseErrorMessage } from '@orbit/database/errors'
 import type { SelectOption, ViewConfig, ViewContext } from '@orbit/database/types'
 import { parseDatabase, patchValues } from '@orbit/database/values'
@@ -35,6 +35,21 @@ export function useViewContext(): ViewContext {
     () => ({ userId: user.id, now, timeZone, members: new Map((members.data ?? []).map((member) => [member.user_id, member.display_name])) }),
     [members.data, now, timeZone, user.id],
   )
+}
+
+/**
+ * Adds pages a relation cell of `rowId` now links to (as the picker knows them) to every cached database holding the
+ * row: a write's response has no `related_pages`, the next read brings them.
+ */
+export function useRememberRelatedPages() {
+  const { workspaceId } = useOrbit()
+  const queryClient = useQueryClient()
+  return (rowId: string, pages: Readonly<Record<string, DatabaseRelatedPage>>) =>
+    queryClient.setQueriesData<DatabaseDetail>({ queryKey: ['database', workspaceId] }, (detail) =>
+      detail?.database && Array.isArray(detail.rows) && detail.rows.some((row) => row.id === rowId)
+        ? { ...detail, related_pages: { ...detail.related_pages, ...pages } }
+        : detail,
+    )
 }
 
 /** A read-only workspace (Orbit Cloud billing) refuses every write; the billing line already says so. */

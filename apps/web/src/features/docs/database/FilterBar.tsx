@@ -14,6 +14,7 @@ import { Pill } from './cells/Pill'
 import { useDatabaseEnv } from './context'
 import { AdvancedFilter } from './AdvancedFilter'
 import { OPERATOR_LABELS, RELATIVE_DATES, allOf, newRule, operatorsOf, ruleNeedsValue, ruleSummary, simpleRules } from '@orbit/database/meta'
+import { filterTypeOf } from '@orbit/database/formula/values'
 import { filterProperty } from '@orbit/database/formula/values'
 import { PROPERTY_TYPES } from './propertyMeta'
 
@@ -233,7 +234,7 @@ function RuleChip({ rule, property, open, onOpenChange, onChange, onRemove }: {
 /** The operator select and the value editor of the property's type. */
 function RuleEditor({ rule, property: source, onChange }: { rule: DatabaseFilterRule; property: Property; onChange: (rule: DatabaseFilterRule) => void }) {
   const property = filterProperty(source)
-  const operators = operatorsOf(property.type)
+  const operators = operatorsOf(filterTypeOf(property))
   const items = operators.map((operator) => ({ value: operator, label: OPERATOR_LABELS[operator] }))
   const needsValue = ruleNeedsValue(rule.operator)
   const setOperator = (operator: DatabaseFilterOperator) =>
@@ -271,6 +272,9 @@ export function RuleValue({ rule, property, onChange }: { rule: DatabaseFilterRu
     case 'url':
     case 'email':
     case 'phone':
+    case 'relation':
+    // A list rollup (number and date rollups edit as their result, `filterProperty`).
+    case 'rollup':
       return (
         <Input autoFocus aria-label="Value" placeholder="Value" value={typeof value === 'string' ? value : ''} onChange={(event) => onChange(event.target.value)} />
       )

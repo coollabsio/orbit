@@ -3,7 +3,7 @@
  * (the web's `SortPopover`, with up and down instead of drag). Every change goes to `onConfig`.
  */
 import { EMPTY_FILTER, filterRules, MAX_RULES } from '@orbit/database/filter'
-import { allOf, newRule, OPERATOR_LABELS, operatorsOf, RELATIVE_DATES, ruleNeedsValue, ruleSummary, simpleRules } from '@orbit/database/meta'
+import { allOf, filterable, newRule, OPERATOR_LABELS, operatorsOf, RELATIVE_DATES, ruleNeedsValue, ruleSummary, simpleRules, sortable } from '@orbit/database/meta'
 import { filterProperty } from '@orbit/database/formula/values'
 import type { DatabaseFilterOperator, DatabaseFilterRule, DatabaseViewSort, Property, ViewConfig, ViewContext } from '@orbit/database/types'
 import { dayOf, localDate } from '@orbit/database/dates'
@@ -73,7 +73,7 @@ export function FilterContent({ properties, config, onConfig, ctx, openRule, onO
   if (openRule === 'add') {
     return (
       <PropertyChoices
-        properties={properties}
+        properties={properties.filter((property) => filterable(property.type))}
         onPick={(property) => {
           setRules([...rules, newRule(property)])
           onOpenRule(rules.length)
@@ -163,6 +163,9 @@ function RuleValue({ rule, property, onChange }: { rule: DatabaseFilterRule; pro
     case 'url':
     case 'email':
     case 'phone':
+    case 'relation':
+    // A list rollup (number and date rollups edit as their result, `filterProperty`).
+    case 'rollup':
       return (
         <View className="px-4 pb-3">
           <Input label="Value" placeholder="Value" value={typeof value === 'string' ? value : ''} onChangeText={onChange} autoCapitalize="none" autoCorrect={false} autoFocus />
@@ -291,7 +294,7 @@ export function SortContent({ properties, config, onConfig }: ConfigProps) {
   const sorts = config.sorts
   const byId = new Map(properties.map((property) => [property.id, property]))
   const setSorts = (next: DatabaseViewSort[]) => onConfig({ ...config, sorts: next })
-  const unsorted = properties.filter((property) => !sorts.some((sort) => sort.property_id === property.id))
+  const unsorted = properties.filter((property) => sortable(property.type) && !sorts.some((sort) => sort.property_id === property.id))
   const move = (from: number, to: number) => {
     const next = [...sorts]
     const [moved] = next.splice(from, 1)

@@ -12,6 +12,8 @@ import { ButtonCell } from './ButtonCell'
 import { FormulaCell } from './FormulaCell'
 import { contactHref } from '@orbit/database/fields'
 import { FileChips } from './FilesCell'
+import { RelationPills, RollupView } from './RelationCell'
+import { hiddenLinks } from '@orbit/database/relations'
 import { Pill } from './Pill'
 
 interface CellViewProps {
@@ -79,6 +81,12 @@ export function CellView({ property, row, width, wrap, onToggle }: CellViewProps
       return <ButtonCell property={property} row={row} />
     case 'formula':
       return <FormulaCell property={property} row={row} width={width} wrap={wrap} />
+    case 'relation':
+      return value?.kind === 'pages' || hiddenLinks(row, property.id) > 0 ? (
+        <RelationPills property={property} row={row} ids={value?.kind === 'pages' ? value.ids : []} wrap={wrap} />
+      ) : null
+    case 'rollup':
+      return <RollupView property={property} row={row} wrap={wrap} />
   }
 }
 

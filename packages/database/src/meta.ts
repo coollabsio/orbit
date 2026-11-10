@@ -25,6 +25,8 @@ export const PROPERTY_TYPE_LABELS: Record<DatabasePropertyType, string> = {
   last_edited_by: 'Last edited by',
   button: 'Button',
   formula: 'Formula',
+  relation: 'Relation',
+  rollup: 'Rollup',
 }
 
 /** Types whose value comes from the row page: they cannot be edited, cleared or pasted into. */
@@ -35,13 +37,19 @@ export function isComputed(type: DatabasePropertyType): boolean {
     type === 'last_edited_time' ||
     type === 'last_edited_by' ||
     type === 'unique_id' ||
-    type === 'formula'
+    type === 'formula' ||
+    type === 'rollup'
   )
 }
 
-/** Whether views can filter and sort by the type (a button has no value). */
-export function sortable(type: DatabasePropertyType): boolean {
+/** Whether views can filter by the type (a button has no value). */
+export function filterable(type: DatabasePropertyType): boolean {
   return type !== 'button'
+}
+
+/** Whether views can sort by the type: not a button, nor a relation (spec P3 11.6). */
+export function sortable(type: DatabasePropertyType): boolean {
+  return type !== 'button' && type !== 'relation'
 }
 
 /** The filter operators of each type (spec 4.3), the first one being the default. */
@@ -77,6 +85,10 @@ export function operatorsOf(type: DatabasePropertyType): DatabaseFilterOperator[
       return []
     case 'formula':
       return ['is_not_empty', 'is_empty']
+    case 'relation':
+    // A list rollup; number and date rollups filter as their result (`filterTypeOf`).
+    case 'rollup':
+      return ['contains', 'not_contains', 'is_empty', 'is_not_empty']
   }
 }
 

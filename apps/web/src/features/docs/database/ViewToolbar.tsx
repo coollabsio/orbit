@@ -20,7 +20,7 @@ import {
 import { Popover, PopoverContent } from '@/components/ui/popover'
 import { Tip } from '@/components/common/Tip'
 import type { DatabaseView, Property, ViewConfig } from '@orbit/database/types'
-import { sortable } from '@orbit/database/meta'
+import { filterable, sortable } from '@orbit/database/meta'
 import { groupable, laneable, showsCards } from '@orbit/database/view'
 import { datable, weekdayName, type Weekday } from '@orbit/database/calendar'
 import { addDays } from '@orbit/database/dates'
@@ -91,7 +91,7 @@ export function ViewToolbar({ properties, config, onConfig, onAddFilter, onAdvan
   return (
     <div className="flex shrink-0 items-center gap-0.5">
       <PropertyPicker
-        properties={properties.filter((property) => sortable(property.type))}
+        properties={properties.filter((property) => filterable(property.type))}
         label="Filter by"
         onPick={onAddFilter}
         onAdvanced={onAdvancedFilter}

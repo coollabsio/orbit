@@ -13,6 +13,7 @@ import { DatabaseEnvContext, useDatabaseEnv, useDatabaseEnvValue, type DatabaseE
 import { ME, TODAY, templatesOf } from '@orbit/database/templates'
 import { Tip } from '@/components/common/Tip'
 import { isComputed } from '@orbit/database/meta'
+import { withRelatedPages } from '@orbit/database/relations'
 import { PROPERTY_TYPES } from './propertyMeta'
 
 interface PropertyListProps {
@@ -35,7 +36,9 @@ export function PropertyList({ workspaceId, databaseId, rowId, viewId }: Propert
   const template = database ? templatesOf(database).find((candidate) => candidate.id === rowId) : undefined
   const row = database?.rows.find((candidate) => candidate.id === rowId) ?? template
   if (!database || !row) return null
-  const env = template ? templateEnv(rowEnv) : rowEnv
+  const base = template ? templateEnv(rowEnv) : rowEnv
+  // Relation cells show the related pages' titles.
+  const env = { ...base, ctx: withRelatedPages(base.ctx, database) }
 
   const views = [...database.views].sort((a, b) => a.position - b.position)
   const view = views.find((candidate) => candidate.id === viewId) ?? views[0]
@@ -163,9 +166,10 @@ function AddProperty() {
       </PopoverTrigger>
       <PopoverContent align="start" className="w-60 gap-0 p-0">
         <NewPropertyForm
-          onCreate={(name, type) => {
+          relations
+          onCreate={(name, type, config) => {
             setOpen(false)
-            createProperty.mutate({ name, type })
+            createProperty.mutate({ name, type, ...(config ? { config } : {}) })
           }}
         />
       </PopoverContent>

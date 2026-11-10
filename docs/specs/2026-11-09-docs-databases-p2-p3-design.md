@@ -936,8 +936,30 @@ outside links.
 
 | # | Question |
 |---|---|
-| OQ-9.1 | Notion's help does not say what happens to links when a related page is deleted. Proposal: as 11.3 (hidden in trash, removed forever with the page). |
-| OQ-9.2 | Relations to databases in another space: allowed (proposal), with the access rules of 11.4. |
+| OQ-9.1 | Notion's help does not say what happens to links when a related page is deleted. Built as proposed: as 11.3 (hidden in trash, removed forever with the page). |
+| OQ-9.2 | Relations to databases in another space: allowed (built), with the access rules of 11.4. |
+
+### 11.12 Status
+
+Done on 2026-11-10 (migration `0085_page_relations`, not registered yet). No tests in this round (the user asked for
+none). Server code: `repositories/databases/computed.rs` (the computed-value layer of 2.3: `ComputeScope`, `fill`,
+documented at the top of the module), `relations.rs` (config, reads, writes, pairs), `rollups.rs` (functions),
+`relation_import.rs` and `notion/relations.rs` (Notion); shared logic `@orbit/database/relations`; web
+`cells/RelationCell.tsx`, `RelationConfig.tsx`; mobile `components/database/Relation.tsx`. Differences from this
+section:
+
+| # | Item | Where | Why |
+|---|---|---|---|
+| 1 | `POST …/properties` returns the relation only; its `config.synced_property_id` names the synced property, which the target's refetch shows. | 11.7 | `DatabaseProperty` is one property everywhere; the synced one lives in the other database. |
+| 2 | A type change to `relation` or `rollup` is refused (422 `type`); clients offer both types only when creating a property. A type change from them clears the links (a primary's synced property becomes one-way); deleting a primary hands its links to the synced property. | 11.3 | Both need a config that a type change cannot derive. |
+| 3 | Relation `contains` / `not_contains` match related titles (case ignored), not a picked page. | 11.6 | One text field for relations and list rollups. |
+| 4 | Rollup results: numbers (percent functions are a fraction 0 to 1), a date value `{start, end}`, or a list of display texts for `show_original` / `show_unique`. Number rollups ignore the target's number format. | 11.5 | The target property lives in another database. |
+| 5 | Rollups compute at depth 0 and 1 (a rollup over a rollup); a deeper chain is refused at save. | 11.5 | Matches "one level deep". |
+| 6 | Realtime: a value write in Y records `database.related_changed` on every other database whose relation targets Y. Trash, restore and title edits of Y's rows send no such event (clients see them at the next refetch). | 11.7 | Only value writes go through `update_values`. |
+| 7 | Notion: relation links are collected while pass 1 creates rows; rows created by an earlier, interrupted run of the same import keep the titles text. Outside links stay in "<name> (titles)" (the relation's planned text property, renamed); the property goes when every link is inside. `count_per_group` and `percent_per_group` rollups stay static. | 11.9 | Links are not stored between job runs. |
+| 8 | Item-level backup restore and CSV import do not restore or fill links (CSV relation columns are skipped). | 11.3 | Links need page ids, not titles. |
+| 9 | The "Edit from <other database>" state of a reverse cell over 100 links is a 422 toast, not a read-only cell. | 11.3 | Not built in this round. |
+| 10 | Relation pills on web open the peek for a self relation and the related row's page otherwise; mobile always opens the page. | 11.8 | The peek reads rows of its own database only. |
 
 ## 12. Item 10: Files, email, phone, unique ID (P3, M)
 

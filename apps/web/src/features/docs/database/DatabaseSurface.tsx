@@ -5,7 +5,8 @@ import { Button } from '@/components/ui/button'
 import { applyView, repairConfig } from '@orbit/database/view'
 import { EMPTY_FILTER, filterRules } from '@orbit/database/filter'
 import { appendChild } from '@orbit/database/filterTree'
-import { newRule, simpleRules, sortable } from '@orbit/database/meta'
+import { filterable, newRule, simpleRules } from '@orbit/database/meta'
+import { withRelatedPages } from '@orbit/database/relations'
 import { newRowValues } from '@orbit/database/newRow'
 import { defaultTemplate, templateFill, templatesOf } from '@orbit/database/templates'
 import type { Database, DatabaseView, Property, ViewConfig } from '@orbit/database/types'
@@ -69,7 +70,9 @@ function readStoredView(key: string): string | null {
  * config drafts (saved for everyone after 500 ms, or kept local for viewers who cannot change the view), the search, the
  * rows added since the view last changed and the row peek (`?row=`).
  */
-export function DatabaseSurface({ database, views: unsorted, env, locked, viewKey, page, block, layout }: DatabaseSurfaceProps) {
+export function DatabaseSurface({ database, views: unsorted, env: baseEnv, locked, viewKey, page, block, layout }: DatabaseSurfaceProps) {
+  // Relation cells, filters and the CSV export show the related pages' titles.
+  const env: DatabaseEnv = { ...baseEnv, ctx: withRelatedPages(baseEnv.ctx, database), openRow: (rowId) => setPeekRow(rowId) }
   const { ctx, canEditViews, canEditValues, workspaceId, databaseId, linkId } = env
   const updateView = useUpdateView(workspaceId, databaseId, linkId)
   const createRow = useCreateRow(workspaceId, databaseId)
@@ -275,7 +278,7 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
         </div>
       ) : null}
       <FilterBar
-        properties={database.properties.filter((property) => sortable(property.type))}
+        properties={database.properties.filter((property) => filterable(property.type))}
         config={config}
         onConfig={changeConfig}
         openRule={openRule}

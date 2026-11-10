@@ -9,6 +9,7 @@ import {
 } from './dates'
 import { parseButtonConfig } from './buttons'
 import { formulaBase, formulaError, formulaRaw, parseFormulaConfig } from './formula/values'
+import { parseRelationConfig, parseRollupConfig, relatedTitle, rollupBase, rollupResult } from './relations'
 import { parseFiles, parseUniqueIdConfig, uniqueIdText, validEmail, validPhone } from './fields'
 import {
   DATE_FORMATS,
@@ -90,6 +91,10 @@ export function parseProperty(property: DatabaseProperty): Property {
       return { ...rest, type: rest.type, config: parseButtonConfig(config) }
     case 'formula':
       return { ...rest, type: rest.type, config: parseFormulaConfig(config) }
+    case 'relation':
+      return { ...rest, type: rest.type, config: parseRelationConfig(config) }
+    case 'rollup':
+      return { ...rest, type: rest.type, config: parseRollupConfig(config) }
     default:
       return unreachable(rest.type)
   }
@@ -161,6 +166,15 @@ export function parseValue(property: Property, raw: unknown): CellValue | null {
       return null
     case 'formula':
       return parseValue(formulaBase(property), formulaRaw(property, raw))
+    case 'relation': {
+      const ids = uniqueStrings(raw)
+      return ids && ids.length > 0 ? { kind: 'pages', ids } : null
+    }
+    case 'rollup': {
+      if (rollupResult(property.config.function) !== 'list') return parseValue(rollupBase(property), raw)
+      const items = Array.isArray(raw) ? raw.filter((item): item is string => typeof item === 'string' && item !== '') : []
+      return items.length > 0 ? { kind: 'list', items } : null
+    }
     default:
       return unreachable(property)
   }
@@ -201,6 +215,8 @@ export function cellOf(row: Row, property: Property): CellValue | null {
     case 'files':
     case 'unique_id':
     case 'formula':
+    case 'relation':
+    case 'rollup':
       return row.values[property.id] ?? null
     case 'button':
       return null
@@ -235,6 +251,10 @@ export function apiValue(value: CellValue | null): unknown {
       return value.files
     case 'unique_id':
       return value.number
+    case 'pages':
+      return value.ids
+    case 'list':
+      return value.items
     default:
       return unreachable(value)
   }
@@ -244,6 +264,7 @@ export function apiValue(value: CellValue | null): unknown {
 export function displayText(property: Property, value: CellValue | null, ctx: ViewContext): string {
   if (!value) return ''
   if (property.type === 'formula') return displayText(formulaBase(property), value, ctx)
+  if (property.type === 'rollup') return displayText(rollupBase(property), value, ctx)
   switch (value.kind) {
     case 'text':
       return value.text
@@ -268,6 +289,10 @@ export function displayText(property: Property, value: CellValue | null, ctx: Vi
       const start = formatPoint(value.date.start, config, ctx)
       return value.date.end ? `${start} → ${formatPoint(value.date.end, config, ctx)}` : start
     }
+    case 'pages':
+      return value.ids.flatMap((id) => relatedTitle(ctx, id) ?? []).join(', ')
+    case 'list':
+      return value.items.join(', ')
     default:
       return unreachable(value)
   }
@@ -326,6 +351,8 @@ export function valueFromText(property: Property, input: string, ctx: ViewContex
     case 'last_edited_by':
     case 'button':
     case 'formula':
+    case 'relation':
+    case 'rollup':
       return null
     default:
       return unreachable(property)

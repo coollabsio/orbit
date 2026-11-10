@@ -1,4 +1,5 @@
 import { isComputed } from '@orbit/database/meta'
+import { withRelatedPages } from '@orbit/database/relations'
 import type { CellValue, Property, Row, SelectOption } from '@orbit/database/types'
 import { apiValue, cellOf } from '@orbit/database/values'
 import { repairConfig } from '@orbit/database/view'
@@ -20,7 +21,7 @@ import { ValueEditor } from './ValueEditor'
  */
 export function PropertyList({ databaseId, rowId, notify }: { databaseId: string; rowId: string; notify: Notify }) {
   const query = useDatabase(databaseId)
-  const ctx = useViewContext()
+  const ctx = withRelatedPages(useViewContext(), query.data)
   const readOnly = useWorkspaceReadOnly()
   const updateValues = useUpdateValues(databaseId, notify)
   const saveOptions = useSaveOptions(databaseId, notify)
@@ -90,15 +91,15 @@ function PropertyLine({ property, row, editable, onEdit, onToggle, ctx }: {
   const { colors } = useTheme()
   const value = cellOf(row, property)
   const checkbox = property.type === 'checkbox'
-  // Formulas run on the server and are edited on the web (spec P3 15.10).
-  const formula = property.type === 'formula'
+  // Formulas and rollups run on the server and are edited on the web (spec P3 15.10, 11.8).
+  const webOnly = property.type === 'formula' ? 'Edit this formula on the web.' : property.type === 'rollup' ? 'Edit this rollup on the web.' : null
   return (
     <Pressable
-      accessibilityRole={editable || formula ? 'button' : undefined}
+      accessibilityRole={editable || webOnly ? 'button' : undefined}
       accessibilityLabel={editable ? `Edit ${property.name}` : property.name}
-      accessibilityHint={formula ? 'Edit this formula on the web.' : undefined}
-      disabled={!editable && !formula}
-      onPress={formula ? () => Alert.alert(property.name, 'Edit this formula on the web.') : checkbox ? onToggle : onEdit}
+      accessibilityHint={webOnly ?? undefined}
+      disabled={!editable && !webOnly}
+      onPress={webOnly ? () => Alert.alert(property.name, webOnly) : checkbox ? onToggle : onEdit}
       className="min-h-[38px] flex-row items-start gap-1 rounded-md active:bg-muted"
     >
       <View className="h-[38px] w-[38%] flex-row items-center gap-1.5 px-1.5">

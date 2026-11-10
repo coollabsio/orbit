@@ -9,12 +9,14 @@ import type {
   DatabaseFormConfig,
   DatabaseProperty,
   DatabasePropertyType,
+  DatabaseRelatedPage,
   DatabaseRow,
   DatabaseViewColumn,
   DatabaseViewSort,
 } from '@orbit/api/generated/types.gen'
 import type { ButtonConfig } from './buttons'
 import type { FormulaConfig } from './formula/values'
+import type { RelationConfig, RollupConfig } from './relations'
 
 export type {
   DatabaseCalculation,
@@ -26,6 +28,7 @@ export type {
   DatabaseHead,
   DatabaseProperty,
   DatabasePropertyType,
+  DatabaseRelatedPage,
   DatabaseRow,
   DatabaseSortDirection,
   DatabaseView,
@@ -79,8 +82,10 @@ export type PropertyKind =
   | { type: 'button'; config: ButtonConfig }
   | { type: 'unique_id'; config: UniqueIdConfig }
   | { type: 'formula'; config: FormulaConfig }
+  | { type: 'relation'; config: RelationConfig }
+  | { type: 'rollup'; config: RollupConfig }
   | {
-      type: Exclude<DatabasePropertyType, 'number' | 'select' | 'multi_select' | 'status' | 'date' | 'button' | 'unique_id' | 'formula'>
+      type: Exclude<DatabasePropertyType, 'number' | 'select' | 'multi_select' | 'status' | 'date' | 'button' | 'unique_id' | 'formula' | 'relation' | 'rollup'>
       config: Record<string, never>
     }
 
@@ -113,6 +118,10 @@ export type CellValue =
   | { kind: 'files'; files: FileRef[] }
   /** A unique ID number (the prefix is the property's). Email and phone values are `text`. */
   | { kind: 'unique_id'; number: number }
+  /** Related page ids of a relation, in order: only pages the viewer can read. */
+  | { kind: 'pages'; ids: string[] }
+  /** A rollup's `show_original` or `show_unique` result: the display texts of the related values. */
+  | { kind: 'list'; items: string[] }
 
 /** A row whose stored values are parsed; a property missing from `values` is empty. */
 export type Row = Omit<DatabaseRow, 'values'> & {
@@ -194,4 +203,6 @@ export type ViewContext = {
   locale?: string
   /** Workspace members: user id to display name. */
   members: ReadonlyMap<string, string>
+  /** The pages relation values link to (`related_pages`), for their titles. */
+  relatedPages?: Readonly<Record<string, DatabaseRelatedPage>>
 }

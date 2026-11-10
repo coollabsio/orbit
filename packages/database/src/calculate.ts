@@ -120,9 +120,10 @@ function percent(part: number, total: number): Calculated {
   return { value: `${raw}%`, raw }
 }
 
-/** The keys `count_values` and `count_unique` count: each item of a list, else the value itself. */
+/** The keys `count_values` and `count_unique` count: each item of a list (options, people, pages, rollup texts), else the value itself. */
 function items(cell: CellValue): string[] {
-  if (cell.kind === 'choices' || cell.kind === 'people') return cell.ids
+  if (cell.kind === 'choices' || cell.kind === 'people' || cell.kind === 'pages') return cell.ids
+  if (cell.kind === 'list') return cell.items
   return [JSON.stringify(apiValue(cell))]
 }
 

@@ -1,5 +1,7 @@
 import {
   ArrowCircleDown,
+  ArrowRightUp,
+  Search,
   Calculator,
   Barcode,
   Call,
@@ -7,11 +9,11 @@ import {
   Sms,
   Calendar,
   CheckSquare,
-  Flash,
   Clock,
   Hashtag,
   Link,
   List,
+  Flash,
   RecordCircle,
   Text,
   TextalignJustifyleft,
@@ -43,6 +45,8 @@ export const PROPERTY_TYPES: Record<DatabasePropertyType, { label: string; icon:
   last_edited_by: { label: PROPERTY_TYPE_LABELS.last_edited_by, icon: UserCircle },
   button: { label: PROPERTY_TYPE_LABELS.button, icon: Flash },
   formula: { label: PROPERTY_TYPE_LABELS.formula, icon: Calculator },
+  relation: { label: PROPERTY_TYPE_LABELS.relation, icon: ArrowRightUp },
+  rollup: { label: PROPERTY_TYPE_LABELS.rollup, icon: Search },
 }
 
 /** The types a user can give a property, in menu order (a database has exactly one title). */
@@ -67,3 +71,6 @@ export const CREATABLE_TYPES: DatabasePropertyType[] = [
   'last_edited_by',
   'button',
 ]
+
+/** Types offered only for a new property: the server refuses a type change to them (their config names other properties). */
+export const NEW_ONLY_TYPES: DatabasePropertyType[] = ['relation', 'rollup']

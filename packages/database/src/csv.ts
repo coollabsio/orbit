@@ -1,7 +1,7 @@
 import { dateText, parseDateText } from './dates'
 import type { Database, DatabaseView, Property, Row, ViewContext } from './types'
 import { uniqueIdText, validEmail } from './fields'
-import { cellOf, optionName, unreachable } from './values'
+import { cellOf, displayText, optionName, unreachable } from './values'
 import { repairConfig, showsCards } from './view'
 
 /** Spec P2 9.3 limits of an import. */
@@ -156,6 +156,9 @@ export function csvText(property: Property, row: Row, ctx: ViewContext): string 
       return 'true'
     case 'date':
       return dateText(value.date)
+    case 'pages':
+    case 'list':
+      return displayText(property, value, ctx)
     default:
       return unreachable(value)
   }
@@ -217,7 +220,7 @@ function columnValues(table: CsvTable, index: number): string[] {
 
 /** A property a CSV column can fill: not computed, except the title. */
 function fillable(property: Property): boolean {
-  return !['created_time', 'created_by', 'last_edited_time', 'last_edited_by', 'files', 'unique_id'].includes(property.type)
+  return !['created_time', 'created_by', 'last_edited_time', 'last_edited_by', 'files', 'unique_id', 'relation', 'rollup'].includes(property.type)
 }
 
 /**

@@ -16,6 +16,7 @@ import { useDatabaseEnv } from '../context'
 import { OPTION_COLOR_LABELS } from '@orbit/database/meta'
 import { Pill } from './Pill'
 import { FilesEditor } from './FilesCell'
+import { RelationEditor } from './RelationCell'
 
 export type EditEnd = 'stay' | 'down' | 'next' | 'previous'
 
@@ -104,7 +105,10 @@ export function CellEditor(props: CellEditorProps) {
     case 'created_by':
     case 'last_edited_time':
     case 'last_edited_by':
+    case 'rollup':
       return null
+    case 'relation':
+      return <RelationEditor {...props} property={property} />
   }
 }
 

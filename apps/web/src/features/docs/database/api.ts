@@ -27,6 +27,7 @@ import type {
   DatabaseLinkedViews,
   DatabaseProperty,
   DatabasePropertyUpdate,
+  DatabaseRelatedPage,
   DatabaseRow,
   DatabaseView,
   DatabaseViewConfig,
@@ -133,6 +134,16 @@ export function patchDatabaseRow(queryClient: QueryClient, workspaceId: string, 
 }
 
 export type ValuesInput = { rowId: string; values: Record<string, unknown> }
+
+/**
+ * Adds pages a relation cell now links to (as its picker knows them) to the cached database and its linked view
+ * copies: a write's response has no `related_pages`, the next read brings them.
+ */
+export function rememberRelatedPages(queryClient: QueryClient, workspaceId: string, databaseId: string, pages: Readonly<Record<string, DatabaseRelatedPage>>): void {
+  queryClient.setQueriesData<Detail>({ queryKey: queryKeys.database(workspaceId, databaseId) }, (detail) =>
+    detail?.database && Array.isArray(detail.rows) ? { ...detail, related_pages: { ...detail.related_pages, ...pages } } : detail,
+  )
+}
 
 export function useUpdateValues(workspaceId: string, databaseId: string) {
   return useDatabaseMutation<ValuesInput, DatabaseRow>(workspaceId, databaseId, {

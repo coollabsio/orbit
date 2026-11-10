@@ -286,6 +286,17 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
   virtualized. Mobile: a gallery is a 2-column grid (1 for large cards, `components/database/Gallery.tsx`); a timeline is
   a list grouped by month with "Timeline · Edit on the web" (`TimelineList.tsx`). Notion gallery and timeline views
   import with their preview, size, dates, zoom and table pane.
+- Database relation and rollup properties (databases P2/P3 spec section 11, D-P3-1/D-P3-5). A relation links rows to
+  rows of a target database (any space the user can open, or the same one); each link is one `page_relations` row under
+  the pair's primary property, and the synced property of a two-way pair ("Show on <database>") reads the same rows
+  from the other side. `GET /databases/{id}?tz=` fills relation values (visible page ids), `hidden_links` counts and
+  `related_pages` titles, and computes rollups (`repositories/databases/computed.rs`, the shared computed-value layer
+  that formulas also use); a write replaces the cell's visible links (max 100) and keeps hidden ones. Rollup functions
+  as Notion's (show, counts, percents, number, date and checkbox functions). Trashed pages are left out, permanent
+  deletes and moves out of a database drop links, a duplicated database keeps links one-way. Web: pills, a target-row
+  picker and relation/rollup setup in "New property"; mobile shows and edits links (search sheet) and edits their
+  configs on the web. Notion relations stay relations when both databases are imported (dual = two-way), outside
+  links stay as "<name> (titles)" text, rollups over them stay rollups.
 - Database formula property (databases P2/P3 spec section 15, D-P3-1/D-P3-3). Only the server runs formulas
   (`repositories/databases/formula/`: `syntax` lexer and parser, `check` type checker to IR, `eval` with a step counter,
   `dates` on jiff in the reader's `?tz=` zone), on every read as the formula pass of the computed-value layer. Config

@@ -10,6 +10,7 @@ import { useTheme } from '../../theme'
 import { Avatar, Icon, Text } from '../../ui'
 import { ButtonCell } from './ButtonCell'
 import { FormulaValue } from './FormulaValue'
+import { RelationValue, RollupValue } from './Relation'
 import { contactHref } from '@orbit/database/fields'
 
 /** A select, multi-select or status option; a status pill is round with a dot of its color. */
@@ -68,6 +69,8 @@ export function CellValue({ property, row, ctx, chip = false }: { property: Prop
   const { colors } = useTheme()
   if (property.type === 'button') return <ButtonCell property={property} row={row} />
   if (property.type === 'formula') return <FormulaValue property={property} row={row} ctx={ctx} chip={chip} />
+  if (property.type === 'relation') return <RelationValue property={property} row={row} ctx={ctx} />
+  if (property.type === 'rollup') return <RollupValue property={property} row={row} ctx={ctx} chip={chip} />
   const value = cellOf(row, property)
   if (!value) return null
   switch (property.type) {

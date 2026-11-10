@@ -19,6 +19,8 @@ export interface DatabaseEnv {
   canEditViews: boolean
   /** The views shown are a linked view block's (`database_links` id). */
   linkId: string | null
+  /** Opens a row of this database in the side peek (a relation pill); absent outside a database surface. */
+  openRow?: (rowId: string) => void
 }
 
 export const DatabaseEnvContext = createContext<DatabaseEnv | null>(null)

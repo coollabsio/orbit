@@ -12,6 +12,7 @@ import { defaultTemplate, templateFill, templatesOf } from '@orbit/database/temp
 import type { Database, DatabaseView as View_, GroupProperty, LaneProperty, Property, Row, ViewConfig, ViewContext } from '@orbit/database/types'
 import { cellOf } from '@orbit/database/values'
 import { applyView, groupable, laneable, repairConfig } from '@orbit/database/view'
+import { withRelatedPages } from '@orbit/database/relations'
 import { router } from 'expo-router'
 import { type ReactElement, useEffect, useState } from 'react'
 import { FlatList, Pressable, ScrollView, useWindowDimensions, View } from 'react-native'
@@ -25,9 +26,9 @@ import { TextInput } from '../../ui/scaled'
 import { Sheet, SheetList, SheetNote, SheetRow, useSheet } from '../tasks/Sheet'
 import { ButtonPressContext } from './ButtonCell'
 import { Calendar } from './Calendar'
-import { FormFill, FormViewPicker } from './FormFill'
 import { Gallery } from './Gallery'
 import { TimelineList } from './TimelineList'
+import { FormFill, FormViewPicker } from './FormFill'
 import { CellValue, ChoiceRow, OptionPill, RowTitle } from './cells'
 import { shareViewCsv } from './csvShare'
 import { FilterContent, SortContent } from './ViewSheets'
@@ -54,7 +55,8 @@ export function DatabaseView({ databaseId, linkId = '', initialView = null, head
   notify: Notify
 }) {
   const query = useDatabase(databaseId, linkId)
-  const ctx = useViewContext()
+  // Relation values, filters and the CSV export show the related pages' titles.
+  const ctx = withRelatedPages(useViewContext(), query.data)
   const readOnly = useWorkspaceReadOnly()
   // The database lock guards its own views only; the server checks a linked view's host page.
   const locked = linkId ? false : (query.data?.database.locked ?? true)

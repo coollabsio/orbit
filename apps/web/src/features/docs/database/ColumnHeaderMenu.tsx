@@ -27,8 +27,9 @@ import { databaseErrorMessage } from '@orbit/database/errors'
 import { previewPropertyUpdate, useCreateProperty, useDeleteProperty, useUpdateProperty } from './api'
 import { useDatabaseEnv } from './context'
 import { placeColumn } from './databaseLib'
-import { isComputed } from '@orbit/database/meta'
-import { CREATABLE_TYPES, PROPERTY_TYPES } from './propertyMeta'
+import { filterable, isComputed, sortable } from '@orbit/database/meta'
+import { CREATABLE_TYPES, NEW_ONLY_TYPES, PROPERTY_TYPES } from './propertyMeta'
+import { RelationMenu, RelationSetup, RollupMenu, RollupSetup } from './RelationConfig'
 import { ButtonConfigDialog } from './ButtonConfigDialog'
 import { FormulaDialog } from './FormulaDialog'
 import { UniqueIdPrefix } from './UniqueIdPrefix'
@@ -94,10 +95,13 @@ export function ColumnHeaderMenu({ property, config, onConfig, onFilter }: Colum
     insertingRef.current = true
     setInserting(side)
   }
-  const insert = (side: 'left' | 'right', name: string, type: DatabasePropertyType) => {
+  const insert = (side: 'left' | 'right', name: string, type: DatabasePropertyType, propertyConfig?: NewPropertyConfig) => {
     setInserting(null)
     // The server adds the column to the end of every view; this view gets it next to the clicked column.
-    createProperty.mutate({ name, type }, { onSuccess: (created) => onConfig(placeColumn(config, created.id, property.id, side)) })
+    createProperty.mutate(
+      { name, type, ...(propertyConfig ? { config: propertyConfig } : {}) },
+      { onSuccess: (created) => onConfig(placeColumn(config, created.id, property.id, side)) },
+    )
   }
   const remove = async () => {
     if (
@@ -237,20 +241,26 @@ export function ColumnHeaderMenu({ property, config, onConfig, onFilter }: Colum
                     <UniqueIdPrefix prefix={property.config.prefix} onSave={(prefix) => setConfig({ prefix })} />
                   </>
                 ) : null}
+                {property.type === 'relation' ? <RelationMenu property={property} /> : null}
+                {property.type === 'rollup' ? <RollupMenu property={property} /> : null}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
           ) : null}
           <DropdownMenuSeparator />
-          {property.type === 'button' ? null : (
+          {!filterable(property.type) ? null : (
             <>
-              <DropdownMenuItem onClick={() => sortBy('asc')}>
-                <ArrowUp />
-                Sort ascending
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => sortBy('desc')}>
-                <ArrowDown />
-                Sort descending
-              </DropdownMenuItem>
+              {sortable(property.type) ? (
+                <>
+                  <DropdownMenuItem onClick={() => sortBy('asc')}>
+                    <ArrowUp />
+                    Sort ascending
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => sortBy('desc')}>
+                    <ArrowDown />
+                    Sort descending
+                  </DropdownMenuItem>
+                </>
+              ) : null}
               <DropdownMenuItem onClick={() => onFilter(property.id)}>
                 <Filter />
                 Filter
@@ -304,7 +314,7 @@ export function ColumnHeaderMenu({ property, config, onConfig, onFilter }: Colum
       >
         {inserting ? (
           <PopoverContent anchor={header} align="start" className="w-60 gap-0 p-0">
-            <NewPropertyForm onCreate={(name, type) => insert(inserting, name, type)} />
+            <NewPropertyForm relations onCreate={(name, type, propertyConfig) => insert(inserting, name, type, propertyConfig)} />
           </PopoverContent>
         ) : null}
       </Popover>
@@ -328,10 +338,11 @@ export function AddPropertyButton() {
       </Tip>
       <PopoverContent align="end" className="w-60 gap-0 p-0">
         <NewPropertyForm
-          onCreate={(name, type) => {
+          relations
+          onCreate={(name, type, config) => {
             setOpen(false)
             // The server adds the column to the end of every view.
-            createProperty.mutate({ name, type })
+            createProperty.mutate({ name, type, ...(config ? { config } : {}) })
           }}
         />
       </PopoverContent>
@@ -339,9 +350,20 @@ export function AddPropertyButton() {
   )
 }
 
-/** A new property's name field and type list: picking a type creates it (an empty name takes the type's label). */
-export function NewPropertyForm({ onCreate }: { onCreate: (name: string, type: DatabasePropertyType) => void }) {
+/** The config a new property is created with: only relations and rollups need one up front. */
+export type NewPropertyConfig = Record<string, unknown>
+
+/**
+ * A new property's name field and type list: picking a type creates it (an empty name takes the type's label).
+ * `relations`: also offers relation and rollup, which ask for their config first.
+ */
+export function NewPropertyForm({ onCreate, relations = false }: { onCreate: (name: string, type: DatabasePropertyType, config?: NewPropertyConfig) => void; relations?: boolean }) {
   const [name, setName] = useState('')
+  const [setup, setSetup] = useState<'relation' | 'rollup' | null>(null)
+  const nameFor = (type: DatabasePropertyType) => (name.trim() || PROPERTY_TYPES[type].label).slice(0, 200)
+  if (setup === 'relation') return <RelationSetup onBack={() => setSetup(null)} onCreate={(config) => onCreate(nameFor('relation'), 'relation', config)} />
+  if (setup === 'rollup') return <RollupSetup onBack={() => setSetup(null)} onCreate={(config) => onCreate(nameFor('rollup'), 'rollup', config)} />
+  const types = relations ? [...CREATABLE_TYPES, ...NEW_ONLY_TYPES] : CREATABLE_TYPES
   return (
     <Command label="Property type" loop>
       <div className="p-1">
@@ -351,10 +373,15 @@ export function NewPropertyForm({ onCreate }: { onCreate: (name: string, type: D
       <CommandList>
         <CommandEmpty className="py-3 text-center text-xs text-muted-foreground">No types</CommandEmpty>
         <CommandGroup>
-          {CREATABLE_TYPES.map((type) => {
+          {types.map((type) => {
             const Icon = PROPERTY_TYPES[type].icon
             return (
-              <CommandItem key={type} value={type} keywords={[PROPERTY_TYPES[type].label]} onSelect={() => onCreate((name.trim() || PROPERTY_TYPES[type].label).slice(0, 200), type)}>
+              <CommandItem
+                key={type}
+                value={type}
+                keywords={[PROPERTY_TYPES[type].label]}
+                onSelect={() => (type === 'relation' || type === 'rollup' ? setSetup(type) : onCreate(nameFor(type), type))}
+              >
                 <Icon className="text-muted-foreground" />
                 {PROPERTY_TYPES[type].label}
                 {isComputed(type) ? <span className="ml-auto text-xs text-muted-foreground">Automatic</span> : null}
