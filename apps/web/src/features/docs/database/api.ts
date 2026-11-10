@@ -47,6 +47,11 @@ function detailKey(workspaceId: string, databaseId: string, linkId?: string | nu
   return linkId ? ([...queryKeys.database(workspaceId, databaseId), 'link', linkId] as const) : queryKeys.database(workspaceId, databaseId)
 }
 
+/** The viewer's IANA zone (`?tz=` of reads with computed values). */
+export function viewerTimeZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+}
+
 /** A database with its own views, or with the views of the linked view block `linkId`. */
 export function useDatabase(workspaceId: string, databaseId: string, linkId?: string | null) {
   return useQuery({
@@ -55,7 +60,8 @@ export function useDatabase(workspaceId: string, databaseId: string, linkId?: st
       const { data } = await getDatabase({
         client: apiClient,
         path: { workspace_id: workspaceId, database_id: databaseId },
-        ...(linkId ? { query: { link: linkId } } : {}),
+        // Formulas compute `today()` and date parts in the viewer's zone.
+        query: { tz: viewerTimeZone(), ...(linkId ? { link: linkId } : {}) },
         throwOnError: true,
       })
       return required(data, 'Database response was empty.')

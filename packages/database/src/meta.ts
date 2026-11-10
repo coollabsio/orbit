@@ -1,6 +1,7 @@
 import { isGroup } from './filter'
 import type { DatabaseFilterGroup, DatabaseFilterOperator, DatabaseFilterRule, DatabasePropertyType, OptionColor, Property, ViewContext } from './types'
 import { options } from './values'
+import { filterProperty, filterTypeOf } from './formula/values'
 
 /** The name of each property type, as the type menus show it. */
 export const PROPERTY_TYPE_LABELS: Record<DatabasePropertyType, string> = {
@@ -23,6 +24,7 @@ export const PROPERTY_TYPE_LABELS: Record<DatabasePropertyType, string> = {
   last_edited_time: 'Last edited time',
   last_edited_by: 'Last edited by',
   button: 'Button',
+  formula: 'Formula',
 }
 
 /** Types whose value comes from the row page: they cannot be edited, cleared or pasted into. */
@@ -32,7 +34,8 @@ export function isComputed(type: DatabasePropertyType): boolean {
     type === 'created_by' ||
     type === 'last_edited_time' ||
     type === 'last_edited_by' ||
-    type === 'unique_id'
+    type === 'unique_id' ||
+    type === 'formula'
   )
 }
 
@@ -72,6 +75,8 @@ export function operatorsOf(type: DatabasePropertyType): DatabaseFilterOperator[
       return ['is', 'is_not']
     case 'button':
       return []
+    case 'formula':
+      return ['is_not_empty', 'is_empty']
   }
 }
 
@@ -138,7 +143,7 @@ export function allOf(rules: DatabaseFilterRule[]): DatabaseFilterGroup {
 
 /** A new filter rule on a property: its type's first operator and no value, which matches every row. */
 export function newRule(property: Property): DatabaseFilterRule {
-  return { property_id: property.id, operator: operatorsOf(property.type)[0], value: null }
+  return { property_id: property.id, operator: operatorsOf(filterTypeOf(property))[0], value: null }
 }
 
 /** Whether a rule leaves rows out: an operator that needs no value, or a value. A rule without one matches every row. */
@@ -147,7 +152,8 @@ export function ruleNeedsValue(operator: DatabaseFilterOperator): boolean {
 }
 
 /** The chip text after the property name (spec 7.1): `Reading`, `contains “abc”`, `is empty`. */
-export function ruleSummary(rule: DatabaseFilterRule, property: Property, ctx: ViewContext): string {
+export function ruleSummary(rule: DatabaseFilterRule, source: Property, ctx: ViewContext): string {
+  const property = filterProperty(source)
   const operator = OPERATOR_LABELS[rule.operator]
   if (!ruleNeedsValue(rule.operator)) return operator
   const value = ruleValueText(rule, property, ctx)

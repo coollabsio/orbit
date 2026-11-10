@@ -9,6 +9,7 @@ import type { Property, Row, StatusOption } from '@orbit/database/types'
 import { useDatabaseEnv } from '../context'
 import { isComputed } from '@orbit/database/meta'
 import { ButtonCell } from './ButtonCell'
+import { FormulaCell } from './FormulaCell'
 import { contactHref } from '@orbit/database/fields'
 import { FileChips } from './FilesCell'
 import { Pill } from './Pill'
@@ -76,6 +77,8 @@ export function CellView({ property, row, width, wrap, onToggle }: CellViewProps
       return <Text wrap={wrap}>{displayText(property, value, ctx)}</Text>
     case 'button':
       return <ButtonCell property={property} row={row} />
+    case 'formula':
+      return <FormulaCell property={property} row={row} width={width} wrap={wrap} />
   }
 }
 

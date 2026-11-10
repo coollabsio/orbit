@@ -1,4 +1,5 @@
 import { calculationsFor } from './calculate'
+import { filterTypeOf } from './formula/values'
 import { datable, defaultDateProperty } from './calendar'
 import { galleryFields } from './gallery'
 import { timelineFields } from './timeline'
@@ -62,7 +63,7 @@ export function repairConfig(view: DatabaseView, properties: readonly Property[]
   const calculations = Object.fromEntries(
     Object.entries(config.calculations ?? {}).filter(([id, fn]) => {
       const property = known.get(id)
-      return property !== undefined && calculationsFor(property.type).includes(fn)
+      return property !== undefined && calculationsFor(filterTypeOf(property)).includes(fn)
     }),
   )
   return {

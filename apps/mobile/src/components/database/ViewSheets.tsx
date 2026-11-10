@@ -4,6 +4,7 @@
  */
 import { EMPTY_FILTER, filterRules, MAX_RULES } from '@orbit/database/filter'
 import { allOf, newRule, OPERATOR_LABELS, operatorsOf, RELATIVE_DATES, ruleNeedsValue, ruleSummary, simpleRules } from '@orbit/database/meta'
+import { filterProperty } from '@orbit/database/formula/values'
 import type { DatabaseFilterOperator, DatabaseFilterRule, DatabaseViewSort, Property, ViewConfig, ViewContext } from '@orbit/database/types'
 import { dayOf, localDate } from '@orbit/database/dates'
 import { options } from '@orbit/database/values'
@@ -117,7 +118,8 @@ export function FilterContent({ properties, config, onConfig, ctx, openRule, onO
   )
 }
 
-function RuleEditor({ rule, property, onChange, onBack }: { rule: DatabaseFilterRule; property: Property; onChange: (rule: DatabaseFilterRule) => void; onBack: () => void }) {
+function RuleEditor({ rule, property: source, onChange, onBack }: { rule: DatabaseFilterRule; property: Property; onChange: (rule: DatabaseFilterRule) => void; onBack: () => void }) {
+  const property = filterProperty(source)
   const operators = operatorsOf(property.type)
   const setOperator = (operator: DatabaseFilterOperator) => onChange({ ...rule, operator, value: ruleNeedsValue(operator) ? rule.value : null })
   return (

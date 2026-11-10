@@ -1,6 +1,7 @@
 import { dayStartMs } from './dates'
 import type { DatabaseViewSort, Property, Row, ViewContext } from './types'
 import { cellOf, displayText, options, unreachable } from './values'
+import { formulaBase } from './formula/values'
 
 type SortKey = number | string | number[] | null
 
@@ -78,6 +79,8 @@ function sortKey(row: Row, property: Property, ctx: ViewContext): SortKey {
     }
     case 'button':
       return null
+    case 'formula':
+      return sortKey(row, formulaBase(property), ctx)
     default:
       return unreachable(property)
   }

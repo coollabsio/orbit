@@ -1,6 +1,7 @@
 import { addDays, addMonths, localDay, parseDatePoint, pointDay } from './dates'
 import type { CellValue, DatabaseFilterGroup, DatabaseFilterNode, DatabaseFilterRule, Property, Row, ViewContext } from './types'
 import { cellOf, displayText, unreachable } from './values'
+import { formulaBase } from './formula/values'
 
 const RELATIVE_DAYS: Record<string, (today: string) => string> = {
   today: (today) => today,
@@ -109,6 +110,8 @@ export function matches(row: Row, rule: DatabaseFilterRule, property: Property, 
     }
     case 'button':
       return true
+    case 'formula':
+      return matches(row, rule, formulaBase(property), ctx)
     default:
       return unreachable(property)
   }

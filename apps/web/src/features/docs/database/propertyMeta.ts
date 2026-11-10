@@ -1,5 +1,6 @@
 import {
   ArrowCircleDown,
+  Calculator,
   Barcode,
   Call,
   Paperclip,
@@ -41,6 +42,7 @@ export const PROPERTY_TYPES: Record<DatabasePropertyType, { label: string; icon:
   last_edited_time: { label: PROPERTY_TYPE_LABELS.last_edited_time, icon: Clock },
   last_edited_by: { label: PROPERTY_TYPE_LABELS.last_edited_by, icon: UserCircle },
   button: { label: PROPERTY_TYPE_LABELS.button, icon: Flash },
+  formula: { label: PROPERTY_TYPE_LABELS.formula, icon: Calculator },
 }
 
 /** The types a user can give a property, in menu order (a database has exactly one title). */
@@ -58,6 +60,7 @@ export const CREATABLE_TYPES: DatabasePropertyType[] = [
   'phone',
   'files',
   'unique_id',
+  'formula',
   'created_time',
   'created_by',
   'last_edited_time',

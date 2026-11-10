@@ -286,6 +286,18 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
   virtualized. Mobile: a gallery is a 2-column grid (1 for large cards, `components/database/Gallery.tsx`); a timeline is
   a list grouped by month with "Timeline · Edit on the web" (`TimelineList.tsx`). Notion gallery and timeline views
   import with their preview, size, dates, zoom and table pane.
+- Database formula property (databases P2/P3 spec section 15, D-P3-1/D-P3-3). Only the server runs formulas
+  (`repositories/databases/formula/`: `syntax` lexer and parser, `check` type checker to IR, `eval` with a step counter,
+  `dates` on jiff in the reader's `?tz=` zone), on every read as the formula pass of the computed-value layer. Config
+  `{expression, result_type}`; clients send `prop("Name")` or ids, the server stores ids and infers the type. A failed
+  cell is `{"error": message}` (`row.formulaErrors` on clients). Limits: 2,000 characters, 500 nodes, depth 32, 2,000
+  steps per cell, lists 1,000, text 10,000, 20 formulas, 15 formula layers, 2 s per read. `POST
+  …/formula/preview` checks an expression and computes the first 10 rows; save errors are 422 `formula_invalid` with
+  `formula: {message, start, end}` (UTF-16). Filters, sorts and calculations follow the result type
+  (`@orbit/database/formula/values`). Web: "Edit property → Edit formula…" (`FormulaDialog`: highlight, completion,
+  error, preview); cells show results or a muted "Error" with the message on hover (`cells/FormulaCell.tsx`). Mobile
+  shows results, taps show errors, editing says "Edit this formula on the web". Notion formulas that parse and type
+  check import live (`notion/formula.rs`), others keep static values.
 - Databases for API tokens and MCP (databases P2/P3 spec section 14): tools `get_database`, `query_database`,
   `create_database_row`, `update_database_row`, `trash_database_rows` and REST `GET /docs/{id}/database`, `POST
   /docs/{id}/database/query`, `POST /docs/{id}/rows`, `PATCH /docs/{id}/rows/{row}`, `POST /docs/{id}/rows/trash` under the

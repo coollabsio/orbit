@@ -3,7 +3,7 @@ import type { CellValue, Property, Row, SelectOption } from '@orbit/database/typ
 import { apiValue, cellOf } from '@orbit/database/values'
 import { repairConfig } from '@orbit/database/view'
 import { useState } from 'react'
-import { Pressable, View } from 'react-native'
+import { Alert, Pressable, View } from 'react-native'
 
 import { PROPERTY_ICONS, pickView } from '../../data/database'
 import { type Notify, useDatabase, useSaveOptions, useUpdateValues, useViewContext, useWorkspaceReadOnly } from '../../hooks/database'
@@ -90,12 +90,15 @@ function PropertyLine({ property, row, editable, onEdit, onToggle, ctx }: {
   const { colors } = useTheme()
   const value = cellOf(row, property)
   const checkbox = property.type === 'checkbox'
+  // Formulas run on the server and are edited on the web (spec P3 15.10).
+  const formula = property.type === 'formula'
   return (
     <Pressable
-      accessibilityRole={editable ? 'button' : undefined}
+      accessibilityRole={editable || formula ? 'button' : undefined}
       accessibilityLabel={editable ? `Edit ${property.name}` : property.name}
-      disabled={!editable}
-      onPress={checkbox ? onToggle : onEdit}
+      accessibilityHint={formula ? 'Edit this formula on the web.' : undefined}
+      disabled={!editable && !formula}
+      onPress={formula ? () => Alert.alert(property.name, 'Edit this formula on the web.') : checkbox ? onToggle : onEdit}
       className="min-h-[38px] flex-row items-start gap-1 rounded-md active:bg-muted"
     >
       <View className="h-[38px] w-[38%] flex-row items-center gap-1.5 px-1.5">

@@ -8,6 +8,7 @@ import {
   pointText,
 } from './dates'
 import { parseButtonConfig } from './buttons'
+import { formulaBase, formulaError, formulaRaw, parseFormulaConfig } from './formula/values'
 import { parseFiles, parseUniqueIdConfig, uniqueIdText, validEmail, validPhone } from './fields'
 import {
   DATE_FORMATS,
@@ -87,6 +88,8 @@ export function parseProperty(property: DatabaseProperty): Property {
       return { ...rest, type: rest.type, config: parseUniqueIdConfig(config) }
     case 'button':
       return { ...rest, type: rest.type, config: parseButtonConfig(config) }
+    case 'formula':
+      return { ...rest, type: rest.type, config: parseFormulaConfig(config) }
     default:
       return unreachable(rest.type)
   }
@@ -94,11 +97,14 @@ export function parseProperty(property: DatabaseProperty): Property {
 
 export function parseRow(row: DatabaseRow, properties: readonly Property[]): Row {
   const values: Record<string, CellValue> = {}
+  const formulaErrors: Record<string, string> = {}
   for (const property of properties) {
     const value = parseValue(property, row.values[property.id])
     if (value) values[property.id] = value
+    const error = property.type === 'formula' ? formulaError(row.values[property.id]) : null
+    if (error !== null) formulaErrors[property.id] = error
   }
-  return { ...row, values }
+  return Object.keys(formulaErrors).length > 0 ? { ...row, values, formulaErrors } : { ...row, values }
 }
 
 /**
@@ -153,6 +159,8 @@ export function parseValue(property: Property, raw: unknown): CellValue | null {
     case 'last_edited_by':
     case 'button':
       return null
+    case 'formula':
+      return parseValue(formulaBase(property), formulaRaw(property, raw))
     default:
       return unreachable(property)
   }
@@ -192,6 +200,7 @@ export function cellOf(row: Row, property: Property): CellValue | null {
     case 'phone':
     case 'files':
     case 'unique_id':
+    case 'formula':
       return row.values[property.id] ?? null
     case 'button':
       return null
@@ -234,6 +243,7 @@ export function apiValue(value: CellValue | null): unknown {
 /** The text a cell shows, formatted by the property's config, in the viewer's zone and locale. */
 export function displayText(property: Property, value: CellValue | null, ctx: ViewContext): string {
   if (!value) return ''
+  if (property.type === 'formula') return displayText(formulaBase(property), value, ctx)
   switch (value.kind) {
     case 'text':
       return value.text
@@ -315,6 +325,7 @@ export function valueFromText(property: Property, input: string, ctx: ViewContex
     case 'last_edited_time':
     case 'last_edited_by':
     case 'button':
+    case 'formula':
       return null
     default:
       return unreachable(property)

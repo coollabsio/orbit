@@ -14,6 +14,7 @@ import type {
   DatabaseViewSort,
 } from '@orbit/api/generated/types.gen'
 import type { ButtonConfig } from './buttons'
+import type { FormulaConfig } from './formula/values'
 
 export type {
   DatabaseCalculation,
@@ -77,8 +78,9 @@ export type PropertyKind =
   | { type: 'date'; config: DateConfig }
   | { type: 'button'; config: ButtonConfig }
   | { type: 'unique_id'; config: UniqueIdConfig }
+  | { type: 'formula'; config: FormulaConfig }
   | {
-      type: Exclude<DatabasePropertyType, 'number' | 'select' | 'multi_select' | 'status' | 'date' | 'button' | 'unique_id'>
+      type: Exclude<DatabasePropertyType, 'number' | 'select' | 'multi_select' | 'status' | 'date' | 'button' | 'unique_id' | 'formula'>
       config: Record<string, never>
     }
 
@@ -113,7 +115,11 @@ export type CellValue =
   | { kind: 'unique_id'; number: number }
 
 /** A row whose stored values are parsed; a property missing from `values` is empty. */
-export type Row = Omit<DatabaseRow, 'values'> & { values: Readonly<Record<string, CellValue>> }
+export type Row = Omit<DatabaseRow, 'values'> & {
+  values: Readonly<Record<string, CellValue>>
+  /** Formula cells that failed, by property id: the message (the cell has no value). */
+  formulaErrors?: Readonly<Record<string, string>>
+}
 
 export type Database = Omit<DatabaseDetail, 'properties' | 'rows'> & {
   properties: Property[]

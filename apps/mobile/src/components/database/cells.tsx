@@ -9,6 +9,7 @@ import { PILL_COLORS } from '../../data/database'
 import { useTheme } from '../../theme'
 import { Avatar, Icon, Text } from '../../ui'
 import { ButtonCell } from './ButtonCell'
+import { FormulaValue } from './FormulaValue'
 import { contactHref } from '@orbit/database/fields'
 
 /** A select, multi-select or status option; a status pill is round with a dot of its color. */
@@ -66,6 +67,7 @@ export function RowTitle({ row, className = 'text-[14px]' }: { row: Row; classNa
 export function CellValue({ property, row, ctx, chip = false }: { property: Property; row: Row; ctx: ViewContext; chip?: boolean }) {
   const { colors } = useTheme()
   if (property.type === 'button') return <ButtonCell property={property} row={row} />
+  if (property.type === 'formula') return <FormulaValue property={property} row={row} ctx={ctx} chip={chip} />
   const value = cellOf(row, property)
   if (!value) return null
   switch (property.type) {

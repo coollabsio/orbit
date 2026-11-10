@@ -1311,6 +1311,29 @@ from 15.9.
 | OQ-13.1 | Read properties of related pages inside formulas (Notion 2.0 does)? It makes rollups mostly unneeded but needs related rows at read time. Proposal: v2, after rollups. |
 | OQ-13.2 | Rich text output (`style`, `link` as a link)? Proposal: `link` only. |
 
+### 15.13 Status
+
+Done on 2026-11-10 (no migration: the type is checked in Rust and the expression lives in `config_json`). No tests
+and no bench in this round (the user asked for none; 15.9 and 15.11 are still to write). Code: server
+`repositories/databases/formula/` (`syntax`, `check`, `eval`, `dates`, `value`), `database_routes/formula.rs`,
+`notion/formula.rs`; shared `@orbit/database/formula/{values,tokens,functions}`; web `database/FormulaDialog.tsx`,
+`cells/FormulaCell.tsx`; mobile `components/database/FormulaValue.tsx`. Differences from this section:
+
+| # | Item | Where | Why |
+|---|---|---|---|
+| 1 | Result types are `number`, `text`, `boolean`, `date`, `person`, `page` and `list<…>`; a person property reads as `list<person>`. | `formula/mod.rs` (`FormulaType`) | `people`/`pages` cannot tell one person (`first(…)`) from a list. |
+| 2 | A failed cell is `{"error": message}` in `values`; clients move it to `row.formulaErrors`. Sorts put errors with empty values (not after them); filters treat them as empty; calculations skip them. | `formula/mod.rs` (`fill`), `@orbit/database/values` | One shape in `values`; no sort rank for errors on the client. |
+| 3 | A deleted property is not written back into the expression: its id stays, reads as "A property was deleted.", and the editor shows it red. Formulas whose result type changes with a property change or delete get the new type saved (`refresh_types`). | `formula/mod.rs` | Ids are never reused, so the dangling id is the mark. |
+| 4 | Preview body `{expression, property_id?}` with `?tz=`; samples are the first 10 rows in manual order, not the view's order. | `database_routes/formula.rs` | The server has no view sort for this route. |
+| 5 | All cells of one read share a 2 s budget; later cells show "Formulas took too long…". Cells run on the request task, not `spawn_blocking`. | `formula/mod.rs`, `eval.rs` | The step limit alone allows 200 M steps per read; the budget bounds the worst case. |
+| 6 | `link(label, url)` gives the label as text (OQ-13.2 not built). | `eval.rs` | No rich text values yet. |
+| 7 | Semantics the spec leaves open: an empty number or date reads as no value, and arithmetic with no value gives no value; an empty text reads `""`, a status its default option; `ifs` without an else gives no value; `split` without a separator splits characters; `month()` is 1 to 12, `day()` 1 (Monday) to 7; `at` and `slice` take negative indexes; `format(date)` is ISO; `dateBetween` truncates. An empty expression is valid and gives no value. | `eval.rs`, `dates.rs`, `value.rs` | Notion 2.0 behavior where known. |
+| 8 | Filters follow the result type (number, text, boolean as checkbox, date); list, person and page results filter only on empty. Calculations follow the result type. | `PropertyKind::filter_type`, `@orbit/database/formula/values` | Same on server and clients. |
+| 9 | A type change to `formula` may carry its `config` in the same request. | `update_property` | A formula stores no values to convert. |
+| 10 | The server's Markdown/CSV export and search do not include formula values (the web CSV export uses the shown text). | `export.rs`, `search.rs` | Export reads stored values; search excludes computed values (15.10). |
+| 11 | Notion import turns `{{notion:block_property:<id>:…}}` tokens into `prop("<Orbit id>")` before the check. | `notion/formula.rs` | Notion's API returns tokens, not names. |
+| 12 | Web completion is a list under the field (property names inside `prop("`, functions and properties elsewhere); Ctrl/⌘+Enter saves. Changing a type to Formula opens the editor. | `FormulaDialog.tsx`, `ColumnHeaderMenu.tsx` | Simpler than a caret popup. |
+
 ## 16. Item 14: Gallery view and timeline view (P3, L)
 
 Needs: the view type check from 3.2. Files preview needs item 10.

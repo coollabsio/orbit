@@ -9,6 +9,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { CALCULATION_LABELS, calculate, calculationsFor } from '@orbit/database/calculate'
+import { filterTypeOf } from '@orbit/database/formula/values'
 import type { DatabaseCalculation, Property, Row, ViewConfig } from '@orbit/database/types'
 import { useDatabaseEnv } from './context'
 
@@ -70,7 +71,7 @@ function CalculationCell({ property, rows, fn, onChange }: { property: Property;
               None
             </DropdownMenuRadioItem>
             <DropdownMenuSeparator />
-            {calculationsFor(property.type).map((option) => (
+            {calculationsFor(filterTypeOf(property)).map((option) => (
               <DropdownMenuRadioItem key={option} value={option} closeOnClick>
                 {CALCULATION_LABELS[option].name}
               </DropdownMenuRadioItem>

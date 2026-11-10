@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { filterRules, isGroup, MAX_GROUP_CHILDREN, MAX_RULES } from '@orbit/database/filter'
 import { appendChild, canNestGroup, duplicateNode, updateNode, wrapInGroup, type NodePath } from '@orbit/database/filterTree'
 import { newRule, OPERATOR_LABELS, operatorsOf, ruleNeedsValue, ruleValueText } from '@orbit/database/meta'
+import { filterProperty } from '@orbit/database/formula/values'
 import type { DatabaseFilterGroup, DatabaseFilterNode, DatabaseFilterOperator, DatabaseFilterRule, Property } from '@orbit/database/types'
 import { useDatabaseEnv } from './context'
 import { RuleValue } from './FilterBar'
@@ -131,8 +132,9 @@ function NodeLine({ node, path, root, properties, rulesLeft, roomy, onChange }: 
 }
 
 function RuleFields({ rule, properties, onChange }: { rule: DatabaseFilterRule; properties: Property[]; onChange: (rule: DatabaseFilterRule) => void }) {
-  const property = properties.find((candidate) => candidate.id === rule.property_id)
-  if (!property) return null
+  const found = properties.find((candidate) => candidate.id === rule.property_id)
+  if (!found) return null
+  const property = filterProperty(found)
   const propertyItems = properties.map((candidate) => ({ value: candidate.id, label: candidate.name }))
   const operatorItems = operatorsOf(property.type).map((operator) => ({ value: operator, label: OPERATOR_LABELS[operator] }))
   const setOperator = (operator: DatabaseFilterOperator) => onChange({ ...rule, operator, value: ruleNeedsValue(operator) ? rule.value : null })

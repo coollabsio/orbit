@@ -30,6 +30,7 @@ import { placeColumn } from './databaseLib'
 import { isComputed } from '@orbit/database/meta'
 import { CREATABLE_TYPES, PROPERTY_TYPES } from './propertyMeta'
 import { ButtonConfigDialog } from './ButtonConfigDialog'
+import { FormulaDialog } from './FormulaDialog'
 import { UniqueIdPrefix } from './UniqueIdPrefix'
 
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'HUF']
@@ -55,6 +56,7 @@ export function ColumnHeaderMenu({ property, config, onConfig, onFilter }: Colum
   const [header, setHeader] = useState<HTMLButtonElement | null>(null)
   const isTitle = property.type === 'title'
   const [configuringButton, setConfiguringButton] = useState(false)
+  const [editingFormula, setEditingFormula] = useState(false)
 
   const rename = () => {
     const next = name.trim()
@@ -82,7 +84,8 @@ export function ColumnHeaderMenu({ property, config, onConfig, onFilter }: Colum
     ) {
       return
     }
-    updateProperty.mutate({ propertyId: property.id, body: { type } })
+    // A new formula opens its editor (it shows once the refetch has the formula).
+    updateProperty.mutate({ propertyId: property.id, body: { type } }, { onSuccess: () => setEditingFormula(type === 'formula') })
   }
   const setConfig = (change: Record<string, unknown>) =>
     updateProperty.mutate({ propertyId: property.id, body: { config: { ...property.config, ...change } } })
@@ -222,6 +225,12 @@ export function ColumnHeaderMenu({ property, config, onConfig, onFilter }: Colum
                     <DropdownMenuItem onClick={() => setConfiguringButton(true)}>Edit button…</DropdownMenuItem>
                   </>
                 ) : null}
+                {property.type === 'formula' ? (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => setEditingFormula(true)}>Edit formula…</DropdownMenuItem>
+                  </>
+                ) : null}
                 {property.type === 'unique_id' ? (
                   <>
                     <DropdownMenuSeparator />
@@ -300,6 +309,7 @@ export function ColumnHeaderMenu({ property, config, onConfig, onFilter }: Colum
         ) : null}
       </Popover>
       {configuringButton && property.type === 'button' ? <ButtonConfigDialog property={property} onClose={() => setConfiguringButton(false)} /> : null}
+      {editingFormula && property.type === 'formula' ? <FormulaDialog property={property} onClose={() => setEditingFormula(false)} /> : null}
     </>
   )
 }

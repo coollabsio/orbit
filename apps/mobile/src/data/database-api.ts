@@ -7,9 +7,10 @@ import type { OrbitClient } from './orbit'
 
 const databasePath = (workspaceId: string, databaseId: string) => ({ workspace_id: workspaceId, database_id: databaseId })
 
-/** With `linkId`, `views` are the linked view block's instead of the database's own. */
+/** With `linkId`, `views` are the linked view block's instead of the database's own. Formulas compute in the viewer's zone. */
 export async function database(client: OrbitClient, workspaceId: string, databaseId: string, linkId = ''): Promise<DatabaseDetail> {
-  return (await getDatabase({ client, path: databasePath(workspaceId, databaseId), query: linkId ? { link: linkId } : undefined, throwOnError: true })).data
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+  return (await getDatabase({ client, path: databasePath(workspaceId, databaseId), query: { tz, ...(linkId ? { link: linkId } : {}) }, throwOnError: true })).data
 }
 
 /** Values by property id; `null` clears one. */

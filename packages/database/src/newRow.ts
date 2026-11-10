@@ -78,6 +78,7 @@ function valueFor(rule: DatabaseFilterRule, property: Property, ctx: ViewContext
     case 'button':
     case 'files':
     case 'unique_id':
+    case 'formula':
       return null
   }
 }
