@@ -24,7 +24,7 @@ import { confirmAction } from '@/components/common/confirmAction'
 import { isPaymentRequired } from '@orbit/api/problem'
 import type { DatabasePropertyType, Property, ViewConfig } from '@orbit/database/types'
 import { databaseErrorMessage } from '@orbit/database/errors'
-import { previewPropertyUpdate, useCreateProperty, useDeleteProperty, useUpdateProperty } from './api'
+import { previewPropertyUpdate, useCreateProperty, useDatabase, useDeleteProperty, useUpdateProperty } from './api'
 import { useDatabaseEnv } from './context'
 import { placeColumn } from './databaseLib'
 import { filterable, isComputed, sortable } from '@orbit/database/meta'
@@ -58,6 +58,8 @@ export function ColumnHeaderMenu({ property, config, onConfig, onFilter }: Colum
   const isTitle = property.type === 'title'
   const [configuringButton, setConfiguringButton] = useState(false)
   const [editingFormula, setEditingFormula] = useState(false)
+  /** A property inserted from this header; a formula or a button opens its editor. */
+  const [created, setCreated] = useState<string | null>(null)
 
   const rename = () => {
     const next = name.trim()
@@ -100,7 +102,12 @@ export function ColumnHeaderMenu({ property, config, onConfig, onFilter }: Colum
     // The server adds the column to the end of every view; this view gets it next to the clicked column.
     createProperty.mutate(
       { name, type, ...(propertyConfig ? { config: propertyConfig } : {}) },
-      { onSuccess: (created) => onConfig(placeColumn(config, created.id, property.id, side)) },
+      {
+        onSuccess: (created) => {
+          onConfig(placeColumn(config, created.id, property.id, side))
+          setCreated(created.id)
+        },
+      },
     )
   }
   const remove = async () => {
@@ -320,8 +327,18 @@ export function ColumnHeaderMenu({ property, config, onConfig, onFilter }: Colum
       </Popover>
       {configuringButton && property.type === 'button' ? <ButtonConfigDialog property={property} onClose={() => setConfiguringButton(false)} /> : null}
       {editingFormula && property.type === 'formula' ? <FormulaDialog property={property} onClose={() => setEditingFormula(false)} /> : null}
+      {created ? <NewPropertySetup propertyId={created} onClose={() => setCreated(null)} /> : null}
     </>
   )
+}
+
+/** A new formula or button opens its editor at once: without an expression or actions it does nothing. */
+function NewPropertySetup({ propertyId, onClose }: { propertyId: string; onClose: () => void }) {
+  const { workspaceId, databaseId } = useDatabaseEnv()
+  const property = useDatabase(workspaceId, databaseId).data?.properties.find((candidate) => candidate.id === propertyId)
+  if (property?.type === 'formula') return <FormulaDialog property={property} onClose={onClose} />
+  if (property?.type === 'button') return <ButtonConfigDialog property={property} onClose={onClose} />
+  return null
 }
 
 /** The "+" header cell: a name and a type make a new property at the end of the views. */
@@ -329,24 +346,28 @@ export function AddPropertyButton() {
   const { workspaceId, databaseId } = useDatabaseEnv()
   const createProperty = useCreateProperty(workspaceId, databaseId)
   const [open, setOpen] = useState(false)
+  const [created, setCreated] = useState<string | null>(null)
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <Tip label="Add a property">
-        <PopoverTrigger render={<Button type="button" variant="ghost" size="icon-sm" className="m-0.5 text-muted-foreground" aria-label="Add a property" />}>
-          <Add />
-        </PopoverTrigger>
-      </Tip>
-      <PopoverContent align="end" className="w-60 gap-0 p-0">
-        <NewPropertyForm
-          relations
-          onCreate={(name, type, config) => {
-            setOpen(false)
-            // The server adds the column to the end of every view.
-            createProperty.mutate({ name, type, ...(config ? { config } : {}) })
-          }}
-        />
-      </PopoverContent>
-    </Popover>
+    <>
+      <Popover open={open} onOpenChange={setOpen}>
+        <Tip label="Add a property">
+          <PopoverTrigger render={<Button type="button" variant="ghost" size="icon-sm" className="m-0.5 text-muted-foreground" aria-label="Add a property" />}>
+            <Add />
+          </PopoverTrigger>
+        </Tip>
+        <PopoverContent align="end" className="w-60 gap-0 p-0">
+          <NewPropertyForm
+            relations
+            onCreate={(name, type, config) => {
+              setOpen(false)
+              // The server adds the column to the end of every view.
+              createProperty.mutate({ name, type, ...(config ? { config } : {}) }, { onSuccess: (property) => setCreated(property.id) })
+            }}
+          />
+        </PopoverContent>
+      </Popover>
+      {created ? <NewPropertySetup propertyId={created} onClose={() => setCreated(null)} /> : null}
+    </>
   )
 }
 
