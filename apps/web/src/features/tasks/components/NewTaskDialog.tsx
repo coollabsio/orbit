@@ -9,7 +9,6 @@ import { Tip } from '@/components/common/Tip'
 import { Dialog, DialogContent, DialogFooter, DialogTitle } from '@/components/ui/dialog'
 import {
   DropdownMenu,
-  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
@@ -22,7 +21,8 @@ import { clipboardFiles } from '@/lib/attachmentLib'
 import type { CreateTaskBody, TaskRecord } from '@orbit/api/generated/types.gen'
 import { ColorDot } from '@/components/common/ColorDot'
 import { DatePicker } from '@/components/common/DatePicker'
-import { UserAvatar, UserAvatarStack } from '@/components/common/UserAvatar'
+import { SearchPicker } from '@/components/common/SearchPicker'
+import { UserAvatarStack } from '@/components/common/UserAvatar'
 import { uploadInlineFile } from '@/features/tasks/api/inlineFiles'
 import { fileBlock, isEmptyRichText } from '@/features/tasks/lib/richText'
 // Type-only import: erased at build time, so the BlockNote chunk stays lazy.
@@ -37,6 +37,7 @@ import { dueDateLabel, matchingLabelIds, PRIORITY_LABEL, PRIORITY_ORDER, project
 import { resolveStatusId } from '@/features/tasks/tasksLib'
 import { ADD_RELATION_OPTIONS, type RelationKind } from '@/features/tasks/relationsLib'
 import { EditorFallback, PageEditor } from './lazyEditor'
+import { personOption, projectOption } from './pickerOptions'
 import { PriorityIcon } from './PriorityIcon'
 import { LabelPicker } from './TaskLabels'
 import { TaskPickerDialog } from './TaskPickerDialog'
@@ -212,30 +213,21 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
           }}
         >
           <div className="flex items-center gap-1.5 pr-8">
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button type="button" variant="outline" size="xs" className="max-w-48 font-normal" aria-label={`Project: ${project?.name ?? 'none'}`}>
-                    <ColorDot color={project?.color} />
-                    <span className="truncate">{project?.name ?? 'No project'}</span>
-                  </Button>
-                }
-              />
-              <DropdownMenuContent className="w-auto min-w-45">
-                {projects.map((option) => (
-                  <DropdownMenuItem
-                    key={option.id}
-                    className="data-selected:bg-accent data-selected:font-medium"
-                    data-selected={option.id === project?.id || undefined}
-                    // the status follows by name into the other project's workflow
-                    onClick={() => setDraft((current) => ({ ...current, projectId: option.id, statusId: resolveStatusId(statuses, option.id, status ? statusKeyOf(status) : null) }))}
-                  >
-                    <ColorDot color={option.color} />
-                    <span className="truncate">{option.name}</span>
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <SearchPicker
+              label="Project"
+              placeholder="Change project…"
+              emptyText="No projects match"
+              options={projects.map(projectOption)}
+              selected={project ? [project.id] : []}
+              // the status follows by name into the other project's workflow
+              onSelect={(id) => setDraft((current) => ({ ...current, projectId: id, statusId: resolveStatusId(statuses, id, status ? statusKeyOf(status) : null) }))}
+              trigger={
+                <Button type="button" variant="outline" size="xs" className="max-w-48 font-normal" aria-label={`Project: ${project?.name ?? 'none'}`}>
+                  <ColorDot color={project?.color} />
+                  <span className="truncate">{project?.name ?? 'No project'}</span>
+                </Button>
+              }
+            />
             <ChevronRight aria-hidden className="size-3 text-muted-foreground/70" />
             <DialogTitle className="text-xs font-normal text-muted-foreground">New task</DialogTitle>
           </div>
@@ -397,40 +389,30 @@ export function NewTaskDialog({ defaults = {}, initialTitle = '', initialDescrip
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button type="button" variant="outline" size="sm" className="max-w-56 font-normal" aria-label="Assignees">
-                    {assignees.length > 0 ? (
-                      <>
-                        <UserAvatarStack users={assignees} size={16} />
-                        <span className="truncate">{assignees.map((member) => member.name).join(', ')}</span>
-                      </>
-                    ) : (
-                      <>
-                        <UserIcon aria-hidden="true" className="text-muted-foreground" />
-                        Assignee
-                      </>
-                    )}
-                  </Button>
-                }
-              />
-              <DropdownMenuContent className="w-auto min-w-45">
-                {members.map((member) => {
-                  const active = draft.assigneeIds.includes(member.id)
-                  return (
-                    <DropdownMenuCheckboxItem
-                      key={member.id}
-                      checked={active}
-                      onCheckedChange={() => setDraft((current) => ({ ...current, assigneeIds: active ? current.assigneeIds.filter((id) => id !== member.id) : [...current.assigneeIds, member.id] }))}
-                    >
-                      <UserAvatar user={member} size={16} />
-                      {member.name}
-                    </DropdownMenuCheckboxItem>
-                  )
-                })}
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <SearchPicker
+              multiple
+              label="Assignees"
+              placeholder="Assign to…"
+              emptyText="No people match"
+              options={members.map(personOption)}
+              selected={draft.assigneeIds}
+              onSelect={(id) => setDraft((current) => ({ ...current, assigneeIds: current.assigneeIds.includes(id) ? current.assigneeIds.filter((item) => item !== id) : [...current.assigneeIds, id] }))}
+              trigger={
+                <Button type="button" variant="outline" size="sm" className="max-w-56 font-normal" aria-label="Assignees">
+                  {assignees.length > 0 ? (
+                    <>
+                      <UserAvatarStack users={assignees} size={16} />
+                      <span className="truncate">{assignees.map((member) => member.name).join(', ')}</span>
+                    </>
+                  ) : (
+                    <>
+                      <UserIcon aria-hidden="true" className="text-muted-foreground" />
+                      Assignee
+                    </>
+                  )}
+                </Button>
+              }
+            />
             <LabelPicker
               workspaceId={workspace.id}
               projectId={project?.id ?? ''}
