@@ -8,7 +8,6 @@ import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { UNDO_TOAST_DURATION } from '@/lib/toast'
 import { loadFailed } from '@/lib/connection'
-import { useScrollMemory } from '@/lib/useScrollMemory'
 import { Bookmark, ChevronDown, Import, Add as Plus, Setting2 as Settings, TaskSquare as SquareCheck } from 'reicon-react'
 import { cn } from 'cn'
 import { ApiProblem } from '@orbit/api/problem'
@@ -318,9 +317,6 @@ function WorkspaceTasksPage() {
     const frame = requestAnimationFrame(() => focusTaskRow(id, pointer))
     return () => cancelAnimationFrame(frame)
   }, [listKey, pointer, tasksShown])
-  // the board scrolls in the page; the list and the timeline remember their own scrollers
-  const boardScroller = useRef<HTMLDivElement>(null)
-  useScrollMemory(boardScroller, 'task-board', tasksShown && layout === 'board')
   // list keys work in every layout; rows can be selected in the list only (it has the bulk toolbar)
   useListNavigation(detailOpen ? null : openTask, { selectable: layout === 'list' })
 
@@ -495,7 +491,7 @@ function WorkspaceTasksPage() {
             }}
           />
           {showNewProject ? <NewProjectModal onClose={() => setShowNewProject(false)} onCreated={(project) => { setProjectFilter(project.id); setShowNewProject(false) }} /> : null}
-          <div ref={boardScroller} className={cn('min-h-0 flex-1', layout === 'timeline' ? 'overflow-hidden' : 'overflow-y-auto')}>
+          <div className={cn('min-h-0 flex-1', layout === 'timeline' ? 'overflow-hidden' : 'overflow-y-auto')}>
             {tasksQuery.error || tasksQuery.isLoading ? (
               <div className="flex h-full flex-col p-2 *:flex-1">
                 {tasksQuery.error
