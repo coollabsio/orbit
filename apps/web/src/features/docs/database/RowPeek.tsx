@@ -195,7 +195,7 @@ export function RowPeek({ workspaceId, databaseId, rowId, viewId, order, focusTi
       className="flex h-full min-h-0 w-1/2 min-w-0 shrink-0 animate-in flex-col border-l border-border bg-background duration-150 ease-out fade-in max-[899px]:fixed max-[899px]:inset-0 max-[899px]:z-40 max-[899px]:w-full max-[899px]:border-l-0 max-[899px]:duration-200 max-[899px]:slide-in-from-bottom-2 motion-reduce:animate-none"
       data-row-peek={rowId}
     >
-      {template ? <TemplateBar key={template.id} workspaceId={workspaceId} databaseId={databaseId} template={template} /> : null}
+      {template ? <TemplateBar key={`template-${template.id}`} workspaceId={workspaceId} databaseId={databaseId} template={template} /> : null}
       {page.data && !foreign ? (
         <DocEditor
           key={rowId}
