@@ -55,6 +55,12 @@ export type StatusOption = SelectOption & { group: StatusGroup }
 export const NUMBER_FORMATS = ['number', 'number_with_commas', 'percent', 'currency'] as const
 export type NumberConfig = { format: (typeof NUMBER_FORMATS)[number]; currency?: string }
 
+/** `next` is the number the next row gets; only the server changes it. */
+export type UniqueIdConfig = { prefix: string | null; next: number }
+
+/** A file of a files value: a file of the row page. */
+export type FileRef = { file_id: string; name: string }
+
 export const DATE_FORMATS = ['relative', 'short', 'iso'] as const
 export const TIME_FORMATS = ['12h', '24h'] as const
 export type DateConfig = {
@@ -69,8 +75,9 @@ export type PropertyKind =
   | { type: 'status'; config: { options: StatusOption[] } }
   | { type: 'date'; config: DateConfig }
   | { type: 'button'; config: ButtonConfig }
+  | { type: 'unique_id'; config: UniqueIdConfig }
   | {
-      type: Exclude<DatabasePropertyType, 'number' | 'select' | 'multi_select' | 'status' | 'date' | 'button'>
+      type: Exclude<DatabasePropertyType, 'number' | 'select' | 'multi_select' | 'status' | 'date' | 'button' | 'unique_id'>
       config: Record<string, never>
     }
 
@@ -99,6 +106,10 @@ export type CellValue =
   | { kind: 'people'; ids: string[] }
   | { kind: 'checked' }
   | { kind: 'url'; url: string }
+  /** Files of the row page, at most 20. */
+  | { kind: 'files'; files: FileRef[] }
+  /** A unique ID number (the prefix is the property's). Email and phone values are `text`. */
+  | { kind: 'unique_id'; number: number }
 
 /** A row whose stored values are parsed; a property missing from `values` is empty. */
 export type Row = Omit<DatabaseRow, 'values'> & { values: Readonly<Record<string, CellValue>> }

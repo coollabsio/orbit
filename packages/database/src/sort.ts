@@ -47,6 +47,8 @@ function sortKey(row: Row, property: Property, ctx: ViewContext): SortKey {
     case 'title':
     case 'text':
     case 'url':
+    case 'email':
+    case 'phone':
     case 'person':
     case 'created_by':
     case 'last_edited_by': {
@@ -55,6 +57,10 @@ function sortKey(row: Row, property: Property, ctx: ViewContext): SortKey {
     }
     case 'number':
       return cell?.kind === 'number' ? cell.number : null
+    case 'unique_id':
+      return cell?.kind === 'unique_id' ? cell.number : null
+    case 'files':
+      return cell?.kind === 'files' ? cell.files.length : null
     case 'select':
     case 'status':
     case 'multi_select': {

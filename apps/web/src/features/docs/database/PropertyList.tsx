@@ -90,7 +90,7 @@ function PropertyLine({ property, row, today }: { property: Property; row: Row; 
     updateProperty.mutateAsync({ propertyId: property.id, body: { config: { ...property.config, options } } }).then(() => undefined)
   const checkbox = property.type === 'checkbox'
   const opensEditor = editable && !checkbox
-  const inline = property.type === 'number' || property.type === 'url'
+  const inline = property.type === 'number' || property.type === 'url' || property.type === 'email' || property.type === 'phone'
 
   return (
     <div className="flex min-h-[34px] items-start gap-1 text-sm">

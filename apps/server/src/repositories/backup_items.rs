@@ -19,7 +19,8 @@ use utoipa::ToSchema;
 
 use super::billing::{TrialCapacityError, TrialLimitReached, ensure_trial_capacity};
 use super::databases::{
-    DatabaseData, RowCapacityError, ensure_row_capacity, retain_fitting_values, write_database_data,
+    DatabaseData, RowCapacityError, ensure_row_capacity, renumber_copy, retain_fitting_values,
+    write_database_data,
 };
 use super::pages::{PageKind, PageSpace, Remap, content_text, is_database, renumber, sibling_ids};
 use super::tasks::description_from_blocks;
@@ -597,9 +598,14 @@ impl BackupItemRepository {
             }
             None => data.values.retain(|(page, ..)| *page != root.id),
         }
-        write_database_data(&mut tx, workspace_id, data, &page_ids, actor_id, now)
+        write_database_data(&mut tx, workspace_id, data, &page_ids, &file_ids, actor_id, now)
             .await
             .map_err(page_error)?;
+        if let Some(database_id) = database_id {
+            renumber_copy(&mut tx, workspace_id, database_id, page_ids[&root.id], actor_id, now)
+                .await
+                .map_err(page_error)?;
+        }
         for ((page, file), row, blob) in &file_rows {
             sqlx::query(
                 "INSERT INTO page_files (id, workspace_id, page_id, blob_id, file_name, mime_type, \

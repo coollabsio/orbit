@@ -9,6 +9,7 @@ import { PILL_COLORS } from '../../data/database'
 import { useTheme } from '../../theme'
 import { Avatar, Icon, Text } from '../../ui'
 import { ButtonCell } from './ButtonCell'
+import { contactHref } from '@orbit/database/fields'
 
 /** A select, multi-select or status option; a status pill is round with a dot of its color. */
 export function Pill({ color, label, dot = false }: { color: OptionColor; label: string; dot?: boolean }) {
@@ -110,14 +111,35 @@ export function CellValue({ property, row, ctx, chip = false }: { property: Prop
           {urlLabel(value.url)}
         </Text>
       ) : null
+    case 'email':
+    case 'phone':
+      return value.kind === 'text' ? (
+        <Text numberOfLines={1} onPress={() => void Linking.openURL(contactHref(property.type === 'email' ? 'email' : 'phone', value.text)).catch(() => {})} className={`text-[13px] text-foreground underline ${chip ? 'px-1.5 rounded-[4px] border border-border' : ''}`}>
+          {value.text}
+        </Text>
+      ) : null
+    case 'files':
+      return value.kind === 'files' ? (
+        <View className="flex-row flex-wrap gap-1 min-w-0">
+          {value.files.map((file) => (
+            <View key={file.file_id} className="h-5 max-w-full flex-row items-center gap-1 px-1.5 rounded-[4px] bg-muted">
+              <Icon name="attach" size={12} color={colors.mutedForeground} />
+              <Text numberOfLines={1} className="shrink text-[12px] leading-4 text-foreground">
+                {file.name}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ) : null
     case 'title':
       return null
+    case 'unique_id':
     case 'text':
     case 'number':
     case 'date':
     case 'created_time':
     case 'last_edited_time': {
-      const muted = property.type === 'created_time' || property.type === 'last_edited_time'
+      const muted = property.type === 'created_time' || property.type === 'last_edited_time' || property.type === 'unique_id'
       return chip ? (
         <View className="h-5 max-w-full justify-center px-1.5 rounded-[4px] border border-border">
           <Text numberOfLines={1} className="text-[12px] leading-4 text-muted-foreground">

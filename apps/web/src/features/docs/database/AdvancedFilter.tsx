@@ -177,10 +177,10 @@ function RuleFields({ rule, properties, onChange }: { rule: DatabaseFilterRule; 
 /** Text and numbers edit in the line; the other values in a popover, as the chips' rule editor. */
 function ValueField({ rule, property, onChange }: { rule: DatabaseFilterRule; property: Property; onChange: (value: unknown) => void }) {
   const { ctx } = useDatabaseEnv()
-  if (property.type === 'title' || property.type === 'text' || property.type === 'url') {
+  if (property.type === 'title' || property.type === 'text' || property.type === 'url' || property.type === 'email' || property.type === 'phone') {
     return <Input aria-label="Value" placeholder="Value" className="h-7 w-40" value={typeof rule.value === 'string' ? rule.value : ''} onChange={(event) => onChange(event.target.value)} />
   }
-  if (property.type === 'number') {
+  if (property.type === 'number' || property.type === 'unique_id') {
     return (
       <Input
         type="number"

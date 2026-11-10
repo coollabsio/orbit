@@ -19,7 +19,7 @@ use utoipa::ToSchema;
 use super::billing::{TrialCapacityError, TrialLimitReached, ensure_trial_capacity};
 use super::databases::{
     DatabaseSchema, LinkCopy, NOT_TEMPLATE, RowCapacityError, block_links, carry_row_values,
-    copy_database_data, copy_links, ensure_row_capacity, insert_schema, is_template,
+    copy_database_data, copy_links, ensure_row_capacity, renumber_copy, insert_schema, is_template,
     linked_databases, row_search_lines,
 };
 use super::page_files::{page_file_url, page_has_file, parse_page_file_url};
@@ -1824,7 +1824,8 @@ impl PageRepository {
         let actor = user_in_tx(&mut tx, actor_id).await?;
         let space = source.space(actor_id);
         // A copied row is one more row of the same database; its sub-pages are not rows.
-        if let Some(database_id) = source.database_id {
+        let row_of = source.database_id;
+        if let Some(database_id) = row_of {
             ensure_row_capacity(&mut tx, database_id, 1).await?;
         }
         // A database's rows are its content: they are always copied.
@@ -2024,8 +2025,20 @@ impl PageRepository {
             .filter(|page| page.kind == PageKind::Database)
             .map(|page| page.id)
             .collect();
-        let property_ids =
-            copy_database_data(&mut tx, workspace_id, &databases, &pages, actor_id, now).await?;
+        let property_ids = copy_database_data(
+            &mut tx,
+            workspace_id,
+            &databases,
+            &pages,
+            &files,
+            actor_id,
+            now,
+        )
+        .await?;
+        if let Some(database_id) = row_of {
+            renumber_copy(&mut tx, workspace_id, database_id, pages[&page_id], actor_id, now)
+                .await?;
+        }
         copy_links(
             &mut tx,
             workspace_id,

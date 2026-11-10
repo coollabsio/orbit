@@ -246,6 +246,12 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
   with that date (plus filter values and the default template). Week start: the locale, or "⋯ → Start week on" (this
   browser, `orbit:calendar-week-start`). Mobile: list views show all visible properties; a calendar is a month grid with
   dots and the tapped day's rows under it (`components/database/Calendar.tsx`), no drag.
+- Database email, phone, files and unique ID properties (databases P2/P3 spec section 12). Email and phone are checked
+  text shown as `mailto:`/`tel:` links. Files hold `[{file_id, name}]` (max 20) of the row page's own files: the web
+  popover uploads (button or drop), reorders and removes; mobile uploads from the photo library or files app. Unique ID
+  (`{prefix, next}`, one per database) numbers existing rows by creation when added and each new row in its create
+  transaction (also CSV import, template, duplicate, move-in, restore); numbers are never reused and only the Notion
+  import may set them. Notion email, phone, unique ID and uploaded files import as these types.
 - Database button property (databases P2/P3 spec section 17, server `repositories/databases/buttons.rs`, shared
   `@orbit/database/buttons`). Config `{label, actions (max 5), confirm}`; actions `set_values` (this row), `add_row` (this
   or another database the presser can open, appended) and `open_url` (one, client side). Values take `"me"` (person),

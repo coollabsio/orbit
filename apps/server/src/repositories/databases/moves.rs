@@ -7,6 +7,7 @@ use serde_json::{Value, json};
 use sqlx::{Any, Transaction};
 
 use super::search::{SearchRows, refresh_search_text};
+use super::unique_id;
 use super::{
     CellValue, DatabaseError, Property, PropertyKind, page_error, parse_id, parse_value,
     properties_in_tx, record_with, upsert_value,
@@ -61,7 +62,7 @@ async fn move_values(
         Some(database_id) => properties_in_tx(tx, database_id).await?,
         None => Vec::new(),
     };
-    let target = match to {
+    let mut target = match to {
         Some(database_id) => properties_in_tx(tx, database_id).await?,
         None => Vec::new(),
     };
@@ -92,6 +93,8 @@ async fn move_values(
     }
     match to {
         Some(database_id) => {
+            unique_id::number_rows(tx, workspace_id, database_id, &mut target, actor_id, now)
+                .await?;
             refresh_search_text(
                 tx,
                 workspace_id,
@@ -144,6 +147,8 @@ fn carry(property: &Property, raw: &Value, target: &[Property]) -> Option<(Id, C
             }
             CellValue::Choices(ids)
         }
+        // The new database numbers the row itself.
+        CellValue::UniqueId(_) => return None,
         other => other,
     };
     let value = parse_value(&into.kind, &value.to_json()).ok()??;

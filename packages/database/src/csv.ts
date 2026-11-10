@@ -1,5 +1,6 @@
 import { dateText, parseDateText } from './dates'
 import type { Database, DatabaseView, Property, Row, ViewContext } from './types'
+import { uniqueIdText, validEmail } from './fields'
 import { cellOf, optionName, unreachable } from './values'
 import { repairConfig, showsCards } from './view'
 
@@ -9,7 +10,7 @@ export const MAX_CSV_ROWS = 5_000
 export const MAX_CSV_COLUMNS = 100
 
 /** The property types an import can create for a column (title is the title column). */
-export type ImportType = 'text' | 'number' | 'select' | 'multi_select' | 'status' | 'date' | 'person' | 'checkbox' | 'url'
+export type ImportType = 'text' | 'number' | 'select' | 'multi_select' | 'status' | 'date' | 'person' | 'checkbox' | 'url' | 'email' | 'phone'
 
 const DELIMITERS = [',', ';', '\t'] as const
 
@@ -95,6 +96,7 @@ export function guessType(values: readonly string[]): ImportType {
   if (cells.every((cell) => NUMBER.test(cell) && Number.isFinite(Number(cell)))) return 'number'
   if (cells.every((cell) => parseDateText(cell) !== null)) return 'date'
   if (cells.every((cell) => /^https?:\/\/\S+$/i.test(cell))) return 'url'
+  if (cells.every(validEmail)) return 'email'
   const distinct = new Set(cells)
   if (
     distinct.size <= MAX_SELECT_OPTIONS &&
@@ -140,6 +142,10 @@ export function csvText(property: Property, row: Row, ctx: ViewContext): string 
       return value.url
     case 'number':
       return String(value.number)
+    case 'files':
+      return value.files.map((file) => file.name).join(', ')
+    case 'unique_id':
+      return uniqueIdText(property, value.number)
     case 'choice':
       return optionName(property, value.id)
     case 'choices':
@@ -211,7 +217,7 @@ function columnValues(table: CsvTable, index: number): string[] {
 
 /** A property a CSV column can fill: not computed, except the title. */
 function fillable(property: Property): boolean {
-  return !['created_time', 'created_by', 'last_edited_time', 'last_edited_by'].includes(property.type)
+  return !['created_time', 'created_by', 'last_edited_time', 'last_edited_by', 'files', 'unique_id'].includes(property.type)
 }
 
 /**

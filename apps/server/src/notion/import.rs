@@ -42,7 +42,7 @@ use super::convert::{
 };
 use super::database::{self, Members, Source};
 use super::files::sanitize_file_name;
-use super::model::{BlockNode, NotionPage, NotionView, normalize_id};
+use super::model::{BlockNode, FileSource, NotionFileRef, NotionPage, NotionView, normalize_id};
 pub use super::scan::{NotionImportNode, NotionImportNodeKind, NotionImportTree};
 use super::scan::{ScanControl, build_tree};
 use crate::billing::WorkspaceAccess;
@@ -51,7 +51,7 @@ use crate::repositories::databases::{
     DatabaseError, DatabaseRepository, DatabaseSchema, NewRow, Property, RowPlacement,
 };
 use crate::repositories::membership;
-use crate::repositories::page_files::{PageFileRepository, page_file_url};
+use crate::repositories::page_files::{PageFileRepository, page_file_url, parse_page_file_url};
 use crate::repositories::page_versions::SaveOrigin;
 use crate::repositories::pages::{
     CreatePage, PageChanges, PageError, PageRepository, PageSpace, SpaceRequest,
@@ -1597,7 +1597,7 @@ impl NotionImportService {
             return Ok(());
         }
         let request_id = format!("notion-import-{page_id}");
-        let changes = {
+        let (changes, file_values) = {
             let page = client.retrieve_page(&item.notion_id).await?;
             let tree = client.fetch_block_tree(&item.notion_id).await?;
             // A resumed import did not fetch the databases created by an earlier run.
@@ -1623,7 +1623,23 @@ impl NotionImportService {
             // Files an earlier attempt of this page already attached (a retry reuses them).
             let attached = self.attached_files(workspace_id, page_id).await?;
             let mut downloaded = HashSet::new();
-            for file in collect_file_refs(Some(&page), &tree.blocks) {
+            // A row's files properties are downloaded with its body.
+            let row_files = if in_database {
+                database::row_files(&page, &mut report.convert)
+            } else {
+                Vec::new()
+            };
+            let mut refs = collect_file_refs(Some(&page), &tree.blocks);
+            refs.extend(row_files.iter().flat_map(|(_, files)| {
+                files.iter().map(|(url, name)| NotionFileRef {
+                    source: FileSource::File,
+                    owner_id: page.id.clone(),
+                    url: url.clone(),
+                    name: name.clone(),
+                    expiry_time: None,
+                })
+            }));
+            for file in refs {
                 if !downloaded.insert(file.url.clone()) || resolver.files.contains_key(&file.url) {
                     continue;
                 }
@@ -1698,6 +1714,7 @@ impl NotionImportService {
                 }
                 _ => None,
             };
+            let file_values = row_file_values(&row_files, resolver);
             // Notion files are per-page: forget them so the map stays small.
             resolver.files.clear();
             let mut ordered = Vec::new();
@@ -1714,7 +1731,7 @@ impl NotionImportService {
                     .await
                     .map_err(page_failure)?;
             }
-            PageChanges {
+            let changes = PageChanges {
                 title: Some(clamp(&converted.title, MAX_TITLE_CHARS, MAX_TITLE_BYTES)),
                 icon: Some(
                     converted
@@ -1728,7 +1745,8 @@ impl NotionImportService {
                 full_width: None,
                 // The imported state becomes an `import` version in the page history.
                 origin: SaveOrigin::Import,
-            }
+            };
+            (changes, file_values)
         };
         let current = self
             .inner
@@ -1749,6 +1767,32 @@ impl NotionImportService {
             )
             .await
             .map_err(page_failure)?;
+        if let Some(database_id) = current.database_id
+            && !file_values.is_empty()
+        {
+            let values = file_values
+                .into_iter()
+                .map(|(notion_id, value)| (database::property_id(database_id, &notion_id), value))
+                .collect();
+            match self
+                .inner
+                .databases
+                .update_values(
+                    workspace_id,
+                    database_id,
+                    page_id,
+                    user_id,
+                    values,
+                    &request_id,
+                    TimestampMillis::now(),
+                )
+                .await
+            {
+                // The property is gone (deleted, or past the property limit).
+                Ok(_) | Err(DatabaseError::Invalid { .. }) => {}
+                Err(error) => return Err(row_failure(error)),
+            }
+        }
         Ok(())
     }
 
@@ -2272,6 +2316,30 @@ fn trial_failure(reached: &crate::repositories::billing::TrialLimitReached) -> F
         "The import stopped at the trial's limit. {}",
         reached.detail()
     ))
+}
+
+/// The files values of a row's `files` properties, from the files its import attached:
+/// `(Notion property id, value)`, empty ones left out.
+fn row_file_values(
+    row_files: &[(String, Vec<(String, Option<String>)>)],
+    resolver: &MapResolver,
+) -> Vec<(String, Value)> {
+    row_files
+        .iter()
+        .filter_map(|(notion_id, files)| {
+            let mut seen = HashSet::new();
+            let value: Vec<Value> = files
+                .iter()
+                .filter_map(|(url, _)| {
+                    let file = resolver.files.get(url)?;
+                    let (_, _, file_id) = parse_page_file_url(&file.url)?;
+                    seen.insert(file_id)
+                        .then(|| json!({ "file_id": file_id.to_string(), "name": file.name }))
+                })
+                .collect();
+            (!value.is_empty()).then(|| (notion_id.clone(), json!(value)))
+        })
+        .collect()
 }
 
 fn row_failure(error: DatabaseError) -> Failure {

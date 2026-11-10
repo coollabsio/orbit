@@ -426,7 +426,8 @@ export function DatabaseTable(props: DatabaseTableProps) {
                   const { property } = column
                   const isActive = active?.row === row.id && active.col === property.id
                   const isEditing = isActive && editing
-                  const inline = property.type === 'title' || property.type === 'number' || property.type === 'url'
+                  const inline =
+                    property.type === 'title' || property.type === 'number' || property.type === 'url' || property.type === 'email' || property.type === 'phone'
                   return (
                     <div
                       key={property.id}

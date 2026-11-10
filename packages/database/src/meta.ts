@@ -14,6 +14,10 @@ export const PROPERTY_TYPE_LABELS: Record<DatabasePropertyType, string> = {
   person: 'Person',
   checkbox: 'Checkbox',
   url: 'URL',
+  email: 'Email',
+  phone: 'Phone',
+  files: 'Files & media',
+  unique_id: 'ID',
   created_time: 'Created time',
   created_by: 'Created by',
   last_edited_time: 'Last edited time',
@@ -23,7 +27,13 @@ export const PROPERTY_TYPE_LABELS: Record<DatabasePropertyType, string> = {
 
 /** Types whose value comes from the row page: they cannot be edited, cleared or pasted into. */
 export function isComputed(type: DatabasePropertyType): boolean {
-  return type === 'created_time' || type === 'created_by' || type === 'last_edited_time' || type === 'last_edited_by'
+  return (
+    type === 'created_time' ||
+    type === 'created_by' ||
+    type === 'last_edited_time' ||
+    type === 'last_edited_by' ||
+    type === 'unique_id'
+  )
 }
 
 /** Whether views can filter and sort by the type (a button has no value). */
@@ -37,9 +47,14 @@ export function operatorsOf(type: DatabasePropertyType): DatabaseFilterOperator[
     case 'title':
     case 'text':
     case 'url':
+    case 'email':
+    case 'phone':
       return ['contains', 'not_contains', 'equals', 'not_equals', 'starts_with', 'ends_with', 'is_empty', 'is_not_empty']
     case 'number':
+    case 'unique_id':
       return ['=', '!=', '>', '<', '>=', '<=', 'is_empty', 'is_not_empty']
+    case 'files':
+      return ['is_not_empty', 'is_empty']
     case 'select':
     case 'status':
       return ['is', 'is_not', 'is_empty', 'is_not_empty']

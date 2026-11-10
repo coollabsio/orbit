@@ -75,9 +75,15 @@ export function matches(row: Row, rule: DatabaseFilterRule, property: Property, 
     case 'title':
     case 'text':
     case 'url':
+    case 'email':
+    case 'phone':
       return typeof value === 'string' ? matchText(displayText(property, cell, ctx), rule, value) : true
     case 'number':
       return typeof value === 'number' ? matchNumber(cell?.kind === 'number' ? cell.number : null, rule, value) : true
+    case 'unique_id':
+      return typeof value === 'number' ? matchNumber(cell?.kind === 'unique_id' ? cell.number : null, rule, value) : true
+    case 'files':
+      return true
     case 'select':
     case 'status': {
       const ids = new Set(idList(value, ctx))

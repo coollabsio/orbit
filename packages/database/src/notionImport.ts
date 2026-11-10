@@ -25,6 +25,8 @@ const LOSSY: Record<string, (n: number) => string> = {
     `${count(n, "relation property was", "relation properties were")} imported as text with the titles of the related pages.`,
   files_as_names: (n) =>
     `${count(n, "files property was", "files properties were")} imported as text with the file names.`,
+  files_dropped: (n) =>
+    `${count(n, "file in a files property was", "files in files properties were")} left out: external links, or more than 20 files in one cell.`,
   number_format: (n) =>
     `${count(n, "number property uses", "number properties use")} a format Orbit does not have (such as Bitcoin) and shows plain numbers.`,
   people_as_text: (n) =>

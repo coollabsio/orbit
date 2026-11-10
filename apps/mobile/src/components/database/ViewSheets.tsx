@@ -159,12 +159,15 @@ function RuleValue({ rule, property, onChange }: { rule: DatabaseFilterRule; pro
     case 'title':
     case 'text':
     case 'url':
+    case 'email':
+    case 'phone':
       return (
         <View className="px-4 pb-3">
           <Input label="Value" placeholder="Value" value={typeof value === 'string' ? value : ''} onChangeText={onChange} autoCapitalize="none" autoCorrect={false} autoFocus />
         </View>
       )
     case 'number':
+    case 'unique_id':
       return (
         <View className="px-4 pb-3">
           <NumberValue value={typeof value === 'number' ? value : null} onChange={onChange} />

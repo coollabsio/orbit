@@ -45,9 +45,11 @@ function valueFor(rule: DatabaseFilterRule, property: Property, ctx: ViewContext
     case 'title':
     case 'text':
     case 'url':
+    case 'email':
+    case 'phone':
       if (typeof value !== 'string' || value === '') return null
       if (!['equals', 'contains', 'starts_with', 'ends_with'].includes(operator)) return null
-      return property.type === 'url' ? parseValue(property, value) : { kind: 'text', text: value }
+      return property.type === 'title' || property.type === 'text' ? { kind: 'text', text: value } : parseValue(property, value)
     case 'number': {
       if (typeof value !== 'number') return null
       const number = { '=': value, '>=': value, '<=': value, '>': value + 1, '<': value - 1 }[operator as string]
@@ -74,6 +76,8 @@ function valueFor(rule: DatabaseFilterRule, property: Property, ctx: ViewContext
     case 'last_edited_time':
     case 'last_edited_by':
     case 'button':
+    case 'files':
+    case 'unique_id':
       return null
   }
 }

@@ -8,6 +8,7 @@ import {
   pointText,
 } from './dates'
 import { parseButtonConfig } from './buttons'
+import { parseFiles, parseUniqueIdConfig, uniqueIdText, validEmail, validPhone } from './fields'
 import {
   DATE_FORMATS,
   NUMBER_FORMATS,
@@ -74,11 +75,16 @@ export function parseProperty(property: DatabaseProperty): Property {
     case 'person':
     case 'checkbox':
     case 'url':
+    case 'email':
+    case 'phone':
+    case 'files':
     case 'created_time':
     case 'created_by':
     case 'last_edited_time':
     case 'last_edited_by':
       return { ...rest, type: rest.type, config: {} }
+    case 'unique_id':
+      return { ...rest, type: rest.type, config: parseUniqueIdConfig(config) }
     case 'button':
       return { ...rest, type: rest.type, config: parseButtonConfig(config) }
     default:
@@ -132,6 +138,14 @@ export function parseValue(property: Property, raw: unknown): CellValue | null {
       return raw === true ? { kind: 'checked' } : null
     case 'url':
       return typeof raw === 'string' && validUrl(raw) ? { kind: 'url', url: raw } : null
+    case 'email':
+      return typeof raw === 'string' && validEmail(raw) ? { kind: 'text', text: raw } : null
+    case 'phone':
+      return typeof raw === 'string' && validPhone(raw) ? { kind: 'text', text: raw } : null
+    case 'files':
+      return parseFiles(raw)
+    case 'unique_id':
+      return typeof raw === 'number' && Number.isInteger(raw) && raw > 0 ? { kind: 'unique_id', number: raw } : null
     case 'title':
     case 'created_time':
     case 'created_by':
@@ -174,6 +188,10 @@ export function cellOf(row: Row, property: Property): CellValue | null {
     case 'person':
     case 'checkbox':
     case 'url':
+    case 'email':
+    case 'phone':
+    case 'files':
+    case 'unique_id':
       return row.values[property.id] ?? null
     case 'button':
       return null
@@ -204,6 +222,10 @@ export function apiValue(value: CellValue | null): unknown {
       return true
     case 'url':
       return value.url
+    case 'files':
+      return value.files
+    case 'unique_id':
+      return value.number
     default:
       return unreachable(value)
   }
@@ -227,6 +249,10 @@ export function displayText(property: Property, value: CellValue | null, ctx: Vi
       return value.ids.map((id) => ctx.members.get(id) ?? '').filter((name) => name !== '').join(', ')
     case 'checked':
       return 'true'
+    case 'files':
+      return value.files.map((file) => file.name).join(', ')
+    case 'unique_id':
+      return uniqueIdText(property, value.number)
     case 'date': {
       const config = property.type === 'date' ? property.config : DEFAULT_DATE_CONFIG
       const start = formatPoint(value.date.start, config, ctx)
@@ -255,6 +281,13 @@ export function valueFromText(property: Property, input: string, ctx: ViewContex
     }
     case 'url':
       return validUrl(text) ? { kind: 'url', url: text } : null
+    case 'email':
+      return validEmail(text) ? { kind: 'text', text } : null
+    case 'phone':
+      return validPhone(text) ? { kind: 'text', text } : null
+    case 'files':
+    case 'unique_id':
+      return null
     case 'checkbox':
       return ['true', 'yes', '1', 'x'].includes(text.toLowerCase()) ? { kind: 'checked' } : null
     case 'date': {

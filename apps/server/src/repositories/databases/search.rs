@@ -35,6 +35,9 @@ pub(super) fn search_lines<'a>(
                 (
                     PropertyKind::Text
                     | PropertyKind::Url
+                    | PropertyKind::Email
+                    | PropertyKind::Phone
+                    | PropertyKind::UniqueId(_)
                     | PropertyKind::Number(_)
                     | PropertyKind::Select(_)
                     | PropertyKind::MultiSelect(_)

@@ -27,6 +27,9 @@ mod agent;
 mod board;
 mod buttons;
 mod calendar;
+mod contact;
+mod files;
+mod unique_id;
 mod computed;
 mod export;
 mod gallery;
@@ -40,6 +43,10 @@ mod timeline;
 pub use buttons::{ButtonAction, ButtonConfig, ButtonPress, CreatedRow, MAX_ACTIONS};
 pub use calendar::CalendarMode;
 pub use computed::{ComputeScope, RelatedPage, is_computed};
+pub use files::{FileRef, MAX_FILES, first_image_url};
+pub(super) use files::FileCopies;
+pub use unique_id::UniqueIdConfig;
+pub(super) use unique_id::renumber_copy;
 pub use agent::{AgentDatabase, AgentQuery, AgentRow, AgentRowPage};
 pub use export::{ExportDatabase, ExportRow, cell_text, is_number};
 pub use gallery::{CardPreview, CardSize, RowPreview};
@@ -99,6 +106,10 @@ pub enum PropertyType {
     Person,
     Checkbox,
     Url,
+    Email,
+    Phone,
+    Files,
+    UniqueId,
     CreatedTime,
     CreatedBy,
     LastEditedTime,
@@ -119,6 +130,10 @@ impl PropertyType {
             Self::Person => "person",
             Self::Checkbox => "checkbox",
             Self::Url => "url",
+            Self::Email => "email",
+            Self::Phone => "phone",
+            Self::Files => "files",
+            Self::UniqueId => "unique_id",
             Self::CreatedTime => "created_time",
             Self::CreatedBy => "created_by",
             Self::LastEditedTime => "last_edited_time",
@@ -248,6 +263,10 @@ pub enum PropertyKind {
     Person,
     Checkbox,
     Url,
+    Email,
+    Phone,
+    Files,
+    UniqueId(UniqueIdConfig),
     CreatedTime,
     CreatedBy,
     LastEditedTime,
@@ -292,6 +311,10 @@ impl PropertyKind {
             Self::Person => PropertyType::Person,
             Self::Checkbox => PropertyType::Checkbox,
             Self::Url => PropertyType::Url,
+            Self::Email => PropertyType::Email,
+            Self::Phone => PropertyType::Phone,
+            Self::Files => PropertyType::Files,
+            Self::UniqueId(_) => PropertyType::UniqueId,
             Self::CreatedTime => PropertyType::CreatedTime,
             Self::CreatedBy => PropertyType::CreatedBy,
             Self::LastEditedTime => PropertyType::LastEditedTime,
@@ -314,6 +337,10 @@ impl PropertyKind {
             PropertyType::Person => Self::Person,
             PropertyType::Checkbox => Self::Checkbox,
             PropertyType::Url => Self::Url,
+            PropertyType::Email => Self::Email,
+            PropertyType::Phone => Self::Phone,
+            PropertyType::Files => Self::Files,
+            PropertyType::UniqueId => Self::UniqueId(UniqueIdConfig::default()),
             PropertyType::CreatedTime => Self::CreatedTime,
             PropertyType::CreatedBy => Self::CreatedBy,
             PropertyType::LastEditedTime => Self::LastEditedTime,
@@ -342,6 +369,7 @@ impl PropertyKind {
             PropertyType::Date => {
                 Self::Date(serde_json::from_value(config.clone()).map_err(invalid)?)
             }
+            PropertyType::UniqueId => Self::UniqueId(UniqueIdConfig::parse(config)?),
             PropertyType::Button => Self::Button(ButtonConfig::parse(config)?),
             PropertyType::Select | PropertyType::MultiSelect | PropertyType::Status => {
                 let input: OptionsInput =
@@ -377,6 +405,7 @@ impl PropertyKind {
             Self::Select(list) | Self::MultiSelect(list) => options(list),
             Self::Status(list) => json!({ "options": list }),
             Self::Button(config) => json!(config),
+            Self::UniqueId(config) => json!(config),
             _ => json!({}),
         }
     }
@@ -635,6 +664,10 @@ pub enum CellValue {
     /// A ticked checkbox (an unticked one stores nothing).
     Checked,
     Url(String),
+    /// Files of the row page, unique, at most 20.
+    Files(Vec<FileRef>),
+    /// A unique ID number (the prefix is the property's).
+    UniqueId(i64),
 }
 
 impl CellValue {
@@ -650,6 +683,8 @@ impl CellValue {
             }),
             Self::People(ids) => json!(ids),
             Self::Checked => json!(true),
+            Self::Files(files) => json!(files),
+            Self::UniqueId(number) => json!(number),
         }
     }
 
@@ -738,6 +773,12 @@ fn parse_value(kind: &PropertyKind, raw: &Value) -> Result<Option<CellValue>, ()
                 return Err(());
             }
         }
+        PropertyKind::Email => contact::parse(raw, contact::valid_email)?,
+        PropertyKind::Phone => contact::parse(raw, contact::valid_phone)?,
+        PropertyKind::Files => files::parse(raw)?,
+        PropertyKind::UniqueId(_) => Some(CellValue::UniqueId(
+            raw.as_i64().filter(|number| *number > 0).ok_or(())?,
+        )),
         PropertyKind::Title
         | PropertyKind::CreatedTime
         | PropertyKind::CreatedBy
@@ -783,6 +824,12 @@ fn display_text(kind: &PropertyKind, value: &CellValue) -> String {
             .collect::<Vec<_>>()
             .join(", "),
         CellValue::Checked => "true".to_owned(),
+        CellValue::Files(files) => files
+            .iter()
+            .map(|file| file.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
+        CellValue::UniqueId(number) => unique_id::text(kind, *number),
     }
 }
 
@@ -803,7 +850,13 @@ pub fn convert(
     values: Vec<(String, CellValue)>,
 ) -> Conversion {
     let old_type = old.property_type();
-    if old_type == PropertyType::Person || new_type == PropertyType::Person || new_type.computed() {
+    if old_type == PropertyType::Person
+        || matches!(
+            new_type,
+            PropertyType::Person | PropertyType::Files | PropertyType::UniqueId
+        )
+        || new_type.computed()
+    {
         return Conversion {
             kind: PropertyKind::default_for(new_type),
             values: values.into_iter().map(|(row, _)| (row, None)).collect(),
@@ -892,6 +945,8 @@ fn scalar_from_text(new_type: PropertyType, text: &str) -> Option<CellValue> {
             .filter(|number| number.is_finite())
             .map(CellValue::Number),
         PropertyType::Url => valid_url(text).then(|| CellValue::Url(text.to_owned())),
+        PropertyType::Email => contact::valid_email(text).then(|| CellValue::Text(text.to_owned())),
+        PropertyType::Phone => contact::valid_phone(text).then(|| CellValue::Text(text.to_owned())),
         PropertyType::Checkbox => ["true", "yes", "1", "x"]
             .iter()
             .any(|truthy| text.eq_ignore_ascii_case(truthy))
@@ -1067,7 +1122,7 @@ fn rule_value(property_type: PropertyType, operator: FilterOperator) -> Option<R
     use PropertyType as Type;
     let empty = matches!(operator, Op::IsEmpty | Op::IsNotEmpty);
     Some(match property_type {
-        Type::Title | Type::Text | Type::Url => match operator {
+        Type::Title | Type::Text | Type::Url | Type::Email | Type::Phone => match operator {
             Op::Equals
             | Op::NotEquals
             | Op::Contains
@@ -1077,7 +1132,7 @@ fn rule_value(property_type: PropertyType, operator: FilterOperator) -> Option<R
             _ if empty => RuleValue::Nothing,
             _ => return None,
         },
-        Type::Number => match operator {
+        Type::Number | Type::UniqueId => match operator {
             Op::Eq | Op::Ne | Op::Gt | Op::Lt | Op::Ge | Op::Le => RuleValue::Number,
             _ if empty => RuleValue::Nothing,
             _ => return None,
@@ -1097,6 +1152,8 @@ fn rule_value(property_type: PropertyType, operator: FilterOperator) -> Option<R
             Op::Is => RuleValue::Bool,
             _ => return None,
         },
+        Type::Files if empty => RuleValue::Nothing,
+        Type::Files => return None,
         Type::Date | Type::CreatedTime | Type::LastEditedTime => match operator {
             Op::Is | Op::Before | Op::After | Op::OnOrBefore | Op::OnOrAfter => RuleValue::Date,
             _ if empty => RuleValue::Nothing,
@@ -2004,6 +2061,7 @@ impl DatabaseRepository {
                 }
                 let kind = PropertyKind::parse(property_type, config.as_ref())
                     .map_err(DatabaseError::invalid)?;
+                let kind = unique_id::fresh(&properties, kind)?;
                 let property = Property {
                     id: Id::new_v7(),
                     name,
@@ -2018,7 +2076,7 @@ impl DatabaseRepository {
                     .position(|property| property.id == source)
                     .ok_or_else(|| DatabaseError::invalid("duplicate_of"))?;
                 let original = properties[at].clone();
-                if original.kind == PropertyKind::Title {
+                if matches!(original.kind, PropertyKind::Title | PropertyKind::UniqueId(_)) {
                     return Err(DatabaseError::invalid("duplicate_of"));
                 }
                 let (kind, option_ids) = original.kind.with_new_option_ids();
@@ -2049,6 +2107,8 @@ impl DatabaseRepository {
                 .await?;
             }
         }
+        unique_id::number_rows(&mut tx, workspace_id, database_id, &mut properties, actor_id, now)
+            .await?;
         for mut view in raw_views(&mut tx, database_id, Views::All).await? {
             let columns = &mut view.config.columns;
             match source.as_ref().and_then(|(original, _)| {
@@ -2089,7 +2149,7 @@ impl DatabaseRepository {
         tx.commit().await?;
         Ok(DatabaseProperty {
             position: index as i64,
-            ..property.output()
+            ..properties[index].output()
         })
     }
 
@@ -2122,6 +2182,13 @@ impl DatabaseRepository {
                 return Err(DatabaseError::TitleProperty);
             }
             (Some(PropertyType::Title), _) => return Err(DatabaseError::invalid("type")),
+            (Some(PropertyType::UniqueId), _)
+                if properties
+                    .iter()
+                    .any(|property| matches!(property.kind, PropertyKind::UniqueId(_))) =>
+            {
+                return Err(DatabaseError::invalid("type"));
+            }
             // A type change derives the new config; set it in a second request.
             (Some(_), Some(_)) => return Err(DatabaseError::invalid("config")),
             (Some(new_type), None) => {
@@ -2144,6 +2211,7 @@ impl DatabaseRepository {
             (None, Some(config)) => {
                 let kind = PropertyKind::parse(current.kind.property_type(), Some(config))
                     .map_err(DatabaseError::invalid)?;
+                let kind = unique_id::keep_next(&current.kind, kind);
                 cleared = remove_missing_options(&mut tx, &current, &kind).await?;
                 kind
             }
@@ -2168,10 +2236,14 @@ impl DatabaseRepository {
         let index = insert_index(changes.position.or(Some(index as i64)), properties.len());
         properties.insert(index, property.clone());
         renumber_rows(&mut tx, "database_properties", &properties_ids(&properties)).await?;
+        if type_change == Some(PropertyType::UniqueId) {
+            unique_id::number_rows(&mut tx, workspace_id, database_id, &mut properties, actor_id, now)
+                .await?;
+        }
         let update = PropertyUpdate {
             property: DatabaseProperty {
                 position: index as i64,
-                ..property.output()
+                ..properties[index].output()
             },
             converted,
             cleared,
@@ -2438,33 +2510,8 @@ impl DatabaseRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<DatabaseRow, DatabaseError> {
-        self.create_row_with_id(
-            Id::new_v7(),
-            workspace_id,
-            database_id,
-            actor_id,
-            input,
-            request_id,
-            now,
-        )
-        .await
-    }
-
-    /// [`Self::create_row`] with a caller-chosen id, so a resumable job (the Notion import) can
-    /// record the id before the row exists.
-    #[allow(clippy::too_many_arguments)]
-    pub async fn create_row_with_id(
-        &self,
-        row_id: Id,
-        workspace_id: Id,
-        database_id: Id,
-        actor_id: Id,
-        input: NewRow,
-        request_id: &str,
-        now: TimestampMillis,
-    ) -> Result<DatabaseRow, DatabaseError> {
         self.insert_row(
-            row_id,
+            Id::new_v7(),
             workspace_id,
             database_id,
             actor_id,
@@ -2474,6 +2521,49 @@ impl DatabaseRepository {
             now,
         )
         .await
+    }
+
+    /// [`Self::create_row`] with a caller-chosen id, so a resumable job (the Notion import) can
+    /// record the id before the row exists. Unique ID numbers in `input` are kept.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_row_with_id(
+        &self,
+        row_id: Id,
+        workspace_id: Id,
+        database_id: Id,
+        actor_id: Id,
+        mut input: NewRow,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<DatabaseRow, DatabaseError> {
+        let mut tx = self.database.immediate_transaction().await?;
+        let properties = properties_in_tx(&mut tx, database_id).await?;
+        let numbers = unique_id::take_imported(&properties, &mut input.values);
+        let mut row = Self::insert_row_in_tx(
+            &self.database,
+            &mut tx,
+            row_id,
+            workspace_id,
+            database_id,
+            actor_id,
+            input,
+            None,
+            request_id,
+            now,
+        )
+        .await?;
+        unique_id::keep_imported(
+            &mut tx,
+            workspace_id,
+            database_id,
+            &mut row,
+            numbers,
+            actor_id,
+            now,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(row)
     }
 
     /// A new row, filled from `template` (its id and the day "today" means) when given.
@@ -2524,7 +2614,7 @@ impl DatabaseRepository {
         let page = open(tx, workspace_id, database_id, actor_id).await?;
         ensure_row_capacity(tx, database_id, 1).await?;
         ensure_trial_capacity(database, tx, workspace_id, TrialLimit::Pages, 1).await?;
-        let properties = properties_in_tx(tx, database_id).await?;
+        let mut properties = properties_in_tx(tx, database_id).await?;
         let fill = match template {
             Some((template_id, today)) => Some(
                 templates::fill(
@@ -2543,7 +2633,7 @@ impl DatabaseRepository {
         if let Some(fill) = &fill {
             fill.apply(&mut input);
         }
-        let values = parse_values(tx, workspace_id, &properties, &input.values).await?;
+        let mut values = parse_values(tx, workspace_id, &properties, &input.values).await?;
         let space = page.space(actor_id);
         let mut siblings =
             templates::row_ids(tx, workspace_id, space, database_id, row_id).await?;
@@ -2575,7 +2665,7 @@ impl DatabaseRepository {
         .await?;
         renumber(tx, &siblings).await?;
         if let Some(fill) = &fill {
-            templates::copy_body(
+            let copies = templates::copy_body(
                 tx,
                 workspace_id,
                 fill.page_id,
@@ -2585,7 +2675,9 @@ impl DatabaseRepository {
                 now,
             )
             .await?;
+            files::remap_values(&mut values, fill.page_id, &copies);
         }
+        files::check_page_files(tx, workspace_id, row_id, &mut values).await?;
         let row = row_id.to_string();
         for (property_id, value) in &values {
             if let Some(value) = value {
@@ -2600,6 +2692,17 @@ impl DatabaseRepository {
                 )
                 .await?;
             }
+        }
+        let numbered =
+            unique_id::number_rows(tx, workspace_id, database_id, &mut properties, actor_id, now)
+                .await?;
+        if !numbered.is_empty() {
+            let rows = if numbered == [row_id] {
+                SearchRows::One(row_id)
+            } else {
+                SearchRows::All
+            };
+            refresh_search_text(tx, workspace_id, database_id, &properties, rows).await?;
         }
         record_with(
             tx,
@@ -2640,7 +2743,8 @@ impl DatabaseRepository {
             Children::Templates => templates::split_placeholders(&properties, input),
             Children::Rows => (input, Vec::new()),
         };
-        let values = parse_values(&mut tx, workspace_id, &properties, &input).await?;
+        let mut values = parse_values(&mut tx, workspace_id, &properties, &input).await?;
+        files::check_page_files(&mut tx, workspace_id, row_id, &mut values).await?;
         write_values(&mut tx, workspace_id, row_id, &values, actor_id, now).await?;
         templates::write_placeholders(&mut tx, row_id, placeholders, now).await?;
         refresh_search_text(
@@ -2918,6 +3022,10 @@ async fn parse_values(
             .iter()
             .find(|property| property.id == *property_id)
             .ok_or_else(path)?;
+        // Unique ID numbers are the server's.
+        if matches!(property.kind, PropertyKind::UniqueId(_)) {
+            return Err(path());
+        }
         let value = parse_value(&property.kind, raw).map_err(|()| path())?;
         if let Some(CellValue::People(people)) = &value {
             if members.is_none() {
@@ -3637,6 +3745,7 @@ pub(super) async fn write_database_data(
     workspace_id: Id,
     data: DatabaseData,
     pages: &HashMap<Id, Id>,
+    files: &FileCopies,
     actor_id: Id,
     now: TimestampMillis,
 ) -> Result<HashMap<Id, Id>, PageError> {
@@ -3665,6 +3774,9 @@ pub(super) async fn write_database_data(
             .map_err(page_error)?;
     }
     for (page_id, property_id, value_json) in data.values {
+        let Some(value_json) = files::remap_stored(value_json, page_id, files) else {
+            continue;
+        };
         sqlx::query(
             "INSERT INTO page_property_values (page_id, property_id, workspace_id, value_json, updated_by, updated_at) \
              VALUES ($1, $2, $3, $4, $5, $6)",
@@ -3701,8 +3813,11 @@ pub(super) async fn retain_fitting_values(
                 .iter()
                 .find(|property| property.id == *property_id)
                 .is_some_and(|property| {
-                    serde_json::from_str::<Value>(value_json)
-                        .is_ok_and(|raw| matches!(parse_value(&property.kind, &raw), Ok(Some(_))))
+                    // A restored row gets a new number.
+                    !matches!(property.kind, PropertyKind::UniqueId(_))
+                        && serde_json::from_str::<Value>(value_json).is_ok_and(|raw| {
+                            matches!(parse_value(&property.kind, &raw), Ok(Some(_)))
+                        })
                 })
     });
     Ok(())
@@ -3716,11 +3831,12 @@ pub(super) async fn copy_database_data(
     workspace_id: Id,
     databases: &[Id],
     pages: &HashMap<Id, Id>,
+    files: &FileCopies,
     actor_id: Id,
     now: TimestampMillis,
 ) -> Result<HashMap<Id, Id>, PageError> {
     let data = load_database_data(tx, databases, pages.keys().copied()).await?;
-    write_database_data(tx, workspace_id, data, pages, actor_id, now).await
+    write_database_data(tx, workspace_id, data, pages, files, actor_id, now).await
 }
 
 async fn record(

@@ -20,6 +20,8 @@ use super::{
     PropertyKind, ViewConfig, Views, block_links, children_in_tx, copy_links, linked_databases,
     open, parse_id, parse_value, properties_in_tx, raw_views, record_with, write_view_config,
 };
+use super::files::{self, FileCopies};
+use super::unique_id;
 use crate::billing::TrialLimit;
 use crate::collab::CollabHub;
 
@@ -433,6 +435,10 @@ pub(super) async fn fill(
         else {
             continue;
         };
+        // A row gets its own number.
+        if matches!(property.kind, PropertyKind::UniqueId(_)) {
+            continue;
+        }
         let raw: Value = serde_json::from_str(&row.get::<String, _>("value_json"))
             .map_err(|_| DatabaseError::Corrupt)?;
         let Ok(Some(value)) = parse_value(&property.kind, &raw) else {
@@ -479,7 +485,7 @@ pub(super) async fn fill(
 
 /// Writes the body of `source_id` (`content`, flushed by the caller) into the new page
 /// `target_id`, as a duplicate does: the page's files are copied and their URLs, and the links
-/// of linked view blocks, point at the copies.
+/// of linked view blocks, point at the copies. Returns the copied files.
 pub(super) async fn copy_body(
     tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
@@ -488,7 +494,7 @@ pub(super) async fn copy_body(
     target_id: Id,
     actor_id: Id,
     now: TimestampMillis,
-) -> Result<(), DatabaseError> {
+) -> Result<FileCopies, DatabaseError> {
     let file_rows = sqlx::query(
         "SELECT id, blob_id, file_name, mime_type, size_bytes FROM page_files \
          WHERE page_id = $1 AND workspace_id = $2 ORDER BY created_at, id",
@@ -565,7 +571,7 @@ pub(super) async fn copy_body(
         now,
     )
     .await?;
-    Ok(())
+    Ok(files)
 }
 
 /// Drops a default template that is not a live template of the database.
@@ -828,7 +834,7 @@ impl DatabaseRepository {
             .bind(from.to_string())
             .execute(&mut *tx)
             .await?;
-            copy_body(
+            let copies = copy_body(
                 &mut tx,
                 workspace_id,
                 *from,
@@ -838,6 +844,8 @@ impl DatabaseRepository {
                 now,
             )
             .await?;
+            files::remap_page(&mut tx, template_id, *from, &copies).await?;
+            unique_id::clear(&mut tx, database_id, template_id).await?;
         }
         record_with(
             &mut tx,

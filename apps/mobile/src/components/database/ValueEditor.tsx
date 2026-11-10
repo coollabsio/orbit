@@ -16,6 +16,7 @@ import { Avatar, Button, Icon, Input, Text } from '../../ui'
 import { DayPicker } from '../tasks/DayPicker'
 import { SheetList, SheetNote, SheetRow, SheetSearch } from '../tasks/Sheet'
 import { ChoiceRow, Pill } from './cells'
+import { FilesEditor } from './FilesEditor'
 
 export interface ValueEditorProps {
   property: Property
@@ -80,6 +81,30 @@ export function ValueEditor(props: ValueEditorProps) {
           }}
         />
       )
+    case 'email':
+    case 'phone':
+      return (
+        <TextForm
+          initial={value?.kind === 'text' ? value.text : ''}
+          label={property.name}
+          keyboard={property.type === 'email' ? 'email-address' : 'phone-pad'}
+          onSave={(text) => {
+            const trimmed = text.trim()
+            if (trimmed === '') {
+              if (value) onCommit(null)
+              return onDone()
+            }
+            const next = parseValue(property, trimmed)
+            if (!next) return property.type === 'email' ? 'Enter an email address.' : 'Enter a phone number (digits, spaces and + - ( ) .).'
+            if (value?.kind !== 'text' || value.text !== trimmed) onCommit(next)
+            onDone()
+          }}
+        />
+      )
+    case 'files':
+      return <FilesEditor row={row} value={value} onCommit={onCommit} />
+    case 'unique_id':
+      return null
     case 'select':
     case 'status':
     case 'multi_select':
@@ -103,7 +128,7 @@ function TextForm({ initial, label, multiline = false, keyboard, onSave }: {
   initial: string
   label: string
   multiline?: boolean
-  keyboard?: 'decimal-pad' | 'url'
+  keyboard?: 'decimal-pad' | 'url' | 'email-address' | 'phone-pad'
   onSave: (text: string) => string | void
 }) {
   const [text, setText] = useState(initial)

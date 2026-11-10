@@ -989,6 +989,23 @@ after delete, concurrent row creates get distinct numbers (two `App`s on one Pos
 `.ai/lessons.md`); a file value must name a file of the same row; the file reference scan keeps
 referenced files.
 
+### 12.6 Status
+
+Done on 2026-11-10 (no migration: the types are checked in Rust and `next` lives in `config_json`). Server code:
+`repositories/databases/{contact,files,unique_id}.rs`; shared logic `@orbit/database/fields`. Gallery covers (item 14)
+use `firstImageFile(value)` (`@orbit/database/fields`, by file name) or `databases::first_image_url(tx, workspace, row,
+value)` (Rust, by detected type). Differences from this section:
+
+| # | Item | Where | Why |
+|---|---|---|---|
+| 1 | No reference scan: `page_files` rows are never deleted while their page lives (as editor images), so a removed file stays until the page is purged. | `repositories/page_files.rs` | There is no existing page-file reconciliation to extend. |
+| 2 | A files write takes each name from its `page_files` row; a template fill, a duplicate and a backup restore point the value at the copied files and drop files that were not copied. | `databases/files.rs`, `templates.rs`, `databases.rs` (`write_database_data`) | `file_id` must stay a file of the same row. |
+| 3 | A row copy (duplicate, backup restore) and a row moved into another database get a new number; a template keeps none; a CSV import cannot fill files or unique ID columns. | `unique_id.rs`, `pages.rs`, `backup_items.rs`, `moves.rs`, `import.rs` | Numbers are never given twice. |
+| 4 | Only `create_row_with_id` (the Notion import) keeps unique ID numbers it is given; `next` becomes the highest number + 1. Every other write of a unique ID value answers 422. | `databases.rs`, `unique_id.rs` | Clients never write numbers. |
+| 5 | Notion `files` external links are dropped and counted (`files_dropped`), not kept as text. | `notion/database.rs` (`row_files`), `notion/import.rs` | A files value holds only uploaded files. |
+| 6 | Email and phone values are `CellValue::Text` (Rust) and `{kind: 'text'}` (TypeScript); the property type picks the link. | `databases.rs`, `@orbit/database/values` | Search, export, sort and filter treat them as text with no new case. |
+| 7 | A unique ID property cannot be duplicated, and counts as automatic in the clients (`isComputed`). | `ColumnHeaderMenu.tsx`, `@orbit/database/meta` | Max one per database; the value is read only. |
+
 ## 13. Item 11: List view and calendar view (P3, M)
 
 Needs: the view type check from 3.2. If item 1 has not landed, this item does that rebuild.

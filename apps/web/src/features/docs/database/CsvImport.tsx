@@ -29,7 +29,7 @@ import { csvImportErrorMessage } from './csvImportText'
 import { PROPERTY_TYPES } from './propertyMeta'
 
 const PREVIEW_ROWS = 5
-const IMPORT_TYPES: ImportType[] = ['text', 'number', 'select', 'multi_select', 'status', 'date', 'person', 'checkbox', 'url']
+const IMPORT_TYPES: ImportType[] = ['text', 'number', 'select', 'multi_select', 'status', 'date', 'person', 'checkbox', 'url', 'email', 'phone']
 
 /** Where the rows go: a new database (created with the request's place and title), or an existing one. */
 export type CsvDestination =

@@ -267,10 +267,13 @@ export function RuleValue({ rule, property, onChange }: { rule: DatabaseFilterRu
     case 'title':
     case 'text':
     case 'url':
+    case 'email':
+    case 'phone':
       return (
         <Input autoFocus aria-label="Value" placeholder="Value" value={typeof value === 'string' ? value : ''} onChange={(event) => onChange(event.target.value)} />
       )
     case 'number':
+    case 'unique_id':
       return (
         <Input
           autoFocus

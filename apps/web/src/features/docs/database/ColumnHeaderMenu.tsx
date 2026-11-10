@@ -30,6 +30,7 @@ import { placeColumn } from './databaseLib'
 import { isComputed } from '@orbit/database/meta'
 import { CREATABLE_TYPES, PROPERTY_TYPES } from './propertyMeta'
 import { ButtonConfigDialog } from './ButtonConfigDialog'
+import { UniqueIdPrefix } from './UniqueIdPrefix'
 
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'HUF']
 
@@ -221,6 +222,12 @@ export function ColumnHeaderMenu({ property, config, onConfig, onFilter }: Colum
                     <DropdownMenuItem onClick={() => setConfiguringButton(true)}>Edit button…</DropdownMenuItem>
                   </>
                 ) : null}
+                {property.type === 'unique_id' ? (
+                  <>
+                    <DropdownMenuSeparator />
+                    <UniqueIdPrefix prefix={property.config.prefix} onSave={(prefix) => setConfig({ prefix })} />
+                  </>
+                ) : null}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
           ) : null}
@@ -264,10 +271,12 @@ export function ColumnHeaderMenu({ property, config, onConfig, onFilter }: Colum
               </DropdownMenuItem>
               {isTitle ? null : (
                 <>
-                  <DropdownMenuItem onClick={() => createProperty.mutate({ duplicate_of: property.id })}>
-                    <Copy />
-                    Duplicate
-                  </DropdownMenuItem>
+                  {property.type === 'unique_id' ? null : (
+                    <DropdownMenuItem onClick={() => createProperty.mutate({ duplicate_of: property.id })}>
+                      <Copy />
+                      Duplicate
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuItem variant="destructive" onClick={() => void remove()}>
                     <Trash />
                     Delete property

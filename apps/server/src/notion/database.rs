@@ -15,7 +15,7 @@ use super::convert::{ConvertReport, page_icon, page_title};
 use super::model::{NotionDataSource, NotionPage, NotionView, normalize_id, plain_text};
 use crate::repositories::databases::{
     CalendarMode, CardPreview, CardSize, FilterGroup, FilterNode, FilterOperator, FilterRule,
-    GroupOp, MAX_CELL_ITEMS, MAX_FILTER_LEVELS, MAX_GROUP_CHILDREN, MAX_NAME_CHARS, MAX_OPTIONS,
+    GroupOp, MAX_CELL_ITEMS, MAX_FILES, MAX_FILTER_LEVELS, MAX_GROUP_CHILDREN, MAX_NAME_CHARS, MAX_OPTIONS,
     MAX_PROPERTIES, MAX_RULES, MAX_SORTS, MAX_TEXT_CHARS, MAX_VIEWS, Property, PropertyType,
     SchemaProperty, SchemaView, SortDirection, TimelineZoom, ViewColumn, ViewConfig, ViewSort,
     ViewType, accepts_value,
@@ -153,7 +153,10 @@ pub fn plan_database(database: Id, source: &Source, members: &Members) -> Databa
         let mut groups = Vec::new();
         let (property_type, orbit_config) = match notion_type {
             "title" => (PropertyType::Title, json!({})),
-            "rich_text" | "email" | "phone_number" | "unique_id" => (PropertyType::Text, json!({})),
+            "rich_text" => (PropertyType::Text, json!({})),
+            "email" => (PropertyType::Email, json!({})),
+            "phone_number" => (PropertyType::Phone, json!({})),
+            "unique_id" => (PropertyType::UniqueId, unique_id_config(config)),
             "number" => {
                 let format = config.get("format").and_then(Value::as_str);
                 (PropertyType::Number, number_config(format, &mut report))
@@ -176,10 +179,8 @@ pub fn plan_database(database: Id, source: &Source, members: &Members) -> Databa
             "people" => (PropertyType::Person, json!({})),
             "checkbox" => (PropertyType::Checkbox, json!({})),
             "url" => (PropertyType::Url, json!({})),
-            "files" => {
-                lossy(&mut report, "files_as_names");
-                (PropertyType::Text, json!({}))
-            }
+            // Uploaded files are downloaded with the row's body (`import.rs`).
+            "files" => (PropertyType::Files, json!({})),
             "relation" => {
                 lossy(&mut report, "relation_titles");
                 (PropertyType::Text, json!({}))
@@ -310,6 +311,44 @@ pub fn plan_database(database: Id, source: &Source, members: &Members) -> Databa
         views: schema_views,
         report,
     }
+}
+
+/// A Notion unique ID's prefix, when Orbit can hold it (1 to 10 letters, digits or `_`).
+fn unique_id_config(config: &Value) -> Value {
+    let prefix = config
+        .get("prefix")
+        .and_then(Value::as_str)
+        .filter(|prefix| {
+            (1..=10).contains(&prefix.chars().count())
+                && prefix.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        });
+    json!({ "prefix": prefix })
+}
+
+/// The Notion-hosted files of each `files` property of a row: `(Notion property id, [(url,
+/// name)])`. External links are not files Orbit holds; they are counted as dropped.
+#[must_use]
+pub fn row_files(
+    row: &NotionPage,
+    report: &mut ConvertReport,
+) -> Vec<(String, Vec<(String, Option<String>)>)> {
+    let mut properties = Vec::new();
+    for (name, value) in &row.properties {
+        if value.get("type").and_then(Value::as_str) != Some("files") {
+            continue;
+        }
+        let notion_id = value.get("id").and_then(Value::as_str).unwrap_or(name);
+        let mut files = Vec::new();
+        for file in value.get("files").and_then(Value::as_array).into_iter().flatten() {
+            let file_name = file.get("name").and_then(Value::as_str).map(str::to_owned);
+            match file.get("file").and_then(|file| file.get("url")).and_then(Value::as_str) {
+                Some(url) if files.len() < MAX_FILES => files.push((url.to_owned(), file_name)),
+                _ => lossy(report, "files_dropped"),
+            }
+        }
+        properties.push((notion_id.to_owned(), files));
+    }
+    properties
 }
 
 fn lossy(report: &mut ConvertReport, kind: &str) {
@@ -959,7 +998,13 @@ fn filter_rule(
         "title" | "rich_text" | "email" | "phone_number" | "url" | "formula"
     );
     match property.property_type {
-        PropertyType::Title | PropertyType::Text | PropertyType::Url if text_source => {
+        PropertyType::Title
+        | PropertyType::Text
+        | PropertyType::Url
+        | PropertyType::Email
+        | PropertyType::Phone
+            if text_source =>
+        {
             let operator = match operator.as_str() {
                 "equals" => Op::Equals,
                 "does_not_equal" => Op::NotEquals,
@@ -971,7 +1016,7 @@ fn filter_rule(
             };
             rule(operator, json!(value.as_str()?))
         }
-        PropertyType::Number if key != "unique_id" => {
+        PropertyType::Number | PropertyType::UniqueId => {
             let operator = match operator.as_str() {
                 "equals" => Op::Eq,
                 "does_not_equal" => Op::Ne,
@@ -1195,7 +1240,10 @@ fn cell(
             }
             _ => None,
         },
-        PropertyType::Url => data.as_str().map(|url| json!(url.trim())),
+        PropertyType::Url | PropertyType::Email | PropertyType::Phone => {
+            data.as_str().map(|text| json!(text.trim()))
+        }
+        PropertyType::UniqueId => data.get("number")?.as_i64().map(|number| json!(number)),
         _ => None,
     }
 }

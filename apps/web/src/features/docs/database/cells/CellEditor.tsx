@@ -15,6 +15,7 @@ import { OPTION_COLORS, type CellValue, type OptionColor, type Property, type Ro
 import { useDatabaseEnv } from '../context'
 import { OPTION_COLOR_LABELS } from '@orbit/database/meta'
 import { Pill } from './Pill'
+import { FilesEditor } from './FilesCell'
 
 export type EditEnd = 'stay' | 'down' | 'next' | 'previous'
 
@@ -68,6 +69,26 @@ export function CellEditor(props: CellEditorProps) {
           onClose={onClose}
         />
       )
+    case 'email':
+    case 'phone':
+      return (
+        <InlineEditor
+          initial={value?.kind === 'text' ? value.text : ''}
+          label={property.name}
+          onSave={(text) => {
+            const trimmed = text.trim()
+            if (trimmed === '') return value ? onCommit(null) : undefined
+            const next = parseValue(property, trimmed)
+            if (!next) toast.error(property.type === 'email' ? 'Enter an email address.' : 'Enter a phone number (digits, spaces and + - ( ) .).')
+            else if (value?.kind !== 'text' || value.text !== trimmed) onCommit(next)
+          }}
+          onClose={onClose}
+        />
+      )
+    case 'files':
+      return <FilesEditor {...props} value={value} />
+    case 'unique_id':
+      return null
     case 'text':
       return <TextEditor {...props} initial={value?.kind === 'text' ? value.text : ''} />
     case 'select':
@@ -137,7 +158,7 @@ function InlineEditor({ initial, label, align, onSave, onClose }: {
  * editor's own cell closes it too, and stops there: reaching the cell, it would open the editor again. A touch on that
  * cell (dismissed on touch start, before its click) keeps the editor open for the same reason.
  */
-function usePopoverClose(anchor: HTMLElement | null, onClose: (end: EditEnd) => void, commit?: () => void) {
+export function usePopoverClose(anchor: HTMLElement | null, onClose: (end: EditEnd) => void, commit?: () => void) {
   return (open: boolean, details?: { reason?: string; event?: Event }) => {
     if (open) return
     const event = details?.event

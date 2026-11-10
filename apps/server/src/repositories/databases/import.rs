@@ -11,6 +11,7 @@ use sqlx::{Any, Transaction};
 use utoipa::ToSchema;
 
 use super::search::{SearchRows, refresh_search_text, search_text};
+use super::unique_id;
 use super::{
     CellValue, DatabaseError, DatabaseRepository, DatabaseSchema, DatabaseView, MAX_CELL_ITEMS,
     MAX_NAME_CHARS, MAX_OPTIONS, MAX_PROPERTIES, MAX_ROWS, MAX_TEXT_CHARS, OptionColor, Property,
@@ -166,14 +167,19 @@ fn plan(
                     return Err(target_error());
                 }
                 let kind = &properties[at].kind;
-                if kind.property_type().computed() && *kind != PropertyKind::Title {
+                if (kind.property_type().computed() && *kind != PropertyKind::Title)
+                    || !text_fills(kind.property_type())
+                {
                     return Err(target_error());
                 }
                 Some(at)
             }
             ImportTarget::New(property_type) => {
                 let title = property_type == PropertyType::Title;
-                if (title && !new_database) || (property_type.computed() && !title) {
+                if (title && !new_database)
+                    || (property_type.computed() && !title)
+                    || !text_fills(property_type)
+                {
                     return Err(target_error());
                 }
                 let name = column.name.trim();
@@ -299,6 +305,12 @@ fn plan(
     })
 }
 
+/// Whether CSV text can fill a property of this type: files are uploads and unique IDs are
+/// numbered by the server.
+fn text_fills(property_type: PropertyType) -> bool {
+    !matches!(property_type, PropertyType::Files | PropertyType::UniqueId)
+}
+
 /// "false", "no", "0" and friends: an unticked box, not a value that failed to convert.
 fn unticked(text: &str) -> bool {
     ["false", "no", "0", "-"]
@@ -327,8 +339,11 @@ fn convert_cell(
         }
         PropertyKind::Number(_)
         | PropertyKind::Url
+        | PropertyKind::Email
+        | PropertyKind::Phone
         | PropertyKind::Checkbox
         | PropertyKind::Date(_) => scalar_from_text(kind.property_type(), text),
+        PropertyKind::Files | PropertyKind::UniqueId(_) => None,
         PropertyKind::Select(_) | PropertyKind::Status(_) => {
             choose_option(kind, text).map(CellValue::Choice)
         }
@@ -617,7 +632,7 @@ impl DatabaseRepository {
         let page = open(&mut tx, workspace_id, database_id, actor_id).await?;
         let current = properties_in_tx(&mut tx, database_id).await?;
         // The schema changed since the snapshot: convert again against the current one.
-        let plan = if same_schema(&snapshot, &current) {
+        let mut plan = if same_schema(&snapshot, &current) {
             planned
         } else {
             plan(&current, &members, &input)?
@@ -674,8 +689,17 @@ impl DatabaseRepository {
             now,
         )
         .await?;
+        let numbered = unique_id::number_rows(
+            &mut tx,
+            workspace_id,
+            database_id,
+            &mut plan.properties,
+            actor_id,
+            now,
+        )
+        .await?;
         // A new status property shows its default option on the rows that were already there.
-        if plan.changes_schema() {
+        if plan.changes_schema() || !numbered.is_empty() {
             refresh_search_text(
                 &mut tx,
                 workspace_id,

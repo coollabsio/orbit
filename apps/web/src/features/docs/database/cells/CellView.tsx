@@ -9,6 +9,8 @@ import type { Property, Row, StatusOption } from '@orbit/database/types'
 import { useDatabaseEnv } from '../context'
 import { isComputed } from '@orbit/database/meta'
 import { ButtonCell } from './ButtonCell'
+import { contactHref } from '@orbit/database/fields'
+import { FileChips } from './FilesCell'
 import { Pill } from './Pill'
 
 interface CellViewProps {
@@ -59,6 +61,13 @@ export function CellView({ property, row, width, wrap, onToggle }: CellViewProps
       )
     case 'url':
       return value?.kind === 'url' ? <UrlLink url={value.url} wrap={wrap} /> : null
+    case 'email':
+    case 'phone':
+      return value?.kind === 'text' ? <ContactLink type={property.type} text={value.text} wrap={wrap} /> : null
+    case 'files':
+      return value?.kind === 'files' ? <FileChips row={row} files={value.files} wrap={wrap} /> : null
+    case 'unique_id':
+      return <Text wrap={wrap} muted>{displayText(property, value, ctx)}</Text>
     case 'created_time':
     case 'last_edited_time':
       return <Text wrap={wrap} muted>{displayText(property, value, ctx)}</Text>
@@ -164,6 +173,18 @@ function People({ ids, width, wrap, muted }: { ids: string[]; width: number; wra
       })}
       <FitCount hidden={ids.length - shown} />
     </span>
+  )
+}
+
+function ContactLink({ type, text, wrap }: { type: 'email' | 'phone'; text: string; wrap: boolean }) {
+  return (
+    <a
+      href={contactHref(type, text)}
+      className={cn('min-w-0 text-foreground underline decoration-foreground/30 underline-offset-2 hover:decoration-foreground', wrap ? 'break-all' : 'truncate')}
+      onClick={(event) => event.stopPropagation()}
+    >
+      {text}
+    </a>
   )
 }
 
