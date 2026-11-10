@@ -547,6 +547,10 @@ CREATE INDEX database_templates_database ON database_templates (database_id, pos
 - Template body and values are edited through the normal page routes (collab editor, `PATCH
   …/rows/{template id}/values`), so the template editor is the row page.
 - The body copy uses the duplicate code (flush, copy `content_json`, `Remap`).
+- A row made from a template also gets copies of the template's live sub-pages, as a duplicate
+  copies them (`copy_pages`); they are pages of the row, not rows, so only the row counts toward
+  the row cap (fixed 2026-11-10; they were not copied). Item-level backup restore does not list
+  template pages or their sub-pages: they come back with their database.
 - Dynamic values: a `person` value `"me"` and a `date` value `"today"` resolve at row create.
   They are stored in the template's values as these literals (a new value shape for templates
   only; validation allows them only on template pages).

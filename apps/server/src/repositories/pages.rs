@@ -19,8 +19,8 @@ use utoipa::ToSchema;
 use super::billing::{TrialCapacityError, TrialLimitReached, ensure_trial_capacity};
 use super::databases::{
     DatabaseSchema, LinkCopy, NOT_TEMPLATE, RowCapacityError, block_links, carry_row_values,
-    copy_database_data, copy_links, ensure_row_capacity, renumber_copy, insert_schema, is_template,
-    linked_databases, row_search_lines,
+    copy_database_data, copy_links, ensure_row_capacity, insert_schema, is_template,
+    linked_databases, renumber_copy, row_search_lines,
 };
 use super::page_files::{page_file_url, page_has_file, parse_page_file_url};
 use super::page_mentions::notify_new_mentions;
@@ -1906,8 +1906,6 @@ impl PageRepository {
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let source = page_in_tx(&mut tx, workspace_id, page_id, actor_id, false).await?;
-        let collab_epoch = collab_generation(&mut tx).await?;
-        let actor = user_in_tx(&mut tx, actor_id).await?;
         let space = source.space(actor_id);
         // A copied row is one more row of the same database; its sub-pages are not rows.
         let row_of = source.database_id;
@@ -1918,22 +1916,7 @@ impl PageRepository {
         let include_children = include_children || source.kind == PageKind::Database;
         let mut originals = vec![source];
         if include_children {
-            let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
-                "WITH RECURSIVE subtree(page_id, depth) AS ( \
-                     SELECT $1, 0 \
-                     UNION ALL \
-                     SELECT pages.id, subtree.depth + 1 FROM pages \
-                     JOIN subtree ON pages.parent_id = subtree.page_id WHERE pages.deleted_at IS NULL \
-                 ) \
-                 SELECT {PAGE_COLUMNS} FROM pages JOIN subtree ON subtree.page_id = pages.id \
-                 WHERE subtree.depth > 0 ORDER BY subtree.depth, pages.parent_id, pages.position, pages.id"
-            )))
-            .bind(page_id.to_string())
-            .fetch_all(&mut *tx)
-            .await?;
-            for row in rows {
-                originals.push(page_from_row(row)?);
-            }
+            originals.extend(live_subtree(&mut tx, page_id).await?);
         }
         let copies = i64::try_from(originals.len()).unwrap_or(i64::MAX);
         ensure_trial_capacity(
@@ -1948,196 +1931,31 @@ impl PageRepository {
             .iter()
             .map(|page| (page.id, Id::new_v7()))
             .collect();
-        let mut files = HashMap::new();
-        let mut file_rows = Vec::new();
-        for page in &originals {
-            let rows = sqlx::query(
-                "SELECT id, blob_id, file_name, mime_type, size_bytes FROM page_files \
-                 WHERE page_id = $1 AND workspace_id = $2 ORDER BY created_at, id",
-            )
-            .bind(page.id.to_string())
-            .bind(workspace_id.to_string())
-            .fetch_all(&mut *tx)
-            .await?;
-            for row in rows {
-                let file_id = parse_id(row.get("id"))?;
-                let copy = (pages[&page.id], Id::new_v7());
-                files.insert((page.id, file_id), copy);
-                file_rows.push((copy, row));
-            }
-        }
-        // Each linked view block gets its own link, with copies of the link's views.
-        let mut link_copies = Vec::new();
-        for original in &originals {
-            let found = block_links(&original.content);
-            for (link_id, database_id) in linked_databases(&mut tx, workspace_id, &found).await? {
-                if !link_copies
-                    .iter()
-                    .any(|copy: &LinkCopy| copy.link_id == link_id)
-                {
-                    link_copies.push(LinkCopy {
-                        link_id,
-                        copy_id: Id::new_v7(),
-                        database_id,
-                        host_page_id: pages[&original.id],
-                    });
-                }
-            }
-        }
-        let links: HashMap<Id, Id> = link_copies
-            .iter()
-            .map(|copy| (copy.link_id, copy.copy_id))
-            .collect();
-        let remap = Remap {
-            workspace_id,
-            pages: &pages,
-            files: &files,
-            links: &links,
-        };
-
-        let mut child_positions: HashMap<Id, i64> = HashMap::new();
-        let mut root = None;
-        for (index, original) in originals.iter().enumerate() {
-            let id = pages[&original.id];
-            let (parent_id, title, position) = if index == 0 {
-                (original.parent_id, copy_title(&original.title), 0)
-            } else {
-                let parent = original
-                    .parent_id
-                    .and_then(|parent| pages.get(&parent).copied());
-                let parent = parent.ok_or(PageError::Corrupt)?;
-                let next = child_positions.entry(parent).or_default();
-                *next += 1;
-                (Some(parent), original.title.clone(), *next - 1)
-            };
-            let mut content = Value::Array(original.content.clone());
-            remap.value(&mut content, None);
-            let Value::Array(content) = content else {
-                return Err(PageError::Corrupt);
-            };
-            let cover_url = original
-                .cover_url
-                .as_ref()
-                .map(|url| remap.url(url).unwrap_or_else(|| url.clone()));
-            sqlx::query(
-                "INSERT INTO pages (id, workspace_id, parent_id, teamspace_id, owner_id, title, icon, \
-                 cover_url, cover_position, content_json, content_text, position, creator_id, updated_by, \
-                 version, created_at, updated_at, full_width, kind) \
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 0, $15, $16, $17, $18)",
-            )
-            .bind(id.to_string())
-            .bind(workspace_id.to_string())
-            .bind(parent_id.map(|parent| parent.to_string()))
-            .bind(space.teamspace_column())
-            .bind(space.owner_column())
-            .bind(&title)
-            .bind(&original.icon)
-            .bind(&cover_url)
-            .bind(&original.cover_position)
-            .bind(serde_json::to_string(&content).map_err(|_| PageError::Corrupt)?)
-            .bind(content_text(&content))
-            .bind(position)
-            .bind(actor_id.to_string())
-            .bind(actor_id.to_string())
-            .bind(now.as_millis())
-            .bind(now.as_millis())
-            .bind(i64::from(original.full_width))
-            .bind(original.kind.as_str())
-            .execute(&mut *tx)
-            .await?;
-            audit::record(
-                &mut tx,
-                workspace_id,
-                Some(actor_id),
-                "page.duplicated",
-                AuditOutcome::Success,
-                "page",
-                Some(id),
-                request_id,
-                json!({"source_page_id": original.id}),
-                now,
-            )
-            .await?;
-            if index == 0 {
-                root = Some(PageRecord {
-                    id,
-                    workspace_id,
-                    parent_id,
-                    teamspace_id: space.teamspace_id(),
-                    private: space.teamspace_id().is_none(),
-                    kind: original.kind,
-                    database_id: original.database_id,
-                    title,
-                    icon: original.icon.clone(),
-                    cover_url,
-                    cover_position: original.cover_position.clone(),
-                    content,
-                    position,
-                    version: 0,
-                    creator_id: actor_id,
-                    updated_by: actor_id,
-                    created_at: now,
-                    updated_at: now,
-                    deleted_at: None,
-                    collab_epoch: collab_epoch.clone(),
-                    // A copy keeps the layout but is never locked.
-                    full_width: original.full_width,
-                    locked_at: None,
-                    locked_by: None,
-                    updated_by_user: actor.clone(),
-                });
-            }
-        }
-        for ((page, file), row) in file_rows {
-            sqlx::query(
-                "INSERT INTO page_files (id, workspace_id, page_id, blob_id, file_name, mime_type, \
-                 size_bytes, uploaded_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
-            )
-            .bind(file.to_string())
-            .bind(workspace_id.to_string())
-            .bind(page.to_string())
-            .bind(row.get::<String, _>("blob_id"))
-            .bind(row.get::<String, _>("file_name"))
-            .bind(row.get::<String, _>("mime_type"))
-            .bind(row.get::<i64, _>("size_bytes"))
-            .bind(actor_id.to_string())
-            .bind(now.as_millis())
-            .execute(&mut *tx)
-            .await?;
-        }
-
-        let databases: Vec<Id> = originals
-            .iter()
-            .filter(|page| page.kind == PageKind::Database)
-            .map(|page| page.id)
-            .collect();
-        let property_ids = copy_database_data(
+        copy_pages(
             &mut tx,
             workspace_id,
-            &databases,
+            &originals,
             &pages,
-            &files,
+            space,
             actor_id,
+            request_id,
             now,
         )
         .await?;
         if let Some(database_id) = row_of {
-            renumber_copy(&mut tx, workspace_id, database_id, pages[&page_id], actor_id, now)
-                .await?;
+            renumber_copy(
+                &mut tx,
+                workspace_id,
+                database_id,
+                pages[&page_id],
+                actor_id,
+                now,
+            )
+            .await?;
         }
-        copy_links(
-            &mut tx,
-            workspace_id,
-            &link_copies,
-            &pages,
-            &property_ids,
-            actor_id,
-            now,
-        )
-        .await?;
 
         // The copy goes right after the original among the original's siblings.
-        let mut root = root.ok_or(PageError::Corrupt)?;
+        let mut root = page_in_tx(&mut tx, workspace_id, pages[&page_id], actor_id, false).await?;
         let mut siblings =
             sibling_ids(&mut tx, workspace_id, space, root.parent_id, root.id).await?;
         let index = siblings
@@ -3156,6 +2974,198 @@ async fn move_descendants(
             break;
         }
     }
+    Ok(())
+}
+
+/// The live sub-pages of `page_id`, all levels deep: parents first, siblings in order.
+pub(in crate::repositories) async fn live_subtree(
+    tx: &mut Transaction<'_, Any>,
+    page_id: Id,
+) -> Result<Vec<PageRecord>, PageError> {
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "WITH RECURSIVE subtree(page_id, depth) AS ( \
+             SELECT $1, 0 \
+             UNION ALL \
+             SELECT pages.id, subtree.depth + 1 FROM pages \
+             JOIN subtree ON pages.parent_id = subtree.page_id WHERE pages.deleted_at IS NULL \
+         ) \
+         SELECT {PAGE_COLUMNS} FROM pages JOIN subtree ON subtree.page_id = pages.id \
+         WHERE subtree.depth > 0 ORDER BY subtree.depth, pages.parent_id, pages.position, pages.id"
+    )))
+    .bind(page_id.to_string())
+    .fetch_all(&mut **tx)
+    .await?;
+    rows.into_iter().map(page_from_row).collect()
+}
+
+/// Writes a copy of each of `originals` (parents first) with the id `pages` gives it, in
+/// `space`. A page goes under its parent's copy, after the siblings copied before it; a page
+/// whose parent is not in `pages` keeps its parent at position 0, titled "<title> (copy)".
+/// Files are shared: each copy gets its own `page_files` rows for the same blobs. Linked view
+/// blocks get their own links, databases come with their properties, views and templates, and
+/// file URLs, `page` blocks and `/docs/<id>` links that point at a page of `pages` point at its
+/// copy.
+#[allow(clippy::too_many_arguments)]
+pub(in crate::repositories) async fn copy_pages(
+    tx: &mut Transaction<'_, Any>,
+    workspace_id: Id,
+    originals: &[PageRecord],
+    pages: &HashMap<Id, Id>,
+    space: PageSpace,
+    actor_id: Id,
+    request_id: &str,
+    now: TimestampMillis,
+) -> Result<(), PageError> {
+    let mut files = HashMap::new();
+    let mut file_rows = Vec::new();
+    for page in originals {
+        let rows = sqlx::query(
+            "SELECT id, blob_id, file_name, mime_type, size_bytes FROM page_files \
+             WHERE page_id = $1 AND workspace_id = $2 ORDER BY created_at, id",
+        )
+        .bind(page.id.to_string())
+        .bind(workspace_id.to_string())
+        .fetch_all(&mut **tx)
+        .await?;
+        for row in rows {
+            let file_id = parse_id(row.get("id"))?;
+            let copy = (pages[&page.id], Id::new_v7());
+            files.insert((page.id, file_id), copy);
+            file_rows.push((copy, row));
+        }
+    }
+    // Each linked view block gets its own link, with copies of the link's views.
+    let mut link_copies = Vec::new();
+    for original in originals {
+        let found = block_links(&original.content);
+        for (link_id, database_id) in linked_databases(tx, workspace_id, &found).await? {
+            if !link_copies
+                .iter()
+                .any(|copy: &LinkCopy| copy.link_id == link_id)
+            {
+                link_copies.push(LinkCopy {
+                    link_id,
+                    copy_id: Id::new_v7(),
+                    database_id,
+                    host_page_id: pages[&original.id],
+                });
+            }
+        }
+    }
+    let links: HashMap<Id, Id> = link_copies
+        .iter()
+        .map(|copy| (copy.link_id, copy.copy_id))
+        .collect();
+    let remap = Remap {
+        workspace_id,
+        pages,
+        files: &files,
+        links: &links,
+    };
+
+    let mut child_positions: HashMap<Id, i64> = HashMap::new();
+    for original in originals {
+        let id = pages[&original.id];
+        let copied_parent = original
+            .parent_id
+            .and_then(|parent| pages.get(&parent).copied());
+        let (parent_id, title, position) = match copied_parent {
+            Some(parent) => {
+                let next = child_positions.entry(parent).or_default();
+                *next += 1;
+                (Some(parent), original.title.clone(), *next - 1)
+            }
+            None => (original.parent_id, copy_title(&original.title), 0),
+        };
+        let mut content = Value::Array(original.content.clone());
+        remap.value(&mut content, None);
+        let Value::Array(content) = content else {
+            return Err(PageError::Corrupt);
+        };
+        let cover_url = original
+            .cover_url
+            .as_ref()
+            .map(|url| remap.url(url).unwrap_or_else(|| url.clone()));
+        sqlx::query(
+            "INSERT INTO pages (id, workspace_id, parent_id, teamspace_id, owner_id, title, icon, \
+             cover_url, cover_position, content_json, content_text, position, creator_id, updated_by, \
+             version, created_at, updated_at, full_width, kind) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 0, $15, $16, $17, $18)",
+        )
+        .bind(id.to_string())
+        .bind(workspace_id.to_string())
+        .bind(parent_id.map(|parent| parent.to_string()))
+        .bind(space.teamspace_column())
+        .bind(space.owner_column())
+        .bind(&title)
+        .bind(&original.icon)
+        .bind(&cover_url)
+        .bind(&original.cover_position)
+        .bind(serde_json::to_string(&content).map_err(|_| PageError::Corrupt)?)
+        .bind(content_text(&content))
+        .bind(position)
+        .bind(actor_id.to_string())
+        .bind(actor_id.to_string())
+        .bind(now.as_millis())
+        .bind(now.as_millis())
+        .bind(i64::from(original.full_width))
+        .bind(original.kind.as_str())
+        .execute(&mut **tx)
+        .await?;
+        audit::record(
+            tx,
+            workspace_id,
+            Some(actor_id),
+            "page.duplicated",
+            AuditOutcome::Success,
+            "page",
+            Some(id),
+            request_id,
+            json!({"source_page_id": original.id}),
+            now,
+        )
+        .await?;
+    }
+    for ((page, file), row) in file_rows {
+        sqlx::query(
+            "INSERT INTO page_files (id, workspace_id, page_id, blob_id, file_name, mime_type, \
+             size_bytes, uploaded_by, created_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        )
+        .bind(file.to_string())
+        .bind(workspace_id.to_string())
+        .bind(page.to_string())
+        .bind(row.get::<String, _>("blob_id"))
+        .bind(row.get::<String, _>("file_name"))
+        .bind(row.get::<String, _>("mime_type"))
+        .bind(row.get::<i64, _>("size_bytes"))
+        .bind(actor_id.to_string())
+        .bind(now.as_millis())
+        .execute(&mut **tx)
+        .await?;
+    }
+
+    let databases: Vec<Id> = originals
+        .iter()
+        .filter(|page| page.kind == PageKind::Database)
+        .map(|page| page.id)
+        .collect();
+    // Only the copied pages bring their values (a template's own go through its row).
+    let copied: HashMap<Id, Id> = originals
+        .iter()
+        .map(|page| (page.id, pages[&page.id]))
+        .collect();
+    let property_ids =
+        copy_database_data(tx, workspace_id, &databases, &copied, &files, actor_id, now).await?;
+    copy_links(
+        tx,
+        workspace_id,
+        &link_copies,
+        pages,
+        &property_ids,
+        actor_id,
+        now,
+    )
+    .await?;
     Ok(())
 }
 

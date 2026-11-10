@@ -185,13 +185,15 @@ impl DatabaseRepository {
         .await?;
         renumber(tx, &siblings).await?;
         if let Some(fill) = &fill {
-            let copies = templates::copy_body(
+            let copies = templates::copy_into_row(
+                database,
                 tx,
                 workspace_id,
-                fill.page_id,
-                &fill.content,
+                fill,
                 row_id,
+                space,
                 actor_id,
+                request_id,
                 now,
             )
             .await?;

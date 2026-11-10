@@ -7,14 +7,14 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use orbit_platform::{Id, Row, TimestampMillis};
+use orbit_platform::{Database, Id, Row, TimestampMillis};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::{Any, Transaction};
 use utoipa::ToSchema;
 
 use super::super::billing::ensure_trial_capacity;
-use super::super::pages::{PageSpace, Remap, content_text};
+use super::super::pages::{PageSpace, Remap, content_text, copy_pages, live_subtree};
 use super::computed::{self, ComputeScope, Computed};
 use super::files::{self, FileCopies};
 use super::{
@@ -490,18 +490,66 @@ pub(super) async fn fill(
     })
 }
 
-/// Writes the body of `source_id` (`content`, flushed by the caller) into the new page
-/// `target_id`, as a duplicate does: the page's files are copied and their URLs, and the links
-/// of linked view blocks, point at the copies. Returns the copied files.
+/// Writes the body and the live sub-pages of template `fill` into the new row `row_id` in
+/// `space`, as a duplicate does ([`copy_pages`]); the sub-pages are pages of the row, not rows.
+/// Returns the template's copied files.
+#[allow(clippy::too_many_arguments)]
+pub(super) async fn copy_into_row(
+    database: &Database,
+    tx: &mut Transaction<'_, Any>,
+    workspace_id: Id,
+    fill: &TemplateFill,
+    row_id: Id,
+    space: PageSpace,
+    actor_id: Id,
+    request_id: &str,
+    now: TimestampMillis,
+) -> Result<FileCopies, DatabaseError> {
+    let sub_pages = live_subtree(tx, fill.page_id).await?;
+    let added = i64::try_from(sub_pages.len()).unwrap_or(i64::MAX);
+    ensure_trial_capacity(database, tx, workspace_id, TrialLimit::Pages, added).await?;
+    let mut pages: HashMap<Id, Id> = sub_pages
+        .iter()
+        .map(|page| (page.id, Id::new_v7()))
+        .collect();
+    pages.insert(fill.page_id, row_id);
+    let copies = copy_body(
+        tx,
+        workspace_id,
+        fill.page_id,
+        &fill.content,
+        &pages,
+        actor_id,
+        now,
+    )
+    .await?;
+    copy_pages(
+        tx,
+        workspace_id,
+        &sub_pages,
+        &pages,
+        space,
+        actor_id,
+        request_id,
+        now,
+    )
+    .await?;
+    Ok(copies)
+}
+
+/// Writes the body of `source_id` (`content`, flushed by the caller) into its copy in `pages`,
+/// as a duplicate does: the page's files are copied, and their URLs, the links of linked view
+/// blocks and references to pages of `pages` point at the copies. Returns the copied files.
 pub(super) async fn copy_body(
     tx: &mut Transaction<'_, Any>,
     workspace_id: Id,
     source_id: Id,
     content: &[Value],
-    target_id: Id,
+    pages: &HashMap<Id, Id>,
     actor_id: Id,
     now: TimestampMillis,
 ) -> Result<FileCopies, DatabaseError> {
+    let target_id = pages[&source_id];
     let file_rows = sqlx::query(
         "SELECT id, blob_id, file_name, mime_type, size_bytes FROM page_files \
          WHERE page_id = $1 AND workspace_id = $2 ORDER BY created_at, id",
@@ -520,7 +568,6 @@ pub(super) async fn copy_body(
         );
         copies.push((copy, row));
     }
-    let pages = HashMap::from([(source_id, target_id)]);
     let mut link_copies = Vec::new();
     for (link_id, database_id) in linked_databases(tx, workspace_id, &block_links(content)).await? {
         link_copies.push(super::LinkCopy {
@@ -536,7 +583,7 @@ pub(super) async fn copy_body(
         .collect();
     let remap = Remap {
         workspace_id,
-        pages: &pages,
+        pages,
         files: &files,
         links: &links,
     };
@@ -572,7 +619,7 @@ pub(super) async fn copy_body(
         tx,
         workspace_id,
         &link_copies,
-        &pages,
+        pages,
         &HashMap::new(),
         actor_id,
         now,
@@ -846,7 +893,7 @@ impl DatabaseRepository {
                 workspace_id,
                 *from,
                 content,
-                template_id,
+                &HashMap::from([(*from, template_id)]),
                 actor_id,
                 now,
             )

@@ -241,7 +241,7 @@ impl BackupItemRepository {
                 let tree = PageTree::read(reader, workspace_id).await?;
                 tree.nodes
                     .values()
-                    .filter(|node| matches(&node.title))
+                    .filter(|node| matches(&node.title) && !tree.in_template(node))
                     .map(|node| BackupItem {
                         id: node.id.clone(),
                         kind,
@@ -350,6 +350,7 @@ impl BackupItemRepository {
         let root = tree
             .nodes
             .get(&page_id.to_string())
+            .filter(|root| !tree.in_template(root))
             .ok_or(BackupItemError::ItemNotFound)?;
         // Parents first, siblings in order. A database always comes with its rows.
         let mut order = vec![root.id.clone()];
@@ -1098,6 +1099,8 @@ struct PageNode {
 struct PageTree {
     nodes: HashMap<String, PageNode>,
     children: HashMap<String, Vec<String>>,
+    /// The database template pages (older snapshots have none).
+    templates: HashSet<String>,
 }
 
 impl PageTree {
@@ -1151,7 +1154,43 @@ impl PageTree {
                     .then_with(|| left.cmp(right))
             });
         }
-        Ok(Self { nodes, children })
+        let templates = if reader.columns("database_templates").await?.is_some() {
+            reader
+                .rows("database_templates", &["page_id", "workspace_id"], |row| {
+                    row.get("workspace_id") == Some(&workspace)
+                })
+                .await?
+                .into_iter()
+                .filter_map(|row| row.get("page_id").map(str::to_owned))
+                .collect()
+        } else {
+            HashSet::new()
+        };
+        Ok(Self {
+            nodes,
+            children,
+            templates,
+        })
+    }
+
+    /// Whether `node` is a template page or one of its sub-pages: those come back with their
+    /// database, not on their own.
+    fn in_template(&self, node: &PageNode) -> bool {
+        let mut id = Some(&node.id);
+        // At most one step per page, so a cycle in a damaged snapshot ends.
+        for _ in 0..=self.nodes.len() {
+            let Some(current) = id else {
+                return false;
+            };
+            if self.templates.contains(current) {
+                return true;
+            }
+            id = self
+                .nodes
+                .get(current)
+                .and_then(|node| node.parent_id.as_ref());
+        }
+        false
     }
 
     /// The direct sub-pages a restore of `node` copies: live ones under a live page, the ones
