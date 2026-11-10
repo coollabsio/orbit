@@ -38,6 +38,15 @@ struct NotionRollup {
     function: String,
 }
 
+/// What [`RelationPlan::apply`] made live, so the report stops counting it as lossy.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct Converted {
+    /// Planned title-text properties that went: every link of the side was inside.
+    pub relation_titles: u32,
+    /// Rollups that compute again instead of keeping static values.
+    pub rollup_values: u32,
+}
+
 #[derive(Default)]
 pub struct RelationPlan {
     relations: Vec<NotionRelation>,
@@ -124,17 +133,21 @@ impl RelationPlan {
     }
 
     /// Converts what can stay live. `pages`: normalized Notion id → Orbit page id of every
-    /// page the import created (databases by data source and database id); `titles`: Notion
-    /// titles for links outside the import.
+    /// page the import created (databases by data source and database id); `rows`: normalized
+    /// Notion id of every created row → its Orbit database; `titles`: Notion titles for links
+    /// outside the import. A link is inside when it names a row of the relation's target.
+    #[allow(clippy::too_many_arguments)]
     pub async fn apply(
         &self,
         databases: &DatabaseRepository,
         workspace_id: Id,
         actor_id: Id,
         pages: &HashMap<String, Id>,
+        rows: &HashMap<String, Id>,
         titles: &HashMap<String, String>,
         request_id: &str,
-    ) -> Result<(), DatabaseError> {
+    ) -> Result<Converted, DatabaseError> {
+        let mut converted = Converted::default();
         let target_of = |relation: &NotionRelation| {
             relation
                 .target_source
@@ -168,43 +181,47 @@ impl RelationPlan {
             if partner.is_some_and(|partner| key(partner) < key(relation)) {
                 continue;
             }
-            let rows = self
+            let links = self
                 .links
                 .get(&(relation.database, key(relation)))
                 .map_or(&[][..], Vec::as_slice);
-            let side = |relation: &NotionRelation, rows: &[(Id, Vec<String>)]| ImportedSide {
-                database_id: relation.database,
-                text_property_id: key(relation),
-                relation_id: property_id(
-                    relation.database,
-                    &format!("{}#relation", relation.notion_id),
-                ),
-                name: relation.name.clone(),
-                outside: rows
-                    .iter()
-                    .map(|(row, linked)| {
-                        let outside: Vec<&str> = linked
-                            .iter()
-                            .filter(|page| !pages.contains_key(*page))
-                            .map(|page| titles.get(page).map_or("Untitled", String::as_str))
-                            .collect();
-                        (*row, (!outside.is_empty()).then(|| outside.join(", ")))
-                    })
-                    .collect(),
+            let inside = |page: &String, target: Id| rows.get(page) == Some(&target);
+            let side = |relation: &NotionRelation, linked: &[(Id, Vec<String>)], target: Id| {
+                ImportedSide {
+                    database_id: relation.database,
+                    text_property_id: key(relation),
+                    relation_id: property_id(
+                        relation.database,
+                        &format!("{}#relation", relation.notion_id),
+                    ),
+                    name: relation.name.clone(),
+                    outside: linked
+                        .iter()
+                        .map(|(row, linked)| {
+                            let outside: Vec<&str> = linked
+                                .iter()
+                                .filter(|page| !inside(page, target))
+                                .map(|page| titles.get(page).map_or("Untitled", String::as_str))
+                                .collect();
+                            (*row, (!outside.is_empty()).then(|| outside.join(", ")))
+                        })
+                        .collect(),
+                }
             };
-            let primary = side(relation, rows);
+            let primary = side(relation, links, target);
             let synced = partner.map(|partner| {
-                let rows = self
+                let linked = self
                     .links
                     .get(&(partner.database, key(partner)))
                     .map_or(&[][..], Vec::as_slice);
-                side(partner, rows)
+                side(partner, linked, relation.database)
             });
-            let links = rows
+            let links = links
                 .iter()
                 .map(|(row, linked)| {
                     let mut ids: Vec<Id> = Vec::new();
-                    for id in linked.iter().filter_map(|page| pages.get(page)) {
+                    let kept = linked.iter().filter(|page| inside(page, target));
+                    for id in kept.filter_map(|page| pages.get(page)) {
                         if !ids.contains(id) {
                             ids.push(*id);
                         }
@@ -218,7 +235,13 @@ impl RelationPlan {
                     .as_ref()
                     .map(|side| (side.text_property_id, side.relation_id)),
             );
-            databases
+            let all_inside =
+                |side: &ImportedSide| side.outside.iter().all(|(_, text)| text.is_none());
+            let titles_gone = u32::from(all_inside(&primary))
+                + synced
+                    .as_ref()
+                    .map_or(0, |side| u32::from(all_inside(side)));
+            let made = databases
                 .import_relation(
                     workspace_id,
                     actor_id,
@@ -232,6 +255,9 @@ impl RelationPlan {
                     TimestampMillis::now(),
                 )
                 .await?;
+            if made {
+                converted.relation_titles += titles_gone;
+            }
             live.insert(key(relation), ids.0);
             if let Some((text, id)) = ids.1 {
                 live.insert(text, id);
@@ -252,7 +278,7 @@ impl RelationPlan {
                 continue;
             };
             let target_property = property_id(target, &rollup.target);
-            databases
+            let made = databases
                 .import_rollup(
                     workspace_id,
                     actor_id,
@@ -276,8 +302,9 @@ impl RelationPlan {
                     TimestampMillis::now(),
                 )
                 .await?;
+            converted.rollup_values += u32::from(made);
         }
-        Ok(())
+        Ok(converted)
     }
 }
 

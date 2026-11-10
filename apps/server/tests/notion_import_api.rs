@@ -2274,7 +2274,7 @@ async fn databases_import_with_typed_properties_values_and_views() {
         report["lossy"],
         json!({
             "files_dropped": 1, "invalid_values": 1, "number_format": 1,
-            "people_as_text": 1, "relation_titles": 1, "rollup_values": 1,
+            "people_as_text": 1, "relation_titles": 1,
             "unmatched_people": 26, "view_filter": 1, "view_sort": 1, "views_unavailable": 1
         })
     );
@@ -2282,7 +2282,7 @@ async fn databases_import_with_typed_properties_values_and_views() {
     let coverage = harness.imported(&id, COVERAGE_DB).await;
     assert_eq!(coverage.detail["database"]["title"], "Coverage");
     let names = coverage.names();
-    assert_eq!(names.len(), 24, "{names:?}");
+    assert_eq!(names.len(), 25, "{names:?}");
     assert_eq!(
         names[..4],
         ["Name", "Stage", "Notes", "Attachments"],
@@ -2311,6 +2311,7 @@ async fn databases_import_with_typed_properties_values_and_views() {
         "Double",
         "Sum",
         "Related",
+        "Related (titles)",
         "Ticket",
     ]
     .into_iter()
@@ -2346,8 +2347,9 @@ async fn databases_import_with_typed_properties_values_and_views() {
             ("Creator", "person", Value::Null),
             ("Editor", "text", Value::Null),
             ("Double", "formula", Value::Null),
-            ("Sum", "number", json!("number")),
-            ("Related", "text", Value::Null),
+            ("Sum", "rollup", Value::Null),
+            ("Related", "relation", Value::Null),
+            ("Related (titles)", "text", Value::Null),
             ("Ticket", "unique_id", Value::Null),
         ]
     );
@@ -2429,8 +2431,9 @@ async fn databases_import_with_typed_properties_values_and_views() {
         ("Creator", json!([owner])),
         ("Editor", json!("Importer bot")),
         ("Double", json!(6.0)),
-        ("Sum", json!(9.0)),
-        ("Related", json!("Home")),
+        ("Sum", json!(4.0)),
+        ("Related", json!([rows[1]])),
+        ("Related (titles)", json!("Home")),
         ("Ticket", json!(1)),
     ] {
         assert_eq!(coverage.value(one, property), expected, "{property}");
@@ -2468,7 +2471,7 @@ async fn databases_import_with_typed_properties_values_and_views() {
         json!([owner]),
         "people beyond the first 25 come from the property-item endpoint"
     );
-    let related = coverage.value(three, "Related");
+    let related = coverage.value(three, "Related (titles)");
     assert!(
         related.as_str().unwrap().ends_with(", Home"),
         "26 relations: {related}"
@@ -2580,6 +2583,44 @@ async fn databases_import_with_typed_properties_values_and_views() {
     assert_eq!(beta.views(), ["Table"]);
     assert_eq!(alpha.detail["rows"][0]["title"], "From A");
     assert_eq!(beta.detail["rows"][0]["title"], "From B");
+    let (partner, partner_of) = (alpha.property("Partner"), beta.property("Partner of"));
+    let (alpha_id, beta_id) = (
+        harness.orbit_id(&id, MULTI_A).await,
+        harness.orbit_id(&id, MULTI_B).await,
+    );
+    let pair: Vec<(&Value, &Value, &Value)> = [(partner, &beta_id), (partner_of, &alpha_id)]
+        .iter()
+        .map(|(property, target)| {
+            assert_eq!(property["type"], "relation");
+            assert_eq!(property["config"]["database_id"], target.as_str());
+            (
+                &property["id"],
+                &property["config"]["synced_property_id"],
+                &property["config"]["primary"],
+            )
+        })
+        .collect();
+    assert_eq!(
+        (pair[0].1, pair[1].1),
+        (pair[1].0, pair[0].0),
+        "a dual property becomes one two-way pair"
+    );
+    assert_ne!(pair[0].2, pair[1].2, "one side is primary");
+    let (from_a, from_b) = (
+        harness
+            .orbit_id(&id, "c3000000-0000-4000-8000-000000000001")
+            .await,
+        harness
+            .orbit_id(&id, "c3000000-0000-4000-8000-000000000002")
+            .await,
+    );
+    assert_eq!(alpha.value(&from_a, "Partner"), json!([from_b]));
+    assert_eq!(beta.value(&from_b, "Partner of"), json!([from_a]));
+    assert_eq!(
+        (alpha.names(), beta.names()),
+        (vec!["Name", "Partner"], vec!["Name", "Partner of"]),
+        "every link was inside: no titles property"
+    );
 }
 
 #[tokio::test]

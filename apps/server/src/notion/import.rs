@@ -1247,22 +1247,55 @@ impl NotionImportService {
                 created.entry(database_id.clone()).or_insert(page);
             }
         }
-        if let Err(error) = databases
+        let database_items: HashSet<&str> = items
+            .iter()
+            .filter(|item| item.kind == "database")
+            .map(|item| item.notion_id.as_str())
+            .collect();
+        let rows: HashMap<String, Id> = items
+            .iter()
+            .filter_map(|item| {
+                let parent = item.parent_notion_id.as_deref()?;
+                if !database_items.contains(parent)
+                    || !matches!(item.status.as_str(), "created" | "done")
+                {
+                    return None;
+                }
+                let database = created.get(&normalize_id(parent)?)?;
+                Some((normalize_id(&item.notion_id)?, *database))
+            })
+            .collect();
+        match databases
             .relations
             .apply(
                 &self.inner.databases,
                 workspace_id,
                 user_id,
                 &created,
+                &rows,
                 &titles,
                 &format!("notion-import-{import_id}"),
             )
             .await
         {
-            match row_failure(error) {
+            Ok(converted) => {
+                let lossy = &mut report.convert.lossy;
+                for (kind, live) in [
+                    ("relation_titles", converted.relation_titles),
+                    ("rollup_values", converted.rollup_values),
+                ] {
+                    if let Some(count) = lossy.get_mut(kind) {
+                        *count = count.saturating_sub(live);
+                        if *count == 0 {
+                            lossy.remove(kind);
+                        }
+                    }
+                }
+            }
+            Err(error) => match row_failure(error) {
                 Failure::Page(_) => {}
                 other => return Err(other),
-            }
+            },
         }
 
         // Pass 2: fill each page.
@@ -2252,6 +2285,14 @@ struct DatabaseCache {
 impl DatabaseCache {
     fn add(&mut self, item_id: &str, fetched: FetchedSource) {
         self.loaded.insert(item_id.to_owned());
+        // Relations name their target by data source id, also when the item is the database.
+        if let Some(source_id) = normalize_id(&fetched.source.data_source.id)
+            && source_id != item_id
+        {
+            self.aliases
+                .entry(source_id)
+                .or_insert_with(|| item_id.to_owned());
+        }
         if let Some(database_id) = fetched.database_id.as_deref().and_then(normalize_id) {
             if let Some(is_inline) = fetched.is_inline {
                 self.inline.insert(database_id.clone(), is_inline);
