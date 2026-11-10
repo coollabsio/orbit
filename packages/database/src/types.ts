@@ -124,6 +124,8 @@ export type ViewConfig = {
   card_properties: string[]
   /** Table: the footer function of each property that has one. */
   calculations: Readonly<Record<string, DatabaseCalculation>>
+  /** The template "New" and "+" fill new rows from (absent: an empty row). The server drops a deleted one. */
+  default_template_id?: string
 }
 
 export type ViewContext = {

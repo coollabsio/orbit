@@ -16,7 +16,7 @@ use thiserror::Error;
 use utoipa::ToSchema;
 
 use super::billing::{TrialCapacityError, TrialLimitReached, ensure_trial_capacity};
-use super::pages::{PageError, PageKind, PageRecord, PageSpace, page_in_tx, renumber, sibling_ids};
+use super::pages::{PageError, PageKind, PageRecord, PageSpace, page_in_tx, renumber};
 pub use super::task_filter::GroupOp;
 use super::tasks::{TaskError, require_access_tx};
 use crate::audit::{self, AuditOutcome};
@@ -29,6 +29,7 @@ mod import;
 mod links;
 mod moves;
 mod search;
+mod templates;
 pub use export::{ExportDatabase, ExportRow, cell_text, is_number};
 pub use import::{
     CsvImport, ImportColumn, ImportColumnResult, ImportResult, ImportTarget, MAX_IMPORT_COLUMNS,
@@ -38,6 +39,9 @@ pub(super) use links::{LinkCopy, block_links, copy_links, linked_databases};
 pub(super) use moves::carry_row_values;
 pub use search::row_search_lines;
 use search::{SearchRows, refresh_search_text};
+use templates::Children;
+pub use templates::{DatabaseTemplate, NewTemplate, TemplateChanges};
+pub(super) use templates::{NOT_TEMPLATE, TemplateCopy, is_template};
 
 pub const MAX_ROWS: i64 = 5_000;
 pub const MAX_PROPERTIES: usize = 100;
@@ -1362,6 +1366,11 @@ pub struct ViewConfig {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     #[schema(value_type = HashMap<String, Calculation>)]
     pub calculations: BTreeMap<Id, Calculation>,
+    /// The template that "New" and "+" use in this view (`null`: an empty row). A deleted
+    /// template reads as `null`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub default_template_id: Option<Id>,
 }
 
 impl ViewConfig {
@@ -1593,6 +1602,9 @@ pub struct DatabaseDetail {
     pub properties: Vec<DatabaseProperty>,
     pub views: Vec<DatabaseView>,
     pub rows: Vec<DatabaseRow>,
+    /// Row templates in order (at most 20); they are not rows. Absent: none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub templates: Vec<DatabaseTemplate>,
 }
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
@@ -1673,6 +1685,10 @@ pub enum DatabaseError {
     /// The linked view block's link is missing or belongs to another database.
     #[error("database link was not found")]
     LinkNotFound,
+    #[error("database template was not found")]
+    TemplateNotFound,
+    #[error("database holds the most templates allowed")]
+    TemplateLimit,
     #[error("database input is invalid: {field}")]
     Invalid { field: String },
     #[error("database is locked")]
@@ -1761,9 +1777,10 @@ pub(super) async fn ensure_row_capacity(
     database_id: Id,
     adding: i64,
 ) -> Result<(), RowCapacityError> {
-    let live: i64 = sqlx::query_scalar(
-        "SELECT CAST(COUNT(*) AS BIGINT) FROM pages WHERE parent_id = $1 AND deleted_at IS NULL",
-    )
+    let live: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT CAST(COUNT(*) AS BIGINT) FROM pages WHERE parent_id = $1 AND deleted_at IS NULL \
+             AND {NOT_TEMPLATE}"
+    )))
     .bind(database_id.to_string())
     .fetch_one(&mut **tx)
     .await?;
@@ -1802,8 +1819,10 @@ impl DatabaseRepository {
             None => Views::Own,
         };
         let properties = properties_in_tx(&mut tx, database_id).await?;
-        let views = views_in_tx(&mut tx, database_id, set, &properties).await?;
+        let mut views = views_in_tx(&mut tx, database_id, set, &properties).await?;
         let rows = rows_in_tx(&mut tx, database_id, None).await?;
+        let templates = templates::templates_in_tx(&mut tx, database_id, &properties, None).await?;
+        templates::repair_defaults(&mut views, &templates);
         tx.rollback().await?;
         Ok(DatabaseDetail {
             database: DatabaseHead {
@@ -1816,6 +1835,7 @@ impl DatabaseRepository {
             properties: properties.iter().map(Property::output).collect(),
             views,
             rows,
+            templates,
         })
     }
 
@@ -2158,6 +2178,7 @@ impl DatabaseRepository {
             .validate(view_type, &properties)
             .map_err(DatabaseError::invalid)?;
         board::drop_former_members(&mut tx, database_id, &properties, &mut [&mut config]).await?;
+        templates::retain_default(&mut tx, database_id, &mut config).await?;
         let view = DatabaseView {
             id: Id::new_v7(),
             name: input.name,
@@ -2207,6 +2228,7 @@ impl DatabaseRepository {
                 .map_err(DatabaseError::invalid)?;
             board::drop_former_members(&mut tx, database_id, &properties, &mut [&mut config])
                 .await?;
+            templates::retain_default(&mut tx, database_id, &mut config).await?;
             view.config = config;
         }
         if let Some(name) = changes.name {
@@ -2318,15 +2340,59 @@ impl DatabaseRepository {
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<DatabaseRow, DatabaseError> {
+        self.insert_row(
+            row_id,
+            workspace_id,
+            database_id,
+            actor_id,
+            input,
+            None,
+            request_id,
+            now,
+        )
+        .await
+    }
+
+    /// A new row, filled from `template` (its id and the day "today" means) when given.
+    #[allow(clippy::too_many_arguments)]
+    async fn insert_row(
+        &self,
+        row_id: Id,
+        workspace_id: Id,
+        database_id: Id,
+        actor_id: Id,
+        mut input: NewRow,
+        template: Option<(Id, String)>,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<DatabaseRow, DatabaseError> {
         let mut tx = self.database.immediate_transaction().await?;
         let page = open(&mut tx, workspace_id, database_id, actor_id).await?;
         ensure_row_capacity(&mut tx, database_id, 1).await?;
         ensure_trial_capacity(&self.database, &mut tx, workspace_id, TrialLimit::Pages, 1).await?;
         let properties = properties_in_tx(&mut tx, database_id).await?;
+        let fill = match template {
+            Some((template_id, today)) => Some(
+                templates::fill(
+                    &mut tx,
+                    workspace_id,
+                    database_id,
+                    template_id,
+                    actor_id,
+                    &today,
+                    &properties,
+                )
+                .await?,
+            ),
+            None => None,
+        };
+        if let Some(fill) = &fill {
+            fill.apply(&mut input);
+        }
         let values = parse_values(&mut tx, workspace_id, &properties, &input.values).await?;
         let space = page.space(actor_id);
         let mut siblings =
-            sibling_ids(&mut tx, workspace_id, space, Some(database_id), row_id).await?;
+            templates::row_ids(&mut tx, workspace_id, space, database_id, row_id).await?;
         let index = placement_index(&siblings, input.placement)?;
         siblings.insert(index, row_id);
         let search_values: HashMap<Id, CellValue> = values
@@ -2354,6 +2420,18 @@ impl DatabaseRepository {
         .execute(&mut *tx)
         .await?;
         renumber(&mut tx, &siblings).await?;
+        if let Some(fill) = &fill {
+            templates::copy_body(
+                &mut tx,
+                workspace_id,
+                fill.page_id,
+                &fill.content,
+                row_id,
+                actor_id,
+                now,
+            )
+            .await?;
+        }
         let row = row_id.to_string();
         for (property_id, value) in &values {
             if let Some(value) = value {
@@ -2400,10 +2478,18 @@ impl DatabaseRepository {
     ) -> Result<DatabaseRow, DatabaseError> {
         let mut tx = self.database.immediate_transaction().await?;
         open(&mut tx, workspace_id, database_id, actor_id).await?;
-        require_row(&mut tx, database_id, row_id).await?;
+        // A template's values are written here too (its "me" and "today" kept aside).
+        let children = templates::child_kind(&mut tx, database_id, row_id)
+            .await?
+            .ok_or(DatabaseError::NotFound)?;
         let properties = properties_in_tx(&mut tx, database_id).await?;
+        let (input, placeholders) = match children {
+            Children::Templates => templates::split_placeholders(&properties, input),
+            Children::Rows => (input, Vec::new()),
+        };
         let values = parse_values(&mut tx, workspace_id, &properties, &input).await?;
         write_values(&mut tx, workspace_id, row_id, &values, actor_id, now).await?;
+        templates::write_placeholders(&mut tx, row_id, placeholders, now).await?;
         refresh_search_text(
             &mut tx,
             workspace_id,
@@ -2426,7 +2512,10 @@ impl DatabaseRepository {
             now,
         )
         .await?;
-        let row = single_row(&mut tx, database_id, row_id).await?;
+        let row = match children {
+            Children::Rows => single_row(&mut tx, database_id, row_id).await?,
+            Children::Templates => templates::template_row(&mut tx, database_id, row_id).await?,
+        };
         tx.commit().await?;
         Ok(row)
     }
@@ -2447,7 +2536,7 @@ impl DatabaseRepository {
         let page = open(&mut tx, workspace_id, database_id, actor_id).await?;
         let space = page.space(actor_id);
         let live: HashSet<Id> =
-            sibling_ids(&mut tx, workspace_id, space, Some(database_id), database_id)
+            templates::row_ids(&mut tx, workspace_id, space, database_id, database_id)
                 .await?
                 .into_iter()
                 .collect();
@@ -2478,7 +2567,7 @@ impl DatabaseRepository {
             return Ok(());
         }
         let siblings =
-            sibling_ids(&mut tx, workspace_id, space, Some(database_id), database_id).await?;
+            templates::row_ids(&mut tx, workspace_id, space, database_id, database_id).await?;
         renumber(&mut tx, &siblings).await?;
         record_with(
             &mut tx,
@@ -2526,11 +2615,11 @@ impl DatabaseRepository {
             )
             .await?;
         }
-        let mut siblings = sibling_ids(
+        let mut siblings = templates::row_ids(
             &mut tx,
             workspace_id,
             page.space(actor_id),
-            Some(database_id),
+            database_id,
             row_id,
         )
         .await?;
@@ -2629,7 +2718,9 @@ async fn require_row(
     database_id: Id,
     row_id: Id,
 ) -> Result<(), DatabaseError> {
-    sqlx::query("SELECT 1 FROM pages WHERE id = $1 AND parent_id = $2 AND deleted_at IS NULL")
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "SELECT 1 FROM pages WHERE id = $1 AND parent_id = $2 AND deleted_at IS NULL AND {NOT_TEMPLATE}"
+    )))
         .bind(row_id.to_string())
         .bind(database_id.to_string())
         .fetch_optional(&mut **tx)
@@ -3012,23 +3103,36 @@ async fn rows_in_tx(
     database_id: Id,
     only: Option<Id>,
 ) -> Result<Vec<DatabaseRow>, DatabaseError> {
+    children_in_tx(tx, database_id, Children::Rows, only).await
+}
+
+/// Live rows or templates in manual order (one with `only`), with their stored values.
+async fn children_in_tx(
+    tx: &mut Transaction<'_, Any>,
+    database_id: Id,
+    children: Children,
+    only: Option<Id>,
+) -> Result<Vec<DatabaseRow>, DatabaseError> {
     let only = only.map(|id| id.to_string());
-    let rows = sqlx::query(
+    let filter = children.filter();
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT id, title, icon, position, version, created_at, creator_id, updated_at, updated_by, \
          content_text <> '' AS has_content FROM pages \
-         WHERE parent_id = $1 AND deleted_at IS NULL AND ($2 IS NULL OR id = $3) ORDER BY position, id",
-    )
+         WHERE parent_id = $1 AND deleted_at IS NULL AND ($2 IS NULL OR id = $3) AND {filter} \
+         ORDER BY position, id"
+    )))
     .bind(database_id.to_string())
     .bind(&only)
     .bind(&only)
     .fetch_all(&mut **tx)
     .await?;
-    let stored = sqlx::query(
+    let stored = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT page_property_values.page_id AS page_id, page_property_values.property_id AS property_id, \
          page_property_values.value_json AS value_json FROM page_property_values \
          JOIN pages ON pages.id = page_property_values.page_id \
-         WHERE pages.parent_id = $1 AND pages.deleted_at IS NULL AND ($2 IS NULL OR pages.id = $3)",
-    )
+         WHERE pages.parent_id = $1 AND pages.deleted_at IS NULL AND ($2 IS NULL OR pages.id = $3) \
+         AND {filter}"
+    )))
     .bind(database_id.to_string())
     .bind(&only)
     .bind(&only)
@@ -3316,6 +3420,8 @@ pub(super) struct DatabaseData {
     pub views: Vec<(Id, DatabaseView)>,
     /// `(page, property, value_json)`.
     pub values: Vec<(Id, Id, String)>,
+    /// The templates of the databases.
+    pub templates: Vec<TemplateCopy>,
 }
 
 /// The live data of the databases in `databases` and the values of the pages in `pages`.
@@ -3324,7 +3430,12 @@ pub(super) async fn load_database_data(
     databases: &[Id],
     pages: impl Iterator<Item = Id>,
 ) -> Result<DatabaseData, PageError> {
-    let mut data = DatabaseData::default();
+    let mut data = DatabaseData {
+        templates: templates::load_copies(tx, databases)
+            .await
+            .map_err(page_error)?,
+        ..DatabaseData::default()
+    };
     for database_id in databases {
         for property in properties_in_tx(tx, *database_id)
             .await
@@ -3380,8 +3491,12 @@ pub(super) async fn write_database_data(
         )
         .await?;
     }
+    templates::write_copies(tx, workspace_id, &data.templates, pages, &property_ids, now)
+        .await
+        .map_err(page_error)?;
     for (database_id, mut view) in data.views {
         view.config.remap(&property_ids);
+        templates::remap_default(&mut view.config, pages);
         view.id = Id::new_v7();
         insert_view(tx, workspace_id, pages[&database_id], None, &view, now)
             .await

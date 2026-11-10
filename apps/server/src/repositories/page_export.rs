@@ -9,6 +9,7 @@ use orbit_platform::{Database, Id};
 use serde_json::Value;
 use thiserror::Error;
 
+use super::databases::NOT_TEMPLATE;
 use super::databases::{DatabaseError, DatabaseRepository, ExportDatabase};
 use super::pages::{json_text_array, parse_id, visible};
 use super::tasks::{TaskError, require_access};
@@ -116,6 +117,7 @@ impl PageExportRepository {
                  UNION \
                  SELECT pages.id FROM pages JOIN subtree ON pages.parent_id = subtree.id \
                  WHERE $4 = 1 AND pages.workspace_id = $5 AND pages.deleted_at IS NULL AND {visible6} \
+                 AND {NOT_TEMPLATE} \
              ) \
              SELECT id FROM subtree LIMIT $7",
             visible3 = visible(3),
@@ -254,7 +256,7 @@ impl PageExportRepository {
         let pool = self.database.pool();
         require_access(pool, workspace_id, actor_id).await?;
         let visible_pages = format!(
-            "FROM pages WHERE workspace_id = $1 AND deleted_at IS NULL AND {visible}",
+            "FROM pages WHERE workspace_id = $1 AND deleted_at IS NULL AND {visible} AND {NOT_TEMPLATE}",
             visible = visible(2)
         );
         if let Some(hub) = CollabHub::existing(&self.database) {

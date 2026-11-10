@@ -28,6 +28,7 @@ use crate::task_routes::{
 };
 
 pub(crate) mod import;
+pub(crate) mod templates;
 
 #[derive(Clone)]
 pub struct DatabaseState {
@@ -81,6 +82,14 @@ pub fn database_router(state: DatabaseState) -> Router {
             post(move_database_row),
         )
         .merge(import::routes())
+        .route(
+            &format!("{BASE}/templates"),
+            post(templates::create_database_template),
+        )
+        .route(
+            &format!("{BASE}/templates/{{template_id}}"),
+            patch(templates::update_database_template).delete(templates::delete_database_template),
+        )
         .with_state(state)
 }
 
@@ -192,6 +201,12 @@ struct CreateDatabaseRowBody {
     #[serde(default, deserialize_with = "deserialize_source_patch")]
     #[schema(value_type = Option<String>)]
     after_row_id: Option<Option<String>>,
+    /// A template of this database that fills the row's title, icon, values and body; `title`,
+    /// `icon` and `values` sent here win over the template's.
+    template_id: Option<String>,
+    /// The caller's local day (`YYYY-MM-DD`) that a template's "today" dates take; default: the
+    /// UTC day.
+    today: Option<String>,
 }
 
 /// Values by property id; `null` clears a value. At most 100 properties per request.
@@ -607,17 +622,44 @@ async fn create_database_row(
         values: values(body.values, &instance, request)?,
         placement,
     };
-    state
-        .databases
-        .create_row(
-            workspace_id,
-            database_id,
-            actor_id,
-            input,
-            request_id_value(request),
-            TimestampMillis::now(),
-        )
-        .await
+    let template_id = body
+        .template_id
+        .map(|id| {
+            id.parse()
+                .map_err(|_| validation("template_id", &instance, request))
+        })
+        .transpose()?;
+    let created = match template_id {
+        Some(template_id) => {
+            state
+                .databases
+                .create_row_from_template(
+                    workspace_id,
+                    database_id,
+                    actor_id,
+                    input,
+                    template_id,
+                    body.today,
+                    request_id_value(request),
+                    TimestampMillis::now(),
+                )
+                .await
+        }
+        None => {
+            state
+                .databases
+                .create_row(
+                    workspace_id,
+                    database_id,
+                    actor_id,
+                    input,
+                    request_id_value(request),
+                    TimestampMillis::now(),
+                )
+                .await
+        }
+    };
+    created
         .map(|row| (StatusCode::CREATED, Json(row)).into_response())
         .map_err(|error| database_problem(error, instance, request))
 }
@@ -873,6 +915,18 @@ fn database_problem(
             "database_view_not_found",
             "Database view not found",
             "The requested view was not found in this database.",
+        ),
+        DatabaseError::TemplateNotFound => (
+            StatusCode::NOT_FOUND,
+            "database_template_not_found",
+            "Database template not found",
+            "The requested template was not found in this database.",
+        ),
+        DatabaseError::TemplateLimit => (
+            StatusCode::CONFLICT,
+            "database_template_limit",
+            "Database template limit",
+            "A database holds at most 20 templates.",
         ),
         DatabaseError::LinkNotFound => (
             StatusCode::NOT_FOUND,

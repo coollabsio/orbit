@@ -247,6 +247,9 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::database_routes::move_database_row,
         crate::database_routes::import::import_database_csv,
         crate::database_routes::import::create_database_from_csv,
+        crate::database_routes::templates::create_database_template,
+        crate::database_routes::templates::update_database_template,
+        crate::database_routes::templates::delete_database_template,
         crate::page_file_routes::upload_page_file,
         crate::page_file_routes::download_page_file,
         crate::page_comment_routes::list_page_threads,
@@ -1689,6 +1692,9 @@ fn database_operation(operation_id: &str) -> bool {
             | "move_database_row"
             | "import_database_csv"
             | "create_database_from_csv"
+            | "create_database_template"
+            | "update_database_template"
+            | "delete_database_template"
     )
 }
 
@@ -1721,6 +1727,10 @@ fn database_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Ve
         "create_database_view" => add_code(responses, "409", "database_view_limit"),
         "delete_database_view" => add_code(responses, "409", "database_last_view"),
         "create_database_row" => add_code(responses, "409", "database_row_limit"),
+        "create_database_template" => add_code(responses, "409", "database_template_limit"),
+        "update_database_template" | "delete_database_template" => {
+            add_code(responses, "404", "database_template_not_found");
+        }
         "import_database_csv" => {
             add_code(responses, "409", "database_row_limit");
             add_code(responses, "409", "database_property_limit");

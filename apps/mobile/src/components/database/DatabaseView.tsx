@@ -7,6 +7,7 @@ import { groupName, groupRows, groupValues, laneRows, moveValues, type BoardGrou
 import { EMPTY_FILTER, filterRules } from '@orbit/database/filter'
 import { ruleSummary, simpleRules } from '@orbit/database/meta'
 import { newRowValues } from '@orbit/database/newRow'
+import { defaultTemplate, templateFill, templatesOf } from '@orbit/database/templates'
 import type { Database, DatabaseView as View_, GroupProperty, LaneProperty, Property, Row, ViewConfig, ViewContext } from '@orbit/database/types'
 import { cellOf } from '@orbit/database/values'
 import { applyView, groupable, laneable, repairConfig } from '@orbit/database/view'
@@ -33,7 +34,7 @@ const COLUMN_GAP = 10
 
 /** Where a card sits: its column, and its lane (`null` on a board without lanes). */
 type Cell = { group: string | null; lane: string | null }
-type DatabaseSheet = { kind: 'views' } | { kind: 'filters' } | { kind: 'sorts' } | { kind: 'more' } | { kind: 'move'; rowId: string; from: Cell }
+type DatabaseSheet = { kind: 'views' } | { kind: 'filters' } | { kind: 'sorts' } | { kind: 'more' } | { kind: 'move'; rowId: string; from: Cell } | { kind: 'templates' }
 
 /**
  * `linkId` shows a linked view block's views instead of the database's own (spec 3.7); `initialView` opens one of them
@@ -87,10 +88,17 @@ export function DatabaseView({ databaseId, linkId = '', initialView = null, head
     void storage.set(storageKey, viewId).catch(() => {})
     sheet.close()
   }
-  /** A new row with the values the filter needs (and a board column's value), opened on its own page. */
-  const addRow = (values: Record<string, unknown> = {}) => {
+  const templates = templatesOf(database)
+  /**
+   * A new row with the values the filter needs (and a board column's value), opened on its own page. It fills from
+   * `templateId` (`null`: empty), by default the view's default template (spec P2 7.5).
+   */
+  const addRow = (values: Record<string, unknown> = {}, templateId: string | null = defaultTemplate(config, templates)?.id ?? null) => {
     const fill = newRowValues(config.filter, database.properties, ctx)
-    createRow.mutate({ ...(fill.title ? { title: fill.title } : {}), values: { ...fill.values, ...values } }, { onSuccess: (row) => router.push(`/docs/${row.id}`) })
+    createRow.mutate(
+      { ...(fill.title ? { title: fill.title } : {}), values: { ...fill.values, ...values }, ...templateFill(templateId, ctx) },
+      { onSuccess: (row) => router.push(`/docs/${row.id}`) },
+    )
   }
   const clearFilters = () => {
     setSearch('')
@@ -112,6 +120,7 @@ export function DatabaseView({ databaseId, linkId = '', initialView = null, head
       canAdd={!readOnly}
       adding={createRow.isPending}
       onAdd={() => addRow()}
+      onAddLongPress={() => sheet.open({ kind: 'templates' })}
       onViews={() => sheet.open({ kind: 'views' })}
       onFilters={openFilters}
       onSorts={() => sheet.open({ kind: 'sorts' })}
@@ -169,6 +178,30 @@ export function DatabaseView({ databaseId, linkId = '', initialView = null, head
           </SheetList>
         ) : sheet.sheet?.kind === 'filters' ? (
           <FilterContent properties={database.properties} config={config} onConfig={onConfig} ctx={ctx} openRule={openRule} onOpenRule={setOpenRule} />
+        ) : sheet.sheet?.kind === 'templates' ? (
+          <SheetList>
+            {templates.map((template) => (
+              <SheetRow
+                key={template.id}
+                label={template.name}
+                subtitle={template.id === config.default_template_id ? 'Default for this view' : undefined}
+                icon="docs"
+                onPress={() => {
+                  sheet.close()
+                  addRow({}, template.id)
+                }}
+              />
+            ))}
+            <SheetRow
+              label="Empty"
+              icon="plus"
+              onPress={() => {
+                sheet.close()
+                addRow({}, null)
+              }}
+            />
+            <SheetNote>Create and edit templates on the web.</SheetNote>
+          </SheetList>
         ) : sheet.sheet?.kind === 'sorts' ? (
           <SortContent properties={database.properties} config={config} onConfig={onConfig} />
         ) : sheet.sheet?.kind === 'more' ? (
@@ -214,6 +247,8 @@ function sheetTitle(sheet: DatabaseSheet | null, moving: Row | undefined): strin
       return 'Sort'
     case 'more':
       return 'View options'
+    case 'templates':
+      return 'New row from'
     case 'move':
       return `Move “${moving?.title || 'Untitled'}” to…`
     case undefined:
@@ -231,6 +266,8 @@ function Toolbar(props: {
   canAdd: boolean
   adding: boolean
   onAdd: () => void
+  /** Lists the templates (a long press on "+"). */
+  onAddLongPress: () => void
   onViews: () => void
   onFilters: (rule: number | 'add' | null) => void
   onSorts: () => void
@@ -258,7 +295,7 @@ function Toolbar(props: {
         <IconButton icon="filter" label={count > 0 ? `Filter, ${count}` : 'Filter'} color={count > 0 ? colors.primary : muted} onPress={() => props.onFilters(null)} />
         <IconButton icon="sort" label={config.sorts.length > 0 ? `Sort, ${config.sorts.length}` : 'Sort'} color={config.sorts.length > 0 ? colors.primary : muted} onPress={props.onSorts} />
         <IconButton icon="more" label="View options" color={muted} onPress={props.onMore} />
-        {props.canAdd ? <IconButton icon="plus" label="New row" size={28} variant="primary" disabled={props.adding} onPress={props.onAdd} /> : null}
+        {props.canAdd ? <IconButton icon="plus" label="New row" size={28} variant="primary" disabled={props.adding} onPress={props.onAdd} onLongPress={props.onAddLongPress} /> : null}
       </View>
       <View className="h-9 flex-row items-center gap-2 px-2.5 rounded-lg border border-input">
         <Icon name="search" size={15} color={colors.mutedForeground} />

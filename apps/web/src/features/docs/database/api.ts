@@ -69,7 +69,7 @@ type Path = { workspace_id: string; database_id: string }
 type Detail = DatabaseDetail
 type Snapshot = { detail: Detail | undefined }
 
-interface DatabaseMutation<Vars, Result> {
+export interface DatabaseMutation<Vars, Result> {
   request: (path: Path, vars: Vars) => Promise<Result>
   /** The cache change shown at once; rolled back when the request fails. */
   optimistic?: (detail: Detail, vars: Vars) => Detail
@@ -84,7 +84,7 @@ interface DatabaseMutation<Vars, Result> {
  * One write to a database. The optimistic change is undone on error (then the query refetches, in case another write
  * landed in between) and a toast says what failed.
  */
-function useDatabaseMutation<Vars, Result>(workspaceId: string, databaseId: string, spec: DatabaseMutation<Vars, Result>, linkId?: string | null) {
+export function useDatabaseMutation<Vars, Result>(workspaceId: string, databaseId: string, spec: DatabaseMutation<Vars, Result>, linkId?: string | null) {
   const queryClient = useQueryClient()
   const key = detailKey(workspaceId, databaseId, linkId)
   const path = { workspace_id: workspaceId, database_id: databaseId }
@@ -112,8 +112,13 @@ function useDatabaseMutation<Vars, Result>(workspaceId: string, databaseId: stri
   })
 }
 
+/** A row, or a template (its page is edited like a row), changed in the cached database. */
 function withRow(detail: Detail, rowId: string, change: (row: DatabaseRow) => DatabaseRow): Detail {
-  return { ...detail, rows: detail.rows.map((row) => (row.id === rowId ? change(row) : row)) }
+  return {
+    ...detail,
+    rows: detail.rows.map((row) => (row.id === rowId ? change(row) : row)),
+    ...(detail.templates ? { templates: detail.templates.map((template) => (template.id === rowId ? { ...change(template), name: template.name } : template)) } : {}),
+  }
 }
 
 /** Patches a row in the cached database, e.g. the title typed on its page (no request; rows not loaded stay as they are). */

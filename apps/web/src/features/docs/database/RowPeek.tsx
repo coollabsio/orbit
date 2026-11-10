@@ -15,6 +15,7 @@ import { MoveToDialog } from '@/features/docs/components/MoveToDialog'
 import { useMovePageTo, type MoveDestination } from '@/features/docs/useMovePageTo'
 import { useDatabase, useTrashRows } from './api'
 import { neighborRows } from './databaseLib'
+import { SaveAsTemplateItem, TemplateActions, TemplateBar } from './TemplatePeek'
 
 interface RowPeekProps {
   workspaceId: string
@@ -55,6 +56,9 @@ export function RowPeek({ workspaceId, databaseId, rowId, viewId, order, focusTi
 
   const missing = page.isError && isPageNotFound(page.error)
   const foreign = page.data !== undefined && page.data.database_id !== databaseId
+  /** The peek edits a row template (spec P2 7.4): its own bar and actions. */
+  const template = database.data?.templates?.find((candidate) => candidate.id === rowId)
+  const flush = async () => control.current?.flush()
   // Read through a ref: the listeners stay while the neighbors and callbacks change.
   const keys = useRef({ previous, next, onShowRow, onClose })
   useEffect(() => {
@@ -148,7 +152,7 @@ export function RowPeek({ workspaceId, databaseId, rowId, viewId, order, focusTi
       </Tip>
     </div>
   )
-  const end = (
+  const rowEnd = (
     <>
       <Tip label="Copy link" side="bottom">
         <Button type="button" variant="ghost" size="icon-sm" className="text-muted-foreground/70" aria-label="Copy link to row" onClick={copyLink}>
@@ -166,6 +170,7 @@ export function RowPeek({ workspaceId, databaseId, rowId, viewId, order, focusTi
             <Copy className="size-[14px]" />
             Duplicate
           </DropdownMenuItem>
+          <SaveAsTemplateItem workspaceId={workspaceId} databaseId={databaseId} rowId={rowId} title={page.data?.title ?? ''} flush={flush} onShowRow={onShowRow} />
           <DropdownMenuItem disabled={!page.data || !teamspaces.data} onClick={() => setMoveOpen(true)}>
             <FolderMove className="size-[14px]" />
             Move to…
@@ -178,6 +183,11 @@ export function RowPeek({ workspaceId, databaseId, rowId, viewId, order, focusTi
       </DropdownMenu>
     </>
   )
+  const end = template ? (
+    <TemplateActions workspaceId={workspaceId} databaseId={databaseId} template={template} flush={flush} onShowRow={onShowRow} onClose={onClose} />
+  ) : (
+    rowEnd
+  )
 
   return (
     <aside
@@ -185,6 +195,7 @@ export function RowPeek({ workspaceId, databaseId, rowId, viewId, order, focusTi
       className="flex h-full min-h-0 w-1/2 min-w-0 shrink-0 animate-in flex-col border-l border-border bg-background duration-150 ease-out fade-in max-[899px]:fixed max-[899px]:inset-0 max-[899px]:z-40 max-[899px]:w-full max-[899px]:border-l-0 max-[899px]:duration-200 max-[899px]:slide-in-from-bottom-2 motion-reduce:animate-none"
       data-row-peek={rowId}
     >
+      {template ? <TemplateBar key={template.id} workspaceId={workspaceId} databaseId={databaseId} template={template} /> : null}
       {page.data && !foreign ? (
         <DocEditor
           key={rowId}

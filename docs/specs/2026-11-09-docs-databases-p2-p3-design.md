@@ -585,6 +585,23 @@ template limit; delete clears `default_template_id`; duplicate of the database c
 | OQ-5.1 | Repeating templates (Notion: daily, weekly, …) need a scheduler. Proposal: not now. |
 | OQ-5.2 | Confirm whether the Notion API exposes templates. |
 
+### 7.9 Status
+
+Done on 2026-11-10 (migration `0084_database_templates`). OQ-5.1: no repeating templates. OQ-5.2: open, no Notion
+mapping. Differences from this section:
+
+| # | Item | Where | Why |
+|---|---|---|---|
+| 1 | "me" and "today" are stored in `database_templates.placeholders_json`, not as literals in `page_property_values`. Reads and writes use the literals: `"me"` among a person value's ids, `{"start": "today", "end": null}` (or `"today"`) as a date. | `repositories/databases/templates.rs` | Stored values stay valid row values, so conversions, option removal, search and copies need no template case. |
+| 2 | `POST …/rows` takes `today` (`YYYY-MM-DD`, the client's local day) next to `template_id`; without it "today" is the UTC day. | `database_routes.rs` | The server has no time zone database. |
+| 3 | `GET /databases/{id}` lists `templates` as rows (`DatabaseRow` fields and `name`; `position` orders the templates). The field is left out when there are none. | `repositories/databases.rs` | The peek's property list edits a template like a row; old clients and fixtures need no change. |
+| 4 | `GET /pages/{id}` keeps `database_id` for a template. | `repositories/pages.rs` | The template editor is the row page (properties, title sync). |
+| 5 | A template duplicated alone (page duplicate) becomes a row; it stays a template only when its database is copied with it. The web "Duplicate" of a template uses `POST …/templates` with `from_row_id`, which takes a template too. | `templates.rs`, `NewRowButton.tsx` | A page duplicate has no template limit check. |
+| 6 | A template is not a favorite: `PUT /pages/{template}/favorite` answers 404. | `repositories/pages.rs` | Favorites list live pages that are not templates. |
+| 7 | Templates are not locked by the database lock (like rows). | `templates.rs` | The lock freezes properties and views only. |
+| 8 | The web row peek has "Save as template" (`from_row_id`). | `database/TemplatePeek.tsx` | The API had it; Notion has the same action. |
+| 9 | `POST /pages/{template}/move` answers 422 (`parent_id`); the peek of a template has no "Move to". | `repositories/pages.rs` | A template stays a hidden page of its database. |
+
 ## 8. Item 6: Board, group by person and sub-groups (P2, M)
 
 ### 8.1 Goal

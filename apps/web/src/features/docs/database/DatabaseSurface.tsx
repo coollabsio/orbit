@@ -7,6 +7,7 @@ import { EMPTY_FILTER, filterRules } from '@orbit/database/filter'
 import { appendChild } from '@orbit/database/filterTree'
 import { newRule, simpleRules } from '@orbit/database/meta'
 import { newRowValues } from '@orbit/database/newRow'
+import { defaultTemplate, templateFill, templatesOf } from '@orbit/database/templates'
 import type { Database, DatabaseView, Property, ViewConfig } from '@orbit/database/types'
 import { useCreateRow, useTrashRows, useUpdateView } from './api'
 import { DatabaseEnvContext, type DatabaseEnv } from './context'
@@ -132,6 +133,7 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
   const draft = drafts[view.id]
   const config = repairConfig({ ...view, config: draft ?? view.config }, database.properties)
   const shown = applyView(database, { ...view, config }, search, ctx)
+  const templates = templatesOf(database)
   const board = view.type === 'board'
   // A block's table shows its first rows; a board limits each column itself.
   const rows = withPinnedRows(board ? shown : shown.slice(0, rowLimit), pins, database.rows)
@@ -180,11 +182,18 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
    * A new row with the values the filter needs; a board card also gets its column's value and place. "New" in the
    * toolbar opens it in the peek; the others edit its title in place, so typing rows stays fast.
    */
-  const addRow = (at: Pin['at'], card?: Omit<NewCard, 'at'>, open: 'inline' | 'peek' = 'inline') => {
+  /** `templateId` fills the row from a template (`null`: empty); the view's default template when absent (spec P2 7.4). */
+  const addRow = (at: Pin['at'], card?: Omit<NewCard, 'at'>, open: 'inline' | 'peek' = 'inline', templateId?: string | null) => {
     const fill = newRowValues(config.filter, database.properties, ctx)
     const after = card && 'after' in card ? card.after : at === 'top' ? null : undefined
+    const template = templateId === undefined ? (defaultTemplate(config, templates)?.id ?? null) : templateId
     createRow.mutate(
-      { ...(fill.title ? { title: fill.title } : {}), values: { ...fill.values, ...card?.values }, ...(after !== undefined ? { after_row_id: after } : {}) },
+      {
+        ...(fill.title ? { title: fill.title } : {}),
+        values: { ...fill.values, ...card?.values },
+        ...(after !== undefined ? { after_row_id: after } : {}),
+        ...templateFill(template, ctx),
+      },
       {
         onSuccess: (row) => {
           setPins((current) => (at === 'top' ? [{ id: row.id, at }, ...current] : [...current, { id: row.id, at }]))
@@ -242,7 +251,9 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
             locked={locked}
             viewId={view.id}
             viewType={view.type}
-            onNew={() => addRow('top', undefined, 'peek')}
+            onNew={(templateId) => addRow('top', undefined, 'peek', templateId)}
+            templates={templates}
+            onEditTemplate={setPeekRow}
             onExportCsv={() => downloadViewCsv(database, { ...view, config }, shown, ctx)}
           />
         )}
@@ -281,6 +292,7 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
       editRowId={editRowId}
       onEditRowShown={() => setEditRowId(null)}
       pageSize={block?.rowLimit}
+      viewId={view.id}
     />
   ) : (
     <>
@@ -294,7 +306,6 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
         virtualize={!!page}
         onConfig={changeConfig}
         onFilter={(propertyId) => {
-      viewId={view.id}
           const property = database.properties.find((candidate) => candidate.id === propertyId)
           if (property) addFilter(property)
         }}

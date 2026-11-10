@@ -73,6 +73,7 @@ export function repairConfig(view: DatabaseView, properties: readonly Property[]
     hide_empty_groups: config.hide_empty_groups ?? false,
     card_properties,
     calculations,
+    ...(config.default_template_id ? { default_template_id: config.default_template_id } : {}),
   }
 }
 

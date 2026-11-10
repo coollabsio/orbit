@@ -9,7 +9,9 @@ import { useCreateProperty, useDatabase, useUpdateProperty, useUpdateValues } fr
 import { CellEditor } from './cells/CellEditor'
 import { CellView } from './cells/CellView'
 import { NewPropertyForm } from './ColumnHeaderMenu'
-import { DatabaseEnvContext, useDatabaseEnv, useDatabaseEnvValue } from './context'
+import { DatabaseEnvContext, useDatabaseEnv, useDatabaseEnvValue, type DatabaseEnv } from './context'
+import { ME, TODAY, templatesOf } from '@orbit/database/templates'
+import { Tip } from '@/components/common/Tip'
 import { isComputed } from '@orbit/database/meta'
 import { PROPERTY_TYPES } from './propertyMeta'
 
@@ -27,10 +29,13 @@ interface PropertyListProps {
  */
 export function PropertyList({ workspaceId, databaseId, rowId, viewId }: PropertyListProps) {
   const query = useDatabase(workspaceId, databaseId)
-  const env = useDatabaseEnvValue(workspaceId, databaseId, query.data?.database.locked ?? true)
+  const rowEnv = useDatabaseEnvValue(workspaceId, databaseId, query.data?.database.locked ?? true)
   const database = query.data
-  const row = database?.rows.find((candidate) => candidate.id === rowId)
+  // A template's page is edited like a row (spec P2 7.4).
+  const template = database ? templatesOf(database).find((candidate) => candidate.id === rowId) : undefined
+  const row = database?.rows.find((candidate) => candidate.id === rowId) ?? template
   if (!database || !row) return null
+  const env = template ? templateEnv(rowEnv) : rowEnv
 
   const views = [...database.views].sort((a, b) => a.position - b.position)
   const view = views.find((candidate) => candidate.id === viewId) ?? views[0]
@@ -45,7 +50,7 @@ export function PropertyList({ workspaceId, databaseId, rowId, viewId }: Propert
     <DatabaseEnvContext.Provider value={env}>
       <div className="mb-5 flex flex-col border-b border-border pb-4" data-print-hide="" aria-label="Properties" role="group">
         {properties.map((property) => (
-          <PropertyLine key={property.id} property={property} row={row} />
+          <PropertyLine key={property.id} property={property} row={row} today={template && property.type === 'date' ? template.today.includes(property.id) : undefined} />
         ))}
         {env.canEditSchema ? <AddProperty /> : null}
       </div>
@@ -53,7 +58,23 @@ export function PropertyList({ workspaceId, databaseId, rowId, viewId }: Propert
   )
 }
 
-function PropertyLine({ property, row }: { property: Property; row: Row }) {
+/**
+ * A template's env: its person values may hold "Me" (whoever makes the row), listed first among the people.
+ */
+function templateEnv(env: DatabaseEnv): DatabaseEnv {
+  const self = env.users.get(env.ctx.userId)
+  if (!self) return env
+  return {
+    ...env,
+    ctx: { ...env.ctx, members: new Map([[ME, ME_LABEL], ...env.ctx.members]) },
+    users: new Map([[ME, { ...self, id: ME, name: ME_LABEL }], ...env.users]),
+  }
+}
+
+const ME_LABEL = 'Me'
+
+/** `today`: set on a template's date property, whether it takes the day a row is added. */
+function PropertyLine({ property, row, today }: { property: Property; row: Row; today?: boolean }) {
   const { workspaceId, databaseId, canEditValues, canEditSchema } = useDatabaseEnv()
   const updateValues = useUpdateValues(workspaceId, databaseId)
   const updateProperty = useUpdateProperty(workspaceId, databaseId)
@@ -63,6 +84,7 @@ function PropertyLine({ property, row }: { property: Property; row: Row }) {
   const editable = canEditValues && !isComputed(property.type)
   const value = cellOf(row, property)
   const commit = (next: CellValue | null) => updateValues.mutate({ rowId: row.id, values: { [property.id]: apiValue(next) } })
+  const toggleToday = () => updateValues.mutate({ rowId: row.id, values: { [property.id]: today ? null : TODAY } })
   const saveOptions = (options: SelectOption[]) =>
     updateProperty.mutateAsync({ propertyId: property.id, body: { config: { ...property.config, options } } }).then(() => undefined)
   const checkbox = property.type === 'checkbox'
@@ -96,6 +118,8 @@ function PropertyLine({ property, row }: { property: Property; row: Row }) {
           <span className="flex w-4">
             <CellView property={property} row={row} width={16} wrap={false} onToggle={editable ? () => commit(value ? null : { kind: 'checked' }) : undefined} />
           </span>
+        ) : today ? (
+          <span className="text-muted-foreground">Today (the day the row is added)</span>
         ) : value === null && !isComputed(property.type) ? (
           <span className="text-muted-foreground/70">Empty</span>
         ) : (
@@ -114,6 +138,13 @@ function PropertyLine({ property, row }: { property: Property; row: Row }) {
           />
         ) : null}
       </div>
+      {today !== undefined && canEditValues ? (
+        <Tip label="Fill in the day the row is added" side="left">
+          <Button type="button" variant="ghost" size="xs" aria-pressed={today} className="mt-[5px] shrink-0 text-muted-foreground aria-pressed:bg-accent aria-pressed:text-foreground" onClick={toggleToday}>
+            Today
+          </Button>
+        </Tip>
+      ) : null}
     </div>
   )
 }

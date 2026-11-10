@@ -18,8 +18,9 @@ use utoipa::ToSchema;
 
 use super::billing::{TrialCapacityError, TrialLimitReached, ensure_trial_capacity};
 use super::databases::{
-    DatabaseSchema, LinkCopy, RowCapacityError, block_links, carry_row_values, copy_database_data,
-    copy_links, ensure_row_capacity, insert_schema, linked_databases, row_search_lines,
+    DatabaseSchema, LinkCopy, NOT_TEMPLATE, RowCapacityError, block_links, carry_row_values,
+    copy_database_data, copy_links, ensure_row_capacity, insert_schema, is_template,
+    linked_databases, row_search_lines,
 };
 use super::page_files::{page_file_url, page_has_file, parse_page_file_url};
 use super::page_mentions::notify_new_mentions;
@@ -1274,7 +1275,8 @@ impl PageRepository {
         let actor = require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let current = page_in_tx(&mut tx, workspace_id, page_id, actor_id, false).await?;
         check_version(expected_version, current.version, &current)?;
-        if parent_id == Some(page_id) {
+        // A row template stays a hidden page of its database.
+        if parent_id == Some(page_id) || is_template(&mut tx, page_id).await? {
             return Err(PageError::Invalid { field: "parent_id" });
         }
         let database_id = match parent_id {
@@ -2089,7 +2091,7 @@ impl PageRepository {
                  JOIN pages ON pages.id = page_search_rows.page_id \
                  LEFT JOIN pages AS parent ON parent.id = pages.parent_id AND parent.kind = 'database' \
                  WHERE page_search.search_vector @@ q.query \
-                 AND pages.workspace_id = $3 AND pages.deleted_at IS NULL AND {visible} \
+                 AND pages.workspace_id = $3 AND pages.deleted_at IS NULL AND {visible} AND {NOT_TEMPLATE} \
                  ORDER BY ts_rank('{{0, 0.2, 0.1, 1}}', page_search.search_vector, q.query) DESC, \
                  pages.updated_at DESC, pages.id DESC LIMIT $5",
                 visible = visible(4)
@@ -2107,7 +2109,7 @@ impl PageRepository {
              JOIN pages ON pages.id = page_search_rows.page_id \
              LEFT JOIN pages AS parent ON parent.id = pages.parent_id AND parent.kind = 'database' \
              WHERE page_search MATCH $2 AND pages.workspace_id = $3 AND pages.deleted_at IS NULL \
-             AND {visible} \
+             AND {visible} AND {NOT_TEMPLATE} \
              ORDER BY bm25(page_search, 10.0, 1.0, 2.0), pages.updated_at DESC, pages.id DESC LIMIT $5",
                 visible = visible(4)
             )
@@ -2417,7 +2419,7 @@ impl PageRepository {
              FROM page_visits JOIN pages ON pages.id = page_visits.page_id \
              WHERE page_visits.workspace_id = $1 AND page_visits.user_id = $2 \
              AND pages.workspace_id = page_visits.workspace_id AND pages.deleted_at IS NULL AND {visible} \
-             ORDER BY page_visits.visited_at DESC, pages.id LIMIT $4", visible = visible(3)
+             AND {NOT_TEMPLATE} ORDER BY page_visits.visited_at DESC, pages.id LIMIT $4", visible = visible(3)
         )))
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
@@ -2476,7 +2478,7 @@ async fn visible_favorites(
          LEFT JOIN pages AS parent ON parent.id = pages.parent_id AND parent.kind = 'database' \
          WHERE page_favorites.workspace_id = $1 AND page_favorites.user_id = $2 \
          AND pages.workspace_id = page_favorites.workspace_id AND pages.deleted_at IS NULL \
-         AND {visible} ORDER BY page_favorites.position, page_favorites.page_id",
+         AND {visible} AND {NOT_TEMPLATE} ORDER BY page_favorites.position, page_favorites.page_id",
         visible = visible(3)
     )))
     .bind(workspace_id.to_string())

@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { Add, ArrowSwapHorizontal, DocumentDownload, DocumentUpload, Eye, EyeSlash, Filter, Kanban, Link, Lock, MoreH, RowHorizontal, Search, Sort, Unlock, Xmark } from 'reicon-react'
+import { ArrowSwapHorizontal, DocumentDownload, DocumentUpload, Eye, EyeSlash, Filter, Kanban, Link, Lock, MoreH, RowHorizontal, Search, Sort, Unlock, Xmark } from 'reicon-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -21,6 +21,7 @@ import { Popover, PopoverContent } from '@/components/ui/popover'
 import { Tip } from '@/components/common/Tip'
 import type { DatabaseView, Property, ViewConfig } from '@orbit/database/types'
 import { groupable, laneable } from '@orbit/database/view'
+import type { Template } from '@orbit/database/templates'
 import { useSetPageLock } from '@/features/docs/api/pageOptions'
 import { useDatabaseEnv } from './context'
 import { MergeCsvDialog } from './CsvImport'
@@ -28,6 +29,7 @@ import { importSummary } from './csvImportText'
 import { PropertyPicker } from './FilterBar'
 import { filterRules } from '@orbit/database/filter'
 import { GripIcon } from './GripIcon'
+import { NewRowButton } from './NewRowButton'
 import { PROPERTY_TYPES } from './propertyMeta'
 import { SortPopover } from './SortPopover'
 
@@ -44,13 +46,16 @@ interface ViewToolbarProps {
   locked: boolean
   viewId: string
   viewType: DatabaseView['type']
-  onNew: () => void
+  /** A new row from the template (`null`: empty), opened in the peek. */
+  onNew: (templateId: string | null) => void
+  templates: readonly Template[]
+  onEditTemplate: (templateId: string) => void
   /** Downloads the rows the view shows as CSV. */
   onExportCsv: () => void
 }
 
 /** Filter, Sort, search, "⋯" (properties or a board's group and card properties, wrap cells, lock, link) and New (spec 7.1). */
-export function ViewToolbar({ properties, config, onConfig, onAddFilter, onAdvancedFilter, search, onSearch, locked, viewId, viewType, onNew, onExportCsv }: ViewToolbarProps) {
+export function ViewToolbar({ properties, config, onConfig, onAddFilter, onAdvancedFilter, search, onSearch, locked, viewId, viewType, onNew, onExportCsv, templates, onEditTemplate }: ViewToolbarProps) {
   const { workspaceId, databaseId, canEditValues, canEditSchema } = useDatabaseEnv()
   const [merging, setMerging] = useState(false)
   const setLock = useSetPageLock(workspaceId)
@@ -208,10 +213,7 @@ export function ViewToolbar({ properties, config, onConfig, onAddFilter, onAdvan
         </PopoverContent>
       </Popover>
       {canEditValues ? (
-        <Button type="button" size="sm" className="ml-1" onClick={onNew}>
-          <Add />
-          New
-        </Button>
+        <NewRowButton templates={templates} config={config} onConfig={onConfig} onNew={onNew} onEditTemplate={onEditTemplate} />
       ) : null}
     </div>
   )

@@ -1493,6 +1493,39 @@ async fn snapshot_database_data(
         .map_err(corrupt)?;
         data.views.push((parse_snapshot_id(database_id)?, view));
     }
+    // Templates stay templates when their database comes with them (older snapshots have none).
+    if reader.columns("database_templates").await?.is_some() {
+        for row in reader
+            .rows(
+                "database_templates",
+                &[
+                    "page_id",
+                    "workspace_id",
+                    "database_id",
+                    "name",
+                    "placeholders_json",
+                    "position",
+                ],
+                |row| {
+                    of_databases(row) && row.get("page_id").is_some_and(|id| page_ids.contains(id))
+                },
+            )
+            .await?
+        {
+            let (Some(page_id), Some(database_id), Some(name)) =
+                (row.get("page_id"), row.get("database_id"), row.get("name"))
+            else {
+                continue;
+            };
+            data.templates.push(super::databases::TemplateCopy {
+                page_id: parse_snapshot_id(page_id)?,
+                database_id: parse_snapshot_id(database_id)?,
+                name: name.to_owned(),
+                position: millis(row.get("position")),
+                placeholders_json: row.get("placeholders_json").unwrap_or("{}").to_owned(),
+            });
+        }
+    }
     for row in reader
         .rows(
             "page_property_values",
