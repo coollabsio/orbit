@@ -410,6 +410,7 @@ fn tool_error(response: &Value) -> &str {
     response["result"]["content"][0]["text"].as_str().unwrap()
 }
 
+const TEMPLATE_DETAIL: &str = "No template of this database has this id. Send the id of one of the database's templates (its templates list), or leave template_id out.";
 const VALUE_DETAIL: &str = "The value is invalid for this database: an unknown or shared property name, an unknown option or member, or a value of the wrong type.";
 const PROPERTY_DETAIL: &str =
     "No property has this name or id, or two properties share the name: use the property id.";
@@ -1248,7 +1249,7 @@ async fn rows_get_a_markdown_body_or_a_template_and_read_as_docs() {
         .await;
     assert_eq!(
         tool_error(&missing),
-        format!("Invalid database input template_id. {VALUE_DETAIL}")
+        format!("Invalid database input template_id. {TEMPLATE_DETAIL}")
     );
     let (status, problem) = f
         .api(
@@ -1259,7 +1260,7 @@ async fn rows_get_a_markdown_body_or_a_template_and_read_as_docs() {
         )
         .await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{problem}");
-    assert_eq!(problem["errors"], json!({"template_id": [VALUE_DETAIL]}));
+    assert_eq!(problem["errors"], json!({"template_id": [TEMPLATE_DETAIL]}));
 
     // `list_docs` shows the database with its kind; a plain doc has no database_id or values.
     let docs = f.tool_ok(&write, "list_docs", json!({})).await;

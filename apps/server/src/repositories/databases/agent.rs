@@ -574,6 +574,9 @@ pub fn invalid_detail(field: &str) -> &'static str {
         "values" => "Send at most 50 values.",
         "sorts" => "Send a list of at most 10 sorts.",
         "title" => "Send a title of at most 500 characters.",
+        "template_id" => {
+            "No template of this database has this id. Send the id of one of the database's templates (its templates list), or leave template_id out."
+        }
         _ if field.ends_with(".property_id") => {
             "No property has this name or id, or two properties share the name: use the property id."
         }
