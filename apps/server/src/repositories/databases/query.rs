@@ -661,3 +661,7 @@ fn compare_text(left: &str, right: &str) -> Ordering {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "query_cases.rs"]
+mod cases;
