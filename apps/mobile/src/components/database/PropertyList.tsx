@@ -1,7 +1,7 @@
 import { isComputed } from '@orbit/database/meta'
 import { withRelatedPages } from '@orbit/database/relations'
 import type { CellValue, Property, Row, SelectOption } from '@orbit/database/types'
-import { apiValue, cellOf } from '@orbit/database/values'
+import { apiValue, cellOf, readsEmpty } from '@orbit/database/values'
 import { repairConfig } from '@orbit/database/view'
 import { useState } from 'react'
 import { Alert, Pressable, View } from 'react-native'
@@ -111,7 +111,7 @@ function PropertyLine({ property, row, editable, onEdit, onToggle, ctx }: {
       <View className="min-h-[38px] flex-1 justify-center items-start py-1.5 px-1.5">
         {checkbox ? (
           <Icon name={value ? 'checkSquare' : 'square'} size={18} color={value ? colors.primary : colors.mutedForeground} />
-        ) : value === null && !isComputed(property.type) && property.type !== 'button' ? (
+        ) : readsEmpty(row, property) ? (
           <Text className="text-[14px] text-muted-foreground/70">Empty</Text>
         ) : (
           <ValueView property={property} row={row} ctx={ctx} />

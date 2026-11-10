@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Add } from 'reicon-react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { apiValue, cellOf } from '@orbit/database/values'
+import { apiValue, cellOf, readsEmpty } from '@orbit/database/values'
 import { repairConfig } from '@orbit/database/view'
 import type { CellValue, Property, Row, SelectOption } from '@orbit/database/types'
 import { useCreateProperty, useDatabase, useUpdateProperty, useUpdateValues } from './api'
@@ -124,7 +124,7 @@ function PropertyLine({ property, row, today }: { property: Property; row: Row; 
           </span>
         ) : today ? (
           <span className="text-muted-foreground">Today (the day the row is added)</span>
-        ) : value === null && !isComputed(property.type) && !button ? (
+        ) : readsEmpty(row, property) ? (
           <span className="text-muted-foreground/70">Empty</span>
         ) : (
           // Wrapped cells show every item, so the width is not measured.

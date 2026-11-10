@@ -79,6 +79,21 @@ export function formulaError(raw: unknown): string | null {
   return typeof message === 'string' ? message : null
 }
 
+/** A server formula message split at its `code` spans (the server writes code in backticks). */
+export function formulaMessageParts(message: string): { text: string; code: boolean }[] {
+  return message
+    .split(/`([^`]+)`/)
+    .map((text, index) => ({ text, code: index % 2 === 1 }))
+    .filter((part) => part.text !== '')
+}
+
+/** A server formula message as plain text, for places that cannot show code (alerts, labels). */
+export function plainFormulaMessage(message: string): string {
+  return formulaMessageParts(message)
+    .map((part) => part.text)
+    .join('')
+}
+
 /** A result in the stored shape of its base type: one person or page becomes a list of one, other lists their items as text. */
 export function formulaRaw(property: FormulaProperty, raw: unknown): unknown {
   if (formulaError(raw) !== null) return null

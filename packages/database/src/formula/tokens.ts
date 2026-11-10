@@ -80,6 +80,13 @@ function markProps(tokens: FormulaToken[], properties: readonly Property[]): For
   return tokens
 }
 
+const PROPERTY_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/** A `prop("<id>")` whose property no longer exists (a name that matches nothing is a typo, not a deletion). */
+export function isDeletedProperty(token: FormulaToken): boolean {
+  return token.kind === 'prop' && token.property === null && PROPERTY_ID.test(stringValue(token.text))
+}
+
 /** The expression as the editor shows it: each `prop("<id>")` names its property. A deleted property's id stays (and shows as missing). */
 export function toEditable(expression: string, properties: readonly Property[]): string {
   return tokenize(expression, properties)

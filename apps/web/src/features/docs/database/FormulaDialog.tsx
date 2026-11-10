@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { cn } from 'cn'
 import { previewDatabaseFormula } from '@orbit/api/generated/sdk.gen'
 import { FORMULA_FUNCTIONS } from '@orbit/database/formula/functions'
-import { quote, toEditable, tokenize, type FormulaToken } from '@orbit/database/formula/tokens'
+import { isDeletedProperty, quote, toEditable, tokenize, type FormulaToken } from '@orbit/database/formula/tokens'
 import type { FormulaProperty } from '@orbit/database/formula/values'
 import type { Property, Row } from '@orbit/database/types'
 import { parseValue } from '@orbit/database/values'
@@ -12,7 +12,7 @@ import { apiClient } from '@/api/client'
 import { Button } from '@/components/ui/button'
 import { Modal } from '@/components/common/Modal'
 import { useDatabase, useUpdateProperty, viewerTimeZone } from './api'
-import { FormulaCell } from './cells/FormulaCell'
+import { FormulaCell, FormulaMessage } from './cells/FormulaCell'
 import { useDatabaseEnv } from './context'
 
 const MAX_EXPRESSION_CHARS = 2_000
@@ -122,9 +122,14 @@ export function FormulaDialog({ property, onClose }: { property: FormulaProperty
                 className={cn(
                   token.kind === 'prop' && token.property === null ? 'text-destructive' : TOKEN_CLASSES[token.kind],
                   error && token.start < error.end && token.end > error.start && 'underline decoration-destructive decoration-wavy',
+                  isDeletedProperty(token) && 'relative text-transparent',
                 )}
               >
                 {token.text}
+                {/* Over the id (which stays the stored text): a mono id is always wider than the label. */}
+                {isDeletedProperty(token) ? (
+                  <span className="absolute top-0 left-0 rounded-sm bg-destructive/10 px-0.5 whitespace-nowrap text-destructive">Deleted property</span>
+                ) : null}
               </span>
             ))}
             {error && error.start >= expression.length ? <span className="underline decoration-destructive decoration-wavy">{' '}</span> : null}
@@ -170,7 +175,7 @@ export function FormulaDialog({ property, onClose }: { property: FormulaProperty
         ) : null}
         {error ? (
           <p role="alert" className="text-sm text-destructive">
-            {error.message}
+            <FormulaMessage message={error.message} />
           </p>
         ) : result?.result_type ? (
           <p className="text-xs text-muted-foreground">Result: {result.result_type}</p>

@@ -350,8 +350,8 @@ const EditorView = memo(function EditorView({ ref, pageId, epoch, generation, ed
 
   const cards = useMemo(() => {
     const out: Record<string, PageCardInfo> = {}
-    for (const item of trash.data ?? []) out[item.id] = { title: item.title, icon: item.icon, trashed: true }
-    for (const item of pages.data ?? []) out[item.id] = { title: item.title, icon: item.icon, trashed: false }
+    for (const item of trash.data ?? []) out[item.id] = { title: item.title, icon: item.icon, trashed: true, database: false }
+    for (const item of pages.data ?? []) out[item.id] = { title: item.title, icon: item.icon, trashed: false, database: item.kind === 'database' }
     return out
   }, [pages.data, trash.data])
   const databases = useDatabaseCards(databaseBlocks, pages.data, trash.data)

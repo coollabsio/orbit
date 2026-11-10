@@ -25,6 +25,7 @@ import {
   spanValues,
   timelineOf,
   timelineRange,
+  type AxisSpan,
   type Bar,
   type BarEdge,
   type TimelineZoom,
@@ -203,12 +204,9 @@ export function DatabaseTimeline({ database, config, rows, onConfig, onAddRow, o
             {showTable ? <TableHeader title={title} columns={columns} width={tableWidth} /> : null}
             <div className="relative shrink-0" style={{ width: axisWidth }}>
               {axis.groups.map((group) => (
-                <div key={group.day} className="absolute top-0 flex h-6 items-center border-l border-border px-2 text-xs font-medium whitespace-nowrap" style={{ left: group.start * axis.dayWidth, width: group.days * axis.dayWidth }}>
-                  <span className="sticky truncate" style={{ left: tableWidth + 8 }}>
-                    {group.label}
-                  </span>
-                </div>
+                <div key={group.day} className="absolute top-0 h-6 border-l border-border" style={{ left: group.start * axis.dayWidth, width: group.days * axis.dayWidth }} />
               ))}
+              <GroupLabels scroller={scroller} groups={axis.groups} dayWidth={axis.dayWidth} />
               {axis.ticks.map((tick) => (
                 <div
                   key={tick.day}
@@ -268,6 +266,7 @@ export function DatabaseTimeline({ database, config, rows, onConfig, onAddRow, o
                       <BarView
                         row={row}
                         left={xOf(bar.startDay)}
+                        labelLeft={tableWidth}
                         width={Math.max((dayIndex(bar.startDay, bar.endDay) + 1) * axis.dayWidth, MIN_BAR_WIDTH)}
                         editable={editable}
                         dragging={dragging !== null}
@@ -294,6 +293,35 @@ export function DatabaseTimeline({ database, config, rows, onConfig, onAddRow, o
       </div>
     </div>
   )
+}
+
+const GROUP_LABEL_INSET = 8
+
+/**
+ * The month (or year) labels over the axis. Each stays at the start of its group's visible part and shortens with it,
+ * so a group mostly scrolled away (under the table pane or past the left edge) keeps its label inside instead of
+ * pushing it out. Axis x equals the scroller's scrollLeft at the visible start, right of the sticky table pane.
+ */
+function GroupLabels({ scroller, groups, dayWidth }: { scroller: HTMLDivElement | null; groups: AxisSpan[]; dayWidth: number }) {
+  const [scrollLeft, setScrollLeft] = useState(0)
+  useLayoutEffect(() => {
+    if (!scroller) return
+    const update = () => setScrollLeft(scroller.scrollLeft)
+    update()
+    scroller.addEventListener('scroll', update, { passive: true })
+    return () => scroller.removeEventListener('scroll', update)
+  }, [scroller])
+  return groups.map((group) => {
+    const end = (group.start + group.days) * dayWidth
+    const left = Math.max(group.start * dayWidth, scrollLeft) + GROUP_LABEL_INSET
+    const maxWidth = end - left - GROUP_LABEL_INSET
+    if (maxWidth <= 0) return null
+    return (
+      <span key={group.day} className="absolute top-0 truncate text-xs leading-6 font-medium whitespace-nowrap" style={{ left, maxWidth }}>
+        {group.label}
+      </span>
+    )
+  })
 }
 
 /** The bar as it shows during a drag. */
@@ -341,6 +369,8 @@ interface BarViewProps {
   row: Row
   left: number
   width: number
+  /** Where the visible axis starts in the scroller: a bar that starts before it keeps its title in view. */
+  labelLeft: number
   editable: boolean
   dragging: boolean
   onPointerDown: (event: ReactPointerEvent<HTMLElement>, edge: BarEdge) => void
@@ -350,7 +380,7 @@ interface BarViewProps {
 }
 
 /** A row's bar: the middle moves it, the edges resize it; a click opens the row. */
-function BarView({ row, left, width, editable, dragging, onPointerDown, onPointerMove, onPointerUp, onPointerCancel }: BarViewProps) {
+function BarView({ row, left, width, labelLeft, editable, dragging, onPointerDown, onPointerMove, onPointerUp, onPointerCancel }: BarViewProps) {
   const label = row.title || 'Untitled'
   const inside = width >= LABEL_INSIDE_MIN
   const resizable = editable && width >= RESIZE_MIN
@@ -362,7 +392,7 @@ function BarView({ row, left, width, editable, dragging, onPointerDown, onPointe
         tabIndex={0}
         aria-label={label}
         className={cn(
-          'absolute top-1.5 flex items-center overflow-hidden rounded-sm border border-primary/40 bg-primary/15 text-xs text-foreground outline-none select-none hover:bg-primary/25 focus-visible:ring-2 focus-visible:ring-ring/50',
+          'absolute top-1.5 flex items-center overflow-clip rounded-sm border border-primary/40 bg-primary/15 text-xs text-foreground outline-none select-none hover:bg-primary/25 focus-visible:ring-2 focus-visible:ring-ring/50',
           editable ? 'cursor-grab' : 'cursor-pointer',
           dragging && 'cursor-grabbing bg-primary/30 shadow-sm',
         )}
@@ -372,7 +402,12 @@ function BarView({ row, left, width, editable, dragging, onPointerDown, onPointe
         {...handlers}
       >
         {resizable ? <EdgeHandle side="start" onPointerDown={(event) => onPointerDown(event, 'start')} {...handlers} /> : null}
-        {inside ? <span className="truncate px-2">{label}</span> : null}
+        {inside ? (
+          // overflow-clip on the bar (not hidden) keeps the timeline, not the bar, the scroller this title sticks to.
+          <span className="sticky truncate px-2" style={{ left: labelLeft }}>
+            {label}
+          </span>
+        ) : null}
         {resizable ? <EdgeHandle side="end" onPointerDown={(event) => onPointerDown(event, 'end')} {...handlers} /> : null}
       </div>
       {inside ? null : (

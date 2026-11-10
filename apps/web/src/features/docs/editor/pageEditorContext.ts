@@ -41,8 +41,7 @@ export function usePageEditorContext(): PageEditorContextValue {
 }
 
 export type PageBlockState =
-  | { kind: 'ok'; title: string; icon: string | null }
-  | { kind: 'trashed'; title: string; icon: string | null }
+  | { kind: 'ok' | 'trashed'; title: string; icon: string | null; database: boolean }
   | { kind: 'missing' }
 
 /** Maps the resolver result to what the card renders (kept pure for tests). */
@@ -50,5 +49,5 @@ export function pageBlockState(pageId: string, resolvePage: PageEditorContextVal
   const page = pageId ? resolvePage(pageId) : null
   if (!page) return { kind: 'missing' }
   const title = page.title.trim() || 'Untitled'
-  return page.trashed ? { kind: 'trashed', title, icon: page.icon } : { kind: 'ok', title, icon: page.icon }
+  return { kind: page.trashed ? 'trashed' : 'ok', title, icon: page.icon, database: page.database ?? false }
 }

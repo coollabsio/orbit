@@ -33,6 +33,8 @@ export interface PageCardInfo {
   title: string
   icon: string | null
   trashed: boolean
+  /** A database page: without its own icon the card shows a database one. */
+  database: boolean
 }
 
 export interface PageEditorColors {
@@ -119,7 +121,7 @@ function PageCard({ block }: { block: { props: { pageId: string } } }) {
         if (page && !page.trashed) openPage(block.props.pageId)
       }}
     >
-      <span className="orbit-page-card-icon">{page?.icon ?? '📄'}</span>
+      <span className="orbit-page-card-icon">{page?.icon ?? (page?.database ? '🗃️' : '📄')}</span>
       <span className="orbit-page-card-title">{page ? page.title.trim() || 'Untitled' : 'Missing page'}</span>
       {page?.trashed ? <span className="orbit-page-card-note">Page in trash</span> : null}
     </button>

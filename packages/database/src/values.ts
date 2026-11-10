@@ -230,6 +230,27 @@ export function cellOf(row: Row, property: Property): CellValue | null {
   }
 }
 
+/** Whether a row's property list reads "Empty" for the property: no value, and nothing else to show instead. */
+export function readsEmpty(row: Row, property: Property): boolean {
+  if (cellOf(row, property) !== null) return false
+  switch (property.type) {
+    // A box or a button shows itself; the others always have a value.
+    case 'checkbox':
+    case 'button':
+    case 'created_time':
+    case 'last_edited_time':
+    case 'created_by':
+    case 'last_edited_by':
+    case 'unique_id':
+      return false
+    // A failed formula shows its error; a true/false one its box.
+    case 'formula':
+      return row.formulaErrors?.[property.id] === undefined && formulaBase(property).type !== 'checkbox'
+    default:
+      return true
+  }
+}
+
 /** The JSON the API takes for a value; `null` clears it. */
 export function apiValue(value: CellValue | null): unknown {
   if (!value) return null
