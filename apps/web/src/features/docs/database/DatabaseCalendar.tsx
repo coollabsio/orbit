@@ -1,4 +1,4 @@
-import { useState, type DragEvent } from 'react'
+import { useRef, useState, type DragEvent } from 'react'
 import { Add, ChevronLeft, ChevronRight } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
@@ -65,6 +65,7 @@ export function DatabaseCalendar({ database, config, rows, onConfig, onAddRow, o
   const [anchor, setAnchor] = useState(today)
   const [drag, setDrag] = useState<CalendarDrag | null>(null)
   const [dropDay, setDropDay] = useState<string | null>(null)
+  const dragTimer = useRef<number | undefined>(undefined)
 
   const candidate = database.properties.find((property) => property.id === config.date_property_id)
   if (!datable(candidate)) {
@@ -100,7 +101,15 @@ export function DatabaseCalendar({ database, config, rows, onConfig, onAddRow, o
   const laneHeight = week ? WEEK_LANE_BASE + WEEK_LANE_PROPERTY * cardProperties.length : MONTH_LANE
   const step = (direction: 1 | -1) => setAnchor((day) => (week ? addDays(day, 7 * direction) : addMonths(day, direction)))
 
+  const beginDrag = (event: DragEvent<HTMLElement>, row: Row, next: CalendarDrag) => {
+    event.dataTransfer.effectAllowed = 'move'
+    event.dataTransfer.setData('text/plain', row.title || 'Untitled')
+    // Chrome cancels a drag whose source stops taking pointer events during `dragstart`, so the cards let the drag
+    // through to the day cells only from the next task on.
+    dragTimer.current = window.setTimeout(() => setDrag(next))
+  }
   const endDrag = () => {
+    window.clearTimeout(dragTimer.current)
     setDrag(null)
     setDropDay(null)
   }
@@ -235,13 +244,11 @@ export function DatabaseCalendar({ database, config, rows, onConfig, onAddRow, o
                     onMoveStart={(event) => {
                       const box = (event.currentTarget.closest('[data-week]') as HTMLElement).getBoundingClientRect()
                       const column = Math.min(6, Math.max(0, Math.floor(((event.clientX - box.left) / box.width) * 7)))
-                      startDrag(event, bar.row)
-                      setDrag({ rowId: bar.row.id, mode: 'move', grabDay: days[column]! })
+                      beginDrag(event, bar.row, { rowId: bar.row.id, mode: 'move', grabDay: days[column]! })
                     }}
                     onEndStart={(event) => {
                       event.stopPropagation()
-                      startDrag(event, bar.row)
-                      setDrag({ rowId: bar.row.id, mode: 'end' })
+                      beginDrag(event, bar.row, { rowId: bar.row.id, mode: 'end' })
                     }}
                     onDragEnd={endDrag}
                   />
@@ -252,11 +259,6 @@ export function DatabaseCalendar({ database, config, rows, onConfig, onAddRow, o
       </div>
     </div>
   )
-}
-
-function startDrag(event: DragEvent<HTMLElement>, row: Row) {
-  event.dataTransfer.effectAllowed = 'move'
-  event.dataTransfer.setData('text/plain', row.title || 'Untitled')
 }
 
 interface CalendarCardProps {
