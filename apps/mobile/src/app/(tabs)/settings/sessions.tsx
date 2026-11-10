@@ -24,7 +24,7 @@ export default function SessionsScreen() {
         actions={others.length > 0 ? <Button label="Sign out all other sessions" variant="outline" disabled={revoke.isPending} onPress={() => revoke.mutate(others.map((session) => session.id))} /> : undefined}
         flush
       >
-        {sessions.isPending ? <View className="p-4"><Note>Loading sessions…</Note></View> : null}
+        {sessions.isPending ? <View className="p-4"><Note loading>Loading sessions…</Note></View> : null}
         {sessions.isError ? <View className="p-4"><Note error>Sessions could not be loaded.</Note></View> : null}
         {list.map((session, index) => (
           <SettingsRow key={session.id} first={index === 0}>

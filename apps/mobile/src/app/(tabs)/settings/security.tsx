@@ -109,7 +109,7 @@ export default function SecurityScreen() {
 
   const passkeyRows: { key: string; content: ReactNode }[] = [
     ...(options.data && !passkeysOn ? [{ key: 'domain', content: <View className="flex-1"><Note>Passkeys need Orbit to be opened at a domain name.</Note></View> }] : []),
-    ...(passkeys.isPending ? [{ key: 'loading', content: <View className="flex-1"><Note>Loading passkeys…</Note></View> }] : []),
+    ...(passkeys.isPending ? [{ key: 'loading', content: <View className="flex-1"><Note loading>Loading passkeys…</Note></View> }] : []),
     ...(passkeys.isError ? [{ key: 'error', content: <><Note error>Passkeys could not be loaded.</Note><Button label="Retry" variant="ghost" onPress={() => void passkeys.refetch()} /></> }] : []),
     ...(passkeys.isSuccess && passkeys.data.length === 0 && passkeysOn ? [{ key: 'empty', content: <View className="flex-1"><Note>No passkeys yet.</Note></View> }] : []),
     ...(passkeys.data ?? []).map((passkey) => ({
@@ -176,7 +176,7 @@ export default function SecurityScreen() {
         }
         flush
       >
-        {status.isPending ? <View className="p-4"><Note>Loading…</Note></View> : null}
+        {status.isPending ? <View className="p-4"><Note loading>Loading…</Note></View> : null}
         {status.isError ? <View className="p-4"><Note error>Two-factor sign-in could not be loaded.</Note></View> : null}
         {status.data ? (
           <SettingsRow first>

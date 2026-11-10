@@ -348,6 +348,21 @@ pub struct PageTrash {
     pub items: Vec<TrashedPage>,
 }
 
+/// A page in the trash with its content, for a read-only preview before restoring it.
+#[derive(Clone, Debug, Serialize, ToSchema)]
+pub struct TrashedPageDetail {
+    pub page: PageRecord,
+    /// Whether the caller may delete this page forever: only pages trashed directly (not along
+    /// with an ancestor) qualify.
+    pub can_purge: bool,
+    /// The user who moved the page (or the ancestor it went with) to the trash; `null` when the
+    /// audit log no longer has that event.
+    #[schema(value_type = Option<String>, required = true)]
+    pub deleted_by: Option<Id>,
+    /// The sub-pages trashed along with it, ordered `parent_id, position, id`.
+    pub sub_pages: Vec<PageSummary>,
+}
+
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct PageSearch {
     pub items: Vec<PageSearchResult>,
@@ -1696,6 +1711,71 @@ impl PageRepository {
             })
             .collect::<Result<_, PageError>>()?;
         Ok(PageTrash { items })
+    }
+
+    /// A trashed page within retention that the caller can see (the trash list's rule), with the
+    /// sub-pages trashed along with it; `NotFound` otherwise.
+    pub async fn trashed_page(
+        &self,
+        workspace_id: Id,
+        page_id: Id,
+        actor_id: Id,
+        now: TimestampMillis,
+    ) -> Result<TrashedPageDetail, PageError> {
+        let actor = require_access(self.database.pool(), workspace_id, actor_id).await?;
+        let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT {PAGE_COLUMNS}, trashed_with FROM pages WHERE id = $1 AND workspace_id = $2 \
+             AND deleted_at > $3 AND trashed_with IS NOT NULL AND {visible}",
+            visible = visible(4)
+        )))
+        .bind(page_id.to_string())
+        .bind(workspace_id.to_string())
+        .bind(now.as_millis().saturating_sub(TRASH_RETENTION_MILLIS))
+        .bind(actor_id.to_string())
+        .fetch_optional(self.database.pool())
+        .await?
+        .ok_or(PageError::NotFound)?;
+        let batch: String = row.get("trashed_with");
+        let page = page_from_row(row)?;
+        let deleted_at = page.deleted_at.ok_or(PageError::Corrupt)?;
+        // `delete_page` stamps the batch and its audit event with the same time.
+        let deleted_by = sqlx::query_scalar::<_, Option<String>>(
+            "SELECT actor_id FROM audit_events WHERE workspace_id = $1 AND occurred_at = $2 \
+             AND action = 'page.deleted' AND resource_id = $3 ORDER BY id DESC LIMIT 1",
+        )
+        .bind(workspace_id.to_string())
+        .bind(deleted_at.as_millis())
+        .bind(&batch)
+        .fetch_optional(self.database.pool())
+        .await?
+        .flatten()
+        .map(parse_id)
+        .transpose()?;
+        let sub_pages = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "WITH RECURSIVE subtree(id) AS ( \
+                 SELECT pages.id FROM pages WHERE pages.parent_id = $1 AND pages.trashed_with = $2 \
+                 UNION ALL \
+                 SELECT pages.id FROM pages JOIN subtree ON pages.parent_id = subtree.id \
+                 WHERE pages.trashed_with = $2 \
+             ) \
+             SELECT {SUMMARY_COLUMNS} FROM pages WHERE pages.workspace_id = $3 \
+             AND pages.deleted_at IS NOT NULL AND pages.id IN (SELECT id FROM subtree) \
+             ORDER BY pages.parent_id, pages.position, pages.id"
+        )))
+        .bind(page_id.to_string())
+        .bind(&batch)
+        .bind(workspace_id.to_string())
+        .fetch_all(self.database.pool())
+        .await?
+        .into_iter()
+        .map(summary_from_row)
+        .collect::<Result<_, _>>()?;
+        Ok(TrashedPageDetail {
+            can_purge: batch == page_id.to_string() && actor.can_purge_page(page.private),
+            deleted_by,
+            sub_pages,
+            page,
+        })
     }
 
     /// Deletes a page in the trash forever, with the sub-pages trashed along with it. Only pages

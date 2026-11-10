@@ -2791,7 +2791,7 @@ async fn the_filter_migration_turns_p1_rules_into_the_root_and_group() {
         .execute(fixture.database.pool())
         .await
         .unwrap();
-    sqlx::query("DELETE FROM schema_migrations WHERE version = 82")
+    sqlx::query("DELETE FROM schema_migrations WHERE version = 89")
         .execute(fixture.database.pool())
         .await
         .unwrap();

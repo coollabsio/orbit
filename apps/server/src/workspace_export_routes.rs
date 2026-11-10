@@ -18,7 +18,7 @@ use crate::export::names::{ascii_file_name, rfc5987};
 use crate::repositories::identity::IdentityRepository;
 use crate::task_routes::{ApiError, authenticate_session, parse_id, request_id_value};
 use crate::workspace_export::{
-    ExportError, WorkspaceExport, WorkspaceExportList, WorkspaceExportService,
+    ExportError, ExportMode, WorkspaceExport, WorkspaceExportList, WorkspaceExportService,
 };
 
 #[derive(Clone)]
@@ -63,7 +63,7 @@ struct WorkspaceExportArchive(Vec<u8>);
 
 /// Starts an export of the whole workspace as a ZIP archive (tasks and chat as JSON, pages as
 /// Markdown, and the files). It uses the caller's view: their private pages, and the private
-/// channels and direct messages they are in. One export at a time per workspace (409).
+/// channels and direct messages they are in. One export of the caller at a time (409).
 #[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/exports", params(("workspace_id" = String, Path)), responses((status = 202, body = WorkspaceExport)))]
 async fn create_workspace_export(
     State(state): State<WorkspaceExportState>,
@@ -90,7 +90,7 @@ async fn create_workspace_export(
         .map_err(|error| problem(error, &instance, request_id))
 }
 
-/// The workspace's exports that have not expired, newest first.
+/// The caller's full exports that have not expired, newest first.
 #[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/exports", params(("workspace_id" = String, Path)), responses((status = 200, body = WorkspaceExportList)))]
 async fn list_workspace_exports(
     State(state): State<WorkspaceExportState>,
@@ -143,6 +143,7 @@ async fn download_workspace_export(
             workspace_id,
             export_id,
             session.user.id,
+            ExportMode::Full,
             request_id_value(request_id),
         )
         .await
@@ -199,7 +200,7 @@ fn problem(
             StatusCode::CONFLICT,
             "export_in_progress",
             "Export in progress",
-            "An export of this workspace is already being prepared. Wait until it is ready.",
+            "An export that you started is already being prepared. Wait until it is ready.",
             instance,
             request_id,
         ),

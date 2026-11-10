@@ -29,6 +29,7 @@ import {
 } from '@/features/settings/api/security'
 import { RowIcon, SettingsRow } from '@/features/settings/components/SettingsParts'
 import { relativeTime } from '@/lib/format'
+import { LoadingText } from '@/components/ui/spinner'
 
 function problemDetail(error: unknown, fallback: string) {
   return error instanceof ApiProblem ? error.detail : fallback
@@ -84,7 +85,7 @@ function AuthenticatorCard() {
       ) : undefined}
       flush
     >
-      {status.isPending ? <SettingsRow role="status">Loading…</SettingsRow> : null}
+      {status.isPending ? <SettingsRow><LoadingText>Loading…</LoadingText></SettingsRow> : null}
       {status.isError ? <SettingsRow role="alert">Two-factor sign-in could not be loaded. <Button variant="ghost" onClick={() => void status.refetch()}>Retry</Button></SettingsRow> : null}
       {status.data ? (
         <SettingsRow className="flex-nowrap">
@@ -334,7 +335,7 @@ function PasskeysCard() {
         {available && !supported ? <SettingsRow className="text-[13px] text-muted-foreground">This browser does not support passkeys.</SettingsRow> : null}
         {!adding && add.isPending ? <SettingsRow role="status" className="text-[13px] text-muted-foreground">Confirm the new passkey in your browser…</SettingsRow> : null}
         {addError ? <SettingsRow role="alert" className="text-[13px] text-destructive">{addError}</SettingsRow> : null}
-        {passkeys.isPending ? <SettingsRow role="status">Loading passkeys…</SettingsRow> : null}
+        {passkeys.isPending ? <SettingsRow><LoadingText>Loading passkeys…</LoadingText></SettingsRow> : null}
         {passkeys.isError ? <SettingsRow role="alert">Passkeys could not be loaded. <Button variant="ghost" onClick={() => void passkeys.refetch()}>Retry</Button></SettingsRow> : null}
         {passkeys.isSuccess && list.length === 0 && available ? <SettingsRow className="text-[13px] text-muted-foreground">No passkeys yet.</SettingsRow> : null}
         {list.map((passkey) => (

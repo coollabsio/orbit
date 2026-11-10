@@ -11,10 +11,14 @@
 //! Jobs carry only the import id. Progress lives in `linear_import_items`, so a restarted job
 //! continues where it stopped, and every step converges on a second run:
 //! - Phase A, per selected team: create the Orbit project (its id recorded first), map the
-//!   workflow states to statuses (same name reuses), and list its issues (parents first) and
-//!   their relations as items.
+//!   workflow states to statuses (same name reuses), and list its issues and their relations as
+//!   items, one page at a time. Each page is stored with the cursor of the next one, so a run
+//!   that stops (for example at a long rate limit) reads on from there. There is no limit on the
+//!   number of issues. Phases B and C run for each page as soon as it is stored.
 //! - Phase B, per issue: create the Orbit task (its id recorded first) silently, without
-//!   notifications.
+//!   notifications, under its parent when the parent is in the same team, was created, and is
+//!   less than [`MAX_SUB_ISSUE_DEPTH`] levels deep. An issue whose parent is not created yet
+//!   waits; once every team is listed it starts a new tree.
 //! - Phase C, per issue: uploaded files (downloaded with the key, attached, and their URLs in the
 //!   description rewritten), then comments (skipping as many as the importer already wrote).
 //! - Phase D, per relation: blocks, related and duplicate relations between imported issues. A
@@ -23,7 +27,12 @@
 //!
 //! An issue that fails is recorded and the import continues; a revoked key fails the import.
 //! What was imported before a failure or cancellation stays.
+//!
+//! A later import of the same team reuses what a finished earlier import in the workspace made:
+//! its Orbit project and its tasks, while they exist. An issue the earlier import finished is
+//! counted as done and not copied again.
 
+use crate::import_notice::{ImportNotices, ImportSource};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
@@ -41,6 +50,7 @@ use super::client::{LinearClient, LinearClientConfig, LinearError};
 use super::model::{LinearComment, LinearIssue};
 pub use super::scan::{LinearImportTeam, LinearImportTree};
 use super::scan::{MAX_TEAMS, build_tree};
+use crate::import_people::{self, Match, Source};
 use crate::notion::files::sanitize_file_name;
 use crate::notion::import::clamp;
 use crate::repositories::attachments::AttachmentRepository;
@@ -52,18 +62,17 @@ use crate::repositories::tasks::{
 use crate::secret_box::{decrypt_secret, encrypt_secret};
 pub use crate::task_import::JobRun;
 use crate::task_import::{
-    Attached, Failure, LABEL_COLORS, NewProject, PROJECT_COLORS, attach_once, attachment_url,
-    category_color, display_instant, ensure_project, ensure_writable, escape_markdown,
-    find_or_create_label, job_kind, markdown_links, member_emails, mentions_any, parse_date_millis,
-    parse_instant_millis, parse_stored_id, project_key_base, project_statuses, retryable,
-    rewrite_links, stopped, with_source_details,
+    Attached, Failure, ImportTables, LABEL_COLORS, NewProject, PROJECT_COLORS, attach_once,
+    attachment_url, category_color, display_instant, ensure_project, ensure_writable,
+    escape_markdown, find_or_create_label, job_kind, markdown_links, member_emails, mentions_any,
+    parse_date_millis, parse_instant_millis, parse_stored_id, project_key_base, project_statuses,
+    retryable, reuse_earlier_projects, reuse_earlier_tasks, rewrite_links, stopped,
+    with_source_details,
 };
 
 /// Job kind names.
 pub const SCAN_JOB: &str = "linear.scan";
 pub const IMPORT_JOB: &str = "linear.import";
-/// Most issues (sub-issues included) one import creates.
-pub const MAX_TASKS: usize = 10_000;
 /// Sub-issue levels kept below a top-level issue; a deeper issue starts a new tree.
 pub const MAX_SUB_ISSUE_DEPTH: usize = 5;
 /// A scanned import waits this long for "start" before its key is deleted.
@@ -74,7 +83,25 @@ const MAX_TOKEN_CHARS: usize = 1_024;
 const MAX_FAILURES_LISTED: i64 = 200;
 const MAX_LISTED_IMPORTS: i64 = 20;
 const ACTIVE: &str = "('scanning', 'queued', 'importing')";
+
+const TABLES: ImportTables = ImportTables {
+    imports: "linear_imports",
+    items: "linear_import_items",
+    source_id: "linear_id",
+    project_kind: "team",
+    task_kind: "issue",
+};
 const OPEN: &str = "('scanning', 'ready', 'queued', 'importing')";
+/// [`LinearImportService::load_items`] filters.
+const ITEMS_ALL: &str = "";
+const ITEMS_PENDING: &str = " AND item.state = 'pending'";
+const ITEMS_CREATED: &str = " AND item.state = 'created'";
+/// Pending issues whose parent is settled: none, or listed and no longer pending.
+const ITEMS_READY: &str = " AND item.state = 'pending' AND (item.parent_id IS NULL OR EXISTS (\
+     SELECT 1 FROM linear_import_items AS parent WHERE parent.import_id = item.import_id \
+     AND parent.kind = 'issue' AND parent.linear_id = item.parent_id AND parent.state <> 'pending'))";
+/// How often a running import writes a rate-limit wait.
+const PROGRESS_INTERVAL: Duration = Duration::from_secs(2);
 
 /// Both job kinds: [`job_kind`], as for the Asana and Notion imports.
 #[must_use]
@@ -91,6 +118,7 @@ pub fn import_job_kind() -> JobKind {
 pub fn register_jobs(
     worker: Worker,
     service: LinearImportService,
+    notices: ImportNotices,
 ) -> Result<Worker, JobKindRegistrationError> {
     let scan = service.clone();
     worker
@@ -112,6 +140,7 @@ pub fn register_jobs(
         })?
         .with_handler(import_job_kind(), move |context| {
             let service = service.clone();
+            let notices = notices.clone();
             async move {
                 let Some(import_id) = payload_import_id(&context.job.payload) else {
                     return Err(JobError::Permanent(
@@ -123,7 +152,9 @@ pub fn register_jobs(
                     last_attempt: context.claim.attempt >= context.job.max_attempts,
                 };
                 let result = service.run_import(import_id, &run).await;
-                service.after_attempt(import_id, &run, result).await
+                let result = service.after_attempt(import_id, &run, result).await;
+                notices.after_run(ImportSource::Linear, import_id).await;
+                result
             }
         })
 }
@@ -228,6 +259,46 @@ pub struct LinearImportProgress {
     pub done: u64,
     /// Issues, teams and relations that could not be imported.
     pub failed: u64,
+    /// Issues the selected teams had when they were scanned: the goal of the `reading` stage.
+    pub expected: u64,
+    /// Issues read from Linear so far, the team being read included.
+    pub read: u64,
+    /// Tasks created so far.
+    pub created: u64,
+    /// What the job does now; `null` before the start and once the import ended.
+    #[schema(required = true)]
+    pub stage: Option<LinearImportStage>,
+}
+
+/// The steps of a running import, in order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LinearImportStage {
+    /// Reading the issue lists of the selected teams from Linear.
+    Reading,
+    /// Creating the tasks.
+    Creating,
+    /// Adding files and comments.
+    Details,
+    /// Linking blocking, related and duplicate issues.
+    Linking,
+}
+
+impl LinearImportStage {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Reading => "reading",
+            Self::Creating => "creating",
+            Self::Details => "details",
+            Self::Linking => "linking",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        [Self::Reading, Self::Creating, Self::Details, Self::Linking]
+            .into_iter()
+            .find(|stage| stage.as_str() == value)
+    }
 }
 
 /// A team, issue or relation the import could not create or fill.
@@ -290,6 +361,9 @@ pub struct LinearImport {
     #[schema(required = true)]
     pub linear_user_name: Option<String>,
     pub progress: LinearImportProgress,
+    /// Set while a Linear rate limit pauses the import: when it goes on.
+    #[schema(value_type = Option<String>, format = DateTime, required = true)]
+    pub waiting_until: Option<TimestampMillis>,
     /// Why the import failed or expired.
     #[schema(required = true)]
     pub error: Option<String>,
@@ -314,7 +388,8 @@ struct StoredSelection {
     team_ids: Vec<String>,
 }
 
-/// A team item's data: its key at start, then the status of each workflow state.
+/// A team item's data: its key at start, then the status of each workflow state and how far
+/// its issues are listed.
 #[derive(Default, Deserialize, Serialize)]
 struct StoredTeam {
     #[serde(default)]
@@ -322,6 +397,12 @@ struct StoredTeam {
     /// `(state id, status id)`.
     #[serde(default)]
     states: Vec<(String, String)>,
+    /// Where the next page of issues starts.
+    #[serde(default)]
+    cursor: Option<String>,
+    /// Every page of issues is stored.
+    #[serde(default)]
+    listed: bool,
 }
 
 /// A relation item's data: `issue_id` is the source (the blocker, or the duplicate).
@@ -338,7 +419,6 @@ struct Item {
     team_id: String,
     parent_id: Option<String>,
     title: String,
-    data_json: Option<String>,
     orbit_id: Option<Id>,
     state: String,
 }
@@ -383,7 +463,18 @@ struct Run<'a> {
     report: StoredReport,
     /// Lowercase email → member id.
     members: HashMap<String, Id>,
+    /// Name key → member of the Linear people an admin mapped (Settings → Import).
+    mapped: HashMap<String, Id>,
     teams: HashMap<String, TeamContext>,
+}
+
+/// Stops the progress writer of an import run when dropped.
+struct ProgressWriter(tokio::task::JoinHandle<()>);
+
+impl Drop for ProgressWriter {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 impl LinearImportService {
@@ -586,6 +677,7 @@ impl LinearImportService {
         let selection = StoredSelection {
             team_ids: teams.iter().map(|team| team.id.clone()).collect(),
         };
+        let expected: u64 = teams.iter().map(|team| team.issue_count).sum();
 
         let now = TimestampMillis::now();
         let mut tx = self.database().immediate_transaction().await?;
@@ -601,13 +693,14 @@ impl LinearImportService {
         }
         let updated = sqlx::query(
             "UPDATE linear_imports SET status = 'queued', selection_json = $1, total = 0, done = 0, \
-             failed = 0, report_json = $2, updated_at = $3 \
+             failed = 0, report_json = $2, updated_at = $3, started_at = $3, expected = $5 \
              WHERE id = $4 AND status = 'ready' AND token_ciphertext IS NOT NULL",
         )
         .bind(serde_json::to_string(&selection).unwrap_or_default())
         .bind(serde_json::to_string(&StoredReport::default()).unwrap_or_default())
         .bind(now.as_millis())
         .bind(import_id.to_string())
+        .bind(i64::try_from(expected).unwrap_or(i64::MAX))
         .execute(&mut *tx)
         .await?
         .rows_affected();
@@ -617,7 +710,7 @@ impl LinearImportService {
         for (position, team) in teams.iter().enumerate() {
             let data = StoredTeam {
                 key: team.key.clone(),
-                states: Vec::new(),
+                ..StoredTeam::default()
             };
             sqlx::query(
                 "INSERT INTO linear_import_items (import_id, kind, linear_id, team_id, position, title, data_json) \
@@ -632,6 +725,7 @@ impl LinearImportService {
             .execute(&mut *tx)
             .await?;
         }
+        reuse_earlier_projects(&mut tx, &TABLES, import_id, workspace_id).await?;
         tx.commit().await?;
         if let Err(error) = self
             .enqueue(import_job_kind(), import_id, workspace_id)
@@ -867,11 +961,22 @@ impl LinearImportService {
             request_id: format!("linear-import-{import_id}"),
             report,
             members: member_emails(self.database(), workspace_id).await?,
+            mapped: import_people::mapped_members(self.database(), workspace_id, Source::Linear)
+                .await?,
             teams: HashMap::new(),
         };
-
-        // Phase A: projects, their statuses, and the issue and relation lists.
-        let teams: Vec<Item> = self.load_items(import_id, "team").await?;
+        let _writer = self.write_progress(import_id, client.clone());
+        let outcome: Result<(), Failure> = async {
+        // Phase A: projects, their statuses, and the issue and relation lists, with phases B
+        // and C for each page of issues.
+        self.set_stage(import_id, LinearImportStage::Reading).await?;
+        let teams: Vec<Item> = self.load_items(import_id, "team", ITEMS_ALL).await?;
+        for team in &teams {
+            if team.state == "filled" {
+                let context = self.team_context(&run, team).await?;
+                run.teams.insert(team.linear_id.clone(), context);
+            }
+        }
         for (index, team) in teams.iter().enumerate() {
             if team.state == "filled" || team.state == "failed" {
                 continue;
@@ -888,90 +993,20 @@ impl LinearImportService {
                 Err(other) => return Err(other),
             }
         }
-        for team in self.load_items(import_id, "team").await? {
-            if team.state == "filled" {
-                let context = self.team_context(&run, &team).await?;
-                run.teams.insert(team.linear_id.clone(), context);
-            }
-        }
 
-        // Phase B: create every issue, parents first.
-        let mut issues = self.load_items(import_id, "issue").await?;
-        for index in 0..issues.len() {
-            if issues[index].state != "pending" {
-                continue;
-            }
-            if self.should_stop(&run).await? {
-                self.save_report(&run).await?;
-                return stopped(job);
-            }
-            let parent = issues[index].parent_id.as_ref().and_then(|parent| {
-                issues
-                    .iter()
-                    .find(|item| {
-                        &item.linear_id == parent
-                            && matches!(item.state.as_str(), "created" | "filled")
-                    })
-                    .and_then(|item| item.orbit_id)
-            });
-            match self.create_task(&mut run, &mut issues[index], parent).await {
-                Ok(()) => issues[index].state = "created".to_owned(),
-                Err(Failure::Item(message)) => {
-                    self.fail_item(import_id, "issue", &issues[index].linear_id, &message)
-                        .await?;
-                    issues[index].state = "failed".to_owned();
-                }
-                Err(other) => {
-                    self.save_report(&run).await?;
-                    return Err(other);
-                }
-            }
+        // Phases B and C for the issues that waited for a parent.
+        if self.should_stop(&run).await? {
+            return stopped(job);
         }
-        self.save_report(&run).await?;
-
-        // Phase C: files and comments.
-        for item in &issues {
-            if item.state != "created" {
-                continue;
-            }
-            if self.should_stop(&run).await? {
-                self.save_report(&run).await?;
-                return stopped(job);
-            }
-            match self.fill_task(&mut run, item).await {
-                Ok(()) => {
-                    sqlx::query(
-                        "UPDATE linear_import_items SET state = 'filled', data_json = NULL, error = NULL \
-                         WHERE import_id = $1 AND kind = 'issue' AND linear_id = $2",
-                    )
-                    .bind(import_id.to_string())
-                    .bind(&item.linear_id)
-                    .execute(self.database().pool())
-                    .await?;
-                    sqlx::query(
-                        "UPDATE linear_imports SET done = done + 1, updated_at = $1 WHERE id = $2",
-                    )
-                    .bind(TimestampMillis::now().as_millis())
-                    .bind(import_id.to_string())
-                    .execute(self.database().pool())
-                    .await?;
-                    self.save_report(&run).await?;
-                }
-                Err(Failure::Item(message)) => {
-                    self.fail_item(import_id, "issue", &item.linear_id, &message)
-                        .await?;
-                    self.save_report(&run).await?;
-                }
-                Err(other) => {
-                    self.save_report(&run).await?;
-                    return Err(other);
-                }
-            }
-        }
+        self.set_stage(import_id, LinearImportStage::Creating).await?;
+        self.create_ready(&mut run, true).await?;
+        self.set_stage(import_id, LinearImportStage::Details).await?;
+        self.fill_created(&mut run).await?;
 
         // Phase D: relations between the imported issues.
+        self.set_stage(import_id, LinearImportStage::Linking).await?;
         let created = self.created_tasks(import_id).await?;
-        for item in self.load_items(import_id, "relation").await? {
+        for item in self.load_items(import_id, "relation", ITEMS_ALL).await? {
             if item.state != "pending" {
                 continue;
             }
@@ -1003,14 +1038,102 @@ impl LinearImportService {
         }
 
         sqlx::query(
-            "UPDATE linear_imports SET status = 'completed', token_ciphertext = NULL, updated_at = $1 \
-             WHERE id = $2 AND status = 'importing'",
+            "UPDATE linear_imports SET status = 'completed', token_ciphertext = NULL, stage = NULL, \
+             reading = 0, waiting_until = NULL, updated_at = $1 WHERE id = $2 AND status = 'importing'",
         )
         .bind(TimestampMillis::now().as_millis())
         .bind(import_id.to_string())
         .execute(self.database().pool())
         .await?;
         Ok(())
+        }
+        .await;
+        // Linear wants a longer pause than the client waits in place: run again after it, without
+        // spending one of the job's few retries.
+        if matches!(outcome, Err(Failure::Transient(_)))
+            && !job.cancel.is_cancelled()
+            && let Some(wait) = client.rate_limited_for()
+        {
+            return self.resume_after(import_id, workspace_id, wait).await;
+        }
+        outcome
+    }
+
+    /// Queues the next run of the import job after `wait` and shows the wait.
+    async fn resume_after(
+        &self,
+        import_id: Id,
+        workspace_id: Id,
+        wait: Duration,
+    ) -> Result<(), Failure> {
+        let at = TimestampMillis::from_millis(
+            TimestampMillis::now().as_millis()
+                + i64::try_from(wait.as_millis()).unwrap_or(i64::MAX / 2),
+        );
+        sqlx::query(
+            "UPDATE linear_imports SET waiting_until = $1 WHERE id = $2 AND status = 'importing'",
+        )
+        .bind(at.as_millis())
+        .bind(import_id.to_string())
+        .execute(self.database().pool())
+        .await?;
+        let job = Job::new(
+            import_job_kind(),
+            json!({"import_id": import_id.to_string()}),
+            at,
+        )
+        .with_workspace(workspace_id.to_string());
+        self.inner
+            .jobs
+            .enqueue(job)
+            .await
+            .map_err(|error| Failure::Transient(error.to_string()))?;
+        tracing::info!(import_id = %import_id, wait_s = wait.as_secs(), "Linear import waits for the rate limit");
+        Ok(())
+    }
+
+    async fn set_stage(&self, import_id: Id, stage: LinearImportStage) -> Result<(), Failure> {
+        sqlx::query("UPDATE linear_imports SET stage = $1 WHERE id = $2")
+            .bind(stage.as_str())
+            .bind(import_id.to_string())
+            .execute(self.database().pool())
+            .await?;
+        Ok(())
+    }
+
+    /// Every [`PROGRESS_INTERVAL`] while the run lasts, stores when a Linear rate limit lets the
+    /// import go on. Best effort: a failed write waits for the next tick.
+    fn write_progress(&self, import_id: Id, client: LinearClient) -> ProgressWriter {
+        let database = self.database().clone();
+        ProgressWriter(tokio::spawn(async move {
+            let mut written: Option<Option<i64>> = None;
+            let mut tick = tokio::time::interval(PROGRESS_INTERVAL);
+            loop {
+                tick.tick().await;
+                let waiting_until = client.rate_limit_wait().map(|wait| {
+                    // whole seconds, so a steady wait is not rewritten on every tick
+                    let at = TimestampMillis::now().as_millis()
+                        + i64::try_from(wait.as_millis()).unwrap_or(i64::MAX / 2);
+                    at - at % 1_000
+                });
+                if written == Some(waiting_until) {
+                    continue;
+                }
+                let result = sqlx::query(
+                    "UPDATE linear_imports SET waiting_until = $1 WHERE id = $2 AND status = 'importing'",
+                )
+                .bind(waiting_until)
+                .bind(import_id.to_string())
+                .execute(database.pool())
+                .await;
+                match result {
+                    Ok(_) => written = Some(waiting_until),
+                    Err(error) => {
+                        tracing::debug!(import_id = %import_id, error = %error, "Linear import progress not written")
+                    }
+                }
+            }
+        }))
     }
 
     /// Phase A for one team: the Orbit project, a status per workflow state, and the items.
@@ -1020,11 +1143,9 @@ impl LinearImportService {
         item: &Item,
         index: usize,
     ) -> Result<(), Failure> {
-        let mut stored: StoredTeam = item
-            .data_json
-            .as_deref()
-            .and_then(|json| serde_json::from_str(json).ok())
-            .unwrap_or_default();
+        let mut stored: StoredTeam = self
+            .item_data(run.import_id, "team", &item.linear_id)
+            .await?;
         let project_id = match item.orbit_id {
             Some(id) => id,
             None => {
@@ -1127,7 +1248,15 @@ impl LinearImportService {
         .bind(&item.linear_id)
         .execute(self.database().pool())
         .await?;
-        self.list_issues(run, &item.linear_id).await?;
+        let team = Item {
+            orbit_id: Some(project_id),
+            ..item.clone()
+        };
+        let context = self.team_context(run, &team).await?;
+        run.teams.insert(item.linear_id.clone(), context);
+        if !self.list_issues(run, &item.linear_id, &mut stored).await? {
+            return Ok(());
+        }
         sqlx::query(
             "UPDATE linear_import_items SET state = 'filled' WHERE import_id = $1 AND kind = 'team' AND linear_id = $2",
         )
@@ -1139,86 +1268,278 @@ impl LinearImportService {
         Ok(())
     }
 
-    /// Lists the team's issues (trashed ones left out) as pending items, parents before their
-    /// sub-issues, and their relations. An item already listed keeps its place.
-    async fn list_issues(&self, run: &mut Run<'_>, team_id: &str) -> Result<(), Failure> {
-        let listed: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM linear_import_items WHERE import_id = $1 AND kind = 'issue'",
-        )
-        .bind(run.import_id.to_string())
-        .fetch_one(self.database().pool())
-        .await?;
-        let room = MAX_TASKS.saturating_sub(usize::try_from(listed).unwrap_or(MAX_TASKS));
-        let issues: Vec<LinearIssue> = run
-            .client
-            .team_issues(team_id, room + 1)
-            .await?
-            .into_iter()
-            .filter(|issue| issue.trashed != Some(true))
-            .collect();
-        if issues.len() > room {
-            return Err(Failure::Fatal(format!(
-                "The selected teams have more than {MAX_TASKS} issues. Import fewer teams at a time."
-            )));
-        }
-        if self.should_stop(run).await? {
-            return stopped(run.job);
-        }
-        let planned = plan_issues(&issues);
-        let mut tx = self.database().immediate_transaction().await?;
-        let mut inserted = 0;
-        for (index, parent) in &planned {
-            let issue = &issues[*index];
-            inserted += sqlx::query(
-                "INSERT INTO linear_import_items (import_id, kind, linear_id, team_id, parent_id, \
-                 position, title, data_json) VALUES ($1, 'issue', $2, $3, $4, \
-                 (SELECT COALESCE(MAX(position) + 1, 0) FROM linear_import_items WHERE import_id = $5), $6, $7) \
-                 ON CONFLICT (import_id, kind, linear_id) DO NOTHING",
-            )
-            .bind(run.import_id.to_string())
-            .bind(&issue.id)
-            .bind(team_id)
-            .bind(parent.as_deref())
-            .bind(run.import_id.to_string())
-            .bind(clamp(&issue_label(issue), 500, 2_000))
-            .bind(serde_json::to_string(issue).unwrap_or_default())
-            .execute(&mut *tx)
-            .await?
-            .rows_affected();
-        }
-        for issue in &issues {
-            for relation in &issue.relations.nodes {
-                let (Some(kind), Some(related)) = (&relation.kind, &relation.related_issue) else {
-                    continue;
-                };
-                let data = StoredRelation {
-                    kind: kind.clone(),
-                    issue_id: issue.id.clone(),
-                    related_id: related.id.clone(),
-                };
-                sqlx::query(
-                    "INSERT INTO linear_import_items (import_id, kind, linear_id, team_id, \
-                     position, title, data_json) VALUES ($1, 'relation', $2, $3, \
-                     (SELECT COALESCE(MAX(position) + 1, 0) FROM linear_import_items WHERE import_id = $4), $5, $6) \
+    /// Lists the team's issues (trashed ones left out) and their relations as pending items, one
+    /// page at a time from the stored cursor. Each page is stored with the next cursor in one
+    /// transaction, then its tasks are created and filled. An item already listed keeps its
+    /// place. Returns false when the run stopped before the last page.
+    async fn list_issues(
+        &self,
+        run: &mut Run<'_>,
+        team_id: &str,
+        stored: &mut StoredTeam,
+    ) -> Result<bool, Failure> {
+        while !stored.listed {
+            if self.should_stop(run).await? {
+                stopped(run.job)?;
+                return Ok(false);
+            }
+            let (issues, next) = run
+                .client
+                .issue_page(team_id, stored.cursor.as_deref())
+                .await?;
+            match next {
+                Some(cursor) => stored.cursor = Some(cursor),
+                None => stored.listed = true,
+            }
+            let mut tx = self.database().immediate_transaction().await?;
+            let mut inserted = 0;
+            for issue in issues.iter().filter(|issue| issue.trashed != Some(true)) {
+                inserted += sqlx::query(
+                    "INSERT INTO linear_import_items (import_id, kind, linear_id, team_id, parent_id, \
+                     position, title, data_json) VALUES ($1, 'issue', $2, $3, $4, \
+                     (SELECT COALESCE(MAX(position) + 1, 0) FROM linear_import_items WHERE import_id = $5), $6, $7) \
                      ON CONFLICT (import_id, kind, linear_id) DO NOTHING",
                 )
                 .bind(run.import_id.to_string())
-                .bind(&relation.id)
+                .bind(&issue.id)
                 .bind(team_id)
+                .bind(issue.parent.as_ref().map(|parent| parent.id.as_str()))
                 .bind(run.import_id.to_string())
-                .bind(clamp(&format!("{} {kind}", issue_label(issue)), 500, 2_000))
-                .bind(serde_json::to_string(&data).unwrap_or_default())
+                .bind(clamp(&issue_label(issue), 500, 2_000))
+                .bind(serde_json::to_string(issue).unwrap_or_default())
                 .execute(&mut *tx)
-                .await?;
+                .await?
+                .rows_affected();
+                for relation in &issue.relations.nodes {
+                    let (Some(kind), Some(related)) = (&relation.kind, &relation.related_issue)
+                    else {
+                        continue;
+                    };
+                    let data = StoredRelation {
+                        kind: kind.clone(),
+                        issue_id: issue.id.clone(),
+                        related_id: related.id.clone(),
+                    };
+                    sqlx::query(
+                        "INSERT INTO linear_import_items (import_id, kind, linear_id, team_id, \
+                         position, title, data_json) VALUES ($1, 'relation', $2, $3, \
+                         (SELECT COALESCE(MAX(position) + 1, 0) FROM linear_import_items WHERE import_id = $4), $5, $6) \
+                         ON CONFLICT (import_id, kind, linear_id) DO NOTHING",
+                    )
+                    .bind(run.import_id.to_string())
+                    .bind(&relation.id)
+                    .bind(team_id)
+                    .bind(run.import_id.to_string())
+                    .bind(clamp(&format!("{} {kind}", issue_label(issue)), 500, 2_000))
+                    .bind(serde_json::to_string(&data).unwrap_or_default())
+                    .execute(&mut *tx)
+                    .await?;
+                }
             }
-        }
-        sqlx::query("UPDATE linear_imports SET total = total + $1, updated_at = $2 WHERE id = $3")
+            sqlx::query(
+                "UPDATE linear_import_items SET data_json = $1 WHERE import_id = $2 AND kind = 'team' AND linear_id = $3",
+            )
+            .bind(serde_json::to_string(&*stored).unwrap_or_default())
+            .bind(run.import_id.to_string())
+            .bind(team_id)
+            .execute(&mut *tx)
+            .await?;
+            sqlx::query(
+                "UPDATE linear_imports SET total = total + $1, updated_at = $2 WHERE id = $3",
+            )
             .bind(inserted as i64)
             .bind(TimestampMillis::now().as_millis())
             .bind(run.import_id.to_string())
             .execute(&mut *tx)
             .await?;
-        tx.commit().await?;
+            reuse_earlier_tasks(&mut tx, &TABLES, run.import_id, run.workspace_id).await?;
+            tx.commit().await?;
+            self.create_ready(run, false).await?;
+            self.fill_created(run).await?;
+        }
+        Ok(true)
+    }
+
+    /// Phase B: creates the task of each pending issue whose parent is settled, in list order,
+    /// until no more can be created. Before `all_listed`, an issue whose parent is not created
+    /// yet waits for a later page; after it, only a parent cycle (impossible in Linear, but the
+    /// data is external) can wait, and its first issue starts a new tree.
+    async fn create_ready(&self, run: &mut Run<'_>, all_listed: bool) -> Result<(), Failure> {
+        let mut break_cycle = false;
+        loop {
+            let mut progressed = false;
+            let mut waiting = false;
+            // before every team is listed, only the issues that need not wait, so a long list
+            // of waiting issues is not checked again on every page
+            let filter = if all_listed {
+                ITEMS_PENDING
+            } else {
+                ITEMS_READY
+            };
+            for mut item in self.load_items(run.import_id, "issue", filter).await? {
+                if self.should_stop(run).await? {
+                    self.save_report(run).await?;
+                    return stopped(run.job);
+                }
+                let parent = match self
+                    .parent_task(run.import_id, &mut item, all_listed)
+                    .await?
+                {
+                    Some(parent) => parent,
+                    None if break_cycle => {
+                        break_cycle = false;
+                        self.detach(run.import_id, &mut item).await?;
+                        None
+                    }
+                    None => {
+                        waiting = true;
+                        continue;
+                    }
+                };
+                match self.create_task(run, &mut item, parent).await {
+                    Ok(()) => {}
+                    Err(Failure::Item(message)) => {
+                        self.fail_item(run.import_id, "issue", &item.linear_id, &message)
+                            .await?;
+                    }
+                    Err(other) => {
+                        self.save_report(run).await?;
+                        return Err(other);
+                    }
+                }
+                progressed = true;
+            }
+            if !all_listed {
+                // the tasks just created may be the parents of more ready issues
+                if !progressed {
+                    break;
+                }
+            } else if !waiting {
+                break;
+            } else {
+                break_cycle = !progressed;
+            }
+        }
+        self.save_report(run).await
+    }
+
+    /// The Orbit parent of a pending issue: `Some(Some(task))` to create it under that task,
+    /// `Some(None)` to create it at the top level (no parent, a parent in another team, not
+    /// imported, failed, or too deep; the item's parent is then cleared), `None` while its
+    /// parent is not created yet.
+    async fn parent_task(
+        &self,
+        import_id: Id,
+        item: &mut Item,
+        all_listed: bool,
+    ) -> Result<Option<Option<Id>>, Failure> {
+        let Some(parent_id) = item.parent_id.clone() else {
+            return Ok(Some(None));
+        };
+        let parent = sqlx::query(
+            "SELECT team_id, orbit_id, state FROM linear_import_items \
+             WHERE import_id = $1 AND kind = 'issue' AND linear_id = $2",
+        )
+        .bind(import_id.to_string())
+        .bind(&parent_id)
+        .fetch_optional(self.database().pool())
+        .await?;
+        let task = match parent {
+            None if all_listed => None,
+            None => return Ok(None),
+            Some(row) if row.get::<String, _>("team_id") != item.team_id => None,
+            Some(row) => match row.get::<String, _>("state").as_str() {
+                "pending" => return Ok(None),
+                "created" | "filled" => row
+                    .get::<Option<String>, _>("orbit_id")
+                    .and_then(|id| id.parse().ok()),
+                _ => None,
+            },
+        };
+        if let Some(task) = task
+            && self.depth(import_id, &parent_id).await? < MAX_SUB_ISSUE_DEPTH
+        {
+            return Ok(Some(Some(task)));
+        }
+        self.detach(import_id, item).await?;
+        Ok(Some(None))
+    }
+
+    /// How many levels below the top of its tree the issue is, counted up to
+    /// [`MAX_SUB_ISSUE_DEPTH`].
+    async fn depth(&self, import_id: Id, linear_id: &str) -> Result<usize, Failure> {
+        let mut depth = 0;
+        let mut current = linear_id.to_owned();
+        while depth < MAX_SUB_ISSUE_DEPTH {
+            let parent: Option<Option<String>> = sqlx::query_scalar(
+                "SELECT parent_id FROM linear_import_items \
+                 WHERE import_id = $1 AND kind = 'issue' AND linear_id = $2",
+            )
+            .bind(import_id.to_string())
+            .bind(&current)
+            .fetch_optional(self.database().pool())
+            .await?;
+            let Some(parent) = parent.flatten() else {
+                break;
+            };
+            depth += 1;
+            current = parent;
+        }
+        Ok(depth)
+    }
+
+    /// Makes a pending issue start a new tree.
+    async fn detach(&self, import_id: Id, item: &mut Item) -> Result<(), Failure> {
+        sqlx::query(
+            "UPDATE linear_import_items SET parent_id = NULL \
+             WHERE import_id = $1 AND kind = 'issue' AND linear_id = $2",
+        )
+        .bind(import_id.to_string())
+        .bind(&item.linear_id)
+        .execute(self.database().pool())
+        .await?;
+        item.parent_id = None;
+        Ok(())
+    }
+
+    /// Phase C for each created task: files and comments.
+    async fn fill_created(&self, run: &mut Run<'_>) -> Result<(), Failure> {
+        let import_id = run.import_id;
+        for item in self.load_items(import_id, "issue", ITEMS_CREATED).await? {
+            if self.should_stop(run).await? {
+                self.save_report(run).await?;
+                return stopped(run.job);
+            }
+            match self.fill_task(run, &item).await {
+                Ok(()) => {
+                    sqlx::query(
+                        "UPDATE linear_import_items SET state = 'filled', data_json = NULL, error = NULL \
+                         WHERE import_id = $1 AND kind = 'issue' AND linear_id = $2",
+                    )
+                    .bind(import_id.to_string())
+                    .bind(&item.linear_id)
+                    .execute(self.database().pool())
+                    .await?;
+                    sqlx::query(
+                        "UPDATE linear_imports SET done = done + 1, updated_at = $1 WHERE id = $2",
+                    )
+                    .bind(TimestampMillis::now().as_millis())
+                    .bind(import_id.to_string())
+                    .execute(self.database().pool())
+                    .await?;
+                    self.save_report(run).await?;
+                }
+                Err(Failure::Item(message)) => {
+                    self.fail_item(import_id, "issue", &item.linear_id, &message)
+                        .await?;
+                    self.save_report(run).await?;
+                }
+                Err(other) => {
+                    self.save_report(run).await?;
+                    return Err(other);
+                }
+            }
+        }
         Ok(())
     }
 
@@ -1227,11 +1548,9 @@ impl LinearImportService {
         let project_id = item
             .orbit_id
             .ok_or_else(|| Failure::Fatal("Stored import data is invalid.".to_owned()))?;
-        let stored: StoredTeam = item
-            .data_json
-            .as_deref()
-            .and_then(|json| serde_json::from_str(json).ok())
-            .unwrap_or_default();
+        let stored: StoredTeam = self
+            .item_data(run.import_id, "team", &item.linear_id)
+            .await?;
         let statuses = project_statuses(self.database(), project_id).await?;
         let usable: HashSet<Id> = statuses
             .iter()
@@ -1286,10 +1605,9 @@ impl LinearImportService {
         if !run.teams.contains_key(&item.team_id) {
             return Err(Failure::Item("Its team could not be imported.".to_owned()));
         }
-        let issue: LinearIssue = item
-            .data_json
-            .as_deref()
-            .and_then(|json| serde_json::from_str(json).ok())
+        let issue: LinearIssue = self
+            .item_data::<Option<LinearIssue>>(run.import_id, "issue", &item.linear_id)
+            .await?
             .ok_or_else(|| Failure::Item("The stored Linear issue is invalid.".to_owned()))?;
         let task_id = match item.orbit_id {
             Some(id) => id,
@@ -1351,6 +1669,20 @@ impl LinearImportService {
             }
             created?;
         }
+        if let Some((found, name)) = source_assignee(run, &issue)
+            && !matches!(found, Match::Email(_))
+        {
+            let email = issue.assignee.as_ref().and_then(|a| a.email.as_deref());
+            import_people::record(
+                self.database(),
+                run.workspace_id,
+                Source::Linear,
+                &name,
+                email,
+                task_id,
+            )
+            .await?;
+        }
         sqlx::query(
             "UPDATE linear_import_items SET state = 'created' WHERE import_id = $1 AND kind = 'issue' AND linear_id = $2",
         )
@@ -1392,24 +1724,12 @@ impl LinearImportService {
             .and_then(|state| team.states.get(&state.id))
             .copied()
             .unwrap_or(team.open_status);
-        let assignee = issue.assignee.as_ref().and_then(|assignee| {
-            assignee
-                .email
-                .as_deref()
-                .and_then(|email| run.members.get(&email.trim().to_lowercase()))
-                .copied()
-        });
-        let unmatched = match (&issue.assignee, assignee) {
-            (Some(linear), None) => {
+        let found = source_assignee(run, issue);
+        let assignee = found.as_ref().and_then(|(found, _)| found.user_id());
+        let unmatched = match found {
+            Some((Match::Unmatched, name)) => {
                 run.report.unmatched_assignees += 1;
-                Some(
-                    linear
-                        .name
-                        .clone()
-                        .or_else(|| linear.display_name.clone())
-                        .or_else(|| linear.email.clone())
-                        .unwrap_or_else(|| "unknown".to_owned()),
-                )
+                Some(name)
             }
             _ => None,
         };
@@ -1489,11 +1809,9 @@ impl LinearImportService {
         let task_id = item
             .orbit_id
             .ok_or_else(|| Failure::Item("The task was not created.".to_owned()))?;
-        let issue: LinearIssue = item
-            .data_json
-            .as_deref()
-            .and_then(|json| serde_json::from_str(json).ok())
-            .unwrap_or_default();
+        let issue: LinearIssue = self
+            .item_data(run.import_id, "issue", &item.linear_id)
+            .await?;
         let mut comments: Vec<&LinearComment> = issue.comments.nodes.iter().collect();
         comments.sort_by(|a, b| a.created_at.cmp(&b.created_at));
 
@@ -1525,20 +1843,8 @@ impl LinearImportService {
 
         if mentions_any(body, &files) {
             let detached = issue.parent.is_some() && item.parent_id.is_none();
-            let unmatched = issue.assignee.as_ref().and_then(|assignee| {
-                let matched = assignee
-                    .email
-                    .as_deref()
-                    .is_some_and(|email| run.members.contains_key(&email.trim().to_lowercase()));
-                (!matched).then(|| {
-                    assignee
-                        .name
-                        .clone()
-                        .or_else(|| assignee.display_name.clone())
-                        .or_else(|| assignee.email.clone())
-                        .unwrap_or_else(|| "unknown".to_owned())
-                })
-            });
+            let unmatched = source_assignee(run, &issue)
+                .and_then(|(found, name)| (found == Match::Unmatched).then_some(name));
             let markdown = description(
                 &issue,
                 &rewrite_links(body, &files),
@@ -1693,10 +1999,9 @@ impl LinearImportService {
         item: &Item,
         created: &HashMap<String, Id>,
     ) -> Result<(), Failure> {
-        let Some(relation) = item
-            .data_json
-            .as_deref()
-            .and_then(|json| serde_json::from_str::<StoredRelation>(json).ok())
+        let Some(relation) = self
+            .item_data::<Option<StoredRelation>>(run.import_id, "relation", &item.linear_id)
+            .await?
         else {
             return Err(Failure::Item("The stored relation is invalid.".to_owned()));
         };
@@ -1802,7 +2107,7 @@ impl LinearImportService {
     /// Linear issue id → Orbit task id of the issues that exist in Orbit.
     async fn created_tasks(&self, import_id: Id) -> Result<HashMap<String, Id>, Failure> {
         Ok(self
-            .load_items(import_id, "issue")
+            .load_items(import_id, "issue", ITEMS_ALL)
             .await?
             .into_iter()
             .filter(|item| matches!(item.state.as_str(), "created" | "filled"))
@@ -1902,8 +2207,8 @@ impl LinearImportService {
         error: Option<&str>,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(sqlx::AssertSqlSafe(format!(
-            "UPDATE linear_imports SET status = $1, token_ciphertext = NULL, error = $2, updated_at = $3 \
-             WHERE id = $4 AND status IN {OPEN}"
+            "UPDATE linear_imports SET status = $1, token_ciphertext = NULL, error = $2, updated_at = $3, \
+             stage = NULL, reading = 0, waiting_until = NULL WHERE id = $4 AND status IN {OPEN}"
         )))
         .bind(status)
         .bind(error.map(|error| clamp(error, 500, 2_000)))
@@ -1954,11 +2259,19 @@ impl LinearImportService {
             .ok_or(LinearImportError::NotFound)
     }
 
-    async fn load_items(&self, import_id: Id, kind: &str) -> Result<Vec<Item>, Failure> {
-        let rows = sqlx::query(
-            "SELECT linear_id, team_id, parent_id, title, data_json, orbit_id, state \
-             FROM linear_import_items WHERE import_id = $1 AND kind = $2 ORDER BY position",
-        )
+    /// The items of one kind in list order that match `filter` (one of the `ITEMS_*` constants),
+    /// without their data (see [`Self::item_data`]), so a large import is not held in memory.
+    async fn load_items(
+        &self,
+        import_id: Id,
+        kind: &str,
+        filter: &'static str,
+    ) -> Result<Vec<Item>, Failure> {
+        let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "SELECT item.linear_id, item.team_id, item.parent_id, item.title, item.orbit_id, item.state \
+             FROM linear_import_items AS item WHERE item.import_id = $1 AND item.kind = $2{filter} \
+             ORDER BY item.position"
+        )))
         .bind(import_id.to_string())
         .bind(kind)
         .fetch_all(self.database().pool())
@@ -1970,7 +2283,6 @@ impl LinearImportService {
                     team_id: row.get("team_id"),
                     parent_id: row.get("parent_id"),
                     title: row.get("title"),
-                    data_json: row.get("data_json"),
                     orbit_id: row
                         .get::<Option<String>, _>("orbit_id")
                         .map(|id| id.parse())
@@ -1980,6 +2292,27 @@ impl LinearImportService {
                 })
             })
             .collect()
+    }
+
+    /// An item's stored data, or the default when it has none or it does not decode.
+    async fn item_data<T: Default + serde::de::DeserializeOwned>(
+        &self,
+        import_id: Id,
+        kind: &str,
+        linear_id: &str,
+    ) -> Result<T, Failure> {
+        let json: Option<Option<String>> = sqlx::query_scalar(
+            "SELECT data_json FROM linear_import_items WHERE import_id = $1 AND kind = $2 AND linear_id = $3",
+        )
+        .bind(import_id.to_string())
+        .bind(kind)
+        .bind(linear_id)
+        .fetch_optional(self.database().pool())
+        .await?;
+        Ok(json
+            .flatten()
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default())
     }
 
     async fn load_view(
@@ -1992,6 +2325,9 @@ impl LinearImportService {
         let row = sqlx::query(
             "SELECT id, workspace_id, status, linear_user_name, \
              CASE WHEN $1 THEN tree_json END AS tree_json, selection_json, total, done, failed, \
+             expected, reading, stage, waiting_until, \
+             (SELECT COUNT(*) FROM linear_import_items AS items WHERE items.import_id = linear_imports.id \
+                 AND items.kind = 'issue' AND items.state IN ('created', 'filled')) AS created, \
              report_json, error, created_at, updated_at FROM linear_imports \
              WHERE id = $2 AND workspace_id = $3 AND user_id = $4",
         )
@@ -2004,6 +2340,10 @@ impl LinearImportService {
         .ok_or(LinearImportError::NotFound)?;
         let invalid = |_| LinearImportError::Unavailable("invalid stored import".to_owned());
         let status = LinearImportStatus::parse(&row.get::<String, _>("status"))?;
+        let active = matches!(
+            status,
+            LinearImportStatus::Queued | LinearImportStatus::Importing
+        );
         let started = row.get::<Option<String>, _>("selection_json").is_some();
         let tree = row
             .get::<Option<String>, _>("tree_json")
@@ -2072,7 +2412,20 @@ impl LinearImportService {
                 total: count("total"),
                 done: count("done"),
                 failed: count("failed"),
+                expected: count("expected"),
+                read: count("total") + count("reading"),
+                created: count("created"),
+                // a cancel or an expiry ends the import without the job: only an active one has a stage
+                stage: row
+                    .get::<Option<String>, _>("stage")
+                    .as_deref()
+                    .and_then(LinearImportStage::parse)
+                    .filter(|_| active),
             },
+            waiting_until: row
+                .get::<Option<i64>, _>("waiting_until")
+                .filter(|_| active)
+                .map(TimestampMillis::from_millis),
             error: row.get("error"),
             tree,
             report,
@@ -2081,61 +2434,6 @@ impl LinearImportService {
             updated_at: TimestampMillis::from_millis(row.get("updated_at")),
         })
     }
-}
-
-/// Orders a team's issues parents first and picks each one's parent: a parent in the same
-/// team, unless that would put the issue more than [`MAX_SUB_ISSUE_DEPTH`] levels deep (it then
-/// starts a new tree). Returns `(index into issues, parent id)`.
-fn plan_issues(issues: &[LinearIssue]) -> Vec<(usize, Option<String>)> {
-    let index: HashMap<&str, usize> = issues
-        .iter()
-        .enumerate()
-        .map(|(position, issue)| (issue.id.as_str(), position))
-        .collect();
-    let parent_of = |position: usize| {
-        issues[position]
-            .parent
-            .as_ref()
-            .and_then(|parent| index.get(parent.id.as_str()).copied())
-    };
-    // Depth below the top of its tree; `None` while unknown. A parent cycle (not possible in
-    // Linear, but the data is external) starts a new tree.
-    let mut depth: Vec<Option<usize>> = vec![None; issues.len()];
-    for start in 0..issues.len() {
-        let mut chain = Vec::new();
-        let mut current = Some(start);
-        while let Some(position) = current {
-            if depth[position].is_some() || chain.contains(&position) {
-                break;
-            }
-            chain.push(position);
-            current = parent_of(position);
-        }
-        let mut base = current.and_then(|position| depth[position]);
-        for position in chain.into_iter().rev() {
-            let level = match (base, parent_of(position)) {
-                (Some(parent), Some(_)) if parent < MAX_SUB_ISSUE_DEPTH => parent + 1,
-                _ => 0,
-            };
-            depth[position] = Some(level);
-            base = Some(level);
-        }
-    }
-    let mut planned: Vec<(usize, usize, Option<String>)> = (0..issues.len())
-        .map(|position| {
-            let level = depth[position].unwrap_or_default();
-            let parent = (level > 0)
-                .then(|| parent_of(position))
-                .flatten()
-                .map(|parent| issues[parent].id.clone());
-            (level, position, parent)
-        })
-        .collect();
-    planned.sort_by_key(|(level, position, _)| (*level, *position));
-    planned
-        .into_iter()
-        .map(|(_, position, parent)| (position, parent))
-        .collect()
 }
 
 /// `ENG-123 Title`, for items and failure lists.
@@ -2197,6 +2495,21 @@ fn priority(value: f64) -> &'static str {
         4 => "low",
         _ => "none",
     }
+}
+
+/// How the import assigns the issue's assignee, with the name an unassigned one gets in the
+/// description and in Settings → Import.
+fn source_assignee(run: &Run<'_>, issue: &LinearIssue) -> Option<(Match, String)> {
+    let assignee = issue.assignee.as_ref()?;
+    let name = assignee
+        .name
+        .clone()
+        .or_else(|| assignee.display_name.clone())
+        .or_else(|| assignee.email.clone())
+        .unwrap_or_else(|| "unknown".to_owned());
+    let found =
+        import_people::match_assignee(&run.members, &run.mapped, assignee.email.as_deref(), &name);
+    Some((found, name))
 }
 
 /// The issue's linked attachments that are not uploads, as `(title, url)`.
@@ -2292,53 +2605,6 @@ fn description(
 mod tests {
     use super::*;
     use crate::linear::model::{Cycle, IssueRef, LinearLabel, NameRef};
-
-    fn issue(id: &str, parent: Option<&str>) -> LinearIssue {
-        LinearIssue {
-            id: id.to_owned(),
-            parent: parent.map(|parent| IssueRef {
-                id: parent.to_owned(),
-                identifier: None,
-            }),
-            ..LinearIssue::default()
-        }
-    }
-
-    #[test]
-    fn plans_parents_first_and_caps_depth() {
-        // a ← b ← c ← d ← e ← f ← g (seven levels), x has a parent in another team.
-        let issues = vec![
-            issue("g", Some("f")),
-            issue("x", Some("other-team")),
-            issue("a", None),
-            issue("b", Some("a")),
-            issue("c", Some("b")),
-            issue("d", Some("c")),
-            issue("e", Some("d")),
-            issue("f", Some("e")),
-        ];
-        let planned: Vec<(String, Option<String>)> = plan_issues(&issues)
-            .into_iter()
-            .map(|(index, parent)| (issues[index].id.clone(), parent))
-            .collect();
-        let expected: Vec<(String, Option<String>)> = [
-            ("g", None),
-            ("x", None),
-            ("a", None),
-            ("b", Some("a")),
-            ("c", Some("b")),
-            ("d", Some("c")),
-            ("e", Some("d")),
-            ("f", Some("e")),
-        ]
-        .into_iter()
-        .map(|(id, parent)| (id.to_owned(), parent.map(str::to_owned)))
-        .collect();
-        assert_eq!(
-            planned, expected,
-            "f is five levels below a; g starts a new tree"
-        );
-    }
 
     #[test]
     fn maps_states_priorities_and_labels() {

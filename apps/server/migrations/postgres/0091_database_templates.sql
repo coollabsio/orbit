@@ -1,4 +1,4 @@
--- Docs databases: row templates, as in migrations/0084_database_templates.sql.
+-- Docs databases: row templates, as in migrations/0091_database_templates.sql.
 CREATE TABLE database_templates (
     page_id TEXT PRIMARY KEY REFERENCES pages(id) ON DELETE CASCADE,
     workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,

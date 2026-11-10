@@ -21,7 +21,12 @@
 //!
 //! A card that fails is recorded and the import continues; revoked credentials fail the import.
 //! What was imported before a failure or cancellation stays.
+//!
+//! A later import of the same board reuses what a finished earlier import in the workspace made:
+//! its Orbit project and its tasks, while they exist. A card the earlier import finished is
+//! counted as done and not copied again.
 
+use crate::import_notice::{ImportNotices, ImportSource};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
@@ -39,6 +44,7 @@ use super::client::{TrelloClient, TrelloClientConfig, TrelloError};
 use super::model::{CustomField, TrelloCard, TrelloChecklist, TrelloComment};
 use super::scan::{MAX_BOARDS, build_tree};
 pub use super::scan::{TrelloImportBoard, TrelloImportTree, TrelloImportWorkspace};
+use crate::import_people::{self, Source};
 use crate::notion::files::sanitize_file_name;
 use crate::notion::import::clamp;
 use crate::repositories::attachments::AttachmentRepository;
@@ -49,11 +55,11 @@ use crate::repositories::tasks::{
 use crate::secret_box::{decrypt_secret, encrypt_secret};
 pub use crate::task_import::JobRun;
 use crate::task_import::{
-    Attached, Failure, LABEL_COLORS, NewProject, PROJECT_COLORS, attach_once, attachment_url,
-    column_statuses, display_instant, ensure_project, ensure_writable, escape_markdown,
-    find_or_create_label, job_kind, markdown_links, member_names, mentions_any,
+    Attached, Failure, ImportTables, LABEL_COLORS, NewProject, PROJECT_COLORS, attach_once,
+    attachment_url, column_statuses, display_instant, ensure_project, ensure_writable,
+    escape_markdown, find_or_create_label, job_kind, markdown_links, member_names, mentions_any,
     parse_instant_millis, parse_stored_id, project_key_base, project_statuses, retryable,
-    rewrite_links, stopped, with_source_details,
+    reuse_earlier_projects, reuse_earlier_tasks, rewrite_links, stopped, with_source_details,
 };
 
 /// Job kind names.
@@ -69,6 +75,14 @@ const MAX_CREDENTIAL_CHARS: usize = 512;
 const MAX_FAILURES_LISTED: i64 = 200;
 const MAX_LISTED_IMPORTS: i64 = 20;
 const ACTIVE: &str = "('scanning', 'queued', 'importing')";
+
+const TABLES: ImportTables = ImportTables {
+    imports: "trello_imports",
+    items: "trello_import_items",
+    source_id: "trello_id",
+    project_kind: "board",
+    task_kind: "card",
+};
 const OPEN: &str = "('scanning', 'ready', 'queued', 'importing')";
 /// Trello's label colors (the `_dark` and `_light` shades map to the base color).
 const TRELLO_COLORS: [(&str, &str); 10] = [
@@ -99,6 +113,7 @@ pub fn import_job_kind() -> JobKind {
 pub fn register_jobs(
     worker: Worker,
     service: TrelloImportService,
+    notices: ImportNotices,
 ) -> Result<Worker, JobKindRegistrationError> {
     let scan = service.clone();
     worker
@@ -120,6 +135,7 @@ pub fn register_jobs(
         })?
         .with_handler(import_job_kind(), move |context| {
             let service = service.clone();
+            let notices = notices.clone();
             async move {
                 let Some(import_id) = payload_import_id(&context.job.payload) else {
                     return Err(JobError::Permanent(
@@ -131,7 +147,9 @@ pub fn register_jobs(
                     last_attempt: context.claim.attempt >= context.job.max_attempts,
                 };
                 let result = service.run_import(import_id, &run).await;
-                service.after_attempt(import_id, &run, result).await
+                let result = service.after_attempt(import_id, &run, result).await;
+                notices.after_run(ImportSource::Trello, import_id).await;
+                result
             }
         })
 }
@@ -418,6 +436,8 @@ struct Run<'a> {
     report: StoredReport,
     /// Lowercase full name → the members with that name.
     members: HashMap<String, Vec<Id>>,
+    /// Name key → member of the Trello people an admin mapped (Settings → Import).
+    mapped: HashMap<String, Id>,
     boards: HashMap<String, BoardContext>,
 }
 
@@ -662,7 +682,7 @@ impl TrelloImportService {
         }
         let updated = sqlx::query(
             "UPDATE trello_imports SET status = 'queued', selection_json = $1, total = 0, done = 0, \
-             failed = 0, report_json = $2, updated_at = $3 \
+             failed = 0, report_json = $2, updated_at = $3, started_at = $3 \
              WHERE id = $4 AND status = 'ready' AND token_ciphertext IS NOT NULL",
         )
         .bind(serde_json::to_string(&selection).unwrap_or_default())
@@ -688,6 +708,7 @@ impl TrelloImportService {
             .execute(&mut *tx)
             .await?;
         }
+        reuse_earlier_projects(&mut tx, &TABLES, import_id, workspace_id).await?;
         tx.commit().await?;
         if let Err(error) = self
             .enqueue(import_job_kind(), import_id, workspace_id)
@@ -927,6 +948,8 @@ impl TrelloImportService {
             request_id: format!("trello-import-{import_id}"),
             report,
             members: member_names(self.database(), workspace_id).await?,
+            mapped: import_people::mapped_members(self.database(), workspace_id, Source::Trello)
+                .await?,
             boards: HashMap::new(),
         };
 
@@ -1269,6 +1292,7 @@ impl TrelloImportService {
             .bind(run.import_id.to_string())
             .execute(&mut *tx)
             .await?;
+        reuse_earlier_tasks(&mut tx, &TABLES, run.import_id, run.workspace_id).await?;
         tx.commit().await?;
         Ok(u32::try_from(archived).unwrap_or(u32::MAX))
     }
@@ -1372,6 +1396,17 @@ impl TrelloImportService {
                     TimestampMillis::now(),
                 )
                 .await?;
+        }
+        for name in card_text(run, &item.board_id, &card, "").people {
+            import_people::record(
+                self.database(),
+                run.workspace_id,
+                Source::Trello,
+                &name,
+                None,
+                task_id,
+            )
+            .await?;
         }
         sqlx::query(
             "UPDATE trello_import_items SET state = 'created' WHERE import_id = $1 AND kind = 'card' AND trello_id = $2",
@@ -2005,6 +2040,9 @@ struct CardText {
     assignees: Vec<Id>,
     /// Members named in the description instead.
     unmatched_members: u32,
+    /// Card members no Orbit member has the full name of: mapped in Settings → Import, or
+    /// named in the description.
+    people: Vec<String>,
     links: u32,
 }
 
@@ -2014,12 +2052,17 @@ fn card_text(run: &Run<'_>, board_id: &str, card: &TrelloCard, body: &str) -> Ca
     let board = run.boards.get(board_id);
     let mut assignees = Vec::new();
     let mut unmatched = Vec::new();
+    let mut people = Vec::new();
     for member in &card.id_members {
         let name = board
             .and_then(|board| board.members.get(member))
             .cloned()
             .unwrap_or_else(|| "Trello member".to_owned());
-        match run.member_named(&name) {
+        let named = run.member_named(&name);
+        if named.is_none() {
+            people.push(name.clone());
+        }
+        match named.or_else(|| import_people::mapped_member(&run.mapped, &name)) {
             Some(id) if !assignees.contains(&id) => assignees.push(id),
             Some(_) => {}
             None => unmatched.push(name),
@@ -2063,6 +2106,7 @@ fn card_text(run: &Run<'_>, board_id: &str, card: &TrelloCard, body: &str) -> Ca
         markdown: with_source_details(&body, "Trello", &fields, &links),
         assignees,
         unmatched_members: u32::try_from(unmatched.len()).unwrap_or(u32::MAX),
+        people,
         links: u32::try_from(links.len()).unwrap_or(u32::MAX),
     }
 }

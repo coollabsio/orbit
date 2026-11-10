@@ -107,7 +107,7 @@ export default function StickersScreen() {
         <View className="min-h-80"><EmptyState icon="sticker" title="No stickers yet" description="Add an image above. Everyone in the workspace can then send it in chat." /></View>
       ) : (
         <SettingsCard title="Stickers" description={stickers.data ? `${stickers.data.length} of ${STICKER_LIMIT} in this workspace.` : undefined} flush>
-          {stickers.isPending ? <SettingsRow first><Text className="text-[13px]">Loading stickers…</Text></SettingsRow> : null}
+          {stickers.isPending ? <SettingsRow first><Note loading>Loading stickers…</Note></SettingsRow> : null}
           {stickers.isError ? <SettingsRow first><Text accessibilityRole="alert" className="text-[13px]">Stickers could not be loaded.</Text></SettingsRow> : null}
           {stickers.data?.map((entry, index) => (
             <SettingsRow key={entry.id} first={index === 0}>

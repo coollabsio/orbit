@@ -27,7 +27,7 @@ const TREE: LinearImportTree = {
 
 const item = (patch: Partial<LinearImport> = {}): LinearImport => ({
   id: 'import-1', workspace_id: 'workspace-1', status: 'ready', linear_user_name: 'Ada', error: null,
-  progress: { total: 0, done: 0, failed: 0 }, tree: null, report: null, project_ids: [],
+  progress: { total: 0, done: 0, failed: 0, expected: 0, read: 0, created: 0, stage: null }, waiting_until: null, tree: null, report: null, project_ids: [],
   created_at: '2026-11-04T10:00:00Z', updated_at: '2026-11-04T10:00:00Z', ...patch,
 })
 
@@ -130,7 +130,7 @@ test('choose: archived teams start unselected, and start sends the selection', a
 test('result: shows counts, notes, imported projects and failures', async () => {
   const done = item({
     status: 'completed',
-    progress: { total: 5, done: 4, failed: 1 },
+    progress: { total: 5, done: 4, failed: 1, expected: 5, read: 5, created: 5, stage: null },
     project_ids: ['project-1'],
     report: {
       comments_imported: 7, files_imported: 2, missing_files: 1, links_added: 1, relations_linked: 3,

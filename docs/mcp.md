@@ -207,6 +207,11 @@ scripts, CI jobs and the Orbit CLI. That API serves tasks and docs, not chat. Se
 | `list_projects` | None | Approved live projects only. |
 | `list_tasks` | Optional `project_id`, `query`, `parent_task_id`, `cursor`, `limit` | Tasks and `next_cursor`. |
 | `get_task` | Required `task_id` | One task in an approved project. |
+| `create_project` | Required `name`, `key`; optional `color` | The new project, with the default statuses. Needs task write and an all-projects connection. |
+| `list_task_statuses`, `list_labels` | Required `project_id`; optional `cursor`, `limit` | Statuses or labels (names, colors) of an approved project. |
+| `list_members` | Optional `cursor`, `limit` | Workspace members: `user_id` and `display_name`. |
+| `list_comments` | Required `task_id`; optional `cursor`, `limit` | Comments on the task, oldest first, and `next_cursor`. |
+| `get_me` | None | The connection: its user (`null` for a service account), workspace, scopes and approved project IDs. Needs no permission. |
 
 `list_tasks` searches titles and descriptions. `parent_task_id` (a task ID or an identifier
 such as `ENG-12`) lists only the direct sub-issues of that task. The default limit is 50; the valid
@@ -285,23 +290,34 @@ Existing connections keep read-only task access. Reconnect to approve additional
 OAuth consent offers optional task writes, docs reads, docs writes, and chat reads. API tokens
 use the same scopes: `tasks:read`, `tasks:write` (task create, update and delete; includes
 `tasks:read`), `docs:read`, `docs:write` (doc create and update; includes `docs:read`), and
-`chat:read`.
+`chat:read`. The API token scopes `workspace:export` and `workspace:export:personal` are for
+the public REST API only (`docs/public-api.md`); a token with only an export scope gets no MCP
+tools.
 Docs and chat permissions default to off. They apply to content visible to the connected
 person in the selected workspace, including their private docs, private channels and DMs.
 Service-account tokens support tasks only; docs and chat require a personal identity.
 
 | Permission | Tools |
 | --- | --- |
-| Task read | `list_projects`, `list_tasks`, `get_task`, `list_task_statuses` |
-| Task write | `create_task`, `update_task`, `delete_task` |
+| Task read | `list_projects`, `list_tasks`, `get_task`, `list_task_statuses`, `list_labels`, `list_members`, `list_comments` |
+| Task write | `create_task`, `update_task`, `delete_task`, `create_comment`, `create_project` |
+| None | `get_me` |
 | Docs read | `list_docs`, `get_doc`, `get_database`, `query_database` |
 | Docs write | `create_doc`, `update_doc`, `create_database_row`, `update_database_row`, `trash_database_rows` |
 | Chat read | `list_conversations`, `list_messages`, `get_thread`, `search_messages` |
 
 Task create takes `project_id`, `status_id`, `title`, optional markdown `description`,
-`priority` and `parent_task_id` (creates a sub-issue). Task update takes `task_id`,
-`expected_version`, and optional title, description, status, priority or `parent_task_id`:
-a task ID or identifier moves the task under that task, and `null` detaches it. A task
+`priority`, `parent_task_id` (creates a sub-issue) and `assignee_ids`. Task update takes `task_id`,
+`expected_version`, and optional title, description, status, priority, `assignee_ids` or
+`parent_task_id`: a task ID or identifier moves the task under that task, and `null` detaches it.
+`assignee_ids` replaces the whole list with member user IDs from `list_members` or `get_me`, and
+`[]` unassigns everyone; to claim a task, send the current list plus your own `get_me` user ID.
+`create_project` works only for a connection approved for all projects (choose all projects at
+consent, or when you create the token): a connection for chosen projects could not use the new
+project. `key` is the identifier prefix (1 to 20 letters, digits or underscores, unique in the
+workspace).
+`create_comment` takes `task_id` and a Markdown `body` and writes as the connection's user (or
+its service account). A task
 cannot become a sub-issue of itself or of its own sub-issues. Delete takes `task_id` and `expected_version` and moves the task subtree
 to the trash for 30 days. With `permanent: true` it deletes the subtree forever instead, with
 its comments and attachments; this cannot be undone. It also works for a task that is

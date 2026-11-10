@@ -57,7 +57,8 @@ const AREAS: Record<SettingsAreaName, SettingsArea> = {
           { to: '/settings/file-storage', label: 'File storage', icon: CloudConnection },
           { to: '/settings/github', label: 'GitHub', icon: Link2 },
           { to: '/settings/agentic', label: 'Agentic', icon: RobotIcon },
-          { to: '/settings/api-tokens', label: 'API tokens', icon: Key, permission: 'api_tokens.manage' },
+          // every member but a guest may create a personal export token there
+          { to: '/settings/api-tokens', label: 'API tokens', icon: Key, permission: 'workspace.export_personal' },
         ],
       },
       {

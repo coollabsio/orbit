@@ -8,7 +8,7 @@ import { confirmAction } from '@/components/common/confirmAction'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { Button } from '@/components/ui/button'
 import { Progress, ProgressLabel } from '@/components/ui/progress'
-import { Spinner } from '@/components/ui/spinner'
+import { LoadingText, Spinner } from '@/components/ui/spinner'
 import { S3BucketForm } from '@/features/settings/components/S3BucketForm'
 import { useDeleteStorageFile, useRemoveWorkspaceBucket, useSaveWorkspaceBucket, useWorkspaceBucket, useWorkspaceStorage } from '@/features/workspaces/api'
 import { useCan } from '@/features/workspaces/permissions'
@@ -36,7 +36,7 @@ export function FileStoragePage() {
 /** The workspace's own S3 bucket for its files, instead of the installation's storage. */
 function BucketSettings({ workspaceId }: { workspaceId: string }) {
   const bucket = useWorkspaceBucket(workspaceId, true)
-  if (bucket.isPending) return <SettingsCard title={TITLE}><p role="status">Loading settings…</p></SettingsCard>
+  if (bucket.isPending) return <SettingsCard title={TITLE}><p><LoadingText>Loading settings…</LoadingText></p></SettingsCard>
   if (bucket.isError) return <SettingsCard title={TITLE}><p role="alert">Settings could not be loaded. <Button variant="ghost" onClick={() => void bucket.refetch()}>Retry</Button></p></SettingsCard>
   // Remount on save so the form shows what the server stored.
   return <BucketForm key={JSON.stringify(bucket.data.s3)} workspaceId={workspaceId} bucket={bucket.data} />
@@ -120,7 +120,7 @@ function StorageCard({ workspaceId }: { workspaceId: string }) {
       title="Usage"
       description="Files, emoji and stickers of this workspace. A file attached more than once counts once; a deleted file stops counting about a day after the trash is emptied."
     >
-      {storage.isPending ? <p role="status" className="text-[13px] text-muted-foreground">Loading storage…</p> : null}
+      {storage.isPending ? <p className="text-[13px] text-muted-foreground"><LoadingText>Loading storage…</LoadingText></p> : null}
       {storage.isError ? <p role="alert" className="text-[13px] text-destructive">Storage use could not be loaded.</p> : null}
       {storage.data ? (
         <Progress

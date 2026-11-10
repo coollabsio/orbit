@@ -110,7 +110,7 @@ export default function AdminBackupBrowseScreen() {
             ) : null}
             {restore.isError ? <Note error>{errorMessage(restore.error)}</Note> : null}
           </View>
-          {items.isPending ? <View className="p-4"><Note>Loading…</Note></View> : null}
+          {items.isPending ? <View className="p-4"><Note loading>Loading…</Note></View> : null}
           {items.isError ? (
             <View className="p-4 flex-row items-center gap-2">
               <View className="flex-1">

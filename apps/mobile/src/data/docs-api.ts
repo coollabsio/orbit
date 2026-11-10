@@ -12,6 +12,7 @@ import {
   deleteTeamspace,
   duplicatePage,
   emptyPageTrash,
+  getTrashedPage,
   listPageDescendants,
   listPageFavorites,
   listPageThreads,
@@ -28,14 +29,14 @@ import {
   updateTeamspace,
   uploadPageFile,
 } from '@orbit/api/generated/sdk.gen'
-import type { CreatePageBody, PageFavorite, PageSearchResult, PageThread, PageUpdateBody, RecentPage, TrashedPage } from '@orbit/api/generated/types.gen'
+import type { CreatePageBody, PageFavorite, PageSearchResult, PageThread, PageUpdateBody, RecentPage, TrashedPage, TrashedPageDetail } from '@orbit/api/generated/types.gen'
 import type { TicketResult } from '@orbit/editor/collab/ticketSocket'
 
 import { multipart, type UploadFile } from './account-api'
 import type { MoveRequest } from './docs'
 import type { OrbitClient, Page, PageSummary, Teamspace } from './orbit'
 
-export type { PageSearchResult, PageThread, RecentPage, TrashedPage }
+export type { PageSearchResult, PageThread, RecentPage, TrashedPage, TrashedPageDetail }
 
 /** Under the `pages` and `page` prefixes, so the workspace events socket refreshes them with the tree. */
 export const docsKeys = {
@@ -44,6 +45,8 @@ export const docsKeys = {
   recent: (workspaceId: string) => ['pages', workspaceId, 'recent'] as const,
   trash: (workspaceId: string) => ['pages', workspaceId, 'trash'] as const,
   threads: (workspaceId: string, pageId: string) => ['page', workspaceId, pageId, 'threads'] as const,
+  /** Outside those prefixes: a restore or a purge must not refetch the preview it is leaving (a 404). */
+  trashedPage: (workspaceId: string, pageId: string) => ['trashed-page', workspaceId, pageId] as const,
 }
 
 const pagePath = (workspaceId: string, pageId: string) => ({ workspace_id: workspaceId, page_id: pageId })
@@ -159,6 +162,11 @@ export async function trashPage(client: OrbitClient, workspaceId: string, page: 
 export async function trash(client: OrbitClient, workspaceId: string): Promise<TrashedPage[]> {
   const { data } = await listPageTrash({ client, path: { workspace_id: workspaceId }, throwOnError: true })
   return [...data.items].sort((a, b) => b.deleted_at.localeCompare(a.deleted_at))
+}
+
+/** A trashed page with its content and the sub-pages trashed with it, for the read-only preview. */
+export async function trashedPage(client: OrbitClient, workspaceId: string, pageId: string): Promise<TrashedPageDetail> {
+  return (await getTrashedPage({ client, path: pagePath(workspaceId, pageId), throwOnError: true })).data
 }
 
 export async function restoreFromTrash(client: OrbitClient, workspaceId: string, page: Pick<TrashedPage, 'id' | 'version'>): Promise<Page> {

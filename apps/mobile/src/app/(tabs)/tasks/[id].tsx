@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { openURL } from 'expo-linking'
 import { router, useLocalSearchParams } from 'expo-router'
 import { type ReactNode, useMemo, useState } from 'react'
-import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from 'react-native'
+import { Alert, Pressable, ScrollView, View } from 'react-native'
 import { TextInput } from '../../../ui/scaled'
 
 import { MentionSuggestions, useMentionField } from '../../../components/MentionSuggestions'
@@ -51,7 +51,7 @@ import { useOrbit } from '../../../orbit-context'
 import { useLabels, useMentionPeople, usePeople, useProjects, useStatuses } from '../../../queries'
 import { errorMessage } from '../../../session-context'
 import { alpha, useTheme } from '../../../theme'
-import { Avatar, Button, ErrorView, Icon, type IconName, IconButton, LoadingView, PaneHeader, PullRefresh, PriorityIcon, SafeAreaView, StatusIcon, Text } from '../../../ui'
+import { Avatar, Button, ErrorView, Icon, IconButton, type IconName, KeyboardSpace, LoadingView, PaneHeader, PriorityIcon, PullRefresh, SafeAreaView, StatusIcon, Text } from '../../../ui'
 
 /** The one sheet of the page and what it shows. */
 type TaskSheet =
@@ -275,7 +275,7 @@ export default function TaskScreen() {
   return (
     <SafeAreaView edges={['left', 'right']} className="flex-1 bg-background">
       {header}
-      <KeyboardAvoidingView className="flex-1" behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardSpace className="flex-1">
         <ScrollView
           contentContainerClassName="px-3.5 pt-4 pb-7 gap-3.5"
           keyboardShouldPersistTaps="handled"
@@ -451,7 +451,7 @@ export default function TaskScreen() {
             />
           </View>
         </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardSpace>
 
       <Sheet visible={sheets.visible} title={sheetTitle(sheet, subject)} onClose={sheets.close}>
         {sheet?.kind === 'status' ? (

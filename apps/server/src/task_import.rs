@@ -267,6 +267,114 @@ pub(crate) async fn column_statuses(
     Ok(mapped)
 }
 
+/// The tables of one importer, for [`reuse_earlier_projects`] and [`reuse_earlier_tasks`].
+pub(crate) struct ImportTables {
+    /// `linear_imports`
+    pub imports: &'static str,
+    /// `linear_import_items`
+    pub items: &'static str,
+    /// The source id column of an item: `linear_id`.
+    pub source_id: &'static str,
+    /// The item kind of a source project (`team`) and of a source task (`issue`).
+    pub project_kind: &'static str,
+    pub task_kind: &'static str,
+}
+
+/// An earlier import that no longer runs: what it made can be reused.
+const FINISHED: &str = "('completed', 'failed', 'cancelled', 'expired')";
+
+/// Gives each new project item the Orbit project of the newest earlier import of the same
+/// source project in this workspace, while that project still exists. A second import of a team,
+/// board or project (for example after a trial stopped the first) then fills the same project.
+pub(crate) async fn reuse_earlier_projects(
+    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    tables: &ImportTables,
+    import_id: Id,
+    workspace_id: Id,
+) -> Result<(), sqlx::Error> {
+    let ImportTables {
+        imports,
+        items,
+        source_id,
+        project_kind,
+        ..
+    } = tables;
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "UPDATE {items} AS items SET orbit_id = (\
+         SELECT earlier.orbit_id FROM {items} AS earlier \
+         JOIN {imports} AS imports ON imports.id = earlier.import_id \
+         JOIN projects ON projects.id = earlier.orbit_id \
+         WHERE earlier.kind = items.kind AND earlier.{source_id} = items.{source_id} \
+         AND earlier.import_id <> items.import_id AND imports.workspace_id = $2 \
+         AND imports.status IN {FINISHED} \
+         AND projects.workspace_id = $2 AND projects.deleted_at IS NULL \
+         ORDER BY imports.created_at DESC LIMIT 1) \
+         WHERE items.import_id = $1 AND items.kind = '{project_kind}' AND items.orbit_id IS NULL"
+    )))
+    .bind(import_id.to_string())
+    .bind(workspace_id.to_string())
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+/// Gives each new pending task item the Orbit task of the newest earlier import of the same
+/// source task in this workspace, while that task and its project still exist, so it is not
+/// created twice. A task the earlier import finished is marked `filled` and counted as done;
+/// one it stopped on continues like a resumed import.
+pub(crate) async fn reuse_earlier_tasks(
+    tx: &mut sqlx::Transaction<'_, sqlx::Any>,
+    tables: &ImportTables,
+    import_id: Id,
+    workspace_id: Id,
+) -> Result<(), sqlx::Error> {
+    let ImportTables {
+        imports,
+        items,
+        source_id,
+        task_kind,
+        ..
+    } = tables;
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "UPDATE {items} AS items SET orbit_id = (\
+         SELECT earlier.orbit_id FROM {items} AS earlier \
+         JOIN {imports} AS imports ON imports.id = earlier.import_id \
+         JOIN tasks ON tasks.id = earlier.orbit_id \
+         JOIN projects ON projects.id = tasks.project_id \
+         WHERE earlier.kind = items.kind AND earlier.{source_id} = items.{source_id} \
+         AND earlier.import_id <> items.import_id AND imports.workspace_id = $2 \
+         AND imports.status IN {FINISHED} AND tasks.deleted_at IS NULL \
+         AND projects.workspace_id = $2 AND projects.deleted_at IS NULL \
+         ORDER BY imports.created_at DESC LIMIT 1) \
+         WHERE items.import_id = $1 AND items.kind = '{task_kind}' AND items.state = 'pending' \
+         AND items.orbit_id IS NULL"
+    )))
+    .bind(import_id.to_string())
+    .bind(workspace_id.to_string())
+    .execute(&mut **tx)
+    .await?;
+    let filled = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "UPDATE {items} AS items SET state = 'filled', data_json = NULL \
+         WHERE items.import_id = $1 AND items.kind = '{task_kind}' AND items.state = 'pending' \
+         AND items.orbit_id IS NOT NULL AND EXISTS (\
+         SELECT 1 FROM {items} AS earlier WHERE earlier.kind = items.kind \
+         AND earlier.{source_id} = items.{source_id} AND earlier.orbit_id = items.orbit_id \
+         AND earlier.import_id <> items.import_id AND earlier.state = 'filled')"
+    )))
+    .bind(import_id.to_string())
+    .execute(&mut **tx)
+    .await?
+    .rows_affected();
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "UPDATE {imports} SET done = done + $1 WHERE id = $2"
+    )))
+    .bind(filled as i64)
+    .bind(import_id.to_string())
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
 /// What the importer creates the Orbit project with.
 pub(crate) struct NewProject<'a> {
     pub id: Id,
@@ -589,6 +697,15 @@ impl RateLimiter {
             slot
         };
         tokio::time::sleep_until(slot).await;
+    }
+
+    /// The time until the next request may go.
+    pub(crate) fn waiting(&self) -> Duration {
+        let next = *self
+            .next
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        next.saturating_duration_since(Instant::now())
     }
 
     pub(crate) fn pause(&self, wait: Duration) {

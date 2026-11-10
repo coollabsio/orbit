@@ -27,7 +27,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
 
     let document: serde_json::Value = serde_json::from_str(&first).unwrap();
     assert_eq!(document["info"]["version"], CONTRACT_ID);
-    assert_eq!(document["paths"].as_object().unwrap().len(), 271);
+    assert_eq!(document["paths"].as_object().unwrap().len(), 290);
     let operation_count: usize = document["paths"]
         .as_object()
         .unwrap()
@@ -42,7 +42,7 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
                 .count()
         })
         .sum();
-    assert_eq!(operation_count, 344);
+    assert_eq!(operation_count, 366);
     for path in [
         "/api/v1/setup/status",
         "/api/v1/auth/me",
@@ -105,6 +105,8 @@ fn openapi_generation_is_byte_stable_and_covers_public_routes() {
         "/api/v1/workspaces/{workspace_id}/imports/obsidian/{import_id}",
         "/api/v1/workspaces/{workspace_id}/imports/obsidian/{import_id}/start",
         "/api/v1/workspaces/{workspace_id}/imports/obsidian/{import_id}/cancel",
+        "/api/v1/workspaces/{workspace_id}/import-people",
+        "/api/v1/workspaces/{workspace_id}/import-people/{person_id}",
     ] {
         assert!(document["paths"].get(path).is_some(), "missing {path}");
     }

@@ -20,7 +20,12 @@
 //!
 //! A task that fails is recorded and the import continues; a revoked token fails the import.
 //! What was imported before a failure or cancellation stays.
+//!
+//! A later import of the same project reuses what a finished earlier import in the workspace made:
+//! its Orbit project and its tasks, while they exist. A task the earlier import finished is
+//! counted as done and not copied again.
 
+use crate::import_notice::{ImportNotices, ImportSource};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Duration;
 
@@ -39,6 +44,7 @@ use super::convert::{bold, bullet, html_to_blocks, link, paragraph, text};
 use super::model::{AsanaAttachment, AsanaTask};
 pub use super::scan::{AsanaImportProject, AsanaImportTree, AsanaImportWorkspace};
 use super::scan::{MAX_PROJECTS, build_tree};
+use crate::import_people::{self, Match, Source};
 use crate::notion::files::sanitize_file_name;
 use crate::notion::import::clamp;
 use crate::repositories::attachments::AttachmentRepository;
@@ -48,10 +54,11 @@ use crate::repositories::tasks::{CommentContent, CreateTask, TaskError, TaskRepo
 use crate::secret_box::{decrypt_secret, encrypt_secret};
 pub use crate::task_import::JobRun;
 use crate::task_import::{
-    Attached, Failure, LABEL_COLORS, NewProject, PROJECT_COLORS, attach_once, column_statuses,
-    display_instant, ensure_project, ensure_writable, find_or_create_label, job_kind,
-    member_emails, parse_date_millis, parse_instant_millis, parse_stored_id, project_key_base,
-    project_statuses, retryable, stopped,
+    Attached, Failure, ImportTables, LABEL_COLORS, NewProject, PROJECT_COLORS, attach_once,
+    column_statuses, display_instant, ensure_project, ensure_writable, find_or_create_label,
+    job_kind, member_emails, parse_date_millis, parse_instant_millis, parse_stored_id,
+    project_key_base, project_statuses, retryable, reuse_earlier_projects, reuse_earlier_tasks,
+    stopped,
 };
 
 /// Job kind names.
@@ -69,6 +76,14 @@ const MAX_TOKEN_CHARS: usize = 1_024;
 const MAX_FAILURES_LISTED: i64 = 200;
 const MAX_LISTED_IMPORTS: i64 = 20;
 const ACTIVE: &str = "('scanning', 'queued', 'importing')";
+
+const TABLES: ImportTables = ImportTables {
+    imports: "asana_imports",
+    items: "asana_import_items",
+    source_id: "asana_gid",
+    project_kind: "project",
+    task_kind: "task",
+};
 const OPEN: &str = "('scanning', 'ready', 'queued', 'importing')";
 
 /// Both job kinds: [`job_kind`], as for the Notion import.
@@ -86,6 +101,7 @@ pub fn import_job_kind() -> JobKind {
 pub fn register_jobs(
     worker: Worker,
     service: AsanaImportService,
+    notices: ImportNotices,
 ) -> Result<Worker, JobKindRegistrationError> {
     let scan = service.clone();
     worker
@@ -105,6 +121,7 @@ pub fn register_jobs(
         })?
         .with_handler(import_job_kind(), move |context| {
             let service = service.clone();
+            let notices = notices.clone();
             async move {
                 let Some(import_id) = payload_import_id(&context.job.payload) else {
                     return Err(JobError::Permanent(
@@ -116,7 +133,9 @@ pub fn register_jobs(
                     last_attempt: context.claim.attempt >= context.job.max_attempts,
                 };
                 let result = service.run_import(import_id, &run).await;
-                service.after_attempt(import_id, &run, result).await
+                let result = service.after_attempt(import_id, &run, result).await;
+                notices.after_run(ImportSource::Asana, import_id).await;
+                result
             }
         })
 }
@@ -373,6 +392,8 @@ struct Run<'a> {
     report: StoredReport,
     /// Lowercase email → member id.
     members: HashMap<String, Id>,
+    /// Name key → member of the Asana people an admin mapped (Settings → Import).
+    mapped: HashMap<String, Id>,
     /// Selected project gid → name.
     project_names: HashMap<String, String>,
     projects: HashMap<String, ProjectContext>,
@@ -594,7 +615,7 @@ impl AsanaImportService {
         }
         let updated = sqlx::query(
             "UPDATE asana_imports SET status = 'queued', selection_json = $1, total = 0, done = 0, \
-             failed = 0, report_json = $2, updated_at = $3 \
+             failed = 0, report_json = $2, updated_at = $3, started_at = $3 \
              WHERE id = $4 AND status = 'ready' AND token_ciphertext IS NOT NULL",
         )
         .bind(serde_json::to_string(&selection).unwrap_or_default())
@@ -620,6 +641,7 @@ impl AsanaImportService {
             .execute(&mut *tx)
             .await?;
         }
+        reuse_earlier_projects(&mut tx, &TABLES, import_id, workspace_id).await?;
         tx.commit().await?;
         if let Err(error) = self
             .enqueue(import_job_kind(), import_id, workspace_id)
@@ -857,6 +879,8 @@ impl AsanaImportService {
             request_id: format!("asana-import-{import_id}"),
             report,
             members,
+            mapped: import_people::mapped_members(self.database(), workspace_id, Source::Asana)
+                .await?,
             project_names: HashMap::new(),
             projects: HashMap::new(),
         };
@@ -1149,6 +1173,7 @@ impl AsanaImportService {
             .bind(run.import_id.to_string())
             .execute(&mut *tx)
             .await?;
+        reuse_earlier_tasks(&mut tx, &TABLES, run.import_id, run.workspace_id).await?;
         tx.commit().await?;
         Ok(())
     }
@@ -1320,6 +1345,20 @@ impl AsanaImportService {
             }
             created?;
         }
+        if let Some((found, name)) = source_assignee(run, &task)
+            && !matches!(found, Match::Email(_))
+        {
+            let email = task.assignee.as_ref().and_then(|a| a.email.as_deref());
+            import_people::record(
+                self.database(),
+                run.workspace_id,
+                Source::Asana,
+                &name,
+                email,
+                task_id,
+            )
+            .await?;
+        }
         sqlx::query(
             "UPDATE asana_import_items SET state = 'created' WHERE import_id = $1 AND kind = 'task' AND asana_gid = $2",
         )
@@ -1392,23 +1431,12 @@ impl AsanaImportService {
             Some(status) if !closed(&status) => status,
             _ => project.open_status,
         };
-        let assignee = task.assignee.as_ref().and_then(|assignee| {
-            assignee
-                .email
-                .as_deref()
-                .and_then(|email| run.members.get(&email.trim().to_lowercase()))
-                .copied()
-        });
-        let unmatched = match (&task.assignee, assignee) {
-            (Some(asana), None) => {
+        let found = source_assignee(run, task);
+        let assignee = found.as_ref().and_then(|(found, _)| found.user_id());
+        let unmatched = match found {
+            Some((Match::Unmatched, name)) => {
                 run.report.unmatched_assignees += 1;
-                Some(
-                    asana
-                        .name
-                        .clone()
-                        .or_else(|| asana.email.clone())
-                        .unwrap_or_else(|| "unknown".to_owned()),
-                )
+                Some(name)
             }
             _ => None,
         };
@@ -1994,6 +2022,20 @@ fn priority(task: &AsanaTask) -> &'static str {
         Some("urgent" | "critical" | "highest") => "urgent",
         _ => "none",
     }
+}
+
+/// How the import assigns the task's assignee, with the name an unassigned one gets in the
+/// description and in Settings → Import.
+fn source_assignee(run: &Run<'_>, task: &AsanaTask) -> Option<(Match, String)> {
+    let assignee = task.assignee.as_ref()?;
+    let name = assignee
+        .name
+        .clone()
+        .or_else(|| assignee.email.clone())
+        .unwrap_or_else(|| "unknown".to_owned());
+    let found =
+        import_people::match_assignee(&run.members, &run.mapped, assignee.email.as_deref(), &name);
+    Some((found, name))
 }
 
 /// What the description carries besides the task's notes.

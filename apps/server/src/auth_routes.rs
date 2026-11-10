@@ -401,6 +401,11 @@ pub fn auth_router(state: AuthState) -> Router {
             "/api/v1/push/subscriptions/{id}",
             delete(push::delete_push_subscription),
         )
+        .route(
+            "/api/v1/push/apns",
+            get(push::list_apns_devices).post(push::create_apns_device),
+        )
+        .route("/api/v1/push/apns/{id}", delete(push::delete_apns_device))
         .route("/api/v1/push/test", post(push::send_test_push))
         .route(
             "/api/v1/notification-preferences",

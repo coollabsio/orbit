@@ -55,8 +55,8 @@ rollup and formula functions when 9 and 13 land. Each item lists these extension
 
 | Area | Fact | Where |
 |---|---|---|
-| Schema | Tables `database_properties`, `database_views`, `page_property_values`; `pages.kind IN ('page','database')`. The property `type` is checked in Rust only, so a new property type needs no SQL change. | `migrations/0079_page_databases.sql` |
-| View types | `database_views.type IN ('table','board')`. A new view type needs a table rebuild on SQLite (as `0080`). | `migrations/0080_database_board_views.sql` |
+| Schema | Tables `database_properties`, `database_views`, `page_property_values`; `pages.kind IN ('page','database')`. The property `type` is checked in Rust only, so a new property type needs no SQL change. | `migrations/0086_page_databases.sql` |
+| View types | `database_views.type IN ('table','board')`. A new view type needs a table rebuild on SQLite (as `0080`). | `migrations/0087_database_board_views.sql` |
 | View config | `ViewConfig` (`#[serde(deny_unknown_fields)]`): `columns`, `sorts`, `filter.rules` (flat AND, max 20), `wrap_cells`, board fields. `repair` drops unknown ids. | `repositories/databases.rs` |
 | Limits | `MAX_ROWS` 5,000, `MAX_PROPERTIES` 100, `MAX_VIEWS` 50, `MAX_OPTIONS` 200, `MAX_CELL_ITEMS` 100, `MAX_SORTS` 10, `MAX_RULES` 20. | `repositories/databases.rs` |
 | Row cap | `ensure_row_capacity(tx, database_id, adding)` runs on every path that makes a row live. | `repositories/databases.rs` |
@@ -272,7 +272,7 @@ OQ-1.1 asks for a cleanup job.
 
 ### 3.11 Status
 
-Done on 2026-11-09 (migration `0081_database_links`). Decisions: D-P2-1 as written; OQ-1.1 no cleanup job; OQ-1.3 the
+Done on 2026-11-09 (migration `0088_database_links`). Decisions: D-P2-1 as written; OQ-1.1 no cleanup job; OQ-1.3 the
 block keeps pointing to the same database; OQ-1.2 see below. Differences from this section:
 
 | # | Item | Where | Why |
@@ -587,7 +587,7 @@ template limit; delete clears `default_template_id`; duplicate of the database c
 
 ### 7.9 Status
 
-Done on 2026-11-10 (migration `0084_database_templates`). OQ-5.1: no repeating templates. OQ-5.2: open, no Notion
+Done on 2026-11-10 (migration `0091_database_templates`). OQ-5.1: no repeating templates. OQ-5.2: open, no Notion
 mapping. Differences from this section:
 
 | # | Item | Where | Why |
@@ -941,7 +941,7 @@ outside links.
 
 ### 11.12 Status
 
-Done on 2026-11-10 (migration `0085_page_relations`, not registered yet). No tests in this round (the user asked for
+Done on 2026-11-10 (migration `0092_page_relations`, not registered yet). No tests in this round (the user asked for
 none). Server code: `repositories/databases/computed.rs` (the computed-value layer of 2.3: `ComputeScope`, `fill`,
 documented at the top of the module), `relations.rs` (config, reads, writes, pairs), `rollups.rs` (functions),
 `relation_import.rs` and `notion/relations.rs` (Notion); shared logic `@orbit/database/relations`; web

@@ -96,6 +96,18 @@ pub fn task_router(state: TaskState) -> Router {
             post(restore_project),
         )
         .route(
+            "/api/v1/workspaces/{workspace_id}/projects/{project_id}/permanent",
+            delete(purge_project),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/projects/trash/{project_id}",
+            get(get_trashed_project),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/projects/trash/{project_id}/tasks",
+            get(list_trashed_project_tasks),
+        )
+        .route(
             "/api/v1/workspaces/{workspace_id}/projects/{project_id}/statuses",
             get(list_statuses).post(create_status),
         )
@@ -127,6 +139,18 @@ pub fn task_router(state: TaskState) -> Router {
         .route(
             "/api/v1/workspaces/{workspace_id}/tasks/trash",
             get(list_task_trash),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/tasks/trash/empty",
+            post(empty_task_trash),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/tasks/trash/{task_id}",
+            get(get_trashed_task),
+        )
+        .route(
+            "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/permanent",
+            delete(purge_task),
         )
         .route(
             "/api/v1/workspaces/{workspace_id}/tasks/bulk",
@@ -430,6 +454,58 @@ async fn restore_project(
             project_id,
             actor_id,
             body.expected_version,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+/// Deletes a project in the trash forever with all its tasks. Workspace owners and admins only
+/// (members get 403).
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/projects/{project_id}/permanent", params(("workspace_id" = String, Path), ("project_id" = String, Path)), responses((status = 204)))]
+async fn purge_project(
+    State(state): State<TaskState>,
+    Path((workspace, project)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<StatusCode, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/projects/{project}/permanent");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let project_id = parse_id(&project, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .purge_project(
+            workspace_id,
+            project_id,
+            actor_id,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(|()| StatusCode::NO_CONTENT)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+/// Deletes forever every trashed task and every trashed project with all its tasks. Workspace
+/// owners and admins only (members get 403).
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/tasks/trash/empty", params(("workspace_id" = String, Path)), responses((status = 200, body = crate::repositories::tasks::TaskTrashEmptied)))]
+async fn empty_task_trash(
+    State(state): State<TaskState>,
+    Path(workspace): Path<String>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<crate::repositories::tasks::TaskTrashEmptied>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/tasks/trash/empty");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    state
+        .tasks
+        .empty_trash(
+            workspace_id,
+            actor_id,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )
@@ -1689,6 +1765,102 @@ async fn list_task_trash(
         .map_err(|error| task_problem(error, instance, request_id.as_ref()))
 }
 
+/// A task the trash shows (trashed, or in a trashed project), for its read-only preview.
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/tasks/trash/{task_id}", params(("workspace_id" = String, Path), ("task_id" = String, Path)), responses((status = 200, body = crate::repositories::tasks::TrashedTask)))]
+async fn get_trashed_task(
+    State(state): State<TaskState>,
+    Path((workspace, task)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<crate::repositories::tasks::TrashedTask>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/tasks/trash/{task}");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let task_id = parse_id(&task, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .trashed_task(workspace_id, task_id, actor_id, TimestampMillis::now())
+        .await
+        .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+/// Deletes a task in the trash forever with the sub-issues trashed with it. Workspace owners
+/// and admins only (members get 403); a live task gets 409 `task_not_trashed`.
+#[utoipa::path(delete, path = "/api/v1/workspaces/{workspace_id}/tasks/{task_id}/permanent", params(("workspace_id" = String, Path), ("task_id" = String, Path)), responses((status = 204)))]
+async fn purge_task(
+    State(state): State<TaskState>,
+    Path((workspace, task)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<StatusCode, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/tasks/{task}/permanent");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let task_id = parse_id(&task, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .purge_task(
+            workspace_id,
+            task_id,
+            actor_id,
+            None,
+            request_id_value(request_id.as_ref()),
+            TimestampMillis::now(),
+        )
+        .await
+        .map(|()| StatusCode::NO_CONTENT)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+/// A project in the trash, for its read-only preview.
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/projects/trash/{project_id}", params(("workspace_id" = String, Path), ("project_id" = String, Path)), responses((status = 200, body = crate::repositories::tasks::TrashedProject)))]
+async fn get_trashed_project(
+    State(state): State<TaskState>,
+    Path((workspace, project)): Path<(String, String)>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<crate::repositories::tasks::TrashedProject>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/projects/trash/{project}");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let project_id = parse_id(&project, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .trashed_project(workspace_id, project_id, actor_id, TimestampMillis::now())
+        .await
+        .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
+/// The tasks of a project in the trash, by number.
+#[utoipa::path(get, path = "/api/v1/workspaces/{workspace_id}/projects/trash/{project_id}/tasks", params(PageQuery, ("workspace_id" = String, Path), ("project_id" = String, Path)), responses((status = 200, body = Page<crate::repositories::tasks::TaskRecord>)))]
+async fn list_trashed_project_tasks(
+    State(state): State<TaskState>,
+    Path((workspace, project)): Path<(String, String)>,
+    ApiQuery(page): ApiQuery<PageQuery>,
+    headers: HeaderMap,
+    request_id: Option<Extension<RequestId>>,
+) -> Result<Json<Page<TaskRecord>>, ApiError> {
+    let instance = format!("/api/v1/workspaces/{workspace}/projects/trash/{project}/tasks");
+    let (workspace_id, actor_id) =
+        scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
+    let project_id = parse_id(&project, &instance, request_id.as_ref())?;
+    state
+        .tasks
+        .trashed_project_tasks(
+            workspace_id,
+            project_id,
+            actor_id,
+            page.cursor.as_deref(),
+            page.limit,
+            TimestampMillis::now(),
+        )
+        .await
+        .map(Json)
+        .map_err(|error| task_problem(error, instance, request_id.as_ref()))
+}
+
 #[derive(Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
 struct CommentBody {
@@ -2396,6 +2568,22 @@ pub(crate) fn task_problem(
             "parent_invalid",
             "Invalid parent",
             "The parent task does not exist, is in the trash, or is not in this workspace.",
+            instance,
+            request_id,
+        ),
+        TaskError::ProjectNotTrashed => ApiError::new(
+            StatusCode::CONFLICT,
+            "project_not_trashed",
+            "Project not in the trash",
+            "Only projects in the trash can be deleted forever.",
+            instance,
+            request_id,
+        ),
+        TaskError::TaskNotTrashed => ApiError::new(
+            StatusCode::CONFLICT,
+            "task_not_trashed",
+            "Task not in the trash",
+            "Only tasks in the trash can be deleted forever.",
             instance,
             request_id,
         ),

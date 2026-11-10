@@ -1,7 +1,7 @@
 import { type Href, router } from 'expo-router'
 import * as WebBrowser from 'expo-web-browser'
 import { type ReactNode, useMemo, useState } from 'react'
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, View } from 'react-native'
+import { Pressable, ScrollView, View } from 'react-native'
 
 import {
   checkStates,
@@ -23,7 +23,7 @@ import {
 import { relativeTime } from '../../data/format'
 import type { ImportDestination } from '../../hooks/imports'
 import { alpha, presenceColors, useTheme } from '../../theme'
-import { Button, Icon, type IconName, IconButton, PaneHeader, SafeAreaView, Spinner, Text } from '../../ui'
+import { Button, Icon, IconButton, type IconName, KeyboardSpace, PaneHeader, SafeAreaView, Spinner, Text } from '../../ui'
 import { TextInput } from '../../ui/scaled'
 import { Dialog } from '../settings/Dialog'
 import { Badge, Select } from '../settings/Shell'
@@ -49,9 +49,9 @@ export function ImportScreen({ title, detail, actions, children }: { title: stri
         <View className="flex-1" />
         {actions}
       </PaneHeader>
-      <KeyboardAvoidingView className="flex-1" behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardSpace className="flex-1">
         {children}
-      </KeyboardAvoidingView>
+      </KeyboardSpace>
     </SafeAreaView>
   )
 }

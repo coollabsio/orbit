@@ -17,7 +17,7 @@
 
 use std::collections::HashSet;
 use std::fmt;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use reqwest::header::{self, HeaderMap, HeaderValue};
@@ -44,6 +44,8 @@ pub const UPLOAD_HOST: &str = "uploads.linear.app";
 /// Below this many complexity points left in the hour, wait for the reset before the next query
 /// (an issue page costs about 5,000).
 const LOW_COMPLEXITY: i64 = 20_000;
+/// A pause longer than this is a rate-limit wait, not the spacing between requests.
+const RATE_LIMIT_NOTICE: Duration = Duration::from_secs(5);
 
 /// Client settings. `Default` is right for production; tests change the endpoint and speed.
 #[derive(Clone, Debug)]
@@ -136,6 +138,8 @@ struct Inner {
     config: LinearClientConfig,
     limiter: RateLimiter,
     file_policy: FilePolicy,
+    /// Set when a request failed with [`LinearError::RateLimited`]: when Linear lets it go on.
+    rate_limited_until: Mutex<Option<tokio::time::Instant>>,
 }
 
 impl fmt::Debug for LinearClient {
@@ -251,6 +255,7 @@ impl LinearClient {
                 limiter: RateLimiter::per_second(config.requests_per_second),
                 config,
                 file_policy,
+                rate_limited_until: Mutex::new(None),
             }),
         })
     }
@@ -315,30 +320,40 @@ impl LinearClient {
         .await
     }
 
-    /// Every issue of the team, archived ones too, oldest first, stopping after `max`. Each
-    /// issue's labels, relations, attachments and comments are complete.
-    pub async fn team_issues(
+    /// One page of the team's issues, archived ones too, oldest first, after the cursor `after`
+    /// (`None` for the first page). Each issue's labels, relations, attachments and comments
+    /// are complete. Returns the page and the cursor of the next one (`None` after the last).
+    pub async fn issue_page(
         &self,
         team_id: &str,
-        max: usize,
-    ) -> Result<Vec<LinearIssue>, LinearError> {
-        let mut issues: Vec<LinearIssue> = self
-            .paginate(
+        after: Option<&str>,
+    ) -> Result<(Vec<LinearIssue>, Option<String>), LinearError> {
+        let data: Value = self
+            .query(
                 &format!(
                     "query($id: String!, $after: String) {{ team(id: $id) {{ issues(first: {ISSUE_PAGE}, \
                      after: $after, includeArchived: true, orderBy: createdAt) {{ nodes {{ {} }} \
                      pageInfo {{ hasNextPage endCursor }} }} }} }}",
                     issue_fields()
                 ),
-                json!({"id": team_id}),
-                "/team/issues",
-                max,
+                json!({"id": team_id, "after": after}),
             )
             .await?;
+        let connection = data
+            .pointer("/team/issues")
+            .cloned()
+            .ok_or_else(|| LinearError::Decode("missing /team/issues".to_owned()))?;
+        let page: Connection<LinearIssue> = serde_json::from_value(connection)
+            .map_err(|error| LinearError::Decode(error.to_string()))?;
+        let mut issues = page.nodes;
         for issue in &mut issues {
             self.complete(issue).await?;
         }
-        Ok(issues)
+        let next = page
+            .page_info
+            .end_cursor
+            .filter(|cursor| page.page_info.has_next_page && Some(cursor.as_str()) != after);
+        Ok((issues, next))
     }
 
     /// Fetches the rest of each nested connection the issue page cut off.
@@ -570,6 +585,12 @@ impl LinearClient {
                     .or_else(|| limits.until_reset())
                     .unwrap_or_else(|| self.backoff(attempt));
                 if attempt >= max_attempts || wait > config.max_retry_after {
+                    *self
+                        .inner
+                        .rate_limited_until
+                        .lock()
+                        .unwrap_or_else(|poison| poison.into_inner()) =
+                        Some(tokio::time::Instant::now() + wait);
                     return Err(LinearError::RateLimited {
                         retry_after: Some(wait),
                     });
@@ -612,6 +633,35 @@ impl LinearClient {
             return serde_json::from_value(data)
                 .map_err(|error| LinearError::Decode(error.to_string()));
         }
+    }
+
+    /// How long a Linear rate limit still holds the next request back; `None` for the usual
+    /// spacing between requests.
+    #[must_use]
+    pub fn rate_limit_wait(&self) -> Option<Duration> {
+        let wait = self
+            .inner
+            .limiter
+            .waiting()
+            .max(self.rate_limited_rest().unwrap_or_default());
+        Some(wait).filter(|wait| *wait > RATE_LIMIT_NOTICE)
+    }
+
+    /// The rest of the wait Linear asked for when a request last failed with
+    /// [`LinearError::RateLimited`] (at least a minute, so a caller never retries right away).
+    #[must_use]
+    pub fn rate_limited_for(&self) -> Option<Duration> {
+        self.rate_limited_rest()
+            .map(|rest| rest.max(Duration::from_secs(60)))
+    }
+
+    fn rate_limited_rest(&self) -> Option<Duration> {
+        let until = (*self
+            .inner
+            .rate_limited_until
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner()))?;
+        Some(until.saturating_duration_since(tokio::time::Instant::now()))
     }
 
     fn backoff(&self, attempt: u32) -> Duration {

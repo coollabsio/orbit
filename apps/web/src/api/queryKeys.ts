@@ -31,6 +31,8 @@ export const queryKeys = {
   memberProfile: (workspaceId: string, userId: string) => [...workspace(workspaceId), 'profiles', userId] as const,
   invitations: (workspaceId: string) => [...workspace(workspaceId), 'invitations'] as const,
   apiTokens: (workspaceId: string) => [...workspace(workspaceId), 'api-tokens'] as const,
+  /** People from Asana, Linear and Trello imports, mapped to members in Settings → Import. */
+  importPeople: (workspaceId: string) => [...workspace(workspaceId), 'import-people'] as const,
   /** Full workspace exports (ZIP archives) that have not expired. */
   workspaceExports: (workspaceId: string) => [...workspace(workspaceId), 'exports'] as const,
   /** Orbit Cloud: the workspace's subscription and access. */
@@ -72,6 +74,8 @@ export const queryKeys = {
     tree: (workspaceId: string) => [...workspace(workspaceId), 'pages', 'tree'] as const,
     detail: (workspaceId: string, pageId: string) => [...workspace(workspaceId), 'pages', 'detail', pageId] as const,
     trash: (workspaceId: string) => [...workspace(workspaceId), 'pages', 'trash'] as const,
+    /** A trashed page's read-only preview; not under `trash`, so trash writes do not refetch it. */
+    trashed: (workspaceId: string, pageId: string) => [...workspace(workspaceId), 'pages', 'trashed', pageId] as const,
     search: (workspaceId: string, query: string) => [...workspace(workspaceId), 'pages', 'search', query] as const,
     favorites: (workspaceId: string) => [...workspace(workspaceId), 'pages', 'favorites'] as const,
     /** A page's live sub-pages from the server: database rows and their sub-pages are not in the tree. */
@@ -114,6 +118,12 @@ export const queryKeys = {
     list: (workspaceId: string) => ['linear-imports', workspaceId, 'list'] as const,
     detail: (workspaceId: string, importId: string) => ['linear-imports', workspaceId, 'detail', importId] as const,
     tree: (workspaceId: string, importId: string) => ['linear-imports', workspaceId, 'tree', importId] as const,
+  },
+  /** Outside the workspace prefix for the same reason as `notionImports`. */
+  orbitImports: {
+    list: (workspaceId: string) => ['orbit-imports', workspaceId, 'list'] as const,
+    detail: (workspaceId: string, importId: string) => ['orbit-imports', workspaceId, 'detail', importId] as const,
+    tree: (workspaceId: string, importId: string) => ['orbit-imports', workspaceId, 'tree', importId] as const,
   },
   /** Outside the workspace prefix for the same reason as `notionImports`. */
   trelloImports: {

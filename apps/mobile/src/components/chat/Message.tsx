@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { Image, Modal, Platform, Pressable, Share, useWindowDimensions, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-import { fileSize, hasReaction, isImage } from '../../data/chat'
+import { fileSize, hasReaction, isImage, type TextPart } from '../../data/chat'
 import type { ChatFileRecord } from '../../data/chat-api'
 import { relativeAgo, timeOfDay } from '../../data/format'
 import type { MessageRecord } from '../../data/orbit'
@@ -18,6 +18,8 @@ export interface MessageHandlers {
   nameOf: (userId: string) => string
   /** A stored body as shown: mentions as names, markdown as plain text. */
   text: (body: string) => string
+  /** Shown text split at its mentions, which the row marks as the web does. */
+  parts: (shown: string) => TextPart[]
   onLongPress: (message: MessageRecord) => void
   onReact: (message: MessageRecord, emoji: string) => void
   onAddReaction: (message: MessageRecord) => void
@@ -32,9 +34,11 @@ export interface MessageHandlers {
  * reactions and the thread summary. A long press opens the action sheet.
  */
 export function MessageItem({ message, groupStart, highlighted = false, handlers }: { message: MessageRecord; groupStart: boolean; highlighted?: boolean; handlers: MessageHandlers }) {
-  const { colors } = useTheme()
+  const { colors, scheme } = useTheme()
   const { user } = useOrbit()
   const author = handlers.nameOf(message.author_id)
+  // the web's `data-mentioned` row: it mentions you, `@channel` or `@here`
+  const mentioned = message.mentions.user_ids.includes(user.id) || message.mentions.channel || message.mentions.here
 
   if (message.kind !== 'message') {
     const what = message.kind === 'join' ? 'joined' : message.kind === 'leave' ? 'left' : 'pinned a message'
@@ -53,7 +57,7 @@ export function MessageItem({ message, groupStart, highlighted = false, handlers
       onLongPress={() => handlers.onLongPress(message)}
       delayLongPress={350}
       accessibilityHint="Long press for actions"
-      className={`${highlighted ? 'bg-primary/12' : 'active:bg-muted/50'} ${groupStart ? 'mt-2' : 'mt-0'}`}
+      className={`${highlighted ? 'bg-primary/12' : mentioned ? 'bg-primary/8' : ''} ${groupStart ? 'mt-2' : 'mt-0'}`}
     >
       {message.reply_to ? <Quote author={handlers.nameOf(message.reply_to.author_id)} body={message.reply_to.sticker && !message.reply_to.body ? 'Sticker' : handlers.text(message.reply_to.body)} /> : null}
       <View className={`flex-row gap-2 px-3 pb-0.5 ${groupStart ? 'pt-1' : 'pt-0.5'}`}>
@@ -76,7 +80,18 @@ export function MessageItem({ message, groupStart, highlighted = false, handlers
           ) : null}
           {body ? (
             <Text className={`text-[14px] leading-[21px] ${message.deleted ? 'text-muted-foreground' : 'text-foreground/85'}`}>
-              {body}
+              {message.deleted
+                ? body
+                : handlers.parts(body).map((part, index) =>
+                    part.mention ? (
+                      // the web's mention: primary text on a primary tint (`bg-primary/10`, `dark:bg-primary/20`)
+                      <Text key={index} className={`font-noto-medium text-[14px] leading-[21px] text-primary ${scheme === 'dark' ? 'bg-primary/20' : 'bg-primary/10'}`}>
+                        {part.text}
+                      </Text>
+                    ) : (
+                      part.text
+                    ),
+                  )}
               {message.edited_at && !message.deleted ? <Text className="text-[11px] text-muted-foreground"> (edited)</Text> : null}
             </Text>
           ) : null}

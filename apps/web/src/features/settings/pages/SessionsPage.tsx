@@ -7,6 +7,7 @@ import { SessionRevocationError, useRevokeSessions, useSessions } from '@/featur
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { useSlowPending } from '@/lib/useDebouncedValue'
 import { RowIcon, SettingsRow } from '@/features/settings/components/SettingsParts'
+import { LoadingText } from '@/components/ui/spinner'
 
 /** Account view: the current user's signed-in devices. */
 export function SessionsPage() {
@@ -32,7 +33,7 @@ export function SessionsPage() {
         flush
       >
         <div className="flex flex-col divide-y">
-          {sessionsQuery.isPending ? <SettingsRow>Loading sessions…</SettingsRow> : null}
+          {sessionsQuery.isPending ? <SettingsRow><LoadingText>Loading sessions…</LoadingText></SettingsRow> : null}
           {sessionsQuery.isError ? <SettingsRow role="alert">Sessions could not be loaded. <Button variant="ghost" onClick={() => void sessionsQuery.refetch()}>Retry</Button></SettingsRow> : null}
           {sessions.map((session) => {
             return (

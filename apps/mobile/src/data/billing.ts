@@ -70,16 +70,23 @@ export function priced(plans: readonly PlanView[], interval: PlanInterval): Plan
   return plans.find((plan) => plan.interval === interval && plan.amount != null && plan.currency)
 }
 
-/** The smallest whole-percent saving of annual over 12 monthly payments across products, so the label holds for each. */
-export function annualSaving(products: readonly PlanView[][]): number | null {
-  const savings = products.flatMap((plans) => {
-    const monthly = priced(plans, 'month')
-    const annual = priced(plans, 'year')
-    if (!monthly?.amount || !annual?.amount || monthly.currency !== annual.currency) return []
-    return [Math.floor((1 - annual.amount / (12 * monthly.amount)) * 100)]
-  })
-  const saving = savings.length ? Math.min(...savings) : 0
+/** The whole-percent saving of one product's annual plan over 12 monthly payments. */
+export function annualSaving(plans: readonly PlanView[]): number | null {
+  const monthly = priced(plans, 'month')
+  const annual = priced(plans, 'year')
+  if (!monthly?.amount || !annual?.amount || monthly.currency !== annual.currency) return null
+  const saving = Math.floor((1 - annual.amount / (12 * monthly.amount)) * 100)
   return saving > 0 ? saving : null
+}
+
+/** A plan's name with its interval: `Team · Annual`. */
+export function planTitle(plan: PlanView): string {
+  return planTitle(plan)
+}
+
+/** The label of a plan card's button: `Choose annual`, or `Choose Team` without an interval. */
+export function chooseLabel(plan: PlanView): string {
+  return plan.interval ? `Choose ${INTERVAL_LABELS[plan.interval].toLowerCase()}` : `Choose ${plan.name}`
 }
 
 /** The Plan line: the subscribed plan and its interval, or what stands in for one. */
@@ -87,7 +94,7 @@ export function planLabel(billing: BillingView): string {
   if (!billing.plan) return billing.status ? 'Other plan' : billing.exempt ? 'Included' : 'No plan'
   const plan = billing.plans.find((candidate) => candidate.key === billing.plan)
   if (!plan) return billing.plan
-  return plan.interval ? `${plan.name} · ${INTERVAL_LABELS[plan.interval]}` : plan.name
+  return planTitle(plan)
 }
 
 /** `Renews on …` / `Ends on …` for a paid plan with full access, else `null`. */

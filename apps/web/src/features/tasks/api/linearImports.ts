@@ -163,3 +163,42 @@ export function useCancelLinearImport(workspaceId: string) {
     },
   })
 }
+
+export type LinearImportProgressView = {
+  label: string
+  /** 1–4 while a stage runs, else null. */
+  step: number | null
+  done: number
+  total: number
+  detail: string
+}
+
+const count = (value: number) => value.toLocaleString('en-US')
+
+/** What the progress page of a queued or importing Linear import shows. */
+export function linearImportProgress(item: LinearImport): LinearImportProgressView {
+  const { done, total, failed, expected, read, created, stage } = item.progress
+  const imported = `${count(done)} of ${count(total)} issues imported`
+  if (item.status === 'queued') return { label: 'Waiting for the import to start…', step: null, done: 0, total: 0, detail: '' }
+  switch (stage) {
+    case 'reading':
+      return { label: 'Reading issues from Linear…', step: 1, done: read, total: Math.max(expected, read), detail: `${count(read)} of about ${count(expected)} issues read${done > 0 ? `, ${count(done)} imported` : ''}` }
+    case 'creating':
+      return { label: 'Creating tasks…', step: 2, done: created, total, detail: `${count(created)} of ${count(total)} tasks created` }
+    case 'details':
+      return { label: 'Adding files and comments…', step: 3, done: done + failed, total, detail: imported }
+    case 'linking':
+      return { label: 'Linking related issues…', step: 4, done: done + failed, total, detail: imported }
+    default:
+      return { label: 'Importing issues…', step: null, done: done + failed, total, detail: imported }
+  }
+}
+
+/** The rate-limit notice while Linear makes the import wait, else null. */
+export function linearRateLimitNotice(waitingUntil: string | null, now: number): string | null {
+  const until = waitingUntil ? Date.parse(waitingUntil) : NaN
+  if (!(until > now)) return null
+  const minutes = Math.max(1, Math.ceil((until - now) / 60_000))
+  const time = new Date(until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return `Linear's rate limit is reached. The import goes on at ${time} (in about ${minutes} min).`
+}

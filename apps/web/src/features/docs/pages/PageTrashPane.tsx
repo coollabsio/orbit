@@ -1,9 +1,11 @@
+import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { databaseErrorMessage } from '@orbit/database/errors'
 import { toast } from 'sonner'
-import { ArrowLeft, DocumentText as FileText, Lock, Refresh as RotateCcw, Trash as Trash2 } from 'reicon-react'
+import { ArrowLeft, DocumentText as FileText, Lock, Refresh as RotateCcw, Search, Trash as Trash2 } from 'reicon-react'
 import type { TrashedPage } from '@orbit/api/generated/types.gen'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { confirmAction } from '@/components/common/confirmAction'
 import { Emoji } from '@/components/common/Emoji'
@@ -23,9 +25,15 @@ import { loadFailed } from '@/lib/connection'
 
 const plural = (count: number) => `${count} page${count === 1 ? '' : 's'}`
 
+/** Trashed pages whose title contains the query, ignoring case; all of them for a blank query. */
+function filterTrash(pages: readonly TrashedPage[], query: string): TrashedPage[] {
+  const needle = query.trim().toLocaleLowerCase()
+  return needle ? pages.filter((page) => pageTitle(page).toLocaleLowerCase().includes(needle)) : [...pages]
+}
+
 /**
  * Pages trashed directly (their sub-pages come back with them), newest first. "Delete forever" and "Empty trash"
- * cover the pages the server marks `can_purge` for the caller.
+ * cover the pages the server marks `can_purge` for the caller. A row opens the page's read-only preview.
  */
 export function PageTrashPane({ workspaceId }: { workspaceId: string }) {
   const navigate = useNavigate()
@@ -34,6 +42,8 @@ export function PageTrashPane({ workspaceId }: { workspaceId: string }) {
   const purge = usePurgePage(workspaceId)
   const emptyTrash = useEmptyPageTrash(workspaceId)
   const teamspaces = useTeamspaces(workspaceId)
+  const [query, setQuery] = useState('')
+  const shown = filterTrash(trash.data ?? [], query)
   const purgeable = (trash.data ?? []).filter((page) => page.can_purge)
   const busy = restore.isPending || purge.isPending || emptyTrash.isPending
 
@@ -102,15 +112,28 @@ export function PageTrashPane({ workspaceId }: { workspaceId: string }) {
         <EmptyState icon={Trash2} title="Trash is empty" description="Pages you move to the trash appear here until restored." />
       </div>
     )
+  } else if (shown.length === 0) {
+    body = (
+      <div className="flex flex-1 flex-col p-6">
+        <EmptyState icon={Search} title="No results" description="No page in the trash has this title." />
+      </div>
+    )
   } else {
     body = (
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {trash.data.map((page) => (
-          <div key={page.id} className="flex min-h-10 w-full min-w-0 items-center gap-2.5 border-b border-border px-3 py-1.5">
-            <span className="inline-flex w-[18px] shrink-0 items-center justify-center text-muted-foreground/70">
-              {page.icon ? <Emoji value={page.icon} /> : <FileText className="size-[15px]" />}
-            </span>
-            <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{pageTitle(page)}</span>
+        {shown.map((page) => (
+          <div key={page.id} className="flex min-h-10 w-full min-w-0 items-center gap-2.5 border-b border-border px-3 py-1.5 hover:bg-accent/40">
+            <button
+              type="button"
+              className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 self-stretch rounded-sm text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              aria-label={`Preview “${pageTitle(page)}”`}
+              onClick={() => navigate(`/docs/trash/${page.id}`)}
+            >
+              <span className="inline-flex w-[18px] shrink-0 items-center justify-center text-muted-foreground/70">
+                {page.icon ? <Emoji value={page.icon} /> : <FileText className="size-[15px]" />}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{pageTitle(page)}</span>
+            </button>
             <span className="flex max-w-40 min-w-0 shrink items-center gap-1 text-xs text-muted-foreground/70" data-space-label>
               {spaceKey(page) === PRIVATE_SPACE ? <Lock className="size-3 shrink-0" aria-hidden="true" /> : null}
               <span className="truncate">{spaceLabel(spaceKey(page), teamspaces.data)}</span>
@@ -174,6 +197,16 @@ export function PageTrashPane({ workspaceId }: { workspaceId: string }) {
           <ArrowLeft className="size-4" />
         </Button>
         <PaneTitle className="min-w-0 flex-1">Trash</PaneTitle>
+        {trash.data?.length ? (
+          <Input
+            type="search"
+            aria-label="Search the trash"
+            placeholder="Search pages…"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            className="h-8 w-52 max-[899px]:w-36"
+          />
+        ) : null}
         {purgeable.length > 0 ? (
           <Button
             type="button"

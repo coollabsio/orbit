@@ -4,7 +4,7 @@ import { router } from 'expo-router'
 import { type ReactElement, useEffect, useMemo, useRef, useState } from 'react'
 import { FlatList, Platform, Pressable, Share, View } from 'react-native'
 
-import { decodeMentions, emojiNames, hasReaction, hasShortcode, type MessageAction, messageActions, type MessageRow, type Person, quickReactions, type ThreadPages, toggleReaction, upsertThreadMessage, withEmoji } from '../../data/chat'
+import { decodeMentions, mentionParts, emojiNames, hasReaction, hasShortcode, type MessageAction, messageActions, type MessageRow, type Person, quickReactions, type ThreadPages, toggleReaction, upsertThreadMessage, withEmoji } from '../../data/chat'
 import * as chat from '../../data/chat-api'
 import { dayLabel } from '../../data/format'
 import { markdownToText } from '../../data/markdown'
@@ -54,6 +54,7 @@ export function useMessageText() {
       emoji.sawShortcode(body)
       return markdownToText(decodeMentions(withEmoji(body, emoji.names), people, channels))
     },
+    parts: (shown: string) => mentionParts(shown, people, channels),
   }
 }
 

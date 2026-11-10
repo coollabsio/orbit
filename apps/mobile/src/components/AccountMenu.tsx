@@ -1,6 +1,6 @@
 import type { Href } from 'expo-router'
 import { type ReactNode, useState } from 'react'
-import { Modal, Pressable, ScrollView, View } from 'react-native'
+import { Pressable, ScrollView, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { hasCustomStatus, PRESENCE_OPTIONS, withoutCustomStatus, withPresence } from '../data/status'
@@ -8,7 +8,7 @@ import { useOwnStatus, useSetStatus } from '../hooks/account'
 import { useOrbit } from '../orbit-context'
 import { errorMessage } from '../session-context'
 import { useTheme } from '../theme'
-import { Icon, type IconName, type PickerSurface, StatusMark, Text } from '../ui'
+import { BottomSheet, Icon, type IconName, type PickerSurface, StatusMark, Text } from '../ui'
 import { Emoji } from './chat/EmojiPicker'
 import { CustomStatusSheet } from './CustomStatusSheet'
 
@@ -54,9 +54,7 @@ export function AccountMenu({
 
   return (
     <>
-      <Modal visible={visible} transparent animationType="slide" onRequestClose={close} statusBarTranslucent>
-        <Pressable accessibilityLabel="Close" onPress={close} className="flex-1 bg-foreground/40 dark:bg-black/40" />
-        <View accessibilityViewIsModal className={`max-h-[85%] rounded-t-[12px] border-t border-border p-2 ${SURFACE[surface]}`} style={{ paddingBottom: Math.max(8, insets.bottom) }}>
+      <BottomSheet visible={visible} onClose={close} statusBarTranslucent maxHeight={0.85} className={`rounded-t-[12px] border-t border-border p-2 ${SURFACE[surface]}`} style={{ paddingBottom: Math.max(8, insets.bottom) }}>
           <ScrollView bounces={false}>
             <View className="min-w-0 px-3 pt-1 pb-2">
               <Text numberOfLines={1} className="font-noto-semibold text-[15px] leading-[20px]">
@@ -96,8 +94,9 @@ export function AccountMenu({
             <Row icon={custom ? 'edit' : 'smile'} label={custom ? 'Edit custom status' : 'Set custom status…'} onPress={run(() => setEditing(true))} />
             {custom ? <Row icon="x" label="Clear custom status" onPress={run(() => setStatus.mutate(withoutCustomStatus(status)))} /> : null}
             <Separator />
-            <Row icon="user" label="Account settings" onPress={run(() => onNavigate('/settings/account'))} />
+            <Row icon="user" label="Account settings" onPress={run(() => onNavigate('/settings/profile'))} />
             <Row icon="brush" label="Appearance" onPress={run(() => onNavigate('/settings/appearance'))} />
+            <Row icon="bell" label="Notifications" onPress={run(() => onNavigate('/settings/notifications'))} />
             <Separator />
             <Row
               icon="logout"
@@ -119,8 +118,7 @@ export function AccountMenu({
               </Text>
             ) : null}
           </ScrollView>
-        </View>
-      </Modal>
+      </BottomSheet>
       {editing ? <CustomStatusSheet onClose={() => setEditing(false)} /> : null}
     </>
   )

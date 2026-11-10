@@ -1,7 +1,13 @@
 import type { NotificationRecord } from './orbit'
 
-/** Where a notification leads in the app: its conversation, page or task, as on the web. */
+const IMPORT_NAMES: Record<string, string> = { asana: 'Asana', linear: 'Linear', trello: 'Trello', notion: 'Notion', obsidian: 'Obsidian' }
+
+/** Where a notification leads in the app: its conversation, page, task or import, as on the web. */
 export function notificationTarget(notification: NotificationRecord): string | null {
+  if (notification.kind === 'import_finished') {
+    const source = notification.import_source ?? ''
+    return IMPORT_NAMES[source] && notification.import_id ? `/settings/import/${source}/${notification.import_id}` : null
+  }
   if (notification.kind === 'chat_mentioned' && notification.chat_conversation_id) return `/chat/${notification.chat_conversation_id}`
   if (notification.page_id) return `/docs/${notification.page_id}`
   return notification.task_id ? `/tasks/${notification.task_id}` : null
@@ -16,6 +22,12 @@ export function notificationCopy(notification: NotificationRecord, pageTitle: st
   const actor = actorName ?? 'Someone'
   const page = pageTitle === undefined ? 'a page' : `“${pageTitle.trim() || 'Untitled'}”`
   switch (notification.kind) {
+    case 'import_finished': {
+      const name = IMPORT_NAMES[notification.import_source ?? ''] ?? 'An'
+      return notification.import_status === 'failed'
+        ? { title: `${name} import failed`, body: 'Open the import to see what happened.' }
+        : { title: `${name} import complete`, body: 'Open the import to see what was imported.' }
+    }
     case 'chat_mentioned':
       return { title: `${actor} mentioned you in chat`, body: 'Open the conversation to see the message.' }
     case 'page_mentioned':

@@ -1,8 +1,8 @@
-import { useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
 import { toast } from 'sonner'
 import { useQueryClient } from '@tanstack/react-query'
-import { Import, Search4 as Search, TickCircle, Warning } from 'reicon-react'
+import { Clock, Import, Search4 as Search, TickCircle, Warning } from 'reicon-react'
 import type { LinearImport, LinearImportTree } from '@orbit/api/generated/types.gen'
 import { apiClient } from '@/api/client'
 import { cn } from 'cn'
@@ -26,6 +26,8 @@ import {
   createLinearImportRequest,
   isLinearImportInProgress,
   linearImportErrorMessage,
+  linearImportProgress,
+  linearRateLimitNotice,
   reconcileLinearImport,
   useCancelLinearImport,
   useLinearImport,
@@ -333,10 +335,20 @@ function ChooseStep({ workspaceId, item }: { workspaceId: string; item: LinearIm
   )
 }
 
-/** Step 4: the import job runs. */
+/** Step 4: the import job runs: it reads the issues, creates the tasks, adds files and comments, then links. */
 function ImportingStep({ workspaceId, item }: { workspaceId: string; item: LinearImport }) {
   const cancel = useCancel(workspaceId, item)
-  const { done, total, failed } = item.progress
+  const progress = linearImportProgress(item)
+  const { failed } = item.progress
+  // the poll keeps the same data while the import waits, so the minutes left need their own clock
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!item.waiting_until) return
+    setNow(Date.now())
+    const timer = window.setInterval(() => setNow(Date.now()), 15_000)
+    return () => window.clearInterval(timer)
+  }, [item.waiting_until])
+  const notice = linearRateLimitNotice(item.waiting_until, now)
   return (
     <>
       <ImportHeader title={TITLE} detail={item.linear_user_name} />
@@ -344,21 +356,24 @@ function ImportingStep({ workspaceId, item }: { workspaceId: string; item: Linea
         <section className="flex flex-col gap-4 py-10" role="status" aria-live="polite">
           <div className="flex items-center gap-2">
             <Spinner className="size-4 text-muted-foreground" />
-            <p className="text-sm font-medium text-foreground">
-              {item.status === 'queued' ? 'Waiting for the import to start…' : total === 0 ? 'Reading teams…' : 'Importing issues…'}
-            </p>
+            <p className="text-sm font-medium text-foreground">{progress.label}</p>
+            {progress.step ? <span className="ml-auto text-xs text-muted-foreground tabular-nums">Step {progress.step} of 4</span> : null}
           </div>
-          <ImportProgressBar done={done + failed} total={total} />
+          <ImportProgressBar done={progress.done} total={progress.total} />
           <div className="flex items-center gap-4 text-sm text-muted-foreground">
-            <span>
-              {done} of {total} issues imported
-            </span>
+            <span className="tabular-nums">{progress.detail}</span>
             {failed > 0 ? <span className="text-destructive">{failed} failed</span> : null}
             <span className="flex-1" />
             <Button type="button" variant="outline" size="sm" disabled={cancel.pending} onClick={() => void cancel.request(true)}>
               Cancel import
             </Button>
           </div>
+          {notice ? (
+            <p className="flex items-start gap-2 rounded-md border border-border px-3 py-2 text-sm text-foreground">
+              <Clock className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+              {notice}
+            </p>
+          ) : null}
           <p className="text-sm text-muted-foreground">
             You can leave this page; the import continues on the server. Linear allows a limited number of requests per hour, so large teams
             take a while.
@@ -389,7 +404,7 @@ function ResultStep({ workspaceId, item }: { workspaceId: string; item: LinearIm
       notes.push(`${report.relations_skipped} relations were skipped: Orbit keeps one relation per pair of tasks and one duplicate per task.`)
     if (report.links_added > 0) notes.push(`${report.links_added} linked attachments (pull requests, threads and links) were added to descriptions.`)
     if (report.unmatched_assignees > 0)
-      notes.push(`${report.unmatched_assignees} issues had an assignee with no Orbit member of the same email; they are unassigned and name the assignee.`)
+      notes.push(`${report.unmatched_assignees} issues had an assignee with no Orbit member of the same email; they are unassigned and name the assignee. Assign them to a member in Settings → Import.`)
     if (report.missing_files > 0) notes.push(`${report.missing_files} Linear files could not be downloaded.`)
     if (report.detached_sub_issues > 0)
       notes.push(`${report.detached_sub_issues} sub-issues are at the top level (parent in another team, or more than five levels deep); their description names the parent.`)

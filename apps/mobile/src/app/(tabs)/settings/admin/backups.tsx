@@ -28,7 +28,7 @@ export default function AdminBackupsScreen() {
       >
         {writes.create.isError ? <View className="p-4 border-b border-border"><Note error>{errorMessage(writes.create.error)}</Note></View> : null}
         {writes.remove.isError ? <View className="p-4 border-b border-border"><Note error>The backup could not be deleted. {errorMessage(writes.remove.error)}</Note></View> : null}
-        {backups.isPending ? <View className="p-4"><Note>Loading backups…</Note></View> : null}
+        {backups.isPending ? <View className="p-4"><Note loading>Loading backups…</Note></View> : null}
         {backups.isError ? (
           <View className="p-4 flex-row items-center gap-2">
             <Note error>Backups could not be loaded.</Note>

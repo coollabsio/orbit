@@ -17,6 +17,7 @@ import { AccessPicker, ProjectPicker, type ScopeResource } from '@/components/co
 import { FieldGrid, RequiredMark, RowIcon, SettingsRow } from '@/features/settings/components/SettingsParts'
 import { useApiTokens, useCreateApiToken, useRevokeApiToken } from '@/features/settings/api/apiTokens'
 import type { ApiTokenScope } from '@orbit/api/generated/types.gen'
+import { LoadingText } from '@/components/ui/spinner'
 
 const EXPIRATION_OPTIONS = [
   { value: 'never', label: 'Never expires' },
@@ -27,6 +28,15 @@ const EXPIRATION_OPTIONS = [
 ] as const
 
 type ExpirationValue = typeof EXPIRATION_OPTIONS[number]['value']
+
+/** An export scope stands alone on a personal token, so it is a kind of token, not an access level. */
+const TOKEN_KINDS = [
+  { value: 'access', label: 'Tasks, docs and chat', description: 'For scripts, bots and AI clients.' },
+  { value: 'workspace:export', label: 'Workspace export', description: 'Lets another Orbit instance import this workspace as you see it: tasks, docs, chat and files.' },
+  { value: 'workspace:export:personal', label: 'Personal export', description: 'Lets another Orbit instance import only your private docs, your private channels and your DMs.' },
+] as const
+
+type TokenKind = typeof TOKEN_KINDS[number]['value']
 
 function tokenResources(serviceAccount: boolean, projects: ReactNode): ScopeResource<ApiTokenScope>[] {
   return [
@@ -44,7 +54,8 @@ function isExpired(expiresAt?: string | null) {
 export function ApiTokensPage() {
   const { workspace } = useWorkspace()
   const canManage = useCan('api_tokens.manage')
-  const tokens = useApiTokens(workspace.id, canManage)
+  const canExportPersonal = useCan('workspace.export_personal')
+  const tokens = useApiTokens(workspace.id, canManage || canExportPersonal)
   const projectsQuery = useProjects(workspace.id, canManage)
   const projects = projectsQuery.data ?? []
   const createToken = useCreateApiToken(workspace.id)
@@ -54,16 +65,20 @@ export function ApiTokensPage() {
   const [allProjects, setAllProjects] = useState(false)
   const projectNames = new Map(projects.map((project) => [project.id, project.name]))
   const [scopes, setScopes] = useState<ApiTokenScope[]>(['tasks:read'])
+  const [chosenKind, setKind] = useState<TokenKind>('access')
+  const kind: TokenKind = canManage ? chosenKind : 'workspace:export:personal'
   const [serviceAccount, setServiceAccount] = useState(false)
   const [expiration, setExpiration] = useState<ExpirationValue>('never')
   const [issuedToken, setIssuedToken] = useState<string>()
   const [copied, setCopied] = useState(false)
 
+  const access = kind === 'access'
+  const kindDescription = TOKEN_KINDS.find((option) => option.value === kind)?.description
   // Projects only limit task access, so a token without a task scope needs none.
-  const taskScope = scopes.some((scope) => scope.startsWith('tasks:'))
-  const ready = name.trim() !== '' && scopes.length > 0 && (!taskScope || allProjects || projectIds.length > 0)
+  const taskScope = access && scopes.some((scope) => scope.startsWith('tasks:'))
+  const ready = name.trim() !== '' && (!access || (scopes.length > 0 && (!taskScope || allProjects || projectIds.length > 0)))
 
-  if (!canManage) return <SettingsCard title="API tokens"><p className="m-0 text-muted-foreground">Only workspace owners and administrators can manage API tokens.</p></SettingsCard>
+  if (!canManage && !canExportPersonal) return <SettingsCard title="API tokens"><p className="m-0 text-muted-foreground">Only workspace owners and administrators can manage API tokens.</p></SettingsCard>
 
   // A service account has task access only, so selecting it drops the docs and chat scopes.
   function selectServiceAccount(checked: boolean) {
@@ -76,17 +91,17 @@ export function ApiTokensPage() {
   async function submit(event: FormEvent) {
     event.preventDefault()
     if (!ready) return
-    const issued = await createToken.mutateAsync({ name: name.trim(), projectIds: taskScope && !allProjects ? projectIds : [], allProjects: taskScope && allProjects, scopes, serviceAccount, expiresInDays: expiration === 'never' ? null : Number(expiration) })
+    const issued = await createToken.mutateAsync({ name: name.trim(), projectIds: taskScope && !allProjects ? projectIds : [], allProjects: taskScope && allProjects, scopes: access ? scopes : [kind], serviceAccount: access && serviceAccount, expiresInDays: expiration === 'never' ? null : Number(expiration) })
     setIssuedToken(issued.token)
     setName('')
     setCopied(false)
   }
 
   return <>
-    <SettingsCard title="Create API token" description="Create a personal token, or select a non-login service account for an integration. The secret is shown only once.">
+    <SettingsCard title="Create API token" description={canManage ? 'Create a personal token, or select a non-login service account for an integration. The secret is shown only once.' : `${kindDescription} Paste it with this workspace's URL in the other instance. The secret is shown only once.`}>
       <form onSubmit={(event) => void submit(event)}>
         <FieldGrid>
-        <Field><FieldLabel htmlFor="api-token-name">Name <RequiredMark /></FieldLabel><Input id="api-token-name" value={name} maxLength={100} onChange={(event) => setName(event.target.value)} placeholder="Discord bot" /></Field>
+        <Field><FieldLabel htmlFor="api-token-name">Name <RequiredMark /></FieldLabel><Input id="api-token-name" value={name} maxLength={100} onChange={(event) => setName(event.target.value)} placeholder={access ? 'Discord bot' : 'Orbit import'} /></Field>
         <Field>
           <FieldLabel htmlFor="api-token-expiration">Expiration</FieldLabel>
           {/* `items` lets Select.Value render the option label instead of the raw value. */}
@@ -99,6 +114,19 @@ export function ApiTokensPage() {
             </SelectContent>
           </Select>
         </Field>
+        {canManage ? <Field className="min-[900px]:col-span-2">
+          <FieldLabel htmlFor="api-token-kind">Token type</FieldLabel>
+          <Select items={TOKEN_KINDS} value={kind} onValueChange={(value) => setKind(value as TokenKind)}>
+            <SelectTrigger id="api-token-kind" aria-label="Token type">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {TOKEN_KINDS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <FieldDescription>{kindDescription}</FieldDescription>
+        </Field> : null}
+        {access ? <>
         {/* a choice card: the whole card toggles the checkbox and tints while checked */}
         <FieldLabel className="min-[900px]:col-span-2">
           <Field orientation="horizontal">
@@ -112,6 +140,7 @@ export function ApiTokensPage() {
         <div className="min-[900px]:col-span-2">
           <AccessPicker id="api-token-access" resources={tokenResources(serviceAccount, taskScope ? <ProjectPicker id="api-token-projects" projects={projects} selected={projectIds} onChange={setProjectIds} all={allProjects} onAllChange={setAllProjects} empty={projectsQuery.isPending ? 'Loading projects…' : projects.length ? undefined : 'This workspace has no active projects.'} /> : null)} scopes={scopes} onChange={setScopes} />
         </div>
+        </> : null}
         <Button className="justify-self-start" type="submit" disabled={createToken.isPending || !ready}>Create token</Button>
         {createToken.isError ? <p className="text-destructive" role="alert">The API token could not be created.</p> : null}
         </FieldGrid>
@@ -120,7 +149,7 @@ export function ApiTokensPage() {
     </SettingsCard>
     <SettingsCard title="Active API tokens" flush>
       <div className="flex flex-col divide-y">
-        {tokens.isPending ? <SettingsRow>Loading API tokens…</SettingsRow> : null}
+        {tokens.isPending ? <SettingsRow><LoadingText>Loading API tokens…</LoadingText></SettingsRow> : null}
         {tokens.isError ? <SettingsRow role="alert">API tokens could not be loaded.</SettingsRow> : null}
         {tokens.data?.length === 0 ? <SettingsRow>No active API tokens.</SettingsRow> : null}
         {tokens.data?.map((token) => <SettingsRow className="flex-nowrap" key={token.id}>

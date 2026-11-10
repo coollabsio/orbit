@@ -5,7 +5,7 @@ import { confirmAction } from '@/components/common/confirmAction'
 import { SettingsCard } from '@/components/common/SettingsCard'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Spinner } from '@/components/ui/spinner'
+import { LoadingText, Spinner } from '@/components/ui/spinner'
 import { Switch } from '@/components/ui/switch'
 import { useInstanceSettings, useRemoveS3, useSaveS3, useSaveStorageOptions, useStartImageCompression } from '@/features/admin/api'
 import { S3BucketForm } from '@/features/settings/components/S3BucketForm'
@@ -26,7 +26,7 @@ function problemText(error: unknown, fallback: string) {
 /** Where attachments and backups are stored: this server's disk or an S3 bucket, and automatic backups. */
 export function AdminStoragePage() {
   const settings = useInstanceSettings()
-  if (settings.isPending) return <SettingsCard title="Storage"><p role="status">Loading settings…</p></SettingsCard>
+  if (settings.isPending) return <SettingsCard title="Storage"><p><LoadingText>Loading settings…</LoadingText></p></SettingsCard>
   if (settings.isError) return <SettingsCard title="Storage"><p role="alert">Settings could not be loaded. <Button variant="ghost" onClick={() => void settings.refetch()}>Retry</Button></p></SettingsCard>
   const storage = settings.data.storage
   return (
@@ -169,7 +169,7 @@ function ImagesCard({ status }: { status: CompressionStatus }) {
         <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-[13px]">
           <span className="font-medium text-foreground">Compress images</span>
           <span className="text-xs text-muted-foreground">Scales JPEG, PNG and WebP images of 512 KB or more to at most 2560 px and saves them as WebP. The originals are replaced; GIFs and other files stay as they are.</span>
-          {status.running ? <span role="status" className="text-xs text-muted-foreground">Compressing… {done} {done === 1 ? 'file' : 'files'} checked. {summary}</span> : null}
+          {status.running ? <LoadingText className="text-xs">Compressing… {done} {done === 1 ? 'file' : 'files'} checked. {summary}</LoadingText> : null}
           {!status.running && done > 0 ? <span role="status" className="text-xs text-muted-foreground">Done. {summary}</span> : null}
           {status.error ? <span role="alert" className="text-xs text-destructive">Compression stopped: {status.error}</span> : null}
         </div>

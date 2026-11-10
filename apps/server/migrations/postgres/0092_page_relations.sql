@@ -1,4 +1,4 @@
--- Docs database relations, as in migrations/0085_page_relations.sql.
+-- Docs database relations, as in migrations/0092_page_relations.sql.
 CREATE TABLE page_relations (
     property_id TEXT NOT NULL REFERENCES database_properties(id) ON DELETE CASCADE,
     page_id TEXT NOT NULL REFERENCES pages(id) ON DELETE CASCADE,

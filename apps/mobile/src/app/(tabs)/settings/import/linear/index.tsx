@@ -6,7 +6,7 @@ import { ScrollView, View } from 'react-native'
 import { type FlowSource, ImportFlow, NoteLine, ResultStep } from '../../../../../components/import/Flow'
 import { ChoiceRow, ChooserFooter, ChooserToolbar, ConnectError, ConnectSection, ExternalLink, ImportBody, ImportedProjects, ImportScreen, Paragraph, RecentImports, WarningLine, WarningStrip } from '../../../../../components/import/Parts'
 import { Badge } from '../../../../../components/settings/Shell'
-import { createLinear, importErrorMessage, importNotes, isImportInProgress, plural } from '../../../../../data/import-api'
+import { createLinear, importErrorMessage, importNotes, isImportInProgress, linearImportProgress, linearRateLimitNotice, plural } from '../../../../../data/import-api'
 import { useConnectImport, useStartImport } from '../../../../../hooks/imports'
 import { useOrbit } from '../../../../../orbit-context'
 import { useProjects } from '../../../../../queries'
@@ -27,8 +27,10 @@ const SOURCE: FlowSource<'linear'> = {
     started: 'Projects and issues already imported stay. The import stops before the next issue.',
   },
   importing: {
-    headline: (item) => (item.status === 'queued' ? 'Waiting for the import to start…' : item.progress.total === 0 ? 'Reading teams…' : 'Importing issues…'),
+    headline: (item) => linearImportProgress(item).label,
     unit: 'issues',
+    progress: linearImportProgress,
+    notice: { until: (item) => item.waiting_until, text: linearRateLimitNotice },
     note: 'You can leave this page; the import continues on the server. Linear allows a limited number of requests per hour, so large teams take a while.',
   },
   treeMissing: 'The team list is not available.',

@@ -6,6 +6,9 @@
 /** Where a guest lands. */
 export const guestHome = '/chat'
 
+/** Where a guest's Settings opens: it has no workspace settings, so its account settings. */
+export const guestSettings = '/settings/profile'
+
 /**
  * What a guest may open: Chat, the Settings tab's own page (the account links for a guest), the account settings
  * and Admin (the installation's, which checks the user itself).

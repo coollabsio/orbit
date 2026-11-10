@@ -27,9 +27,9 @@ pub use backup::{
     BackupManifest, BackupService, BackupSnapshot, SnapshotReader, SnapshotRow,
 };
 pub use config::{
-    AppKey, BillingConfig, Config, ConfigError, DataConfig, EnvironmentMode, HttpConfig,
-    JobsConfig, MetricsConfig, Plan, RateLimitConfig, Secret, TrialConfig, UploadConfig,
-    redact_database_url,
+    ApnsConfig, AppKey, BillingConfig, Config, ConfigError, DataConfig, EnvironmentMode,
+    HttpConfig, JobsConfig, MetricsConfig, Plan, RateLimitConfig, Secret, TrialConfig,
+    UploadConfig, redact_database_url,
 };
 pub use db::{
     Access, Backend, Column, Database, DatabaseConfig, DatabaseError, Flag, GuardedMigrationError,
@@ -50,8 +50,8 @@ pub use files::{
 };
 pub use health::{HealthCheck, HealthCheckResult, HealthRegistry, ReadinessReport};
 pub use http::{
-    ClientIp, HttpLimits, HttpPlatformLayer, OriginPolicy, RequestId, RequestTransport,
-    bearer_token,
+    ClientIp, HttpLimits, HttpPlatformLayer, LargeUpload, OriginPolicy, RequestId,
+    RequestTransport, bearer_token,
 };
 pub use id::{Id, ParseIdError};
 pub use integrity::{IntegrityError, IntegrityService};

@@ -1,36 +1,31 @@
 import type { CollabProblem } from '@orbit/editor/collab/session'
-import { isSafeLinkHref } from '@orbit/editor/links'
-import type { DatabaseDetail, PageSummary, TrashedPage } from '@orbit/api/generated/types.gen'
-import { ApiProblem } from '@orbit/api/problem'
-import { useQueries, useQuery } from '@tanstack/react-query'
-import { router, useLocalSearchParams } from 'expo-router'
-import { memo, useEffect, useMemo, useRef, useState } from 'react'
-import { Image, KeyboardAvoidingView, Linking, Platform, ScrollView, View } from 'react-native'
+import { useQuery } from '@tanstack/react-query'
+import { Redirect, router, useLocalSearchParams } from 'expo-router'
+import { useEffect, useRef, useState } from 'react'
+import { Image, ScrollView, View } from 'react-native'
 import { TextInput } from '../../../ui/scaled'
 
 import { CommentsSheet } from '../../../components/docs/Comments'
 import { EditorToolbar } from '../../../components/docs/EditorToolbar'
 import { IconDialog } from '../../../components/docs/IconDialog'
+import { EditorView } from '../../../components/docs/EditorView'
 import { useMoveSheet } from '../../../components/docs/MoveSheet'
 import { DatabaseView } from '../../../components/database/DatabaseView'
 import { PropertyList } from '../../../components/database/PropertyList'
-import PageEditor, { type PageCardInfo, type PageEditorProps, type PageEditorRef } from '../../../components/docs/PageEditor.dom'
+import type { PageEditorRef } from '../../../components/docs/PageEditor.dom'
 import { ActionSheet, ConfirmDialog, type ConfirmRequest, PromptDialog, type PromptRequest, type SheetAction } from '../../../components/settings/Dialog'
-import { type DatabaseBlockRef, databaseCard, databaseCardKey, databaseHref } from '../../../data/database-card'
-import * as databaseApi from '../../../data/database-api'
-import { formScreenOf } from '../../../data/form-api'
 import { absoluteUrl, pageTitle, subPagesOf, trashPrompt, validCoverUrl, visibleThreads } from '../../../data/docs'
-import { collabTicket, descendants, fileDataUrl, fileDeleted } from '../../../data/docs-api'
+import { descendants } from '../../../data/docs-api'
 import { keys } from '../../../data/keys'
 import * as api from '../../../data/orbit'
-import { BLOCK_KINDS, type BlockKind, type EditorCommand, type FormatState, IDLE_FORMAT, PROBLEM_RESPONSES, type ProblemResponse, whileMounted } from '../../../data/page-editor'
+import { BLOCK_KINDS, type BlockKind, type EditorCommand, type FormatState, IDLE_FORMAT, PROBLEM_RESPONSES, type ProblemResponse } from '../../../data/page-editor'
 import { pickImage } from '../../../hooks/account'
-import { isFavorite, useFavorites, usePageThreads, usePageTrash, useSavePage, useToggleFavorite, useTrashPage, useUploadPageImage } from '../../../hooks/docs'
+import { isFavorite, useFavorites, usePageThreads, useSavePage, useToggleFavorite, useTrashPage, useTrashedPage, useUploadPageImage } from '../../../hooks/docs'
 import { useOrbit } from '../../../orbit-context'
-import { useMembers, usePages } from '../../../queries'
+import { usePages } from '../../../queries'
 import { errorMessage } from '../../../session-context'
 import { alpha, useTheme } from '../../../theme'
-import { Button, CountBadge, ErrorView, Icon, IconButton, LoadingView, PaneHeader, PullRefresh, SafeAreaView, Text } from '../../../ui'
+import { Button, CountBadge, ErrorView, Icon, IconButton, KeyboardSpace, LoadingView, PaneHeader, PullRefresh, SafeAreaView, Text } from '../../../ui'
 
 /** Room kept between the caret and the toolbar or the top of the screen while typing. */
 const CARET_MARGIN = 24
@@ -45,6 +40,8 @@ export default function DocScreen() {
   const { client, workspaceId, session } = useOrbit()
   const { colors } = useTheme()
   const page = useQuery({ queryKey: keys.page(workspaceId, id), queryFn: () => api.page(client, workspaceId, id) })
+  // a link to a page in the trash opens its trash preview
+  const trashed = useTrashedPage(id, page.isError)
   const pages = usePages()
   const favorites = useFavorites()
   const threads = usePageThreads(id)
@@ -262,7 +259,9 @@ export default function DocScreen() {
         </Text>
       ) : null}
       {!page.data ? (
-        page.isError ? (
+        trashed.data ? (
+          <Redirect href={`/docs/trash/${id}`} />
+        ) : page.isError && !trashed.isPending ? (
           <ErrorView error={page.error} onRetry={() => void page.refetch()} />
         ) : (
           <LoadingView />
@@ -270,7 +269,7 @@ export default function DocScreen() {
       ) : page.data.kind === 'database' ? (
         <DatabaseView key={link ?? ''} databaseId={id} linkId={link ?? ''} initialView={view ?? null} header={head!} notify={setNotice} />
       ) : (
-        <KeyboardAvoidingView className="flex-1" behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
+        <KeyboardSpace className="flex-1">
           <ScrollView
             ref={scroll}
             contentContainerClassName="pb-8"
@@ -298,7 +297,7 @@ export default function DocScreen() {
             </View>
           </ScrollView>
           {format.focused && editable ? <EditorToolbar format={format} onCommand={run} onBlockMenu={() => setChoosingBlock(true)} onImage={() => void addImage()} /> : null}
-        </KeyboardAvoidingView>
+        </KeyboardSpace>
       )}
       <ActionSheet visible={menu !== null} actions={menu ?? []} onClose={() => setMenu(null)} />
       <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />
@@ -314,120 +313,4 @@ export default function DocScreen() {
       <CommentsSheet pageId={id} visible={commentsOpen} onClose={() => setCommentsOpen(false)} />
     </SafeAreaView>
   )
-}
-
-type EditorViewProps = Pick<PageEditorProps, 'pageId' | 'epoch' | 'generation' | 'editable'> & {
-  ref: React.Ref<PageEditorRef>
-  onProblem: (problem: CollabProblem) => void
-  onProbe: () => void
-  onFormat: (state: FormatState) => void
-}
-
-/**
- * The page editor with what it needs from the app: the session (tickets, files), the theme, page and member names.
- * Every render sends all props to the web view, so it renders only when they change: the screen re-renders on every
- * selection change (the toolbar), and the callbacks are read through a ref.
- */
-const EditorView = memo(function EditorView({ ref, pageId, epoch, generation, editable, ...callbacks }: EditorViewProps) {
-  const { client, workspaceId, session, user } = useOrbit()
-  const { scheme, colors } = useTheme()
-  const pages = usePages()
-  const trash = usePageTrash()
-  const members = useMembers()
-  const [height, setHeight] = useState(120)
-  const [databaseBlocks, setDatabaseBlocks] = useState<DatabaseBlockRef[]>([])
-  const latest = useRef(callbacks)
-  useEffect(() => {
-    latest.current = callbacks
-  })
-  const mounted = useRef(true)
-  useEffect(() => {
-    mounted.current = true
-    return () => {
-      mounted.current = false
-    }
-  }, [])
-
-  const cards = useMemo(() => {
-    const out: Record<string, PageCardInfo> = {}
-    for (const item of trash.data ?? []) out[item.id] = { title: item.title, icon: item.icon, trashed: true, database: false }
-    for (const item of pages.data ?? []) out[item.id] = { title: item.title, icon: item.icon, trashed: false, database: item.kind === 'database' }
-    return out
-  }, [pages.data, trash.data])
-  const databases = useDatabaseCards(databaseBlocks, pages.data, trash.data)
-  const names = useMemo(() => Object.fromEntries((members.data ?? []).map((member) => [member.user_id, member.display_name])), [members.data])
-  const editorColors = useMemo(
-    () => ({ background: colors.background, foreground: colors.foreground, mutedForeground: colors.mutedForeground, muted: colors.muted, border: colors.border, primary: colors.primary }),
-    [colors],
-  )
-  // the server shows everyone else this session's name and a color of its own
-  const me = useMemo(() => ({ name: user.display_name, color: colors.mutedForeground }), [user.display_name, colors.mutedForeground])
-  const actions = useMemo(
-    () => ({
-      getTicket: whileMounted(mounted, () => collabTicket(client, pageId)),
-      loadFile: whileMounted(mounted, (url: string) => fileDataUrl(session.server, session.token, url)),
-      fileDeleted: whileMounted(mounted, (url: string) => fileDeleted(session.server, session.token, url)),
-      openPage: whileMounted(mounted, async (target: string) => router.push(`/docs/${target}`)),
-      openDatabase: whileMounted(mounted, async (block: DatabaseBlockRef, viewId: string | null) => router.push(databaseHref(block, viewId))),
-      onDatabases: whileMounted(mounted, async (blocks: DatabaseBlockRef[]) => setDatabaseBlocks(blocks)),
-      // the editor already filters links; the app checks again before it hands one to the OS
-      openUrl: whileMounted(mounted, async (url: string) => {
-        const form = formScreenOf(url, session.server)
-        if (form) router.push(form)
-        else if (isSafeLinkHref(url)) void Linking.openURL(url).catch(() => {})
-      }),
-      onProblem: whileMounted(mounted, async (problem: CollabProblem) => latest.current.onProblem(problem)),
-      onProbe: whileMounted(mounted, async () => latest.current.onProbe()),
-      onFormat: whileMounted(mounted, async (state: FormatState) => latest.current.onFormat(state)),
-      onHeight: whileMounted(mounted, async (next: number) => setHeight(next)),
-    }),
-    [client, pageId, session.server, session.token],
-  )
-  const dom = useMemo(() => ({ scrollEnabled: false, style: { height } }), [height])
-
-  return (
-    <PageEditor
-      ref={ref}
-      dom={dom}
-      server={session.server}
-      workspaceId={workspaceId}
-      pageId={pageId}
-      epoch={epoch}
-      generation={generation}
-      editable={editable}
-      theme={scheme}
-      colors={editorColors}
-      user={me}
-      pages={cards}
-      databases={databases}
-      members={names}
-      {...actions}
-    />
-  )
-})
-
-/** A 4xx answer will not change on a retry: the card says why at once. */
-const retryUnlessRefused = (count: number, error: unknown) => !(error instanceof ApiProblem && error.status < 500) && count < 2
-
-// a module function, so `useQueries` keeps the combined list while no fetch changes
-const fetchesOf = (results: { data: DatabaseDetail | undefined; error: unknown }[]) => results.map(({ data, error }) => ({ data, error }))
-
-/** The cards of the document's database blocks: each block's database (or linked view), in the cache the database screen reads. */
-function useDatabaseCards(blocks: readonly DatabaseBlockRef[], pages: readonly PageSummary[] | undefined, trash: readonly TrashedPage[] | undefined) {
-  const { client, workspaceId } = useOrbit()
-  const fetches = useQueries({
-    queries: blocks.map((block) => ({
-      queryKey: keys.database(workspaceId, block.databaseId, block.linkId),
-      queryFn: () => databaseApi.database(client, workspaceId, block.databaseId, block.linkId),
-      retry: retryUnlessRefused,
-    })),
-    combine: fetchesOf,
-  })
-  return useMemo(() => {
-    const lookup = {
-      trashed: new Map((trash ?? []).map((item) => [item.id, { title: item.title, icon: item.icon }])),
-      readable: new Set((pages ?? []).map((item) => item.id)),
-    }
-    return Object.fromEntries(blocks.map((block, index) => [databaseCardKey(block), databaseCard(block, fetches[index], lookup)]))
-  }, [blocks, fetches, pages, trash])
 }

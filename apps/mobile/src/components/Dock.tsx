@@ -4,6 +4,7 @@ import { Pressable, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { useIsGuest } from '../orbit-context'
+import { guestSettings } from '../data/guest'
 import { useChatBadge } from '../queries'
 import { alpha, useTheme } from '../theme'
 import { CountBadge, Icon, type IconName, Text } from '../ui'
@@ -20,7 +21,7 @@ const ITEMS: { route: string | null; href: Href; label: string; icon: IconName }
 
 /** A guest's dock: Chat and its own account settings (the web's `/profile`), as it has no workspace settings. */
 const GUEST_ITEMS = ITEMS.filter((item) => item.route === 'chat' || item.route === 'settings').map((item) =>
-  item.route === 'settings' ? { ...item, href: '/settings/account' as Href } : item,
+  item.route === 'settings' ? { ...item, href: guestSettings as Href } : item,
 )
 
 export function Dock({ state }: BottomTabBarProps) {

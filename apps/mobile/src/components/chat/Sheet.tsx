@@ -1,9 +1,9 @@
 import type { ReactNode } from 'react'
-import { KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, View } from 'react-native'
+import { Modal, Platform, Pressable, ScrollView, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { useTheme } from '../../theme'
-import { Button, Icon, type IconName, SafeAreaView, Text } from '../../ui'
+import { BottomSheet, Button, Icon, type IconName, KeyboardSpace, SafeAreaView, Text } from '../../ui'
 
 export interface SheetItem {
   key: string
@@ -24,12 +24,7 @@ export function ActionSheet({ visible, title, header, items, onClose }: { visibl
   const { colors } = useTheme()
   const insets = useSafeAreaInsets()
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <Pressable accessibilityLabel="Close" onPress={onClose} className="flex-1 bg-foreground/40 dark:bg-black/40" />
-      <View
-        accessibilityViewIsModal
-        className="max-h-[80%] bg-popover rounded-t-[12px] border-t border-border p-2" style={{ paddingBottom: Math.max(8, insets.bottom) }}
-      >
+    <BottomSheet visible={visible} onClose={onClose} className="bg-popover rounded-t-[12px] border-t border-border p-2" style={{ paddingBottom: Math.max(8, insets.bottom) }}>
         {title ? (
           <Text numberOfLines={1} className="font-noto-semibold text-[13px] px-3 pt-1 pb-2 text-muted-foreground">
             {title}
@@ -58,8 +53,7 @@ export function ActionSheet({ visible, title, header, items, onClose }: { visibl
             ))}
           </View>
         </ScrollView>
-      </View>
-    </Modal>
+    </BottomSheet>
   )
 }
 
@@ -103,12 +97,12 @@ export function FormSheet({
             {submitLabel && onSubmit ? <Button label={submitLabel} size="sm" loading={busy} disabled={!canSubmit} onPress={onSubmit} /> : null}
           </View>
         </View>
-        <KeyboardAvoidingView className="flex-1" behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <KeyboardSpace className="flex-1">
           <ScrollView keyboardShouldPersistTaps="handled" contentContainerClassName="p-4 gap-4">
             {description ? <Text className="text-[14px] leading-[20px] text-muted-foreground">{description}</Text> : null}
             {children}
           </ScrollView>
-        </KeyboardAvoidingView>
+        </KeyboardSpace>
       </SafeAreaView>
     </Modal>
   )

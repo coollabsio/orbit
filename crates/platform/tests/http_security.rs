@@ -2,11 +2,11 @@ use std::future::Ready;
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::str::FromStr;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll, Waker};
 
-use axum::body::{to_bytes, Body};
+use axum::body::{Body, to_bytes};
 use axum::extract::ConnectInfo;
 use axum::http::header::{CONTENT_LENGTH, CONTENT_SECURITY_POLICY, CONTENT_TYPE};
 use axum::http::{HeaderMap, HeaderValue, Request, StatusCode};
@@ -18,7 +18,7 @@ use orbit_platform::{
     RateLimitConfig, RequestId, RequestTransport,
 };
 use serde_json::Value;
-use tower::{service_fn, Layer, Service, ServiceExt};
+use tower::{Layer, Service, ServiceExt, service_fn};
 
 #[derive(Clone)]
 struct PendingService;
@@ -134,9 +134,11 @@ async fn unsafe_requests_reject_foreign_and_missing_origins_as_problem_details()
         assert_eq!(response.headers()[CONTENT_TYPE], "application/problem+json");
         let problem = body_json(response).await;
         assert_eq!(problem["code"], "origin_forbidden");
-        assert!(problem["request_id"]
-            .as_str()
-            .is_some_and(|id| !id.is_empty()));
+        assert!(
+            problem["request_id"]
+                .as_str()
+                .is_some_and(|id| !id.is_empty())
+        );
     }
 }
 
@@ -312,10 +314,12 @@ async fn untrusted_forwarded_headers_are_ignored_and_a_uuid_v7_request_id_is_gen
         .to_owned();
     assert_ne!(response_id, "upstream-id");
     assert!(Id::from_str(&response_id).is_ok());
-    assert!(response
-        .headers()
-        .get("strict-transport-security")
-        .is_none());
+    assert!(
+        response
+            .headers()
+            .get("strict-transport-security")
+            .is_none()
+    );
     let body = body_json(response).await;
     assert_eq!(body["request_id"], response_id);
     assert_eq!(body["client_ip"], "192.0.2.10");
@@ -509,9 +513,11 @@ async fn forwarded_chain_cannot_spoof_an_address_before_the_nearest_untrusted_ho
     let response = app.oneshot(request).await.unwrap();
     let body = to_bytes(response.into_body(), 1024).await.unwrap();
 
-    assert!(String::from_utf8(body.to_vec())
-        .unwrap()
-        .ends_with("|203.0.113.9"));
+    assert!(
+        String::from_utf8(body.to_vec())
+            .unwrap()
+            .ends_with("|203.0.113.9")
+    );
 }
 
 #[tokio::test]

@@ -17,6 +17,7 @@
 //! fails the import. When an import fails or is cancelled, the pages pass 1 created but pass 2
 //! never filled are moved to the trash (audited as `page.deleted`); filled pages stay.
 
+use crate::import_notice::{ImportNotices, ImportSource};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
@@ -109,6 +110,7 @@ fn notion_job_kind(name: &str) -> JobKind {
 pub fn register_jobs(
     worker: Worker,
     service: NotionImportService,
+    notices: ImportNotices,
 ) -> Result<Worker, JobKindRegistrationError> {
     let scan = service.clone();
     worker
@@ -130,6 +132,7 @@ pub fn register_jobs(
         })?
         .with_handler(import_job_kind(), move |context| {
             let service = service.clone();
+            let notices = notices.clone();
             async move {
                 let Some(import_id) = payload_import_id(&context.job.payload) else {
                     return Err(JobError::Permanent(
@@ -141,7 +144,9 @@ pub fn register_jobs(
                     last_attempt: context.claim.attempt >= context.job.max_attempts,
                 };
                 let result = service.run_import(import_id, &run).await;
-                service.after_attempt(import_id, &run, result).await
+                let result = service.after_attempt(import_id, &run, result).await;
+                notices.after_run(ImportSource::Notion, import_id).await;
+                result
             }
         })
 }
@@ -698,7 +703,7 @@ impl NotionImportService {
         let updated = sqlx::query(
             "UPDATE notion_imports SET status = 'queued', selection_json = $1, target_teamspace_id = $2, \
              target_private = $3, target_parent_page_id = $4, total = $5, done = 0, failed = 0, \
-             report_json = $6, updated_at = $7 \
+             report_json = $6, updated_at = $7, started_at = $7 \
              WHERE id = $8 AND status = 'ready' AND token_ciphertext IS NOT NULL",
         )
         .bind(serde_json::to_string(&stored_selection).unwrap_or_default())

@@ -7,6 +7,7 @@ use utoipa::ToSchema;
 
 use super::membership;
 use crate::audit::{self, AuditOutcome};
+use crate::workspace_export::ExportMode;
 
 #[derive(Clone, Debug, Serialize, ToSchema)]
 pub struct ApiTokenRecord {
@@ -40,7 +41,8 @@ pub struct IssuedApiToken {
 }
 
 /// What a credential may do. API tokens and OAuth grants use the same names; `tasks:write`
-/// includes `tasks:read`, and `docs:write` includes `docs:read`.
+/// includes `tasks:read`, and `docs:write` includes `docs:read`. The two export scopes are for
+/// personal API tokens only, each as the token's only scope (see [`ApiTokenScope::export_mode`]).
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize, ToSchema)]
 pub enum ApiTokenScope {
     #[serde(rename = "tasks:read")]
@@ -53,15 +55,23 @@ pub enum ApiTokenScope {
     DocsWrite,
     #[serde(rename = "chat:read")]
     ChatRead,
+    /// Export the whole workspace as the token's creator sees it; owners and admins only.
+    #[serde(rename = "workspace:export")]
+    WorkspaceExport,
+    /// Export the creator's private pages, private channels and DMs; any member but a guest.
+    #[serde(rename = "workspace:export:personal")]
+    WorkspaceExportPersonal,
 }
 
 impl ApiTokenScope {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 7] = [
         Self::TasksRead,
         Self::TasksWrite,
         Self::DocsRead,
         Self::DocsWrite,
         Self::ChatRead,
+        Self::WorkspaceExport,
+        Self::WorkspaceExportPersonal,
     ];
 
     #[must_use]
@@ -72,7 +82,36 @@ impl ApiTokenScope {
             Self::DocsRead => "docs:read",
             Self::DocsWrite => "docs:write",
             Self::ChatRead => "chat:read",
+            Self::WorkspaceExport => "workspace:export",
+            Self::WorkspaceExportPersonal => "workspace:export:personal",
         }
+    }
+
+    /// The export a token may run: `Some` when its scopes are exactly one export scope.
+    #[must_use]
+    pub fn export_mode(scopes: &[Self]) -> Option<ExportMode> {
+        match scopes {
+            [Self::WorkspaceExport] => Some(ExportMode::Full),
+            [Self::WorkspaceExportPersonal] => Some(ExportMode::Personal),
+            _ => None,
+        }
+    }
+
+    const fn is_export(self) -> bool {
+        matches!(self, Self::WorkspaceExport | Self::WorkspaceExportPersonal)
+    }
+
+    /// Whether a token may hold these scopes: an export scope stands alone on a personal token,
+    /// and a service account (which acts as the workspace owner) gets tasks only.
+    #[must_use]
+    pub fn valid_combination(scopes: &[Self], service_account: bool) -> bool {
+        let export = scopes.iter().any(|scope| scope.is_export());
+        let content = scopes
+            .iter()
+            .any(|scope| matches!(scope, Self::DocsRead | Self::DocsWrite | Self::ChatRead));
+        !scopes.is_empty()
+            && !(export && (service_account || scopes.len() > 1))
+            && !(service_account && content)
     }
 
     /// The scopes of a stored space-separated list, in canonical order; unknown names are dropped.
@@ -124,6 +163,8 @@ pub struct ApiTokenPrincipal {
     /// The approved projects, read again on each request, so an all-projects credential also
     /// covers projects created after it.
     pub project_ids: Vec<Id>,
+    /// Whether the credential covers every live project, including projects created later.
+    pub all_projects: bool,
     pub creator_id: Id,
     /// The member whose access a request is checked with: the creator of a personal token, the
     /// workspace owner for a service account (which does not depend on its creator).
@@ -179,9 +220,10 @@ impl ApiTokenRepository {
         workspace_id: Id,
         actor_id: Id,
     ) -> Result<Vec<ApiTokenRecord>, ApiTokenError> {
-        self.require_manager(workspace_id, actor_id).await?;
-        let rows = sqlx::query("SELECT api_tokens.id, api_tokens.name, api_tokens.token_prefix, api_tokens.scopes, api_tokens.all_projects, api_tokens.created_at, api_tokens.last_used_at, api_tokens.expires_at, api_tokens.service_account_id, service_accounts.name AS service_account_name FROM api_tokens LEFT JOIN service_accounts ON service_accounts.id = api_tokens.service_account_id WHERE api_tokens.workspace_id = $1 AND api_tokens.revoked_at IS NULL ORDER BY api_tokens.created_at DESC, api_tokens.id DESC")
-            .bind(workspace_id.to_string()).fetch_all(self.database.pool()).await?;
+        let only_own =
+            token_viewer(membership::actor(self.database.pool(), workspace_id, actor_id).await?)?;
+        let rows = sqlx::query("SELECT api_tokens.id, api_tokens.name, api_tokens.token_prefix, api_tokens.scopes, api_tokens.all_projects, api_tokens.created_at, api_tokens.last_used_at, api_tokens.expires_at, api_tokens.service_account_id, service_accounts.name AS service_account_name FROM api_tokens LEFT JOIN service_accounts ON service_accounts.id = api_tokens.service_account_id WHERE api_tokens.workspace_id = $1 AND api_tokens.revoked_at IS NULL AND ($2 IS NULL OR (api_tokens.created_by = $2 AND api_tokens.service_account_id IS NULL)) ORDER BY api_tokens.created_at DESC, api_tokens.id DESC")
+            .bind(workspace_id.to_string()).bind(only_own.then(|| actor_id.to_string())).fetch_all(self.database.pool()).await?;
         let mut records = Vec::with_capacity(rows.len());
         for row in rows {
             let id = parse_id(&row, "id")?;
@@ -209,13 +251,6 @@ impl ApiTokenRepository {
         now: TimestampMillis,
     ) -> Result<IssuedApiToken, ApiTokenError> {
         let scopes = ApiTokenScope::parse_list(&ApiTokenScope::format_list(scopes));
-        // A service account acts as the workspace owner, so it gets no docs or chat access.
-        let content_scope = scopes.iter().any(|scope| {
-            matches!(
-                scope,
-                ApiTokenScope::DocsRead | ApiTokenScope::DocsWrite | ApiTokenScope::ChatRead
-            )
-        });
         // Projects only limit task access, so a token without a task scope stores none, and an
         // all-projects token reads them on each request instead.
         let grants_tasks = ApiTokenScope::grants_tasks(&scopes);
@@ -224,11 +259,25 @@ impl ApiTokenRepository {
             TokenProjects::All => (true, Vec::new()),
             TokenProjects::Only(ids) => (false, ids),
         };
-        if scopes.is_empty() || (service_account && content_scope) {
+        if !ApiTokenScope::valid_combination(&scopes, service_account) {
             return Err(ApiTokenError::NotFound);
         }
         let mut transaction = self.database.immediate_transaction().await?;
-        require_manager_in(&mut transaction, workspace_id, actor_id).await?;
+        let actor = membership::actor(&mut *transaction, workspace_id, actor_id)
+            .await?
+            .ok_or(ApiTokenError::NotFound)?;
+        // Any member but a guest may create a personal export token; every other token needs a
+        // manager, and a full export token also the export permission.
+        let allowed = match ApiTokenScope::export_mode(&scopes) {
+            Some(ExportMode::Personal) => actor.can(Permission::WorkspaceExportPersonal),
+            Some(ExportMode::Full) => {
+                actor.can(Permission::ApiTokensManage) && actor.can(Permission::WorkspaceExport)
+            }
+            None => actor.can(Permission::ApiTokensManage),
+        };
+        if !allowed {
+            return Err(ApiTokenError::Forbidden);
+        }
         if grants_tasks && !all_projects && project_ids.is_empty() {
             return Err(ApiTokenError::NotFound);
         }
@@ -409,6 +458,7 @@ impl ApiTokenRepository {
             token_id,
             workspace_id,
             project_ids,
+            all_projects,
             creator_id,
             actor_id,
             service_account,
@@ -462,9 +512,10 @@ impl ApiTokenRepository {
         now: TimestampMillis,
     ) -> Result<(), ApiTokenError> {
         let mut transaction = self.database.immediate_transaction().await?;
-        require_manager_in(&mut transaction, workspace_id, actor_id).await?;
-        let service_account_id = sqlx::query_scalar::<_, Option<String>>("UPDATE api_tokens SET revoked_at = $1 WHERE id = $2 AND workspace_id = $3 AND revoked_at IS NULL RETURNING service_account_id")
-            .bind(now.as_millis()).bind(token_id.to_string()).bind(workspace_id.to_string()).fetch_optional(&mut *transaction).await?
+        let only_own =
+            token_viewer(membership::actor(&mut *transaction, workspace_id, actor_id).await?)?;
+        let service_account_id = sqlx::query_scalar::<_, Option<String>>("UPDATE api_tokens SET revoked_at = $1 WHERE id = $2 AND workspace_id = $3 AND revoked_at IS NULL AND ($4 IS NULL OR (created_by = $4 AND service_account_id IS NULL)) RETURNING service_account_id")
+            .bind(now.as_millis()).bind(token_id.to_string()).bind(workspace_id.to_string()).bind(only_own.then(|| actor_id.to_string())).fetch_optional(&mut *transaction).await?
             .ok_or(ApiTokenError::NotFound)?;
         audit::record(
             &mut transaction,
@@ -493,12 +544,6 @@ impl ApiTokenRepository {
         }
         transaction.commit().await?;
         Ok(())
-    }
-
-    async fn require_manager(&self, workspace_id: Id, actor_id: Id) -> Result<(), ApiTokenError> {
-        require_token_manager(
-            membership::actor(self.database.pool(), workspace_id, actor_id).await?,
-        )
     }
 }
 
@@ -549,20 +594,15 @@ async fn disable_unused_service_account(
     Ok(())
 }
 
-async fn require_manager_in(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Any>,
-    workspace_id: Id,
-    actor_id: Id,
-) -> Result<(), ApiTokenError> {
-    require_token_manager(membership::actor(&mut **transaction, workspace_id, actor_id).await?)
-}
-
-fn require_token_manager(actor: Option<Actor>) -> Result<(), ApiTokenError> {
-    if actor
-        .ok_or(ApiTokenError::NotFound)?
-        .can(Permission::ApiTokensManage)
-    {
-        Ok(())
+/// Which tokens the actor lists and revokes: `false` for every token of the workspace (a
+/// manager), `true` for only their own personal tokens (a member, who can only create a
+/// personal export token).
+fn token_viewer(actor: Option<Actor>) -> Result<bool, ApiTokenError> {
+    let actor = actor.ok_or(ApiTokenError::NotFound)?;
+    if actor.can(Permission::ApiTokensManage) {
+        Ok(false)
+    } else if actor.can(Permission::WorkspaceExportPersonal) {
+        Ok(true)
     } else {
         Err(ApiTokenError::Forbidden)
     }

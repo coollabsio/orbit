@@ -18,12 +18,14 @@ export function useReconcileImport<K extends api.ImportKind>(kind: K) {
   }
 }
 
-/** What an import changes once it ends: the page tree, or the projects and tasks. */
+/** What an import changes once it ends: the page tree, the projects and tasks, or (Orbit) both and the channels. */
 function useRefreshImported(kind: api.ImportKind) {
   const { workspaceId } = useOrbit()
   const queryClient = useQueryClient()
   return () => {
-    if (api.docsImport(kind)) {
+    if (kind === 'orbit') {
+      for (const key of [keys.pages(workspaceId), keys.projects(workspaceId), keys.tasks(workspaceId), keys.conversations(workspaceId)]) void queryClient.invalidateQueries({ queryKey: key })
+    } else if (api.docsImport(kind)) {
       void queryClient.invalidateQueries({ queryKey: keys.pages(workspaceId) })
     } else {
       void queryClient.invalidateQueries({ queryKey: keys.projects(workspaceId) })
@@ -163,4 +165,41 @@ export function useConnectImport<K extends api.ImportKind>(kind: K, onCreated: (
     }
   }
   return { imports: imports.data, pending, error, setError, running, submit }
+}
+
+/** People from Asana, Linear and Trello imports, for admins (`enabled`). */
+export function useImportPeople(enabled: boolean) {
+  const { client, workspaceId } = useOrbit()
+  const queryClient = useQueryClient()
+  const query = useQuery({
+    queryKey: api.importKeys.people(workspaceId),
+    enabled,
+    queryFn: () => api.listPeople(client, workspaceId),
+    // a job moves a mapped person's tasks: poll until it ends
+    refetchInterval: (current) => (current.state.data?.some((person) => person.assigning) ? 2000 : false),
+  })
+  const assigning = (query.data ?? []).filter((person) => person.assigning).map((person) => person.id).join(',')
+  const previous = useRef(assigning)
+  useEffect(() => {
+    const before = previous.current
+    previous.current = assigning
+    if (!before || before === assigning) return
+    // the job moved tasks: the task lists and every open task detail (`keys.task` starts with this prefix)
+    void queryClient.invalidateQueries({ queryKey: keys.tasks(workspaceId) })
+    void queryClient.invalidateQueries({ queryKey: ['task', workspaceId] })
+  }, [assigning, queryClient, workspaceId])
+  return query
+}
+
+/** Maps a person to a member; a job then moves their tasks, and the people list shows it until it ends. */
+export function useMapImportPerson() {
+  const { client, workspaceId } = useOrbit()
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ personId, userId }: { personId: string; userId: string | null }) => api.mapPerson(client, workspaceId, personId, userId),
+    onSuccess: (person) => {
+      queryClient.setQueryData<api.ImportPerson[]>(api.importKeys.people(workspaceId), (people) => people?.map((item) => (item.id === person.id ? person : item)))
+      void queryClient.invalidateQueries({ queryKey: api.importKeys.people(workspaceId) })
+    },
+  })
 }

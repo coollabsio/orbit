@@ -9,6 +9,18 @@ import type { PageSummary, Teamspace } from './orbit'
 
 export const pageTitle = (page: Pick<PageSummary, 'title'>) => page.title.trim() || 'Untitled'
 
+/** Trashed pages whose title contains the query, ignoring case; all of them for a blank query. */
+export function filterTrash<T extends Pick<PageSummary, 'title'>>(pages: readonly T[], query: string): T[] {
+  const needle = query.trim().toLocaleLowerCase()
+  return needle ? pages.filter((page) => pageTitle(page).toLocaleLowerCase().includes(needle)) : [...pages]
+}
+
+/** Whole days until the trash deletes a page trashed at `deletedAt` for good (30 days, rounded up, never below 0). */
+export function daysUntilPurge(deletedAt: string, now = Date.now()): number {
+  const day = 24 * 60 * 60 * 1000
+  return Math.max(0, Math.ceil((new Date(deletedAt).getTime() + 30 * day - now) / day))
+}
+
 export interface TreeRow {
   page: PageSummary
   depth: number

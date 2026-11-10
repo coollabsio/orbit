@@ -64,6 +64,8 @@ export interface PageEditorProps {
   /** Bump to drop the document and connect again (after a reset). */
   generation: number
   editable: boolean
+  /** A fixed, read-only document (a page in the trash) instead of the page's Y.Doc: no socket opens. */
+  content?: unknown[]
   theme: 'light' | 'dark'
   colors: PageEditorColors
   /** The local caret's name and color for the others. */
@@ -233,7 +235,8 @@ interface Connection {
 const CONNECTING: CollabState = { status: 'connecting', problem: null, ready: false }
 
 export default function PageEditor(props: PageEditorProps) {
-  const { server, workspaceId, pageId, epoch, generation, editable, theme, colors, pages, databases, members } = props
+  const { server, workspaceId, pageId, epoch, generation, editable, content, theme, colors, pages, databases, members } = props
+  const live = content === undefined
   // Native actions arrive as new functions with every prop update; the socket and the editor read the latest.
   const actions = useRef(props)
   useEffect(() => {
@@ -255,6 +258,7 @@ export default function PageEditor(props: PageEditorProps) {
   )
 
   useEffect(() => {
+    if (!live) return
     const doc = new Y.Doc()
     const { serverUrl, room, params } = collabSocket(server, { workspaceId, kind: 'pages', id: pageId, epoch })
     const provider = new WebsocketProvider(serverUrl, room, doc, {
@@ -275,7 +279,7 @@ export default function PageEditor(props: PageEditorProps) {
       current.destroy()
       setSession(null)
     }
-  }, [server, workspaceId, pageId, epoch, generation])
+  }, [server, workspaceId, pageId, epoch, generation, live])
 
   useEffect(() => {
     const root = rootRef.current
@@ -301,9 +305,10 @@ export default function PageEditor(props: PageEditorProps) {
   } as CSSProperties
 
   const state = session?.state ?? CONNECTING
+  const source: EditorProps['source'] | null = !live ? { content } : session && state.ready ? { connection: session.connection } : null
   return (
     <div ref={rootRef} className="orbit-page-editor" data-theme={theme} style={style}>
-      {session && state.ready ? (
+      {source ? (
         <LookupsContext
           value={{
             pages,
@@ -315,8 +320,8 @@ export default function PageEditor(props: PageEditorProps) {
         >
           <Editor
             key={`${pageId}:${epoch}:${generation}`}
-            connection={session.connection}
-            editable={editable && state.problem !== 'read-only'}
+            source={source}
+            editable={live && editable && state.problem !== 'read-only'}
             theme={theme}
             server={server}
             actions={actions}
@@ -335,7 +340,8 @@ export default function PageEditor(props: PageEditorProps) {
 }
 
 interface EditorProps {
-  connection: Connection
+  /** The live Y.Doc, or a fixed document shown read-only. */
+  source: { connection: Connection } | { content: unknown[] }
   editable: boolean
   theme: 'light' | 'dark'
   server: string
@@ -343,44 +349,51 @@ interface EditorProps {
   editorRef: { current: PageEditorInstance | null }
 }
 
-function Editor({ connection, editable, theme, server, actions, editorRef }: EditorProps) {
+function Editor({ source, editable, theme, server, actions, editorRef }: EditorProps) {
   const [files] = useState(() => new Map<string, Promise<string>>())
   const rootRef = useRef<HTMLDivElement>(null)
+  const options = {
+    schema: pageEditorSchema,
+    // Without the comment mark, y-prosemirror would drop the text of anchored comments for everyone.
+    extensions: [commentMarks(), selectBlockExtension()],
+    // the web's link policy: http(s), mailto and in-app page links; any other href is neither created nor opened
+    links: {
+      isValidLink: isSafeLinkHref,
+      onClick: (event: MouseEvent) => {
+        const href = event.target instanceof Element ? event.target.closest('a')?.getAttribute('href') : null
+        if (!href) return true
+        const pageId = docsLinkPageId(href, server)
+        if (pageId) void actions.current.openPage(pageId)
+        else if (isSafeLinkHref(href)) void actions.current.openUrl(href)
+        return true
+      },
+    },
+    // Orbit files need the session, which only the app has; other URLs load as they are.
+    resolveFileUrl: (url: string) => {
+      if (!url.startsWith('/')) return Promise.resolve(url)
+      let file = files.get(url)
+      if (!file) {
+        file = actions.current.loadFile(url).then((data) => data ?? url)
+        files.set(url, file)
+      }
+      return file
+    },
+  }
   const editor: PageEditorInstance = useCreateBlockNote(
-    // The server initializes every document, so there is no initial content: the fragment is the page.
-    withCollaboration({
-      schema: pageEditorSchema,
-      // Without the comment mark, y-prosemirror would drop the text of anchored comments for everyone.
-      extensions: [commentMarks(), selectBlockExtension(), collabUndoExtension()],
-      collaboration: {
-        provider: connection.provider,
-        fragment: connection.fragment,
-        user: actions.current.user,
-        showCursorLabels: 'activity',
-      },
-      // the web's link policy: http(s), mailto and in-app page links; any other href is neither created nor opened
-      links: {
-        isValidLink: isSafeLinkHref,
-        onClick: (event: MouseEvent) => {
-          const href = event.target instanceof Element ? event.target.closest('a')?.getAttribute('href') : null
-          if (!href) return true
-          const pageId = docsLinkPageId(href, server)
-          if (pageId) void actions.current.openPage(pageId)
-          else if (isSafeLinkHref(href)) void actions.current.openUrl(href)
-          return true
-        },
-      },
-      // Orbit files need the session, which only the app has; other URLs load as they are.
-      resolveFileUrl: (url: string) => {
-        if (!url.startsWith('/')) return Promise.resolve(url)
-        let file = files.get(url)
-        if (!file) {
-          file = actions.current.loadFile(url).then((data) => data ?? url)
-          files.set(url, file)
-        }
-        return file
-      },
-    }),
+    'connection' in source
+      ? // The server initializes every document, so there is no initial content: the fragment is the page.
+        withCollaboration({
+          ...options,
+          extensions: [...options.extensions, collabUndoExtension()],
+          collaboration: {
+            provider: source.connection.provider,
+            fragment: source.connection.fragment,
+            user: actions.current.user,
+            showCursorLabels: 'activity',
+          },
+        })
+      : // BlockNote refuses an empty initial document; an empty page starts with its default paragraph.
+        { ...options, initialContent: source.content.length > 0 ? (source.content as never) : undefined },
   )
 
   useEffect(() => watchDeletedFiles(editor, (url) => actions.current.fileDeleted(url)), [editor])

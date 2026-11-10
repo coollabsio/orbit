@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-/// A Relay connection page. After [`super::client::LinearClient::team_issues`] the nested
+/// A Relay connection page. After [`super::client::LinearClient::issue_page`] the nested
 /// connections of an issue hold every node and `page_info.has_next_page` is false.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]

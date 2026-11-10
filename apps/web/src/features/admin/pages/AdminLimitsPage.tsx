@@ -8,6 +8,7 @@ import { Field, FieldDescription, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { useInstanceSettings, useSaveLimits } from '@/features/admin/api'
 import { FieldGrid } from '@/features/settings/components/SettingsParts'
+import { LoadingText } from '@/components/ui/spinner'
 
 function problemText(error: unknown, fallback: string) {
   return error instanceof ApiProblem ? error.detail : fallback
@@ -16,7 +17,7 @@ function problemText(error: unknown, fallback: string) {
 /** What one account and one workspace may use. */
 export function AdminLimitsPage() {
   const settings = useInstanceSettings()
-  if (settings.isPending) return <SettingsCard title="Limits"><p role="status">Loading settings…</p></SettingsCard>
+  if (settings.isPending) return <SettingsCard title="Limits"><p><LoadingText>Loading settings…</LoadingText></p></SettingsCard>
   if (settings.isError) return <SettingsCard title="Limits"><p role="alert">Settings could not be loaded. <Button variant="ghost" onClick={() => void settings.refetch()}>Retry</Button></p></SettingsCard>
   // Remount on save so the form shows what the server stored.
   return <LimitsCard key={JSON.stringify(settings.data.limits)} limits={settings.data.limits} />

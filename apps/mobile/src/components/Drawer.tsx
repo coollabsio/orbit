@@ -1,6 +1,6 @@
 import { type Href, router, useGlobalSearchParams, usePathname } from 'expo-router'
 import { createContext, Fragment, type ReactNode, use, useEffect, useMemo, useRef, useState } from 'react'
-import { AccessibilityInfo, Animated, Easing, Modal, PanResponder, type PanResponderGestureState, Pressable, ScrollView, useWindowDimensions, View } from 'react-native'
+import { Animated, Easing, Modal, PanResponder, type PanResponderGestureState, Pressable, ScrollView, useWindowDimensions, View } from 'react-native'
 import { NativeText as RNText } from '../ui/scaled'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg'
@@ -12,11 +12,11 @@ import { splitAlpha } from '../data/color'
 import { customSidebarTheme } from '../data/custom-theme'
 import { alpha, cssColors, mix, useButtonStyle, useCustomTheme, useTheme } from '../theme'
 import { ColorScope } from '../theme/ColorScope'
-import { CountBadge, Icon, type IconName } from '../ui'
+import { CountBadge, Icon, type IconName, useReduceMotion } from '../ui'
 import { NewProjectSheet } from './NewProjectSheet'
 import { DRAWER_AREA_TITLES, type DrawerArea, drawerAreaOf, drawerSections, TASK_PRESETS, tasksHref } from './drawerAreas'
 import { ACCOUNT_NAV, ADMIN_NAV, allowedNav, WORKSPACE_NAV } from './settings/Shell'
-import { isGuestRole } from '../data/guest'
+import { guestSettings, isGuestRole } from '../data/guest'
 
 const DrawerContext = createContext<(() => void) | null>(null)
 
@@ -255,7 +255,7 @@ function DrawerPanel({ mounted, width, onClose }: { mounted: boolean; width: num
           ) : guest ? (
             <>
               <NavRow link={{ label: 'Chat', icon: 'chat', href: '/chat', active: pathname.startsWith('/chat'), badge: chatBadge.count, dot: chatBadge.unread }} onPress={() => go('/chat')} />
-              <NavRow link={{ label: 'Settings', icon: 'settings', href: '/settings/account', active: onSettings && !onAdmin }} onPress={() => go('/settings/account')} />
+              <NavRow link={{ label: 'Settings', icon: 'settings', href: guestSettings, active: onSettings && !onAdmin }} onPress={() => go(guestSettings)} />
               {user.installation_admin ? (
                 <>
                   <View className="flex-1" />
@@ -314,6 +314,7 @@ function TasksArea({ view, project, onTasks, onBack, go }: { view?: string; proj
         </>
       ) : <Section label="Projects" />}
       <NavRow link={{ label: 'New project', icon: 'plus', href: '/tasks', active: false }} onPress={() => setCreating(true)} />
+      <NavRow link={{ label: 'Trash', icon: 'trash', href: '/tasks/trash', active: false }} onPress={() => go('/tasks/trash')} />
       <NewProjectSheet visible={creating} onClose={() => setCreating(false)} onCreated={(created) => {
         setCreating(false)
         go(tasksHref(current, { project: created.id }))
@@ -336,17 +337,6 @@ function SlideIn({ from, children }: { from: SlideFrom | null; children: ReactNo
       {children}
     </Animated.View>
   )
-}
-
-/** The system's Reduce motion setting. */
-function useReduceMotion(): boolean {
-  const [reduce, setReduce] = useState(false)
-  useEffect(() => {
-    void AccessibilityInfo.isReduceMotionEnabled().then(setReduce)
-    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduce)
-    return () => subscription.remove()
-  }, [])
-  return reduce
 }
 
 /**

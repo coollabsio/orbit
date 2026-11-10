@@ -1,14 +1,12 @@
-import { type Href, router, useNavigation, usePathname } from 'expo-router'
+import { type Href, usePathname } from 'expo-router'
 import type { Permission } from '@orbit/api/generated/types.gen'
 import { type ReactNode, useState } from 'react'
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, Switch, View } from 'react-native'
+import { Pressable, ScrollView, Switch, View } from 'react-native'
 
-import { useAuthOptions } from '../../hooks/account'
 import { useOrbit } from '../../orbit-context'
-import { guestMayOpen, isGuestRole } from '../../data/guest'
-import { drawerSections, type SettingsArea } from '../drawerAreas'
+import { guestMayOpen } from '../../data/guest'
 import { alpha, cssColors, useButtonStyle, useTheme } from '../../theme'
-import { Icon, type IconName, IconButton, PaneHeader, PickerSheet, type Presence, PullRefresh, SafeAreaView, StatusMark, Text } from '../../ui'
+import { Icon, type IconName, KeyboardSpace, PaneHeader, PickerSheet, type Presence, PullRefresh, SafeAreaView, Spinner, StatusMark, Text } from '../../ui'
 
 export interface SettingsNavItem {
   href: Href & string
@@ -25,7 +23,7 @@ export interface SettingsNavItem {
  * lives at `/settings/workspace-agentic` because `/settings/agentic` is the account's.
  */
 export const WORKSPACE_NAV: readonly SettingsNavItem[] = [
-  { href: '/settings/general', label: 'General', icon: 'settings' },
+  { href: '/settings', label: 'General', icon: 'settings' },
   { href: '/settings/members', label: 'Members', icon: 'people' },
   { href: '/settings/billing', label: 'Billing', icon: 'card', cloud: true },
   { href: '/settings/emoji', label: 'Emoji', icon: 'smile', permission: 'chat.manage' },
@@ -33,7 +31,8 @@ export const WORKSPACE_NAV: readonly SettingsNavItem[] = [
   { href: '/settings/file-storage', label: 'File storage', icon: 'cloudConnection' },
   { href: '/settings/github', label: 'GitHub', icon: 'link2' },
   { href: '/settings/workspace-agentic', label: 'Agentic', icon: 'robot' },
-  { href: '/settings/api-tokens', label: 'API tokens', icon: 'key', permission: 'api_tokens.manage' },
+  // every member but a guest may create a personal export token there
+  { href: '/settings/api-tokens', label: 'API tokens', icon: 'key', permission: 'workspace.export_personal' },
   { href: '/settings/import', label: 'Import', icon: 'import' },
   { href: '/settings/export', label: 'Export', icon: 'documentDownload', permission: 'workspace.export' },
   { href: '/settings/danger-zone', label: 'Danger zone', icon: 'danger', permission: 'workspace.delete' },
@@ -56,9 +55,9 @@ export const ACCOUNT_NAV: readonly SettingsNavItem[] = [
   { href: '/settings/agentic', label: 'Agentic', icon: 'robot' },
 ]
 
-/** The web's Admin pages in its order. `/settings/admin` is the area's menu, General its first page. */
+/** The web's Admin pages in its order; General is the area's first page, as `/admin` is on the web. */
 export const ADMIN_NAV: readonly SettingsNavItem[] = [
-  { href: '/settings/admin/general', label: 'General', icon: 'settings' },
+  { href: '/settings/admin', label: 'General', icon: 'settings' },
   { href: '/settings/admin/users', label: 'Users', icon: 'people' },
   { href: '/settings/admin/email', label: 'Email', icon: 'mail' },
   { href: '/settings/admin/limits', label: 'Limits', icon: 'chart' },
@@ -69,27 +68,20 @@ export const ADMIN_NAV: readonly SettingsNavItem[] = [
 ]
 
 /**
- * The web's `SettingsShell` on a phone: the topbar, then the cards. A page has a back button; an area's menu has
- * none. The drawer lists the area's pages.
+ * The web's `SettingsShell` on a phone: the topbar, then the cards. No back button: the drawer lists the area's pages,
+ * and the dock leaves the area.
  */
 export function SettingsShell({ title, nav, children, onRefresh }: { title: string; nav: readonly SettingsNavItem[]; children: ReactNode; onRefresh?: () => Promise<unknown> }) {
   const { colors } = useTheme()
-  const navigation = useNavigation()
   const pathname = usePathname()
-  const muted = alpha(colors.mutedForeground, 0.7)
   // the longest matching link names the page, so `/settings/admin/users` beats `/settings/admin`
   const page = nav
     .filter((item) => pathname === item.href || pathname.startsWith(`${item.href}/`))
     .sort((a, b) => b.href.length - a.href.length)[0]
-  // only this stack's history: the tab navigator around it can always go back
-  const canGoBack = (navigation.getState()?.index ?? 0) > 0
-  // a page of an area (not its menu) always has Back: to the screen before it, else to the area's menu
-  const back = canGoBack ? () => navigation.goBack() : page ? () => router.navigate(AREA_ROOT[title] ?? '/settings') : null
   return (
     <SafeAreaView edges={['left', 'right']} className="flex-1 bg-background">
       {/* the web's breadcrumb header: the area (muted, with its icon) / the page; same left inset as the cards */}
-      <PaneHeader className={`min-h-12 gap-[7px] ${back ? 'pl-2' : 'pl-5'}`}>
-        {back ? <IconButton icon="back" label="Back" color={muted} onPress={back} /> : null}
+      <PaneHeader className="min-h-12 gap-[7px] pl-5">
         <Icon name={AREA_ICON[title] ?? 'settings'} size={15} color={colors.mutedForeground} />
         <Text numberOfLines={1} className="shrink font-noto-semibold text-[13px] text-muted-foreground">
           {title}
@@ -103,7 +95,7 @@ export function SettingsShell({ title, nav, children, onRefresh }: { title: stri
           </>
         ) : null}
       </PaneHeader>
-      <KeyboardAvoidingView className="flex-1" behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardSpace className="flex-1">
         <ScrollView
           contentContainerClassName="px-5 pt-5 pb-8 gap-6"
           keyboardShouldPersistTaps="handled"
@@ -111,49 +103,13 @@ export function SettingsShell({ title, nav, children, onRefresh }: { title: stri
         >
           {children}
         </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardSpace>
     </SafeAreaView>
-  )
-}
-
-/**
- * An area's root on a phone (the web's `SettingsMenu`): its pages under the web's section labels, as rows that open
- * them. Each page then has Back to this menu.
- */
-export function SettingsMenu({ title, area, nav }: { title: string; area: SettingsArea; nav: readonly SettingsNavItem[] }) {
-  const { colors } = useTheme()
-  const { user, workspace } = useOrbit()
-  const cloud = useAuthOptions().data?.billing_enabled ?? false
-  const sections = drawerSections(area, allowedNav(nav, workspace.permissions, cloud, isGuestRole(workspace.role)))
-  return (
-    <SettingsShell title={title} nav={nav}>
-      {area === 'admin' && !user.installation_admin ? (
-        <Note>Only the instance admins of this Orbit server see the Admin area.</Note>
-      ) : (
-        sections.map((section) => (
-          <View key={section.label} className="gap-2">
-            <Text accessibilityRole="header" className="px-1 font-noto-medium text-[12px] text-muted-foreground">{section.label}</Text>
-            <View className="overflow-hidden rounded-lg bg-card shadow-[0_0_0_1px_var(--color-border)]">
-              {section.items.map((item, index) => (
-                <SettingsRow key={item.href} first={index === 0} label={item.label} onPress={() => router.push(item.href)}>
-                  <Icon name={item.icon} size={18} color={colors.mutedForeground} />
-                  <Text numberOfLines={1} className="flex-1 font-noto-medium text-[14px] text-foreground">{item.label}</Text>
-                  <Icon name="chevronRight" size={16} color={colors.mutedForeground} />
-                </SettingsRow>
-              ))}
-            </View>
-          </View>
-        ))
-      )}
-    </SettingsShell>
   )
 }
 
 /** The web areas' header icons (`settingsNav.ts`). */
 const AREA_ICON: Record<string, IconName> = { Settings: 'settings', 'Account settings': 'user', Admin: 'admin' }
-
-/** The areas' menus (`SettingsMenu`), where a page's Back goes when nothing is before it. */
-const AREA_ROOT: Record<string, Href & string> = { Settings: '/settings', 'Account settings': '/settings/account', Admin: '/settings/admin' }
 
 /** The Admin area: only instance admins see it (the server refuses the others anyway). */
 export function AdminShell({ children, onRefresh }: { children: ReactNode; onRefresh?: () => Promise<unknown> }) {
@@ -352,8 +308,16 @@ export function Segmented<T extends string>({ value, options, onChange, label }:
 }
 
 /** A quiet status or error line inside a card. */
-export function Note({ children, error = false }: { children: ReactNode; error?: boolean }) {
-  return <Text className={`text-[13px] leading-[19px] ${error ? 'text-destructive' : 'text-muted-foreground'}`}>{children}</Text>
+/** A short message. `loading` puts the spinner before it, as the web's `LoadingText`. */
+export function Note({ children, error = false, loading = false }: { children: ReactNode; error?: boolean; loading?: boolean }) {
+  const text = <Text className={`text-[13px] leading-[19px] ${error ? 'text-destructive' : 'text-muted-foreground'}`}>{children}</Text>
+  if (!loading) return text
+  return (
+    <View accessibilityRole="progressbar" className="flex-row items-center gap-2">
+      <Spinner />
+      {text}
+    </View>
+  )
 }
 
 /**

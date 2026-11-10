@@ -68,16 +68,29 @@ pub fn encrypt(
 /// contact.
 #[must_use]
 pub fn vapid_authorization(key: &SecretKey, audience: &str, subject: &str, expires: i64) -> String {
-    let header = BASE64.encode(br#"{"typ":"JWT","alg":"ES256"}"#);
-    let claims =
-        BASE64.encode(json!({ "aud": audience, "exp": expires, "sub": subject }).to_string());
-    let signed = format!("{header}.{claims}");
+    let token = es256_jwt(
+        key,
+        &json!({ "typ": "JWT", "alg": "ES256" }),
+        &json!({ "aud": audience, "exp": expires, "sub": subject }),
+    );
+    format!("vapid t={token}, k={}", public_key(key))
+}
+
+/// A JSON Web Token with this header and these claims, signed with `key` (ES256). VAPID and the
+/// APNs provider token are both such tokens.
+#[must_use]
+pub fn es256_jwt(
+    key: &SecretKey,
+    header: &serde_json::Value,
+    claims: &serde_json::Value,
+) -> String {
+    let signed = format!(
+        "{}.{}",
+        BASE64.encode(header.to_string()),
+        BASE64.encode(claims.to_string())
+    );
     let signature: Signature = SigningKey::from(key).sign(signed.as_bytes());
-    format!(
-        "vapid t={signed}.{}, k={}",
-        BASE64.encode(signature.to_bytes()),
-        public_key(key)
-    )
+    format!("{signed}.{}", BASE64.encode(signature.to_bytes()))
 }
 
 /// The VAPID public key as browsers take it (`applicationServerKey`).

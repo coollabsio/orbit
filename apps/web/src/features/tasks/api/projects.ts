@@ -9,7 +9,10 @@ import {
   deleteStatus,
   listProjects,
   listProjectTrash,
+  listTrashedProjectTasks,
+  getTrashedProject,
   listStatuses,
+  purgeProject,
   reorderStatuses,
   restoreProject,
   updateProject,
@@ -156,6 +159,33 @@ export function useProjectTrash(workspaceId: string) {
   })
 }
 
+/** A project in the trash with its statuses, for its read-only preview. */
+export function useTrashedProject(workspaceId: string, projectId: string) {
+  return useQuery({
+    queryKey: [...queryKeys.projectTrash(workspaceId), 'preview', projectId],
+    queryFn: async () => {
+      const { data } = await getTrashedProject({ client: apiClient, path: { workspace_id: workspaceId, project_id: projectId }, throwOnError: true })
+      return required(data, 'Trashed project response was empty.')
+    },
+    retry: false,
+  })
+}
+
+/** Every task of a trashed project, by number. */
+export function useTrashedProjectTasks(workspaceId: string, projectId: string) {
+  return useQuery({
+    queryKey: [...queryKeys.projectTrash(workspaceId), 'preview', projectId, 'tasks'],
+    queryFn: async () => {
+      const page = await fetchAllPages(async (cursor) => {
+        const { data } = await listTrashedProjectTasks({ client: apiClient, path: { workspace_id: workspaceId, project_id: projectId }, query: { limit: 100, cursor }, throwOnError: true })
+        return required(data, 'Trashed project tasks response was empty.')
+      })
+      return page.items
+    },
+    retry: false,
+  })
+}
+
 export function useRestoreProject(workspaceId: string) {
   const queryClient = useQueryClient()
   return useMutation({
@@ -169,6 +199,17 @@ export function useRestoreProject(workspaceId: string) {
       }
     },
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: queryKeys.workspace(workspaceId) }),
+  })
+}
+
+/** Deletes a trashed project forever with all its tasks. */
+export function usePurgeProject(workspaceId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (projectId: string) => {
+      await purgeProject({ client: apiClient, path: { workspace_id: workspaceId, project_id: projectId }, throwOnError: true })
+    },
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.workspace(workspaceId) }),
   })
 }
 

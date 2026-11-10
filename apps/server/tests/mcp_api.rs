@@ -664,7 +664,7 @@ async fn tools_list_includes_required_cache_fields_for_current_protocol() {
         let result: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(result["result"]["ttlMs"], 0, "{result}");
         assert_eq!(result["result"]["cacheScope"], "private", "{result}");
-        assert_eq!(result["result"]["tools"].as_array().unwrap().len(), 4);
+        assert_eq!(result["result"]["tools"].as_array().unwrap().len(), 8);
     }
 }
 
@@ -890,6 +890,179 @@ async fn sub_issues_can_be_created_listed_moved_and_detached_within_the_grant() 
         f.task.to_string(),
         "{attached}"
     );
+}
+
+#[tokio::test]
+async fn agents_can_claim_unassign_and_comment_within_the_grant() {
+    let f = Fixture::new().await;
+    // get_me tells the agent which user id to assign.
+    let me = f.tool("get_me", json!({})).await;
+    assert_eq!(
+        me["result"]["structuredContent"]["user"]["id"],
+        f.user.to_string(),
+        "{me}"
+    );
+    let members = f.tool("list_members", json!({})).await;
+    assert_eq!(
+        members["result"]["structuredContent"]["items"][0]["display_name"], "Owner",
+        "{members}"
+    );
+    let labels = f
+        .tool("list_labels", json!({"project_id": f.project}))
+        .await;
+    assert!(
+        labels["result"]["structuredContent"]["items"].is_array(),
+        "{labels}"
+    );
+    let hidden = f
+        .tool("list_labels", json!({"project_id": f.other_project}))
+        .await;
+    assert_eq!(hidden["result"]["isError"], true, "{hidden}");
+    // Writes need tasks:write.
+    let denied = f
+        .tool("create_comment", json!({"task_id": f.task, "body": "Hi"}))
+        .await;
+    assert!(denied.get("error").is_some(), "{denied}");
+    sqlx::query("UPDATE api_tokens SET scopes = 'tasks:read tasks:write' WHERE id = $1")
+        .bind(f.token_id.to_string())
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    let current = f.tasks.get_task(f.workspace, f.task, f.user).await.unwrap();
+    let claimed = f
+        .tool(
+            "update_task",
+            json!({"task_id": f.task, "expected_version": token_version(&current), "assignee_ids": [f.user]}),
+        )
+        .await;
+    let claimed = &claimed["result"]["structuredContent"];
+    assert_eq!(
+        claimed["assignee_ids"],
+        json!([f.user.to_string()]),
+        "{claimed}"
+    );
+    // An unknown user is refused with a message that names the field.
+    let stranger = f
+        .tool(
+            "update_task",
+            json!({"task_id": f.task, "expected_version": claimed["version"], "assignee_ids": [Id::new_v7()]}),
+        )
+        .await;
+    assert_eq!(stranger["result"]["isError"], true, "{stranger}");
+    assert!(stranger.to_string().contains("assignee_ids"), "{stranger}");
+    let unassigned = f
+        .tool(
+            "update_task",
+            json!({"task_id": f.task, "expected_version": claimed["version"], "assignee_ids": []}),
+        )
+        .await;
+    assert_eq!(
+        unassigned["result"]["structuredContent"]["assignee_ids"],
+        json!([]),
+        "{unassigned}"
+    );
+    let comment = f
+        .tool(
+            "create_comment",
+            json!({"task_id": f.task, "body": "PR opened, checks green"}),
+        )
+        .await;
+    let comment = &comment["result"]["structuredContent"];
+    assert_eq!(comment["body"], "PR opened, checks green", "{comment}");
+    assert_eq!(comment["author_id"], f.user.to_string());
+    assert!(comment.get("body_json").is_none(), "{comment}");
+    let listed = f.tool("list_comments", json!({"task_id": f.task})).await;
+    let items = listed["result"]["structuredContent"]["items"]
+        .as_array()
+        .unwrap();
+    assert_eq!(items.len(), 1, "{listed}");
+    assert_eq!(items[0]["id"], comment["id"]);
+    // Tasks outside the grant stay hidden for comments too.
+    for (name, arguments) in [
+        ("list_comments", json!({"task_id": f.other_task})),
+        (
+            "create_comment",
+            json!({"task_id": f.other_task, "body": "Leak"}),
+        ),
+    ] {
+        let hidden = f.tool(name, arguments).await;
+        assert_eq!(hidden["result"]["isError"], true, "{name}: {hidden}");
+    }
+    let secret_comments: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM task_comments WHERE task_id = $1")
+            .bind(f.other_task.to_string())
+            .fetch_one(f.database.pool())
+            .await
+            .unwrap();
+    assert_eq!(secret_comments, 0);
+}
+
+#[tokio::test]
+async fn projects_can_be_created_only_by_all_projects_writers() {
+    let f = Fixture::new().await;
+    let create = json!({"name": "Agent tools", "key": "agt"});
+    let denied = f.tool("create_project", create.clone()).await;
+    assert!(
+        denied.get("error").is_some(),
+        "tasks:read cannot create: {denied}"
+    );
+    sqlx::query("UPDATE api_tokens SET scopes = 'tasks:read tasks:write' WHERE id = $1")
+        .bind(f.token_id.to_string())
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    // A token for chosen projects could not use the new project.
+    let chosen = f.tool("create_project", create.clone()).await;
+    assert_eq!(chosen["result"]["isError"], true, "{chosen}");
+    assert!(chosen.to_string().contains("all projects"), "{chosen}");
+    sqlx::query("UPDATE api_tokens SET all_projects = 1 WHERE id = $1")
+        .bind(f.token_id.to_string())
+        .execute(f.database.pool())
+        .await
+        .unwrap();
+    let created = f.tool("create_project", create.clone()).await;
+    let project = &created["result"]["structuredContent"];
+    assert_eq!(project["key"], "AGT", "{created}");
+    assert_eq!(project["color"], "#6366f1");
+    // The next request sees the project and can put tasks in it.
+    let listed = f.tool("list_projects", json!({})).await;
+    assert!(
+        listed["result"]["structuredContent"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["id"] == project["id"]),
+        "{listed}"
+    );
+    let statuses = f
+        .tool("list_task_statuses", json!({"project_id": project["id"]}))
+        .await;
+    let status = &statuses["result"]["structuredContent"]["items"][0]["id"];
+    let task = f
+        .tool(
+            "create_task",
+            json!({"project_id": project["id"], "status_id": status, "title": "First"}),
+        )
+        .await;
+    assert_eq!(
+        task["result"]["structuredContent"]["identifier"], "AGT-1",
+        "{task}"
+    );
+    for (arguments, message) in [
+        (create, "already exists"),
+        (json!({"name": "Bad", "key": "A-B"}), "project key"),
+        (json!({"name": " ", "key": "OK"}), "project name"),
+        (
+            json!({"name": "Bad", "key": "OK", "color": "red"}),
+            "#rrggbb",
+        ),
+    ] {
+        let refused = f.tool("create_project", arguments).await;
+        assert!(
+            refused.to_string().contains(message),
+            "{message}: {refused}"
+        );
+    }
 }
 
 #[tokio::test]

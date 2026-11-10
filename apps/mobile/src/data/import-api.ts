@@ -1,5 +1,5 @@
 /**
- * The workspace imports (Notion and Obsidian into Docs; Asana, Linear and Trello into Tasks) over the generated SDK,
+ * The workspace imports (Notion and Obsidian into Docs; Asana, Linear and Trello into Tasks; Orbit into all three) over the SDK,
  * with the web's error sentences, report notes, and the pure tree logic of the "Choose pages" step. No React.
  */
 import {
@@ -7,50 +7,63 @@ import {
   cancelLinearImport,
   cancelNotionImport,
   cancelObsidianImport,
+  cancelOrbitImport,
   cancelTrelloImport,
   createAsanaImport,
   createLinearImport,
   createNotionImport,
   createObsidianImport,
+  createOrbitImport,
   createTrelloImport,
   getAsanaImport,
   getLinearImport,
   getNotionImport,
   getObsidianImport,
+  getOrbitImport,
   getTrelloImport,
+  listImportPeople,
   listAsanaImports,
   listLinearImports,
   listNotionImports,
   listObsidianImports,
+  listOrbitImports,
   listTrelloImports,
   startAsanaImport,
   startLinearImport,
   startNotionImport,
   startObsidianImport,
+  startOrbitImport,
   startTrelloImport,
+  updateImportPerson,
+  uploadOrbitImport,
 } from '@orbit/api/generated/sdk.gen'
 import { notionDatabaseNotes } from '@orbit/database/notionImport'
 import type {
   AsanaImport,
   CreateTrelloImportBody,
+  ImportPerson,
+  ImportSource,
   LinearImport,
   NotionImport,
   NotionImportDestination,
   NotionImportStatus,
   ObsidianImport,
   ObsidianSkippedFiles,
+  OrbitImport,
   StartAsanaImportBody,
   StartLinearImportBody,
   StartNotionImportBody,
   StartObsidianImportBody,
+  StartOrbitImportBody,
   StartTrelloImportBody,
   TrelloImport,
 } from '@orbit/api/generated/types.gen'
+import { orbitImportProblemMessage } from '@orbit/api/orbitImports'
 import { ApiProblem } from '@orbit/api/problem'
 
 import type { OrbitClient, PageSummary, Teamspace } from './orbit'
 
-export type ImportKind = 'notion' | 'obsidian' | 'asana' | 'linear' | 'trello'
+export type ImportKind = 'notion' | 'obsidian' | 'asana' | 'linear' | 'trello' | 'orbit'
 
 interface Records {
   notion: NotionImport
@@ -58,6 +71,7 @@ interface Records {
   asana: AsanaImport
   linear: LinearImport
   trello: TrelloImport
+  orbit: OrbitImport
 }
 interface StartBodies {
   notion: StartNotionImportBody
@@ -65,6 +79,7 @@ interface StartBodies {
   asana: StartAsanaImportBody
   linear: StartLinearImportBody
   trello: StartTrelloImportBody
+  orbit: StartOrbitImportBody
 }
 
 export type ImportRecord<K extends ImportKind> = Records[K]
@@ -80,12 +95,13 @@ export const importKeys = {
   list: (workspaceId: string, kind: ImportKind) => ['imports', workspaceId, kind] as const,
   detail: (workspaceId: string, kind: ImportKind, id: string) => ['imports', workspaceId, kind, id] as const,
   tree: (workspaceId: string, kind: ImportKind, id: string) => ['imports', workspaceId, kind, id, 'tree'] as const,
+  people: (workspaceId: string) => ['imports', workspaceId, 'people'] as const,
 }
 
 /** Into Docs (pages) or into Tasks (projects). */
 export const docsImport = (kind: ImportKind) => kind === 'notion' || kind === 'obsidian'
 
-// The SDK's five families have the same shape; one loose signature serves them all, typed again per kind below.
+// The SDK's six families have the same shape; one loose signature serves them all, typed again per kind below.
 type Call = (options: { client: OrbitClient; path: Record<string, string>; query?: { include: 'tree' }; body?: unknown; throwOnError: true }) => Promise<{ data: unknown }>
 interface Calls {
   list: Call
@@ -99,6 +115,13 @@ const SDK = {
   asana: { list: listAsanaImports, get: getAsanaImport, start: startAsanaImport, cancel: cancelAsanaImport },
   linear: { list: listLinearImports, get: getLinearImport, start: startLinearImport, cancel: cancelLinearImport },
   trello: { list: listTrelloImports, get: getTrelloImport, start: startTrelloImport, cancel: cancelTrelloImport },
+  // the Orbit list is `{ imports }`, not `{ items }`
+  orbit: {
+    list: async (options: Parameters<typeof listOrbitImports<true>>[0]) => ({ data: { items: (await listOrbitImports(options)).data.imports } }),
+    get: getOrbitImport,
+    start: startOrbitImport,
+    cancel: cancelOrbitImport,
+  },
 } as unknown as Record<ImportKind, Calls>
 
 const importPath = (workspaceId: string, importId: string) => ({ workspace_id: workspaceId, import_id: importId })
@@ -127,6 +150,20 @@ export async function cancelImport<K extends ImportKind>(client: OrbitClient, ki
   return (await SDK[kind].cancel({ client, path: importPath(workspaceId, importId), throwOnError: true })).data as ImportRecord<K>
 }
 
+export type { ImportPerson }
+
+export const IMPORT_SOURCE_NAMES: Record<ImportSource, string> = { asana: 'Asana', linear: 'Linear', trello: 'Trello' }
+
+/** People that Asana, Linear and Trello imports could not assign (no member had their email). Admins only. */
+export async function listPeople(client: OrbitClient, workspaceId: string): Promise<ImportPerson[]> {
+  return (await listImportPeople({ client, path: { workspace_id: workspaceId }, throwOnError: true })).data.items
+}
+
+/** Gives all tasks of a person to a member (`null` takes them off again). */
+export async function mapPerson(client: OrbitClient, workspaceId: string, personId: string, userId: string | null): Promise<ImportPerson> {
+  return (await updateImportPerson({ client, path: { workspace_id: workspaceId, person_id: personId }, body: { user_id: userId }, throwOnError: true })).data
+}
+
 // The token is sent once and never kept: these are plain calls, not mutations (whose state keeps the variables).
 
 export async function createNotion(client: OrbitClient, workspaceId: string, token: string): Promise<NotionImport> {
@@ -153,6 +190,20 @@ export async function uploadObsidian(client: OrbitClient, workspaceId: string, f
     return body
   }
   return (await createObsidianImport({ client, path: { workspace_id: workspaceId }, body: { file }, bodySerializer: form, signal, throwOnError: true })).data
+}
+
+/** Uploads an Orbit export zip as the `file` part under its own name, and starts reading it. */
+export async function uploadOrbit(client: OrbitClient, workspaceId: string, file: Blob, name: string, signal: AbortSignal): Promise<OrbitImport> {
+  const form = () => {
+    const body = new FormData()
+    body.append('file', file, name)
+    return body
+  }
+  return (await uploadOrbitImport({ client, path: { workspace_id: workspaceId }, body: { file }, bodySerializer: form, signal, throwOnError: true })).data
+}
+
+export async function createOrbit(client: OrbitClient, workspaceId: string, url: string, token: string): Promise<OrbitImport> {
+  return (await createOrbitImport({ client, path: { workspace_id: workspaceId }, body: { url, token }, throwOnError: true })).data
 }
 
 /** A job is working on it: poll. */
@@ -193,11 +244,13 @@ export function importHeadline(status: ImportStatus): string {
 
 export const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`
 
-const SOURCE: Record<ImportKind, string> = { notion: 'Notion', obsidian: 'Obsidian', asana: 'Asana', linear: 'Linear', trello: 'Trello' }
+const SOURCE: Record<ImportKind, string> = { notion: 'Notion', obsidian: 'Obsidian', asana: 'Asana', linear: 'Linear', trello: 'Trello', orbit: 'Orbit' }
 
 /** A user-facing sentence for a failed import request, as each web import page words it. */
 export function importErrorMessage(kind: ImportKind, error: unknown): string {
   if (error instanceof ApiProblem) {
+    const orbit = kind === 'orbit' ? orbitImportProblemMessage(error.code) : null
+    if (orbit) return orbit
     const source = SOURCE[kind]
     switch (error.code) {
       case 'app_key_missing':
@@ -234,10 +287,10 @@ export function importErrorMessage(kind: ImportKind, error: unknown): string {
       case 'teamspace_not_found':
         return 'The destination teamspace no longer exists. Choose another one.'
     }
-    if (kind === 'obsidian' && error.status === 413) return 'The file is larger than the server’s upload limit.'
+    if ((kind === 'obsidian' || kind === 'orbit') && error.status === 413) return 'The file is larger than the server’s upload limit.'
     if (error.status === 422) return 'The request was not valid. Check your input and try again.'
   }
-  if (kind === 'obsidian' && error instanceof TypeError) return 'The server could not be reached. Check your connection and try again.'
+  if ((kind === 'obsidian' || kind === 'orbit') && error instanceof TypeError) return 'The server could not be reached. Check your connection and try again.'
   return 'Something went wrong. Try again.'
 }
 
@@ -308,7 +361,7 @@ export function importNotes<K extends ImportKind>(kind: K, item: ImportRecord<K>
     if (!report) return notes
     push(report.dependencies_linked, `${report.dependencies_linked} dependencies became “blocked by” relations.`)
     push(report.links_added, `${report.links_added} linked files (Google Drive, Dropbox and others) were added to descriptions as links.`)
-    push(report.unmatched_assignees, `${report.unmatched_assignees} tasks had an assignee with no Orbit member of the same email; they are unassigned and name the assignee.`)
+    push(report.unmatched_assignees, `${report.unmatched_assignees} tasks had an assignee with no Orbit member of the same email; they are unassigned and name the assignee. Assign them to a member in Settings → Import.`)
     push(report.missing_files, `${report.missing_files} Asana files could not be downloaded.`)
     push(report.skipped_subtasks, `${report.skipped_subtasks} subtasks deeper than five levels were not imported.`)
   } else if (kind === 'linear') {
@@ -317,15 +370,19 @@ export function importNotes<K extends ImportKind>(kind: K, item: ImportRecord<K>
     push(report.relations_linked, `${report.relations_linked} blocking, related and duplicate relations were linked.`)
     push(report.relations_skipped, `${report.relations_skipped} relations were skipped: Orbit keeps one relation per pair of tasks and one duplicate per task.`)
     push(report.links_added, `${report.links_added} linked attachments (pull requests, threads and links) were added to descriptions.`)
-    push(report.unmatched_assignees, `${report.unmatched_assignees} issues had an assignee with no Orbit member of the same email; they are unassigned and name the assignee.`)
+    push(report.unmatched_assignees, `${report.unmatched_assignees} issues had an assignee with no Orbit member of the same email; they are unassigned and name the assignee. Assign them to a member in Settings → Import.`)
     push(report.missing_files, `${report.missing_files} Linear files could not be downloaded.`)
     push(report.detached_sub_issues, `${report.detached_sub_issues} sub-issues are at the top level (parent in another team, or more than five levels deep); their description names the parent.`)
+  } else if (kind === 'orbit') {
+    const report = (item as OrbitImport).report
+    if (!report) return notes
+    push(report.skipped_existing, `${plural(report.skipped_existing, 'item was', 'items were')} imported before and skipped.`)
   } else {
     const report = (item as TrelloImport).report
     if (!report) return notes
     push(report.checklists_added, `${plural(report.checklists_added, 'checklist was', 'checklists were')} written into card descriptions.`)
     push(report.links_added, `${plural(report.links_added, 'link attachment was', 'link attachments were')} added to card descriptions.`)
-    push(report.unmatched_members, `${plural(report.unmatched_members, 'card member has', 'card members have')} no Orbit member of the same full name; the card description names them.`)
+    push(report.unmatched_members, `${plural(report.unmatched_members, 'card member has', 'card members have')} no Orbit member of the same full name; the card description names them. Assign them to a member in Settings → Import.`)
     push(report.archived_lists_skipped, `${plural(report.archived_lists_skipped, 'archived list and its', 'archived lists and their')} cards were left out.`)
     push(report.archived_cards_skipped, `${plural(report.archived_cards_skipped, 'archived card was', 'archived cards were')} left out.`)
     push(report.refused_files, `Trello refused ${plural(report.refused_files, 'file download', 'file downloads')}; some Enterprise workspaces block them.`)
@@ -547,4 +604,45 @@ export function visibleRows<T extends TreeNode>(tree: SelectionTree<T>, expanded
   }
   walk(null, 0)
   return rows
+}
+
+
+/** What the progress step of a running import shows. */
+export interface ImportProgressView {
+  label: string
+  /** 1–4 while a stage runs, else null. */
+  step: number | null
+  done: number
+  total: number
+  detail: string
+}
+
+const count = (value: number) => value.toLocaleString('en-US')
+
+/** The web's `linearImportProgress`: each stage of a queued or importing Linear import with its own count. */
+export function linearImportProgress(item: LinearImport): ImportProgressView {
+  const { done, total, failed, expected, read, created, stage } = item.progress
+  const imported = `${count(done)} of ${count(total)} issues imported`
+  if (item.status === 'queued') return { label: 'Waiting for the import to start…', step: null, done: 0, total: 0, detail: '' }
+  switch (stage) {
+    case 'reading':
+      return { label: 'Reading issues from Linear…', step: 1, done: read, total: Math.max(expected, read), detail: `${count(read)} of about ${count(expected)} issues read${done > 0 ? `, ${count(done)} imported` : ''}` }
+    case 'creating':
+      return { label: 'Creating tasks…', step: 2, done: created, total, detail: `${count(created)} of ${count(total)} tasks created` }
+    case 'details':
+      return { label: 'Adding files and comments…', step: 3, done: done + failed, total, detail: imported }
+    case 'linking':
+      return { label: 'Linking related issues…', step: 4, done: done + failed, total, detail: imported }
+    default:
+      return { label: 'Importing issues…', step: null, done: done + failed, total, detail: imported }
+  }
+}
+
+/** The rate-limit notice while Linear makes the import wait, else null. */
+export function linearRateLimitNotice(waitingUntil: string | null, now: number): string | null {
+  const until = waitingUntil ? Date.parse(waitingUntil) : NaN
+  if (!(until > now)) return null
+  const minutes = Math.max(1, Math.ceil((until - now) / 60_000))
+  const time = new Date(until).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return `Linear's rate limit is reached. The import goes on at ${time} (in about ${minutes} min).`
 }

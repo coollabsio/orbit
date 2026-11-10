@@ -33,6 +33,7 @@ import { Topbar } from './Topbar'
 import { UserMenu } from './UserMenu'
 import { SidebarResizeHandle, usePageListWidth } from './pageListWidth'
 import { MobileDock } from './MobileDock'
+import { DonationReminder } from './DonationReminder'
 import { ProfilePopoverProvider } from './ProfilePopover'
 import { NoWorkspaceShell } from './NoWorkspaceShell'
 import { useAppSidebarTheme } from '@/lib/customTheme'
@@ -146,7 +147,7 @@ function Shell() {
     <NewTaskProvider>
     <SidebarSlotContext value={hostsList ? pageListSlot : null}>
     {/* Floating navigation (Account settings → Appearance, desktop): framed panels on a dotted backdrop */}
-    <div className="flex h-[var(--app-height,100svh)] w-full overflow-hidden bg-background pt-[env(safe-area-inset-top,0px)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)] min-[900px]:floating:gap-2 min-[900px]:floating:p-2 min-[900px]:floating:bg-[radial-gradient(circle,rgb(0_0_0/0.13)_1px,transparent_1.3px)] min-[900px]:floating:bg-size-[20px_20px] dark:min-[900px]:floating:bg-[radial-gradient(circle,rgb(255_255_255/0.09)_1px,transparent_1.3px)]">
+    <div className="flex h-[var(--app-height,100svh)] w-full overflow-hidden bg-background pt-[env(safe-area-inset-top,0px)] pl-[env(safe-area-inset-left,0px)] pr-[env(safe-area-inset-right,0px)] min-[900px]:floating:gap-2 min-[900px]:floating:p-2">
       <aside
         className={cn(
           sidebarTheme.scheme,
@@ -203,6 +204,7 @@ function Shell() {
           </ErrorBoundary>
         </div>
         <MobileDock chatBadge={chatBadge} chatUnread={chatUnread} />
+        {!guest && <DonationReminder />}
       </div>
 
       <SideSheet open={drawerOpen} onOpenChange={setDrawerOpen}>

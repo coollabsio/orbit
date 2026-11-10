@@ -24,7 +24,7 @@ export default function AdminStorageScreen() {
   const storage = settings.data?.storage
   return (
     <AdminShell onRefresh={() => settings.refetch()}>
-      {settings.isPending ? <SettingsCard title="Storage"><Note>Loading settings…</Note></SettingsCard> : null}
+      {settings.isPending ? <SettingsCard title="Storage"><Note loading>Loading settings…</Note></SettingsCard> : null}
       {settings.isError ? (
         <SettingsCard title="Storage">
           <View className="flex-row items-center gap-2">

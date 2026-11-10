@@ -21,6 +21,7 @@ Every action runs in the app; nothing opens the web.
 - `src/orbit-context.tsx`: `useOrbit()` gives the client, the user and the current workspace (the last one chosen, else the first).
 - `src/components/docs/PageEditor.dom.tsx`: the page editor, an Expo DOM component (`'use dom'`) running BlockNote with the web's schema from `@orbit/editor` (`packages/editor`). It connects to the page's collab socket with a one-time ticket (`getTicket` native action), and the screen (`src/app/(tabs)/docs/[id].tsx`) drives it through props, native actions and `ref.run(command)`. `src/data/page-editor.ts` holds the commands, the toolbar state and the answers to close codes.
 - `src/live.ts`: the workspace events socket (marks task, project and inbox queries stale) and the chat live socket (patches messages and read states). Both close in the background and reconnect in the foreground.
+- `src/push.ts`: iOS push notifications straight through APNs (no Expo push service). Settings → Notifications turns them on (`POST /api/v1/push/apns` with the raw device token and the profile's APNs environment); launch, sign-in and a workspace change register the token again when iOS allows notifications. A tapped notification's `url` (a web path) opens the matching screen (`src/data/push-route.ts`). The server pushes only when the user has no active live connection, which is why the sockets close in the background. Expo Go cannot get them: use a TestFlight or development build.
 
 ## How the app talks to Orbit
 
@@ -133,5 +134,5 @@ What you still have to do:
 
 ## Next steps
 
-- Move to a development build (`bunx expo run:ios|android`, or EAS) when the app needs native modules that Expo Go does not include, for example APNs/FCM push.
+- Android push (FCM). iOS push needs a TestFlight or development build (`bunx expo run:ios`); Expo Go cannot get it.
 - Browser-sheet sign-in for passkeys. Admin → Sign-in providers (client ID and secret) is web-only.

@@ -17,6 +17,7 @@ import { useWorkspace } from '@/features/workspaces/workspaceContext'
 import { EMOJI_IMAGE_TYPES, emojiNameFromFile, emojiProblem } from '@/lib/customEmoji'
 import { shortDate } from '@/lib/format'
 import { EMOJI_SHORTCODES } from '@/lib/markdown'
+import { LoadingText } from '@/components/ui/spinner'
 
 /** What the server can answer to a new emoji or a delete, in words for the page. */
 const SERVER_PROBLEMS: Record<string, string> = {
@@ -119,7 +120,7 @@ export function EmojiPage() {
     ) : (
       <SettingsCard title="Emoji" description={emoji.data ? `${emoji.data.length} of 200 in this workspace.` : undefined} flush>
         <div className="flex flex-col divide-y">
-          {emoji.isPending ? <SettingsRow>Loading emoji…</SettingsRow> : null}
+          {emoji.isPending ? <SettingsRow><LoadingText>Loading emoji…</LoadingText></SettingsRow> : null}
           {emoji.isError ? <SettingsRow role="alert">Emoji could not be loaded.</SettingsRow> : null}
           {emoji.data?.map((entry) => (
             <SettingsRow className="flex-nowrap" key={entry.id}>
