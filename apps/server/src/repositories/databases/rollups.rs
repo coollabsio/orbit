@@ -438,7 +438,10 @@ fn compute(function: RollupFunction, pages: &[Vec<Item>]) -> Option<Value> {
         F::CountNotEmpty => count(pages.len() - empty),
         F::PercentEmpty => ratio(empty),
         F::PercentNotEmpty => ratio(pages.len() - empty),
-        F::Sum => Some(json!(numbers.iter().sum::<f64>())),
+        // `Iterator::sum` of no floats is -0.0.
+        F::Sum => Some(json!(
+            numbers.iter().fold(0.0, |total, number| total + number)
+        )),
         F::Average => {
             (!numbers.is_empty()).then(|| json!(numbers.iter().sum::<f64>() / numbers.len() as f64))
         }
