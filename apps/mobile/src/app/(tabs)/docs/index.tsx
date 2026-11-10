@@ -81,7 +81,7 @@ export default function DocsScreen() {
       onPress: () => toggleFavorite.mutate({ pageId: page.id, favorite: !favorite, page }, { onError: failed('Could not change the favorites.') }),
     }
   }
-  /** A favorite outside the tree (a database row or one of its sub-pages): the server has its version and sub-pages. */
+  /** A favorite outside the tree (a database row or one of its sub-pages): the server has its parent, version and sub-pages. */
   const favoriteMenu = (row: FavoriteRow) => {
     if (row.page) return pageMenu(row.page)
     const confirmTrash = () =>
@@ -94,6 +94,7 @@ export default function DocsScreen() {
       actions: [
         { label: 'Open', icon: 'arrowUpRight', onPress: () => router.push(`/docs/${row.id}`) },
         favoriteAction(row),
+        { label: 'Move to', icon: 'arrowRight', onPress: () => void api.page(client, workspaceId, row.id).then(moveSheet.open, failed('Could not load the page.')) },
         { label: 'Move to trash', icon: 'trash', destructive: true, onPress: () => void confirmTrash() },
       ],
     })
