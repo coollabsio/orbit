@@ -17,6 +17,7 @@ const SOURCES: readonly { name: string; description: string; href: Href }[] = [
   { name: 'Asana', description: 'Import projects and their tasks into Tasks.', href: '/settings/import/asana' },
   { name: 'Linear', description: 'Import teams and their issues into Tasks.', href: '/settings/import/linear' },
   { name: 'Trello', description: 'Import boards and their cards into Tasks.', href: '/settings/import/trello' },
+  { name: 'Orbit', description: 'Import projects, pages and chats from another Orbit instance.', href: '/settings/import/orbit' },
 ]
 
 /** The Select value of "Not assigned". */

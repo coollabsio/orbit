@@ -30,6 +30,8 @@ pub struct ExportPage {
 pub struct ExportFile {
     pub page_id: Id,
     pub id: Id,
+    /// The stored bytes; files with the same content share one blob.
+    pub blob_id: Id,
     pub file_name: String,
     pub mime_type: String,
     pub size_bytes: u64,
@@ -239,19 +241,24 @@ impl PageExportRepository {
     }
 
     /// Every live page `actor_id` can see in the workspace, as one forest: teamspace pages in the
-    /// folder `<root>/<Teamspace name>/`, the actor's private pages in `<root>/Private/`.
+    /// folder `<root>/<Teamspace name>/`, the actor's private pages in `<root>/Private/`. With
+    /// `private_only`, only the actor's private pages.
     pub async fn load_workspace(
         &self,
         workspace_id: Id,
         actor_id: Id,
         root: &str,
+        private_only: bool,
     ) -> Result<ExportSource, PageExportError> {
         let pool = self.database.pool();
         require_access(pool, workspace_id, actor_id).await?;
-        let visible_pages = format!(
-            "FROM pages WHERE workspace_id = $1 AND deleted_at IS NULL AND {visible}",
-            visible = visible(2)
-        );
+        let visible = if private_only {
+            "(pages.teamspace_id IS NULL AND pages.owner_id = $2)".to_owned()
+        } else {
+            visible(2)
+        };
+        let visible_pages =
+            format!("FROM pages WHERE workspace_id = $1 AND deleted_at IS NULL AND {visible}");
         if let Some(hub) = CollabHub::existing(&self.database) {
             let ids: Vec<String> =
                 sqlx::query_scalar(sqlx::AssertSqlSafe(format!("SELECT id {visible_pages}")))
@@ -379,8 +386,8 @@ impl PageExportRepository {
         let exported: Vec<String> = pages.iter().map(|page| page.id.to_string()).collect();
         let exported = serde_json::to_string(&exported).map_err(|_| PageExportError::Corrupt)?;
         let file_rows = sqlx::query(sqlx::AssertSqlSafe(format!(
-            "SELECT page_files.id, page_files.page_id, page_files.file_name, page_files.mime_type, \
-             page_files.size_bytes, attachment_blobs.storage_key FROM page_files \
+            "SELECT page_files.id, page_files.page_id, page_files.blob_id, page_files.file_name, \
+             page_files.mime_type, page_files.size_bytes, attachment_blobs.storage_key FROM page_files \
              JOIN attachment_blobs ON attachment_blobs.id = page_files.blob_id \
              WHERE page_files.workspace_id = $1 AND page_files.page_id IN ({ids})",
             ids = json_text_array(self.database.backend(), 2)
@@ -398,6 +405,7 @@ impl PageExportRepository {
                 ExportFile {
                     page_id,
                     id,
+                    blob_id: parse_id(row.get("blob_id")).map_err(|_| PageExportError::Corrupt)?,
                     file_name: row.get("file_name"),
                     mime_type: row.get("mime_type"),
                     size_bytes: u64::try_from(row.get::<i64, _>("size_bytes")).unwrap_or(0),

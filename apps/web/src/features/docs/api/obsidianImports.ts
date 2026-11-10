@@ -82,23 +82,26 @@ function uploadProblem(request: XMLHttpRequest): ApiProblem {
   })
 }
 
+type UploadOptions = { onProgress?: (fraction: number) => void; signal?: AbortSignal }
+
+/** Uploads the vault zip as the `file` field and starts the scan. */
+export function uploadObsidianArchive(workspaceId: string, file: File, options: UploadOptions = {}): Promise<ObsidianImport> {
+  return uploadImportArchive<ObsidianImport>(`/api/v1/workspaces/${workspaceId}/imports/obsidian`, file, options)
+}
+
 /**
- * Uploads the vault zip as the `file` field, reporting progress from 0 to 1. One `XMLHttpRequest` because `fetch`
- * cannot report upload progress (like chat attachments). Rejects with an `ApiProblem`, an `UploadUnreachable`, or an
- * `AbortError` when `signal` aborts.
+ * Posts a zip as the `file` field of `url`, reporting progress from 0 to 1. One `XMLHttpRequest` because `fetch`
+ * cannot report upload progress (like chat attachments). Resolves with the 201 body; rejects with an `ApiProblem`,
+ * an `UploadUnreachable`, or an `AbortError` when `signal` aborts.
  */
-export function uploadObsidianArchive(
-  workspaceId: string,
-  file: File,
-  { onProgress, signal }: { onProgress?: (fraction: number) => void; signal?: AbortSignal } = {},
-): Promise<ObsidianImport> {
+export function uploadImportArchive<T>(url: string, file: File, { onProgress, signal }: UploadOptions = {}): Promise<T> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(new DOMException('The upload was cancelled.', 'AbortError'))
       return
     }
     const request = new XMLHttpRequest()
-    request.open('POST', `/api/v1/workspaces/${workspaceId}/imports/obsidian`)
+    request.open('POST', url)
     request.setRequestHeader('X-Orbit-Contract', CONTRACT_ID)
     request.withCredentials = true
     request.responseType = 'json'
@@ -106,7 +109,7 @@ export function uploadObsidianArchive(
       if (event.lengthComputable) onProgress?.(event.loaded / event.total)
     }
     request.onload = () => {
-      if (request.status === 201) resolve(request.response as ObsidianImport)
+      if (request.status === 201) resolve(request.response as T)
       else reject(uploadProblem(request))
     }
     request.onerror = () => reject(new UploadUnreachable('The server could not be reached.'))

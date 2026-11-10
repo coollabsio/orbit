@@ -50,10 +50,14 @@ pub enum Permission {
     /// Export the whole workspace as a ZIP archive and download its exports.
     #[serde(rename = "workspace.export")]
     WorkspaceExport,
+    /// Export one's own private pages, private channels and DMs, and create an API token whose
+    /// only scope is `workspace:export:personal`.
+    #[serde(rename = "workspace.export_personal")]
+    WorkspaceExportPersonal,
 }
 
 impl Permission {
-    pub const ALL: [Self; 15] = [
+    pub const ALL: [Self; 16] = [
         Self::WorkspaceUpdate,
         Self::WorkspaceDelete,
         Self::WorkspaceTransfer,
@@ -69,6 +73,7 @@ impl Permission {
         Self::BillingManage,
         Self::StorageManage,
         Self::WorkspaceExport,
+        Self::WorkspaceExportPersonal,
     ];
 }
 
@@ -279,6 +284,7 @@ impl Policy {
             | Permission::WorkspaceExport => {
                 matches!(role, WorkspaceRole::Owner | WorkspaceRole::Admin)
             }
+            Permission::WorkspaceExportPersonal => !matches!(role, WorkspaceRole::Guest),
         }
     }
 

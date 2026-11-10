@@ -51,6 +51,15 @@ export const EXPIRATION_OPTIONS = [
 
 export type ExpirationValue = (typeof EXPIRATION_OPTIONS)[number]['value']
 
+/** An export scope stands alone on a personal token, so it is a kind of token, not an access level. */
+export const TOKEN_KINDS = [
+  { value: 'access', label: 'Tasks, docs and chat', description: 'For scripts, bots and AI clients.' },
+  { value: 'workspace:export', label: 'Workspace export', description: 'Lets another Orbit instance import this workspace as you see it: tasks, docs, chat and files.' },
+  { value: 'workspace:export:personal', label: 'Personal export', description: 'Lets another Orbit instance import only your private docs, your private channels and your DMs.' },
+] as const
+
+export type TokenKind = (typeof TOKEN_KINDS)[number]['value']
+
 export const isExpired = (expiresAt: string | null | undefined, now = Date.now()) => expiresAt != null && new Date(expiresAt).getTime() <= now
 
 /** A row of the access picker; a level without a scope is unavailable, except `read` with no `read` scope, which is always granted. */

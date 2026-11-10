@@ -7,7 +7,7 @@ import { ConfirmDialog, type ConfirmRequest } from '../../../components/settings
 import { Badge, FieldLabel, RowIcon, Select, SettingsCard, SettingsRow, SettingsShell, WORKSPACE_NAV } from '../../../components/settings/Shell'
 import { Toggles } from '../../../components/settings/Toggles'
 import { relativeTime, shortDate } from '../../../data/format'
-import { type AccessLevel, accessLevel, EXPIRATION_OPTIONS, type ExpirationValue, isExpired, levelEnabled, type ScopeResource, tokenResources, tokenSummary, withAccessLevel } from '../../../data/workspace-settings-api'
+import { type AccessLevel, accessLevel, EXPIRATION_OPTIONS, type ExpirationValue, isExpired, levelEnabled, type ScopeResource, TOKEN_KINDS, type TokenKind, tokenResources, tokenSummary, withAccessLevel } from '../../../data/workspace-settings-api'
 import { useApiTokens, useApiTokenWrites } from '../../../hooks/workspace-settings'
 import { useOrbit } from '../../../orbit-context'
 import { useProjects } from '../../../queries'
@@ -24,12 +24,13 @@ const LEVELS: { value: AccessLevel; label: string }[] = [
 export default function ApiTokensScreen() {
   const { workspace } = useOrbit()
   const canManage = workspace.permissions.includes('api_tokens.manage')
-  const tokens = useApiTokens(canManage)
+  const canCreate = canManage || workspace.permissions.includes('workspace.export_personal')
+  const tokens = useApiTokens(canCreate)
   return (
-    <SettingsShell title="Settings" nav={WORKSPACE_NAV} onRefresh={canManage ? () => tokens.refetch() : undefined}>
-      {canManage ? (
+    <SettingsShell title="Settings" nav={WORKSPACE_NAV} onRefresh={canCreate ? () => tokens.refetch() : undefined}>
+      {canCreate ? (
         <>
-          <CreateToken />
+          <CreateToken canManage={canManage} />
           <ActiveTokens />
         </>
       ) : (
@@ -41,7 +42,7 @@ export default function ApiTokensScreen() {
   )
 }
 
-function CreateToken() {
+function CreateToken({ canManage }: { canManage: boolean }) {
   const { create } = useApiTokenWrites()
   const projectsQuery = useProjects()
   const projects = projectsQuery.data ?? []
@@ -49,14 +50,19 @@ function CreateToken() {
   const [projectIds, setProjectIds] = useState<string[]>([])
   const [allProjects, setAllProjects] = useState(false)
   const [scopes, setScopes] = useState<ApiTokenScope[]>(['tasks:read'])
+  const [chosenKind, setKind] = useState<TokenKind>('access')
+  // members may create only a personal export token
+  const kind: TokenKind = canManage ? chosenKind : 'workspace:export:personal'
+  const access = kind === 'access'
+  const kindDescription = TOKEN_KINDS.find((option) => option.value === kind)?.description
   const [serviceAccount, setServiceAccount] = useState(false)
   const [expiration, setExpiration] = useState<ExpirationValue>('never')
   const [issuedToken, setIssuedToken] = useState<string>()
   const [copied, setCopied] = useState(false)
 
   // projects only limit task access, so a token without a task scope needs none
-  const taskScope = scopes.some((scope) => scope.startsWith('tasks:'))
-  const ready = name.trim() !== '' && scopes.length > 0 && (!taskScope || allProjects || projectIds.length > 0)
+  const taskScope = access && scopes.some((scope) => scope.startsWith('tasks:'))
+  const ready = name.trim() !== '' && (!access || (scopes.length > 0 && (!taskScope || allProjects || projectIds.length > 0)))
 
   // a service account has task access only, so selecting it drops the docs and chat scopes
   const selectServiceAccount = (checked: boolean) => {
@@ -69,7 +75,7 @@ function CreateToken() {
   const submit = () => {
     if (!ready || create.isPending) return
     create.mutate(
-      { name: name.trim(), projectIds: taskScope && !allProjects ? projectIds : [], allProjects: taskScope && allProjects, scopes, serviceAccount, expiresInDays: expiration === 'never' ? null : Number(expiration) },
+      { name: name.trim(), projectIds: taskScope && !allProjects ? projectIds : [], allProjects: taskScope && allProjects, scopes: access ? scopes : [kind], serviceAccount: access && serviceAccount, expiresInDays: expiration === 'never' ? null : Number(expiration) },
       {
         onSuccess: (issued) => {
           setIssuedToken(issued.token)
@@ -92,30 +98,41 @@ function CreateToken() {
   ) : null
 
   return (
-    <SettingsCard title="Create API token" description="Create a personal token, or select a non-login service account for an integration. The secret is shown only once.">
+    <SettingsCard title="Create API token" description={canManage ? 'Create a personal token, or select a non-login service account for an integration. The secret is shown only once.' : `${kindDescription} Paste it with this workspace's URL in the other instance. The secret is shown only once.`}>
       <View className="gap-4">
-        <Input label="Name" required value={name} maxLength={100} onChangeText={setName} placeholder="Discord bot" autoCorrect={false} returnKeyType="done" onSubmitEditing={submit} />
+        <Input label="Name" required value={name} maxLength={100} onChangeText={setName} placeholder={access ? 'Discord bot' : 'Orbit import'} autoCorrect={false} returnKeyType="done" onSubmitEditing={submit} />
         <View className="gap-2">
           <FieldLabel>Expiration</FieldLabel>
           <Select label="Expiration" value={expiration} options={EXPIRATION_OPTIONS} onChange={setExpiration} />
         </View>
-        {/* a choice card: the whole card toggles the checkbox and tints while checked */}
-        <Pressable
-          accessibilityRole="checkbox"
-          accessibilityLabel="Use a service account"
-          accessibilityState={{ checked: serviceAccount }}
-          onPress={() => selectServiceAccount(!serviceAccount)}
-          className={`flex-row gap-2 rounded-lg border p-2.5 ${serviceAccount ? 'border-primary/20 bg-primary/10' : 'border-border active:bg-muted/50'}`}
-        >
-          <View className="pt-0.5">
-            <Checkbox checked={serviceAccount} />
+        {canManage ? (
+          <View className="gap-2">
+            <FieldLabel>Token type</FieldLabel>
+            <Select label="Token type" value={kind} options={TOKEN_KINDS} onChange={setKind} />
+            <Text className="text-[14px] leading-[20px] text-muted-foreground">{kindDescription}</Text>
           </View>
-          <View className="flex-1 gap-1.5">
-            <Text className="font-noto-medium text-[14px] leading-[19.25px]">Use a service account</Text>
-            <Text className="text-[14px] leading-[21px] text-muted-foreground">For bots, such as a Discord bot. Changes show as made by this account, not by you. Tokens with the same name share one account.</Text>
-          </View>
-        </Pressable>
-        <AccessPicker resources={tokenResources(serviceAccount)} scopes={scopes} onChange={setScopes} details={{ Tasks: projectPicker }} />
+        ) : null}
+        {access ? (
+          <>
+            {/* a choice card: the whole card toggles the checkbox and tints while checked */}
+            <Pressable
+              accessibilityRole="checkbox"
+              accessibilityLabel="Use a service account"
+              accessibilityState={{ checked: serviceAccount }}
+              onPress={() => selectServiceAccount(!serviceAccount)}
+              className={`flex-row gap-2 rounded-lg border p-2.5 ${serviceAccount ? 'border-primary/20 bg-primary/10' : 'border-border active:bg-muted/50'}`}
+            >
+              <View className="pt-0.5">
+                <Checkbox checked={serviceAccount} />
+              </View>
+              <View className="flex-1 gap-1.5">
+                <Text className="font-noto-medium text-[14px] leading-[19.25px]">Use a service account</Text>
+                <Text className="text-[14px] leading-[21px] text-muted-foreground">For bots, such as a Discord bot. Changes show as made by this account, not by you. Tokens with the same name share one account.</Text>
+              </View>
+            </Pressable>
+            <AccessPicker resources={tokenResources(serviceAccount)} scopes={scopes} onChange={setScopes} details={{ Tasks: projectPicker }} />
+          </>
+        ) : null}
         <View className="items-start">
           <Button label="Create token" disabled={create.isPending || !ready} onPress={submit} />
         </View>

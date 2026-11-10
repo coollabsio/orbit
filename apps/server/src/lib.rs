@@ -31,6 +31,8 @@ pub mod object_storage;
 pub mod obsidian;
 pub mod obsidian_import_routes;
 pub mod openapi;
+pub mod orbit_import;
+pub mod orbit_import_routes;
 pub mod page_comment_routes;
 pub mod page_file_routes;
 pub mod page_routes;

@@ -113,6 +113,29 @@ Core files: `TasksPage.tsx`, `components/TaskList.tsx`, `components/TaskBoard.ts
   list become description lines; link attachments a Links section. Uploaded attachments and uploads linked from the
   description and comments are downloaded, attached, and their URLs rewritten; a download Trello refuses is counted.
   Comments are written by the importer, oldest first, with author and time.
+- Orbit import (server `orbit_import/` with `client.rs`, `archive.rs`, `tasks.rs`, `pages.rs`, `chat.rs`; routes
+  `orbit_import_routes.rs` under `/imports/orbit` (`POST {url, token}`, `POST /upload`, `GET`, `GET /{id}?include=tree`,
+  `POST /{id}/start {selection}`, `POST /{id}/cancel`); migration 0085: `orbit_imports`, `orbit_import_items`,
+  `orbit_import_links`): copies another Orbit workspace from its export archive, pulled with an export API token
+  (`orbit.fetch` job: `/me`, `POST /exports` once, poll up to 24 h, download to storage, read the manifest and tree)
+  or uploaded as a ZIP. `mode` comes from the token's scope or the manifest: `full` (owner/admin of the target;
+  teamspaces matched by name, projects with statuses and labels, tasks parents first via `import_task` with creator
+  and assignees by email, attachments, comments, relations, teamspace pages, the exporter's private pages into the
+  importer's private space, public channels matched by name, private channels, DMs) or `personal` (any non-guest;
+  only private pages and private channels/DMs, `project_ids`/`teamspace_ids` refused; any import needs
+  `WorkspaceExportPersonal`, a full one also `WorkspaceExport`). Every created record is in `orbit_import_links`
+  keyed by the source workspace id and a `scope` (`''` for full imports, the importer's user id for personal ones):
+  a re-run in the same scope creates nothing twice; pre-existing pages keep their content and only gain new
+  comments. The archive is under the importer's control, so a personal import writes only its own scope, skips
+  (counts as existing) a channel or page a full import created, and writes every message and comment as the importer
+  with a name/time header, keeping only the importer's reactions. Consequence: a private channel or DM imported by a
+  member before the admin's full import, or by two members, exists once per scope. Chat history is inserted directly
+  (`chat.rs`): no notifications, mention rows, push, bots, webhooks or live events; read markers end at the last
+  message; unmatched authors get a name/time header. Report: `created` counts, `skipped_existing`, `unmatched_users`,
+  `failures`, `members_must_import_private`. Problem codes: `orbit_url_invalid`, `orbit_token_invalid`,
+  `orbit_scope_missing`, `orbit_unreachable`, `orbit_export_too_large`, `orbit_format_unsupported`,
+  `orbit_import_state_conflict`, `forbidden`. Source side: public `POST /api/public/v1/exports` reuses only a queued or
+  running export. Dev: `ORBIT_DEV_ORBIT_IMPORT_LOCAL=1` allows `http://127.0.0.1:<port>` as the source.
 
 ### Sub-issues
 

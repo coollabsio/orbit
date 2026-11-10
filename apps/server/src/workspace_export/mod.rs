@@ -1,13 +1,17 @@
-//! Full workspace export (data portability): an owner or admin starts it, a `workspace.export` job
-//! writes a ZIP of the workspace as the requester sees it (layout in [`archive::README`]) and
-//! stores it, and the requester downloads it until it expires. Leaving the workspace or deleting
-//! the account expires the member's exports ([`expire_for_user`]).
+//! Workspace export (data portability): a member starts it, a `workspace.export` job writes a ZIP
+//! (layout in [`archive::README`]) and stores it, and the requester downloads it until it
+//! expires. A [`ExportMode::Full`] export (owners and admins) holds the workspace as the requester
+//! sees it; a [`ExportMode::Personal`] one (any member but a guest) only the requester's private
+//! pages, private channels and DMs. The web app starts full exports with a session, other Orbit
+//! instances start either mode through the public API with an export API token. Leaving the
+//! workspace or deleting the account expires the member's exports ([`expire_for_user`]).
 //!
 //! State machine (`workspace_exports.status`): `queued` → `running` → `ready`, or `failed` after
-//! the job's last attempt. One export per workspace is `queued` or `running` at a time. The ZIP is
-//! `exports/{workspace_id}/{id}.zip` where new attachment blobs of the workspace go (its own bucket,
-//! the installation bucket, or the server's disk under the backups directory, which backups do not
-//! copy). Retention deletes it with its row [`EXPORT_TTL_MILLIS`] after it is ready.
+//! the job's last attempt. One export per (workspace, requester, mode) is `queued` or `running` at
+//! a time. The ZIP is `exports/{workspace_id}/{id}.zip` where new attachment blobs of the
+//! workspace go (its own bucket, the installation bucket, or the server's disk under the backups
+//! directory, which backups do not copy). Retention deletes it with its row [`EXPORT_TTL_MILLIS`]
+//! after it is ready.
 
 mod archive;
 
@@ -20,7 +24,7 @@ use orbit_platform::{
     BlobReader, BlobStore, Database, Id, Job, JobError, JobKind, JobKindRegistrationError,
     JobStore, ObjectStorage, Row, S3Bucket, TimestampMillis, Worker,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
@@ -51,7 +55,42 @@ pub fn job_kind() -> JobKind {
         )
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, ToSchema)]
+/// What an export holds; also what an export API token may start.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ExportMode {
+    /// The workspace as the requester sees it.
+    Full,
+    /// Only the requester's private pages, the private channels and DMs they are in, and the
+    /// members who appear in them.
+    Personal,
+}
+
+impl ExportMode {
+    const fn as_str(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::Personal => "personal",
+        }
+    }
+
+    fn parse(value: &str) -> Self {
+        match value {
+            "personal" => Self::Personal,
+            _ => Self::Full,
+        }
+    }
+
+    #[must_use]
+    pub const fn permission(self) -> Permission {
+        match self {
+            Self::Full => Permission::WorkspaceExport,
+            Self::Personal => Permission::WorkspaceExportPersonal,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum WorkspaceExportStatus {
     Queued,
@@ -106,6 +145,7 @@ pub struct WorkspaceExport {
     #[schema(value_type = String)]
     pub id: Id,
     pub status: WorkspaceExportStatus,
+    pub mode: ExportMode,
     /// The member who started it; `null` when the account is gone.
     pub requested_by_name: Option<String>,
     /// Size of the ZIP archive once it is ready.
@@ -137,9 +177,10 @@ pub enum ExportError {
     /// Not a member, an unknown workspace, or no such (ready, unexpired) export.
     #[error("workspace export not found")]
     NotFound,
-    #[error("only workspace owners and administrators can export the workspace")]
+    /// Not allowed to run an export of this mode (owners and admins for a full export).
+    #[error("the member may not run this export")]
     Forbidden,
-    #[error("another export of the workspace is in progress")]
+    #[error("another export of the member is in progress")]
     InProgress,
     #[error("the export was stopped")]
     Cancelled,
@@ -176,6 +217,7 @@ async fn require_exporter<'e, E>(
     executor: E,
     workspace_id: Id,
     user_id: Id,
+    mode: ExportMode,
 ) -> Result<(), ExportError>
 where
     E: sqlx::Executor<'e, Database = sqlx::Any>,
@@ -183,7 +225,7 @@ where
     let actor = membership::actor(executor, workspace_id, user_id)
         .await?
         .ok_or(ExportError::NotFound)?;
-    if actor.can(Permission::WorkspaceExport) {
+    if actor.can(mode.permission()) {
         Ok(())
     } else {
         Err(ExportError::Forbidden)
@@ -191,8 +233,8 @@ where
 }
 
 const SELECT_EXPORT: &str = "SELECT workspace_exports.id, workspace_exports.status, \
-     workspace_exports.size_bytes, workspace_exports.created_at, workspace_exports.completed_at, \
-     workspace_exports.expires_at, users.display_name FROM workspace_exports \
+     workspace_exports.mode, workspace_exports.size_bytes, workspace_exports.created_at, \
+     workspace_exports.completed_at, workspace_exports.expires_at, users.display_name FROM workspace_exports \
      LEFT JOIN users ON users.id = workspace_exports.requested_by";
 
 fn export_from_row(row: &sqlx::any::AnyRow) -> Result<WorkspaceExport, ExportError> {
@@ -202,6 +244,7 @@ fn export_from_row(row: &sqlx::any::AnyRow) -> Result<WorkspaceExport, ExportErr
             .parse()
             .map_err(|_| storage_error("invalid export id"))?,
         status: WorkspaceExportStatus::parse(row.get("status")),
+        mode: ExportMode::parse(row.get("mode")),
         requested_by_name: row.get("display_name"),
         size_bytes: row
             .get::<Option<i64>, _>("size_bytes")
@@ -238,33 +281,69 @@ impl WorkspaceExportService {
         &self.inner.database
     }
 
-    /// Queues an export of the workspace as `actor_id` (whose visibility it uses).
+    /// Queues a full export of the workspace as `actor_id` (whose visibility it uses); `InProgress`
+    /// while the actor's previous full export is queued or running.
     pub async fn create(
         &self,
         workspace_id: Id,
         actor_id: Id,
         request_id: &str,
     ) -> Result<WorkspaceExport, ExportError> {
+        self.queue(workspace_id, actor_id, ExportMode::Full, false, request_id)
+            .await
+    }
+
+    /// Returns the actor's queued or running export of `mode`, or queues a new one. Another
+    /// instance's importer calls this, so a retried request never starts a second export; a
+    /// ready export is not reused, so an import never receives stale data.
+    pub async fn start(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        mode: ExportMode,
+        request_id: &str,
+    ) -> Result<WorkspaceExport, ExportError> {
+        self.queue(workspace_id, actor_id, mode, true, request_id)
+            .await
+    }
+
+    async fn queue(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+        mode: ExportMode,
+        reuse: bool,
+        request_id: &str,
+    ) -> Result<WorkspaceExport, ExportError> {
         let now = self.database().database_now().await?;
         let id = Id::new_v7();
         let mut tx = self.database().immediate_transaction().await?;
-        require_exporter(&mut *tx, workspace_id, actor_id).await?;
-        let active: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
-            "SELECT COUNT(*) FROM workspace_exports WHERE workspace_id = $1 AND status IN {ACTIVE}"
+        require_exporter(&mut *tx, workspace_id, actor_id, mode).await?;
+        let existing = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "{SELECT_EXPORT} WHERE workspace_exports.workspace_id = $1 \
+             AND workspace_exports.requested_by = $2 AND workspace_exports.mode = $3 \
+             AND workspace_exports.expires_at > $4 AND workspace_exports.status IN {ACTIVE} \
+             ORDER BY workspace_exports.created_at DESC, workspace_exports.id DESC LIMIT 1"
         )))
         .bind(workspace_id.to_string())
-        .fetch_one(&mut *tx)
+        .bind(actor_id.to_string())
+        .bind(mode.as_str())
+        .bind(now.as_millis())
+        .fetch_optional(&mut *tx)
         .await?;
-        if active > 0 {
-            return Err(ExportError::InProgress);
+        match existing {
+            Some(row) if reuse => return export_from_row(&row),
+            Some(_) => return Err(ExportError::InProgress),
+            None => {}
         }
         sqlx::query(
-            "INSERT INTO workspace_exports (id, workspace_id, requested_by, status, created_at, expires_at) \
-             VALUES ($1, $2, $3, 'queued', $4, $5)",
+            "INSERT INTO workspace_exports (id, workspace_id, requested_by, status, mode, created_at, expires_at) \
+             VALUES ($1, $2, $3, 'queued', $4, $5, $6)",
         )
         .bind(id.to_string())
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
+        .bind(mode.as_str())
         .bind(now.as_millis())
         .bind(now.as_millis() + EXPORT_TTL_MILLIS)
         .execute(&mut *tx)
@@ -283,7 +362,7 @@ impl WorkspaceExportService {
             "workspace_export",
             Some(id),
             request_id,
-            json!({}),
+            json!({"mode": mode.as_str()}),
             now,
         )
         .await?;
@@ -297,19 +376,19 @@ impl WorkspaceExportService {
         export_from_row(&row)
     }
 
-    /// The actor's own exports: an archive holds what its requester sees (private pages, private
-    /// channels, direct messages), so nobody else lists or downloads it.
+    /// The actor's own full exports: an archive holds what its requester sees (private pages,
+    /// private channels, direct messages), so nobody else lists or downloads it.
     pub async fn list(
         &self,
         workspace_id: Id,
         actor_id: Id,
     ) -> Result<Vec<WorkspaceExport>, ExportError> {
         let pool = self.database().pool();
-        require_exporter(pool, workspace_id, actor_id).await?;
+        require_exporter(pool, workspace_id, actor_id, ExportMode::Full).await?;
         let now = self.database().database_now().await?;
         sqlx::query(sqlx::AssertSqlSafe(format!(
             "{SELECT_EXPORT} WHERE workspace_exports.workspace_id = $1 AND workspace_exports.requested_by = $2 \
-             AND workspace_exports.expires_at > $3 \
+             AND workspace_exports.expires_at > $3 AND workspace_exports.mode = 'full' \
              ORDER BY workspace_exports.created_at DESC, workspace_exports.id DESC LIMIT $4"
         )))
         .bind(workspace_id.to_string())
@@ -323,28 +402,57 @@ impl WorkspaceExportService {
         .collect()
     }
 
-    /// Opens a ready, unexpired export for the owner or admin who requested it and audits the
-    /// download.
+    /// One unexpired export of `mode` that the actor requested, while they may still run it.
+    pub async fn get(
+        &self,
+        workspace_id: Id,
+        export_id: Id,
+        actor_id: Id,
+        mode: ExportMode,
+    ) -> Result<WorkspaceExport, ExportError> {
+        let pool = self.database().pool();
+        require_exporter(pool, workspace_id, actor_id, mode).await?;
+        let now = self.database().database_now().await?;
+        let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "{SELECT_EXPORT} WHERE workspace_exports.id = $1 AND workspace_exports.workspace_id = $2 \
+             AND workspace_exports.requested_by = $3 AND workspace_exports.mode = $4 \
+             AND workspace_exports.expires_at > $5"
+        )))
+        .bind(export_id.to_string())
+        .bind(workspace_id.to_string())
+        .bind(actor_id.to_string())
+        .bind(mode.as_str())
+        .bind(now.as_millis())
+        .fetch_optional(pool)
+        .await?
+        .ok_or(ExportError::NotFound)?;
+        export_from_row(&row)
+    }
+
+    /// Opens a ready, unexpired export of `mode` for the member who requested it (while they may
+    /// still run it) and audits the download.
     pub async fn download(
         &self,
         workspace_id: Id,
         export_id: Id,
         actor_id: Id,
+        mode: ExportMode,
         request_id: &str,
     ) -> Result<ExportDownload, ExportError> {
         let pool = self.database().pool();
-        require_exporter(pool, workspace_id, actor_id).await?;
+        require_exporter(pool, workspace_id, actor_id, mode).await?;
         let now = self.database().database_now().await?;
         let row = sqlx::query(
             "SELECT workspace_exports.location, workspace_exports.size_bytes, workspace_exports.created_at, \
              workspaces.name FROM workspace_exports JOIN workspaces ON workspaces.id = workspace_exports.workspace_id \
              WHERE workspace_exports.id = $1 AND workspace_exports.workspace_id = $2 \
-             AND workspace_exports.requested_by = $3 \
-             AND workspace_exports.status = 'ready' AND workspace_exports.expires_at > $4",
+             AND workspace_exports.requested_by = $3 AND workspace_exports.mode = $4 \
+             AND workspace_exports.status = 'ready' AND workspace_exports.expires_at > $5",
         )
         .bind(export_id.to_string())
         .bind(workspace_id.to_string())
         .bind(actor_id.to_string())
+        .bind(mode.as_str())
         .bind(now.as_millis())
         .fetch_optional(pool)
         .await?
@@ -368,7 +476,7 @@ impl WorkspaceExportService {
             "workspace_export",
             Some(export_id),
             request_id,
-            json!({}),
+            json!({"mode": mode.as_str()}),
             now,
         )
         .await?;
@@ -379,11 +487,15 @@ impl WorkspaceExportService {
             .take(10)
             .collect();
         let name = sanitize_segment(row.get::<&str, _>("name"), STEM_MAX_CHARS, "Workspace");
+        let kind = match mode {
+            ExportMode::Full => "export",
+            ExportMode::Personal => "personal export",
+        };
         Ok(ExportDownload {
             reader,
             size_bytes: u64::try_from(row.get::<Option<i64>, _>("size_bytes").unwrap_or(0))
                 .unwrap_or(0),
-            file_name: format!("{name} export {day}.zip"),
+            file_name: format!("{name} {kind} {day}.zip"),
         })
     }
 
@@ -393,7 +505,7 @@ impl WorkspaceExportService {
         let mut tx = self.database().immediate_transaction().await?;
         let row = sqlx::query(sqlx::AssertSqlSafe(format!(
             "UPDATE workspace_exports SET status = 'running' WHERE id = $1 AND status IN {ACTIVE} \
-             RETURNING workspace_id, requested_by"
+             RETURNING workspace_id, requested_by, mode"
         )))
         .bind(export_id.to_string())
         .fetch_optional(&mut *tx)
@@ -406,12 +518,13 @@ impl WorkspaceExportService {
         let workspace_id: Id = workspace
             .parse()
             .map_err(|_| storage_error("invalid workspace id"))?;
+        let mode = ExportMode::parse(row.get("mode"));
         let requester = row
             .get::<Option<String>, _>("requested_by")
             .and_then(|id| id.parse::<Id>().ok());
         let allowed = match requester {
             Some(actor_id) => {
-                match require_exporter(self.database().pool(), workspace_id, actor_id).await {
+                match require_exporter(self.database().pool(), workspace_id, actor_id, mode).await {
                     Ok(()) => Some(actor_id),
                     Err(ExportError::NotFound | ExportError::Forbidden) => None,
                     Err(error) => return Err(error),
@@ -436,6 +549,7 @@ impl WorkspaceExportService {
             blobs: self.inner.blobs.as_ref(),
             workspace_id,
             actor_id,
+            mode,
             origin: &self.inner.public_origin,
             now,
             cancel,

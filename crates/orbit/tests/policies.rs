@@ -91,8 +91,11 @@ fn admin_holds_every_permission_except_the_owner_only_ones() {
 }
 
 #[test]
-fn member_holds_no_role_permission() {
-    assert_eq!(Policy::permissions(WorkspaceRole::Member), []);
+fn member_holds_only_the_personal_export() {
+    assert_eq!(
+        Policy::permissions(WorkspaceRole::Member),
+        [Permission::WorkspaceExportPersonal]
+    );
 }
 
 #[test]
