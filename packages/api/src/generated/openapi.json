@@ -909,6 +909,889 @@
         ]
       }
     },
+    "/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/database": {
+      "get": {
+        "tags": [
+          "public-api"
+        ],
+        "summary": "A database's properties, views and templates",
+        "operationId": "public_get_database",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "The token's workspace, from `GET /me`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page_id",
+            "in": "path",
+            "description": "The database's page id.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The database",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicDatabase"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "insufficient_scope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limit_exceeded",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/database/query": {
+      "post": {
+        "tags": [
+          "public-api"
+        ],
+        "summary": "Rows of a database that match a filter, sorted",
+        "operationId": "public_query_database",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "The token's workspace, from `GET /me`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page_id",
+            "in": "path",
+            "description": "The database's page id.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicQueryDatabaseBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "A page of rows",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicDatabaseRows"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "insufficient_scope",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limit_exceeded",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/rows": {
+      "post": {
+        "tags": [
+          "public-api"
+        ],
+        "summary": "Add a row to a database",
+        "operationId": "public_create_database_row",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "The token's workspace, from `GET /me`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page_id",
+            "in": "path",
+            "description": "The database's page id.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicCreateDatabaseRowBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "The new row",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicDatabaseRow"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "workspace_read_only, trial_limit_reached",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "insufficient_scope, origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, database_row_limit, conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large, doc_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limit_exceeded",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "service_unavailable, page_busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/rows/trash": {
+      "post": {
+        "tags": [
+          "public-api"
+        ],
+        "summary": "Move rows of a database to the trash",
+        "operationId": "public_trash_database_rows",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "The token's workspace, from `GET /me`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page_id",
+            "in": "path",
+            "description": "The database's page id.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicTrashDatabaseRowsBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "How many rows went to the trash",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicTrashedDatabaseRows"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "workspace_read_only",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "insufficient_scope, origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limit_exceeded",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "service_unavailable",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/rows/{row_id}": {
+      "patch": {
+        "tags": [
+          "public-api"
+        ],
+        "summary": "Change a row's values or title",
+        "operationId": "public_update_database_row",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "description": "The token's workspace, from `GET /me`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page_id",
+            "in": "path",
+            "description": "The database's page id.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "row_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublicUpdateDatabaseRowBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "The row",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicDatabaseRow"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "unauthorized",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "workspace_read_only",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "insufficient_scope, origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, conflict",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "423": {
+            "description": "page_locked",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limit_exceeded",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "service_unavailable, page_busy",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/public/v1/workspaces/{workspace_id}/members": {
       "get": {
         "tags": [
@@ -23427,6 +24310,15 @@
             }
           },
           {
+            "name": "tz",
+            "in": "query",
+            "description": "The reader's IANA time zone for computed values (rollups, formulas); default `UTC`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "X-Orbit-Contract",
             "in": "header",
             "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
@@ -23469,6 +24361,328 @@
           },
           "404": {
             "description": "page_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/databases/{database_id}/forms/{view_id}/submit": {
+      "post": {
+        "tags": [
+          "crate::database_routes::forms"
+        ],
+        "summary": "Submits a form view: a new row created by the caller, who needs only read access to the\ndatabase. Required questions left empty and answers to properties the form does not ask are\n422 `answers.<property_id>`; a closed form is 409 `database_form_closed`; more than 30\nsubmissions an hour in the workspace are 429 `database_form_rate_limited`.",
+        "operationId": "submit_database_form",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "database_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "view_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitDatabaseFormBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseRow"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "workspace_read_only, trial_limit_reached",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "page_not_found, database_view_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, database_form_closed, database_row_limit",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "database_form_rate_limited",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/databases/{database_id}/formula/preview": {
+      "post": {
+        "tags": [
+          "crate::database_routes::formula"
+        ],
+        "operationId": "preview_database_formula",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "database_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "tz",
+            "in": "query",
+            "description": "The reader's IANA time zone for date functions; default `UTC`.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DatabaseFormulaPreviewBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseFormulaPreview"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -24923,6 +26137,155 @@
           },
           "422": {
             "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/databases/{database_id}/rows/{row_id}/press/{property_id}": {
+      "post": {
+        "tags": [
+          "crate::database_routes::buttons"
+        ],
+        "summary": "Runs the button's server actions (`set_values`, `add_row`) in one transaction and returns\nthe pressed row, the rows made and the URL to open. A failed action rolls back every one\n(422 names `actions[i]`). Needs access to each `add_row` target (else 404). At most 10\npresses per user per second (429 `database_button_rate_limit`).",
+        "operationId": "press_database_button",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "database_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "row_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "property_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PressDatabaseButtonBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseButtonPress"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -50408,6 +51771,138 @@
           }
         }
       },
+      "DatabaseButtonAction": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "Writes values on the pressed row.",
+            "required": [
+              "values",
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "set_values"
+                ]
+              },
+              "values": {
+                "type": "object"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Adds a row (last) to this or another database of the workspace.",
+            "required": [
+              "database_id",
+              "type"
+            ],
+            "properties": {
+              "database_id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "add_row"
+                ]
+              },
+              "values": {
+                "type": "object"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Opens an `http(s)` URL on the client after the server actions.",
+            "required": [
+              "url",
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "open_url"
+                ]
+              },
+              "url": {
+                "type": "string"
+              }
+            }
+          }
+        ]
+      },
+      "DatabaseButtonConfig": {
+        "type": "object",
+        "description": "A button property's config.",
+        "properties": {
+          "actions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DatabaseButtonAction"
+            },
+            "description": "Run in order on a press, at most 5, with at most one `open_url`."
+          },
+          "confirm": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A question the client asks before the press runs (at most 500 characters)."
+          },
+          "label": {
+            "type": "string",
+            "description": "What the button shows, at most 200 characters; empty shows the property name."
+          }
+        },
+        "additionalProperties": false
+      },
+      "DatabaseButtonCreatedRow": {
+        "type": "object",
+        "required": [
+          "database_id",
+          "row"
+        ],
+        "properties": {
+          "database_id": {
+            "type": "string"
+          },
+          "row": {
+            "$ref": "#/components/schemas/DatabaseRow"
+          }
+        }
+      },
+      "DatabaseButtonPress": {
+        "type": "object",
+        "description": "What a press did.",
+        "required": [
+          "row",
+          "created_rows"
+        ],
+        "properties": {
+          "created_rows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DatabaseButtonCreatedRow"
+            },
+            "description": "The rows that `add_row` actions made, in action order."
+          },
+          "open_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The `open_url` action's URL, for the client to open."
+          },
+          "row": {
+            "$ref": "#/components/schemas/DatabaseRow",
+            "description": "The pressed row after the actions."
+          }
+        }
+      },
       "DatabaseCalculation": {
         "type": "string",
         "description": "A footer calculation of a table column (spec P2 4.3).",
@@ -50439,6 +51934,52 @@
         "enum": [
           "month",
           "week"
+        ]
+      },
+      "DatabaseCardPreview": {
+        "oneOf": [
+          {
+            "type": "string",
+            "enum": [
+              "none"
+            ]
+          },
+          {
+            "type": "string",
+            "description": "The row page's cover.",
+            "enum": [
+              "cover"
+            ]
+          },
+          {
+            "type": "string",
+            "description": "The first image of the row page's body, else the start of its text.",
+            "enum": [
+              "content"
+            ]
+          },
+          {
+            "type": "object",
+            "description": "The first image of a `files` property, by its id.",
+            "required": [
+              "files"
+            ],
+            "properties": {
+              "files": {
+                "type": "string",
+                "description": "The first image of a `files` property, by its id."
+              }
+            }
+          }
+        ],
+        "description": "What a gallery card shows above its title."
+      },
+      "DatabaseCardSize": {
+        "type": "string",
+        "enum": [
+          "small",
+          "medium",
+          "large"
         ]
       },
       "DatabaseCsvCreated": {
@@ -50480,6 +52021,16 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/DatabaseProperty"
+            }
+          },
+          "related_pages": {
+            "type": "object",
+            "description": "Every page that a relation value of `rows` links to, by page id. Absent: none.",
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DatabaseRelatedPage"
+            },
+            "propertyNames": {
+              "type": "string"
             }
           },
           "rows": {
@@ -50577,6 +52128,181 @@
           }
         },
         "additionalProperties": false
+      },
+      "DatabaseFormAccess": {
+        "type": "string",
+        "description": "Who may submit: members who can read the database, or nobody.",
+        "enum": [
+          "members",
+          "closed"
+        ]
+      },
+      "DatabaseFormConfig": {
+        "type": "object",
+        "description": "A form view's layout. A form view without one starts with the title as its one required\nquestion.",
+        "properties": {
+          "access": {
+            "$ref": "#/components/schemas/DatabaseFormAccess"
+          },
+          "confirmation": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The thank-you text after a submission. At most 2,000 characters."
+          },
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "At most 2,000 characters."
+          },
+          "questions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DatabaseFormQuestion"
+            },
+            "description": "In order. Questions of deleted or computed properties, and repeats, are dropped."
+          },
+          "submit_label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The submit button; absent: \"Submit\". At most 200 characters."
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The heading; absent: the database's title. At most 200 characters."
+          }
+        },
+        "additionalProperties": false
+      },
+      "DatabaseFormQuestion": {
+        "type": "object",
+        "required": [
+          "property_id"
+        ],
+        "properties": {
+          "description": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Help text under the question. At most 2,000 characters."
+          },
+          "label": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Shown instead of the property name. At most 200 characters."
+          },
+          "property_id": {
+            "type": "string",
+            "description": "The title or a property that stores values (not a computed one)."
+          },
+          "required": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "DatabaseFormulaPreview": {
+        "type": "object",
+        "description": "`POST …/formula/preview`: the result type of `expression` as the formula of `property_id`\n(a new property when `None`), or its error, and its values for `rows`.",
+        "required": [
+          "samples"
+        ],
+        "properties": {
+          "error": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DatabaseFormulaProblem"
+              }
+            ]
+          },
+          "result_type": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "`number`, `text`, `boolean`, `date`, `person`, `page` or `list<…>`; absent with `error`."
+          },
+          "samples": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DatabaseFormulaSample"
+            }
+          }
+        }
+      },
+      "DatabaseFormulaPreviewBody": {
+        "type": "object",
+        "required": [
+          "expression"
+        ],
+        "properties": {
+          "expression": {
+            "type": "string",
+            "description": "The expression; `prop(\"…\")` takes a property name or id."
+          },
+          "property_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The formula property being edited (so it cannot read itself); omitted for a new one."
+          }
+        },
+        "additionalProperties": false
+      },
+      "DatabaseFormulaProblem": {
+        "type": "object",
+        "description": "A formula error in an API response: `start`..`end` are UTF-16 offsets into the expression.",
+        "required": [
+          "message",
+          "start",
+          "end"
+        ],
+        "properties": {
+          "end": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "message": {
+            "type": "string"
+          },
+          "start": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "DatabaseFormulaSample": {
+        "type": "object",
+        "required": [
+          "row_id"
+        ],
+        "properties": {
+          "row_id": {
+            "type": "string"
+          },
+          "value": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "The cell value as `GET` returns it; absent when empty."
+          }
+        }
       },
       "DatabaseHead": {
         "type": "object",
@@ -50840,10 +52566,18 @@
           "person",
           "checkbox",
           "url",
+          "email",
+          "phone",
+          "files",
+          "unique_id",
+          "relation",
+          "rollup",
           "created_time",
           "created_by",
           "last_edited_time",
-          "last_edited_by"
+          "last_edited_by",
+          "button",
+          "formula"
         ]
       },
       "DatabasePropertyUpdate": {
@@ -50868,6 +52602,30 @@
           },
           "property": {
             "$ref": "#/components/schemas/DatabaseProperty"
+          }
+        }
+      },
+      "DatabaseRelatedPage": {
+        "type": "object",
+        "description": "A page that a relation cell of the response links to, and the reader can read.",
+        "required": [
+          "title",
+          "icon",
+          "database_id"
+        ],
+        "properties": {
+          "database_id": {
+            "type": "string",
+            "description": "The database the page is a row of."
+          },
+          "icon": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string"
           }
         }
       },
@@ -50898,6 +52656,18 @@
             "type": "boolean",
             "description": "The row page has body text."
           },
+          "hidden_links": {
+            "type": "object",
+            "description": "Per relation property id: links of the cell to pages the reader cannot read (they are\nnot in `values`). Absent: none.",
+            "additionalProperties": {
+              "type": "integer",
+              "format": "int64",
+              "minimum": 0
+            },
+            "propertyNames": {
+              "type": "string"
+            }
+          },
           "icon": {
             "type": [
               "string",
@@ -50912,6 +52682,17 @@
             "format": "int64",
             "description": "Manual order among the rows."
           },
+          "preview": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DatabaseRowPreview",
+                "description": "What a gallery card shows of the row page; only when a view read with it is a gallery."
+              }
+            ]
+          },
           "title": {
             "type": "string"
           },
@@ -50924,7 +52705,7 @@
           },
           "values": {
             "type": "object",
-            "description": "Stored values by property id; a missing property is empty.",
+            "description": "Values by property id, stored and computed (relations, rollups); a missing property is\nempty.",
             "additionalProperties": {},
             "propertyNames": {
               "type": "string"
@@ -50935,6 +52716,38 @@
             "format": "int64",
             "description": "The row page's version (`expected_version` of its title and icon edits).",
             "minimum": 0
+          }
+        }
+      },
+      "DatabaseRowPreview": {
+        "type": "object",
+        "description": "What a gallery card can show of a row page. Sent only when a view of the response is a gallery.",
+        "properties": {
+          "cover_position": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cover_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "image_url": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The first image of the body."
+          },
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The first 300 characters of the body text."
           }
         }
       },
@@ -50969,6 +52782,16 @@
           }
         ],
         "description": "A row template: a hidden page of the database whose title, icon, values and body fill a new\nrow."
+      },
+      "DatabaseTimelineZoom": {
+        "type": "string",
+        "enum": [
+          "day",
+          "week",
+          "month",
+          "quarter",
+          "year"
+        ]
       },
       "DatabaseView": {
         "type": "object",
@@ -51037,12 +52860,20 @@
             "$ref": "#/components/schemas/DatabaseCalendarMode",
             "description": "Calendar: a month grid (default) or one week."
           },
+          "card_preview": {
+            "$ref": "#/components/schemas/DatabaseCardPreview",
+            "description": "Gallery: what a card shows above its title (default: the body's first image or text)."
+          },
           "card_properties": {
             "type": "array",
             "items": {
               "type": "string"
             },
             "description": "Board: the properties shown on each card, in order. The title always shows."
+          },
+          "card_size": {
+            "$ref": "#/components/schemas/DatabaseCardSize",
+            "description": "Gallery: the card width."
           },
           "columns": {
             "type": "array",
@@ -51065,8 +52896,30 @@
             ],
             "description": "The template that \"New\" and \"+\" use in this view (`null`: an empty row). A deleted\ntemplate reads as `null`."
           },
+          "end_property_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Timeline: the `date` property where a bar ends. Without one, a date range's end is the\nend and a single date is a one-day bar."
+          },
           "filter": {
             "$ref": "#/components/schemas/DatabaseFilterGroup"
+          },
+          "fit_image": {
+            "type": "boolean",
+            "description": "Gallery: the preview image fits its box instead of filling it."
+          },
+          "form": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DatabaseFormConfig",
+                "description": "Form: the questions and texts (spec P3 18). Only form views have one."
+              }
+            ]
           },
           "group_by": {
             "type": [
@@ -51109,12 +52962,26 @@
             "type": "boolean",
             "description": "Board: hides the columns and lanes that have no cards."
           },
+          "show_table": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Timeline: the table pane left of the bars shows (absent: `true`)."
+          },
           "sorts": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/DatabaseViewSort"
             },
             "description": "At most 10."
+          },
+          "start_property_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Timeline: the `date` property where a bar starts. A timeline without one takes the first\n`date` property."
           },
           "sub_group_by": {
             "type": [
@@ -51133,8 +53000,19 @@
             },
             "description": "Board: group ids in lane order, as `group_order`."
           },
+          "table_columns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Timeline: the properties of the table pane, after the title."
+          },
           "wrap_cells": {
             "type": "boolean"
+          },
+          "zoom": {
+            "$ref": "#/components/schemas/DatabaseTimelineZoom",
+            "description": "Timeline: the time scale."
           }
         },
         "additionalProperties": false
@@ -51161,7 +53039,10 @@
           "table",
           "board",
           "list",
-          "calendar"
+          "calendar",
+          "form",
+          "gallery",
+          "timeline"
         ]
       },
       "DeleteAccountBody": {
@@ -56978,6 +58859,19 @@
           "invisible"
         ]
       },
+      "PressDatabaseButtonBody": {
+        "type": "object",
+        "properties": {
+          "today": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The caller's local day (`YYYY-MM-DD`) that `\"today\"` values take; default: the UTC day."
+          }
+        },
+        "additionalProperties": false
+      },
       "PreviewInvitationBody": {
         "type": "object",
         "required": [
@@ -57291,6 +59185,31 @@
         },
         "additionalProperties": false
       },
+      "PublicCreateDatabaseRowBody": {
+        "type": "object",
+        "properties": {
+          "markdown": {
+            "type": "string",
+            "description": "The body as GitHub-flavored Markdown; with a template, it replaces the template's body."
+          },
+          "template_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A template of the database that fills the title, values and body."
+          },
+          "title": {
+            "type": "string",
+            "description": "Up to 500 characters."
+          },
+          "values": {
+            "type": "object",
+            "description": "Up to 50 values by property name or id."
+          }
+        },
+        "additionalProperties": false
+      },
       "PublicCreateDocBody": {
         "type": "object",
         "description": "Without `parent_id`, `teamspace_id` or `private`, the doc goes to the root of the default\nteamspace.",
@@ -57401,6 +59320,247 @@
         },
         "additionalProperties": false
       },
+      "PublicDatabase": {
+        "type": "object",
+        "description": "A database's schema: what a query and a row write can name.",
+        "required": [
+          "id",
+          "title",
+          "icon",
+          "url",
+          "locked",
+          "row_count",
+          "properties",
+          "views",
+          "templates"
+        ],
+        "properties": {
+          "icon": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "locked": {
+            "type": "boolean",
+            "description": "Properties and views are read-only; rows and values stay writable."
+          },
+          "properties": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicDatabaseProperty"
+            }
+          },
+          "row_count": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "templates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicDatabaseTemplate"
+            }
+          },
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          },
+          "views": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicDatabaseView"
+            }
+          }
+        }
+      },
+      "PublicDatabaseOption": {
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "group": {
+            "description": "Status options: `todo`, `in_progress` or `done`."
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "PublicDatabasePerson": {
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "description": "Empty for someone who left the workspace."
+          }
+        }
+      },
+      "PublicDatabaseProperty": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "type"
+        ],
+        "properties": {
+          "config": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "The rest of the config, such as a number's `format` (a `percent` stores 0.5 for 50%)."
+          },
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "options": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "$ref": "#/components/schemas/PublicDatabaseOption"
+            },
+            "description": "The options of a `select`, `multi_select` or `status` property, in order."
+          },
+          "type": {
+            "$ref": "#/components/schemas/DatabasePropertyType"
+          }
+        }
+      },
+      "PublicDatabaseRow": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "icon",
+          "url",
+          "created_at",
+          "created_by",
+          "updated_at",
+          "updated_by",
+          "values"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "$ref": "#/components/schemas/PublicDatabasePerson"
+          },
+          "icon": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_by": {
+            "$ref": "#/components/schemas/PublicDatabasePerson"
+          },
+          "url": {
+            "type": "string"
+          },
+          "values": {
+            "type": "object",
+            "description": "Every property but the title and the created and edited ones, by property name (by id\nwhen two properties share the name); `null` is empty. Options show by name, people as\n`{id, name}`, dates as `{start, end}`."
+          }
+        }
+      },
+      "PublicDatabaseRows": {
+        "type": "object",
+        "required": [
+          "items",
+          "next_cursor",
+          "total"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicDatabaseRow"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Send it as `cursor` with the same query for the next page; `null` on the last page."
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Rows that match the filter.",
+            "minimum": 0
+          }
+        }
+      },
+      "PublicDatabaseTemplate": {
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        }
+      },
+      "PublicDatabaseView": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "type"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/DatabaseViewType"
+          }
+        }
+      },
       "PublicDoc": {
         "allOf": [
           {
@@ -57415,6 +59575,13 @@
               "markdown": {
                 "type": "string",
                 "description": "The content as GitHub-flavored Markdown, the format that doc writes take."
+              },
+              "values": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "description": "A row of a database: its values, as `POST /docs/{page_id}/database/query` shows them."
               }
             }
           }
@@ -57566,6 +59733,59 @@
             "minimum": 0
           }
         }
+      },
+      "PublicQueryDatabaseBody": {
+        "type": "object",
+        "description": "See `query_database` in `docs/mcp.md` for the filter, sort and value shapes.",
+        "properties": {
+          "cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The `next_cursor` of the previous page, with the same query (else `422`)."
+          },
+          "filter": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "description": "An AND/OR group of rules, as a view's filter; `property_id` takes a property name or id\nand `value` option names, user ids, emails or `\"me\"`."
+          },
+          "limit": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "1 to 100; default 50.",
+            "minimum": 0
+          },
+          "sorts": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "object"
+            },
+            "description": "Up to 10 `{property_id, direction}` with names or ids."
+          },
+          "tz": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "IANA zone for relative dates and computed values; default `UTC`."
+          },
+          "view_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Starts from this view's filter and sorts: `filter` must match too, `sorts` replace them."
+          }
+        },
+        "additionalProperties": false
       },
       "PublicStatus": {
         "type": "object",
@@ -57763,6 +59983,54 @@
             }
           }
         }
+      },
+      "PublicTrashDatabaseRowsBody": {
+        "type": "object",
+        "required": [
+          "row_ids"
+        ],
+        "properties": {
+          "row_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "1 to 100 row ids; ids that are not live rows of the database are skipped."
+          }
+        },
+        "additionalProperties": false
+      },
+      "PublicTrashedDatabaseRows": {
+        "type": "object",
+        "required": [
+          "trashed"
+        ],
+        "properties": {
+          "trashed": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Rows moved to the trash.",
+            "minimum": 0
+          }
+        }
+      },
+      "PublicUpdateDatabaseRowBody": {
+        "type": "object",
+        "description": "Send `values`, `title` or both. Last write wins: no version.",
+        "properties": {
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Up to 500 characters."
+          },
+          "values": {
+            "type": "object",
+            "description": "Up to 50 values by property name or id; `null` clears a value."
+          }
+        },
+        "additionalProperties": false
       },
       "PublicUpdateDocBody": {
         "type": "object",
@@ -59719,6 +61987,23 @@
           "hidden"
         ]
       },
+      "SubmitDatabaseFormBody": {
+        "type": "object",
+        "required": [
+          "answers"
+        ],
+        "properties": {
+          "answers": {
+            "type": "object",
+            "description": "Answers by property id, in the shape of row values; the title's answer is its text.\nLeave out (or send `null`) what the member skipped.",
+            "additionalProperties": {},
+            "propertyNames": {
+              "type": "string"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
       "SubscriptionStatus": {
         "type": "string",
         "description": "A Stripe subscription status (`subscription.status`).",
@@ -59826,6 +62111,17 @@
           },
           "detail": {
             "type": "string"
+          },
+          "formula": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/DatabaseFormulaProblem",
+                "description": "The message and place (UTF-16 offsets into the expression) of a formula error. Only set\nfor `formula_invalid`."
+              }
+            ]
           },
           "instance": {
             "type": "string"

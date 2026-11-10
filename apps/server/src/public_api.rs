@@ -9,7 +9,7 @@ use axum::http::request::Parts;
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, patch, post};
 use axum::{Json, Router};
 use orbit_platform::{Id, Problem, RequestId, TimestampMillis};
 use serde::{Deserialize, Serialize};
@@ -75,7 +75,18 @@ pub fn router(state: PublicApiState) -> Router {
         )
         .route("/tasks/{task}/comments", get(comments).post(create_comment))
         .route("/docs", get(docs).post(create_doc))
-        .route("/docs/{page_id}", get(doc).patch(update_doc));
+        .route("/docs/{page_id}", get(doc).patch(update_doc))
+        .route("/docs/{page_id}/database", get(databases::database))
+        .route(
+            "/docs/{page_id}/database/query",
+            post(databases::query_database),
+        )
+        .route("/docs/{page_id}/rows", post(databases::create_row))
+        .route("/docs/{page_id}/rows/trash", post(databases::trash_rows))
+        .route(
+            "/docs/{page_id}/rows/{row_id}",
+            patch(databases::update_row),
+        );
     let routes = Router::new()
         .route("/me", get(me))
         .nest("/workspaces/{workspace_id}", workspace)
@@ -260,6 +271,7 @@ impl Responder {
             TokenApiError::Internal => Problem::internal(&self.request_id, &self.instance),
             TokenApiError::Task(error) => self.task_problem(error),
             TokenApiError::Page(error) => self.page_problem(error),
+            TokenApiError::Database(error) => self.database_problem(error),
         };
         problem_response(problem)
     }
@@ -781,6 +793,8 @@ macro_rules! path_id {
         }
     };
 }
+
+pub(crate) mod databases;
 
 #[utoipa::path(
     get,

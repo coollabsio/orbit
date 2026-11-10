@@ -294,8 +294,8 @@ Service-account tokens support tasks only; docs and chat require a personal iden
 | --- | --- |
 | Task read | `list_projects`, `list_tasks`, `get_task`, `list_task_statuses` |
 | Task write | `create_task`, `update_task`, `delete_task` |
-| Docs read | `list_docs`, `get_doc` |
-| Docs write | `create_doc`, `update_doc` |
+| Docs read | `list_docs`, `get_doc`, `get_database`, `query_database` |
+| Docs write | `create_doc`, `update_doc`, `create_database_row`, `update_database_row`, `trash_database_rows` |
 | Chat read | `list_conversations`, `list_messages`, `get_thread`, `search_messages` |
 
 Task create takes `project_id`, `status_id`, `title`, optional markdown `description`,
@@ -326,6 +326,26 @@ and fail on a locked doc. A doc can have at most 4,000 blocks (nested ones inclu
 `markdown` for a doc that already has more, fail with "A doc can have at most 4,000 blocks"
 and change nothing. A database outage on a doc or chat tool is a JSON-RPC internal error
 (-32603), not "Resource is not available".
+Databases are docs with `kind: "database"` in `list_docs`, and their rows are docs: `get_doc`
+of a row also returns its `database_id` and `values`. `get_database` takes `database_id` and
+returns the properties (with option names), views, templates and `row_count`.
+`query_database` takes `database_id` and optional `filter`, `sorts`, `view_id`, `limit`
+(1–100, default 50), `cursor` and `tz` (an IANA zone for relative dates and computed values;
+default UTC). The filter is a view filter: an AND/OR group of up to 3 levels, 10 children per
+group and 20 rules, such as `{"op": "and", "children": [{"property_id": "Status", "operator":
+"is", "value": ["Done"]}]}`. With `view_id`, the query starts from that view's filter and sorts;
+`filter` must then match too, and `sorts` replace the view's. It returns `items`, `next_cursor`
+and `total`; a cursor works only with the same query. Orbit filters and sorts on the server
+with the web app's rules. `create_database_row` takes `database_id` and optional `title`,
+`values`, `markdown` (the body) and `template_id`. `update_database_row` takes `database_id`,
+`row_id`, and `values`, `title` or both; the last write wins and no version is needed.
+`trash_database_rows` takes `database_id` and 1–100 `row_ids` and returns `trashed`. Values
+use property names or IDs as keys (a name that two properties share is an error), option
+names or IDs (values never add options), user IDs, member emails or `"me"` for people, and
+`YYYY-MM-DD`, a UTC time or `start/end` for dates. Results show option names and people as
+`{id, name}`. An invalid value or filter fails with "Invalid database input" and its field,
+such as `values.Status`. A write has at most 50 values. See
+[Databases in the public API](public-api.md#databases) for every value shape.
 Chat message and thread tools accept `before` and `limit` (1–100) for pagination.
 `search_messages` takes `query` (up to 500 characters; every word must match, the last one as a
 prefix) and optional `conversation_id`, `author_id`, `has_file` and `cursor` filters. It returns

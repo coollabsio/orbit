@@ -1698,12 +1698,81 @@ export type CustomStickerRecord = {
     url: string;
 };
 
+export type DatabaseButtonAction = {
+    type: 'set_values';
+    values: {
+        [key: string]: unknown;
+    };
+} | {
+    database_id: string;
+    type: 'add_row';
+    values?: {
+        [key: string]: unknown;
+    };
+} | {
+    type: 'open_url';
+    url: string;
+};
+
+/**
+ * A button property's config.
+ */
+export type DatabaseButtonConfig = {
+    /**
+     * Run in order on a press, at most 5, with at most one `open_url`.
+     */
+    actions?: Array<DatabaseButtonAction>;
+    /**
+     * A question the client asks before the press runs (at most 500 characters).
+     */
+    confirm?: string | null;
+    /**
+     * What the button shows, at most 200 characters; empty shows the property name.
+     */
+    label?: string;
+};
+
+export type DatabaseButtonCreatedRow = {
+    database_id: string;
+    row: DatabaseRow;
+};
+
+/**
+ * What a press did.
+ */
+export type DatabaseButtonPress = {
+    /**
+     * The rows that `add_row` actions made, in action order.
+     */
+    created_rows: Array<DatabaseButtonCreatedRow>;
+    /**
+     * The `open_url` action's URL, for the client to open.
+     */
+    open_url?: string | null;
+    /**
+     * The pressed row after the actions.
+     */
+    row: DatabaseRow;
+};
+
 /**
  * A footer calculation of a table column (spec P2 4.3).
  */
 export type DatabaseCalculation = 'count_all' | 'count_values' | 'count_unique' | 'count_empty' | 'count_not_empty' | 'percent_empty' | 'percent_not_empty' | 'sum' | 'average' | 'median' | 'min' | 'max' | 'range' | 'earliest_date' | 'latest_date' | 'date_range' | 'checked' | 'unchecked' | 'percent_checked' | 'percent_unchecked';
 
 export type DatabaseCalendarMode = 'month' | 'week';
+
+/**
+ * What a gallery card shows above its title.
+ */
+export type DatabaseCardPreview = 'none' | 'cover' | 'content' | {
+    /**
+     * The first image of a `files` property, by its id.
+     */
+    files: string;
+};
+
+export type DatabaseCardSize = 'small' | 'medium' | 'large';
 
 export type DatabaseCsvCreated = {
     database: null | Page;
@@ -1716,6 +1785,12 @@ export type DatabaseCsvCreated = {
 export type DatabaseDetail = {
     database: DatabaseHead;
     properties: Array<DatabaseProperty>;
+    /**
+     * Every page that a relation value of `rows` links to, by page id. Absent: none.
+     */
+    related_pages?: {
+        [key: string]: DatabaseRelatedPage;
+    };
     rows: Array<DatabaseRow>;
     /**
      * Row templates in order (at most 20); they are not rows. Absent: none.
@@ -1748,6 +1823,98 @@ export type DatabaseFilterRule = {
      * Depends on the property type and operator (spec 4.3); `null` matches every row.
      */
     value?: unknown;
+};
+
+/**
+ * Who may submit: members who can read the database, or nobody.
+ */
+export type DatabaseFormAccess = 'members' | 'closed';
+
+/**
+ * A form view's layout. A form view without one starts with the title as its one required
+ * question.
+ */
+export type DatabaseFormConfig = {
+    access?: DatabaseFormAccess;
+    /**
+     * The thank-you text after a submission. At most 2,000 characters.
+     */
+    confirmation?: string | null;
+    /**
+     * At most 2,000 characters.
+     */
+    description?: string | null;
+    /**
+     * In order. Questions of deleted or computed properties, and repeats, are dropped.
+     */
+    questions?: Array<DatabaseFormQuestion>;
+    /**
+     * The submit button; absent: "Submit". At most 200 characters.
+     */
+    submit_label?: string | null;
+    /**
+     * The heading; absent: the database's title. At most 200 characters.
+     */
+    title?: string | null;
+};
+
+export type DatabaseFormQuestion = {
+    /**
+     * Help text under the question. At most 2,000 characters.
+     */
+    description?: string | null;
+    /**
+     * Shown instead of the property name. At most 200 characters.
+     */
+    label?: string | null;
+    /**
+     * The title or a property that stores values (not a computed one).
+     */
+    property_id: string;
+    required?: boolean;
+};
+
+/**
+ * `POST …/formula/preview`: the result type of `expression` as the formula of `property_id`
+ * (a new property when `None`), or its error, and its values for `rows`.
+ */
+export type DatabaseFormulaPreview = {
+    error?: null | DatabaseFormulaProblem;
+    /**
+     * `number`, `text`, `boolean`, `date`, `person`, `page` or `list<…>`; absent with `error`.
+     */
+    result_type?: string | null;
+    samples: Array<DatabaseFormulaSample>;
+};
+
+export type DatabaseFormulaPreviewBody = {
+    /**
+     * The expression; `prop("…")` takes a property name or id.
+     */
+    expression: string;
+    /**
+     * The formula property being edited (so it cannot read itself); omitted for a new one.
+     */
+    property_id?: string | null;
+};
+
+/**
+ * A formula error in an API response: `start`..`end` are UTF-16 offsets into the expression.
+ */
+export type DatabaseFormulaProblem = {
+    end: number;
+    message: string;
+    start: number;
+};
+
+export type DatabaseFormulaSample = {
+    row_id: string;
+    /**
+     * The cell value as `GET` returns it; absent when empty.
+     */
+    value?: {
+        [key: string]: unknown;
+    } | null;
 };
 
 export type DatabaseHead = {
@@ -1854,7 +2021,7 @@ export type DatabaseProperty = {
     type: DatabasePropertyType;
 };
 
-export type DatabasePropertyType = 'title' | 'text' | 'number' | 'select' | 'multi_select' | 'status' | 'date' | 'person' | 'checkbox' | 'url' | 'created_time' | 'created_by' | 'last_edited_time' | 'last_edited_by';
+export type DatabasePropertyType = 'title' | 'text' | 'number' | 'select' | 'multi_select' | 'status' | 'date' | 'person' | 'checkbox' | 'url' | 'email' | 'phone' | 'files' | 'unique_id' | 'relation' | 'rollup' | 'created_time' | 'created_by' | 'last_edited_time' | 'last_edited_by' | 'button' | 'formula';
 
 export type DatabasePropertyUpdate = {
     /**
@@ -1868,6 +2035,18 @@ export type DatabasePropertyUpdate = {
     property: DatabaseProperty;
 };
 
+/**
+ * A page that a relation cell of the response links to, and the reader can read.
+ */
+export type DatabaseRelatedPage = {
+    /**
+     * The database the page is a row of.
+     */
+    database_id: string;
+    icon: string | null;
+    title: string;
+};
+
 export type DatabaseRow = {
     created_at: string;
     created_by: string;
@@ -1875,17 +2054,26 @@ export type DatabaseRow = {
      * The row page has body text.
      */
     has_content: boolean;
+    /**
+     * Per relation property id: links of the cell to pages the reader cannot read (they are
+     * not in `values`). Absent: none.
+     */
+    hidden_links?: {
+        [key: string]: number;
+    };
     icon: string | null;
     id: string;
     /**
      * Manual order among the rows.
      */
     position: number;
+    preview?: null | DatabaseRowPreview;
     title: string;
     updated_at: string;
     updated_by: string;
     /**
-     * Stored values by property id; a missing property is empty.
+     * Values by property id, stored and computed (relations, rollups); a missing property is
+     * empty.
      */
     values: {
         [key: string]: unknown;
@@ -1894,6 +2082,22 @@ export type DatabaseRow = {
      * The row page's version (`expected_version` of its title and icon edits).
      */
     version: number;
+};
+
+/**
+ * What a gallery card can show of a row page. Sent only when a view of the response is a gallery.
+ */
+export type DatabaseRowPreview = {
+    cover_position?: string | null;
+    cover_url?: string | null;
+    /**
+     * The first image of the body.
+     */
+    image_url?: string | null;
+    /**
+     * The first 300 characters of the body text.
+     */
+    text?: string | null;
 };
 
 /**
@@ -1915,6 +2119,8 @@ export type DatabaseTemplate = DatabaseRow & {
      */
     name: string;
 };
+
+export type DatabaseTimelineZoom = 'day' | 'week' | 'month' | 'quarter' | 'year';
 
 export type DatabaseView = {
     config: DatabaseViewConfig;
@@ -1951,9 +2157,17 @@ export type DatabaseViewConfig = {
      */
     calendar_mode?: DatabaseCalendarMode;
     /**
+     * Gallery: what a card shows above its title (default: the body's first image or text).
+     */
+    card_preview?: DatabaseCardPreview;
+    /**
      * Board: the properties shown on each card, in order. The title always shows.
      */
     card_properties?: Array<string>;
+    /**
+     * Gallery: the card width.
+     */
+    card_size?: DatabaseCardSize;
     /**
      * The order of the properties; properties missing here show at the end.
      */
@@ -1968,7 +2182,17 @@ export type DatabaseViewConfig = {
      * template reads as `null`.
      */
     default_template_id?: string | null;
+    /**
+     * Timeline: the `date` property where a bar ends. Without one, a date range's end is the
+     * end and a single date is a one-day bar.
+     */
+    end_property_id?: string | null;
     filter?: DatabaseFilterGroup;
+    /**
+     * Gallery: the preview image fits its box instead of filling it.
+     */
+    fit_image?: boolean;
+    form?: null | DatabaseFormConfig;
     /**
      * Board: the `select`, `status`, `multi_select` or `person` property whose groups are the
      * columns (a card with several values shows in each of their columns). A board without one
@@ -1993,9 +2217,18 @@ export type DatabaseViewConfig = {
      */
     hide_empty_groups?: boolean;
     /**
+     * Timeline: the table pane left of the bars shows (absent: `true`).
+     */
+    show_table?: boolean | null;
+    /**
      * At most 10.
      */
     sorts?: Array<DatabaseViewSort>;
+    /**
+     * Timeline: the `date` property where a bar starts. A timeline without one takes the first
+     * `date` property.
+     */
+    start_property_id?: string | null;
     /**
      * Board: the property whose groups are the lanes (rows of the same columns): a `select`,
      * `status`, `multi_select`, `person` or `checkbox` property other than `group_by`. A
@@ -2006,7 +2239,15 @@ export type DatabaseViewConfig = {
      * Board: group ids in lane order, as `group_order`.
      */
     sub_group_order?: Array<string | null>;
+    /**
+     * Timeline: the properties of the table pane, after the title.
+     */
+    table_columns?: Array<string>;
     wrap_cells?: boolean;
+    /**
+     * Timeline: the time scale.
+     */
+    zoom?: DatabaseTimelineZoom;
 };
 
 export type DatabaseViewSort = {
@@ -2014,7 +2255,7 @@ export type DatabaseViewSort = {
     property_id: string;
 };
 
-export type DatabaseViewType = 'table' | 'board' | 'list' | 'calendar';
+export type DatabaseViewType = 'table' | 'board' | 'list' | 'calendar' | 'form' | 'gallery' | 'timeline';
 
 export type DeleteAccountBody = {
     /**
@@ -4268,6 +4509,13 @@ export type PlanView = {
  */
 export type Presence = 'online' | 'idle' | 'dnd' | 'invisible';
 
+export type PressDatabaseButtonBody = {
+    /**
+     * The caller's local day (`YYYY-MM-DD`) that `"today"` values take; default: the UTC day.
+     */
+    today?: string | null;
+};
+
 export type PreviewInvitationBody = {
     token: string;
 };
@@ -4374,6 +4622,27 @@ export type PublicCommentBody = {
     body: string;
 };
 
+export type PublicCreateDatabaseRowBody = {
+    /**
+     * The body as GitHub-flavored Markdown; with a template, it replaces the template's body.
+     */
+    markdown?: string;
+    /**
+     * A template of the database that fills the title, values and body.
+     */
+    template_id?: string | null;
+    /**
+     * Up to 500 characters.
+     */
+    title?: string;
+    /**
+     * Up to 50 values by property name or id.
+     */
+    values?: {
+        [key: string]: unknown;
+    };
+};
+
 /**
  * Without `parent_id`, `teamspace_id` or `private`, the doc goes to the root of the default
  * teamspace.
@@ -4443,6 +4712,99 @@ export type PublicCreateTaskBody = {
 };
 
 /**
+ * A database's schema: what a query and a row write can name.
+ */
+export type PublicDatabase = {
+    icon: string | null;
+    id: string;
+    /**
+     * Properties and views are read-only; rows and values stay writable.
+     */
+    locked: boolean;
+    properties: Array<PublicDatabaseProperty>;
+    row_count: number;
+    templates: Array<PublicDatabaseTemplate>;
+    title: string;
+    url: string;
+    views: Array<PublicDatabaseView>;
+};
+
+export type PublicDatabaseOption = {
+    /**
+     * Status options: `todo`, `in_progress` or `done`.
+     */
+    group?: unknown;
+    id: string;
+    name: string;
+};
+
+export type PublicDatabasePerson = {
+    id: string;
+    /**
+     * Empty for someone who left the workspace.
+     */
+    name: string;
+};
+
+export type PublicDatabaseProperty = {
+    /**
+     * The rest of the config, such as a number's `format` (a `percent` stores 0.5 for 50%).
+     */
+    config?: {
+        [key: string]: unknown;
+    } | null;
+    id: string;
+    name: string;
+    /**
+     * The options of a `select`, `multi_select` or `status` property, in order.
+     */
+    options?: Array<PublicDatabaseOption> | null;
+    type: DatabasePropertyType;
+};
+
+export type PublicDatabaseRow = {
+    created_at: string;
+    created_by: PublicDatabasePerson;
+    icon: string | null;
+    id: string;
+    title: string;
+    updated_at: string;
+    updated_by: PublicDatabasePerson;
+    url: string;
+    /**
+     * Every property but the title and the created and edited ones, by property name (by id
+     * when two properties share the name); `null` is empty. Options show by name, people as
+     * `{id, name}`, dates as `{start, end}`.
+     */
+    values: {
+        [key: string]: unknown;
+    };
+};
+
+export type PublicDatabaseRows = {
+    items: Array<PublicDatabaseRow>;
+    /**
+     * Send it as `cursor` with the same query for the next page; `null` on the last page.
+     */
+    next_cursor: string | null;
+    /**
+     * Rows that match the filter.
+     */
+    total: number;
+};
+
+export type PublicDatabaseTemplate = {
+    id: string;
+    name: string;
+};
+
+export type PublicDatabaseView = {
+    id: string;
+    name: string;
+    type: DatabaseViewType;
+};
+
+/**
  * A doc record. `version` is an opaque number below 2^53 that changes with every change, live edits included: compare it for equality only, and send it back as `expected_version`.
  */
 export type PublicDoc = Page & {
@@ -4450,6 +4812,12 @@ export type PublicDoc = Page & {
      * The content as GitHub-flavored Markdown, the format that doc writes take.
      */
     markdown: string;
+    /**
+     * A row of a database: its values, as `POST /docs/{page_id}/database/query` shows them.
+     */
+    values?: {
+        [key: string]: unknown;
+    } | null;
 };
 
 export type PublicLabel = {
@@ -4492,6 +4860,41 @@ export type PublicProject = {
     name: string;
     updated_at: string;
     version: number;
+};
+
+/**
+ * See `query_database` in `docs/mcp.md` for the filter, sort and value shapes.
+ */
+export type PublicQueryDatabaseBody = {
+    /**
+     * The `next_cursor` of the previous page, with the same query (else `422`).
+     */
+    cursor?: string | null;
+    /**
+     * An AND/OR group of rules, as a view's filter; `property_id` takes a property name or id
+     * and `value` option names, user ids, emails or `"me"`.
+     */
+    filter?: {
+        [key: string]: unknown;
+    } | null;
+    /**
+     * 1 to 100; default 50.
+     */
+    limit?: number | null;
+    /**
+     * Up to 10 `{property_id, direction}` with names or ids.
+     */
+    sorts?: Array<{
+        [key: string]: unknown;
+    }> | null;
+    /**
+     * IANA zone for relative dates and computed values; default `UTC`.
+     */
+    tz?: string | null;
+    /**
+     * Starts from this view's filter and sorts: `filter` must match too, `sorts` replace them.
+     */
+    view_id?: string | null;
 };
 
 export type PublicStatus = {
@@ -4561,6 +4964,36 @@ export type PublicTokenInfo = {
     name: string;
     project_ids: Array<string>;
     scopes: Array<ApiTokenScope>;
+};
+
+export type PublicTrashDatabaseRowsBody = {
+    /**
+     * 1 to 100 row ids; ids that are not live rows of the database are skipped.
+     */
+    row_ids: Array<string>;
+};
+
+export type PublicTrashedDatabaseRows = {
+    /**
+     * Rows moved to the trash.
+     */
+    trashed: number;
+};
+
+/**
+ * Send `values`, `title` or both. Last write wins: no version.
+ */
+export type PublicUpdateDatabaseRowBody = {
+    /**
+     * Up to 500 characters.
+     */
+    title?: string | null;
+    /**
+     * Up to 50 values by property name or id; `null` clears a value.
+     */
+    values?: {
+        [key: string]: unknown;
+    };
 };
 
 /**
@@ -5338,6 +5771,16 @@ export type StorageView = {
  */
 export type SubIssuesDisplay = 'nested' | 'flat' | 'hidden';
 
+export type SubmitDatabaseFormBody = {
+    /**
+     * Answers by property id, in the shape of row values; the title's answer is its text.
+     * Leave out (or send `null`) what the member skipped.
+     */
+    answers: {
+        [key: string]: unknown;
+    };
+};
+
 /**
  * A Stripe subscription status (`subscription.status`).
  */
@@ -5367,6 +5810,7 @@ export type TaskProblem = {
     code: string;
     conflict?: null | TaskConflict;
     detail: string;
+    formula?: null | DatabaseFormulaProblem;
     instance: string;
     /**
      * JSON path of the first invalid filter node, e.g. `filter.children[2].value`. Only set
@@ -6591,6 +7035,411 @@ export type PublicUpdateDocResponses = {
 };
 
 export type PublicUpdateDocResponse = PublicUpdateDocResponses[keyof PublicUpdateDocResponses];
+
+export type PublicGetDatabaseData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        /**
+         * The database's page id.
+         */
+        page_id: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/database';
+};
+
+export type PublicGetDatabaseErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * insufficient_scope
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicGetDatabaseError = PublicGetDatabaseErrors[keyof PublicGetDatabaseErrors];
+
+export type PublicGetDatabaseResponses = {
+    /**
+     * The database
+     */
+    200: PublicDatabase;
+};
+
+export type PublicGetDatabaseResponse = PublicGetDatabaseResponses[keyof PublicGetDatabaseResponses];
+
+export type PublicQueryDatabaseData = {
+    body: PublicQueryDatabaseBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        /**
+         * The database's page id.
+         */
+        page_id: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/database/query';
+};
+
+export type PublicQueryDatabaseErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * insufficient_scope
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * validation_failed
+     */
+    422: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicQueryDatabaseError = PublicQueryDatabaseErrors[keyof PublicQueryDatabaseErrors];
+
+export type PublicQueryDatabaseResponses = {
+    /**
+     * A page of rows
+     */
+    200: PublicDatabaseRows;
+};
+
+export type PublicQueryDatabaseResponse = PublicQueryDatabaseResponses[keyof PublicQueryDatabaseResponses];
+
+export type PublicCreateDatabaseRowData = {
+    body: PublicCreateDatabaseRowBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        /**
+         * The database's page id.
+         */
+        page_id: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/rows';
+};
+
+export type PublicCreateDatabaseRowErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * workspace_read_only, trial_limit_reached
+     */
+    402: Problem;
+    /**
+     * insufficient_scope, origin_forbidden
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch, database_row_limit, conflict
+     */
+    409: Problem;
+    /**
+     * request_too_large, doc_too_large
+     */
+    413: Problem;
+    /**
+     * validation_failed
+     */
+    422: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * service_unavailable, page_busy
+     */
+    503: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicCreateDatabaseRowError = PublicCreateDatabaseRowErrors[keyof PublicCreateDatabaseRowErrors];
+
+export type PublicCreateDatabaseRowResponses = {
+    /**
+     * The new row
+     */
+    201: PublicDatabaseRow;
+};
+
+export type PublicCreateDatabaseRowResponse = PublicCreateDatabaseRowResponses[keyof PublicCreateDatabaseRowResponses];
+
+export type PublicTrashDatabaseRowsData = {
+    body: PublicTrashDatabaseRowsBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        /**
+         * The database's page id.
+         */
+        page_id: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/rows/trash';
+};
+
+export type PublicTrashDatabaseRowsErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * workspace_read_only
+     */
+    402: Problem;
+    /**
+     * insufficient_scope, origin_forbidden
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * validation_failed
+     */
+    422: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * service_unavailable
+     */
+    503: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicTrashDatabaseRowsError = PublicTrashDatabaseRowsErrors[keyof PublicTrashDatabaseRowsErrors];
+
+export type PublicTrashDatabaseRowsResponses = {
+    /**
+     * How many rows went to the trash
+     */
+    200: PublicTrashedDatabaseRows;
+};
+
+export type PublicTrashDatabaseRowsResponse = PublicTrashDatabaseRowsResponses[keyof PublicTrashDatabaseRowsResponses];
+
+export type PublicUpdateDatabaseRowData = {
+    body: PublicUpdateDatabaseRowBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+        /**
+         * The database's page id.
+         */
+        page_id: string;
+        row_id: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/docs/{page_id}/rows/{row_id}';
+};
+
+export type PublicUpdateDatabaseRowErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * workspace_read_only
+     */
+    402: Problem;
+    /**
+     * insufficient_scope, origin_forbidden
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch, conflict
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * validation_failed
+     */
+    422: Problem;
+    /**
+     * page_locked
+     */
+    423: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * service_unavailable, page_busy
+     */
+    503: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicUpdateDatabaseRowError = PublicUpdateDatabaseRowErrors[keyof PublicUpdateDatabaseRowErrors];
+
+export type PublicUpdateDatabaseRowResponses = {
+    /**
+     * The row
+     */
+    200: PublicDatabaseRow;
+};
+
+export type PublicUpdateDatabaseRowResponse = PublicUpdateDatabaseRowResponses[keyof PublicUpdateDatabaseRowResponses];
 
 export type PublicListMembersData = {
     body?: never;
@@ -16760,6 +17609,10 @@ export type GetDatabaseData = {
          * A `database_links` id of this database.
          */
         link?: string;
+        /**
+         * The reader's IANA time zone for computed values (rollups, formulas); default `UTC`.
+         */
+        tz?: string;
     };
     url: '/api/v1/workspaces/{workspace_id}/databases/{database_id}';
 };
@@ -16802,6 +17655,138 @@ export type GetDatabaseResponses = {
 };
 
 export type GetDatabaseResponse = GetDatabaseResponses[keyof GetDatabaseResponses];
+
+export type SubmitDatabaseFormData = {
+    body: SubmitDatabaseFormBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        database_id: string;
+        view_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/databases/{database_id}/forms/{view_id}/submit';
+};
+
+export type SubmitDatabaseFormErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * workspace_read_only, trial_limit_reached
+     */
+    402: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * page_not_found, database_view_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, database_form_closed, database_row_limit
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * database_form_rate_limited
+     */
+    429: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type SubmitDatabaseFormError = SubmitDatabaseFormErrors[keyof SubmitDatabaseFormErrors];
+
+export type SubmitDatabaseFormResponses = {
+    201: DatabaseRow;
+};
+
+export type SubmitDatabaseFormResponse = SubmitDatabaseFormResponses[keyof SubmitDatabaseFormResponses];
+
+export type PreviewDatabaseFormulaData = {
+    body: DatabaseFormulaPreviewBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        database_id: string;
+    };
+    query?: {
+        /**
+         * The reader's IANA time zone for date functions; default `UTC`.
+         */
+        tz?: string;
+    };
+    url: '/api/v1/workspaces/{workspace_id}/databases/{database_id}/formula/preview';
+};
+
+export type PreviewDatabaseFormulaErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type PreviewDatabaseFormulaError = PreviewDatabaseFormulaErrors[keyof PreviewDatabaseFormulaErrors];
+
+export type PreviewDatabaseFormulaResponses = {
+    200: DatabaseFormulaPreview;
+};
+
+export type PreviewDatabaseFormulaResponse = PreviewDatabaseFormulaResponses[keyof PreviewDatabaseFormulaResponses];
 
 export type ImportDatabaseCsvData = {
     body: ImportDatabaseCsvBody;
@@ -17401,6 +18386,63 @@ export type MoveDatabaseRowResponses = {
 };
 
 export type MoveDatabaseRowResponse = MoveDatabaseRowResponses[keyof MoveDatabaseRowResponses];
+
+export type PressDatabaseButtonData = {
+    body: PressDatabaseButtonBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        database_id: string;
+        row_id: string;
+        property_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/databases/{database_id}/rows/{row_id}/press/{property_id}';
+};
+
+export type PressDatabaseButtonErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type PressDatabaseButtonError = PressDatabaseButtonErrors[keyof PressDatabaseButtonErrors];
+
+export type PressDatabaseButtonResponses = {
+    200: DatabaseButtonPress;
+};
+
+export type PressDatabaseButtonResponse = PressDatabaseButtonResponses[keyof PressDatabaseButtonResponses];
 
 export type UpdateDatabaseRowValuesData = {
     body: DatabaseRowValuesBody;

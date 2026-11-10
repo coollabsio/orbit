@@ -23,6 +23,7 @@ use crate::audit::{self, AuditOutcome};
 use crate::billing::TrialLimit;
 use crate::collab::CollabHub;
 
+mod agent;
 mod board;
 mod calendar;
 mod computed;
@@ -30,10 +31,12 @@ mod export;
 mod import;
 mod links;
 mod moves;
+mod query;
 mod search;
 mod templates;
 pub use calendar::CalendarMode;
 pub use computed::{ComputeScope, RelatedPage, is_computed};
+pub use agent::{AgentDatabase, AgentQuery, AgentRow, AgentRowPage};
 pub use export::{ExportDatabase, ExportRow, cell_text, is_number};
 pub use import::{
     CsvImport, ImportColumn, ImportColumnResult, ImportResult, ImportTarget, MAX_IMPORT_COLUMNS,

@@ -1126,6 +1126,28 @@ pass in both suites. Both databases.
 |---|---|
 | OQ-12.1 | Add tools for properties and views (create a database with a schema)? Proposal: after usage data. |
 
+### 14.8 Status
+
+Done on 2026-11-10 (no migration). OQ-12.1: not built, as proposed. The case files exist; the `bun test` and
+`cargo test` harnesses that run them, and the server tests of 14.6, are not written yet (this round has no tests).
+Differences from this section:
+
+| # | Item | Where | Why |
+|---|---|---|---|
+| 1 | `query_database` returns `{items, next_cursor, total}`; each row also has `icon`, `created_*` and `updated_*` (people as `{id, name}`). | `repositories/databases/agent.rs` | `items` and `next_cursor` as the other list tools; `total` tells an agent how many rows match. |
+| 2 | Row `values` leave out the title and the created and edited properties (the row has them as fields); a property whose name another property shares shows under its id. Empty values are `null` (a checkbox `false`). | `agent.rs` | One key per property, and every key a write takes is visible. |
+| 3 | A name key matches in any letter case when no property has the exact name; option names too. | `agent.rs` | Agents often change the case of a name. |
+| 4 | With `view_id`, a sent `filter` is ANDed with the view's filter; sent `sorts` replace the view's. | `agent.rs` | "Rows of this view that also…" is the common question. |
+| 5 | Person values (writes and filters) also take `"me"`; dates also take `start/end` text. | `agent.rs` | The same shorthands as views and templates. |
+| 6 | `create_database_row` writes `markdown` after the row (a second step through `update_doc`), and with a template it replaces the template's body. "today" in a template is the UTC day. | `token_api/databases.rs` | The row insert has no body input; the merge path keeps the doc limits. |
+| 7 | `update_database_row` changes the title with the row page's current version (last write wins), after the values. | `token_api/databases.rs` | No `expected_version` (14.3); a co-edit in between gives a version error to retry. |
+| 8 | Trash returns `{"trashed": n}` (`200`), the live rows among the ids. | `public_api/databases.rs` | "count" in 14.3. |
+| 9 | REST paths use `{page_id}` for the database id. | `public_api.rs` | The router needs one parameter name under `/docs/{page_id}`. |
+| 10 | The case files share one fixture per file (`ctx`, `properties`, `rows`) and list `cases` of `{name, filter or sorts, expected_ids}`; every case passes in `@orbit/database` (checked with a one-off script). | `packages/database/cases/` | One fixture covers every type, so a case is one line to read. |
+| 11 | Rust text sorts approximate `Intl.Collator(base, numeric)`: case is ignored and digit runs compare as numbers, but accents count. The cases use ASCII. | `query.rs` | The server has no ICU collator. |
+| 12 | The time zone database is `jiff` with the bundled tzdb. An invalid `tz` is 422 (`tz`); a changed query with a cursor is 422 (`cursor`). | `apps/server/Cargo.toml`, `query.rs` | The Alpine image has no zoneinfo. |
+| 13 | Values of computed and later types (relation, rollup, formula, files, email, phone, unique ID) pass through as the read path returns them. Rules on them use the value's JSON shape (text, number or checkbox rules); other rules match every row. | `query.rs`, `agent.rs` | Items 9, 10 and 13 were built at the same time; the shared cases do not cover these types yet. |
+
 ## 15. Item 13: Formula (P3, L)
 
 Needs: the computed-value layer (2.3). Rollup references need item 9.

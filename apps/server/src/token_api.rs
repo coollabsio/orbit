@@ -36,6 +36,9 @@ use crate::repositories::tasks::{
 };
 use crate::repositories::workspaces::{WorkspaceError, WorkspaceRepository};
 
+mod databases;
+pub use databases::{DatabaseRowPatch, NewDatabaseRow};
+
 const PRIORITIES: [&str; 5] = ["none", "low", "medium", "high", "urgent"];
 
 #[derive(Debug)]
@@ -52,6 +55,8 @@ pub enum TokenApiError {
     PurgeForbidden,
     Task(TaskError),
     Page(PageError),
+    /// A database refusal other than not found (see `databases`).
+    Database(crate::repositories::databases::DatabaseError),
     Internal,
 }
 
@@ -291,6 +296,10 @@ pub struct DocView {
     pub page: PageRecord,
     /// The content as GitHub-flavored Markdown, the format that doc writes take.
     pub markdown: String,
+    /// A row of a database: its values, as `POST /docs/{page_id}/database/query` shows them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<Object>)]
+    pub values: Option<std::collections::BTreeMap<String, Value>>,
 }
 
 /// Links pages to `/docs/<id>` under the titles of the pages that the actor can see; any other
@@ -1018,8 +1027,13 @@ impl Authorized<'_> {
             }
         }
         let markdown = blocks_to_markdown(&page.content, &DocLinks(titles));
+        let values = self.row_values(&page).await?;
         page.version = revision(page.version, page.updated_at);
-        Ok(DocView { page, markdown })
+        Ok(DocView {
+            page,
+            markdown,
+            values,
+        })
     }
 
     pub async fn create_doc(&self, input: NewDoc) -> Result<DocView> {

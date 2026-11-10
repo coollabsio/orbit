@@ -144,6 +144,11 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::public_api::doc,
         crate::public_api::create_doc,
         crate::public_api::update_doc,
+        crate::public_api::databases::database,
+        crate::public_api::databases::query_database,
+        crate::public_api::databases::create_row,
+        crate::public_api::databases::update_row,
+        crate::public_api::databases::trash_rows,
         crate::integration_routes::create_discord_event,
         crate::integration_routes::github_webhook,
         crate::integration_routes::github_manifest_callback,
@@ -555,6 +560,7 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             | "public_list_tasks"
             | "public_get_task"
             | "public_list_comments"
+            | "public_query_database"
     ) {
         add_code(&mut responses, "400", "invalid_request");
     }
@@ -575,6 +581,9 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             | "public_create_comment"
             | "public_create_doc"
             | "public_update_doc"
+            | "public_create_database_row"
+            | "public_update_database_row"
+            | "public_trash_database_rows"
     );
     if write {
         add_code(&mut responses, "400", "invalid_request");
@@ -582,10 +591,16 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         add_code(&mut responses, "403", "origin_forbidden");
         add_code(&mut responses, "503", "service_unavailable");
     }
-    if matches!(operation_id, "public_create_task" | "public_create_doc") {
+    if matches!(
+        operation_id,
+        "public_create_task" | "public_create_doc" | "public_create_database_row"
+    ) {
         add_code(&mut responses, "402", "trial_limit_reached");
     }
-    if matches!(operation_id, "public_create_doc" | "public_update_doc") {
+    if matches!(
+        operation_id,
+        "public_create_doc" | "public_update_doc" | "public_create_database_row"
+    ) {
         add_code(&mut responses, "413", "doc_too_large");
     }
     if matches!(
@@ -595,6 +610,10 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             | "public_create_comment"
             | "public_create_doc"
             | "public_update_doc"
+            | "public_query_database"
+            | "public_create_database_row"
+            | "public_update_database_row"
+            | "public_trash_database_rows"
     ) {
         add_code(&mut responses, "422", "validation_failed");
     }
@@ -626,6 +645,16 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
         // `permanent=true` without a workspace owner or admin.
         "public_delete_task" => add_code(&mut responses, "403", "workspace_action_forbidden"),
         "public_update_doc" => {
+            add_code(&mut responses, "423", "page_locked");
+            add_code(&mut responses, "503", "page_busy");
+        }
+        "public_create_database_row" => {
+            add_code(&mut responses, "409", "database_row_limit");
+            add_code(&mut responses, "409", "conflict");
+            add_code(&mut responses, "503", "page_busy");
+        }
+        "public_update_database_row" => {
+            add_code(&mut responses, "409", "conflict");
             add_code(&mut responses, "423", "page_locked");
             add_code(&mut responses, "503", "page_busy");
         }

@@ -246,6 +246,14 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
   with that date (plus filter values and the default template). Week start: the locale, or "⋯ → Start week on" (this
   browser, `orbit:calendar-week-start`). Mobile: list views show all visible properties; a calendar is a month grid with
   dots and the tapped day's rows under it (`components/database/Calendar.tsx`), no drag.
+- Databases for API tokens and MCP (databases P2/P3 spec section 14): tools `get_database`, `query_database`,
+  `create_database_row`, `update_database_row`, `trash_database_rows` and REST `GET /docs/{id}/database`, `POST
+  /docs/{id}/database/query`, `POST /docs/{id}/rows`, `PATCH /docs/{id}/rows/{row}`, `POST /docs/{id}/rows/trash` under the
+  docs scopes (personal tokens only). Keys are property names or ids, options go by name, people by id, email or "me";
+  results name options and show people as `{id, name}`. Queries filter and sort in Rust in memory
+  (`repositories/databases/query.rs`, the rules of `@orbit/database` filter/sort; shared cases in
+  `packages/database/cases/`), 100 rows per page with an opaque cursor; name translation is
+  `repositories/databases/agent.rs`. `get_doc` of a row adds `values`.
   Custom `callout` block (`editor/CalloutBlock.tsx`; slash "Callout" in Basic blocks after Quote, aliases callout/note/tip/
   warning/info): inline rich text, props `emoji` (default 💡; click it to pick another in the app's emoji picker),
   `backgroundColor` (BlockNote color names, default `gray`; `default` = border only) and `textColor`, both editable in the
