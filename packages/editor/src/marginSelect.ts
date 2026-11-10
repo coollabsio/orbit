@@ -18,6 +18,17 @@ export function marginBlockAt(view: EditorView, types: ReadonlySet<string>, x: n
   return null
 }
 
+/** Selects the `types` block beside the press `event` (see `marginBlockAt`). Whether it did. */
+export function selectMarginBlock(view: EditorView, types: ReadonlySet<string>, event: MouseEvent): boolean {
+  if (event.button !== 0 || event.shiftKey || !view.editable) return false
+  const pos = marginBlockAt(view, types, event.clientX, event.clientY)
+  if (pos === null) return false
+  event.preventDefault()
+  view.focus()
+  view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, pos)))
+  return true
+}
+
 /**
  * A press in the page margin beside a block of `types` (blocks whose whole body is their own UI, like a database)
  * selects that block, as Notion does, instead of putting the caret in the nearest paragraph.
@@ -29,17 +40,7 @@ export function marginSelectExtension(types: readonly string[]) {
     prosemirrorPlugins: [
       new Plugin({
         props: {
-          handleDOMEvents: {
-            mousedown: (view, event) => {
-              if (event.button !== 0 || event.shiftKey || !view.editable) return false
-              const pos = marginBlockAt(view, set, event.clientX, event.clientY)
-              if (pos === null) return false
-              event.preventDefault()
-              view.focus()
-              view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, pos)))
-              return true
-            },
-          },
+          handleDOMEvents: { mousedown: (view, event) => selectMarginBlock(view, set, event) },
           // With a block selected, Chrome keeps a hidden caret at the start of the next text block, so a click there
           // changes no DOM selection and ProseMirror's own fix only covers positions up to 2 away from the block.
           handleClick: (view, pos) => {

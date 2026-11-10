@@ -39,7 +39,7 @@ import type { PageEditorInstance } from '@orbit/editor/schema'
 import type { PageKind } from '@orbit/api/generated/types.gen'
 import { isolatedDragsExtension, isolatedDropCursor } from '@orbit/editor/isolation'
 import { selectBlockExtension } from '@orbit/editor/selectBlock'
-import { marginSelectExtension } from '@orbit/editor/marginSelect'
+import { marginSelectExtension, selectMarginBlock } from '@orbit/editor/marginSelect'
 import { collabUndoExtension } from '@orbit/editor/collab/undo'
 import { EDITOR_BLOCK_TYPES, markdownToTaskBlocks, pageEditorSchema, TASK_EDITOR_BLOCK_TYPES, taskEditorSchema } from './schema'
 import { getPageSlashMenuItems, getTaskSlashMenuItems } from './slashMenu'
@@ -64,7 +64,12 @@ export interface PageEditorHandle {
   focus: () => void
   /** Adds blocks at the end (files picked outside the editor). */
   appendBlocks: (blocks: unknown[]) => void
+  /** A press on the layout around the editor (the pane padding) beside a database block selects it. Whether it did. */
+  selectBlockBeside: (event: globalThis.MouseEvent) => boolean
 }
+
+/** Blocks selected as a whole by a press in the margin beside them. */
+const MARGIN_SELECT_TYPES = new Set(['database'])
 
 /** Real-time co-editing: the document lives in `fragment` (already synced with the server) instead of `initialContent`. */
 export interface PageEditorCollab {
@@ -293,7 +298,7 @@ function PageEditorInner({
     // Tiptap would inject its base stylesheet as a <style> tag, which the production CSP (`style-src 'self'`)
     // blocks. The same rules ship statically at the end of src/index.css instead.
     _tiptapOptions: { injectCSS: false },
-    extensions: [selectBlockExtension(), isolatedDragsExtension(), marginSelectExtension(['database'])],
+    extensions: [selectBlockExtension(), isolatedDragsExtension(), marginSelectExtension([...MARGIN_SELECT_TYPES])],
     dropCursor: isolatedDropCursor,
     domAttributes: ariaLabel ? { editor: { 'aria-label': ariaLabel } } : undefined,
     dictionary,
@@ -385,6 +390,12 @@ function PageEditorInner({
       appendBlocks: (blocks) => {
         const last = editor.document.at(-1)
         if (last) editor.insertBlocks(blocks as never, last, 'after')
+      },
+      selectBlockBeside: (event) => {
+        const view = editor.prosemirrorView
+        // Only the elements that hold the editor: other pane UI (and the editor's own content) keeps its clicks.
+        const layout = event.target instanceof Element && event.target !== view?.dom && event.target.contains(view?.dom ?? null)
+        return !!view && layout && selectMarginBlock(view, MARGIN_SELECT_TYPES, event)
       },
     }),
     [editor, fileScope],

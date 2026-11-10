@@ -1100,6 +1100,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
         ) : (
           <div
             data-print-root=""
+            onMouseDown={(event) => editorRef.current?.selectBlockBeside(event.nativeEvent)}
             // The peek is narrow: room for the editor's block handles (-54px) on both sides.
             className={cn('min-h-0 flex-1 overflow-y-auto px-6 pt-8 pb-24 max-[899px]:px-3 max-[899px]:pt-[18px] max-[899px]:pb-14', peek && 'px-[60px]')}
           >
