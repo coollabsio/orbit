@@ -16,7 +16,7 @@ use super::{
     ThreadMember, ThreadStateRecord, Written, conversation_from_row, current_state, finish,
     id_list, in_ids, load_access, load_actor, load_message, load_message_access,
     load_thread_member, member_from_row, member_ids, parse_id, parse_optional_id, public_for,
-    reachable_dm,
+    reachable_dm, thread_baseline,
 };
 
 /// Cursors that one `restore_read` call may put back.
@@ -320,6 +320,31 @@ impl ChatRepository {
             .await?;
             emit_thread_state(&mut tx, &root, actor_id, &mut events).await?;
         }
+        // Threads the caller does not follow: those of conversations it has not muted. A thread
+        // without a row gets one, and its snapshot cursor puts the same replies back to unread.
+        for thread in unread_threads(&mut tx, workspace_id, actor_id).await? {
+            if thread.state.following {
+                continue;
+            }
+            let Some(root) = load_message(&mut tx, thread.state.root_id).await? else {
+                continue;
+            };
+            threads.push(thread.state);
+            upsert_thread_member(
+                &mut tx,
+                workspace_id,
+                &root,
+                actor_id,
+                &ThreadMember {
+                    following: false,
+                    last_read_reply_id: root.last_reply_id,
+                    read_reply_count: root.reply_count,
+                    mention_count: 0,
+                },
+            )
+            .await?;
+            emit_thread_state(&mut tx, &root, actor_id, &mut events).await?;
+        }
         finish(tx, events, ReadSnapshot { states, threads }).await
     }
 
@@ -608,6 +633,107 @@ async fn emit_thread_state(
         },
     );
     Ok(state)
+}
+
+/// A thread with unread replies, for the Unreads view and "mark all as read".
+pub(super) struct UnreadThread {
+    pub state: ThreadStateRecord,
+    pub last_reply_id: Option<Id>,
+}
+
+/// The threads with unread replies, followed or not, in the open conversations the caller is a
+/// member of and has not muted, newest reply first. A thread the caller has no state in counts
+/// the replies after its thread baseline (`thread_baseline`).
+pub(super) async fn unread_threads(
+    conn: &mut AnyConnection,
+    workspace_id: Id,
+    actor_id: Id,
+) -> Result<Vec<UnreadThread>, ChatError> {
+    let scope = format!(
+        "m.workspace_id = $1 AND m.user_id = $2 AND m.notify <> 'muted' \
+         AND c.archived_at IS NULL AND {}",
+        reachable_dm()
+    );
+    let mut threads = Vec::new();
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "SELECT t.root_id, t.conversation_id, t.following, t.last_read_reply_id, t.mention_count, \
+         r.reply_count - t.read_reply_count AS unread, r.last_reply_id \
+         FROM chat_members m JOIN chat_conversations c ON c.id = m.conversation_id \
+         JOIN chat_thread_members t ON t.conversation_id = m.conversation_id AND t.user_id = m.user_id \
+         JOIN chat_messages r ON r.id = t.root_id \
+         WHERE {scope} AND r.reply_count > t.read_reply_count"
+    )))
+    .bind(workspace_id.to_string())
+    .bind(actor_id.to_string())
+    .fetch_all(&mut *conn)
+    .await?;
+    for row in &rows {
+        let following: bool = row.get("following");
+        threads.push(UnreadThread {
+            state: ThreadStateRecord {
+                root_id: parse_id(row.get("root_id"))?,
+                conversation_id: parse_id(row.get("conversation_id"))?,
+                following,
+                last_read_reply_id: parse_optional_id(row.get("last_read_reply_id"))?,
+                unread_replies: row.get("unread"),
+                mention_count: if following {
+                    row.get("mention_count")
+                } else {
+                    0
+                },
+            },
+            last_reply_id: parse_optional_id(row.get("last_reply_id"))?,
+        });
+    }
+
+    let members = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "SELECT m.conversation_id, m.joined_at, m.threads_read_to FROM chat_members m \
+         JOIN chat_conversations c ON c.id = m.conversation_id WHERE {scope}"
+    )))
+    .bind(workspace_id.to_string())
+    .bind(actor_id.to_string())
+    .fetch_all(&mut *conn)
+    .await?;
+    for member in &members {
+        let conversation_id = parse_id(member.get("conversation_id"))?;
+        let baseline = thread_baseline(member.get("joined_at"), member.get("threads_read_to"));
+        // `chat_messages_threads` (partial: `reply_count > 0`) finds the roots with a reply after
+        // the baseline.
+        let rows = sqlx::query(
+            "SELECT r.id, r.last_reply_id, \
+             (SELECT MAX(x.id) FROM chat_messages x WHERE x.thread_root_id = r.id AND x.id <= $2) \
+             AS cursor, \
+             (SELECT COUNT(*) FROM chat_messages x WHERE x.thread_root_id = r.id AND x.id > $2 \
+              AND x.author_id <> $3) AS unread \
+             FROM chat_messages r WHERE r.conversation_id = $1 AND r.reply_count > 0 \
+             AND r.last_reply_id > $2 AND r.thread_root_id IS NULL AND NOT EXISTS (SELECT 1 FROM chat_thread_members t \
+             WHERE t.root_id = r.id AND t.user_id = $3)",
+        )
+        .bind(conversation_id.to_string())
+        .bind(baseline)
+        .bind(actor_id.to_string())
+        .fetch_all(&mut *conn)
+        .await?;
+        for row in &rows {
+            let unread: i64 = row.get("unread");
+            if unread == 0 {
+                continue;
+            }
+            threads.push(UnreadThread {
+                state: ThreadStateRecord {
+                    root_id: parse_id(row.get("id"))?,
+                    conversation_id,
+                    following: false,
+                    last_read_reply_id: parse_optional_id(row.get("cursor"))?,
+                    unread_replies: unread,
+                    mention_count: 0,
+                },
+                last_reply_id: parse_optional_id(row.get("last_reply_id"))?,
+            });
+        }
+    }
+    threads.sort_by_key(|thread| std::cmp::Reverse(thread.last_reply_id));
+    Ok(threads)
 }
 
 /// The last entry of each key, in the order of the list. A restore counts a conversation (or a

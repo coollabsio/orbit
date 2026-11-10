@@ -292,6 +292,10 @@ fn json_router(state: ChatState) -> Router {
             get(messages::list_followed_chat_threads),
         )
         .route(
+            "/api/v1/workspaces/{workspace_id}/chat/unread-threads",
+            get(messages::list_unread_chat_threads),
+        )
+        .route(
             "/api/v1/workspaces/{workspace_id}/chat/threads/{root_id}",
             get(messages::get_chat_thread),
         )

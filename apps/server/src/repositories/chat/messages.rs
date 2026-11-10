@@ -7,6 +7,7 @@ use sqlx::any::AnyRow;
 
 use super::blocks::{self, MessageBlock, fallback_text};
 use super::files::{MAX_MESSAGE_FILES, attach_files, copy_files};
+use super::state::unread_threads;
 use super::stickers::load_sticker;
 use super::webhooks::{BotSender, HookTarget, clean_bot_name, clean_icon_url};
 use super::{
@@ -15,7 +16,7 @@ use super::{
     MessageKind, MessagePage, MessageRecord, ReplyToRecord, StickerRecord, ThreadMember,
     ThreadPage, Written, current_state, finish, hydrate, id_list, in_ids, json_values, load_access,
     load_actor, load_conversation, load_message, load_message_access, load_thread_member,
-    mentioned_user_ids, parse_id, parse_optional_id, public_for, reachable_dm,
+    mentioned_user_ids, parse_id, parse_optional_id, public_for, reachable_dm, thread_state,
 };
 
 const DEFAULT_PAGE: usize = 50;
@@ -138,9 +139,7 @@ impl ChatRepository {
             return Err(ChatError::NotFound);
         }
         let (items, before, after) = page(&mut tx, Scope::Thread(root_id), cursor).await?;
-        let state = load_thread_member(&mut tx, root_id, actor_id)
-            .await?
-            .map(|member| member.state(&root));
+        let state = thread_state(&mut tx, &root, actor_id).await?;
         Ok(ThreadPage {
             items,
             before,
@@ -249,6 +248,45 @@ impl ChatRepository {
             });
         }
         Ok(threads)
+    }
+
+    /// The threads with unread replies for the Unreads view: followed or not, in the conversations
+    /// the caller is a member of and has not muted, newest reply first.
+    pub async fn list_unread_threads(
+        &self,
+        workspace_id: Id,
+        actor_id: Id,
+    ) -> Result<Vec<FollowedThreadRecord>, ChatError> {
+        let mut tx = self.database.pool().begin().await?;
+        load_actor(&mut tx, workspace_id, actor_id).await?;
+        let mut unread = unread_threads(&mut tx, workspace_id, actor_id).await?;
+        unread.truncate(usize::try_from(FOLLOWED_LIMIT).unwrap_or(usize::MAX));
+        if unread.is_empty() {
+            return Ok(Vec::new());
+        }
+        let ids = unread
+            .iter()
+            .flat_map(|thread| std::iter::once(thread.state.root_id).chain(thread.last_reply_id));
+        let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+            "{MESSAGE_SELECT} WHERE m.id {}",
+            in_ids(&*tx, 1)
+        )))
+        .bind(id_list(ids))
+        .fetch_all(&mut *tx)
+        .await?;
+        let messages = hydrate(&mut tx, &rows).await?;
+        let find = |id: Id| messages.iter().find(|message| message.id == id).cloned();
+        Ok(unread
+            .into_iter()
+            .filter_map(|thread| {
+                Some(FollowedThreadRecord {
+                    root: find(thread.state.root_id)?,
+                    conversation_id: thread.state.conversation_id,
+                    last_reply: thread.last_reply_id.and_then(find),
+                    state: thread.state,
+                })
+            })
+            .collect())
     }
 
     /// A send that is tried again with the same nonce returns the first message.

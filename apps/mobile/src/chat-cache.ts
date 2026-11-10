@@ -12,6 +12,7 @@ import type { ConversationStateRecord } from './data/orbit'
  */
 export const chatQueryKeys = {
   followedThreads: (workspaceId: string) => ['messages', workspaceId, 'followed-threads'] as const,
+  unreadThreads: (workspaceId: string) => ['messages', workspaceId, 'unread-threads'] as const,
   thread: (workspaceId: string, rootId: string) => ['messages', workspaceId, 'thread', rootId] as const,
   around: (workspaceId: string, conversationId: string, messageId: string) => ['messages', workspaceId, 'around', conversationId, messageId] as const,
   conversationList: (workspaceId: string, conversationId: string, kind: ConversationList) => ['messages', workspaceId, kind, conversationId] as const,
@@ -46,6 +47,8 @@ export function applyChatActions(queryClient: QueryClient, workspaceId: string, 
  * threads, which the socket hook does not patch.
  */
 export function applyChatEvents(queryClient: QueryClient, workspaceId: string, events: readonly chat.ChatEvent[]) {
+  const states = queryClient.getQueryData<ConversationStateRecord[]>(keys.chatStates(workspaceId))
+  const wasMuted = (conversationId: string) => states?.find((state) => state.conversation_id === conversationId)?.notify === 'muted'
   applyChatActions(
     queryClient,
     workspaceId,
@@ -59,6 +62,17 @@ export function applyChatEvents(queryClient: QueryClient, workspaceId: string, e
     if (event.type === 'message.deleted' && event.thread_root_id) void queryClient.invalidateQueries({ queryKey: chatQueryKeys.thread(workspaceId, event.thread_root_id) })
     if (event.type === 'thread.changed' || (event.type === 'message.created' && event.message.thread_root_id)) {
       void queryClient.invalidateQueries({ queryKey: chatQueryKeys.followedThreads(workspaceId) })
+    }
+    // Unreads lists threads the user does not follow too: their replies send no thread state. Unmuting brings a
+    // conversation's threads back.
+    const unmuted = event.type === 'state.changed' && event.state.notify !== 'muted' && wasMuted(event.state.conversation_id)
+    if (
+      event.type === 'thread.changed' ||
+      (event.type === 'message.created' && event.message.thread_root_id) ||
+      (event.type === 'message.deleted' && event.thread_root_id) ||
+      unmuted
+    ) {
+      void queryClient.invalidateQueries({ queryKey: chatQueryKeys.unreadThreads(workspaceId) })
     }
   }
 }

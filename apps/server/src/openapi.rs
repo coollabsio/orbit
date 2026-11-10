@@ -355,6 +355,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::chat_routes::messages::list_chat_pins,
         crate::chat_routes::messages::list_chat_threads,
         crate::chat_routes::messages::list_followed_chat_threads,
+        crate::chat_routes::messages::list_unread_chat_threads,
         crate::chat_routes::messages::get_chat_thread,
         crate::chat_routes::state::list_chat_states,
         crate::chat_routes::state::update_chat_state,
