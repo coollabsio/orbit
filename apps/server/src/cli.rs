@@ -69,6 +69,8 @@ pub enum Command {
         yes: bool,
     },
     Seed,
+    /// Opens an interactive SQL shell on the database: `psql` for Postgres, `sqlite3` for SQLite.
+    Db,
     RecoveryLink {
         #[arg(long)]
         email: String,
@@ -181,6 +183,7 @@ pub async fn run(cli: Cli, env: BTreeMap<String, String>) -> Result<String, CliE
         Command::Attachments { command } => attachments(config()?, command).await,
         Command::DbReset { yes } => reset(config()?, *yes).await,
         Command::Seed => seed(config()?).await,
+        Command::Db => database_shell(&config()?.data),
         Command::RecoveryLink { email, origin } => {
             recovery_link(config()?, email, origin.as_deref()).await
         }
@@ -293,6 +296,55 @@ async fn shutdown_signal() {
 #[cfg(not(unix))]
 async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
+}
+
+fn database_shell(data: &DataConfig) -> Result<String, CliError> {
+    let mut shell = database_shell_command(data)?;
+    let program = shell.get_program().to_string_lossy().into_owned();
+    let failed = |error: std::io::Error| {
+        CliError::Operation(format!(
+            "could not start {program}: {error}. Is it installed?"
+        ))
+    };
+    // Replace this process, so Ctrl+C reaches only the shell (it cancels the query, not the session).
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        Err(failed(shell.exec()))
+    }
+    #[cfg(not(unix))]
+    {
+        let status = shell.status().map_err(failed)?;
+        if status.success() {
+            Ok(String::new())
+        } else {
+            Err(CliError::Operation(format!(
+                "{program} exited with {status}"
+            )))
+        }
+    }
+}
+
+/// The password goes in `PGPASSWORD`, not the arguments, so other users cannot read it from the process list.
+fn database_shell_command(data: &DataConfig) -> Result<std::process::Command, CliError> {
+    let Some(database_url) = &data.database_url else {
+        let mut shell = std::process::Command::new("sqlite3");
+        shell.arg(&data.database);
+        return Ok(shell);
+    };
+    let mut url = url::Url::parse(database_url).map_err(operation)?;
+    let mut shell = std::process::Command::new("psql");
+    if let Some(password) = url.password() {
+        let password = percent_encoding::percent_decode_str(password)
+            .decode_utf8()
+            .map_err(operation)?
+            .into_owned();
+        shell.env("PGPASSWORD", password);
+        url.set_password(None)
+            .map_err(|()| CliError::Operation("invalid database URL".to_owned()))?;
+    }
+    shell.arg(url.as_str());
+    Ok(shell)
 }
 
 async fn setup_token(config: Config, command: &SetupTokenCommand) -> Result<String, CliError> {
@@ -1379,10 +1431,12 @@ mod tests {
     };
     use orbit_server::repositories::identity::{IdentityRepository, SetupRequest};
 
+    use orbit_platform::DataConfig;
+
     use super::{
         BackupCommand, Cli, Command, ConfigCommand, MigrateCommand, SetupTokenCommand,
-        config_command, failure_message, healthcheck, parent_directory, redacted_config,
-        remove_sidecars, run, validate_reset_paths,
+        config_command, database_shell_command, failure_message, healthcheck, parent_directory,
+        redacted_config, remove_sidecars, run, validate_reset_paths,
     };
 
     fn environment(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
@@ -1822,6 +1876,24 @@ mod tests {
         assert!(shown.contains("ORBIT_STRIPE_PRICES=team:price_1,business:price_2"));
         assert!(!shown.contains("hidden"), "{shown}");
         assert!(!format!("{config:?}").contains("hidden"));
+    }
+
+    #[test]
+    fn database_shell_keeps_the_postgres_password_out_of_the_arguments() {
+        let data = DataConfig {
+            database_url: Some("postgres://orbit:p%40ss@db:5432/orbit?sslmode=require".to_owned()),
+            ..DataConfig::default()
+        };
+        let shell = database_shell_command(&data).unwrap();
+        assert_eq!(shell.get_program(), "psql");
+        let args: Vec<_> = shell.get_args().collect();
+        assert_eq!(args, ["postgres://orbit@db:5432/orbit?sslmode=require"]);
+        let envs: Vec<_> = shell.get_envs().collect();
+        assert_eq!(envs, [("PGPASSWORD".as_ref(), Some("p@ss".as_ref()))]);
+
+        let shell = database_shell_command(&DataConfig::default()).unwrap();
+        assert_eq!(shell.get_program(), "sqlite3");
+        assert_eq!(shell.get_args().collect::<Vec<_>>(), ["data/orbit.sqlite"]);
     }
 
     #[test]

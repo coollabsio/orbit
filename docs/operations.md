@@ -114,6 +114,10 @@ docker compose --env-file deploy/.env -f deploy/compose.yaml start orbit
 
 `root set` makes the account root, gives it Admin access and reinstates it if it was suspended. The previous root user stays an instance admin; remove that in Admin → Users if needed. The change is in the audit log as `instance.root_changed`. On upgrade, Orbit makes the oldest account with Admin access the root user, which is the account created at setup.
 
+## Opening a SQL shell
+
+`orbit db` opens the configured database in an interactive shell: `psql` for Postgres, `sqlite3` for SQLite. The Docker image includes both clients. Changes that you make in the shell skip all of Orbit's checks: make a backup first. With Compose: `docker compose --env-file deploy/.env -f deploy/compose.yaml exec orbit /orbit db`.
+
 ## Email, registration and the app key
 
 Orbit sends email only for invitations, open-registration sign-up links, password reset links and email changes. The root user saves the SMTP server in **Admin → Settings → Email** and checks it with **Send test email**. Without a mail server, invitations are shared as links and password recovery works as described below. Orbit Cloud is different: it always needs a mail server (see [Billing](#billing-orbit-cloud)).
