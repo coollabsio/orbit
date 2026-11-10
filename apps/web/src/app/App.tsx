@@ -12,6 +12,7 @@ import { ProjectSettingsPage } from '@/features/tasks/pages/ProjectSettingsPage'
 import { TasksPage } from '@/features/tasks/pages/TasksPage'
 import { HomePage } from '@/features/home/pages/HomePage'
 import { TaskTrashPage } from '@/features/tasks/pages/TaskTrashPage'
+import { TrashedProjectPage, TrashedTaskPage } from '@/features/tasks/pages/TaskTrashPreviewPage'
 import { AsanaImportPage } from '@/features/tasks/pages/AsanaImportPage'
 import { LinearImportPage } from '@/features/tasks/pages/LinearImportPage'
 import { TrelloImportPage } from '@/features/tasks/pages/TrelloImportPage'
@@ -105,6 +106,8 @@ export default function App() {
                 <Route path="tasks/projects/:projectId/settings" element={<ProjectSettingsPage />} />
                 <Route path="tasks/:taskId" element={<TasksPage />} />
                 <Route path="tasks-trash" element={<TaskTrashPage />} />
+                <Route path="tasks-trash/task/:taskId" element={<TrashedTaskPage />} />
+                <Route path="tasks-trash/project/:projectId" element={<TrashedProjectPage />} />
                 <Route path="tasks-import/:importId?" element={<AsanaImportPage />} />
                 <Route path="tasks-import/linear/:importId?" element={<LinearImportPage />} />
                 <Route path="tasks-import/trello/:importId?" element={<TrelloImportPage />} />
@@ -112,6 +115,7 @@ export default function App() {
                 <Route path="views/:viewId" element={<TasksPage />} />
                 <Route path="views/:viewId/:taskId" element={<TasksPage />} />
                 <Route path="docs/trash" element={<DocsPage view="trash" />} />
+                <Route path="docs/trash/:pageId" element={<DocsPage view="trash" />} />
                 <Route path="docs/import/obsidian/:importId?" element={<DocsPage view="obsidian-import" />} />
                 <Route path="docs/import/:importId?" element={<DocsPage view="import" />} />
                 <Route path="docs/:pageId?" element={<DocsPage />} />

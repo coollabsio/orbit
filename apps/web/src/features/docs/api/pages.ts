@@ -6,6 +6,7 @@ import {
   duplicatePage,
   emptyPageTrash,
   getPage,
+  getTrashedPage,
   listPages,
   listPageTrash,
   movePage,
@@ -151,6 +152,18 @@ export function usePageTrash(workspaceId: string) {
     queryFn: async () => {
       const { data } = await listPageTrash({ client: apiClient, path: { workspace_id: workspaceId }, throwOnError: true })
       return required(data, 'Page trash response was empty.').items
+    },
+  })
+}
+
+/** A trashed page with its content and the sub-pages trashed with it, for the read-only preview. */
+export function useTrashedPage(workspaceId: string, pageId: string, enabled = true) {
+  return useQuery({
+    enabled,
+    queryKey: queryKeys.pages.trashed(workspaceId, pageId),
+    queryFn: async () => {
+      const { data } = await getTrashedPage({ client: apiClient, path: { workspace_id: workspaceId, page_id: pageId }, throwOnError: true })
+      return required(data, 'Trashed page response was empty.')
     },
   })
 }

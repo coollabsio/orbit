@@ -12,7 +12,9 @@ import {
   deleteTask,
   deleteTaskAttachment,
   deleteTaskRelation,
+  emptyTaskTrash,
   getTask,
+  getTrashedTask,
   listComments,
   listGithubLinks,
   listTaskActivity,
@@ -20,6 +22,7 @@ import {
   listTaskAttachments,
   listTaskRelations,
   listTaskTrash,
+  purgeTask,
   listTasks,
   reorderTasks,
   restoreTask,
@@ -317,6 +320,29 @@ export function useTaskTrash(workspaceId: string) {
   })
 }
 
+/** A task the trash shows (trashed, or in a trashed project), for its read-only preview. */
+export function useTrashedTask(workspaceId: string, taskId: string) {
+  return useQuery({
+    queryKey: [...queryKeys.taskTrash(workspaceId), 'preview', taskId],
+    queryFn: async () => {
+      const { data } = await getTrashedTask({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId }, throwOnError: true })
+      return required(data, 'Trashed task response was empty.')
+    },
+    retry: false,
+  })
+}
+
+/** Deletes a trashed task forever with the sub-issues trashed with it. */
+export function usePurgeTask(workspaceId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (taskId: string) => {
+      await purgeTask({ client: apiClient, path: { workspace_id: workspaceId, task_id: taskId }, throwOnError: true })
+    },
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.taskTrash(workspaceId) }),
+  })
+}
+
 async function promptForConflict(error: Error, refresh: () => void) {
   if (isTaskVersionConflict(error) && await confirmAction({ title: 'Refresh task?', description: 'This task changed on the server. Refresh it now?', confirmLabel: 'Refresh' })) refresh()
 }
@@ -527,6 +553,18 @@ export function useRestoreTask(workspaceId: string) {
       void queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all(workspaceId) })
       void queryClient.invalidateQueries({ queryKey: queryKeys.taskTrash(workspaceId) })
     },
+  })
+}
+
+/** Deletes forever every trashed task and every trashed project with its tasks. */
+export function useEmptyTaskTrash(workspaceId: string) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async () => {
+      const { data } = await emptyTaskTrash({ client: apiClient, path: { workspace_id: workspaceId }, throwOnError: true })
+      return required(data, 'Empty trash response was empty.')
+    },
+    onSettled: () => void queryClient.invalidateQueries({ queryKey: queryKeys.workspace(workspaceId) }),
   })
 }
 
