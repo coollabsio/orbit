@@ -136,9 +136,10 @@ export function DatabaseCalendar({ database, config, rows, onConfig, onAddRow, o
     },
   })
 
+  // `contain` keeps the toolbar's width out of the page's `w-max` column, so a phone fits the 7 days instead of scrolling.
   return (
-    <div className="flex flex-col gap-2 pb-4 text-sm">
-      <div className="flex items-center gap-1">
+    <div className="flex flex-col gap-2 pb-4 text-sm [contain:inline-size]">
+      <div className="flex flex-wrap items-center gap-1">
         <h3 className="mr-2 text-base font-semibold">{monthTitle(week ? weeks[0]![0]! : anchor, ctx.locale)}</h3>
         <Button type="button" variant="ghost" size="icon-sm" aria-label={week ? 'Previous week' : 'Previous month'} onClick={() => step(-1)}>
           <ChevronLeft />
