@@ -38,10 +38,14 @@ const ROW_HEIGHT = 34
 const HEADER_HEIGHT = 52
 const TITLE_WIDTH = 240
 const COLUMN_WIDTH = 140
+/** The table pane takes at most this share of the timeline's width; columns that do not fit are left out. */
+const PANE_SHARE = 2 / 3
 /** A bar narrower than this shows its title after it. */
 const LABEL_INSIDE_MIN = 72
 const MIN_BAR_WIDTH = 6
 const EDGE_WIDTH = 6
+/** A bar narrower than this has no edge handles: the edges would cover it, so it could not move. */
+const RESIZE_MIN = 3 * EDGE_WIDTH
 /** Pointer travel (px) before a press on a bar becomes a drag. */
 const DRAG_SLOP = 3
 
@@ -76,6 +80,15 @@ export function DatabaseTimeline({ database, config, rows, onConfig, onAddRow, o
   const title = database.properties.find((property) => property.type === 'title')
   const today = localDay(ctx.now, ctx.timeZone)
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null)
+  const [scrollerWidth, setScrollerWidth] = useState<number | null>(null)
+  useLayoutEffect(() => {
+    if (!scroller) return
+    setScrollerWidth(scroller.clientWidth)
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(([entry]) => setScrollerWidth(entry!.contentRect.width))
+    observer.observe(scroller)
+    return () => observer.disconnect()
+  }, [scroller])
   const [drag, setDrag] = useState<Drag | null>(null)
   const [hover, setHover] = useState<{ rowId: string; day: string } | null>(null)
 
@@ -89,7 +102,11 @@ export function DatabaseTimeline({ database, config, rows, onConfig, onAddRow, o
   const bars = items.flatMap((item) => (item.kind === 'row' && item.bar ? [item.bar] : []))
   const axis = axisOf(timeline.zoom, timelineRange(bars, today, timeline.zoom), ctx.locale)
   const axisWidth = axis.days * axis.dayWidth
-  const tableWidth = timeline.showTable ? TITLE_WIDTH + timeline.columns.length * COLUMN_WIDTH : 0
+  // A narrow timeline (a phone) keeps room for the axis: a pane wider than the scroller would hide every bar.
+  const paneRoom = scrollerWidth === null ? Infinity : scrollerWidth * PANE_SHARE
+  const showTable = timeline.showTable && paneRoom >= TITLE_WIDTH
+  const columns = showTable ? timeline.columns.slice(0, Math.floor((paneRoom - TITLE_WIDTH) / COLUMN_WIDTH)) : []
+  const tableWidth = showTable ? TITLE_WIDTH + columns.length * COLUMN_WIDTH : 0
   const xOf = (day: string) => dayIndex(axis.start, day) * axis.dayWidth
 
   const virtualizer = useVirtualizer({
@@ -104,10 +121,10 @@ export function DatabaseTimeline({ database, config, rows, onConfig, onAddRow, o
     const visible = scroller.clientWidth - tableWidth
     scroller.scrollTo({ left: Math.max(0, xOf(today) - visible / 3), behavior })
   }
-  // Opens at today, and again at each zoom.
+  // Opens at today, and again at each zoom and pane width.
   const scrolledFor = useRef<string | null>(null)
   useLayoutEffect(() => {
-    const key = `${timeline.zoom}:${axis.start}`
+    const key = `${timeline.zoom}:${axis.start}:${tableWidth}`
     if (!scroller || scrolledFor.current === key) return
     scrolledFor.current = key
     scrollToToday('instant')
@@ -183,7 +200,7 @@ export function DatabaseTimeline({ database, config, rows, onConfig, onAddRow, o
       >
         <div className="relative" style={{ width: tableWidth + axisWidth }}>
           <div role="row" className="sticky top-0 z-20 flex border-b border-border bg-background" style={{ height: HEADER_HEIGHT }}>
-            {timeline.showTable ? <TableHeader title={title} columns={timeline.columns} width={tableWidth} /> : null}
+            {showTable ? <TableHeader title={title} columns={columns} width={tableWidth} /> : null}
             <div className="relative shrink-0" style={{ width: axisWidth }}>
               {axis.groups.map((group) => (
                 <div key={group.day} className="absolute top-0 flex h-6 items-center border-l border-border px-2 text-xs font-medium whitespace-nowrap" style={{ left: group.start * axis.dayWidth, width: group.days * axis.dayWidth }}>
@@ -226,7 +243,7 @@ export function DatabaseTimeline({ database, config, rows, onConfig, onAddRow, o
               const ghost = !item.bar && hover?.rowId === row.id ? hover.day : null
               return (
                 <div key={row.id} role="row" className="group/row absolute left-0 flex w-full border-b border-border/60 hover:bg-muted/30" style={{ top: virtual.start, height: ROW_HEIGHT }}>
-                  {timeline.showTable ? <TableCells row={row} title={title} columns={timeline.columns} width={tableWidth} onOpen={() => onOpenRow(row.id)} /> : null}
+                  {showTable ? <TableCells row={row} title={title} columns={columns} width={tableWidth} onOpen={() => onOpenRow(row.id)} /> : null}
                   <div
                     className={cn('relative shrink-0', !item.bar && editable && 'cursor-cell')}
                     style={{ width: axisWidth }}
@@ -241,6 +258,9 @@ export function DatabaseTimeline({ database, config, rows, onConfig, onAddRow, o
                       if (ghost && timeline.start) updateValues.mutate({ rowId: row.id, values: dayValues(timeline, ghost) })
                     }}
                   >
+                    {!showTable && !item.bar ? (
+                      <span className="pointer-events-none sticky left-0 flex h-full w-fit max-w-60 items-center truncate px-2 text-sm text-muted-foreground">{row.title || 'Untitled'}</span>
+                    ) : null}
                     {ghost ? (
                       <div aria-hidden="true" className="absolute top-1.5 rounded-sm border border-dashed border-primary/60 bg-primary/10" style={{ left: xOf(ghost), width: Math.max(axis.dayWidth, MIN_BAR_WIDTH), height: ROW_HEIGHT - 12 }} />
                     ) : null}
@@ -333,6 +353,7 @@ interface BarViewProps {
 function BarView({ row, left, width, editable, dragging, onPointerDown, onPointerMove, onPointerUp, onPointerCancel }: BarViewProps) {
   const label = row.title || 'Untitled'
   const inside = width >= LABEL_INSIDE_MIN
+  const resizable = editable && width >= RESIZE_MIN
   const handlers = { onPointerMove, onPointerUp, onPointerCancel }
   return (
     <>
@@ -350,9 +371,9 @@ function BarView({ row, left, width, editable, dragging, onPointerDown, onPointe
         onClick={(event) => event.stopPropagation()}
         {...handlers}
       >
-        {editable ? <EdgeHandle side="start" onPointerDown={(event) => onPointerDown(event, 'start')} {...handlers} /> : null}
+        {resizable ? <EdgeHandle side="start" onPointerDown={(event) => onPointerDown(event, 'start')} {...handlers} /> : null}
         {inside ? <span className="truncate px-2">{label}</span> : null}
-        {editable ? <EdgeHandle side="end" onPointerDown={(event) => onPointerDown(event, 'end')} {...handlers} /> : null}
+        {resizable ? <EdgeHandle side="end" onPointerDown={(event) => onPointerDown(event, 'end')} {...handlers} /> : null}
       </div>
       {inside ? null : (
         <span className="pointer-events-none absolute top-1.5 flex items-center text-xs whitespace-nowrap text-muted-foreground" style={{ left: left + width + 6, height: ROW_HEIGHT - 12 }}>
@@ -401,7 +422,7 @@ export function TimelineMenus({ properties, config, onConfig }: { properties: Pr
         Show table
       </DropdownMenuCheckboxItem>
       <DropdownMenuSub>
-        <DropdownMenuSubTrigger disabled={!timeline.showTable}>
+        <DropdownMenuSubTrigger className="whitespace-nowrap" disabled={!timeline.showTable}>
           <Eye />
           Table properties
         </DropdownMenuSubTrigger>
@@ -435,10 +456,10 @@ export function TimelineMenus({ properties, config, onConfig }: { properties: Pr
 function DateMenu({ label, icon, choices, value, onChange, none = false }: { label: string; icon: ReactNode; choices: Property[]; value: string | null; onChange: (id: string | null) => void; none?: boolean }) {
   return (
     <DropdownMenuSub>
-      <DropdownMenuSubTrigger disabled={choices.length === 0 && !none}>
+      <DropdownMenuSubTrigger className="whitespace-nowrap" disabled={choices.length === 0 && !none}>
         {icon}
         {label}
-        <span className="ml-auto max-w-20 truncate text-xs text-muted-foreground">{choices.find((property) => property.id === value)?.name ?? (none ? 'None' : '')}</span>
+        <span className="ml-auto max-w-20 min-w-0 truncate text-xs text-muted-foreground">{choices.find((property) => property.id === value)?.name ?? (none ? 'None' : '')}</span>
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent className="w-48">
         <DropdownMenuRadioGroup

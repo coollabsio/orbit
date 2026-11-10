@@ -28,13 +28,15 @@ export function TimelineList({ database, config, rows, ctx, header, empty, refre
   const months = new Map<string, Row[]>()
   const undated: Row[] = []
   const spans = new Map<string, string>()
+  const dayName = new Intl.DateTimeFormat(ctx.locale, { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+  const day = (iso: string) => dayName.format(new Date(`${iso}T00:00:00Z`))
   for (const row of rows) {
     const bar = barOf(row, timeline, ctx.timeZone)
     if (!bar) {
       undated.push(row)
       continue
     }
-    spans.set(row.id, bar.startDay === bar.endDay ? bar.startDay : `${bar.startDay} – ${bar.endDay}`)
+    spans.set(row.id, bar.startDay === bar.endDay ? day(bar.startDay) : `${day(bar.startDay)} – ${day(bar.endDay)}`)
     const month = bar.startDay.slice(0, 7)
     months.set(month, [...(months.get(month) ?? []), row])
   }
