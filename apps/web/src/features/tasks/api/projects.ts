@@ -1,5 +1,5 @@
 import { confirmAction } from '@/components/common/confirmAction'
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { queryOptions, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/api/client'
 import { fetchAllPages } from '@/api/pagination'
 import {
@@ -61,17 +61,18 @@ async function fetchProjects(workspaceId: string): Promise<ProjectRecord[]> {
   return page.items
 }
 
-export function useProjects(workspaceId: string, enabled = true) {
-  return useQuery({ queryKey: queryKeys.projects(workspaceId), enabled, queryFn: () => fetchProjects(workspaceId) })
+/** The workspace's projects; shared by `useProjects` and code that reads them outside React (`fetchQuery`). */
+export function projectsQuery(workspaceId: string) {
+  return queryOptions({ queryKey: queryKeys.projects(workspaceId), queryFn: () => fetchProjects(workspaceId) })
 }
 
-export function useProjectStatuses(workspaceId: string, projectId: string | undefined) {
-  return useQuery({
-    queryKey: queryKeys.statuses(workspaceId, projectId ?? ''),
-    enabled: Boolean(projectId),
+/** A project's statuses; shared by the status hooks and code that reads them outside React (`fetchQuery`). */
+export function statusesQuery(workspaceId: string, projectId: string) {
+  return queryOptions({
+    queryKey: queryKeys.statuses(workspaceId, projectId),
     queryFn: async () => {
       const page = await fetchAllPages(async (cursor) => {
-        const { data } = await listStatuses({ client: apiClient, path: { workspace_id: workspaceId, project_id: projectId! }, query: { limit: 100, cursor }, throwOnError: true })
+        const { data } = await listStatuses({ client: apiClient, path: { workspace_id: workspaceId, project_id: projectId }, query: { limit: 100, cursor }, throwOnError: true })
         return required(data, 'Statuses response was empty.')
       })
       return page.items.map(statusFromRecord)
@@ -79,18 +80,17 @@ export function useProjectStatuses(workspaceId: string, projectId: string | unde
   })
 }
 
+export function useProjects(workspaceId: string, enabled = true) {
+  return useQuery({ ...projectsQuery(workspaceId), enabled })
+}
+
+export function useProjectStatuses(workspaceId: string, projectId: string | undefined) {
+  return useQuery({ ...statusesQuery(workspaceId, projectId ?? ''), enabled: Boolean(projectId) })
+}
+
 export function useAllStatuses(workspaceId: string, projects: ProjectRecord[]) {
   const results = useQueries({
-    queries: projects.map((project) => ({
-      queryKey: queryKeys.statuses(workspaceId, project.id),
-      queryFn: async () => {
-        const page = await fetchAllPages(async (cursor) => {
-          const { data } = await listStatuses({ client: apiClient, path: { workspace_id: workspaceId, project_id: project.id }, query: { limit: 100, cursor }, throwOnError: true })
-          return required(data, 'Statuses response was empty.')
-        })
-        return page.items.map(statusFromRecord)
-      },
-    })),
+    queries: projects.map((project) => statusesQuery(workspaceId, project.id)),
   })
   return {
     data: results.flatMap((result) => result.data ?? []),

@@ -1,6 +1,8 @@
-import { useLayoutEffect, useRef, type ComponentProps, type Ref } from 'react'
+import { useLayoutEffect, useRef, type ComponentProps, type PointerEvent, type ReactNode, type Ref } from 'react'
 import { cn } from 'cn'
+import { ReferencePreviewCard } from '@/components/common/ReferencePreview'
 import { Textarea } from '@/components/ui/textarea'
+import { rectAt, useHoverPreview } from '@/lib/useHoverPreview'
 import type { MentionTarget } from '../../lib/mentionTokens'
 import { composerSegments } from './composerSegments'
 
@@ -9,6 +11,12 @@ interface ComposerInputProps extends Omit<ComponentProps<typeof Textarea>, 'valu
   value: string
   people: readonly MentionTarget[]
   conversations: readonly MentionTarget[]
+  /** Project keys: a typed `ENG-12` is tinted as the task it names. */
+  taskKeys?: readonly string[]
+  /** What a tinted reference is (`user:<id>`, `channel:<id>`, `global:here`, `task:ENG-12`), shown while the pointer rests on it. */
+  renderPreview?: (ref: string) => ReactNode
+  /** Another popup (the suggestions) sits over the field: no preview opens. */
+  previewHidden?: boolean
 }
 
 /**
@@ -19,21 +27,43 @@ interface ComposerInputProps extends Omit<ComponentProps<typeof Textarea>, 'valu
  * a mention or a format changes colour, background or decoration only, never width. A width that differs moves the
  * caret away from the text.
  */
-export function ComposerInput({ ref, value, people, conversations, className, onScroll, ...props }: ComposerInputProps) {
+export function ComposerInput({ ref, value, people, conversations, taskKeys, renderPreview, previewHidden = false, className, onScroll, ...props }: ComposerInputProps) {
   const mirror = useRef<HTMLDivElement>(null)
   const field = useRef<HTMLTextAreaElement | null>(null)
+  const preview = useHoverPreview<string>()
+
+  /**
+   * The textarea takes the pointer, so the hovered reference is found in the copy behind it, which has the same layout.
+   * Only a mouse hovers: a touch places the caret.
+   */
+  const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== 'mouse' || !renderPreview || previewHidden || !mirror.current) return preview.hide()
+    const pieces = mirror.current.querySelectorAll<HTMLElement>('[data-ref]')
+    for (const [index, piece] of pieces.entries()) {
+      const rect = rectAt(piece, event.clientX, event.clientY)
+      if (rect) return preview.show(`${index}:${piece.dataset.ref}`, piece.dataset.ref!, rect)
+    }
+    preview.hide()
+  }
 
   // The textarea scrolls past the box's maximum height; the copy follows it.
   useLayoutEffect(() => {
     if (mirror.current && field.current) mirror.current.scrollTop = field.current.scrollTop
   }, [value])
 
-  const segments = composerSegments(value, people, conversations)
+  const segments = composerSegments(value, people, conversations, taskKeys)
   // A mention keeps its own background, so it is not part of the code or spoiler box around it.
   const fills = segments.map((segment) => (segment.kind === 'mention' ? undefined : segment.marks?.includes('spoiler') ? 'spoiler' : segment.marks?.includes('code') ? 'code' : undefined))
 
   return (
-    <div data-slot="composer-input" className="relative flex min-h-10 shrink flex-col">
+    <div
+      data-slot="composer-input"
+      className="relative flex min-h-10 shrink flex-col"
+      onPointerMove={onPointerMove}
+      onPointerLeave={preview.hide}
+      // typing changes the text under the card: it goes, and comes back when the pointer moves again
+      onKeyDownCapture={preview.hide}
+    >
       <div
         ref={mirror}
         aria-hidden="true"
@@ -50,6 +80,7 @@ export function ComposerInput({ ref, value, people, conversations, className, on
             <span
               key={index}
               data-kind={segment.kind}
+              data-ref={segment.kind === 'mention' ? segment.ref : undefined}
               // Colour, background and decoration line each hang on one attribute: two variants that set the same property can win in the wrong order.
               data-tone={segment.kind !== 'text' ? undefined : marks?.includes('marker') ? 'marker' : marks?.includes('muted') ? 'muted' : undefined}
               data-fill={fills[index]}
@@ -79,11 +110,17 @@ export function ComposerInput({ ref, value, people, conversations, className, on
         value={value}
         className={cn('relative text-transparent caret-foreground [scrollbar-width:none] selection:bg-primary/30 selection:text-transparent', className)}
         onScroll={(event) => {
+          preview.hide()
           if (mirror.current) mirror.current.scrollTop = event.currentTarget.scrollTop
           onScroll?.(event)
         }}
         {...props}
       />
+      {preview.shown && renderPreview && !previewHidden ? (
+        <ReferencePreviewCard key={preview.shown.key} rect={preview.shown.rect}>
+          {renderPreview(preview.shown.value)}
+        </ReferencePreviewCard>
+      ) : null}
     </div>
   )
 }

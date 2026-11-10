@@ -26,6 +26,7 @@ import { relativeAgo } from '../../../data/format'
 import { keys } from '../../../data/keys'
 import { markdownToText } from '../../../data/markdown'
 import { mentionedUserIds } from '../../../data/mentions'
+import { linkTaskIdsInMarkdown } from '../../../data/taskIds'
 import * as api from '../../../data/orbit'
 import * as taskApi from '../../../data/task-api'
 import {
@@ -93,7 +94,7 @@ let draftFileCount = 0
 
 export default function TaskScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
-  const { client, workspaceId, user } = useOrbit()
+  const { client, workspaceId, user, session } = useOrbit()
   const queryClient = useQueryClient()
   const { colors } = useTheme()
   const projects = useProjects()
@@ -130,7 +131,9 @@ export default function TaskScreen() {
 
   const mentionable = useMentionPeople()
   const sendComment = useMutation({
-    mutationFn: (body: string) => api.addComment(client, workspaceId, id, body, mentionedUserIds(body, mentionable)),
+    // a typed task ID goes as a link to the task, as the web's "#" inserts it
+    mutationFn: (body: string) =>
+      api.addComment(client, workspaceId, id, linkTaskIdsInMarkdown(body, (projects.data ?? []).map((project) => project.key), session.server), mentionedUserIds(body, mentionable)),
     onSuccess: (comment) => {
       setDraft('')
       setDraftFiles([])
@@ -713,7 +716,7 @@ function CommentComposer({
 }) {
   const { colors, scheme } = useTheme()
   const [focused, setFocused] = useState(false)
-  const mention = useMentionField({ text: value, setText: onChangeText, people: useMentionPeople() })
+  const mention = useMentionField({ text: value, setText: onChangeText, people: useMentionPeople(), tasks: true })
   return (
     <View className={`mt-3 rounded-lg border bg-card/50 ${focused ? 'border-ring/50' : 'border-border'}`}>
       <MentionSuggestions suggestions={mention.suggestions} onPick={mention.pick} />
