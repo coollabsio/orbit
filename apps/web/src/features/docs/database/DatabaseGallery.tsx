@@ -79,7 +79,7 @@ export function DatabaseGallery({ database, config, rows, onAddRow, onOpenRow, f
           )}
         </div>
       ) : null}
-      <div role="list" aria-label="Cards" aria-busy={moveRow.isPending} className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(${width}px, 1fr))` }}>
+      <div role="list" aria-label="Cards" aria-busy={moveRow.isPending} className="grid gap-3" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(min(${width}px, 100%), 1fr))` }}>
         {rows.map((row, index) => (
           <GalleryCard
             key={row.id}
@@ -220,10 +220,10 @@ export function GalleryMenus({ properties, config, onConfig }: { properties: Pro
   return (
     <>
       <DropdownMenuSub>
-        <DropdownMenuSubTrigger>
+        <DropdownMenuSubTrigger className="whitespace-nowrap">
           <Image />
           Card preview
-          <span className="ml-auto max-w-20 truncate text-xs text-muted-foreground">{currentLabel}</span>
+          <span className="ml-auto max-w-20 min-w-0 truncate text-xs text-muted-foreground">{currentLabel}</span>
         </DropdownMenuSubTrigger>
         <DropdownMenuSubContent className="w-48">
           <DropdownMenuRadioGroup
@@ -251,7 +251,7 @@ export function GalleryMenus({ properties, config, onConfig }: { properties: Pro
         </DropdownMenuSubContent>
       </DropdownMenuSub>
       <DropdownMenuSub>
-        <DropdownMenuSubTrigger>
+        <DropdownMenuSubTrigger className="whitespace-nowrap">
           <GalleryIcon />
           Card size
           <span className="ml-auto text-xs text-muted-foreground">{SIZE_LABELS[gallery.size]}</span>
