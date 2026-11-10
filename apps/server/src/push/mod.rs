@@ -36,11 +36,17 @@ use crate::repositories::chat::MessageRecord;
 use apns::{ApnsDevice, ApnsEnvironment, ApnsSender};
 
 /// The hosts of the push services of the browser vendors. A subscription names the URL the
-/// server sends to, so it must not be able to name any other host.
-const PUSH_HOSTS: [&str; 5] = [
+/// server sends to, so it must not be able to name any other host. A host that starts with a
+/// dot allows its subdomains; the others must match exactly.
+const PUSH_HOSTS: [&str; 8] = [
     "fcm.googleapis.com",
+    // Chrome Beta, Dev and Canary (every channel but Stable).
+    "jmt17.google.com",
     "updates.push.services.mozilla.com",
     ".push.services.mozilla.com",
+    // Mozilla's stage and dev push services.
+    "updates-autopush.stage.mozaws.net",
+    "updates-autopush.dev.mozaws.net",
     ".notify.windows.com",
     ".push.apple.com",
 ];
@@ -1184,6 +1190,9 @@ mod tests {
             "https://updates.push.services.mozilla.com/wpush/v2/abc",
             "https://db5p.notify.windows.com/w/?token=abc",
             "https://web.push.apple.com/abc",
+            "https://jmt17.google.com/fcm/send/abc",
+            "https://updates-autopush.stage.mozaws.net/wpush/v2/abc",
+            "https://updates-autopush.dev.mozaws.net/wpush/v2/abc",
         ] {
             assert!(allowed_endpoint(allowed), "{allowed}");
         }
@@ -1192,6 +1201,9 @@ mod tests {
             "https://fcm.googleapis.com:8443/fcm/send/abc",
             "https://fcm.googleapis.com.evil.example/abc",
             "https://evilpush.apple.com/abc",
+            "https://evil.jmt17.google.com/abc",
+            "https://evil.updates-autopush.stage.mozaws.net/abc",
+            "https://evil.mozaws.net/abc",
             "https://127.0.0.1/abc",
             "https://localhost/abc",
             "not a url",
