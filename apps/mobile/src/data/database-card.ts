@@ -81,10 +81,11 @@ function problemOf(error: unknown): { status?: unknown; code?: unknown } {
   return typeof error === 'object' && error !== null ? (error as { status?: unknown; code?: unknown }) : {}
 }
 
-/** The database screen of a card: the block's linked view, opened on the view the card shows. */
-export function databaseHref(ref: DatabaseBlockRef, viewId: string | null): string {
+/** The database screen of a card: the block's linked view (with `hostId`, the page that shows it), opened on the view the card shows. */
+export function databaseHref(ref: DatabaseBlockRef, viewId: string | null, hostId?: string): string {
   const params = new URLSearchParams()
   if (ref.linkId) params.set('link', ref.linkId)
+  if (ref.linkId && hostId) params.set('host', hostId)
   if (viewId) params.set('view', viewId)
   const query = params.toString()
   return `/docs/${encodeURIComponent(ref.databaseId)}${query ? `?${query}` : ''}`

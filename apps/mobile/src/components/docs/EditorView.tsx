@@ -78,7 +78,7 @@ export const EditorView = memo(function EditorView({ ref, pageId, epoch, generat
       loadFile: whileMounted(mounted, (url: string) => fileDataUrl(session.server, session.token, url)),
       fileDeleted: whileMounted(mounted, (url: string) => fileDeleted(session.server, session.token, url)),
       openPage: whileMounted(mounted, async (target: string) => router.push(pageHref(target))),
-      openDatabase: whileMounted(mounted, async (block: DatabaseBlockRef, viewId: string | null) => router.push(databaseHref(block, viewId))),
+      openDatabase: whileMounted(mounted, async (block: DatabaseBlockRef, viewId: string | null) => router.push(databaseHref(block, viewId, pageId))),
       onDatabases: whileMounted(mounted, async (blocks: DatabaseBlockRef[]) => setDatabaseBlocks(blocks)),
       // the editor already filters links; the app checks again before it hands one to the OS
       openUrl: whileMounted(mounted, async (url: string) => {

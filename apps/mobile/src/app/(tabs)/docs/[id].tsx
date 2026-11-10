@@ -35,8 +35,8 @@ const CARET_MARGIN = 24
  * co-edits the page live with everyone else. A formatting bar sits above the keyboard while the body has focus.
  */
 export default function DocScreen() {
-  // `link` and `view`: a database opened from a page's database card (its linked view, the view the card showed)
-  const { id, link, view } = useLocalSearchParams<{ id: string; link?: string; view?: string }>()
+  // `link`, `host` and `view`: a database opened from a page's database card (its linked view, that page, the view the card showed)
+  const { id, link, host, view } = useLocalSearchParams<{ id: string; link?: string; host?: string; view?: string }>()
   const { client, workspaceId, session } = useOrbit()
   const { colors } = useTheme()
   const page = useQuery({ queryKey: keys.page(workspaceId, id), queryFn: () => api.page(client, workspaceId, id) })
@@ -267,7 +267,7 @@ export default function DocScreen() {
           <LoadingView />
         )
       ) : page.data.kind === 'database' ? (
-        <DatabaseView key={link ?? ''} databaseId={id} linkId={link ?? ''} initialView={view ?? null} header={head!} notify={setNotice} />
+        <DatabaseView key={link ?? ''} databaseId={id} linkId={link ?? ''} hostId={host ?? ''} initialView={view ?? null} header={head!} notify={setNotice} />
       ) : (
         <KeyboardSpace className="flex-1">
           <ScrollView

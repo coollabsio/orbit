@@ -18,7 +18,7 @@ import { type ReactElement, useEffect, useState } from 'react'
 import { FlatList, Pressable, ScrollView, useWindowDimensions, View } from 'react-native'
 
 import { advancedFilterLabel, listProperties, pickView, PROPERTY_ICONS, sortedViews, summaryLines, VIEW_ICONS, viewStorageKey } from '../../data/database'
-import { type Notify, useCreateRow, useDatabase, useUpdateValues, useViewContext, useViewDrafts, useWorkspaceReadOnly } from '../../hooks/database'
+import { type Notify, useCreateRow, useDatabase, useHostLocked, useUpdateValues, useViewContext, useViewDrafts, useWorkspaceReadOnly } from '../../hooks/database'
 import { storage } from '../../storage'
 import { alpha, useTheme } from '../../theme'
 import { Avatar, Button, ErrorView, Icon, IconButton, LoadingView, PullRefresh, Text } from '../../ui'
@@ -45,11 +45,13 @@ type DatabaseSheet = { kind: 'views' } | { kind: 'filters' } | { kind: 'sorts' }
 
 /**
  * `linkId` shows a linked view block's views instead of the database's own (spec 3.7); `initialView` opens one of them
- * (the view a page's card showed) instead of the last one chosen on this device.
+ * (the view a page's card showed) instead of the last one chosen on this device. `hostId` is the page that shows the
+ * linked view block.
  */
-export function DatabaseView({ databaseId, linkId = '', initialView = null, header, notify }: {
+export function DatabaseView({ databaseId, linkId = '', hostId = '', initialView = null, header, notify }: {
   databaseId: string
   linkId?: string
+  hostId?: string
   initialView?: string | null
   header: ReactElement
   notify: Notify
@@ -58,10 +60,11 @@ export function DatabaseView({ databaseId, linkId = '', initialView = null, head
   // Relation values, filters and the CSV export show the related pages' titles.
   const ctx = withRelatedPages(useViewContext(), query.data)
   const readOnly = useWorkspaceReadOnly()
-  // The database lock guards its own views only; the server checks a linked view's host page.
-  const locked = linkId ? false : (query.data?.database.locked ?? true)
-  const canEditSchema = !locked && !readOnly
-  const views = useViewDrafts(databaseId, linkId, canEditSchema, notify)
+  // Spec D1: the database lock freezes its own views, the host page's lock a linked view's. Frozen views change locally.
+  const hostLocked = useHostLocked(linkId ? hostId : '')
+  const locked = linkId ? hostLocked : (query.data?.database.locked ?? true)
+  const canEditViews = !locked && !readOnly
+  const views = useViewDrafts(databaseId, linkId, canEditViews, notify)
   const createRow = useCreateRow(databaseId, notify, linkId)
   const updateValues = useUpdateValues(databaseId, notify, linkId)
   const sheet = useSheet<DatabaseSheet>()
@@ -133,7 +136,7 @@ export function DatabaseView({ databaseId, linkId = '', initialView = null, head
       onFilters={openFilters}
       onSorts={() => sheet.open({ kind: 'sorts' })}
       onMore={() => sheet.open({ kind: 'more' })}
-      localOnly={draft !== undefined && !canEditSchema}
+      localOnly={draft !== undefined && !canEditViews}
       onReset={() => views.reset(view.id)}
     />
   )
@@ -157,7 +160,7 @@ export function DatabaseView({ databaseId, linkId = '', initialView = null, head
           ctx={ctx}
           header={<>{header}<FormViewPicker view={view} onPress={() => sheet.open({ kind: 'views' })} /></>}
           canSubmit={!readOnly}
-          editOnWeb={canEditSchema}
+          editOnWeb={canEditViews}
         />
       ) : view.type === 'board' ? (
         <ScrollView contentContainerClassName="pb-8" keyboardShouldPersistTaps="handled" refreshControl={refresh}>

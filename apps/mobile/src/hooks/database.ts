@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { billingKey, workspaceBilling } from '../data/billing'
 import * as api from '../data/database-api'
+import { page } from '../data/orbit'
 import { keys } from '../data/keys'
 import { useOrbit } from '../orbit-context'
 import { useMembers } from '../queries'
@@ -53,6 +54,13 @@ export function useRememberRelatedPages() {
 }
 
 /** A read-only workspace (Orbit Cloud billing) refuses every write; the billing line already says so. */
+/** Whether a linked view's host page is locked: its lock freezes the linked views. `true` until known, and without a host. */
+export function useHostLocked(hostId: string): boolean {
+  const { client, workspaceId } = useOrbit()
+  const host = useQuery({ queryKey: keys.page(workspaceId, hostId), queryFn: () => page(client, workspaceId, hostId), enabled: hostId !== '' })
+  return host.data ? host.data.locked_at !== null : true
+}
+
 export function useWorkspaceReadOnly(): boolean {
   const { client, workspaceId } = useOrbit()
   const billing = useQuery({ queryKey: billingKey(workspaceId), queryFn: () => workspaceBilling(client, workspaceId), enabled: false })
