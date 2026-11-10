@@ -1,11 +1,13 @@
 /** The Docs writes, favorites, trash and comments, over `data/docs-api.ts`. The tree lists are in `src/queries.ts`. */
 import type { DatabaseDetail, PageFavorite, PageKind } from '@orbit/api/generated/types.gen'
 import { type QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useState } from 'react'
 
 import type { UploadFile } from '../data/account-api'
-import { paragraphBlocks, spaceRequest } from '../data/docs'
+import { type MoveDestination, moveRequest, paragraphBlocks, spaceRequest } from '../data/docs'
 import * as docs from '../data/docs-api'
 import { keys } from '../data/keys'
+import * as api from '../data/orbit'
 import type { Page, PageSummary, Teamspace } from '../data/orbit'
 import { useOrbit } from '../orbit-context'
 import { useMentionPeople } from '../queries'
@@ -92,26 +94,31 @@ export function useFavorites() {
 /** True when `pageId` is one of `favorites`. */
 export const isFavorite = (favorites: readonly PageFavorite[] | undefined, pageId: string) => favorites?.some((favorite) => favorite.page_id === pageId) ?? false
 
-/** Adds (appended last, shown with `page` at once) or removes a favorite; the star moves at once and goes back on an error. */
+/**
+ * Adds (appended last, shown with `page` at once) or removes a favorite; the star moves at once and goes back on an
+ * error. A row shows its database's name from the tree at once.
+ */
 export function useToggleFavorite() {
   const { client, workspaceId } = useOrbit()
   const queryClient = useQueryClient()
   const key = docs.docsKeys.favorites(workspaceId)
   return useMutation({
-    mutationFn: ({ pageId, favorite }: { pageId: string; favorite: boolean; page?: Pick<PageSummary, 'title' | 'icon' | 'kind'> }) =>
+    mutationFn: ({ pageId, favorite }: { pageId: string; favorite: boolean; page?: Pick<PageSummary, 'title' | 'icon' | 'kind'> & { database_id?: string | null } }) =>
       docs.setFavorite(client, workspaceId, pageId, favorite),
     onMutate: async ({ pageId, favorite, page }) => {
       await queryClient.cancelQueries({ queryKey: key })
       const favorites = queryClient.getQueryData<PageFavorite[]>(key)
       const without = (favorites ?? []).filter((item) => item.page_id !== pageId)
+      const databaseId = page?.database_id ?? null
+      const database = databaseId ? queryClient.getQueryData<PageSummary[]>(keys.pages(workspaceId))?.find((item) => item.id === databaseId) : undefined
       const added: PageFavorite = {
         page_id: pageId,
         position: without.length,
         title: page?.title ?? '',
         icon: page?.icon ?? null,
         kind: page?.kind ?? 'page',
-        database_id: null,
-        database_title: null,
+        database_id: databaseId,
+        database_title: database ? database.title : null,
       }
       queryClient.setQueryData<PageFavorite[]>(key, favorite ? [...without, added] : without)
       return { favorites }
@@ -130,6 +137,52 @@ function useRefreshDocs() {
     void queryClient.invalidateQueries({ queryKey: ['page', workspaceId] })
     void queryClient.invalidateQueries({ queryKey: ['database', workspaceId] })
   }
+}
+
+/**
+ * "Move to" for one page, in two steps so the screen can confirm in between: `prepare` reads the page's current
+ * version and, for a row that leaves its database, asks the server how many values the move deletes (a dry run);
+ * `move` then moves it. The server refuses a database into a database and a template.
+ */
+export function useMovePageTo() {
+  const { client, workspaceId } = useOrbit()
+  const queryClient = useQueryClient()
+  const refresh = useRefreshDocs()
+  const move = useMutation({
+    mutationFn: ({ page, request }: { page: Page; request: ReturnType<typeof moveRequest> }) => docs.movePageTo(client, workspaceId, page, request),
+    onSettled: refresh,
+  })
+  return {
+    prepare: async (pageId: string, destination: MoveDestination): Promise<{ dropped: number; move: () => Promise<unknown> }> => {
+      const page = await api.page(client, workspaceId, pageId)
+      const request = moveRequest(queryClient.getQueryData<PageSummary[]>(keys.pages(workspaceId)) ?? [], pageId, destination)
+      const leaves = page.database_id !== null && request.parent_id !== page.database_id
+      const dropped = leaves ? await docs.movePageTo(client, workspaceId, page, request, true) : 0
+      return { dropped, move: () => move.mutateAsync({ page, request }) }
+    },
+  }
+}
+
+/** Server search a moment after the last key (idle while blank), keeping the last results while the next ones load. */
+export function usePageSearch(query: string) {
+  const { client, workspaceId } = useOrbit()
+  const typed = query.trim().slice(0, 200)
+  const [q, setQ] = useState(typed)
+  useEffect(() => {
+    const timer = setTimeout(() => setQ(typed), 250)
+    return () => clearTimeout(timer)
+  }, [typed])
+  return useQuery({
+    queryKey: docs.docsKeys.search(workspaceId, q),
+    queryFn: () => docs.search(client, workspaceId, q),
+    enabled: q.length > 0,
+    placeholderData: (previous) => previous,
+  })
+}
+
+export function useRecentPages() {
+  const { client, workspaceId } = useOrbit()
+  return useQuery({ queryKey: docs.docsKeys.recent(workspaceId), queryFn: () => docs.recentPages(client, workspaceId) })
 }
 
 export function useTrashPage() {

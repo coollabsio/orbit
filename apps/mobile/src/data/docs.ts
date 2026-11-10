@@ -74,6 +74,39 @@ export async function subPagesOf(pages: readonly PageSummary[], pageId: string, 
   return pages.some((page) => page.id === pageId) ? descendantsOf(pages, pageId) : server(pageId)
 }
 
+/** "Private", the teamspace's name, or "Teamspace" while the list is unknown. */
+export function spaceLabel(space: string, teamspaces: readonly Pick<Teamspace, 'id' | 'name'>[] | undefined): string {
+  if (space === 'private') return 'Private'
+  return teamspaces?.find((teamspace) => `teamspace:${teamspace.id}` === space)?.name ?? 'Teamspace'
+}
+
+/** Where "Move to" sends a page: the end of a space's root pages, or the last sub-page (or row) of a page or database. */
+export type MoveDestination = { kind: 'space'; space: string } | { kind: 'page'; page: PageSummary }
+
+export interface MoveRequest {
+  parent_id: string | null
+  position: number
+  private?: boolean
+  teamspace_id?: string
+}
+
+/** The web's `destinationMove`: the `POST …/pages/{id}/move` body (without the version) for `destination`. */
+export function moveRequest(pages: readonly PageSummary[], movingId: string, destination: MoveDestination): MoveRequest {
+  if (destination.kind === 'page') {
+    const siblings = pages.filter((page) => page.parent_id === destination.page.id && page.id !== movingId)
+    return { parent_id: destination.page.id, position: siblings.length }
+  }
+  const roots = pages.filter((page) => page.parent_id === null && spaceOf(page) === destination.space && page.id !== movingId)
+  const space = destination.space === 'private' ? { private: true } : { teamspace_id: destination.space.replace(/^teamspace:/, '') }
+  return { parent_id: null, position: roots.length, ...space }
+}
+
+/** The search result's hint, as the web palette: "Row · Research" for a database row, else "Page · General". */
+export function searchHint(result: { database_title: string | null; private: boolean; teamspace_id: string | null }, teamspaces: readonly Pick<Teamspace, 'id' | 'name'>[] | undefined): string {
+  if (result.database_title !== null) return `Row · ${result.database_title || 'Untitled'}`
+  return `Page · ${spaceLabel(result.private || !result.teamspace_id ? 'private' : `teamspace:${result.teamspace_id}`, teamspaces)}`
+}
+
 /** The web's "Move to trash" confirmation; `below` is the number of sub-pages that go with the page. */
 export function trashPrompt(page: Pick<PageSummary, 'title'>, below: number): { title: string; description: string } {
   return {

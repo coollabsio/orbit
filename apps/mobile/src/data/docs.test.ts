@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 
 import type { PageFavorite } from '@orbit/api/generated/types.gen'
 
-import { absoluteUrl, blockId, descendantsOf, docSpaces, favoritePages, iconOf, pageTitle, paragraphBlocks, spaceRequest, subPagesOf, trashPrompt, validCoverUrl, visibleThreads } from './docs'
+import { absoluteUrl, blockId, descendantsOf, docSpaces, favoritePages, iconOf, moveRequest, pageTitle, paragraphBlocks, searchHint, spaceRequest, subPagesOf, trashPrompt, validCoverUrl, visibleThreads } from './docs'
 import type { PageSummary, Teamspace } from './orbit'
 
 const page = (id: string, fields: Partial<PageSummary>): PageSummary => ({
@@ -53,6 +53,37 @@ describe('docSpaces', () => {
   test('a collapsed page hides its children', () => {
     expect(docSpaces(pages, teamspaces, new Set(['roadmap'])).teamspaces[0]!.rows.map((row) => row.page.id)).toEqual(['notes', 'roadmap'])
   })
+})
+
+describe('Move to', () => {
+  const tree = [
+    page('a', { position: 0 }),
+    page('b', { position: 1 }),
+    page('a1', { parent_id: 'a' }),
+    page('db', { kind: 'database', parent_id: 'a', position: 1 }),
+    page('diary', { private: true, teamspace_id: null }),
+  ]
+
+  test('a page or database destination puts the page last among its children, the moving page not counted', () => {
+    expect(moveRequest(tree, 'b', { kind: 'page', page: tree[0]! })).toEqual({ parent_id: 'a', position: 2 })
+    expect(moveRequest(tree, 'a1', { kind: 'page', page: tree[0]! })).toEqual({ parent_id: 'a', position: 1 })
+    expect(moveRequest(tree, 'row', { kind: 'page', page: tree[3]! })).toEqual({ parent_id: 'db', position: 0 })
+  })
+
+  test('a space destination puts the page last among its root pages', () => {
+    expect(moveRequest(tree, 'a1', { kind: 'space', space: 'teamspace:ts-general' })).toEqual({ parent_id: null, position: 2, teamspace_id: 'ts-general' })
+    expect(moveRequest(tree, 'b', { kind: 'space', space: 'teamspace:ts-general' })).toEqual({ parent_id: null, position: 1, teamspace_id: 'ts-general' })
+    expect(moveRequest(tree, 'a1', { kind: 'space', space: 'private' })).toEqual({ parent_id: null, position: 1, private: true })
+  })
+})
+
+test('a search result names its database, or the space of a page', () => {
+  const spaces = [teamspace('ts-general', 'General', 0)]
+  expect(searchHint({ database_title: 'Research', private: false, teamspace_id: 'ts-general' }, spaces)).toBe('Row · Research')
+  expect(searchHint({ database_title: '', private: false, teamspace_id: 'ts-general' }, spaces)).toBe('Row · Untitled')
+  expect(searchHint({ database_title: null, private: false, teamspace_id: 'ts-general' }, spaces)).toBe('Page · General')
+  expect(searchHint({ database_title: null, private: true, teamspace_id: null }, spaces)).toBe('Page · Private')
+  expect(searchHint({ database_title: null, private: false, teamspace_id: 'gone' }, spaces)).toBe('Page · Teamspace')
 })
 
 test('an empty title reads Untitled', () => {

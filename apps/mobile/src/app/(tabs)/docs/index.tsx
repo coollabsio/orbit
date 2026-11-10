@@ -4,8 +4,11 @@ import { type ReactNode, useMemo, useState } from 'react'
 import { Pressable, ScrollView, View } from 'react-native'
 
 import { IconDialog } from '../../../components/docs/IconDialog'
+import { useMoveSheet } from '../../../components/docs/MoveSheet'
 import { ActionSheet, ConfirmDialog, type ConfirmRequest, PromptDialog, type PromptRequest, type SheetAction } from '../../../components/settings/Dialog'
 import { descendantsOf, docSpaces, type FavoriteRow, favoritePages, pageTitle, trashPrompt, type TreeRow } from '../../../data/docs'
+import { descendants } from '../../../data/docs-api'
+import * as api from '../../../data/orbit'
 import type { PageSummary, Teamspace } from '../../../data/orbit'
 import { isFavorite, useCreatePage, useDuplicatePage, useFavorites, useTeamspaceWrites, useToggleFavorite, useTrashPage } from '../../../hooks/docs'
 import { useOrbit } from '../../../orbit-context'
@@ -19,7 +22,7 @@ type Menu = { title: string; actions: SheetAction[] }
 /** The web's docs sidebar at phone size: Favorites, Teamspaces with their page trees, Private, and Trash at the bottom. */
 export default function DocsScreen() {
   const { colors } = useTheme()
-  const { workspace } = useOrbit()
+  const { client, workspace, workspaceId } = useOrbit()
   const pages = usePages()
   const teamspaces = useTeamspaces()
   const favorites = useFavorites()
@@ -46,6 +49,7 @@ export default function DocsScreen() {
     })
   const muted = alpha(colors.mutedForeground, 0.7)
   const failed = (what: string) => (error: unknown) => setNotice(`${what} ${errorMessage(error)}`)
+  const moveSheet = useMoveSheet(setConfirm, failed)
 
   const newPage = (where: { space?: string | null; parentId?: string; kind?: PageKind }) => {
     setNotice(null)
@@ -77,8 +81,23 @@ export default function DocsScreen() {
       onPress: () => toggleFavorite.mutate({ pageId: page.id, favorite: !favorite, page }, { onError: failed('Could not change the favorites.') }),
     }
   }
-  /** A favorite outside the tree (a database row or one of its sub-pages): trash it from its own page. */
-  const favoriteMenu = (row: FavoriteRow) => (row.page ? pageMenu(row.page) : setMenu({ title: pageTitle(row), actions: [favoriteAction(row)] }))
+  /** A favorite outside the tree (a database row or one of its sub-pages): the server has its version and sub-pages. */
+  const favoriteMenu = (row: FavoriteRow) => {
+    if (row.page) return pageMenu(row.page)
+    const confirmTrash = () =>
+      Promise.all([api.page(client, workspaceId, row.id), descendants(client, workspaceId, row.id)]).then(([page, below]) =>
+        setConfirm({ ...trashPrompt(page, below.length), confirmLabel: 'Move to trash', danger: true, onConfirm: () => trash.mutate(page, { onError: failed('Could not move the page to the trash.') }) }),
+        failed('Could not move the page to the trash.'),
+      )
+    setMenu({
+      title: pageTitle(row),
+      actions: [
+        { label: 'Open', icon: 'arrowUpRight', onPress: () => router.push(`/docs/${row.id}`) },
+        favoriteAction(row),
+        { label: 'Move to trash', icon: 'trash', destructive: true, onPress: () => void confirmTrash() },
+      ],
+    })
+  }
   const pageMenu = (page: PageSummary) => {
     const hasChildren = (pages.data ?? []).some((item) => item.parent_id === page.id)
     setMenu({
@@ -87,6 +106,7 @@ export default function DocsScreen() {
         favoriteAction(page),
         { label: 'Duplicate', icon: 'copy', onPress: () => duplicate.mutate({ pageId: page.id, withChildren: false }, { onError: failed('Could not duplicate the page.') }) },
         ...(hasChildren ? [{ label: 'Duplicate with sub-pages', icon: 'copy' as const, onPress: () => duplicate.mutate({ pageId: page.id, withChildren: true }, { onError: failed('Could not duplicate the page.') }) }] : []),
+        { label: 'Move to', icon: 'arrowRight', onPress: () => moveSheet.open(page) },
         {
           label: 'Move to trash',
           icon: 'trash',
@@ -139,6 +159,7 @@ export default function DocsScreen() {
         <View className="flex-1">
           <HeaderTitle>Documents</HeaderTitle>
         </View>
+        <IconButton icon="search" label="Search docs" onPress={() => router.push('/docs/search')} />
         {/* the web's menu has Import from Notion, a desktop upload: the app offers the other docs actions */}
         <IconButton
           icon="more"
@@ -233,6 +254,7 @@ export default function DocsScreen() {
       <ActionSheet visible={menu !== null} title={menu?.title} actions={menu?.actions ?? []} onClose={() => setMenu(null)} />
       <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />
       <PromptDialog request={prompt} onClose={() => setPrompt(null)} />
+      {moveSheet.sheet}
       <IconDialog
         visible={iconFor !== null}
         title={`Icon for ${iconFor?.name ?? ''}`}

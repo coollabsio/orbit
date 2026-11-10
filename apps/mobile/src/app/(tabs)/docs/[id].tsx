@@ -11,6 +11,7 @@ import { TextInput } from '../../../ui/scaled'
 import { CommentsSheet } from '../../../components/docs/Comments'
 import { EditorToolbar } from '../../../components/docs/EditorToolbar'
 import { IconDialog } from '../../../components/docs/IconDialog'
+import { useMoveSheet } from '../../../components/docs/MoveSheet'
 import { DatabaseView } from '../../../components/database/DatabaseView'
 import { PropertyList } from '../../../components/database/PropertyList'
 import PageEditor, { type PageCardInfo, type PageEditorProps, type PageEditorRef } from '../../../components/docs/PageEditor.dom'
@@ -63,6 +64,7 @@ export default function DocScreen() {
   const openThreads = visibleThreads(threads.data ?? []).filter((thread) => !thread.resolved).length
   const locked = Boolean(page.data?.locked_at)
   const failed = (what: string) => (error: unknown) => setNotice(`${what} ${errorMessage(error)}`)
+  const moveSheet = useMoveSheet(setConfirm, failed)
 
   const editor = useRef<PageEditorRef>(null)
   const [format, setFormat] = useState<FormatState>(IDLE_FORMAT)
@@ -174,6 +176,7 @@ export default function DocScreen() {
           { label: favorite ? 'Remove from favorites' : 'Add to favorites', icon: 'star', onPress: () => toggleFavorite.mutate({ pageId: id, favorite: !favorite, page: page.data }) },
           { label: page.data.icon ? 'Change icon' : 'Add icon', icon: 'emojiHappy', disabled: locked, onPress: () => setChoosingIcon(true) },
           { label: page.data.cover_url ? 'Change cover' : 'Add cover', icon: 'sticker', disabled: locked, onPress: () => setMenu(coverActions()) },
+          { label: 'Move to', icon: 'arrowRight', onPress: () => page.data && moveSheet.open(page.data) },
           { label: 'Move to trash', icon: 'trash', destructive: true, onPress: () => void confirmTrash() },
         ]
       : []
@@ -300,6 +303,7 @@ export default function DocScreen() {
       <ActionSheet visible={menu !== null} actions={menu ?? []} onClose={() => setMenu(null)} />
       <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />
       <PromptDialog request={prompt} onClose={() => setPrompt(null)} />
+      {moveSheet.sheet}
       <ActionSheet
         visible={choosingBlock}
         title="Turn into"
