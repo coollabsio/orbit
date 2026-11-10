@@ -101,6 +101,8 @@ impl Authorized<'_> {
         let values = databases
             .agent_values(p.workspace_id, database_id, p.actor_id, &input.values)
             .await?;
+        let ids: Vec<Id> = values.iter().map(|(id, _)| *id).collect();
+        let named = |error| DatabaseRepository::agent_value_error(error, &input.values, &ids);
         let row = NewRow {
             title: input.title,
             icon: None,
@@ -109,32 +111,30 @@ impl Authorized<'_> {
         };
         let now = TimestampMillis::now();
         let row = match input.template_id {
-            Some(template_id) => {
-                databases
-                    .create_row_from_template(
-                        p.workspace_id,
-                        database_id,
-                        p.actor_id,
-                        row,
-                        template_id,
-                        None,
-                        self.request_id,
-                        now,
-                    )
-                    .await?
-            }
-            None => {
-                databases
-                    .create_row(
-                        p.workspace_id,
-                        database_id,
-                        p.actor_id,
-                        row,
-                        self.request_id,
-                        now,
-                    )
-                    .await?
-            }
+            Some(template_id) => databases
+                .create_row_from_template(
+                    p.workspace_id,
+                    database_id,
+                    p.actor_id,
+                    row,
+                    template_id,
+                    None,
+                    self.request_id,
+                    now,
+                )
+                .await
+                .map_err(named)?,
+            None => databases
+                .create_row(
+                    p.workspace_id,
+                    database_id,
+                    p.actor_id,
+                    row,
+                    self.request_id,
+                    now,
+                )
+                .await
+                .map_err(named)?,
         };
         if !markdown.is_empty() {
             let page = self.row_page(row.id).await?;
@@ -177,6 +177,7 @@ impl Authorized<'_> {
             let values = databases
                 .agent_values(p.workspace_id, database_id, p.actor_id, &patch.values)
                 .await?;
+            let ids: Vec<Id> = values.iter().map(|(id, _)| *id).collect();
             databases
                 .update_values(
                     p.workspace_id,
@@ -187,7 +188,10 @@ impl Authorized<'_> {
                     self.request_id,
                     TimestampMillis::now(),
                 )
-                .await?;
+                .await
+                .map_err(|error| {
+                    DatabaseRepository::agent_value_error(error, &patch.values, &ids)
+                })?;
         }
         if let Some(title) = patch.title {
             let pages = self.content(ApiTokenScope::DocsWrite, &self.api.pages)?;
