@@ -5,9 +5,10 @@
 //! in order, with their replies, reactions and files, and nothing fires on them (no
 //! notification, mention row, push, bot, webhook or live event). The imported history never
 //! shows as unread: a member who had read everything stays at the end, and a member with
-//! unread messages keeps exactly those (see `refresh_conversation`). A personal import's archive is the
-//! importer's own upload: every message is written by the importer with a name and time header,
-//! only the importer's reactions are kept, and a conversation a full import created is skipped.
+//! unread messages keeps exactly those (see `refresh_conversation`). A personal import's
+//! archive is the importer's own upload: every message is written by the importer with a name
+//! and time header, only the importer's reactions are kept, and a conversation a full import
+//! created is skipped.
 
 use std::collections::HashSet;
 
