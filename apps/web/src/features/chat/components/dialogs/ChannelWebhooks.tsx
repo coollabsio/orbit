@@ -2,11 +2,13 @@ import { useId, useState } from 'react'
 import { Add, Copy, Danger, Edit, Flash, Key, MoreH, Trash } from 'reicon-react'
 import { toast } from 'sonner'
 import { confirmAction } from '@/components/common/confirmAction'
+import { InfoTip } from '@/components/common/InfoTip'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Field, FieldError, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupInput } from '@/components/ui/input-group'
+import { Switch } from '@/components/ui/switch'
 import type { CreatedWebhook } from '@/features/chat/api/client'
 import {
   useCreateWebhook,
@@ -165,6 +167,7 @@ function WebhookRow({
           <p className="truncate text-xs text-muted-foreground">
             Made by {creator} · {used}
             {webhook.requestUrl ? ' · buttons on' : ''}
+            {webhook.events ? ' · events on' : ''}
           </p>
         </div>
         <DropdownMenu>
@@ -204,8 +207,9 @@ function WebhookRow({
 }
 
 /**
- * Where clicks on the webhook's buttons go, the secret that signs them, and the last clicks with their answers. The
- * receiver checks `X-Slack-Signature` as for Slack, and answers through the click's `response_url`.
+ * Where clicks on the webhook's buttons (and, with events on, members' messages) go, the secret that signs them, and the
+ * last deliveries with their answers. The receiver checks `X-Slack-Signature` as for Slack, and answers through the
+ * click's `response_url` or the webhook URL.
  */
 function WebhookInteractivity({ webhook, conversationId, onClose }: { webhook: ChannelWebhook; conversationId: string; onClose: () => void }) {
   const [requestUrl, setRequestUrl] = useState(webhook.requestUrl ?? '')
@@ -215,15 +219,22 @@ function WebhookInteractivity({ webhook, conversationId, onClose }: { webhook: C
   const deliveries = useWebhookDeliveries(conversationId, webhook.id, webhook.requestUrl !== null)
   const urlId = useId()
   const secretId = useId()
+  const eventsId = useId()
   const changed = requestUrl.trim() !== (webhook.requestUrl ?? '')
 
-  const submit = (url: string | null) =>
+  const submit = (url: string | null, events: boolean) =>
     save.mutate(
-      { conversationId, webhookId: webhook.id, requestUrl: url },
+      { conversationId, webhookId: webhook.id, requestUrl: url, events: url !== null && events },
       {
         onSuccess: (next) => {
           setRequestUrl(next.requestUrl ?? '')
-          toast.success(next.requestUrl ? 'Buttons send clicks to the request URL.' : 'Buttons are off.')
+          toast.success(
+            next.events
+              ? 'Clicks and messages go to the request URL.'
+              : next.requestUrl
+                ? 'Buttons send clicks to the request URL.'
+                : 'Buttons and events are off.',
+          )
         },
       },
     )
@@ -244,79 +255,85 @@ function WebhookInteractivity({ webhook, conversationId, onClose }: { webhook: C
   }
 
   return (
-    <div data-slot="webhook-interactivity" className="grid gap-3 rounded-lg border p-3">
+    <div data-slot="webhook-interactivity" className="grid gap-5 rounded-lg border p-4">
       <form
-        className="grid gap-2"
         onSubmit={(event) => {
           event.preventDefault()
           event.stopPropagation()
-          if (requestUrl.trim()) submit(requestUrl.trim())
+          if (requestUrl.trim()) submit(requestUrl.trim(), webhook.events)
         }}
       >
         <Field data-invalid={save.isError || undefined}>
-          <FieldLabel htmlFor={urlId}>Request URL</FieldLabel>
-          <Input
-            id={urlId}
-            type="url"
-            inputMode="url"
-            placeholder="https://example.com/slack/actions"
-            value={requestUrl}
-            onChange={(event) => setRequestUrl(event.target.value)}
-          />
+          <FieldLabel htmlFor={urlId}>
+            Request URL
+            <InfoTip text="A click on a button without a link sends a signed block_actions payload here, as Slack does. Answer through its response_url to replace the message, delete it, or reply." />
+          </FieldLabel>
+          <div className="flex gap-2">
+            <Input
+              id={urlId}
+              type="url"
+              inputMode="url"
+              placeholder="https://example.com/slack/actions"
+              value={requestUrl}
+              onChange={(event) => setRequestUrl(event.target.value)}
+            />
+            <Button type="submit" disabled={!requestUrl.trim() || !changed || save.isPending}>
+              {save.isPending ? 'Saving…' : 'Save'}
+            </Button>
+          </div>
           {save.isError ? (
             <FieldError>{chatErrorMessage(save.error, 'The request URL was not saved.', { conflict: 'Use a public https URL.' })}</FieldError>
           ) : null}
         </Field>
-        <p className="text-xs text-muted-foreground">
-          A click on a button without a link sends a signed <code>block_actions</code> payload here, as Slack does. Answer through its{' '}
-          <code>response_url</code> to replace the message, delete it, or reply.
-        </p>
-        <div className="flex justify-end gap-2">
-          {webhook.requestUrl ? (
-            <Button type="button" variant="outline" size="sm" disabled={save.isPending} onClick={() => submit(null)}>
-              Turn off
-            </Button>
-          ) : null}
-          <Button type="submit" size="sm" disabled={!requestUrl.trim() || !changed || save.isPending}>
-            {save.isPending ? 'Saving…' : 'Save'}
-          </Button>
-        </div>
       </form>
 
       {webhook.requestUrl ? (
         <>
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-1.5">
+              <label htmlFor={eventsId} className="text-sm font-medium">
+                Send messages as events
+              </label>
+              <InfoTip
+                text={`Each member's message in this channel goes to the request URL as a signed event_callback (app_mention when it names @${webhook.name}). The webhook URL's secret can then also read the channel and its threads.`}
+              />
+            </div>
+            <Switch
+              id={eventsId}
+              checked={webhook.events}
+              disabled={save.isPending}
+              onCheckedChange={(checked: boolean) => submit(webhook.requestUrl, checked)}
+            />
+          </div>
+
           <Field>
             <FieldLabel htmlFor={secretId}>Signing secret</FieldLabel>
-            <InputGroup>
-              <InputGroupInput id={secretId} readOnly value={secret ?? '••••••••••••••••••••••••••••••••'} className="font-mono text-xs" />
-              <InputGroupAddon align="inline-end">
-                {secret ? (
-                  <InputGroupButton aria-label="Copy signing secret" size="icon-xs" onClick={() => copy(secret, 'Signing secret copied')}>
-                    <Copy />
-                  </InputGroupButton>
-                ) : (
-                  <InputGroupButton size="xs" disabled={signingSecret.isPending} onClick={() => void loadSecret(false)}>
-                    Reveal
-                  </InputGroupButton>
-                )}
-              </InputGroupAddon>
-            </InputGroup>
+            <div className="flex gap-2">
+              <InputGroup>
+                <InputGroupInput id={secretId} readOnly value={secret ?? '••••••••••••••••••••••••••••••••'} className="font-mono text-xs" />
+                <InputGroupAddon align="inline-end">
+                  {secret ? (
+                    <InputGroupButton aria-label="Copy signing secret" size="icon-xs" onClick={() => copy(secret, 'Signing secret copied')}>
+                      <Copy />
+                    </InputGroupButton>
+                  ) : (
+                    <InputGroupButton size="xs" disabled={signingSecret.isPending} onClick={() => void loadSecret(false)}>
+                      Reveal
+                    </InputGroupButton>
+                  )}
+                </InputGroupAddon>
+              </InputGroup>
+              <Button type="button" variant="outline" disabled={signingSecret.isPending} onClick={() => void loadSecret(true)}>
+                <Key data-icon="inline-start" />
+                Make new
+              </Button>
+            </div>
           </Field>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="justify-self-start"
-            disabled={signingSecret.isPending}
-            onClick={() => void loadSecret(true)}
-          >
-            <Key data-icon="inline-start" />
-            Make new secret
-          </Button>
-          <div className="grid gap-1">
-            <p className="text-xs font-medium">Last clicks</p>
+
+          <div className="grid gap-2">
+            <p className="text-sm font-medium">Last deliveries</p>
             {deliveries.data && deliveries.data.length > 0 ? (
-              <ul className="grid gap-0.5 text-xs">
+              <ul className="grid gap-1 text-xs">
                 {deliveries.data.map((delivery) => {
                   const good = delivery.status !== null && delivery.status >= 200 && delivery.status < 300
                   return (
@@ -331,14 +348,24 @@ function WebhookInteractivity({ webhook, conversationId, onClose }: { webhook: C
                 })}
               </ul>
             ) : (
-              <p className="text-xs text-muted-foreground">No clicks yet.</p>
+              <p className="text-xs text-muted-foreground">Nothing sent yet.</p>
             )}
           </div>
         </>
       ) : null}
-      <Button type="button" variant="ghost" size="sm" className="justify-self-end" onClick={onClose}>
-        Close
-      </Button>
+
+      <div className="flex items-center justify-between gap-2 border-t pt-4">
+        {webhook.requestUrl ? (
+          <Button type="button" variant="ghost" size="sm" className="text-destructive" disabled={save.isPending} onClick={() => submit(null, false)}>
+            Remove request URL
+          </Button>
+        ) : (
+          <span />
+        )}
+        <Button type="button" variant="ghost" size="sm" onClick={onClose}>
+          Close
+        </Button>
+      </div>
     </div>
   )
 }

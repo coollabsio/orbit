@@ -12757,6 +12757,167 @@
         ]
       }
     },
+    "/api/v1/hooks/chat/{webhook_id}/messages": {
+      "get": {
+        "tags": [
+          "crate::chat_routes::events"
+        ],
+        "summary": "Reads the webhook's channel, or one thread of it, for an integration with events on. The\ncredential is the webhook URL's secret in `Authorization: Bearer <secret>`.",
+        "operationId": "read_hook_messages",
+        "parameters": [
+          {
+            "name": "webhook_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "thread_ts",
+            "in": "query",
+            "description": "The root of a thread: its replies, oldest first. Without it, the channel's main list.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "description": "Messages older than this message id, for the next page.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "1–100 messages; 50 by default.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HookMessages"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "webhook_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "rate_limit_exceeded",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {}
+        ]
+      }
+    },
     "/api/v1/hooks/chat/{webhook_id}/responses/{token}": {
       "post": {
         "tags": [
@@ -52876,12 +53037,16 @@
       "ChatInteractivityBody": {
         "type": "object",
         "properties": {
+          "events": {
+            "type": "boolean",
+            "description": "Also send each member's message in the channel to the request URL (`event_callback`),\nand let the webhook's secret read the channel. Needs a request URL."
+          },
           "request_url": {
             "type": [
               "string",
               "null"
             ],
-            "description": "Where clicks go: https (http and local hosts in development). Null turns clicks off."
+            "description": "Where clicks go: https (http and local hosts in development). Null turns clicks and\nevents off."
           }
         },
         "additionalProperties": false
@@ -56615,6 +56780,88 @@
           "or"
         ]
       },
+      "HookMessage": {
+        "type": "object",
+        "description": "One message as an integration reads it, in Slack's shape.",
+        "required": [
+          "type",
+          "ts",
+          "user",
+          "text"
+        ],
+        "properties": {
+          "bot_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The webhook that posted it; absent for members' messages."
+          },
+          "reply_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "text": {
+            "type": "string",
+            "description": "Markdown with mention tokens (`<@user_id>`); empty for a deleted message."
+          },
+          "thread_ts": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The root of its thread; for a root with replies, its own id."
+          },
+          "ts": {
+            "type": "string",
+            "description": "The message id."
+          },
+          "type": {
+            "type": "string",
+            "description": "Always `message`."
+          },
+          "user": {
+            "type": "string",
+            "description": "The member who wrote it; for an integration's message, the member who set it up."
+          },
+          "username": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The display name of `user`, or the integration's name for its messages."
+          }
+        }
+      },
+      "HookMessages": {
+        "type": "object",
+        "required": [
+          "ok",
+          "messages"
+        ],
+        "properties": {
+          "messages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HookMessage"
+            },
+            "description": "Oldest first."
+          },
+          "next_before": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Send it as `before` for the older page; null on the oldest page."
+          },
+          "ok": {
+            "type": "boolean"
+          }
+        }
+      },
       "ImportDatabaseCsvBody": {
         "type": "object",
         "required": [
@@ -56716,7 +56963,7 @@
       },
       "IncomingWebhookPayload": {
         "type": "object",
-        "description": "What a tool posts: the payload of a Slack incoming webhook. Fields that Orbit does not use\n(`channel`, `thread_ts`, `unfurl_links`) are ignored, so a Slack payload posts as it is.",
+        "description": "What a tool posts: the payload of a Slack incoming webhook. Fields that Orbit does not use\n(`channel`, `unfurl_links`) are ignored, so a Slack payload posts as it is.",
         "properties": {
           "attachments": {
             "type": [
@@ -56763,6 +57010,13 @@
               "null"
             ],
             "description": "Slack mrkdwn or Markdown; mentions are tokens: `<@user_id>`, `<#channel_id>`,\n`<!channel>`, `<!here>`. Longer than 4000 characters, it is cut. With `blocks` or\n`attachments` it is the plain text for notifications and search, and may be left out."
+          },
+          "thread_ts": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The id of a root message in the webhook's channel: the message is a reply in its thread."
           },
           "username": {
             "type": [
@@ -64288,7 +64542,8 @@
           "author_id",
           "body",
           "sticker",
-          "created_at"
+          "created_at",
+          "bot_name"
         ],
         "properties": {
           "author_id": {
@@ -64296,6 +64551,13 @@
           },
           "body": {
             "type": "string"
+          },
+          "bot_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The integration's name when an integration posted the reply: `author_id` is then only the\nmember who set it up."
           },
           "created_at": {
             "type": "string",
@@ -67636,7 +67898,8 @@
           "created_at",
           "rotated_at",
           "last_used_at",
-          "request_url"
+          "request_url",
+          "events"
         ],
         "properties": {
           "conversation_id": {
@@ -67648,6 +67911,10 @@
           },
           "created_by": {
             "type": "string"
+          },
+          "events": {
+            "type": "boolean",
+            "description": "Members' messages in the channel are sent to the request URL, and the webhook's secret\ncan read the channel. Always false without a request URL."
           },
           "icon_url": {
             "type": [
