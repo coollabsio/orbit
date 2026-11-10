@@ -66654,6 +66654,7 @@
           "can_purge",
           "title",
           "icon",
+          "kind",
           "position",
           "version",
           "updated_at",
@@ -66676,6 +66677,9 @@
           },
           "id": {
             "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/PageKind"
           },
           "parent_id": {
             "type": [

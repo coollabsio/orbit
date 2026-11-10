@@ -6454,6 +6454,7 @@ export type TrashedPage = {
     deleted_at: string;
     icon: string | null;
     id: string;
+    kind: PageKind;
     parent_id: string | null;
     position: number;
     /**

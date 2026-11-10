@@ -288,6 +288,7 @@ pub struct TrashedPage {
     pub title: String,
     #[schema(required = true)]
     pub icon: Option<String>,
+    pub kind: PageKind,
     pub position: i64,
     pub version: u64,
     #[schema(value_type = String, format = DateTime)]
@@ -1703,6 +1704,7 @@ impl PageRepository {
                     can_purge: actor.can_purge_page(summary.private),
                     title: summary.title,
                     icon: summary.icon,
+                    kind: summary.kind,
                     position: summary.position,
                     version: summary.version,
                     updated_at: summary.updated_at,

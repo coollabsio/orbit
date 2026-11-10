@@ -59,7 +59,7 @@ export const EditorView = memo(function EditorView({ ref, pageId, epoch, generat
 
   const cards = useMemo(() => {
     const out: Record<string, PageCardInfo> = {}
-    for (const item of trash.data ?? []) out[item.id] = { title: item.title, icon: item.icon, trashed: true, database: false }
+    for (const item of trash.data ?? []) out[item.id] = { title: item.title, icon: item.icon, trashed: true, database: item.kind === 'database' }
     for (const item of extraPages ?? []) out[item.id] = { title: item.title, icon: item.icon, trashed: false, database: false }
     for (const item of pages.data ?? []) out[item.id] = { title: item.title, icon: item.icon, trashed: false, database: item.kind === 'database' }
     return out
