@@ -39,6 +39,7 @@ import type { PageEditorInstance } from '@orbit/editor/schema'
 import type { PageKind } from '@orbit/api/generated/types.gen'
 import { isolatedDragsExtension, isolatedDropCursor } from '@orbit/editor/isolation'
 import { selectBlockExtension } from '@orbit/editor/selectBlock'
+import { collabUndoExtension } from '@orbit/editor/collab/undo'
 import { EDITOR_BLOCK_TYPES, markdownToTaskBlocks, pageEditorSchema, TASK_EDITOR_BLOCK_TYPES, taskEditorSchema } from './schema'
 import { getPageSlashMenuItems, getTaskSlashMenuItems } from './slashMenu'
 import { PageMentionMenu } from './MentionMenu'
@@ -311,6 +312,7 @@ function PageEditorInner({
           ...options,
           extensions: [
             ...options.extensions,
+            collabUndoExtension(),
             // Task documents carry no comment marks, so they need no comments extension.
             ...(task ? [] : [commentsExtension]),
             ...(collab.provider.awareness ? [collabBlockPresence({ awareness: collab.provider.awareness, selfId: collab.user.id })] : []),

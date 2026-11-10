@@ -17,6 +17,7 @@ import { ticketWebSocket, type TicketResult } from '@orbit/editor/collab/ticketS
 import { watchDeletedFiles } from '@orbit/editor/deletedFiles'
 import { isSafeLinkHref } from '@orbit/editor/links'
 import { selectBlockExtension } from '@orbit/editor/selectBlock'
+import { collabUndoExtension } from '@orbit/editor/collab/undo'
 import { CALLOUT_DEFAULT_EMOJI, createEditorSchemas, type PageEditorInstance } from '@orbit/editor/schema'
 import { type DOMImperativeFactory, useDOMImperativeHandle } from 'expo/dom'
 import katex from 'katex'
@@ -348,7 +349,7 @@ function Editor({ connection, editable, theme, server, actions, editorRef }: Edi
     withCollaboration({
       schema: pageEditorSchema,
       // Without the comment mark, y-prosemirror would drop the text of anchored comments for everyone.
-      extensions: [commentMarks(), selectBlockExtension()],
+      extensions: [commentMarks(), selectBlockExtension(), collabUndoExtension()],
       collaboration: {
         provider: connection.provider,
         fragment: connection.fragment,
