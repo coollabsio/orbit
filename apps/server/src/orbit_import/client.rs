@@ -23,6 +23,8 @@ const MAX_URL_BYTES: usize = 2_048;
 const MAX_TOKEN_CHARS: usize = 1_024;
 /// Largest JSON answer read into memory.
 const MAX_JSON_BYTES: usize = 1024 * 1024;
+/// Longest wait for the next chunk of the archive before the download fails.
+const DOWNLOAD_IDLE: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Error)]
 pub enum ClientError {
@@ -252,7 +254,8 @@ impl OrbitClient {
     }
 
     /// Streams the ready export's ZIP to `path`; returns its size. More than `max_bytes`
-    /// (also announced by `Content-Length`) fails before the file is complete.
+    /// (also announced by `Content-Length`) fails before the file is complete, and so does a
+    /// wait of more than [`DOWNLOAD_IDLE`] for the next chunk. Drop the future to stop it.
     pub async fn download_export(
         &self,
         export_id: &str,
@@ -281,7 +284,11 @@ impl OrbitClient {
         let mut file = tokio::fs::File::create(path).await.map_err(io)?;
         let mut size = 0u64;
         let mut response = response;
-        while let Some(chunk) = response.chunk().await.map_err(transport)? {
+        while let Some(chunk) = tokio::time::timeout(DOWNLOAD_IDLE, response.chunk())
+            .await
+            .map_err(|_| ClientError::Unreachable("the download stalled".to_owned()))?
+            .map_err(transport)?
+        {
             size = size.saturating_add(chunk.len() as u64);
             if size > max_bytes {
                 return Err(ClientError::TooLarge { limit: max_bytes });

@@ -11,7 +11,8 @@
 //! a time. The ZIP is `exports/{workspace_id}/{id}.zip` where new attachment blobs of the
 //! workspace go (its own bucket, the installation bucket, or the server's disk under the backups
 //! directory, which backups do not copy). Retention deletes it with its row [`EXPORT_TTL_MILLIS`]
-//! after it is ready.
+//! after it is ready; a member keeps at most [`MAX_READY`] ready exports per mode, and a new one
+//! deletes the oldest at once.
 
 mod archive;
 
@@ -40,6 +41,9 @@ pub const EXPORT_TTL_MILLIS: i64 = 7 * 24 * 60 * 60 * 1000;
 /// An export still `queued` or `running` after this long failed without its job noticing.
 const STALLED_AFTER_MILLIS: i64 = 24 * 60 * 60 * 1000;
 const MAX_LISTED: i64 = 20;
+/// Ready exports kept per (workspace, requester, mode); a newer one deletes the oldest, so
+/// repeated exports cannot fill the storage.
+const MAX_READY: i64 = 3;
 const ACTIVE: &str = "('queued', 'running')";
 
 /// Two exports at a time on all servers, one per workspace while another waits (Admin can change
@@ -578,10 +582,30 @@ impl WorkspaceExportService {
         .execute(&mut *tx)
         .await?
         .rows_affected();
+        let superseded = if updated == 0 {
+            Vec::new()
+        } else {
+            sqlx::query(
+                "UPDATE workspace_exports SET expires_at = $1 WHERE workspace_id = $2 \
+                 AND requested_by = $3 AND mode = $4 AND status = 'ready' AND expires_at > $1 \
+                 AND id NOT IN (SELECT id FROM workspace_exports WHERE workspace_id = $2 \
+                 AND requested_by = $3 AND mode = $4 AND status = 'ready' AND expires_at > $1 \
+                 ORDER BY completed_at DESC, id DESC LIMIT $5) \
+                 RETURNING id, workspace_id, location",
+            )
+            .bind(completed.as_millis())
+            .bind(&workspace)
+            .bind(actor_id.to_string())
+            .bind(mode.as_str())
+            .bind(MAX_READY)
+            .fetch_all(&mut *tx)
+            .await?
+        };
         tx.commit().await?;
         if updated == 0 {
             self.delete_stored(&workspace, &key, location).await?;
         }
+        self.delete_expired(superseded).await?;
         Ok(())
     }
 
@@ -615,8 +639,13 @@ impl WorkspaceExportService {
         .bind(now.as_millis())
         .fetch_all(self.database().pool())
         .await?;
+        self.delete_expired(expired).await
+    }
+
+    /// Deletes expired export rows (`id`, `workspace_id`, `location`) with their archives.
+    async fn delete_expired(&self, rows: Vec<sqlx::any::AnyRow>) -> Result<u64, ExportError> {
         let mut deleted = 0;
-        for row in expired {
+        for row in rows {
             let id: String = row.get("id");
             let workspace: String = row.get("workspace_id");
             let key = storage_key(&workspace, &id);

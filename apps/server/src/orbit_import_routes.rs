@@ -45,11 +45,19 @@ impl OrbitImportState {
     }
 }
 
-pub fn orbit_import_router(state: OrbitImportState) -> Router {
-    // Room for the multipart boundaries and headers around the archive.
-    let body_limit = usize::try_from(state.service.max_archive_bytes())
+/// The archive upload route ends with this path; the platform body limit lets it through.
+pub const UPLOAD_PATH_SUFFIX: &str = "/imports/orbit/upload";
+
+/// The largest upload request: the archive and room for the multipart boundaries and headers.
+#[must_use]
+pub fn upload_body_limit(max_archive_bytes: u64) -> usize {
+    usize::try_from(max_archive_bytes)
         .unwrap_or(usize::MAX)
-        .saturating_add(64 * 1024);
+        .saturating_add(64 * 1024)
+}
+
+pub fn orbit_import_router(state: OrbitImportState) -> Router {
+    let body_limit = upload_body_limit(state.service.max_archive_bytes());
     Router::new()
         .route(
             "/api/v1/workspaces/{workspace_id}/imports/orbit",

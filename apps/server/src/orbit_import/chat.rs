@@ -3,8 +3,9 @@
 //! a DM becomes a real DM when every participant is here (the importer among them), else a
 //! private channel named after the people. Messages are history: they are written directly,
 //! in order, with their replies, reactions and files, and nothing fires on them (no
-//! notification, mention row, push, bot, webhook or live event). Every member's read marker
-//! ends at the last message, so nothing shows as unread. A personal import's archive is the
+//! notification, mention row, push, bot, webhook or live event). The imported history never
+//! shows as unread: a member who had read everything stays at the end, and a member with
+//! unread messages keeps exactly those (see `refresh_conversation`). A personal import's archive is the
 //! importer's own upload: every message is written by the importer with a name and time header,
 //! only the importer's reactions are kept, and a conversation a full import created is skipped.
 
@@ -703,12 +704,20 @@ async fn refresh_thread(service: &OrbitImportService, root_id: Id) -> Result<(),
     Ok(())
 }
 
-/// The conversation's counters from its messages, and every member's read marker at the end.
+/// The conversation's counters from its messages. The imported messages count as read for
+/// every member: `read_count` grows by the messages not counted yet, and a member who had read
+/// everything moves to the new end. A member of a reused channel keeps their unread messages.
 async fn refresh_conversation(
     service: &OrbitImportService,
     conversation_id: Id,
 ) -> Result<(), Failure> {
     let mut tx = service.database().immediate_transaction().await?;
+    // Live sends keep `message_count` exact; only the imported rows are not in it yet.
+    let counted: i64 =
+        sqlx::query_scalar("SELECT message_count FROM chat_conversations WHERE id = $1")
+            .bind(conversation_id.to_string())
+            .fetch_one(&mut *tx)
+            .await?;
     sqlx::query(
         "UPDATE chat_conversations SET \
          message_count = (SELECT COUNT(*) FROM chat_messages m WHERE m.conversation_id = $1 AND m.kind = 'message' \
@@ -722,11 +731,16 @@ async fn refresh_conversation(
     .await?;
     sqlx::query(
         "UPDATE chat_members SET \
-         read_count = (SELECT message_count FROM chat_conversations c WHERE c.id = $1), \
-         last_read_message_id = (SELECT m.id FROM chat_messages m WHERE m.conversation_id = $1 ORDER BY m.id DESC LIMIT 1) \
+         last_read_message_id = CASE WHEN read_count >= $2 THEN \
+             (SELECT m.id FROM chat_messages m WHERE m.conversation_id = $1 \
+              AND (m.thread_root_id IS NULL OR m.also_in_channel = 1) ORDER BY m.id DESC LIMIT 1) \
+             ELSE last_read_message_id END, \
+         read_count = read_count + (SELECT CASE WHEN c.message_count > $2 THEN c.message_count - $2 ELSE 0 END \
+                                    FROM chat_conversations c WHERE c.id = $1) \
          WHERE conversation_id = $1",
     )
     .bind(conversation_id.to_string())
+    .bind(counted)
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;

@@ -14,10 +14,10 @@ use hyper_util::server::conn::auto::Builder as ConnectionBuilder;
 use hyper_util::service::TowerToHyperService;
 use orbit_platform::{
     BackupService, BlobStoreError, Config, Database, DatabaseConfig, HealthCheck, HealthRegistry,
-    HttpLimits, IntegrityError, IntegrityService, JobError, JobKind, JobStore, LocalBlobStore,
-    MigrationError, MigrationRunner, ObjectStorage, OriginPolicy, RecurringSchedule, ScheduleError,
-    Scheduler, TieredBlobStore, TimestampMillis, UploadLimits, UploadService, Worker, WorkerConfig,
-    run_guarded_migrations,
+    HttpLimits, IntegrityError, IntegrityService, JobError, JobKind, JobStore, LargeUpload,
+    LocalBlobStore, MigrationError, MigrationRunner, ObjectStorage, OriginPolicy,
+    RecurringSchedule, ScheduleError, Scheduler, TieredBlobStore, TimestampMillis, UploadLimits,
+    UploadService, Worker, WorkerConfig, run_guarded_migrations,
 };
 use serde_json::json;
 use thiserror::Error;
@@ -549,6 +549,13 @@ impl App {
             HttpLimits {
                 max_body_bytes: usize::try_from(upload_limits.max_request_bytes())
                     .unwrap_or(usize::MAX),
+                // Orbit archive imports go above the upload limit; the route checks its own.
+                large_upload: Some(LargeUpload {
+                    path_suffix: crate::orbit_import_routes::UPLOAD_PATH_SUFFIX,
+                    max_bytes: crate::orbit_import_routes::upload_body_limit(
+                        crate::orbit_import::MAX_ARCHIVE_BYTES,
+                    ),
+                }),
                 ..HttpLimits::default()
             },
             config.rate_limits,

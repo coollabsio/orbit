@@ -778,7 +778,8 @@ impl OrbitImportService {
         user_id: Id,
     ) -> Result<Vec<OrbitImport>, OrbitImportError> {
         self.require_importer(workspace_id, user_id, None).await?;
-        self.expire_stale(TimestampMillis::now()).await?;
+        self.expire_rows(TimestampMillis::now(), Some((workspace_id, user_id)))
+            .await?;
         let ids: Vec<String> = sqlx::query_scalar(
             "SELECT id FROM orbit_imports WHERE workspace_id = $1 AND user_id = $2 \
              ORDER BY created_at DESC, id DESC LIMIT $3",
@@ -808,7 +809,8 @@ impl OrbitImportService {
         with_tree: bool,
     ) -> Result<OrbitImport, OrbitImportError> {
         self.require_importer(workspace_id, user_id, None).await?;
-        self.expire_stale(TimestampMillis::now()).await?;
+        self.expire_rows(TimestampMillis::now(), Some((workspace_id, user_id)))
+            .await?;
         self.load_view(workspace_id, user_id, import_id, with_tree)
             .await
     }
@@ -919,30 +921,82 @@ impl OrbitImportService {
     /// made no progress for 24 hours, and deletes the archives of final imports. Returns the
     /// rows changed.
     pub async fn expire_stale(&self, now: TimestampMillis) -> Result<u64, OrbitImportError> {
+        let changed = self.expire_rows(now, None).await?;
+        self.release_final_archives().await?;
+        Ok(changed)
+    }
+
+    /// The state changes of [`Self::expire_stale`], for all imports or, on the polled read
+    /// paths, only for one member's imports in one workspace (`member`). Leaves the archives to
+    /// the cleanup.
+    async fn expire_rows(
+        &self,
+        now: TimestampMillis,
+        member: Option<(Id, Id)>,
+    ) -> Result<u64, OrbitImportError> {
+        // The member filter, with its two placeholders numbered from `first`.
+        let only = |first: usize| match member {
+            Some(_) => format!(
+                " AND orbit_imports.workspace_id = ${first} AND orbit_imports.user_id = ${}",
+                first + 1
+            ),
+            None => String::new(),
+        };
+        let bind_member =
+            |query: sqlx::query::Query<'static, sqlx::Any, sqlx::any::AnyArguments>| match member {
+                Some((workspace_id, user_id)) => query
+                    .bind(workspace_id.to_string())
+                    .bind(user_id.to_string()),
+                None => query,
+            };
         let ready_cutoff = now.as_millis() - READY_TTL.as_millis() as i64;
         let stalled_cutoff = now.as_millis() - STALLED_AFTER.as_millis() as i64;
-        let expired = sqlx::query(
-            "UPDATE orbit_imports SET status = 'expired', token_ciphertext = NULL, \
-             error = 'The import was not started within 24 hours.', updated_at = $1 \
-             WHERE status = 'ready' AND updated_at < $2",
+        let expired = bind_member(
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "UPDATE orbit_imports SET status = 'expired', token_ciphertext = NULL, \
+                 error = 'The import was not started within 24 hours.', updated_at = $1 \
+                 WHERE status = 'ready' AND updated_at < $2{}",
+                only(3)
+            )))
+            .bind(now.as_millis())
+            .bind(ready_cutoff),
         )
-        .bind(now.as_millis())
-        .bind(ready_cutoff)
         .execute(self.database().pool())
         .await?
         .rows_affected();
-        let stalled = sqlx::query(sqlx::AssertSqlSafe(format!(
-            "UPDATE orbit_imports SET status = 'failed', token_ciphertext = NULL, \
-             error = 'The import stopped making progress.', updated_at = $1 \
-             WHERE status IN {ACTIVE} AND updated_at < $2"
-        )))
-        .bind(now.as_millis())
-        .bind(stalled_cutoff)
+        let stalled = bind_member(
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "UPDATE orbit_imports SET status = 'failed', token_ciphertext = NULL, \
+                 error = 'The import stopped making progress.', updated_at = $1 \
+                 WHERE status IN {ACTIVE} AND updated_at < $2{}",
+                only(3)
+            )))
+            .bind(now.as_millis())
+            .bind(stalled_cutoff),
+        )
         .execute(self.database().pool())
         .await?
         .rows_affected();
-        let dead = self.fail_imports_with_dead_jobs().await?;
-        self.release_final_archives().await?;
+        let import_id_of_job = match self.database().backend() {
+            Backend::Sqlite => "json_extract(jobs.payload_json, '$.import_id')",
+            Backend::Postgres => "(jobs.payload_json::jsonb ->> 'import_id')",
+        };
+        let dead = bind_member(
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "UPDATE orbit_imports SET status = 'failed', token_ciphertext = NULL, \
+                 error = 'The import stopped after repeated errors.', updated_at = $1 \
+                 WHERE status IN {ACTIVE}{} \
+                 AND EXISTS (SELECT 1 FROM jobs WHERE jobs.kind IN ('{FETCH_JOB}', '{IMPORT_JOB}') \
+                     AND jobs.state = 'dead' AND {import_id_of_job} = orbit_imports.id) \
+                 AND NOT EXISTS (SELECT 1 FROM jobs WHERE jobs.kind IN ('{FETCH_JOB}', '{IMPORT_JOB}') \
+                     AND jobs.state IN ('queued', 'running') AND {import_id_of_job} = orbit_imports.id)",
+                only(2)
+            )))
+            .bind(now.as_millis()),
+        )
+        .execute(self.database().pool())
+        .await?
+        .rows_affected();
         Ok(expired + stalled + dead)
     }
 
@@ -1003,27 +1057,6 @@ impl OrbitImportService {
             tracing::warn!(import_id = %import_id, error = %error, cleanup = %cleanup, "Orbit import could not be finalized");
         }
         result
-    }
-
-    async fn fail_imports_with_dead_jobs(&self) -> Result<u64, OrbitImportError> {
-        let import_id_of_job = match self.database().backend() {
-            Backend::Sqlite => "json_extract(jobs.payload_json, '$.import_id')",
-            Backend::Postgres => "(jobs.payload_json::jsonb ->> 'import_id')",
-        };
-        let failed = sqlx::query(sqlx::AssertSqlSafe(format!(
-            "UPDATE orbit_imports SET status = 'failed', token_ciphertext = NULL, \
-             error = 'The import stopped after repeated errors.', updated_at = $1 \
-             WHERE status IN {ACTIVE} \
-             AND EXISTS (SELECT 1 FROM jobs WHERE jobs.kind IN ('{FETCH_JOB}', '{IMPORT_JOB}') \
-                 AND jobs.state = 'dead' AND {import_id_of_job} = orbit_imports.id) \
-             AND NOT EXISTS (SELECT 1 FROM jobs WHERE jobs.kind IN ('{FETCH_JOB}', '{IMPORT_JOB}') \
-                 AND jobs.state IN ('queued', 'running') AND {import_id_of_job} = orbit_imports.id)"
-        )))
-        .bind(TimestampMillis::now().as_millis())
-        .execute(self.database().pool())
-        .await?
-        .rows_affected();
-        Ok(failed)
     }
 
     /// The `orbit.fetch` job: starts and waits for the remote export, downloads it, reads the
@@ -1158,14 +1191,29 @@ impl OrbitImportService {
                 .partial_path(workspace_id, import_id)
                 .await
                 .map_err(|error| Failure::Transient(error.to_string()))?;
-            let size = match client
-                .download_export(&export_id, &partial, self.inner.settings.max_archive_bytes)
-                .await
-            {
-                Ok(size) => size,
-                Err(error) => {
+            // A member's cancel shows only in the row, so it is polled while the download runs.
+            let cancelled_by_member = async {
+                loop {
+                    tokio::time::sleep(Duration::from_secs(10)).await;
+                    if !self.is_scanning(import_id).await? {
+                        return Ok(());
+                    }
+                }
+            };
+            let downloaded = tokio::select! {
+                () = run.cancel.cancelled() => Err(Failure::Interrupted),
+                stop = cancelled_by_member => stop.map(|()| None),
+                result = client.download_export(
+                    &export_id,
+                    &partial,
+                    self.inner.settings.max_archive_bytes,
+                ) => result.map(Some).map_err(Failure::from),
+            };
+            let size = match downloaded {
+                Ok(Some(size)) => size,
+                stop => {
                     let _ = tokio::fs::remove_file(&partial).await;
-                    return Err(Failure::from(error));
+                    return stop.map(|_| ());
                 }
             };
             if !is_zip(&partial).await {
@@ -1506,6 +1554,11 @@ impl OrbitImportService {
         let Some(id) = found.and_then(|id| id.parse::<Id>().ok()) else {
             return Ok(None);
         };
+        Ok(self.row_exists(kind, id).await?.then_some(id))
+    }
+
+    /// Whether the Orbit row of kind `kind` with id `id` exists.
+    async fn row_exists(&self, kind: &str, id: Id) -> Result<bool, Failure> {
         let table = match kind {
             "teamspace" => "teamspaces",
             "project" => "projects",
@@ -1521,7 +1574,7 @@ impl OrbitImportService {
             "channel" => "chat_conversations",
             "message" => "chat_messages",
             "message_file" => "chat_message_files",
-            _ => return Ok(None),
+            _ => return Ok(false),
         };
         let exists: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT COUNT(*) FROM {table} WHERE id = $1"
@@ -1529,7 +1582,7 @@ impl OrbitImportService {
         .bind(id.to_string())
         .fetch_one(self.database().pool())
         .await?;
-        Ok((exists > 0).then_some(id))
+        Ok(exists > 0)
     }
 
     async fn record_link(
@@ -1557,7 +1610,8 @@ impl OrbitImportService {
     /// the row is created. Returns `(id, row already exists)`.
     async fn item_id(&self, run: &mut Run, item: &mut Item) -> Result<(Id, bool), Failure> {
         if let Some(id) = item.orbit_id {
-            return Ok((id, true));
+            // The id is recorded before the row is created: after a restart, check the row.
+            return Ok((id, self.row_exists(item.kind, id).await?));
         }
         let (id, existing) = match self.linked(run, item.kind, &item.source_id).await? {
             Some(id) => {
@@ -1818,11 +1872,11 @@ impl OrbitImportService {
     ) -> Result<OrbitImport, OrbitImportError> {
         let row = sqlx::query(
             "SELECT id, status, phase, mode, source_kind, source_url, source_workspace_name, \
-             exported_by_email, CASE WHEN $1 THEN tree_json END AS tree_json, selection_json, \
+             exported_by_email, CASE WHEN $1 = 1 THEN tree_json END AS tree_json, selection_json, \
              total, done, failed, report_json, error, created_at, updated_at FROM orbit_imports \
              WHERE id = $2 AND workspace_id = $3 AND user_id = $4",
         )
-        .bind(with_tree)
+        .bind(i64::from(with_tree))
         .bind(import_id.to_string())
         .bind(workspace_id.to_string())
         .bind(user_id.to_string())
