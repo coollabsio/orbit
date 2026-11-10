@@ -15,6 +15,8 @@ mod dates;
 mod eval;
 mod syntax;
 mod value;
+#[cfg(test)]
+mod tests;
 
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
