@@ -4050,8 +4050,19 @@
     "configuration": {
      "type": "board",
      "group_by": {
+      "type": "person",
+      "property_id": "ow",
+      "sort": {
+       "type": "manual"
+      },
+      "hide_empty_groups": true
+     },
+     "sub_group_by": {
       "type": "select",
-      "property_id": "s%3Bt"
+      "property_id": "s%3Bt",
+      "sort": {
+       "type": "manual"
+      }
      },
      "properties": [
       {

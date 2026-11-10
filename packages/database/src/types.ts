@@ -70,8 +70,11 @@ export type PropertyKind =
 
 export type Property = Omit<DatabaseProperty, 'type' | 'config'> & PropertyKind
 
-/** A property a board can group by. */
-export type GroupProperty = Property & { type: 'select' | 'status' }
+/** A property whose groups can be a board's columns (spec P2 8.2). */
+export type GroupProperty = Property & { type: 'select' | 'status' | 'multi_select' | 'person' }
+
+/** A property whose groups can be a board's lanes: a column property or a checkbox. */
+export type LaneProperty = Property & { type: GroupProperty['type'] | 'checkbox' }
 
 /** A date (`2026-11-09`) or a UTC time (`2026-11-09T14:00:00Z`, normalized as the server stores it). */
 export type DatePoint = { kind: 'day'; day: string } | { kind: 'moment'; iso: string; ms: number }
@@ -106,11 +109,17 @@ export type ViewConfig = {
   /** AND/OR groups of rules, the root group first (spec P2 5.2). */
   filter: DatabaseFilterGroup
   wrap_cells: boolean
-  /** Board: the `select` or `status` property whose options are the columns. */
+  /** Board: the property whose groups are the columns. */
   group_by: string | null
-  /** Board: option ids in column order; `null` is the "No <property>" column. */
+  /** Board: group ids (option or user ids) in column order; `null` is the "No <property>" column. */
   group_order: (string | null)[]
   hidden_groups: (string | null)[]
+  /** Board: the property whose groups are the lanes (a checkbox's are `"true"` and `"false"`). */
+  sub_group_by: string | null
+  sub_group_order: (string | null)[]
+  hidden_sub_groups: (string | null)[]
+  /** Board: hides the columns and lanes that have no cards. */
+  hide_empty_groups: boolean
   /** Board: the properties shown on each card, after the title. */
   card_properties: string[]
   /** Table: the footer function of each property that has one. */

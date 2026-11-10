@@ -559,8 +559,9 @@ fn view_columns(view: &NotionView) -> Option<Vec<(&str, &Value)>> {
 }
 
 /// One Notion view as an Orbit table or board view: name, columns, sorts and the flat AND part of
-/// the filter; a board also keeps its group property (when it became a select or status) and its
-/// visible card properties. Other layouts (calendar, gallery, …) become tables.
+/// the filter; a board also keeps its group and lane properties (when they became a type that
+/// can group), "hide empty groups" and its visible card properties. Other layouts (calendar,
+/// gallery, …) become tables.
 fn plan_view(
     view: &NotionView,
     planned: &[Planned],
@@ -698,24 +699,44 @@ fn plan_view(
     if !filters.complete {
         lossy(report, "view_filter");
     }
-    let group_by = (view_type == ViewType::Board)
-        .then(|| view.configuration.as_ref()?.get("group_by"))
-        .flatten()
-        .and_then(|group| group.get("property_id").or(Some(group)))
-        .and_then(Value::as_str)
-        .and_then(|key| lookup(planned, key))
-        .filter(|property| {
-            matches!(
-                property.property_type,
-                PropertyType::Select | PropertyType::Status
-            )
-        })
-        .map(|property| property.id);
+    let grouping = |field: &str| {
+        (view_type == ViewType::Board)
+            .then(|| view.configuration.as_ref()?.get(field))
+            .flatten()
+            .filter(|group| !group.is_null())
+    };
+    let group_property = |group: &Value, lanes: bool| {
+        group
+            .get("property_id")
+            .or(Some(group))
+            .and_then(Value::as_str)
+            .and_then(|key| lookup(planned, key))
+            .filter(|property| {
+                matches!(
+                    property.property_type,
+                    PropertyType::Select
+                        | PropertyType::Status
+                        | PropertyType::MultiSelect
+                        | PropertyType::Person
+                ) || (lanes && property.property_type == PropertyType::Checkbox)
+            })
+            .map(|property| property.id)
+    };
+    let group_by = grouping("group_by").and_then(|group| group_property(group, false));
+    let sub_group_by = grouping("sub_group_by")
+        .and_then(|group| group_property(group, true))
+        .filter(|id| Some(*id) != group_by);
+    let hide_empty_groups = grouping("group_by")
+        .and_then(|group| group.get("hide_empty_groups"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     SchemaView {
         name: clean_name(view.name.as_deref().unwrap_or_default(), "Table"),
         view_type,
         config: ViewConfig {
             group_by,
+            sub_group_by,
+            hide_empty_groups,
             card_properties,
             columns,
             sorts,

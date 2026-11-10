@@ -292,6 +292,7 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
         virtualize={!!page}
         onConfig={changeConfig}
         onFilter={(propertyId) => {
+      viewId={view.id}
           const property = database.properties.find((candidate) => candidate.id === propertyId)
           if (property) addFilter(property)
         }}

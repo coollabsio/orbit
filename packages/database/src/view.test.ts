@@ -52,6 +52,10 @@ describe('repairConfig', () => {
       group_by: null,
       group_order: [],
       hidden_groups: [],
+      sub_group_by: null,
+      sub_group_order: [],
+      hidden_sub_groups: [],
+      hide_empty_groups: false,
       card_properties: [],
       calculations: {},
     })
@@ -70,6 +74,10 @@ describe('repairConfig', () => {
       group_by: null,
       group_order: [],
       hidden_groups: [],
+      sub_group_by: null,
+      sub_group_order: [],
+      hidden_sub_groups: [],
+      hide_empty_groups: false,
       card_properties: [],
       calculations: {},
     })
@@ -90,9 +98,24 @@ describe('repairConfig', () => {
       [null],
       ['p-num', 'p-text'],
     ])
-    const fallback = board({ group_by: 'p-multi', group_order: ['t-x'], hidden_groups: ['t-x'] })
+    const fallback = board({ group_by: 'p-url', group_order: ['t-x'], hidden_groups: ['t-x'] })
     expect([fallback.group_by, fallback.group_order, fallback.hidden_groups]).toEqual(['p-status', [], []])
     expect(repairConfig(view({ group_by: 'gone' }), database.properties).group_by).toBeNull()
+  })
+
+  test('a board groups by a person or multi-select, and its lanes by another property or a checkbox', () => {
+    const board = (config: DatabaseViewConfig) =>
+      repairConfig({ id: 'b', name: 'Board', type: 'board', config, position: 0 }, database.properties)
+    const lanes = (config: ReturnType<typeof board>) => [config.group_by, config.group_order, config.sub_group_by, config.sub_group_order, config.hidden_sub_groups]
+    expect(lanes(board({ group_by: 'p-person', group_order: ['u-bob', null, 'u-bob'], sub_group_by: 'p-check', sub_group_order: ['true', null, 'x'], hidden_sub_groups: ['false'] }))).toEqual([
+      'p-person',
+      ['u-bob', null],
+      'p-check',
+      ['true'],
+      ['false'],
+    ])
+    expect(lanes(board({ group_by: 'p-multi', sub_group_by: 'p-multi', sub_group_order: ['t-x'] }))).toEqual(['p-multi', [], null, [], []])
+    expect(lanes(board({ group_by: 'p-sel', sub_group_by: 'p-url' }))).toEqual(['p-sel', [], null, [], []])
   })
 })
 

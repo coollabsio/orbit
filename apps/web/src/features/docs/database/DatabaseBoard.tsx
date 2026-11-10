@@ -1,14 +1,16 @@
-import { useState, type DragEvent } from 'react'
-import { Add, Eye, EyeSlash, MoreH } from 'reicon-react'
+import { useState, type DragEvent, type ReactNode } from 'react'
+import { Add, ChevronDown, ChevronRight, Eye, EyeSlash, MoreH } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Tip } from '@/components/common/Tip'
+import { UserAvatar } from '@/components/common/UserAvatar'
 import { indexAt } from '@/features/views/useGroupDrop'
-import { cardAfter, groupRows, type BoardGroup } from '@orbit/database/board'
-import type { Database, Property, Row, ViewConfig } from '@orbit/database/types'
+import { cardAfter, groupName, groupRows, groupValues, laneRows, moveValues, type BoardGroup } from '@orbit/database/board'
+import type { Database, LaneProperty, Property, Row, ViewConfig } from '@orbit/database/types'
 import { cellOf } from '@orbit/database/values'
-import { groupable } from '@orbit/database/view'
+import { groupable, laneable } from '@orbit/database/view'
 import { useCreateProperty, useMoveRow, useUpdateRowTitle, useUpdateValues } from './api'
 import { CellView, OptionPill } from './cells/CellView'
 import { useDatabaseEnv } from './context'
@@ -16,6 +18,8 @@ import { useDatabaseEnv } from './context'
 const COLUMN_WIDTH = 260
 /** Cards each column renders before "Show more"; a column can hold all 5,000 rows. */
 const PAGE = 50
+/** Cards each cell of a board with lanes renders before "Show more" (spec P2 8.5). */
+const LANE_PAGE = 25
 
 export type NewCard = { values: Record<string, unknown>; after?: string | null; at: 'top' | 'bottom' }
 
@@ -34,21 +38,30 @@ interface DatabaseBoardProps {
   onEditRowShown: () => void
   /** Cards a column shows at first and adds with "Show more" (default 50). */
   pageSize?: number
+  /** Keys the collapsed lanes this browser remembers. */
+  viewId?: string
 }
 
-type CardDrag = { rowId: string; from: string | null }
-/** `index`: the slot among the column's other cards; `null` when the view has sorts (only the group changes). */
-type CardDrop = { group: string | null; index: number | null }
+/** Where a card sits: its column, and its lane (`null` on a board without lanes). */
+type Cell = { group: string | null; lane: string | null }
+type CardDrag = { rowId: string; from: Cell }
+/** `index`: the slot among the cell's other cards; `null` when the view has sorts (only the values change). */
+type CardDrop = { cell: Cell; index: number | null }
+
+const sameCell = (a: Cell, b: Cell) => a.group === b.group && a.lane === b.lane
+const cellKey = (cell: Cell) => JSON.stringify([cell.group, cell.lane])
 
 /**
- * A board view (spec 7.7): one column per option of the group property, cards with the title and the card
- * properties. Cards drag between columns (sets the value) and, without sorts, inside a column (manual order); column
- * headers drag to reorder the groups. Drag and drop follows the task board: native events, the dragged element
- * stays mounted (faded) and a placeholder shows among the others.
+ * A board view (spec 7.7, P2 8): one column per group of the group property (a card with several people or options
+ * shows in each of their columns), cards with the title and the card properties, and optional lanes: the groups of
+ * the sub-group property, each a band with the same columns. Cards drag between cells (sets the column's and the
+ * lane's value in one request) and, without sorts, inside a cell (manual order); column headers drag to reorder the
+ * groups. Drag and drop follows the task board: native events, the dragged element stays mounted (faded) and a
+ * placeholder shows among the others.
  */
 export function DatabaseBoard(props: DatabaseBoardProps) {
-  const { database, config, rows, onConfig, onAddCard, onOpenRow, filtered, onClearFilters, editRowId, onEditRowShown, pageSize = PAGE } = props
-  const { workspaceId, databaseId, canEditValues, canEditSchema } = useDatabaseEnv()
+  const { database, config, rows, onConfig, onAddCard, onOpenRow, filtered, onClearFilters, editRowId, onEditRowShown, pageSize = PAGE, viewId = '' } = props
+  const { workspaceId, databaseId, canEditValues, canEditSchema, ctx } = useDatabaseEnv()
   const moveRow = useMoveRow(workspaceId, databaseId)
   const updateValues = useUpdateValues(workspaceId, databaseId)
   const createProperty = useCreateProperty(workspaceId, databaseId)
@@ -58,13 +71,14 @@ export function DatabaseBoard(props: DatabaseBoardProps) {
   const [columnDrag, setColumnDrag] = useState<{ id: string | null } | null>(null)
   const [columnDrop, setColumnDrop] = useState<number | null>(null)
   const [shown, setShown] = useState<Readonly<Record<string, number>>>({})
+  const [collapsed, setCollapsed] = useCollapsedLanes(`orbit:board-lanes:${databaseId}:${viewId}`)
 
   const property = database.properties.find((candidate) => candidate.id === config.group_by)
   if (!groupable(property)) {
     return (
       <div className="flex h-40 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
         Choose a property to group by
-        <span className="text-xs">A board groups its cards by a Status or Select property.</span>
+        <span className="text-xs">A board groups its cards by a Status, Select, Multi-select or Person property.</span>
         {canEditSchema ? (
           <Button type="button" variant="outline" size="sm" disabled={createProperty.isPending} onClick={() => createProperty.mutate({ name: 'Status', type: 'status' })}>
             <Add />
@@ -74,45 +88,54 @@ export function DatabaseBoard(props: DatabaseBoardProps) {
       </div>
     )
   }
+  const candidate = database.properties.find((other) => other.id === config.sub_group_by)
+  const laneProperty = laneable(candidate) ? candidate : undefined
   const sorted = config.sorts.length > 0
-  const groups = groupRows(rows, property, config)
+  const groups = groupRows(rows, property, config, ctx.members)
   const visible = groups.filter((group) => !group.hidden)
   const hidden = groups.filter((group) => group.hidden)
-  const cardProperties = config.card_properties.flatMap((id) => database.properties.find((candidate) => candidate.id === id) ?? [])
+  const lanes = laneProperty ? laneRows(rows, property, laneProperty, config, ctx.members) : []
+  const hiddenLanes = lanes.filter((lane) => lane.hidden)
+  const cardProperties = config.card_properties.flatMap((id) => database.properties.find((other) => other.id === id) ?? [])
+  const title = database.properties.find((other) => other.type === 'title')
   const ordered = [...database.rows].sort((a, b) => a.position - b.position || a.id.localeCompare(b.id))
-  const groupValue = (group: BoardGroup) => ({ [property.id]: group.id })
+  const name = (owner: LaneProperty, group: BoardGroup) => groupName(owner, group, ctx.members)
+  const cellName = (group: BoardGroup, lane: BoardGroup | null) => (lane && laneProperty ? `${name(property, group)}, ${name(laneProperty, lane)}` : name(property, group))
+  const newCardValues = (cell: Cell) => ({ ...groupValues(property, cell.group), ...(laneProperty ? groupValues(laneProperty, cell.lane) : {}) })
 
   const endCardDrag = () => {
     setCardDrag(null)
     setCardDrop(null)
   }
-  const dropCard = (group: BoardGroup, index: number | null) => {
+  const dropCard = (cell: Cell, cellRows: readonly Row[], index: number | null) => {
     const drag = cardDrag
     endCardDrag()
-    if (!drag) return
-    const values = drag.from === group.id ? undefined : groupValue(group)
+    const row = drag && rows.find((candidate) => candidate.id === drag.rowId)
+    if (!drag || !row) return
+    const patch = { ...moveValues(row, property, drag.from.group, cell.group), ...(laneProperty ? moveValues(row, laneProperty, drag.from.lane, cell.lane) : {}) }
+    const values = Object.keys(patch).length > 0 ? patch : undefined
     if (index === null) {
       if (values) updateValues.mutate({ rowId: drag.rowId, values })
       return
     }
-    const after = cardAfter(ordered, group.rows.filter((row) => row.id !== drag.rowId), index, drag.rowId)
+    const after = cardAfter(ordered, cellRows.filter((other) => other.id !== drag.rowId), index, drag.rowId)
     if (!values && after === cardAfter(ordered, [], 0, drag.rowId)) return
     moveRow.mutate({ rowId: drag.rowId, afterRowId: after, values })
   }
-  const cardZone = (group: BoardGroup) => ({
+  const cardZone = (cell: Cell, cellRows: readonly Row[]) => ({
     onDragOver: (event: DragEvent<HTMLElement>) => {
-      if (!cardDrag || (sorted && cardDrag.from === group.id)) return
+      if (!cardDrag || (sorted && sameCell(cardDrag.from, cell))) return
       event.preventDefault()
       event.dataTransfer.dropEffect = 'move'
       const index = sorted ? null : indexAt(event.currentTarget, '[data-board-card]', event.clientY)
-      if (cardDrop?.group !== group.id || cardDrop.index !== index) setCardDrop({ group: group.id, index })
+      if (!cardDrop || !sameCell(cardDrop.cell, cell) || cardDrop.index !== index) setCardDrop({ cell, index })
     },
     onDragLeave: (event: DragEvent<HTMLElement>) => {
-      if (!event.currentTarget.contains(event.relatedTarget as Node | null) && cardDrop?.group === group.id) setCardDrop(null)
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null) && cardDrop && sameCell(cardDrop.cell, cell)) setCardDrop(null)
     },
     onDrop: (event: DragEvent<HTMLElement>) => {
       event.preventDefault()
-      dropCard(group, sorted ? null : indexAt(event.currentTarget, '[data-board-card]', event.clientY))
+      dropCard(cell, cellRows, sorted ? null : indexAt(event.currentTarget, '[data-board-card]', event.clientY))
     },
   })
 
@@ -136,13 +159,177 @@ export function DatabaseBoard(props: DatabaseBoardProps) {
     ids.splice(slot, 0, drag.id)
     onConfig({ ...config, group_order: [...ids, ...hidden.map((group) => group.id)] })
   }
+  const columnZone = {
+    onDragOver: (event: DragEvent<HTMLElement>) => {
+      if (!columnDrag) return
+      event.preventDefault()
+      event.dataTransfer.dropEffect = 'move'
+      const slot = columnSlot(event.currentTarget, event.clientX)
+      if (slot !== columnDrop) setColumnDrop(slot)
+    },
+    onDrop: (event: DragEvent<HTMLElement>) => {
+      if (!columnDrag) return
+      event.preventDefault()
+      dropColumn(columnSlot(event.currentTarget, event.clientX))
+    },
+  }
   const setHidden = (group: BoardGroup, hide: boolean) =>
     onConfig({ ...config, hidden_groups: hide ? [...config.hidden_groups, group.id] : config.hidden_groups.filter((id) => id !== group.id) })
+  const setLaneHidden = (lane: BoardGroup, hide: boolean) =>
+    onConfig({ ...config, hidden_sub_groups: hide ? [...config.hidden_sub_groups, lane.id] : config.hidden_sub_groups.filter((id) => id !== lane.id) })
 
-  const groupLabel = (group: BoardGroup) =>
-    group.id === null ? <span className="truncate text-sm text-muted-foreground">No {property.name}</span> : <OptionPill property={property} id={group.id} />
   const othersOf = (columnId: string | null) => (columnDrag ? visible.filter((group) => group.id !== columnId) : visible)
   const columnPlaceholder = <div aria-hidden="true" className="w-1 shrink-0 self-stretch rounded-full bg-primary/40" />
+
+  /** A column's header: the group, its card count, "Hide group" and "Add a card"; it drags to reorder the columns. */
+  const header = (group: BoardGroup) => (
+    <header
+      draggable
+      className="group/header flex h-9 cursor-grab items-center gap-1.5 px-1"
+      onDragStart={(event) => {
+        event.dataTransfer.effectAllowed = 'move'
+        event.dataTransfer.setData('text/plain', name(property, group))
+        setColumnDrag({ id: group.id })
+      }}
+      onDragEnd={endColumnDrag}
+    >
+      <GroupLabel property={property} group={group} />
+      <span className="text-xs text-muted-foreground tabular-nums">{group.rows.length}</span>
+      <span className="flex-1" />
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          render={
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              aria-label={`${name(property, group)} group options`}
+              className="text-muted-foreground hover-fine:opacity-0 hover-fine:group-hover/header:opacity-100 aria-expanded:opacity-100"
+            />
+          }
+        >
+          <MoreH />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-40">
+          <DropdownMenuItem onClick={() => setHidden(group, true)}>
+            <EyeSlash />
+            Hide group
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {canEditValues && !laneProperty ? (
+        <Tip label="Add a card">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`Add a card to ${name(property, group)}`}
+            className="text-muted-foreground hover-fine:opacity-0 hover-fine:group-hover/header:opacity-100"
+            onClick={() => onAddCard({ values: newCardValues({ group: group.id, lane: null }), after: cardAfter(ordered, group.rows, 0, ''), at: 'top' })}
+          >
+            <Add />
+          </Button>
+        </Tip>
+      ) : null}
+    </header>
+  )
+
+  /** The cards of one cell (a column, or a column in a lane), the drop placeholder, "Show more" and "New". */
+  const cards = (cell: Cell, cellRows: readonly Row[], page: number) => {
+    const key = cellKey(cell)
+    const limit = shown[key] ?? page
+    const list = cellRows.slice(0, limit)
+    const dragged = (row: Row) => cardDrag?.rowId === row.id && sameCell(cardDrag.from, cell)
+    const others = cardDrag ? list.filter((row) => !dragged(row)) : list
+    const placeholderIndex = cardDrop && sameCell(cardDrop.cell, cell) ? cardDrop.index : null
+    const placeholder = <div data-board-placeholder className="min-h-10 rounded-md border border-dashed border-primary/40 bg-primary/10" style={{ height: cardHeight }} />
+    return (
+      <>
+        {sorted && cardDrag && sameCell(cardDrag.from, cell) ? <p className="px-1 pb-1 text-xs text-muted-foreground">Remove sorts to reorder cards</p> : null}
+        <div className="flex min-h-10 flex-col gap-1.5 px-0.5 pb-1">
+          {list.map((row) => (
+            <div key={row.id} className="contents">
+              {!dragged(row) && placeholderIndex !== null && placeholderIndex === others.indexOf(row) ? placeholder : null}
+              <Card
+                row={row}
+                title={title}
+                properties={cardProperties}
+                dragging={dragged(row)}
+                draggable={canEditValues}
+                editing={row.id === editRowId}
+                onEditShown={onEditRowShown}
+                onOpen={() => onOpenRow(row.id)}
+                onDragStart={(event) => {
+                  event.stopPropagation()
+                  event.dataTransfer.effectAllowed = 'move'
+                  event.dataTransfer.setData('text/plain', row.title)
+                  setCardHeight(event.currentTarget.offsetHeight)
+                  setCardDrag({ rowId: row.id, from: cell })
+                }}
+                onDragEnd={endCardDrag}
+              />
+            </div>
+          ))}
+          {placeholderIndex !== null && placeholderIndex >= others.length ? placeholder : null}
+          {cellRows.length > limit ? (
+            <Button type="button" variant="ghost" size="sm" className="justify-start text-muted-foreground" onClick={() => setShown((current) => ({ ...current, [key]: limit + page }))}>
+              Show {Math.min(page, cellRows.length - limit)} more
+            </Button>
+          ) : null}
+          {canEditValues ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className={cn('justify-start text-muted-foreground', laneProperty ? 'hover-fine:opacity-0 hover-fine:group-hover/cell:opacity-100 focus-visible:opacity-100' : '')}
+              onClick={() => {
+                const last = cellRows.at(-1)
+                onAddCard({ values: newCardValues(cell), ...(last ? { after: last.id } : {}), at: 'bottom' })
+              }}
+            >
+              <Add />
+              New
+            </Button>
+          ) : null}
+        </div>
+      </>
+    )
+  }
+
+  const cellClass =
+    'flex shrink-0 flex-col rounded-md transition-opacity data-dragging:opacity-35 data-drop-over:bg-primary/5 data-drop-over:ring-1 data-drop-over:ring-primary/40'
+  const dropOver = (cell: Cell) => (cardDrop !== null && sameCell(cardDrop.cell, cell) && cardDrop.index === null) || undefined
+  const withColumnSlots = (render: (group: BoardGroup) => ReactNode) => (
+    <>
+      {visible.map((group) => {
+        const slot = columnDrag ? othersOf(columnDrag.id).indexOf(group) : -1
+        return (
+          <div key={group.id ?? ''} className="contents">
+            {columnDrop !== null && slot === columnDrop ? columnPlaceholder : null}
+            {render(group)}
+          </div>
+        )
+      })}
+      {columnDrop !== null && columnDrop >= othersOf(columnDrag?.id ?? null).length ? columnPlaceholder : null}
+    </>
+  )
+  const hiddenList = (label: string, owner: LaneProperty, list: BoardGroup[], onShow: (group: BoardGroup) => void) => (
+    <section aria-label={label} className="flex w-[220px] shrink-0 flex-col gap-0.5">
+      <h3 className="flex h-9 items-center px-1 text-sm text-muted-foreground">{label}</h3>
+      {list.map((group) => (
+        <div key={group.id ?? ''} className="flex h-8 items-center gap-1.5 rounded-md px-1 hover:bg-muted/60">
+          <GroupLabel property={owner} group={group} />
+          <span className="text-xs text-muted-foreground tabular-nums">{group.rows.length}</span>
+          <span className="flex-1" />
+          <Tip label="Show group">
+            <Button type="button" variant="ghost" size="icon-xs" aria-label={`Show ${name(owner, group)}`} className="text-muted-foreground" onClick={() => onShow(group)}>
+              <Eye />
+            </Button>
+          </Tip>
+        </div>
+      ))}
+    </section>
+  )
 
   return (
     <div className="flex flex-col gap-2 pb-4">
@@ -154,166 +341,155 @@ export function DatabaseBoard(props: DatabaseBoardProps) {
           </Button>
         </div>
       ) : null}
-      <div
-        className="flex items-start gap-3"
-        aria-busy={moveRow.isPending || updateValues.isPending}
-        onDragOver={(event) => {
-          if (!columnDrag) return
-          event.preventDefault()
-          event.dataTransfer.dropEffect = 'move'
-          const slot = columnSlot(event.currentTarget, event.clientX)
-          if (slot !== columnDrop) setColumnDrop(slot)
-        }}
-        onDrop={(event) => {
-          if (!columnDrag) return
-          event.preventDefault()
-          dropColumn(columnSlot(event.currentTarget, event.clientX))
-        }}
-      >
-        {visible.map((group) => {
-          const key = group.id ?? ''
-          const slot = columnDrag ? othersOf(columnDrag.id).indexOf(group) : -1
-          const limit = shown[key] ?? pageSize
-          const cards = group.rows.slice(0, limit)
-          const others = cardDrag ? cards.filter((row) => row.id !== cardDrag.rowId) : cards
-          const placeholderIndex = cardDrop?.group === group.id ? cardDrop.index : null
-          const placeholder = <div data-board-placeholder className="min-h-10 rounded-md border border-dashed border-primary/40 bg-primary/10" style={{ height: cardHeight }} />
-          return (
-            <div key={key} className="contents">
-              {columnDrop !== null && slot === columnDrop ? columnPlaceholder : null}
-              <section
-                aria-label={group.option?.name ?? `No ${property.name}`}
+      {laneProperty ? (
+        <div className="flex w-max flex-col" aria-busy={moveRow.isPending || updateValues.isPending}>
+          <div className="sticky top-0 z-10 flex items-start gap-3 bg-background" {...columnZone}>
+            {withColumnSlots((group) => (
+              <div
+                key={group.id ?? ''}
+                role="columnheader"
+                aria-label={name(property, group)}
                 data-board-column=""
                 data-dragging={columnDrag?.id === group.id || undefined}
-                data-drop-over={(cardDrop?.group === group.id && cardDrop.index === null) || undefined}
-                className="flex shrink-0 flex-col rounded-md transition-opacity data-dragging:opacity-35 data-drop-over:bg-primary/5 data-drop-over:ring-1 data-drop-over:ring-primary/40"
+                className="shrink-0 transition-opacity data-dragging:opacity-35"
                 style={{ width: COLUMN_WIDTH }}
-                {...cardZone(group)}
               >
-                <header
-                  draggable
-                  className="group/header flex h-9 cursor-grab items-center gap-1.5 px-1"
-                  onDragStart={(event) => {
-                    event.dataTransfer.effectAllowed = 'move'
-                    event.dataTransfer.setData('text/plain', group.option?.name ?? `No ${property.name}`)
-                    setColumnDrag({ id: group.id })
-                  }}
-                  onDragEnd={endColumnDrag}
-                >
-                  {groupLabel(group)}
-                  <span className="text-xs text-muted-foreground tabular-nums">{group.rows.length}</span>
-                  <span className="flex-1" />
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
-                      render={
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon-xs"
-                          aria-label={`${group.option?.name ?? `No ${property.name}`} group options`}
-                          className="text-muted-foreground hover-fine:opacity-0 hover-fine:group-hover/header:opacity-100 aria-expanded:opacity-100"
-                        />
-                      }
+                {header(group)}
+              </div>
+            ))}
+            {hidden.length > 0 ? hiddenList('Hidden groups', property, hidden, (group) => setHidden(group, false)) : null}
+          </div>
+          {lanes
+            .filter((lane) => !lane.hidden)
+            .map((lane) => {
+              const closed = collapsed.includes(lane.id)
+              return (
+                <section key={lane.id ?? ''} aria-label={name(laneProperty, lane)} className="flex flex-col border-t border-border pt-1 pb-2">
+                  <div className="group/lane sticky left-0 flex h-9 w-fit items-center gap-1.5 px-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label={`${closed ? 'Expand' : 'Collapse'} ${name(laneProperty, lane)}`}
+                      aria-expanded={!closed}
+                      className="text-muted-foreground"
+                      onClick={() => setCollapsed(closed ? collapsed.filter((id) => id !== lane.id) : [...collapsed, lane.id])}
                     >
-                      <MoreH />
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-40">
-                      <DropdownMenuItem onClick={() => setHidden(group, true)}>
-                        <EyeSlash />
-                        Hide group
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                  {canEditValues ? (
-                    <Tip label="Add a card">
+                      {closed ? <ChevronRight /> : <ChevronDown />}
+                    </Button>
+                    <GroupLabel property={laneProperty} group={lane} />
+                    <span className="text-xs text-muted-foreground tabular-nums">{lane.rows.length}</span>
+                    <Tip label="Hide group">
                       <Button
                         type="button"
                         variant="ghost"
                         size="icon-xs"
-                        aria-label={`Add a card to ${group.option?.name ?? `No ${property.name}`}`}
-                        className="text-muted-foreground hover-fine:opacity-0 hover-fine:group-hover/header:opacity-100"
-                        onClick={() => onAddCard({ values: groupValue(group), after: cardAfter(ordered, group.rows, 0, ''), at: 'top' })}
+                        aria-label={`Hide ${name(laneProperty, lane)}`}
+                        className="text-muted-foreground hover-fine:opacity-0 hover-fine:group-hover/lane:opacity-100"
+                        onClick={() => setLaneHidden(lane, true)}
                       >
-                        <Add />
+                        <EyeSlash />
                       </Button>
                     </Tip>
-                  ) : null}
-                </header>
-                {sorted && cardDrag?.from === group.id ? <p className="px-1 pb-1 text-xs text-muted-foreground">Remove sorts to reorder cards</p> : null}
-                <div className="flex min-h-10 flex-col gap-1.5 px-0.5 pb-1">
-                  {cards.map((row) => {
-                    const dragged = cardDrag?.rowId === row.id
-                    return (
-                      <div key={row.id} className="contents">
-                        {!dragged && placeholderIndex !== null && placeholderIndex === others.indexOf(row) ? placeholder : null}
-                        <Card
-                          row={row}
-                          title={database.properties.find((candidate) => candidate.type === 'title')}
-                          properties={cardProperties}
-                          dragging={dragged}
-                          draggable={canEditValues}
-                          editing={row.id === editRowId}
-                          onEditShown={onEditRowShown}
-                          onOpen={() => onOpenRow(row.id)}
-                          onDragStart={(event) => {
-                            event.stopPropagation()
-                            event.dataTransfer.effectAllowed = 'move'
-                            event.dataTransfer.setData('text/plain', row.title)
-                            setCardHeight(event.currentTarget.offsetHeight)
-                            setCardDrag({ rowId: row.id, from: group.id })
-                          }}
-                          onDragEnd={endCardDrag}
-                        />
-                      </div>
-                    )
-                  })}
-                  {placeholderIndex !== null && placeholderIndex >= others.length ? placeholder : null}
-                  {group.rows.length > limit ? (
-                    <Button type="button" variant="ghost" size="sm" className="justify-start text-muted-foreground" onClick={() => setShown((current) => ({ ...current, [key]: limit + pageSize }))}>
-                      Show {Math.min(pageSize, group.rows.length - limit)} more
-                    </Button>
-                  ) : null}
-                  {canEditValues ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="justify-start text-muted-foreground"
-                      onClick={() => {
-                        const last = group.rows.at(-1)
-                        onAddCard({ values: groupValue(group), ...(last ? { after: last.id } : {}), at: 'bottom' })
-                      }}
-                    >
-                      <Add />
-                      New
-                    </Button>
-                  ) : null}
-                </div>
+                  </div>
+                  {closed ? null : (
+                    <div className="flex items-start gap-3">
+                      {lane.columns
+                        .filter((column) => !column.hidden)
+                        .map((column) => {
+                          const cell = { group: column.id, lane: lane.id }
+                          return (
+                            <section
+                              key={column.id ?? ''}
+                              aria-label={cellName(column, lane)}
+                              data-drop-over={dropOver(cell)}
+                              className={cn('group/cell', cellClass)}
+                              style={{ width: COLUMN_WIDTH }}
+                              {...cardZone(cell, column.rows)}
+                            >
+                              {cards(cell, column.rows, Math.min(pageSize, LANE_PAGE))}
+                            </section>
+                          )
+                        })}
+                    </div>
+                  )}
+                </section>
+              )
+            })}
+          {hiddenLanes.length > 0 ? <div className="pt-2">{hiddenList('Hidden sub-groups', laneProperty, hiddenLanes, (lane) => setLaneHidden(lane, false))}</div> : null}
+        </div>
+      ) : (
+        <div className="flex items-start gap-3" aria-busy={moveRow.isPending || updateValues.isPending} {...columnZone}>
+          {withColumnSlots((group) => {
+            const cell = { group: group.id, lane: null }
+            return (
+              <section
+                aria-label={name(property, group)}
+                data-board-column=""
+                data-dragging={columnDrag?.id === group.id || undefined}
+                data-drop-over={dropOver(cell)}
+                className={cellClass}
+                style={{ width: COLUMN_WIDTH }}
+                {...cardZone(cell, group.rows)}
+              >
+                {header(group)}
+                {cards(cell, group.rows, pageSize)}
               </section>
-            </div>
-          )
-        })}
-        {columnDrop !== null && columnDrop >= othersOf(columnDrag?.id ?? null).length ? columnPlaceholder : null}
-        {hidden.length > 0 ? (
-          <section aria-label="Hidden groups" className="flex w-[220px] shrink-0 flex-col gap-0.5">
-            <h3 className="flex h-9 items-center px-1 text-sm text-muted-foreground">Hidden groups</h3>
-            {hidden.map((group) => (
-              <div key={group.id ?? ''} className="flex h-8 items-center gap-1.5 rounded-md px-1 hover:bg-muted/60">
-                {groupLabel(group)}
-                <span className="text-xs text-muted-foreground tabular-nums">{group.rows.length}</span>
-                <span className="flex-1" />
-                <Tip label="Show group">
-                  <Button type="button" variant="ghost" size="icon-xs" aria-label={`Show ${group.option?.name ?? `No ${property.name}`}`} className="text-muted-foreground" onClick={() => setHidden(group, false)}>
-                    <Eye />
-                  </Button>
-                </Tip>
-              </div>
-            ))}
-          </section>
-        ) : null}
-      </div>
+            )
+          })}
+          {hidden.length > 0 ? hiddenList('Hidden groups', property, hidden, (group) => setHidden(group, false)) : null}
+        </div>
+      )}
     </div>
   )
+}
+
+/** The lanes this browser keeps collapsed, as group ids, in `localStorage` under `key`. */
+function useCollapsedLanes(key: string): [(string | null)[], (ids: (string | null)[]) => void] {
+  const [ids, setIds] = useState<(string | null)[]>(() => {
+    try {
+      const stored: unknown = JSON.parse(localStorage.getItem(key) ?? '[]')
+      return Array.isArray(stored) ? stored.filter((id): id is string | null => id === null || typeof id === 'string') : []
+    } catch {
+      return []
+    }
+  })
+  const save = (next: (string | null)[]) => {
+    setIds(next)
+    try {
+      if (next.length > 0) localStorage.setItem(key, JSON.stringify(next))
+      else localStorage.removeItem(key)
+    } catch {
+      // Private mode: the lanes stay collapsed until the page reloads.
+    }
+  }
+  return [ids, save]
+}
+
+/** A group's label: its option pill, its member, a checkbox, or "No <property>". */
+function GroupLabel({ property, group }: { property: LaneProperty; group: BoardGroup }) {
+  const { users } = useDatabaseEnv()
+  if (group.id === null) return <span className="truncate text-sm text-muted-foreground">No {property.name}</span>
+  switch (property.type) {
+    case 'person': {
+      const user = users.get(group.id)
+      return (
+        <span className="flex min-w-0 items-center gap-1.5 text-sm">
+          <UserAvatar user={user} name={user ? undefined : '?'} size={18} />
+          <span className="truncate">{user?.name ?? 'Former member'}</span>
+        </span>
+      )
+    }
+    case 'checkbox':
+      return (
+        <span className="flex min-w-0 items-center gap-1.5 text-sm">
+          <Checkbox checked={group.id === 'true'} disabled tabIndex={-1} aria-hidden="true" />
+          <span className="truncate">{group.id === 'true' ? 'Checked' : 'Unchecked'}</span>
+        </span>
+      )
+    default:
+      return <OptionPill property={property} id={group.id} />
+  }
 }
 
 interface CardProps {

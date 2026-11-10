@@ -656,6 +656,20 @@ non-member. Web: a drop into another lane sends one request with two values.
 | OQ-6.1 | What does Notion's view API expose for sub-groups? |
 | OQ-6.2 | Group by date (by day, week, month)? Not confirmed in Notion's help. Proposal: later. |
 
+### 8.10 Status
+
+Done on 2026-11-10 (no migration). OQ-6.1: Notion's board configuration has `group_by` and `sub_group_by` (same
+shape: `type`, `property_id`, `sort`, `hide_empty_groups`); the import maps both. Differences from this section:
+
+| # | Item | Where | Why |
+|---|---|---|---|
+| 1 | A lane header also has "Hide group"; hidden lanes list under "Hidden sub-groups" with a show button. | `database/DatabaseBoard.tsx` | `hidden_sub_groups` needs a way in and out. |
+| 2 | Checkbox lanes are "Unchecked", then "Checked". People that the rows name but who are not members sort last, as "Former member". | `packages/database/src/board.ts` | The spec gives no order for them. |
+| 3 | With lanes, the column header has no "Add a card"; each cell has "New" (shown on hover with a mouse). Without lanes, columns keep 50 cards per page. | `database/DatabaseBoard.tsx` | A header button cannot know the lane; 25 per cell is for lanes only. |
+| 4 | Mobile "Move to…" lists the lanes, then the columns: a lane tap selects it, a column tap moves the card. It sends `PATCH …/values` with both values (no position), as before. | `apps/mobile/src/components/database/DatabaseView.tsx` | One request, as the spec asks; the phone board has no manual order. |
+| 5 | The client computes the multi-value patch (`moveValues`); two people moving the same card at once: the last write wins. | `packages/database/src/board.ts` | P1 D7: the move takes plain values. |
+| 6 | Notion import: `hide_empty_groups` comes from `group_by` only; `sort` (ascending, descending) and status `group_by: "group"` (by To-do, In progress, Complete) are not kept: the board groups by option. | `notion/database.rs` | Orbit has one flag and no sorted or status-group columns. |
+
 ## 9. Item 7: CSV import and export (P2, M)
 
 ### 9.1 Goal

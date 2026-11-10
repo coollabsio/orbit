@@ -1,9 +1,9 @@
 /**
  * What the database screens decide on a phone, as plain data: which view is open, which properties a row of the list
- * shows, and what a board card move sends. The view logic itself (filter, sort, groups) is `@orbit/database`.
+ * shows. The view logic itself (filter, sort, groups) is `@orbit/database`.
  */
 import { CALCULATION_LABELS, calculate } from '@orbit/database/calculate'
-import type { DatabasePropertyType, DatabaseView, GroupProperty, OptionColor, Property, Row, ViewConfig, ViewContext } from '@orbit/database/types'
+import type { DatabasePropertyType, DatabaseView, OptionColor, Property, Row, ViewConfig, ViewContext } from '@orbit/database/types'
 import { cellOf } from '@orbit/database/values'
 
 import type { IconName } from '../ui'
@@ -78,11 +78,6 @@ export function summaryLines(properties: readonly Property[], config: ViewConfig
 /** Of `shown`, the properties the row has a value for: an empty one leaves no gap. */
 export function filledProperties(row: Row, shown: readonly Property[]): Property[] {
   return shown.filter((property) => cellOf(row, property) !== null)
-}
-
-/** The values a card moved to another board column gets: the column's option, or none for "No <property>". */
-export function groupValues(property: GroupProperty, groupId: string | null): Record<string, unknown> {
-  return { [property.id]: groupId }
 }
 
 /** The web's option pill colors (`cells/Pill.tsx`), one class set per scheme: Uniwind's `dark:` does not override. */

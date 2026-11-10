@@ -1,9 +1,8 @@
 import { expect, test } from 'bun:test'
 import { ctx, database, property } from '@orbit/database/testing'
-import type { GroupProperty } from '@orbit/database/types'
 import { repairConfig } from '@orbit/database/view'
 
-import { advancedFilterLabel, filledProperties, groupValues, listProperties, parseTime, pickView, summaryLines } from './database'
+import { advancedFilterLabel, filledProperties, listProperties, parseTime, pickView, summaryLines } from './database'
 
 const view = database.views[0]!
 
@@ -35,11 +34,6 @@ test('a row shows only the listed properties it has a value for', () => {
   expect(filledProperties(cherry, shown).map((shown) => shown.id)).toEqual(['p-sel', 'p-num'])
 })
 
-test('moving a card to a column sets the group property, or clears it for "No <property>"', () => {
-  const kind = property('p-sel') as GroupProperty
-  expect(groupValues(kind, 'o-b')).toEqual({ 'p-sel': 'o-b' })
-  expect(groupValues(kind, null)).toEqual({ 'p-sel': null })
-})
 
 test('the chosen view while it exists, else the first by position', () => {
   const views = [

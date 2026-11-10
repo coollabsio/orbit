@@ -23,6 +23,7 @@ use crate::audit::{self, AuditOutcome};
 use crate::billing::TrialLimit;
 use crate::collab::CollabHub;
 
+mod board;
 mod links;
 mod moves;
 mod search;
@@ -1315,18 +1316,34 @@ pub struct ViewConfig {
     pub filter: FilterGroup,
     #[serde(default)]
     pub wrap_cells: bool,
-    /// Board: the `select` or `status` property whose options are the columns. A board without
-    /// one falls back to the first status, else the first select property.
+    /// Board: the `select`, `status`, `multi_select` or `person` property whose groups are the
+    /// columns (a card with several values shows in each of their columns). A board without one
+    /// falls back to the first status, else the first select property.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>)]
     pub group_by: Option<Id>,
-    /// Board: option ids in column order, `null` for the "No <property>" column. Options missing
-    /// here follow in the property's option order.
+    /// Board: group ids in column order (option ids, or user ids for a person), `null` for the
+    /// "No <property>" column. Groups missing here follow in the property's order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub group_order: Vec<Option<String>>,
-    /// Board: option ids (or `null`) of the columns listed under "Hidden groups".
+    /// Board: group ids (or `null`) of the columns listed under "Hidden groups".
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hidden_groups: Vec<Option<String>>,
+    /// Board: the property whose groups are the lanes (rows of the same columns): a `select`,
+    /// `status`, `multi_select`, `person` or `checkbox` property other than `group_by`. A
+    /// checkbox's groups are `"true"` and `"false"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub sub_group_by: Option<Id>,
+    /// Board: group ids in lane order, as `group_order`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sub_group_order: Vec<Option<String>>,
+    /// Board: group ids (or `null`) of the hidden lanes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hidden_sub_groups: Vec<Option<String>>,
+    /// Board: hides the columns and lanes that have no cards.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hide_empty_groups: bool,
     /// Board: the properties shown on each card, in order. The title always shows.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schema(value_type = Vec<String>)]
@@ -1338,33 +1355,6 @@ pub struct ViewConfig {
     pub calculations: BTreeMap<Id, Calculation>,
 }
 
-/// Option ids, plus `null` for "no value", that a board can group by. Groups that name no option of
-/// `kind` are dropped, and repeats.
-fn retain_groups(groups: &mut Vec<Option<String>>, kind: Option<&PropertyKind>) {
-    let mut seen = HashSet::new();
-    groups.retain(|group| {
-        kind.is_some_and(|kind| group.as_deref().is_none_or(|id| kind.has_option(id)))
-            && seen.insert(group.clone())
-    });
-}
-
-const fn groupable(kind: &PropertyKind) -> bool {
-    matches!(kind, PropertyKind::Select(_) | PropertyKind::Status(_))
-}
-
-/// The property a board groups by when it names none: the first status, else the first select.
-fn default_group_by(properties: &[Property]) -> Option<Id> {
-    properties
-        .iter()
-        .find(|property| matches!(property.kind, PropertyKind::Status(_)))
-        .or_else(|| {
-            properties
-                .iter()
-                .find(|property| matches!(property.kind, PropertyKind::Select(_)))
-        })
-        .map(|property| property.id)
-}
-
 impl ViewConfig {
     /// Every property as a visible column, in property order.
     fn for_properties(properties: &[Property]) -> Self {
@@ -1374,9 +1364,8 @@ impl ViewConfig {
         }
     }
 
-    /// Drops what names a property not in `properties`, repeats, and groups that are not options of
-    /// the group property. A board whose group property is gone or no longer a select or status
-    /// groups by the default one, with the default group order.
+    /// Drops what names a property not in `properties`, repeats, and the board groups that do not
+    /// fit their property (`board::repair`).
     fn repair(&mut self, view_type: ViewType, properties: &[Property]) {
         self.retain_known(properties);
         let kind = |id: Id| {
@@ -1385,19 +1374,7 @@ impl ViewConfig {
                 .find(|property| property.id == id)
                 .map(|property| &property.kind)
         };
-        let group_by = self.group_by.filter(|id| kind(*id).is_some_and(groupable));
-        let group_by = match view_type {
-            ViewType::Board => group_by.or_else(|| default_group_by(properties)),
-            ViewType::Table => group_by,
-        };
-        if group_by != self.group_by {
-            self.group_order.clear();
-            self.hidden_groups.clear();
-            self.group_by = group_by;
-        }
-        let group_kind = self.group_by.and_then(kind);
-        retain_groups(&mut self.group_order, group_kind);
-        retain_groups(&mut self.hidden_groups, group_kind);
+        board::repair(self, view_type, properties);
         let mut cards = HashSet::new();
         self.card_properties.retain(|id| {
             kind(*id).is_some_and(|kind| *kind != PropertyKind::Title) && cards.insert(*id)
@@ -1435,21 +1412,10 @@ impl ViewConfig {
                 return Err(format!("config.columns[{index}].width"));
             }
         }
-        if self.group_order.len() > MAX_OPTIONS + 1 {
-            return Err("config.group_order".to_owned());
-        }
-        if self.hidden_groups.len() > MAX_OPTIONS + 1 {
-            return Err("config.hidden_groups".to_owned());
-        }
         if self.card_properties.len() > MAX_PROPERTIES {
             return Err("config.card_properties".to_owned());
         }
-        if let Some(group_by) = self.group_by
-            && let Some(property) = properties.iter().find(|property| property.id == group_by)
-            && !groupable(&property.kind)
-        {
-            return Err("config.group_by".to_owned());
-        }
+        board::check(self, properties)?;
         let types: HashMap<Id, PropertyType> = properties
             .iter()
             .map(|property| (property.id, property.kind.property_type()))
@@ -1500,6 +1466,9 @@ impl ViewConfig {
             .rules_mut(&mut |rule| map(&mut rule.property_id));
         if let Some(group_by) = &mut self.group_by {
             map(group_by);
+        }
+        if let Some(sub_group_by) = &mut self.sub_group_by {
+            map(sub_group_by);
         }
         self.card_properties.iter_mut().for_each(map);
         self.calculations = std::mem::take(&mut self.calculations)
@@ -2179,6 +2148,7 @@ impl DatabaseRepository {
         config
             .validate(view_type, &properties)
             .map_err(DatabaseError::invalid)?;
+        board::drop_former_members(&mut tx, database_id, &properties, &mut [&mut config]).await?;
         let view = DatabaseView {
             id: Id::new_v7(),
             name: input.name,
@@ -2226,6 +2196,8 @@ impl DatabaseRepository {
             config
                 .validate(view.view_type, &properties)
                 .map_err(DatabaseError::invalid)?;
+            board::drop_former_members(&mut tx, database_id, &properties, &mut [&mut config])
+                .await?;
             view.config = config;
         }
         if let Some(name) = changes.name {
@@ -3005,6 +2977,8 @@ async fn views_in_tx(
     for view in &mut views {
         view.config.repair(view.view_type, properties);
     }
+    let mut configs: Vec<_> = views.iter_mut().map(|view| &mut view.config).collect();
+    board::drop_former_members(tx, database_id, properties, &mut configs).await?;
     Ok(views)
 }
 

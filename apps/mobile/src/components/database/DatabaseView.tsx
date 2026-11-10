@@ -1,24 +1,24 @@
 /**
  * A database page at phone size (spec 8): the page header, the view picker, search, Filter and Sort, then the rows of
  * a table view as a list (title and the first 3 visible properties) or the columns of a board view, one screen wide
- * each. View changes save for everyone after 500 ms, or stay on this device for viewers who cannot change views (D1).
+ * each (with sub-groups, a lane picker shows one lane at a time). View changes save for everyone after 500 ms, or stay on this device for viewers who cannot change views (D1).
  */
-import { groupRows, type BoardGroup } from '@orbit/database/board'
+import { groupName, groupRows, groupValues, laneRows, moveValues, type BoardGroup, type BoardLane } from '@orbit/database/board'
 import { EMPTY_FILTER, filterRules } from '@orbit/database/filter'
 import { ruleSummary, simpleRules } from '@orbit/database/meta'
 import { newRowValues } from '@orbit/database/newRow'
-import type { Database, DatabaseView as View_, GroupProperty, Property, Row, ViewConfig, ViewContext } from '@orbit/database/types'
+import type { Database, DatabaseView as View_, GroupProperty, LaneProperty, Property, Row, ViewConfig, ViewContext } from '@orbit/database/types'
 import { cellOf } from '@orbit/database/values'
-import { applyView, groupable, repairConfig } from '@orbit/database/view'
+import { applyView, groupable, laneable, repairConfig } from '@orbit/database/view'
 import { router } from 'expo-router'
 import { type ReactElement, useEffect, useState } from 'react'
 import { FlatList, Pressable, ScrollView, useWindowDimensions, View } from 'react-native'
 
-import { advancedFilterLabel, filledProperties, groupValues, listProperties, pickView, PROPERTY_ICONS, sortedViews, summaryLines, VIEW_ICONS, viewStorageKey } from '../../data/database'
+import { advancedFilterLabel, filledProperties, listProperties, pickView, PROPERTY_ICONS, sortedViews, summaryLines, VIEW_ICONS, viewStorageKey } from '../../data/database'
 import { type Notify, useCreateRow, useDatabase, useUpdateValues, useViewContext, useViewDrafts, useWorkspaceReadOnly } from '../../hooks/database'
 import { storage } from '../../storage'
 import { alpha, useTheme } from '../../theme'
-import { Button, ErrorView, Icon, IconButton, LoadingView, PullRefresh, Text } from '../../ui'
+import { Avatar, Button, ErrorView, Icon, IconButton, LoadingView, PullRefresh, Text } from '../../ui'
 import { TextInput } from '../../ui/scaled'
 import { Sheet, SheetList, SheetNote, SheetRow, useSheet } from '../tasks/Sheet'
 import { CellValue, ChoiceRow, OptionPill, RowTitle } from './cells'
@@ -30,7 +30,9 @@ const PAGE = 50
 const COLUMN_SHARE = 0.85
 const COLUMN_GAP = 10
 
-type DatabaseSheet = { kind: 'views' } | { kind: 'filters' } | { kind: 'sorts' } | { kind: 'move'; rowId: string }
+/** Where a card sits: its column, and its lane (`null` on a board without lanes). */
+type Cell = { group: string | null; lane: string | null }
+type DatabaseSheet = { kind: 'views' } | { kind: 'filters' } | { kind: 'sorts' } | { kind: 'move'; rowId: string; from: Cell }
 
 /**
  * `linkId` shows a linked view block's views instead of the database's own (spec 3.7); `initialView` opens one of them
@@ -119,6 +121,9 @@ export function DatabaseView({ databaseId, linkId = '', initialView = null, head
   const empty = <EmptyRows filtered={filtered} onClear={clearFilters} />
   const refresh = <PullRefresh onRefresh={() => query.refetch()} />
   const groupProperty = database.properties.find((property) => property.id === config.group_by)
+  const lanePick = database.properties.find((property) => property.id === config.sub_group_by)
+  const laneProperty = laneable(lanePick) ? lanePick : undefined
+  const cellValues = (property: GroupProperty, cell: Cell) => ({ ...groupValues(property, cell.group), ...(laneProperty ? groupValues(laneProperty, cell.lane) : {}) })
   const open = sheet.sheet
   const moving = open?.kind === 'move' ? database.rows.find((row) => row.id === open.rowId) : undefined
 
@@ -135,15 +140,16 @@ export function DatabaseView({ databaseId, linkId = '', initialView = null, head
               config={config}
               rows={rows}
               property={groupProperty}
+              laneProperty={laneProperty}
               ctx={ctx}
               canEdit={!readOnly}
-              onAdd={(group) => addRow(groupValues(groupProperty, group.id))}
-              onMove={(row) => sheet.open({ kind: 'move', rowId: row.id })}
+              onAdd={(cell) => addRow(cellValues(groupProperty, cell))}
+              onMove={(row, from) => sheet.open({ kind: 'move', rowId: row.id, from })}
             />
           ) : (
             <View className="items-center gap-1 py-10 px-6">
               <Text className="text-[14px] text-muted-foreground">Choose a property to group by</Text>
-              <Text className="text-[12px] text-muted-foreground text-center">A board groups its cards by a Status or Select property. Edit on the web.</Text>
+              <Text className="text-[12px] text-muted-foreground text-center">A board groups its cards by a Status, Select, Multi-select or Person property. Edit on the web.</Text>
             </View>
           )}
           {rows.length === 0 && filtered ? empty : null}
@@ -163,14 +169,19 @@ export function DatabaseView({ databaseId, linkId = '', initialView = null, head
           <FilterContent properties={database.properties} config={config} onConfig={onConfig} ctx={ctx} openRule={openRule} onOpenRule={setOpenRule} />
         ) : sheet.sheet?.kind === 'sorts' ? (
           <SortContent properties={database.properties} config={config} onConfig={onConfig} />
-        ) : moving && groupable(groupProperty) ? (
+        ) : open?.kind === 'move' && moving && groupable(groupProperty) ? (
           <MoveChoices
-            row={moving}
+            key={moving.id}
+            rows={rows}
             property={groupProperty}
+            laneProperty={laneProperty}
             config={config}
-            onPick={(group) => {
+            ctx={ctx}
+            from={open.from}
+            onPick={(to) => {
               sheet.close()
-              updateValues.mutate({ rowId: moving.id, values: groupValues(groupProperty, group.id) })
+              const values = { ...moveValues(moving, groupProperty, open.from.group, to.group), ...(laneProperty ? moveValues(moving, laneProperty, open.from.lane, to.lane) : {}) }
+              if (Object.keys(values).length > 0) updateValues.mutate({ rowId: moving.id, values })
             }}
           />
         ) : null}
@@ -363,25 +374,34 @@ function ListRowItem({ row, properties, ctx }: { row: Row; properties: Property[
   )
 }
 
-/** The board columns side by side, one screen wide each and snapping; hidden groups stay out. */
-function Board({ database, config, rows, property, ctx, canEdit, onAdd, onMove }: {
+/**
+ * The board columns side by side, one screen wide each and snapping; hidden groups stay out. With sub-groups, a lane
+ * picker at the top shows the columns of one lane at a time (spec P2 8.6).
+ */
+function Board({ database, config, rows, property, laneProperty, ctx, canEdit, onAdd, onMove }: {
   database: Database
   config: ViewConfig
   rows: Row[]
   property: GroupProperty
+  laneProperty: LaneProperty | undefined
   ctx: ViewContext
   canEdit: boolean
-  onAdd: (group: BoardGroup) => void
-  onMove: (row: Row) => void
+  onAdd: (cell: Cell) => void
+  onMove: (row: Row, from: Cell) => void
 }) {
   const { width } = useWindowDimensions()
+  const [picked, setPicked] = useState<{ id: string | null } | null>(null)
   const columnWidth = Math.round(width * COLUMN_SHARE)
-  const groups = groupRows(rows, property, config)
+  const lanes = laneProperty ? laneRows(rows, property, laneProperty, config, ctx.members).filter((lane) => !lane.hidden) : []
+  const lane = laneProperty ? (lanes.find((candidate) => picked !== null && candidate.id === picked.id) ?? lanes[0]) : undefined
+  const groups = lane ? lane.columns : groupRows(rows, property, config, ctx.members)
   const visible = groups.filter((group) => !group.hidden)
   const hidden = groups.length - visible.length
+  const laneId = lane?.id ?? null
   const cardProperties = config.card_properties.flatMap((id) => database.properties.find((candidate) => candidate.id === id) ?? [])
   return (
     <>
+      {laneProperty && lanes.length > 0 ? <LanePicker lanes={lanes} property={laneProperty} ctx={ctx} selected={laneId} onSelect={(id) => setPicked({ id })} /> : null}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
@@ -390,12 +410,78 @@ function Board({ database, config, rows, property, ctx, canEdit, onAdd, onMove }
         contentContainerStyle={{ paddingHorizontal: 12, gap: COLUMN_GAP }}
       >
         {visible.map((group) => (
-          <Column key={group.id ?? 'none'} group={group} property={property} cardProperties={cardProperties} ctx={ctx} width={columnWidth} canEdit={canEdit} onAdd={() => onAdd(group)} onMove={onMove} />
+          <Column
+            key={JSON.stringify([group.id, laneId])}
+            group={group}
+            property={property}
+            cardProperties={cardProperties}
+            ctx={ctx}
+            width={columnWidth}
+            canEdit={canEdit}
+            onAdd={() => onAdd({ group: group.id, lane: laneId })}
+            onMove={(row) => onMove(row, { group: group.id, lane: laneId })}
+          />
         ))}
       </ScrollView>
       {hidden > 0 ? <Text className="text-[12px] px-4 pt-3 text-muted-foreground">{hidden === 1 ? '1 hidden group' : `${hidden} hidden groups`}. Show them on the web.</Text> : null}
     </>
   )
+}
+
+/** The lanes as a row of chips, each with its card count; the chosen one is the lane the columns show. */
+function LanePicker({ lanes, property, ctx, selected, onSelect }: {
+  lanes: BoardLane[]
+  property: LaneProperty
+  ctx: ViewContext
+  selected: string | null
+  onSelect: (id: string | null) => void
+}) {
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ paddingHorizontal: 12, paddingBottom: 10, gap: 6 }}>
+      {lanes.map((lane) => {
+        const active = lane.id === selected
+        return (
+          <Pressable
+            key={lane.id ?? 'none'}
+            accessibilityRole="button"
+            accessibilityLabel={`${groupName(property, lane, ctx.members)}, ${lane.rows.length}`}
+            accessibilityState={{ selected: active }}
+            onPress={() => onSelect(lane.id)}
+            className={`h-8 flex-row items-center gap-1.5 rounded-full border px-3 ${active ? 'border-primary bg-primary/10' : 'border-border active:bg-muted'}`}
+          >
+            <GroupLabel property={property} group={lane} ctx={ctx} />
+            <Text className="text-[12px] text-muted-foreground">{lane.rows.length}</Text>
+          </Pressable>
+        )
+      })}
+    </ScrollView>
+  )
+}
+
+/** A group's label: its option pill, its member, a checkbox, or "No <property>". */
+function GroupLabel({ property, group, ctx }: { property: LaneProperty; group: BoardGroup; ctx: ViewContext }) {
+  const { colors } = useTheme()
+  if (group.id === null) return <Text className="text-[13px] text-muted-foreground">No {property.name}</Text>
+  switch (property.type) {
+    case 'person': {
+      const name = ctx.members.get(group.id)
+      return (
+        <View className="flex-row items-center gap-1.5 min-w-0">
+          <Avatar id={group.id} name={name ?? '?'} size={18} />
+          <Text numberOfLines={1} className="text-[13px] text-foreground shrink">{name ?? 'Former member'}</Text>
+        </View>
+      )
+    }
+    case 'checkbox':
+      return (
+        <View className="flex-row items-center gap-1.5">
+          <Icon name={group.id === 'true' ? 'checkSquare' : 'square'} size={15} color={colors.mutedForeground} />
+          <Text className="text-[13px] text-foreground">{groupName(property, group, ctx.members)}</Text>
+        </View>
+      )
+    default:
+      return <OptionPill property={property} id={group.id} />
+  }
 }
 
 function Column({ group, property, cardProperties, ctx, width, canEdit, onAdd, onMove }: {
@@ -410,11 +496,11 @@ function Column({ group, property, cardProperties, ctx, width, canEdit, onAdd, o
 }) {
   const { colors } = useTheme()
   const [shown, setShown] = useState(PAGE)
-  const name = group.option?.name ?? `No ${property.name}`
+  const name = groupName(property, group, ctx.members)
   return (
     <View accessibilityLabel={name} className="rounded-lg bg-muted/40 p-2 gap-2" style={{ width }}>
       <View className="h-7 flex-row items-center gap-2 px-1">
-        {group.id === null ? <Text className="text-[13px] text-muted-foreground">{name}</Text> : <OptionPill property={property} id={group.id} />}
+        <GroupLabel property={property} group={group} ctx={ctx} />
         <Text className="text-[12px] text-muted-foreground">{group.rows.length}</Text>
         <View className="flex-1" />
         {canEdit ? <IconButton icon="plus" label={`Add a card to ${name}`} size={24} iconSize={14} color={colors.mutedForeground} onPress={onAdd} /> : null}
@@ -447,18 +533,41 @@ function Card({ row, properties, ctx, onMove }: { row: Row; properties: Property
   )
 }
 
-/** The board's visible groups but the card's own: a pick sets the group property. */
-function MoveChoices({ row, property, config, onPick }: { row: Row; property: GroupProperty; config: ViewConfig; onPick: (group: BoardGroup) => void }) {
-  const current = cellOf(row, property)
-  const currentId = current?.kind === 'choice' ? current.id : null
-  const groups = groupRows([], property, config).filter((group) => !group.hidden)
+/**
+ * "Move to…": the board's visible columns, and with sub-groups its lanes. A lane pick only selects it (the card's lane
+ * at first); a column pick moves the card to that column in the selected lane, both values in one request. A card
+ * with several people or options swaps the column it was opened from (`moveValues`).
+ */
+function MoveChoices({ rows, property, laneProperty, config, ctx, from, onPick }: {
+  rows: Row[]
+  property: GroupProperty
+  laneProperty: LaneProperty | undefined
+  config: ViewConfig
+  ctx: ViewContext
+  from: Cell
+  onPick: (to: Cell) => void
+}) {
+  const [lane, setLane] = useState(from.lane)
+  const columns = groupRows(rows, property, { ...config, hide_empty_groups: false }, ctx.members).filter((group) => !group.hidden)
+  const lanes = laneProperty ? laneRows(rows, property, laneProperty, { ...config, hide_empty_groups: false }, ctx.members).filter((candidate) => !candidate.hidden) : []
+  const choice = (owner: LaneProperty, group: BoardGroup, checked: boolean, onPress: () => void) => (
+    <ChoiceRow key={group.id ?? 'none'} label={groupName(owner, group, ctx.members)} checked={checked} onPress={onPress}>
+      <GroupLabel property={owner} group={group} ctx={ctx} />
+    </ChoiceRow>
+  )
   return (
     <SheetList>
-      {groups.map((group) => (
-        <ChoiceRow key={group.id ?? 'none'} label={group.option?.name ?? `No ${property.name}`} checked={group.id === currentId} onPress={() => (group.id === currentId ? undefined : onPick(group))}>
-          {group.id === null ? <Text className="text-[14px] text-muted-foreground">No {property.name}</Text> : <OptionPill property={property} id={group.id} />}
-        </ChoiceRow>
-      ))}
+      {laneProperty ? (
+        <>
+          <SheetNote>{laneProperty.name}</SheetNote>
+          {lanes.map((candidate) => choice(laneProperty, candidate, candidate.id === lane, () => setLane(candidate.id)))}
+          <SheetNote>{property.name}</SheetNote>
+        </>
+      ) : null}
+      {columns.map((group) => {
+        const here = group.id === from.group && lane === from.lane
+        return choice(property, group, group.id === from.group, () => (here ? undefined : onPick({ group: group.id, lane })))
+      })}
     </SheetList>
   )
 }

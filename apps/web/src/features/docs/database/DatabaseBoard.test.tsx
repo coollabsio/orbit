@@ -157,3 +157,91 @@ test('"Add a new view" moves with the arrow keys and creates a board with a uniq
   await waitFor(() => expect(selected).toEqual(['v-new']))
   expect(calls[0]).toEqual({ method: 'POST', path: '/api/v1/workspaces/ws/databases/db/views', body: { name: 'Board 2', type: 'board' } })
 })
+
+const people: DatabaseDetail = {
+  ...detail,
+  properties: [...detail.properties, { id: 'p-owner', name: 'Owner', type: 'person', config: {}, position: 3 }],
+  rows: [
+    row('r1', 0, 'Alpha', { 'p-sel': 'o-high', 'p-owner': ['u1', 'u2'] }),
+    row('r2', 1, 'Beta', { 'p-sel': 'o-low', 'p-owner': ['u3'] }),
+    row('r3', 2, 'Gamma', {}),
+  ],
+}
+const members = new Map([
+  ['u1', 'Ann'],
+  ['u2', 'Bo'],
+  ['u3', 'Cy'],
+])
+
+function renderPeople(config: DatabaseView['config']) {
+  const database = parseDatabase(people)
+  const peopleEnv = { ...env, ctx: { ...env.ctx, members } }
+  return render(
+    <DatabaseEnvContext.Provider value={peopleEnv}>
+      <DatabaseBoard
+        database={database}
+        config={repairConfig({ ...board, config }, database.properties)}
+        rows={database.rows}
+        onConfig={() => {}}
+        onAddCard={() => {}}
+        onOpenRow={() => {}}
+        filtered={false}
+        onClearFilters={() => {}}
+        editRowId={null}
+        onEditRowShown={() => {}}
+      />
+    </DatabaseEnvContext.Provider>,
+    { wrapper },
+  )
+}
+
+const drag = (card: Element, target: Element) => {
+  fireEvent.dragStart(card, { dataTransfer: new DataTransfer() })
+  fireEvent.dragOver(target, { dataTransfer: new DataTransfer() })
+  fireEvent.drop(target, { dataTransfer: new DataTransfer() })
+}
+
+test('a card with two people shows in both columns; a drag swaps one person and keeps the other', async () => {
+  const calls = mockServer(() => row('r1', 0, 'Alpha', { 'p-owner': ['u2', 'u3'] }))
+  renderPeople({ group_by: 'p-owner' })
+  expect(screen.getAllByRole('region').map((region) => region.getAttribute('aria-label'))).toEqual(['Ann', 'Bo', 'Cy', 'No Owner'])
+  expect(within(screen.getByRole('region', { name: 'Ann' })).getByText('Alpha')).toBeTruthy()
+  expect(within(screen.getByRole('region', { name: 'Bo' })).getByText('Alpha')).toBeTruthy()
+  const card = within(screen.getByRole('region', { name: 'Ann' })).getByText('Alpha').closest('[data-board-card]')!
+  drag(card, screen.getByRole('region', { name: 'Cy' }))
+  await waitFor(() => expect(calls.length).toBeGreaterThan(0))
+  expect(calls[0]).toEqual({
+    method: 'POST',
+    path: '/api/v1/workspaces/ws/databases/db/rows/r1/move',
+    body: { after_row_id: 'r2', values: { 'p-owner': ['u2', 'u3'] } },
+  })
+})
+
+test('a drop into another lane and column sends one request with both values', async () => {
+  const calls = mockServer(() => row('r1', 0, 'Alpha', { 'p-sel': 'o-low', 'p-owner': ['u2', 'u3'] }))
+  renderPeople({ group_by: 'p-owner', sub_group_by: 'p-sel', sub_group_order: ['o-high'] })
+  expect(screen.getAllByRole('columnheader').map((header) => header.getAttribute('aria-label'))).toEqual(['Ann', 'Bo', 'Cy', 'No Owner'])
+  const lanes = screen.getAllByRole('region').filter((region) => region.getAttribute('aria-label')?.includes(',') === false)
+  expect(lanes.map((lane) => lane.getAttribute('aria-label'))).toEqual(['High', 'No Priority', 'Low'])
+  const card = within(screen.getByRole('region', { name: 'Ann, High' })).getByText('Alpha').closest('[data-board-card]')!
+  drag(card, screen.getByRole('region', { name: 'Cy, Low' }))
+  await waitFor(() => expect(calls.length).toBeGreaterThan(0))
+  expect(calls).toHaveLength(1)
+  expect(calls[0]).toEqual({
+    method: 'POST',
+    path: '/api/v1/workspaces/ws/databases/db/rows/r1/move',
+    body: { after_row_id: 'r2', values: { 'p-owner': ['u2', 'u3'], 'p-sel': 'o-low' } },
+  })
+})
+
+test('a collapsed lane hides its cards and stays collapsed', () => {
+  localStorage.clear()
+  const first = renderPeople({ group_by: 'p-owner', sub_group_by: 'p-sel' })
+  expect(screen.getByRole('region', { name: 'Cy, Low' })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Collapse Low' }))
+  expect(screen.queryByRole('region', { name: 'Cy, Low' })).toBeNull()
+  first.unmount()
+  renderPeople({ group_by: 'p-owner', sub_group_by: 'p-sel' })
+  expect(screen.getByRole('button', { name: 'Expand Low' })).toBeTruthy()
+  localStorage.clear()
+})

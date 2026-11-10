@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react'
-import { Add, ArrowSwapHorizontal, Eye, Filter, Kanban, Link, Lock, MoreH, Search, Sort, Unlock, Xmark } from 'reicon-react'
+import { useRef, useState, type ReactNode } from 'react'
+import { Add, ArrowSwapHorizontal, Eye, EyeSlash, Filter, Kanban, Link, Lock, MoreH, RowHorizontal, Search, Sort, Unlock, Xmark } from 'reicon-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -20,7 +20,7 @@ import {
 import { Popover, PopoverContent } from '@/components/ui/popover'
 import { Tip } from '@/components/common/Tip'
 import type { DatabaseView, Property, ViewConfig } from '@orbit/database/types'
-import { groupable } from '@orbit/database/view'
+import { groupable, laneable } from '@orbit/database/view'
 import { useSetPageLock } from '@/features/docs/api/pageOptions'
 import { useDatabaseEnv } from './context'
 import { PropertyPicker } from './FilterBar'
@@ -139,11 +139,17 @@ export function ViewToolbar({ properties, config, onConfig, onAddFilter, onAdvan
           </DropdownMenuTrigger>
         </Tip>
         <DropdownMenuContent align="end" className="w-52">
-          {viewType === 'board' ? <GroupByMenu properties={properties} config={config} onConfig={onConfig} /> : null}
+          {viewType === 'board' ? <GroupMenus properties={properties} config={config} onConfig={onConfig} /> : null}
           <DropdownMenuItem onClick={() => setPropertiesOpen(true)}>
             <Eye />
             {viewType === 'board' ? 'Card properties' : 'Properties'}
           </DropdownMenuItem>
+          {viewType === 'board' ? (
+            <DropdownMenuCheckboxItem checked={config.hide_empty_groups} onCheckedChange={(checked) => onConfig({ ...config, hide_empty_groups: checked })}>
+              <EyeSlash />
+              Hide empty groups
+            </DropdownMenuCheckboxItem>
+          ) : null}
           {viewType === 'table' ? (
             <DropdownMenuCheckboxItem checked={config.wrap_cells} onCheckedChange={(checked) => onConfig({ ...config, wrap_cells: checked })}>
               <ArrowSwapHorizontal />
@@ -244,23 +250,51 @@ function PropertiesList({ properties, config, onConfig }: { properties: Property
   )
 }
 
-/** A board's group property: a select or status property (the columns are its options). */
-function GroupByMenu({ properties, config, onConfig }: { properties: Property[]; config: ViewConfig; onConfig: (config: ViewConfig) => void }) {
-  const choices = properties.filter(groupable)
+const NO_LANES = { sub_group_by: null, sub_group_order: [], hidden_sub_groups: [] } satisfies Partial<ViewConfig>
+
+/**
+ * A board's "Group by" (a select, status, multi-select or person property: its groups are the columns) and
+ * "Sub-group" (one of those or a checkbox, not the group property: its groups are the lanes; or None).
+ */
+function GroupMenus({ properties, config, onConfig }: { properties: Property[]; config: ViewConfig; onConfig: (config: ViewConfig) => void }) {
+  return (
+    <>
+      <GroupMenu
+        label="Group by"
+        icon={<Kanban />}
+        choices={properties.filter(groupable)}
+        value={config.group_by}
+        onChange={(id) => onConfig({ ...config, group_by: id, group_order: [], hidden_groups: [], ...(id === config.sub_group_by ? NO_LANES : {}) })}
+      />
+      <GroupMenu
+        label="Sub-group"
+        icon={<RowHorizontal />}
+        choices={properties.filter((property) => laneable(property) && property.id !== config.group_by)}
+        value={config.sub_group_by}
+        onChange={(id) => onConfig({ ...config, ...NO_LANES, sub_group_by: id })}
+        none
+      />
+    </>
+  )
+}
+
+function GroupMenu({ label, icon, choices, value, onChange, none = false }: { label: string; icon: ReactNode; choices: Property[]; value: string | null; onChange: (id: string | null) => void; none?: boolean }) {
   return (
     <DropdownMenuSub>
       <DropdownMenuSubTrigger disabled={choices.length === 0}>
-        <Kanban />
-        Group by
-        <span className="ml-auto max-w-20 truncate text-xs text-muted-foreground">{choices.find((property) => property.id === config.group_by)?.name}</span>
+        {icon}
+        {label}
+        <span className="ml-auto max-w-20 truncate text-xs text-muted-foreground">{choices.find((property) => property.id === value)?.name ?? (none ? 'None' : '')}</span>
       </DropdownMenuSubTrigger>
       <DropdownMenuSubContent className="w-48">
         <DropdownMenuRadioGroup
-          value={config.group_by ?? ''}
+          value={value ?? ''}
           onValueChange={(id: string) => {
-            if (id !== config.group_by) onConfig({ ...config, group_by: id, group_order: [], hidden_groups: [] })
+            const next = id === '' ? null : id
+            if (next !== value) onChange(next)
           }}
         >
+          {none ? <DropdownMenuRadioItem value="">None</DropdownMenuRadioItem> : null}
           {choices.map((property) => {
             const Icon = PROPERTY_TYPES[property.type].icon
             return (

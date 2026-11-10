@@ -2460,9 +2460,13 @@ async fn databases_import_with_typed_properties_values_and_views() {
     let board = &coverage.detail["views"][1];
     assert_eq!(board["type"], "board");
     assert_eq!(
-        board["config"]["group_by"],
-        id_of("Stage"),
-        "the board groups by its Notion property"
+        (
+            &board["config"]["group_by"],
+            &board["config"]["sub_group_by"],
+            &board["config"]["hide_empty_groups"]
+        ),
+        (&id_of("Owner"), &id_of("Stage"), &json!(true)),
+        "the board groups by its Notion people property, in lanes by its sub-group"
     );
     assert_eq!(board["config"]["card_properties"], json!([id_of("Tags")]));
     assert_eq!(coverage.detail["views"][3]["type"], "table");

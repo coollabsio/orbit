@@ -1858,13 +1858,13 @@ async fn board_views_check_and_repair_their_grouping() {
         .call(
             "PATCH",
             &format!("databases/{db}/views/{view}"),
-            Some(json!({"config": {"group_by": tags}})),
+            Some(json!({"config": {"group_by": name}})),
         )
         .await;
     assert_eq!(
         (status, body["detail"].as_str()),
         (StatusCode::UNPROCESSABLE_ENTITY, Some("config.group_by")),
-        "a multi-select cannot group a board"
+        "a title cannot group a board"
     );
 
     let saved = fixture
@@ -1972,6 +1972,219 @@ async fn moving_a_card_sets_its_group_and_its_place_in_one_request() {
         "a bad value moves nothing"
     );
     assert_eq!(database["rows"][0]["values"], json!({&priority_id: high}));
+}
+
+#[tokio::test]
+async fn boards_group_by_people_and_lanes_and_drop_former_members() {
+    let fixture = Fixture::new().await;
+    let db = fixture.create_database("People board").await;
+    let tags = id_of(property(&fixture.database(&db).await, "Tags")).to_owned();
+    let owner = id_of(
+        &fixture
+            .add_property(&db, json!({"name": "Owner", "type": "person"}))
+            .await,
+    )
+    .to_owned();
+    let done = id_of(
+        &fixture
+            .add_property(&db, json!({"name": "Done", "type": "checkbox"}))
+            .await,
+    )
+    .to_owned();
+    let url = id_of(
+        &fixture
+            .add_property(&db, json!({"name": "Link", "type": "url"}))
+            .await,
+    )
+    .to_owned();
+    let (member, _) = fixture.add_member("member@example.com").await;
+    let (former, _) = fixture.add_member("former@example.com").await;
+    let me = fixture.owner_id.to_string();
+    let board = fixture
+        .ok(
+            "POST",
+            &format!("databases/{db}/views"),
+            Some(json!({"name": "Board", "type": "board", "config": {"group_by": owner}})),
+        )
+        .await;
+    let view = id_of(&board).to_owned();
+    let patch = |config: Value| {
+        let fixture = &fixture;
+        let path = format!("databases/{db}/views/{view}");
+        async move {
+            fixture
+                .call("PATCH", &path, Some(json!({"config": config})))
+                .await
+        }
+    };
+
+    for (config, field, why) in [
+        (
+            json!({"group_by": owner, "sub_group_by": owner}),
+            "config.sub_group_by",
+            "lanes by the column property",
+        ),
+        (
+            json!({"group_by": owner, "sub_group_by": url}),
+            "config.sub_group_by",
+            "a URL cannot group lanes",
+        ),
+        (
+            json!({"group_by": done}),
+            "config.group_by",
+            "a checkbox groups lanes only",
+        ),
+    ] {
+        let (status, body) = patch(config).await;
+        assert_eq!(
+            (status, body["detail"].as_str()),
+            (StatusCode::UNPROCESSABLE_ENTITY, Some(field)),
+            "{why}"
+        );
+    }
+
+    let (status, saved) = patch(json!({
+        "group_by": owner,
+        "group_order": [member.to_string(), null, "not-an-id", former.to_string(), me, member.to_string()],
+        "hidden_groups": [former.to_string()],
+        "sub_group_by": done,
+        "sub_group_order": ["true", "maybe", null, "false"],
+        "hidden_sub_groups": ["false"],
+        "hide_empty_groups": true,
+    }))
+    .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    let config = |order: Value, hidden: Value| {
+        let mut config = json!({
+            "columns": [], "sorts": [], "filter": {"op": "and", "children": []}, "wrap_cells": false,
+            "group_by": owner, "group_order": order, "hidden_groups": hidden,
+            "sub_group_by": done, "sub_group_order": ["true", "false"], "hidden_sub_groups": ["false"],
+            "hide_empty_groups": true,
+        });
+        if config["hidden_groups"] == json!([]) {
+            config.as_object_mut().unwrap().remove("hidden_groups");
+        }
+        config
+    };
+    assert_eq!(
+        saved["config"],
+        config(
+            json!([member.to_string(), null, former.to_string(), me]),
+            json!([former.to_string()])
+        ),
+        "bad ids, repeats and groups a checkbox does not have are dropped"
+    );
+
+    sqlx::query("DELETE FROM memberships WHERE user_id = $1")
+        .bind(former.to_string())
+        .execute(fixture.database.pool())
+        .await
+        .unwrap();
+    let views = fixture.database(&db).await["views"].clone();
+    assert_eq!(
+        views[1]["config"],
+        config(json!([member.to_string(), null, me]), json!([])),
+        "a user who left the workspace leaves the group order"
+    );
+
+    let (status, body) = patch(json!({"group_by": tags, "sub_group_by": owner})).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        (&body["config"]["group_by"], &body["config"]["sub_group_by"]),
+        (&json!(tags), &json!(owner)),
+        "a multi-select groups the columns and a person the lanes"
+    );
+    fixture
+        .ok(
+            "DELETE",
+            &format!("databases/{db}/properties/{owner}"),
+            None,
+        )
+        .await;
+    let views = fixture.database(&db).await["views"].clone();
+    assert_eq!(
+        views[1]["config"].get("sub_group_by"),
+        None,
+        "a deleted lane property goes"
+    );
+}
+
+#[tokio::test]
+async fn one_move_swaps_a_person_and_sets_the_lane() {
+    let fixture = Fixture::new().await;
+    let db = fixture.create_database("Lanes").await;
+    let owner = id_of(
+        &fixture
+            .add_property(&db, json!({"name": "Owner", "type": "person"}))
+            .await,
+    )
+    .to_owned();
+    let stage = fixture
+        .add_property(
+            &db,
+            json!({"name": "Stage", "type": "select", "config": {"options": [{"name": "Now"}, {"name": "Later"}]}}),
+        )
+        .await;
+    let stage_id = id_of(&stage).to_owned();
+    let later = option_id(&stage, "Later");
+    let now = option_id(&stage, "Now");
+    let (member, _) = fixture.add_member("member@example.com").await;
+    let (other, _) = fixture.add_member("other@example.com").await;
+    let me = fixture.owner_id.to_string();
+    let a = fixture
+        .add_row(
+            &db,
+            json!({"title": "A", "values": {&owner: [me, member.to_string()], &stage_id: now}}),
+        )
+        .await;
+    let b = fixture.add_row(&db, json!({"title": "B"})).await;
+
+    let moved = fixture
+        .ok(
+            "POST",
+            &format!("databases/{db}/rows/{}/move", id_of(&a)),
+            Some(json!({
+                "after_row_id": id_of(&b),
+                "values": {&owner: [me, other.to_string()], &stage_id: later},
+            })),
+        )
+        .await;
+    assert_eq!(
+        moved["values"],
+        json!({&owner: [me, other.to_string()], &stage_id: later}),
+        "the column and the lane change in one request"
+    );
+    assert_eq!(names(&fixture.database(&db).await["rows"]), ["B", "A"]);
+
+    let (status, body) = fixture
+        .call(
+            "POST",
+            &format!("databases/{db}/rows/{}/move", id_of(&a)),
+            Some(json!({
+                "after_row_id": null,
+                "values": {&owner: [Id::new_v7().to_string()], &stage_id: now},
+            })),
+        )
+        .await;
+    assert_eq!(
+        (status, body["detail"].as_str()),
+        (
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Some(format!("values.{owner}").as_str())
+        ),
+        "not a member"
+    );
+    let database = fixture.database(&db).await;
+    assert_eq!(
+        names(&database["rows"]),
+        ["B", "A"],
+        "a bad value moves nothing"
+    );
+    assert_eq!(
+        database["rows"][1]["values"],
+        json!({&owner: [me, other.to_string()], &stage_id: later}),
+        "and writes neither value"
+    );
 }
 
 impl Fixture {
