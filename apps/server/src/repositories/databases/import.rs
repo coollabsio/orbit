@@ -378,7 +378,8 @@ fn convert_cell(
         | PropertyKind::CreatedBy
         | PropertyKind::LastEditedTime
         | PropertyKind::LastEditedBy
-        | PropertyKind::Button(_) => None,
+        | PropertyKind::Button(_)
+        | PropertyKind::Formula(_) => None,
     }
 }
 

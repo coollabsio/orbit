@@ -12,6 +12,7 @@ pub mod client;
 pub mod convert;
 pub mod database;
 pub mod files;
+pub mod formula;
 pub mod import;
 pub mod model;
 pub mod relations;

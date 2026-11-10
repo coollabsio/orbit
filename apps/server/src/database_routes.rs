@@ -29,6 +29,7 @@ use crate::task_routes::{
 };
 
 pub(crate) mod buttons;
+pub(crate) mod formula;
 pub(crate) mod forms;
 pub(crate) mod import;
 pub(crate) mod templates;
@@ -92,6 +93,7 @@ pub fn database_router(state: DatabaseState) -> Router {
         )
         .merge(import::routes())
         .merge(forms::routes())
+        .merge(formula::routes())
         .route(
             &format!("{BASE}/templates"),
             post(templates::create_database_template),
@@ -911,6 +913,9 @@ fn database_problem(
         }
         DatabaseError::TrialLimit(reached) => {
             return ApiError::trial_limit(reached, instance, request_id);
+        }
+        DatabaseError::FormulaInvalid(problem) => {
+            return ApiError::formula_invalid(problem, instance, request_id);
         }
         DatabaseError::NotFound => (
             StatusCode::NOT_FOUND,

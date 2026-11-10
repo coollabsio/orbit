@@ -298,7 +298,7 @@ pub fn plan_database(database: Id, source: &Source, members: &Members) -> Databa
             config: ViewConfig::default(),
         });
     }
-    DatabasePlan {
+    let mut plan = DatabasePlan {
         properties: planned
             .into_iter()
             .map(|property| SchemaProperty {
@@ -310,7 +310,9 @@ pub fn plan_database(database: Id, source: &Source, members: &Members) -> Databa
             .collect(),
         views: schema_views,
         report,
-    }
+    };
+    super::formula::keep_live(database, source, &mut plan);
+    plan
 }
 
 /// A Notion unique ID's prefix, when Orbit can hold it (1 to 10 letters, digits or `_`).

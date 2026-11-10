@@ -18,7 +18,7 @@
 //!   1. relations (`relations::fill`): link ids per cell, only pages the actor can read;
 //!   2. rollups (`relations::fill_rollups`): computes the related rows of the target database
 //!      one level deeper first, so a rollup over a formula or a rollup works one level deep;
-//!   3. formulas (item 13): add the pass at the marked place in [`fill_at`]. It gets every value
+//!   3. formulas (item 13): `formula::fill_rows` in [`fill_at`]. It gets every value
 //!      of the row, relations and rollups included, and `scope.tz`.
 //! - [`is_computed`]: kinds whose values are never in `page_property_values` and never written
 //!   through `PATCH …/values` as stored values. A new computed type adds its kind there.
@@ -33,7 +33,7 @@ use serde::Serialize;
 use sqlx::{Any, Transaction};
 use utoipa::ToSchema;
 
-use super::{DatabaseError, DatabaseRow, Property, PropertyKind, relations};
+use super::{DatabaseError, DatabaseRow, Property, PropertyKind, formula, relations};
 
 /// How deep a read follows rollups into other databases: rollups of the read's own rows (depth
 /// 0) and of their target rows (1) are computed; at depth 2 only relations and formulas are.
@@ -108,7 +108,10 @@ impl Computed {
 /// Kinds that have no stored value: computed on read, or (relation) stored in their own table.
 #[must_use]
 pub fn is_computed(kind: &PropertyKind) -> bool {
-    matches!(kind, PropertyKind::Relation(_) | PropertyKind::Rollup(_))
+    matches!(
+        kind,
+        PropertyKind::Relation(_) | PropertyKind::Rollup(_) | PropertyKind::Formula(_)
+    )
 }
 
 /// Puts the computed values of `rows` (rows of `database_id`) into their `values`.
@@ -157,6 +160,6 @@ async fn fill_at(
     if depth < MAX_ROLLUP_DEPTH {
         relations::fill_rollups(tx, scope, properties, rows, depth).await?;
     }
-    // 3. Formulas (item 13) go here: a pure pass over each row's `values`.
+    formula::fill_rows(tx, scope, properties, rows, &computed.related_pages).await?;
     Ok(computed)
 }

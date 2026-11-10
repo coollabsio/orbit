@@ -33,6 +33,7 @@ mod unique_id;
 mod computed;
 mod export;
 mod forms;
+mod formula;
 mod gallery;
 mod import;
 mod links;
@@ -53,6 +54,9 @@ pub use unique_id::UniqueIdConfig;
 pub(super) use unique_id::renumber_copy;
 pub use agent::{AgentDatabase, AgentQuery, AgentRow, AgentRowPage};
 pub use forms::{FormAccess, FormConfig, FormQuestion, FormSubmission, MAX_SUBMISSIONS_PER_HOUR};
+pub use formula::{
+    FormulaConfig, FormulaPreview, FormulaProblem, FormulaSample, checked as check_formula,
+};
 pub use export::{ExportDatabase, ExportRow, cell_text, is_number};
 pub use gallery::{CardPreview, CardSize, RowPreview};
 pub use import::{
@@ -125,6 +129,7 @@ pub enum PropertyType {
     LastEditedTime,
     LastEditedBy,
     Button,
+    Formula,
 }
 
 impl PropertyType {
@@ -151,6 +156,7 @@ impl PropertyType {
             Self::LastEditedTime => "last_edited_time",
             Self::LastEditedBy => "last_edited_by",
             Self::Button => "button",
+            Self::Formula => "formula",
         }
     }
 
@@ -170,6 +176,7 @@ impl PropertyType {
                 | Self::LastEditedTime
                 | Self::LastEditedBy
                 | Self::Button
+                | Self::Formula
         )
     }
 }
@@ -290,6 +297,8 @@ pub enum PropertyKind {
     LastEditedBy,
     /// Stores no value: a press runs its actions (`buttons`).
     Button(ButtonConfig),
+    /// Computed on every read (`formula`); stores no value.
+    Formula(FormulaConfig),
 }
 
 /// An option as clients send it: a missing id gets a new one.
@@ -339,6 +348,7 @@ impl PropertyKind {
             Self::LastEditedTime => PropertyType::LastEditedTime,
             Self::LastEditedBy => PropertyType::LastEditedBy,
             Self::Button(_) => PropertyType::Button,
+            Self::Formula(_) => PropertyType::Formula,
         }
     }
 
@@ -368,6 +378,7 @@ impl PropertyKind {
             PropertyType::LastEditedTime => Self::LastEditedTime,
             PropertyType::LastEditedBy => Self::LastEditedBy,
             PropertyType::Button => Self::Button(ButtonConfig::default()),
+            PropertyType::Formula => Self::Formula(FormulaConfig::default()),
         }
     }
 
@@ -396,6 +407,7 @@ impl PropertyKind {
             }
             PropertyType::UniqueId => Self::UniqueId(UniqueIdConfig::parse(config)?),
             PropertyType::Button => Self::Button(ButtonConfig::parse(config)?),
+            PropertyType::Formula => Self::Formula(FormulaConfig::parse(config)?),
             PropertyType::Select | PropertyType::MultiSelect | PropertyType::Status => {
                 let input: OptionsInput =
                     serde_json::from_value(config.clone()).map_err(invalid)?;
@@ -431,8 +443,9 @@ impl PropertyKind {
             Self::Status(list) => json!({ "options": list }),
             Self::Relation(config) => json!(config),
             Self::Rollup(config) => json!(config),
-            Self::Button(config) => json!(config),
             Self::UniqueId(config) => json!(config),
+            Self::Button(config) => json!(config),
+            Self::Formula(config) => config.to_json(),
             _ => json!({}),
         }
     }
@@ -833,7 +846,8 @@ fn parse_value(kind: &PropertyKind, raw: &Value) -> Result<Option<CellValue>, ()
         | PropertyKind::CreatedBy
         | PropertyKind::LastEditedTime
         | PropertyKind::LastEditedBy
-        | PropertyKind::Button(_) => return Err(()),
+        | PropertyKind::Button(_)
+        | PropertyKind::Formula(_) => return Err(()),
     };
     Ok(value)
 }
@@ -1230,7 +1244,9 @@ fn rule_value(property_type: PropertyType, operator: FilterOperator) -> Option<R
             Op::Is | Op::IsNot => RuleValue::People,
             _ => return None,
         },
-        Type::Button => return None,
+        // A list, person or page result (others filter as their result type).
+        Type::Formula if empty => RuleValue::Nothing,
+        Type::Button | Type::Formula => return None,
     })
 }
 
@@ -1603,7 +1619,7 @@ impl ViewConfig {
             kind(*id).is_some_and(|kind| *kind != PropertyKind::Title) && cards.insert(*id)
         });
         self.calculations.retain(|id, calculation| {
-            kind(*id).is_some_and(|kind| calculation.fits(kind.property_type()))
+            kind(*id).is_some_and(|kind| calculation.fits(kind.filter_type()))
         });
     }
 
@@ -1645,7 +1661,7 @@ impl ViewConfig {
         timeline::check(self, properties)?;
         let types: HashMap<Id, PropertyType> = properties
             .iter()
-            .map(|property| (property.id, property.kind.property_type()))
+            .map(|property| (property.id, property.kind.filter_type()))
             .collect();
         if self.calculations.len() > MAX_PROPERTIES {
             return Err("config.calculations".to_owned());
@@ -1667,7 +1683,7 @@ impl ViewConfig {
     fn drop_unfit_rules(&mut self, properties: &[Property]) -> usize {
         let types: HashMap<Id, PropertyType> = properties
             .iter()
-            .map(|property| (property.id, property.kind.property_type()))
+            .map(|property| (property.id, property.kind.filter_type()))
             .collect();
         self.filter.retain_rules(&mut |rule| {
             types.get(&rule.property_id).is_none_or(|property_type| {
@@ -1950,6 +1966,9 @@ pub enum DatabaseError {
     TitleProperty,
     #[error("trial limit reached")]
     TrialLimit(TrialLimitReached),
+    /// A formula that does not parse or type check (422 `formula_invalid`).
+    #[error("database formula is invalid: {}", .0.message)]
+    FormulaInvalid(FormulaProblem),
     #[error("stored database data is invalid")]
     Corrupt,
     #[error("database repository is unavailable")]
@@ -2149,7 +2168,11 @@ impl DatabaseRepository {
                 let mut property = property;
                 let scope = ComputeScope::utc(workspace_id, actor_id);
                 relations::check(&mut tx, &scope, database_id, &properties, &mut property).await?;
-                (property, insert_index(position, properties.len()), None)
+                (
+                    formula::checked(&properties, property)?,
+                    insert_index(position, properties.len()),
+                    None,
+                )
             }
             NewProperty::Duplicate { source, name } => {
                 let at = properties
@@ -2169,7 +2192,11 @@ impl DatabaseRepository {
                     kind,
                     position: 0,
                 };
-                (property, at + 1, Some((original, option_ids)))
+                (
+                    formula::checked(&properties, property)?,
+                    at + 1,
+                    Some((original, option_ids)),
+                )
             }
         };
         insert_property(&mut tx, workspace_id, database_id, &property, now).await?;
@@ -2288,6 +2315,15 @@ impl DatabaseRepository {
             {
                 return Err(DatabaseError::invalid("type"));
             }
+            // A formula stores no values, so its expression can come with the type change.
+            (Some(PropertyType::Formula), Some(config)) => {
+                for (row, _) in stored_values(&mut tx, &current).await? {
+                    cleared += 1;
+                    delete_value(&mut tx, &row, property_id).await?;
+                }
+                PropertyKind::parse(PropertyType::Formula, Some(config))
+                    .map_err(DatabaseError::invalid)?
+            }
             // A type change derives the new config; set it in a second request.
             (Some(_), Some(_)) => return Err(DatabaseError::invalid("config")),
             (Some(new_type), None) => {
@@ -2329,6 +2365,12 @@ impl DatabaseRepository {
             kind,
             ..current
         };
+        let others: Vec<Property> = properties
+            .iter()
+            .filter(|other| other.id != property_id)
+            .cloned()
+            .collect();
+        let property = formula::checked(&others, property)?;
         sqlx::query(
             "UPDATE database_properties SET name = $1, type = $2, config_json = $3, updated_at = $4 WHERE id = $5",
         )
@@ -2360,6 +2402,7 @@ impl DatabaseRepository {
         let index = insert_index(changes.position.or(Some(index as i64)), properties.len());
         properties.insert(index, property.clone());
         renumber_rows(&mut tx, "database_properties", &properties_ids(&properties)).await?;
+        formula::refresh_types(&mut tx, &mut properties, now).await?;
         if type_change == Some(PropertyType::UniqueId) {
             unique_id::number_rows(&mut tx, workspace_id, database_id, &mut properties, actor_id, now)
                 .await?;
@@ -2429,6 +2472,7 @@ impl DatabaseRepository {
             .execute(&mut *tx)
             .await?;
         properties.remove(index);
+        formula::refresh_types(&mut tx, &mut properties, now).await?;
         renumber_rows(&mut tx, "database_properties", &properties_ids(&properties)).await?;
         refresh_search_text(
             &mut tx,
