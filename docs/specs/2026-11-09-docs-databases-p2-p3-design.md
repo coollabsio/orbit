@@ -530,7 +530,9 @@ CREATE INDEX database_templates_database ON database_templates (database_id, pos
   `row_count`, `ensure_row_capacity`, `GET /pages/{id}` `database_id`, search, export, duplicate
   (copies templates as templates), restore, the tree. Riskiest part: find every such query;
   write one SQL fragment `LIVE_ROW` and use it everywhere.
-- A template is not in docs search and not in recent pages.
+- A template is not in docs search, not in recent pages and not a favorite: the page header
+  (web and mobile) has no favorite action on a template, and `PUT /pages/{id}/favorite` returns 404
+  without storing one (fixed 2026-11-10; it stored a hidden favorite).
 - View config gets `default_template_id` (`null` = empty row). Repair drops a deleted template.
 - Max 20 templates per database.
 

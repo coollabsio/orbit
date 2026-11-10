@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { queryOptions, useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { apiClient } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
@@ -55,7 +55,17 @@ export function viewerTimeZone(): string {
 
 /** A database with its own views, or with the views of the linked view block `linkId`. */
 export function useDatabase(workspaceId: string, databaseId: string, linkId?: string | null) {
-  return useQuery({
+  return useQuery(databaseQuery(workspaceId, databaseId, linkId))
+}
+
+/** Whether `pageId` is a row template of its database `databaseId` (`null`: not a row). */
+export function useIsTemplate(workspaceId: string, databaseId: string | null, pageId: string): boolean {
+  const { data } = useQuery({ ...databaseQuery(workspaceId, databaseId ?? ''), enabled: databaseId !== null })
+  return data?.templates?.some((template) => template.id === pageId) ?? false
+}
+
+function databaseQuery(workspaceId: string, databaseId: string, linkId?: string | null) {
+  return queryOptions({
     queryKey: detailKey(workspaceId, databaseId, linkId),
     queryFn: async () => {
       const { data } = await getDatabase({

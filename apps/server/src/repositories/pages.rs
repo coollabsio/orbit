@@ -2108,7 +2108,8 @@ impl PageRepository {
         Ok(PageFavoriteList { items })
     }
 
-    /// Adds the page as the caller's last favorite; an existing favorite is left in place.
+    /// Adds the page as the caller's last favorite; an existing favorite is left in place. A row
+    /// template is not a favorite (the list leaves it out): not found, and nothing is stored.
     pub async fn add_favorite(
         &self,
         workspace_id: Id,
@@ -2119,6 +2120,9 @@ impl PageRepository {
         let mut tx = self.database.immediate_transaction().await?;
         require_access_tx(&mut tx, workspace_id, actor_id).await?;
         page_in_tx(&mut tx, workspace_id, page_id, actor_id, false).await?;
+        if is_template(&mut tx, page_id).await? {
+            return Err(PageError::NotFound);
+        }
         let mut order = favorite_order(&mut tx, workspace_id, actor_id).await?;
         if !order.contains(&page_id) {
             sqlx::query(

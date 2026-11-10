@@ -79,7 +79,7 @@ import { PageHistoryPane } from './PageHistoryPane'
 import { MoveToDialog } from './MoveToDialog'
 import { PageLinkDialog } from './PageLinkDialog'
 import { DatabasePage } from '@/features/docs/database/DatabasePage'
-import { createLink, patchDatabaseRow } from '@/features/docs/database/api'
+import { createLink, patchDatabaseRow, useIsTemplate } from '@/features/docs/database/api'
 import { PropertyList } from '@/features/docs/database/PropertyList'
 
 const PageEditor = lazy(() => loadPageEditor().then((module) => ({ default: module.PageEditor })))
@@ -168,6 +168,8 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
     navigateRef.current = navigate
   })
   const pageId = page.id
+  /** A row template opened as a page: it is never a favorite (the server refuses it). */
+  const template = useIsTemplate(workspaceId, page.database_id ?? null, pageId)
   /** A database page has no document: the table replaces the editor, comments and history. */
   const isDatabase = page.kind === 'database'
   const pageActions = useDocPageActions()
@@ -922,20 +924,22 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
           )}
           {peek ? peek.end : (
             <>
-              <Tip label={favoriteLabel} side="bottom">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  className={cn('text-muted-foreground/70', favorite && 'text-amber-500 hover:text-amber-500 dark:text-amber-400 dark:hover:text-amber-400')}
-                  aria-label={favoriteLabel}
-                  aria-pressed={favorite}
-                  disabled={favoritesQuery.isPending}
-                  onClick={() => setFavorite(!favorite)}
-                >
-                  <Star className="size-4" weight={favorite ? 'Filled' : 'Outline'} />
-                </Button>
-              </Tip>
+              {template ? null : (
+                <Tip label={favoriteLabel} side="bottom">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    className={cn('text-muted-foreground/70', favorite && 'text-amber-500 hover:text-amber-500 dark:text-amber-400 dark:hover:text-amber-400')}
+                    aria-label={favoriteLabel}
+                    aria-pressed={favorite}
+                    disabled={favoritesQuery.isPending}
+                    onClick={() => setFavorite(!favorite)}
+                  >
+                    <Star className="size-4" weight={favorite ? 'Filled' : 'Outline'} />
+                  </Button>
+                </Tip>
+              )}
               <DropdownMenu>
                 <Tip label="Page options" side="bottom">
                   <DropdownMenuTrigger
@@ -968,10 +972,12 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
                       <DropdownMenuSeparator />
                     </>
                   ) : null}
-                  <DropdownMenuItem onClick={() => setFavorite(!favorite)}>
-                    <Star className="size-[14px]" weight={favorite ? 'Filled' : 'Outline'} />
-                    {favoriteLabel}
-                  </DropdownMenuItem>
+                  {template ? null : (
+                    <DropdownMenuItem onClick={() => setFavorite(!favorite)}>
+                      <Star className="size-[14px]" weight={favorite ? 'Filled' : 'Outline'} />
+                      {favoriteLabel}
+                    </DropdownMenuItem>
+                  )}
                   {/* A database page is always full width. */}
                   {isDatabase ? null : (
                     <DropdownMenuCheckboxItem checked={fullWidth} onCheckedChange={toggleFullWidth}>

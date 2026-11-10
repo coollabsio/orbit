@@ -4,7 +4,7 @@ import type { CreateDatabaseRowBody, DatabaseDetail, DatabaseRelatedPage, Databa
 import { databaseErrorMessage } from '@orbit/database/errors'
 import type { SelectOption, ViewConfig, ViewContext } from '@orbit/database/types'
 import { parseDatabase, patchValues } from '@orbit/database/values'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { queryOptions, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { billingKey, workspaceBilling } from '../data/billing'
@@ -23,7 +23,18 @@ export type Notify = (message: string) => void
 /** `linkId` empty: the database's own views; else a linked view block's views (spec 3.4). */
 export function useDatabase(databaseId: string, linkId = '') {
   const { client, workspaceId } = useOrbit()
-  return useQuery({ queryKey: keys.database(workspaceId, databaseId, linkId), queryFn: () => api.database(client, workspaceId, databaseId, linkId), select: parseDatabase })
+  return useQuery(databaseQuery(client, workspaceId, databaseId, linkId))
+}
+
+/** Whether `pageId` is a row template of its database `databaseId` (`null`: not a row). */
+export function useIsTemplate(databaseId: string | null, pageId: string): boolean {
+  const { client, workspaceId } = useOrbit()
+  const { data } = useQuery({ ...databaseQuery(client, workspaceId, databaseId ?? '', ''), enabled: databaseId !== null })
+  return data?.templates?.some((template) => template.id === pageId) ?? false
+}
+
+function databaseQuery(client: ReturnType<typeof useOrbit>['client'], workspaceId: string, databaseId: string, linkId: string) {
+  return queryOptions({ queryKey: keys.database(workspaceId, databaseId, linkId), queryFn: () => api.database(client, workspaceId, databaseId, linkId), select: parseDatabase })
 }
 
 /** The viewer, the members and the clock that `@orbit/database` formats and filters with. */
