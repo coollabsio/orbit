@@ -41,6 +41,7 @@ import {
   dropOnSpace,
   dropToMove,
   moveSpace,
+  pageTitle,
   revealPage,
   rootsOf,
   spaceKey,
@@ -242,7 +243,9 @@ export function DocTree({
       { pageId: dragged.id, version: dragged.version, ...move },
       {
         onSuccess: () => {
-          if (from !== to) toast.success(`Moved to ${spaceLabel(to, teamspaces)}`)
+          const database = pages.find((page) => page.id === move.parent_id && page.kind === 'database')
+          if (database) toast.success(`Moved to “${pageTitle(database)}” as a row`)
+          else if (from !== to) toast.success(`Moved to ${spaceLabel(to, teamspaces)}`)
         },
         onError: (error) => {
           if (!isPageVersionConflict(error)) toast.error(movePageErrorMessage(error))
@@ -540,6 +543,10 @@ export function DocTree({
         <DropdownMenuItem onClick={() => navigate('/docs/import/obsidian')}>
           <Import className="size-[14px]" />
           Import from Obsidian
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => navigate('/docs/import/csv')}>
+          <Import className="size-[14px]" />
+          Import CSV
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

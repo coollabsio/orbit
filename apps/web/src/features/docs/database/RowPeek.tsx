@@ -1,7 +1,7 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 import { toast } from 'sonner'
-import { ChevronDown, ChevronUp, Copy, Link2, Maximize4, MoreH, Trash, Xmark } from 'reicon-react'
+import { ChevronDown, ChevronUp, Copy, FolderMove, Link2, Maximize4, MoreH, Trash, Xmark } from 'reicon-react'
 import { isPaymentRequired } from '@orbit/api/problem'
 import { databaseErrorMessage } from '@orbit/database/errors'
 import { Button } from '@/components/ui/button'
@@ -9,7 +9,10 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Spinner } from '@/components/ui/spinner'
 import { Tip } from '@/components/common/Tip'
 import { isPageNotFound, useDuplicatePage, usePage, usePageTree } from '@/features/docs/api/pages'
+import { useTeamspaces } from '@/features/docs/api/teamspaces'
 import { DocEditor, type DocEditorControl } from '@/features/docs/components/DocEditor'
+import { MoveToDialog } from '@/features/docs/components/MoveToDialog'
+import { useMovePageTo, type MoveDestination } from '@/features/docs/useMovePageTo'
 import { useDatabase, useTrashRows } from './api'
 import { neighborRows } from './databaseLib'
 
@@ -44,6 +47,9 @@ export function RowPeek({ workspaceId, databaseId, rowId, viewId, order, focusTi
   const database = useDatabase(workspaceId, databaseId)
   const trashRows = useTrashRows(workspaceId, databaseId)
   const duplicatePage = useDuplicatePage(workspaceId)
+  const teamspaces = useTeamspaces(workspaceId)
+  const moveTo = useMovePageTo(workspaceId, tree.data ?? [], teamspaces.data)
+  const [moveOpen, setMoveOpen] = useState(false)
   const control = useRef<DocEditorControl>(null)
   const { previous, next } = neighborRows(order, rowId)
 
@@ -54,9 +60,11 @@ export function RowPeek({ workspaceId, databaseId, rowId, viewId, order, focusTi
   useEffect(() => {
     keys.current = { previous, next, onShowRow, onClose }
   })
+  // Set once "Move to" sends the row away: the peek then closes without the "does not exist" error.
+  const movedAway = useRef(false)
   useEffect(() => {
     if (!missing && !foreign) return
-    toast.error('This row was moved to the trash or does not exist.')
+    if (!(foreign && movedAway.current)) toast.error('This row was moved to the trash or does not exist.')
     keys.current.onClose()
   }, [missing, foreign])
   useEffect(() => {
@@ -107,6 +115,15 @@ export function RowPeek({ workspaceId, databaseId, rowId, viewId, order, focusTi
     )
   }
 
+  /** Moves the row out of the database (or into another one); the peek closes when the row has left. */
+  const move = async (destination: MoveDestination) => {
+    setMoveOpen(false)
+    const row = page.data
+    if (!row) return
+    const flush = async () => (await control.current?.flush()) ?? row.version
+    if (await moveTo({ id: rowId, version: row.version, database_id: databaseId }, destination, flush)) movedAway.current = true
+  }
+
   const start = (
     <div className="flex items-center gap-0.5">
       <Tip label="Close" side="bottom">
@@ -149,6 +166,10 @@ export function RowPeek({ workspaceId, databaseId, rowId, viewId, order, focusTi
             <Copy className="size-[14px]" />
             Duplicate
           </DropdownMenuItem>
+          <DropdownMenuItem disabled={!page.data || !teamspaces.data} onClick={() => setMoveOpen(true)}>
+            <FolderMove className="size-[14px]" />
+            Move to…
+          </DropdownMenuItem>
           <DropdownMenuItem className="text-destructive focus:text-destructive" onClick={() => void remove()}>
             <Trash className="size-[14px]" />
             Delete
@@ -188,6 +209,15 @@ export function RowPeek({ workspaceId, databaseId, rowId, viewId, order, focusTi
           </div>
         </>
       )}
+      {moveOpen && page.data && teamspaces.data ? (
+        <MoveToDialog
+          pages={tree.data ?? []}
+          teamspaces={teamspaces.data}
+          moving={page.data}
+          onPick={(destination) => void move(destination)}
+          onClose={() => setMoveOpen(false)}
+        />
+      ) : null}
     </aside>
   )
 }

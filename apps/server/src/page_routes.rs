@@ -18,9 +18,9 @@ use crate::repositories::page_versions::{
     DEFAULT_VERSION_LIMIT, MAX_VERSION_LIMIT, PageVersion, PageVersionList,
 };
 use crate::repositories::pages::{
-    CreatePage, PageChanges, PageError, PageFavorite, PageFavoriteList, PageKind, PageList,
-    PageRecord, PageRepository, PageSearch, PageTrash, PageTrashEmptied, RECENT_DEFAULT_LIMIT,
-    RECENT_MAX_LIMIT, RecentPageList, SpaceRequest,
+    CreatePage, MovedPage, PageChanges, PageError, PageFavorite, PageFavoriteList, PageKind,
+    PageList, PageRecord, PageRepository, PageSearch, PageTrash, PageTrashEmptied,
+    RECENT_DEFAULT_LIMIT, RECENT_MAX_LIMIT, RecentPageList, SpaceRequest,
 };
 use crate::socket_ticket::SocketTickets;
 use crate::task_routes::{
@@ -219,8 +219,11 @@ struct MovePageBody {
     /// With `parent_id: null`: `true` moves the page into the caller's private space, `false`
     /// out of it (to the default teamspace unless `teamspace_id` is given).
     private: Option<bool>,
-    /// Index among the new siblings.
+    /// Index among the new siblings. A page that enters a database always goes last.
     position: i64,
+    /// Checks the move and counts `dropped_values`, then changes nothing.
+    #[serde(default)]
+    dry_run: bool,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -432,14 +435,14 @@ async fn update_page(
         .map_err(|error| page_problem(error, instance, request))
 }
 
-#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/pages/{page_id}/move", params(("workspace_id" = String, Path), ("page_id" = String, Path)), request_body = MovePageBody, responses((status = 200, body = PageRecord)))]
+#[utoipa::path(post, path = "/api/v1/workspaces/{workspace_id}/pages/{page_id}/move", params(("workspace_id" = String, Path), ("page_id" = String, Path)), request_body = MovePageBody, responses((status = 200, body = MovedPage)))]
 async fn move_page(
     State(state): State<PageState>,
     Path((workspace, page)): Path<(String, String)>,
     headers: HeaderMap,
     request_id: Option<Extension<RequestId>>,
     ApiJson(body): ApiJson<MovePageBody>,
-) -> Result<Json<PageRecord>, ApiError> {
+) -> Result<Json<MovedPage>, ApiError> {
     let instance = format!("/api/v1/workspaces/{workspace}/pages/{page}/move");
     let (workspace_id, actor_id) =
         scope(&state, &headers, &workspace, &instance, request_id.as_ref()).await?;
@@ -465,6 +468,7 @@ async fn move_page(
             parent_id,
             space,
             position,
+            body.dry_run,
             request_id_value(request_id.as_ref()),
             TimestampMillis::now(),
         )
@@ -1133,11 +1137,11 @@ fn page_problem(
             instance,
             request_id,
         ),
-        PageError::DatabaseMoveUnsupported => ApiError::new(
+        PageError::DatabaseInDatabase => ApiError::new(
             StatusCode::CONFLICT,
-            "database_move_unsupported",
-            "Database move unsupported",
-            "Pages cannot move into or out of a database yet. Add rows through the database.",
+            "database_in_database",
+            "Database in a database",
+            "A database cannot be a row.",
             instance,
             request_id,
         ),

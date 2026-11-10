@@ -1655,12 +1655,15 @@ fn page_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Vec<&'
         add_code(responses, "423", "page_locked");
     }
     if matches!(operation_id, "create_page" | "move_page") {
-        add_code(responses, "409", "database_move_unsupported");
+        add_code(responses, "409", "database_in_database");
     }
     if operation_id == "restore_page" {
         add_code(responses, "409", "database_trashed");
     }
-    if matches!(operation_id, "restore_page" | "duplicate_page") {
+    if matches!(
+        operation_id,
+        "restore_page" | "duplicate_page" | "create_page" | "move_page"
+    ) {
         add_code(responses, "409", "database_row_limit");
     }
     if operation_id == "list_recent_pages" {

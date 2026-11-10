@@ -4,7 +4,7 @@ import { lazy, Suspense, useCallback, useEffect, useImperativeHandle, useMemo, u
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { ArrowLeft, ArrowSwapHorizontal, Check, Copy, Download, MoreH as Ellipsis, Grid, History, Lock, Star, Trash as Trash2, Unlock, People as Users } from 'reicon-react'
+import { ArrowLeft, ArrowSwapHorizontal, Check, Copy, Download, MoreH as Ellipsis, FolderMove, Grid, History, Lock, Star, Trash as Trash2, Unlock, People as Users } from 'reicon-react'
 import { cn } from 'cn'
 import { apiClient, UNAUTHORIZED_EVENT } from '@/api/client'
 import { queryKeys } from '@/api/queryKeys'
@@ -59,6 +59,7 @@ import { useCollabSession } from '@/features/docs/collab/useCollabSession'
 import { useDocPageActions } from '@/features/docs/pageActions'
 import { downloadPageMarkdown, printPage } from '@/features/docs/pageExport'
 import { PRIVATE_SPACE, ancestorsOf, pageTitle, removeSubtree, spaceKey, spaceLabel, teamspaceSpace, type SpaceKey } from '@/features/docs/pageTree'
+import type { MoveDestination } from '@/features/docs/useMovePageTo'
 import { dayLabel, timeOfDay } from '@/lib/format'
 import { threadCounts, usePageThreads } from '@/features/docs/comments/api'
 import { CommentsPanel, type CommentsFilter } from '@/features/docs/comments/CommentsPanel'
@@ -75,6 +76,7 @@ import type { PageRef } from '@/features/docs/editor/pageEditorContext'
 import { CoverBanner } from './CoverBanner'
 import { CoverSourcePanel } from './CoverSourcePanel'
 import { PageHistoryPane } from './PageHistoryPane'
+import { MoveToDialog } from './MoveToDialog'
 import { PageLinkDialog } from './PageLinkDialog'
 import { DatabasePage } from '@/features/docs/database/DatabasePage'
 import { createLink, patchDatabaseRow } from '@/features/docs/database/api'
@@ -113,7 +115,7 @@ interface DocEditorProps {
   teamspaces?: Teamspace[]
   onRequestTrash: (pageId: string) => void
   /** Moves the page (with its sub-pages) to the end of another space's root. */
-  onRequestMove?: (pageId: string, space: SpaceKey) => void
+  onRequestMove?: (pageId: string, destination: MoveDestination) => void
   /** The page went away while open (trashed or out of reach elsewhere); the editor is leaving for /docs. */
   onGone?: (pageId: string) => void
   controlRef?: Ref<DocEditorControl>
@@ -183,6 +185,7 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
   const [addIconOpen, setAddIconOpen] = useState(false)
   /** The page picker of "Link a page", or the database picker of "Linked view of database". */
   const [linkKind, setLinkKind] = useState<'page' | 'database' | null>(null)
+  const [moveOpen, setMoveOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   // A database has no history; the peek has no room for it (the full row page has it).
   useCommand('docs.history', () => setHistoryOpen((open) => !open), { enabled: !isDatabase && !peek })
@@ -941,22 +944,25 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
                   </DropdownMenuTrigger>
                 </Tip>
                 <DropdownMenuContent align="end" className="w-auto max-w-64 min-w-44">
-                  {/* A row moves with its database. */}
-                  {onRequestMove && teamspaces && !page.database_id ? (
+                  {onRequestMove && teamspaces ? (
                     <>
                       <DropdownMenuGroup>
                         <DropdownMenuLabel>Move to</DropdownMenuLabel>
                         {spaceTargets.map((target) => (
                           <DropdownMenuItem
                             key={target}
-                            disabled={target === space}
-                            onClick={() => onRequestMove(pageId, target)}
+                            disabled={target === space && !page.database_id}
+                            onClick={() => onRequestMove(pageId, { kind: 'space', space: target })}
                           >
                             {target === PRIVATE_SPACE ? <Lock className="size-[14px]" /> : <Users className="size-[14px]" />}
                             <span className="min-w-0 flex-1 truncate">{spaceLabel(target, teamspaces)}</span>
                             {target === space ? <Check className="size-[14px] text-muted-foreground" aria-label="Current space" /> : null}
                           </DropdownMenuItem>
                         ))}
+                        <DropdownMenuItem onClick={() => setMoveOpen(true)}>
+                          <FolderMove className="size-[14px]" />
+                          Page or database…
+                        </DropdownMenuItem>
                       </DropdownMenuGroup>
                       <DropdownMenuSeparator />
                     </>
@@ -1190,6 +1196,18 @@ export function DocEditor({ workspaceId, page, pages, teamspaces, onRequestTrash
             kind={linkKind}
             onPick={(picked) => closeLinkDialog(picked.id)}
             onClose={() => closeLinkDialog(null)}
+          />
+        ) : null}
+        {moveOpen && onRequestMove && teamspaces ? (
+          <MoveToDialog
+            pages={pages}
+            teamspaces={teamspaces}
+            moving={page}
+            onPick={(destination) => {
+              setMoveOpen(false)
+              onRequestMove(pageId, destination)
+            }}
+            onClose={() => setMoveOpen(false)}
           />
         ) : null}
       </Pane>

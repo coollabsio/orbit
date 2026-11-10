@@ -184,6 +184,27 @@ test('a database row has no "Add child page" and no expand arrow', async () => {
   expect(within(pageRow(view, 'roadmap')).getByRole('button', { name: 'Add child page' })).toBeTruthy()
 })
 
+test('a page dropped inside a database becomes its row; a database only reorders next to it', async () => {
+  const database = { ...page('db', null, 1, 't1', 'Reading list'), kind: 'database' as const }
+  const other = { ...page('other-db', null, 2, 't1', 'Other list'), kind: 'database' as const }
+  const { view, calls } = setup({ pages: [...tree, database, other] })
+  await view.findByRole('group', { name: 'General' })
+
+  const dragged = dataTransfer()
+  fireEvent.dragStart(pageRow(view, 'other-db'), { dataTransfer: dragged })
+  fireEvent.dragOver(pageRow(view, 'db'), { dataTransfer: dragged })
+  expect(pageRow(view, 'db').getAttribute('data-drop')).toBe('after')
+  fireEvent.dragEnd(pageRow(view, 'other-db'), { dataTransfer: dragged })
+
+  const transfer = dataTransfer()
+  fireEvent.dragStart(pageRow(view, 'roadmap'), { dataTransfer: transfer })
+  fireEvent.dragOver(pageRow(view, 'db'), { dataTransfer: transfer })
+  expect(pageRow(view, 'db').getAttribute('data-drop')).toBe('inside')
+  fireEvent.drop(pageRow(view, 'db'), { dataTransfer: transfer })
+  await waitFor(() => expect(calls.some((call) => call.path === '/pages/roadmap/move')).toBeTrue())
+  expect(calls.find((call) => call.path === '/pages/roadmap/move')?.body).toEqual({ expected_version: 1, parent_id: 'db', position: 0 })
+})
+
 test('creating a teamspace from the dialog posts its name', async () => {
   let created = false
   const { view, calls } = setup({

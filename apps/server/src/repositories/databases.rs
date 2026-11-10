@@ -24,9 +24,11 @@ use crate::billing::TrialLimit;
 use crate::collab::CollabHub;
 
 mod links;
+mod moves;
 mod search;
 pub use links::{DatabaseLink, LinkedViews, MAX_LINK_VIEWS};
 pub(super) use links::{LinkCopy, block_links, copy_links, linked_databases};
+pub(super) use moves::carry_row_values;
 pub use search::row_search_lines;
 use search::{SearchRows, refresh_search_text};
 

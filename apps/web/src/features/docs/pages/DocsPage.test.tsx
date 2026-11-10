@@ -967,3 +967,46 @@ test('"Open" on a row puts ?row= in the URL and shows the peek; its property lis
   fireEvent.click(within(peek).getByRole('button', { name: 'Close row' }))
   await waitFor(() => expect(search(view)).not.toContain('row='))
 })
+
+test('"Move to" on a row asks before it deletes the row\'s values, then moves it to the space', async () => {
+  const { view, calls } = setup('/docs/r1', (call) => {
+    if (call.path === '/pages') return Response.json({ items: [databaseSummary] })
+    if (call.path === '/databases/db') return Response.json(databaseDetail([databaseRow('r1', 'Paper A')]))
+    if (call.path === '/pages/r1' && call.method === 'GET') return Response.json(rowPage('r1', 'Paper A'))
+    if (call.path === '/pages/r1/move') {
+      const dryRun = (call.body as { dry_run?: boolean }).dry_run === true
+      return Response.json({ ...fullPage('r1', { title: 'Paper A', version: dryRun ? 1 : 2 }), dropped_values: 2 })
+    }
+  })
+  await view.findByLabelText('Page title')
+  fireEvent.click(within(view.container.querySelector('section:last-of-type') as HTMLElement).getAllByRole('button', { name: 'Page options' }).at(-1)!)
+  await userEvent.click(await view.findByRole('menuitem', { name: /General/ }))
+  const dialog = await view.findByRole('dialog')
+  expect(dialog.textContent).toContain('2 property values will be removed.')
+  expect(calls.filter((call) => call.path === '/pages/r1/move').map((call) => call.body)).toEqual([
+    { expected_version: 1, parent_id: null, position: 1, teamspace_id: 'teamspace-1', dry_run: true },
+  ])
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Move' }))
+  await waitFor(() => expect(calls.filter((call) => call.path === '/pages/r1/move').length).toBe(2))
+  expect(calls.filter((call) => call.path === '/pages/r1/move')[1]?.body).toEqual({
+    expected_version: 1, parent_id: null, position: 1, teamspace_id: 'teamspace-1',
+  })
+})
+
+test('"Move to → Page or database…" lists databases and makes the page a row without a dry run', async () => {
+  const { view, calls } = setup('/docs/plan', (call) => {
+    if (call.path === '/pages') return Response.json({ items: [databaseSummary, summary('plan', null, 1, 'Plan')] })
+    if (call.path === '/pages/plan' && call.method === 'GET') return Response.json(fullPage('plan', { title: 'Plan', position: 1 }))
+    if (call.path === '/pages/plan/move') return Response.json({ ...rowPage('plan', 'Plan'), version: 2, dropped_values: 0 })
+  })
+  await view.findByLabelText('Page title')
+  fireEvent.click(within(view.container.querySelector('section:last-of-type') as HTMLElement).getAllByRole('button', { name: 'Page options' }).at(-1)!)
+  await userEvent.click(await view.findByRole('menuitem', { name: 'Page or database…' }))
+  const dialog = await view.findByRole('dialog', { name: 'Move to' })
+  expect(within(dialog).queryByRole('option', { name: /Plan/ })).toBeNull()
+  await userEvent.click(within(dialog).getByRole('option', { name: /Research/ }))
+  await waitFor(() => expect(calls.some((call) => call.path === '/pages/plan/move')).toBeTrue())
+  expect(calls.filter((call) => call.path === '/pages/plan/move').map((call) => call.body)).toEqual([
+    { expected_version: 1, parent_id: 'db', position: 0 },
+  ])
+})

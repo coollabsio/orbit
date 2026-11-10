@@ -23228,6 +23228,171 @@
         ]
       }
     },
+    "/api/v1/workspaces/{workspace_id}/databases/import": {
+      "post": {
+        "tags": [
+          "crate::database_routes::import"
+        ],
+        "summary": "Creates a database from a CSV in one transaction: a property per mapped column (the title\ncolumn first) and one table view, then a row per CSV row, converted as in\n`POST …/databases/{database_id}/import`.",
+        "operationId": "create_database_from_csv",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDatabaseFromCsvBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseCsvCreated"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseCsvCreated"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "workspace_read_only",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "page_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/databases/{database_id}": {
       "get": {
         "tags": [
@@ -23324,6 +23489,179 @@
           },
           "413": {
             "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/databases/{database_id}/import": {
+      "post": {
+        "tags": [
+          "crate::database_routes::import"
+        ],
+        "summary": "Adds the CSV's rows to the database, all or nothing (a merge never changes existing rows).\nCells convert with the type-change rules: values that do not fit stay empty and are counted\nin `cleared`; select options are matched by name (case ignored) or created; person cells\nmatch member names or emails. 409 `database_row_limit` when the rows do not fit.",
+        "operationId": "import_database_csv",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "database_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportDatabaseCsvBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseImportResult"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "workspace_read_only",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "page_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, database_row_limit, database_property_limit",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "423": {
+            "description": "page_locked",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -24726,6 +25064,492 @@
           },
           "404": {
             "description": "page_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/databases/{database_id}/templates": {
+      "post": {
+        "tags": [
+          "crate::database_routes::templates"
+        ],
+        "summary": "Adds a row template, a hidden page of the database that is not a row. At most 20 per\ndatabase (409 `database_template_limit`).",
+        "operationId": "create_database_template",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "database_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateDatabaseTemplateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseTemplate"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "workspace_read_only",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "page_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch, database_template_limit",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspace_id}/databases/{database_id}/templates/{template_id}": {
+      "delete": {
+        "tags": [
+          "crate::database_routes::templates"
+        ],
+        "summary": "Deletes a template and its page for good (no trash). Views that used it as their default\ntemplate go back to an empty row.",
+        "operationId": "delete_database_template",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "database_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "template_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "workspace_read_only",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "page_not_found, database_template_not_found",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "contract_mismatch",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "request_too_large",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "validation_failed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "internal_error",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "default": {
+            "description": "internal_error or another documented stable code",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "cookieAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "crate::database_routes::templates"
+        ],
+        "summary": "Renames a template or moves it among the templates.",
+        "operationId": "update_database_template",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "database_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "template_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-Orbit-Contract",
+            "in": "header",
+            "description": "Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateDatabaseTemplateBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatabaseTemplate"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "invalid_proxy_headers, invalid_request",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "authentication_required",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "workspace_read_only",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "origin_forbidden",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskProblem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "page_not_found, database_template_not_found",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -30966,7 +31790,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, database_move_unsupported",
+            "description": "contract_mismatch, database_in_database, database_row_limit",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -33410,7 +34234,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Page"
+                  "$ref": "#/components/schemas/MovedPage"
                 }
               }
             }
@@ -33456,7 +34280,7 @@
             }
           },
           "409": {
-            "description": "contract_mismatch, conflict, database_move_unsupported",
+            "description": "contract_mismatch, conflict, database_in_database, database_row_limit",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -49051,6 +49875,74 @@
         },
         "additionalProperties": false
       },
+      "CreateDatabaseFromCsvBody": {
+        "type": "object",
+        "required": [
+          "title_column",
+          "columns",
+          "rows"
+        ],
+        "properties": {
+          "columns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DatabaseImportColumn"
+            },
+            "description": "One per CSV column; targets are `{new: type}` or `\"skip\"`."
+          },
+          "dry_run": {
+            "type": "boolean",
+            "description": "Converts and counts without creating anything (`database` is then `null`)."
+          },
+          "parent_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "With a parent the database joins the parent's space."
+          },
+          "position": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Index among the new siblings; omitted appends the database last."
+          },
+          "private": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Root databases only: `true` creates it in the caller's private space."
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "teamspace_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Root databases only: the target teamspace."
+          },
+          "title": {
+            "type": "string"
+          },
+          "title_column": {
+            "type": "integer",
+            "description": "The column that becomes the title property; its `target` is ignored.",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
       "CreateDatabaseLinkBody": {
         "type": "object",
         "required": [
@@ -49133,12 +50025,46 @@
               "null"
             ]
           },
+          "template_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A template of this database that fills the row's title, icon, values and body; `title`,\n`icon` and `values` sent here win over the template's."
+          },
           "title": {
             "type": "string"
+          },
+          "today": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The caller's local day (`YYYY-MM-DD`) that a template's \"today\" dates take; default: the\nUTC day."
           },
           "values": {
             "type": "object",
             "description": "Values by property id, as in `PATCH …/rows/{row_id}/values`."
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateDatabaseTemplateBody": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "from_row_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "A row (or template) of this database whose title, icon, values and body the template\ncopies; omitted: an empty template."
+          },
+          "name": {
+            "type": "string",
+            "description": "1 to 200 characters."
           }
         },
         "additionalProperties": false
@@ -49508,6 +50434,28 @@
           "percent_unchecked"
         ]
       },
+      "DatabaseCsvCreated": {
+        "type": "object",
+        "required": [
+          "database",
+          "result"
+        ],
+        "properties": {
+          "database": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/Page"
+              }
+            ]
+          },
+          "result": {
+            "$ref": "#/components/schemas/DatabaseImportResult"
+          }
+        }
+      },
       "DatabaseDetail": {
         "type": "object",
         "description": "A whole database: its properties, views and live rows.",
@@ -49532,6 +50480,13 @@
             "items": {
               "$ref": "#/components/schemas/DatabaseRow"
             }
+          },
+          "templates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DatabaseTemplate"
+            },
+            "description": "Row templates in order (at most 20); they are not rows. Absent: none."
           },
           "views": {
             "type": "array",
@@ -49648,6 +50603,149 @@
             "type": "string"
           }
         }
+      },
+      "DatabaseImportColumn": {
+        "type": "object",
+        "required": [
+          "name",
+          "target"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The CSV header; the name of a new property."
+          },
+          "target": {
+            "$ref": "#/components/schemas/DatabaseImportTarget"
+          }
+        },
+        "additionalProperties": false
+      },
+      "DatabaseImportColumnResult": {
+        "type": "object",
+        "required": [
+          "converted",
+          "cleared",
+          "created_options",
+          "values_truncated"
+        ],
+        "properties": {
+          "cleared": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "converted": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "created_options": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "values_truncated": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          }
+        }
+      },
+      "DatabaseImportNewTarget": {
+        "type": "object",
+        "required": [
+          "new"
+        ],
+        "properties": {
+          "new": {
+            "$ref": "#/components/schemas/DatabasePropertyType",
+            "description": "The new property's type; it is named after the column."
+          }
+        },
+        "additionalProperties": false
+      },
+      "DatabaseImportPropertyTarget": {
+        "type": "object",
+        "required": [
+          "property_id"
+        ],
+        "properties": {
+          "property_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "DatabaseImportResult": {
+        "type": "object",
+        "description": "What an import did (or, as a dry run, would do).",
+        "required": [
+          "created_rows",
+          "converted",
+          "cleared",
+          "created_options",
+          "values_truncated",
+          "columns"
+        ],
+        "properties": {
+          "cleared": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Non-empty cells that do not fit their property and stay empty.",
+            "minimum": 0
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DatabaseImportColumnResult"
+            },
+            "description": "The same counts per CSV column, in column order (zero for skipped columns)."
+          },
+          "converted": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Non-empty cells that became a value.",
+            "minimum": 0
+          },
+          "created_options": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Options added to select, multi-select and status properties.",
+            "minimum": 0
+          },
+          "created_rows": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "values_truncated": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Titles over 500 and texts over 10,000 characters that were cut.",
+            "minimum": 0
+          }
+        }
+      },
+      "DatabaseImportSkip": {
+        "type": "string",
+        "enum": [
+          "skip"
+        ]
+      },
+      "DatabaseImportTarget": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/DatabaseImportPropertyTarget"
+          },
+          {
+            "$ref": "#/components/schemas/DatabaseImportNewTarget"
+          },
+          {
+            "$ref": "#/components/schemas/DatabaseImportSkip"
+          }
+        ],
+        "description": "Where a CSV column goes: an existing property, a new property of a type, or nowhere."
       },
       "DatabaseLink": {
         "type": "object",
@@ -49844,6 +50942,27 @@
           "desc"
         ]
       },
+      "DatabaseTemplate": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/DatabaseRow",
+            "description": "The template page as a row: `position` orders the templates, and `values` hold `\"me\"` in\na person value and `{\"start\": \"today\", \"end\": null}` as a date where the template uses\nthem."
+          },
+          {
+            "type": "object",
+            "required": [
+              "name"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "What \"New\" lists, 1 to 200 characters."
+              }
+            }
+          }
+        ],
+        "description": "A row template: a hidden page of the database whose title, icon, values and body fill a new\nrow."
+      },
       "DatabaseView": {
         "type": "object",
         "required": [
@@ -49921,6 +51040,13 @@
             },
             "description": "The order of the properties; properties missing here show at the end."
           },
+          "default_template_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The template that \"New\" and \"+\" use in this view (`null`: an empty row). A deleted\ntemplate reads as `null`."
+          },
           "filter": {
             "$ref": "#/components/schemas/DatabaseFilterGroup"
           },
@@ -49929,7 +51055,7 @@
               "string",
               "null"
             ],
-            "description": "Board: the `select` or `status` property whose options are the columns. A board without\none falls back to the first status, else the first select property."
+            "description": "Board: the `select`, `status`, `multi_select` or `person` property whose groups are the\ncolumns (a card with several values shows in each of their columns). A board without one\nfalls back to the first status, else the first select property."
           },
           "group_order": {
             "type": "array",
@@ -49939,7 +51065,7 @@
                 "null"
               ]
             },
-            "description": "Board: option ids in column order, `null` for the \"No <property>\" column. Options missing\nhere follow in the property's option order."
+            "description": "Board: group ids in column order (option ids, or user ids for a person), `null` for the\n\"No <property>\" column. Groups missing here follow in the property's order."
           },
           "hidden_groups": {
             "type": "array",
@@ -49949,7 +51075,21 @@
                 "null"
               ]
             },
-            "description": "Board: option ids (or `null`) of the columns listed under \"Hidden groups\"."
+            "description": "Board: group ids (or `null`) of the columns listed under \"Hidden groups\"."
+          },
+          "hidden_sub_groups": {
+            "type": "array",
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "description": "Board: group ids (or `null`) of the hidden lanes."
+          },
+          "hide_empty_groups": {
+            "type": "boolean",
+            "description": "Board: hides the columns and lanes that have no cards."
           },
           "sorts": {
             "type": "array",
@@ -49957,6 +51097,23 @@
               "$ref": "#/components/schemas/DatabaseViewSort"
             },
             "description": "At most 10."
+          },
+          "sub_group_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Board: the property whose groups are the lanes (rows of the same columns): a `select`,\n`status`, `multi_select`, `person` or `checkbox` property other than `group_by`. A\ncheckbox's groups are `\"true\"` and `\"false\"`."
+          },
+          "sub_group_order": {
+            "type": "array",
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "description": "Board: group ids in lane order, as `group_order`."
           },
           "wrap_cells": {
             "type": "boolean"
@@ -50571,6 +51728,37 @@
           "and",
           "or"
         ]
+      },
+      "ImportDatabaseCsvBody": {
+        "type": "object",
+        "required": [
+          "columns",
+          "rows"
+        ],
+        "properties": {
+          "columns": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DatabaseImportColumn"
+            },
+            "description": "One per CSV column, in order (at most 100). Exactly one maps to the title property."
+          },
+          "dry_run": {
+            "type": "boolean",
+            "description": "Converts and counts without writing anything."
+          },
+          "rows": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": "Cell text per row (at most 5,000 rows); a row may be shorter than `columns`."
+          }
+        },
+        "additionalProperties": false
       },
       "IncomingWebhookPayload": {
         "type": "object",
@@ -52676,6 +53864,10 @@
           "position"
         ],
         "properties": {
+          "dry_run": {
+            "type": "boolean",
+            "description": "Checks the move and counts `dropped_values`, then changes nothing."
+          },
           "expected_version": {
             "type": "integer",
             "format": "int64",
@@ -52691,7 +53883,7 @@
           "position": {
             "type": "integer",
             "format": "int64",
-            "description": "Index among the new siblings."
+            "description": "Index among the new siblings. A page that enters a database always goes last."
           },
           "private": {
             "type": [
@@ -52729,6 +53921,28 @@
           }
         },
         "additionalProperties": false
+      },
+      "MovedPage": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Page"
+          },
+          {
+            "type": "object",
+            "required": [
+              "dropped_values"
+            ],
+            "properties": {
+              "dropped_values": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Property values the move deletes: the page left its database, or the new database has no\nproperty of the same name and type (or no such option) for them.",
+                "minimum": 0
+              }
+            }
+          }
+        ],
+        "description": "A moved page (as it is after the move, or would be after a dry run)."
       },
       "NewTaskRelationType": {
         "type": "string",
@@ -59917,6 +61131,26 @@
                 "description": "A new type converts the values (spec: text in between; person and computed types clear\nthem) and derives the config: send `config` in a later request."
               }
             ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateDatabaseTemplateBody": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "position": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "description": "Index among the templates."
           }
         },
         "additionalProperties": false

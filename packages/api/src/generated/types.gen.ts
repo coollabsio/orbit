@@ -1426,6 +1426,39 @@ export type CreateAsanaImportBody = {
     token: string;
 };
 
+export type CreateDatabaseFromCsvBody = {
+    /**
+     * One per CSV column; targets are `{new: type}` or `"skip"`.
+     */
+    columns: Array<DatabaseImportColumn>;
+    /**
+     * Converts and counts without creating anything (`database` is then `null`).
+     */
+    dry_run?: boolean;
+    /**
+     * With a parent the database joins the parent's space.
+     */
+    parent_id?: string | null;
+    /**
+     * Index among the new siblings; omitted appends the database last.
+     */
+    position?: number | null;
+    /**
+     * Root databases only: `true` creates it in the caller's private space.
+     */
+    private?: boolean | null;
+    rows: Array<Array<string>>;
+    /**
+     * Root databases only: the target teamspace.
+     */
+    teamspace_id?: string | null;
+    title?: string;
+    /**
+     * The column that becomes the title property; its `target` is ignored.
+     */
+    title_column: number;
+};
+
 export type CreateDatabaseLinkBody = {
     /**
      * An own view whose type and config the link's first view copies (default: the first one).
@@ -1469,13 +1502,35 @@ export type CreateDatabaseRowBody = {
      */
     after_row_id?: string | null;
     icon?: string | null;
+    /**
+     * A template of this database that fills the row's title, icon, values and body; `title`,
+     * `icon` and `values` sent here win over the template's.
+     */
+    template_id?: string | null;
     title?: string;
+    /**
+     * The caller's local day (`YYYY-MM-DD`) that a template's "today" dates take; default: the
+     * UTC day.
+     */
+    today?: string | null;
     /**
      * Values by property id, as in `PATCH …/rows/{row_id}/values`.
      */
     values?: {
         [key: string]: unknown;
     };
+};
+
+export type CreateDatabaseTemplateBody = {
+    /**
+     * A row (or template) of this database whose title, icon, values and body the template
+     * copies; omitted: an empty template.
+     */
+    from_row_id?: string | null;
+    /**
+     * 1 to 200 characters.
+     */
+    name: string;
 };
 
 export type CreateDatabaseViewBody = {
@@ -1648,6 +1703,11 @@ export type CustomStickerRecord = {
  */
 export type DatabaseCalculation = 'count_all' | 'count_values' | 'count_unique' | 'count_empty' | 'count_not_empty' | 'percent_empty' | 'percent_not_empty' | 'sum' | 'average' | 'median' | 'min' | 'max' | 'range' | 'earliest_date' | 'latest_date' | 'date_range' | 'checked' | 'unchecked' | 'percent_checked' | 'percent_unchecked';
 
+export type DatabaseCsvCreated = {
+    database: null | Page;
+    result: DatabaseImportResult;
+};
+
 /**
  * A whole database: its properties, views and live rows.
  */
@@ -1655,6 +1715,10 @@ export type DatabaseDetail = {
     database: DatabaseHead;
     properties: Array<DatabaseProperty>;
     rows: Array<DatabaseRow>;
+    /**
+     * Row templates in order (at most 20); they are not rows. Absent: none.
+     */
+    templates?: Array<DatabaseTemplate>;
     views: Array<DatabaseView>;
 };
 
@@ -1694,6 +1758,66 @@ export type DatabaseHead = {
     row_count: number;
     title: string;
 };
+
+export type DatabaseImportColumn = {
+    /**
+     * The CSV header; the name of a new property.
+     */
+    name: string;
+    target: DatabaseImportTarget;
+};
+
+export type DatabaseImportColumnResult = {
+    cleared: number;
+    converted: number;
+    created_options: number;
+    values_truncated: number;
+};
+
+export type DatabaseImportNewTarget = {
+    /**
+     * The new property's type; it is named after the column.
+     */
+    new: DatabasePropertyType;
+};
+
+export type DatabaseImportPropertyTarget = {
+    property_id: string;
+};
+
+/**
+ * What an import did (or, as a dry run, would do).
+ */
+export type DatabaseImportResult = {
+    /**
+     * Non-empty cells that do not fit their property and stay empty.
+     */
+    cleared: number;
+    /**
+     * The same counts per CSV column, in column order (zero for skipped columns).
+     */
+    columns: Array<DatabaseImportColumnResult>;
+    /**
+     * Non-empty cells that became a value.
+     */
+    converted: number;
+    /**
+     * Options added to select, multi-select and status properties.
+     */
+    created_options: number;
+    created_rows: number;
+    /**
+     * Titles over 500 and texts over 10,000 characters that were cut.
+     */
+    values_truncated: number;
+};
+
+export type DatabaseImportSkip = 'skip';
+
+/**
+ * Where a CSV column goes: an existing property, a new property of a type, or nowhere.
+ */
+export type DatabaseImportTarget = DatabaseImportPropertyTarget | DatabaseImportNewTarget | DatabaseImportSkip;
 
 export type DatabaseLink = {
     created_at: string;
@@ -1779,6 +1903,17 @@ export type DatabaseRowValuesBody = {
 
 export type DatabaseSortDirection = 'asc' | 'desc';
 
+/**
+ * A row template: a hidden page of the database whose title, icon, values and body fill a new
+ * row.
+ */
+export type DatabaseTemplate = DatabaseRow & {
+    /**
+     * What "New" lists, 1 to 200 characters.
+     */
+    name: string;
+};
+
 export type DatabaseView = {
     config: DatabaseViewConfig;
     id: string;
@@ -1817,25 +1952,49 @@ export type DatabaseViewConfig = {
      * The order of the properties; properties missing here show at the end.
      */
     columns?: Array<DatabaseViewColumn>;
+    /**
+     * The template that "New" and "+" use in this view (`null`: an empty row). A deleted
+     * template reads as `null`.
+     */
+    default_template_id?: string | null;
     filter?: DatabaseFilterGroup;
     /**
-     * Board: the `select` or `status` property whose options are the columns. A board without
-     * one falls back to the first status, else the first select property.
+     * Board: the `select`, `status`, `multi_select` or `person` property whose groups are the
+     * columns (a card with several values shows in each of their columns). A board without one
+     * falls back to the first status, else the first select property.
      */
     group_by?: string | null;
     /**
-     * Board: option ids in column order, `null` for the "No <property>" column. Options missing
-     * here follow in the property's option order.
+     * Board: group ids in column order (option ids, or user ids for a person), `null` for the
+     * "No <property>" column. Groups missing here follow in the property's order.
      */
     group_order?: Array<string | null>;
     /**
-     * Board: option ids (or `null`) of the columns listed under "Hidden groups".
+     * Board: group ids (or `null`) of the columns listed under "Hidden groups".
      */
     hidden_groups?: Array<string | null>;
+    /**
+     * Board: group ids (or `null`) of the hidden lanes.
+     */
+    hidden_sub_groups?: Array<string | null>;
+    /**
+     * Board: hides the columns and lanes that have no cards.
+     */
+    hide_empty_groups?: boolean;
     /**
      * At most 10.
      */
     sorts?: Array<DatabaseViewSort>;
+    /**
+     * Board: the property whose groups are the lanes (rows of the same columns): a `select`,
+     * `status`, `multi_select`, `person` or `checkbox` property other than `group_by`. A
+     * checkbox's groups are `"true"` and `"false"`.
+     */
+    sub_group_by?: string | null;
+    /**
+     * Board: group ids in lane order, as `group_order`.
+     */
+    sub_group_order?: Array<string | null>;
     wrap_cells?: boolean;
 };
 
@@ -2062,6 +2221,21 @@ export type GithubWorkspaceSettings = {
 export type GroupBy = 'status' | 'assignee' | 'priority' | 'project' | 'label' | 'none';
 
 export type GroupOp = 'and' | 'or';
+
+export type ImportDatabaseCsvBody = {
+    /**
+     * One per CSV column, in order (at most 100). Exactly one maps to the title property.
+     */
+    columns: Array<DatabaseImportColumn>;
+    /**
+     * Converts and counts without writing anything.
+     */
+    dry_run?: boolean;
+    /**
+     * Cell text per row (at most 5,000 rows); a row may be shorter than `columns`.
+     */
+    rows: Array<Array<string>>;
+};
 
 /**
  * What a tool posts: the payload of a Slack incoming webhook. Fields that Orbit does not use
@@ -2798,6 +2972,10 @@ export type MoveFavoriteBody = {
 };
 
 export type MovePageBody = {
+    /**
+     * Checks the move and counts `dropped_values`, then changes nothing.
+     */
+    dry_run?: boolean;
     expected_version: number;
     /**
      * The new parent; `null` moves the page to a space root. The page and its whole subtree
@@ -2805,7 +2983,7 @@ export type MovePageBody = {
      */
     parent_id: string | null;
     /**
-     * Index among the new siblings.
+     * Index among the new siblings. A page that enters a database always goes last.
      */
     position: number;
     /**
@@ -2826,6 +3004,17 @@ export type MoveTeamspaceBody = {
      * default teamspace.
      */
     position: number;
+};
+
+/**
+ * A moved page (as it is after the move, or would be after a dry run).
+ */
+export type MovedPage = Page & {
+    /**
+     * Property values the move deletes: the page left its database, or the new database has no
+     * property of the same name and type (or no such option) for them.
+     */
+    dropped_values: number;
 };
 
 /**
@@ -5705,6 +5894,14 @@ export type UpdateDatabasePropertyBody = {
     name?: string | null;
     position?: number | null;
     type?: null | DatabasePropertyType;
+};
+
+export type UpdateDatabaseTemplateBody = {
+    name?: string | null;
+    /**
+     * Index among the templates.
+     */
+    position?: number | null;
 };
 
 export type UpdateDatabaseViewBody = {
@@ -16468,6 +16665,73 @@ export type ReadChatThreadResponses = {
 
 export type ReadChatThreadResponse = ReadChatThreadResponses[keyof ReadChatThreadResponses];
 
+export type CreateDatabaseFromCsvData = {
+    body: CreateDatabaseFromCsvBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/databases/import';
+};
+
+export type CreateDatabaseFromCsvErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * workspace_read_only
+     */
+    402: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * page_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateDatabaseFromCsvError = CreateDatabaseFromCsvErrors[keyof CreateDatabaseFromCsvErrors];
+
+export type CreateDatabaseFromCsvResponses = {
+    200: DatabaseCsvCreated;
+    201: DatabaseCsvCreated;
+};
+
+export type CreateDatabaseFromCsvResponse = CreateDatabaseFromCsvResponses[keyof CreateDatabaseFromCsvResponses];
+
 export type GetDatabaseData = {
     body?: never;
     headers?: {
@@ -16527,6 +16791,77 @@ export type GetDatabaseResponses = {
 };
 
 export type GetDatabaseResponse = GetDatabaseResponses[keyof GetDatabaseResponses];
+
+export type ImportDatabaseCsvData = {
+    body: ImportDatabaseCsvBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        database_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/databases/{database_id}/import';
+};
+
+export type ImportDatabaseCsvErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * workspace_read_only
+     */
+    402: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * page_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, database_row_limit, database_property_limit
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * page_locked
+     */
+    423: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type ImportDatabaseCsvError = ImportDatabaseCsvErrors[keyof ImportDatabaseCsvErrors];
+
+export type ImportDatabaseCsvResponses = {
+    200: DatabaseImportResult;
+};
+
+export type ImportDatabaseCsvResponse = ImportDatabaseCsvResponses[keyof ImportDatabaseCsvResponses];
 
 export type CreateDatabaseLinkData = {
     body: CreateDatabaseLinkBody;
@@ -17123,6 +17458,209 @@ export type UpdateDatabaseRowValuesResponses = {
 };
 
 export type UpdateDatabaseRowValuesResponse = UpdateDatabaseRowValuesResponses[keyof UpdateDatabaseRowValuesResponses];
+
+export type CreateDatabaseTemplateData = {
+    body: CreateDatabaseTemplateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        database_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/databases/{database_id}/templates';
+};
+
+export type CreateDatabaseTemplateErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * workspace_read_only
+     */
+    402: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * page_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch, database_template_limit
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type CreateDatabaseTemplateError = CreateDatabaseTemplateErrors[keyof CreateDatabaseTemplateErrors];
+
+export type CreateDatabaseTemplateResponses = {
+    201: DatabaseTemplate;
+};
+
+export type CreateDatabaseTemplateResponse = CreateDatabaseTemplateResponses[keyof CreateDatabaseTemplateResponses];
+
+export type DeleteDatabaseTemplateData = {
+    body?: never;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        database_id: string;
+        template_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/databases/{database_id}/templates/{template_id}';
+};
+
+export type DeleteDatabaseTemplateErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * workspace_read_only
+     */
+    402: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * page_not_found, database_template_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type DeleteDatabaseTemplateError = DeleteDatabaseTemplateErrors[keyof DeleteDatabaseTemplateErrors];
+
+export type DeleteDatabaseTemplateResponses = {
+    204: void;
+};
+
+export type DeleteDatabaseTemplateResponse = DeleteDatabaseTemplateResponses[keyof DeleteDatabaseTemplateResponses];
+
+export type UpdateDatabaseTemplateData = {
+    body: UpdateDatabaseTemplateBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        workspace_id: string;
+        database_id: string;
+        template_id: string;
+    };
+    query?: never;
+    url: '/api/v1/workspaces/{workspace_id}/databases/{database_id}/templates/{template_id}';
+};
+
+export type UpdateDatabaseTemplateErrors = {
+    /**
+     * invalid_proxy_headers, invalid_request
+     */
+    400: TaskProblem;
+    /**
+     * authentication_required
+     */
+    401: TaskProblem;
+    /**
+     * workspace_read_only
+     */
+    402: TaskProblem;
+    /**
+     * origin_forbidden
+     */
+    403: TaskProblem;
+    /**
+     * page_not_found, database_template_not_found
+     */
+    404: TaskProblem;
+    /**
+     * contract_mismatch
+     */
+    409: TaskProblem;
+    /**
+     * request_too_large
+     */
+    413: TaskProblem;
+    /**
+     * validation_failed
+     */
+    422: TaskProblem;
+    /**
+     * internal_error
+     */
+    500: TaskProblem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: TaskProblem;
+};
+
+export type UpdateDatabaseTemplateError = UpdateDatabaseTemplateErrors[keyof UpdateDatabaseTemplateErrors];
+
+export type UpdateDatabaseTemplateResponses = {
+    200: DatabaseTemplate;
+};
+
+export type UpdateDatabaseTemplateResponse = UpdateDatabaseTemplateResponses[keyof UpdateDatabaseTemplateResponses];
 
 export type CreateDatabaseViewData = {
     body: CreateDatabaseViewBody;
@@ -19836,7 +20374,7 @@ export type CreatePageErrors = {
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, database_move_unsupported
+     * contract_mismatch, database_in_database, database_row_limit
      */
     409: TaskProblem;
     /**
@@ -20922,7 +21460,7 @@ export type MovePageErrors = {
      */
     404: TaskProblem;
     /**
-     * contract_mismatch, conflict, database_move_unsupported
+     * contract_mismatch, conflict, database_in_database, database_row_limit
      */
     409: TaskProblem;
     /**
@@ -20946,7 +21484,7 @@ export type MovePageErrors = {
 export type MovePageError = MovePageErrors[keyof MovePageErrors];
 
 export type MovePageResponses = {
-    200: Page;
+    200: MovedPage;
 };
 
 export type MovePageResponse = MovePageResponses[keyof MovePageResponses];

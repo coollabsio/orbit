@@ -1406,7 +1406,7 @@ async fn a_row_lists_its_live_sub_pages_and_copies_them() {
 }
 
 #[tokio::test]
-async fn rows_stay_out_of_the_tree_and_out_of_page_moves() {
+async fn rows_stay_out_of_the_tree() {
     let fixture = Fixture::new().await;
     let db = fixture.create_database("Inbox").await;
     let row = fixture
@@ -1427,40 +1427,6 @@ async fn rows_stay_out_of_the_tree_and_out_of_page_moves() {
         fixture.page(id_of(&child)).await["database_id"],
         Value::Null
     );
-
-    let refused = |status: StatusCode, body: &Value| {
-        assert_eq!(
-            (status, body["code"].as_str()),
-            (StatusCode::CONFLICT, Some("database_move_unsupported")),
-            "{body}"
-        );
-    };
-    let (status, body) = fixture
-        .call(
-            "POST",
-            &format!("pages/{row_id}/move"),
-            Some(
-                json!({"expected_version": row_page["version"], "parent_id": null, "position": 0}),
-            ),
-        )
-        .await;
-    refused(status, &body);
-    let (status, body) = fixture
-        .call(
-            "POST",
-            &format!("pages/{}/move", id_of(&other)),
-            Some(json!({"expected_version": 0, "parent_id": db, "position": 0})),
-        )
-        .await;
-    refused(status, &body);
-    let (status, body) = fixture
-        .call(
-            "POST",
-            "pages",
-            Some(json!({"parent_id": db, "title": "Sneaky row"})),
-        )
-        .await;
-    refused(status, &body);
 
     // The database page itself still moves.
     let version = fixture.page(&db).await["version"].clone();

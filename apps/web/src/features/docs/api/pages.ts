@@ -36,9 +36,12 @@ export function isPageVersionConflict(error: unknown): error is ApiProblem {
   return isTaskVersionConflict(error)
 }
 
-/** The toast for a failed move: the server's reason when it forbids the move, else a generic one. */
+/** Moves the server refuses with a reason to show (a database cannot be a row, the target database is full). */
+const MOVE_REFUSALS = new Set(['database_in_database', 'database_row_limit'])
+
+/** The toast for a failed move: the server's reason when it forbids or refuses the move, else a generic one. */
 export function movePageErrorMessage(error: unknown): string {
-  return error instanceof ApiProblem && error.status === 403 ? error.detail : 'Could not move the page.'
+  return error instanceof ApiProblem && (error.status === 403 || MOVE_REFUSALS.has(error.code ?? '')) ? error.detail : 'Could not move the page.'
 }
 
 export function isPageNotFound(error: unknown): boolean {
@@ -258,8 +261,12 @@ export function useMovePage(workspaceId: string) {
       if (snapshot?.tree) queryClient.setQueryData(treeKey, snapshot.tree)
       return promptForConflict(error, () => void queryClient.invalidateQueries({ queryKey: treeKey }))
     },
-    // Only the moved page's version bumps; the open editor picks the new version up from the detail cache.
-    onSuccess: (page) => reconcilePage(queryClient, workspaceId, page),
+    // Only the moved page's version bumps; the open editor picks the new version up from the detail cache. A new row
+    // shows in its database at once.
+    onSuccess: (page) => {
+      reconcilePage(queryClient, workspaceId, page)
+      if (page.database_id) void queryClient.invalidateQueries({ queryKey: queryKeys.database(workspaceId, page.database_id) })
+    },
     // A space change also moves the subtree, so cached sub-page details, search hits and trash rows go stale.
     onSettled: (_page, _error, input) =>
       void queryClient.invalidateQueries({ queryKey: input.teamspace_id || input.private ? queryKeys.pages.all(workspaceId) : treeKey }),

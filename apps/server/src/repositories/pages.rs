@@ -18,8 +18,8 @@ use utoipa::ToSchema;
 
 use super::billing::{TrialCapacityError, TrialLimitReached, ensure_trial_capacity};
 use super::databases::{
-    DatabaseSchema, LinkCopy, RowCapacityError, block_links, copy_database_data, copy_links,
-    ensure_row_capacity, insert_schema, linked_databases, row_search_lines,
+    DatabaseSchema, LinkCopy, RowCapacityError, block_links, carry_row_values, copy_database_data,
+    copy_links, ensure_row_capacity, insert_schema, linked_databases, row_search_lines,
 };
 use super::page_files::{page_file_url, page_has_file, parse_page_file_url};
 use super::page_mentions::notify_new_mentions;
@@ -140,6 +140,17 @@ impl PageSpace {
 pub struct SpaceRequest {
     pub teamspace_id: Option<Id>,
     pub private: Option<bool>,
+}
+
+/// A moved page (as it is after the move, or would be after a dry run).
+#[derive(Clone, Debug, Serialize, ToSchema)]
+#[schema(as = MovedPage)]
+pub struct MovedPage {
+    #[serde(flatten)]
+    pub page: PageRecord,
+    /// Property values the move deletes: the page left its database, or the new database has no
+    /// property of the same name and type (or no such option) for them.
+    pub dropped_values: u64,
 }
 
 /// A page with its content.
@@ -443,10 +454,9 @@ pub enum PageError {
     /// The page is locked: its title, icon, cover and content cannot change.
     #[error("page is locked")]
     Locked,
-    /// Pages move into or out of a database only in a later phase; rows are made and ordered
-    /// through the database routes.
-    #[error("pages cannot move into or out of a database")]
-    DatabaseMoveUnsupported,
+    /// A database page cannot be created or moved directly under a database (become a row).
+    #[error("a database cannot be a row")]
+    DatabaseInDatabase,
     /// Restoring a row whose database is in the trash (or gone): a row cannot live outside its
     /// database, so the database comes back first.
     #[error("the row's database is in the trash")]
@@ -742,10 +752,16 @@ impl PageRepository {
             None,
         )
         .await?;
-        if let Some(parent_id) = input.parent_id
-            && is_database(&mut tx, parent_id).await?
-        {
-            return Err(PageError::DatabaseMoveUnsupported);
+        // A page created under a database is a row with no values.
+        let row_of = match input.parent_id {
+            Some(parent_id) if is_database(&mut tx, parent_id).await? => Some(parent_id),
+            _ => None,
+        };
+        if let Some(database_id) = row_of {
+            if input.kind == PageKind::Database {
+                return Err(PageError::DatabaseInDatabase);
+            }
+            ensure_row_capacity(&mut tx, database_id, 1).await?;
         }
         let mut siblings = sibling_ids(&mut tx, workspace_id, space, input.parent_id, id).await?;
         let index = insert_index(input.position, siblings.len());
@@ -775,6 +791,17 @@ impl PageRepository {
         if input.kind == PageKind::Database {
             insert_schema(&mut tx, workspace_id, id, schema, now).await?;
         }
+        carry_row_values(
+            &mut tx,
+            workspace_id,
+            id,
+            None,
+            row_of,
+            actor_id,
+            request_id,
+            now,
+        )
+        .await?;
         renumber(&mut tx, &siblings).await?;
         notify_new_mentions(&mut tx, id, &[], &content, Some(actor_id), request_id, now).await?;
         let collab_epoch = collab_generation(&mut tx).await?;
@@ -798,7 +825,7 @@ impl PageRepository {
             teamspace_id: space.teamspace_id(),
             private: space.teamspace_id().is_none(),
             kind: input.kind,
-            database_id: None,
+            database_id: row_of,
             title: input.title,
             icon: input.icon,
             cover_url: None,
@@ -1218,7 +1245,9 @@ impl PageRepository {
     /// siblings. With a parent the page joins the parent's space; at the root it goes to the
     /// requested space, or stays in its own. The whole subtree follows a space change. Sibling
     /// positions are renumbered without bumping their versions, so a reorder never makes a
-    /// concurrent content save conflict.
+    /// concurrent content save conflict. A page that enters a database becomes its last row; a
+    /// row that changes database keeps only the values the new one can hold (see
+    /// [`carry_row_values`]). `dry_run` does all of it, then rolls back.
     #[allow(clippy::too_many_arguments)]
     pub async fn move_page(
         &self,
@@ -1229,9 +1258,10 @@ impl PageRepository {
         parent_id: Option<Id>,
         space: SpaceRequest,
         position: i64,
+        dry_run: bool,
         request_id: &str,
         now: TimestampMillis,
-    ) -> Result<PageRecord, PageError> {
+    ) -> Result<MovedPage, PageError> {
         let mut tx = self.database.immediate_transaction().await?;
         let actor = require_access_tx(&mut tx, workspace_id, actor_id).await?;
         let current = page_in_tx(&mut tx, workspace_id, page_id, actor_id, false).await?;
@@ -1239,12 +1269,18 @@ impl PageRepository {
         if parent_id == Some(page_id) {
             return Err(PageError::Invalid { field: "parent_id" });
         }
-        let into_database = match parent_id {
-            Some(parent_id) => is_database(&mut tx, parent_id).await?,
-            None => false,
+        let database_id = match parent_id {
+            Some(parent_id) if is_database(&mut tx, parent_id).await? => Some(parent_id),
+            _ => None,
         };
-        if current.database_id.is_some() || into_database {
-            return Err(PageError::DatabaseMoveUnsupported);
+        let joins_database = database_id.is_some() && database_id != current.database_id;
+        if let Some(database_id) = database_id {
+            if current.kind == PageKind::Database {
+                return Err(PageError::DatabaseInDatabase);
+            }
+            if joins_database {
+                ensure_row_capacity(&mut tx, database_id, 1).await?;
+            }
         }
         let current_space = current.space(actor_id);
         let space = resolve_space(
@@ -1281,7 +1317,8 @@ impl PageRepository {
         .await?;
         renumber(&mut tx, &old_siblings).await?;
         let mut siblings = sibling_ids(&mut tx, workspace_id, space, parent_id, page_id).await?;
-        let index = insert_index(Some(position), siblings.len());
+        // A new row goes last in the database's manual order.
+        let index = insert_index((!joins_database).then_some(position), siblings.len());
         siblings.insert(index, page_id);
         sqlx::query(
             "UPDATE pages SET parent_id = $1, teamspace_id = $2, owner_id = $3, position = $4, \
@@ -1303,6 +1340,17 @@ impl PageRepository {
             move_descendants(&mut tx, page_id, space).await?;
         }
         renumber(&mut tx, &siblings).await?;
+        let dropped_values = carry_row_values(
+            &mut tx,
+            workspace_id,
+            page_id,
+            current.database_id,
+            database_id,
+            actor_id,
+            request_id,
+            now,
+        )
+        .await?;
         record_mutation(
             &mut tx,
             workspace_id,
@@ -1330,19 +1378,29 @@ impl PageRepository {
             .await?;
         }
         let updated_by_user = user_in_tx(&mut tx, actor_id).await?;
-        tx.commit().await?;
-        // A page (and its subtree) moved into someone's private space closes other editors.
-        CollabHub::revalidate_database(&self.database, Some(workspace_id));
-        Ok(PageRecord {
+        let page = PageRecord {
             parent_id,
             teamspace_id: space.teamspace_id(),
             private: space.teamspace_id().is_none(),
+            database_id,
             position: index as i64,
             version: current.version + 1,
             updated_by: actor_id,
             updated_by_user,
             updated_at: now,
             ..current
+        };
+        if dry_run {
+            // Nothing is kept, so nothing is audited and no realtime event goes out.
+            tx.rollback().await?;
+        } else {
+            tx.commit().await?;
+            // A page (and its subtree) moved into someone's private space closes other editors.
+            CollabHub::revalidate_database(&self.database, Some(workspace_id));
+        }
+        Ok(MovedPage {
+            page,
+            dropped_values,
         })
     }
 

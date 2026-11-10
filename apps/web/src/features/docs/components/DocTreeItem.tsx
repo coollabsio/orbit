@@ -118,7 +118,9 @@ export function DocTreeItem({
           e.preventDefault()
           e.stopPropagation()
           e.dataTransfer.dropEffect = 'move'
-          dnd.onDragOver(page.id, zoneAt(e.currentTarget, e.clientY, reorderOnly || isDatabase))
+          // A page dropped inside a database becomes a row; a database cannot.
+          const draggedDatabase = pages.find((item) => item.id === dnd.dragId)?.kind === 'database'
+          dnd.onDragOver(page.id, zoneAt(e.currentTarget, e.clientY, reorderOnly || (isDatabase && draggedDatabase)))
         }}
         onDragLeave={(e) => {
           if (!e.currentTarget.contains(e.relatedTarget as Node | null)) dnd.onDragLeave(page.id)
