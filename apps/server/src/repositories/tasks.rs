@@ -862,14 +862,14 @@ impl TaskRepository {
         }
         inserted?;
         insert_default_statuses(&mut tx, workspace_id, project_id, now).await?;
-        record_mutation(
+        self.record_write(
             &mut tx,
             workspace_id,
             actor_id,
-            "project.created",
-            "project",
+            ("project.created", "project"),
             project_id,
             request_id,
+            json!({}),
             now,
         )
         .await?;

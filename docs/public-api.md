@@ -145,6 +145,18 @@ export ORBIT_WS="$ORBIT_URL/api/public/v1/workspaces/$WORKSPACE_ID"
 curl -sS "$ORBIT_WS/projects" -H "Authorization: Bearer $ORBIT_TOKEN"
 ```
 
+`POST /workspaces/{workspace_id}/projects`. Scope: `tasks:write`, and the token must cover
+**all projects**; a token for chosen projects gets 403 `all_projects_required`, because it could
+not use the new project. Body: `{name, key, color?}`. `key` is the prefix of task identifiers:
+1 to 20 letters, digits or underscores, unique in the workspace, stored in upper case. `color` is
+`#rrggbb` (default `#6366f1`). The project gets the default workflow statuses. Answers 201 with
+the project, or 400 when the key is already used.
+
+```bash
+curl -sS -X POST "$ORBIT_WS/projects" -H "Authorization: Bearer $ORBIT_TOKEN" \
+  -H 'Content-Type: application/json' --data '{"name":"Video series","key":"VID"}'
+```
+
 `GET /workspaces/{workspace_id}/projects/{project_id}/statuses?cursor&limit`. Scope: `tasks:read`. Item:
 `{id, project_id, name, description, color, category, position, version}`.
 `category` is `unstarted`, `started`, `completed`, `cancelled` or `duplicate`.

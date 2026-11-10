@@ -64,7 +64,7 @@ pub fn router(state: PublicApiState) -> Router {
     // Workspace paths leave room for tokens with more than one workspace; today the path must
     // name the token's only workspace.
     let workspace = Router::new()
-        .route("/projects", get(projects))
+        .route("/projects", get(projects).post(create_project))
         .route("/projects/{project_id}/statuses", get(statuses))
         .route("/projects/{project_id}/labels", get(labels))
         .route("/members", get(members))
@@ -251,6 +251,12 @@ impl Responder {
             ),
             TokenApiError::Invalid(detail) => return self.invalid(detail),
             TokenApiError::NotAvailable => self.not_found(),
+            TokenApiError::AllProjectsRequired => self.problem(
+                StatusCode::FORBIDDEN,
+                "all_projects_required",
+                "All projects required",
+                "Creating a project needs a token for all projects.",
+            ),
             TokenApiError::PurgeForbidden => self.problem(
                 StatusCode::FORBIDDEN,
                 "workspace_action_forbidden",
@@ -537,7 +543,7 @@ impl From<LabelRecord> for LabelOut {
 
 #[derive(Serialize, ToSchema)]
 #[schema(as = PublicComment)]
-struct CommentOut {
+pub(crate) struct CommentOut {
     #[schema(value_type = String)]
     id: Id,
     #[schema(value_type = String)]
@@ -700,6 +706,19 @@ fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
 }
 
 #[derive(Deserialize, ToSchema)]
+#[schema(as = PublicCreateProjectBody)]
+#[serde(deny_unknown_fields)]
+struct CreateProjectBody {
+    /// 1 to 200 characters.
+    name: String,
+    /// The prefix of task identifiers (`ENG` for `ENG-12`): 1 to 20 letters, digits or
+    /// underscores, unique in the workspace. Stored in upper case.
+    key: String,
+    /// `#rrggbb`; `#6366f1` when unset.
+    color: Option<String>,
+}
+
+#[derive(Deserialize, ToSchema)]
 #[schema(as = PublicCommentBody)]
 #[serde(deny_unknown_fields)]
 struct CommentBody {
@@ -827,6 +846,37 @@ async fn projects(State(s): State<PublicApiState>, ctx: Ctx) -> Response {
     }
     .await;
     ctx.reply(StatusCode::OK, result)
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/public/v1/workspaces/{workspace_id}/projects",
+    operation_id = "public_create_project",
+    tag = "public-api",
+    summary = "Create a project",
+    description = "Creates a project with the default workflow statuses. Needs `tasks:write` and a token for all projects (403 `all_projects_required` otherwise); the new project is approved for the token from the next request on.",
+    params(("workspace_id" = String, Path, description = "The token's workspace, from `GET /me`.")),
+    request_body = CreateProjectBody,
+    responses((status = 201, description = "The new project", body = ProjectOut)),
+    security(("bearerAuth" = []))
+)]
+async fn create_project(
+    State(s): State<PublicApiState>,
+    ctx: Ctx,
+    body: Result<Json<CreateProjectBody>, JsonRejection>,
+) -> Response {
+    let body = input!(ctx, ApiTokenScope::TasksWrite, body);
+    let result = async {
+        let api = s
+            .api
+            .authorize(&ctx.principal, ApiTokenScope::TasksWrite, &ctx.request_id)
+            .await?;
+        api.create_project(body.name, &body.key, body.color)
+            .await
+            .map(ProjectOut::from)
+    }
+    .await;
+    ctx.reply(StatusCode::CREATED, result)
 }
 
 #[utoipa::path(

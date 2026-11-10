@@ -3984,6 +3984,22 @@ export type PublicCreateDocBody = {
     title?: string;
 };
 
+export type PublicCreateProjectBody = {
+    /**
+     * `#rrggbb`; `#6366f1` when unset.
+     */
+    color?: string | null;
+    /**
+     * The prefix of task identifiers (`ENG` for `ENG-12`): 1 to 20 letters, digits or
+     * underscores, unique in the workspace. Stored in upper case.
+     */
+    key: string;
+    /**
+     * 1 to 200 characters.
+     */
+    name: string;
+};
+
 export type PublicCreateTaskBody = {
     /**
      * Members of the workspace.
@@ -6340,6 +6356,74 @@ export type PublicListProjectsResponses = {
 };
 
 export type PublicListProjectsResponse = PublicListProjectsResponses[keyof PublicListProjectsResponses];
+
+export type PublicCreateProjectData = {
+    body: PublicCreateProjectBody;
+    headers?: {
+        /**
+         * Frontend contract identifier. Unsupported values return contract_mismatch; current value: orbit-api-v1.
+         */
+        'X-Orbit-Contract'?: string;
+    };
+    path: {
+        /**
+         * The token's workspace, from `GET /me`.
+         */
+        workspace_id: string;
+    };
+    query?: never;
+    url: '/api/public/v1/workspaces/{workspace_id}/projects';
+};
+
+export type PublicCreateProjectErrors = {
+    /**
+     * invalid_proxy_headers
+     */
+    400: Problem;
+    /**
+     * unauthorized
+     */
+    401: Problem;
+    /**
+     * insufficient_scope
+     */
+    403: Problem;
+    /**
+     * not_found
+     */
+    404: Problem;
+    /**
+     * contract_mismatch
+     */
+    409: Problem;
+    /**
+     * request_too_large
+     */
+    413: Problem;
+    /**
+     * rate_limit_exceeded
+     */
+    429: Problem;
+    /**
+     * internal_error
+     */
+    500: Problem;
+    /**
+     * internal_error or another documented stable code
+     */
+    default: Problem;
+};
+
+export type PublicCreateProjectError = PublicCreateProjectErrors[keyof PublicCreateProjectErrors];
+
+export type PublicCreateProjectResponses = {
+    /**
+     * The new project
+     */
+    201: PublicProject;
+};
+
+export type PublicCreateProjectResponse = PublicCreateProjectResponses[keyof PublicCreateProjectResponses];
 
 export type PublicListLabelsData = {
     body?: never;

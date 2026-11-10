@@ -133,6 +133,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::backup_item_routes::restore_backup_item,
         crate::public_api::me,
         crate::public_api::projects,
+        crate::public_api::create_project,
         crate::public_api::statuses,
         crate::public_api::labels,
         crate::public_api::members,

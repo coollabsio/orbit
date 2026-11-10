@@ -133,6 +133,7 @@ fn principal(
             .map_err(|_| OAuthError::server())?,
         workspace_id,
         project_ids,
+        all_projects: row.get::<bool, _>("all_projects"),
         creator_id: user_id,
         actor_id: user_id,
         service_account: None,

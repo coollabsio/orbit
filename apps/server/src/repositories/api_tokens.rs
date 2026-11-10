@@ -124,6 +124,8 @@ pub struct ApiTokenPrincipal {
     /// The approved projects, read again on each request, so an all-projects credential also
     /// covers projects created after it.
     pub project_ids: Vec<Id>,
+    /// Whether the credential covers every live project, including projects created later.
+    pub all_projects: bool,
     pub creator_id: Id,
     /// The member whose access a request is checked with: the creator of a personal token, the
     /// workspace owner for a service account (which does not depend on its creator).
@@ -409,6 +411,7 @@ impl ApiTokenRepository {
             token_id,
             workspace_id,
             project_ids,
+            all_projects,
             creator_id,
             actor_id,
             service_account,

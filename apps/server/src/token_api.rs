@@ -32,11 +32,13 @@ use crate::repositories::task_filter::{
 use crate::repositories::tasks::{
     CommentContent, CommentRecord, CreateTask, LabelRecord, Page, ProjectRecord, SortOrder,
     StatusRecord, TaskChanges, TaskError, TaskFilter, TaskRecord, TaskRepository, TaskSort,
-    TaskUpdate, TokenActor, parse_task_identifier,
+    TaskUpdate, TokenActor, normalize_project_key, parse_task_identifier,
 };
 use crate::repositories::workspaces::{WorkspaceError, WorkspaceRepository};
 
 const PRIORITIES: [&str; 5] = ["none", "low", "medium", "high", "urgent"];
+/// The web app's second project color, indigo.
+const DEFAULT_PROJECT_COLOR: &str = "#6366f1";
 
 #[derive(Debug)]
 pub enum TokenApiError {
@@ -50,6 +52,9 @@ pub enum TokenApiError {
     NotAvailable,
     /// Deleting a task forever takes a workspace owner or admin.
     PurgeForbidden,
+    /// Creating a project takes a credential for all projects: one limited to chosen projects
+    /// could not use the new project.
+    AllProjectsRequired,
     Task(TaskError),
     Page(PageError),
     Internal,
@@ -612,6 +617,52 @@ impl Authorized<'_> {
             .tasks
             .approved_projects(p.workspace_id, p.actor_id, &p.project_ids)
             .await?)
+    }
+
+    /// Creates a project with the default workflow. The credential must cover all projects, so
+    /// the new project is approved for it from the next request on.
+    pub async fn create_project(
+        &self,
+        name: String,
+        key: &str,
+        color: Option<String>,
+    ) -> Result<ProjectRecord> {
+        self.need(ApiTokenScope::TasksWrite)?;
+        if !self.principal.all_projects {
+            return Err(TokenApiError::AllProjectsRequired);
+        }
+        let name = name.trim().to_owned();
+        if name.is_empty() || name.chars().count() > 200 {
+            return Err(TokenApiError::Invalid("Invalid project name"));
+        }
+        let key = normalize_project_key(key).ok_or(TokenApiError::Invalid(
+            "A project key has 1 to 20 letters, digits or underscores",
+        ))?;
+        let color = color.unwrap_or_else(|| DEFAULT_PROJECT_COLOR.to_owned());
+        if !(color.len() == 7
+            && color.starts_with('#')
+            && color[1..].bytes().all(|byte| byte.is_ascii_hexdigit()))
+        {
+            return Err(TokenApiError::Invalid("A project color is #rrggbb"));
+        }
+        let p = self.principal;
+        self.granted()
+            .create_project(
+                p.workspace_id,
+                p.actor_id,
+                name,
+                key,
+                color.to_ascii_lowercase(),
+                self.request_id,
+                TimestampMillis::now(),
+            )
+            .await
+            .map_err(|error| match error {
+                TaskError::Conflict => {
+                    TokenApiError::Invalid("A project with this key already exists")
+                }
+                error => error.into(),
+            })
     }
 
     pub async fn statuses(
