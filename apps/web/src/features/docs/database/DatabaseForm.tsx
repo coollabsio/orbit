@@ -57,8 +57,9 @@ export function DatabaseFormView({ database, viewId, form, onForm }: DatabaseFor
       () => toast.error('Could not copy the link.'),
     )
   const building = onForm !== undefined && !preview
+  // `contain` keeps the form's 640 px column out of the database page's `w-max` column, so it fits a phone.
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3 [contain:inline-size]">
       <div className="flex items-center justify-end gap-1">
         {onForm ? (
           <Button type="button" variant="ghost" size="sm" aria-pressed={preview} onClick={() => setPreview((current) => !current)}>
