@@ -204,6 +204,9 @@ struct CreateArgs {
     /// Workspace member user IDs, from list_members or get_me.
     #[serde(default)]
     assignee_ids: Vec<String>,
+    /// Label IDs of the task's project, from list_labels.
+    #[serde(default)]
+    label_ids: Vec<String>,
 }
 fn default_priority() -> String {
     "none".into()
@@ -224,6 +227,9 @@ struct UpdateArgs {
     /// Replaces the assignees with these member user IDs (from list_members or get_me); `[]`
     /// unassigns everyone.
     assignee_ids: Option<Vec<String>>,
+    /// Replaces the labels with these label IDs of the task's project (from list_labels); `[]`
+    /// removes all labels.
+    label_ids: Option<Vec<String>>,
 }
 /// A field that is present, `null` included: `null` clears the value, a missing field keeps it.
 fn present<'de, D: serde::Deserializer<'de>, T: Deserialize<'de>>(
@@ -382,12 +388,12 @@ fn tools() -> Vec<Tool> {
     let mut tools = vec![
         write_definition::<CreateArgs>(
             "create_task",
-            "Create a task in an approved project. With parent_task_id, the task is a sub-issue of that task. assignee_ids takes member user IDs.",
+            "Create a task in an approved project. With parent_task_id, the task is a sub-issue of that task. assignee_ids takes member user IDs; label_ids takes label IDs of the project, from list_labels.",
             false,
         ),
         write_definition::<UpdateArgs>(
             "update_task",
-            "Update a task using its current version. parent_task_id moves the task under another task; null detaches it. Related task projects must also be approved. assignee_ids replaces the assignees: add your get_me user id to claim a task, send [] to unassign everyone.",
+            "Update a task using its current version. parent_task_id moves the task under another task; null detaches it. Related task projects must also be approved. assignee_ids replaces the assignees: add your get_me user id to claim a task, send [] to unassign everyone. label_ids replaces the labels with label IDs of the task's project (from list_labels); [] removes all labels.",
             true,
         ),
         write_definition::<DeleteArgs>(
@@ -551,6 +557,7 @@ impl TaskTools {
                 let a: CreateArgs = arguments(&request)?;
                 let (project_id, status_id) = (parse_id(&a.project_id)?, parse_id(&a.status_id)?);
                 let assignee_ids = parse_ids(&a.assignee_ids)?;
+                let label_ids = parse_ids(&a.label_ids)?;
                 async {
                     let parent_task_id = api.optional_task_id(a.parent_task_id.as_deref()).await?;
                     api.create_task(NewTask {
@@ -560,7 +567,7 @@ impl TaskTools {
                         description: a.description,
                         priority: a.priority,
                         assignee_ids,
-                        label_ids: vec![],
+                        label_ids,
                         parent_task_id,
                         due_start_at: None,
                         due_at: None,
@@ -574,6 +581,7 @@ impl TaskTools {
                 let a: UpdateArgs = arguments(&request)?;
                 let status_id = a.status_id.as_deref().map(parse_id).transpose()?;
                 let assignee_ids = a.assignee_ids.as_deref().map(parse_ids).transpose()?;
+                let label_ids = a.label_ids.as_deref().map(parse_ids).transpose()?;
                 async {
                     let parent_task_id = match a.parent_task_id {
                         Some(parent) => Some(api.optional_task_id(parent.as_deref()).await?),
@@ -586,6 +594,7 @@ impl TaskTools {
                         priority: a.priority,
                         parent_task_id,
                         assignee_ids,
+                        label_ids,
                         ..Default::default()
                     };
                     api.update_task(&a.task_id, a.expected_version, patch).await
@@ -764,6 +773,9 @@ fn tool_error(error: TokenApiError) -> Result<CallToolResult, ErrorData> {
             TaskError::Invalid {
                 field: "assignee_ids",
             } => "assignee_ids must be distinct user IDs of workspace members who are not guests",
+            TaskError::Invalid { field: "label_ids" } => {
+                "label_ids must be distinct label IDs of the task's project, from list_labels"
+            }
             TaskError::InvalidFilter { .. } | TaskError::Invalid { .. } => "Invalid task query",
             TaskError::VersionConflict { .. } => {
                 "Task version changed; read the task again before retrying"
