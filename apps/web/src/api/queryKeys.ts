@@ -31,6 +31,9 @@ export const queryKeys = {
   memberProfile: (workspaceId: string, userId: string) => [...workspace(workspaceId), 'profiles', userId] as const,
   invitations: (workspaceId: string) => [...workspace(workspaceId), 'invitations'] as const,
   apiTokens: (workspaceId: string) => [...workspace(workspaceId), 'api-tokens'] as const,
+  /** Outgoing webhook subscriptions; each one's deliveries sit under it. */
+  webhooks: (workspaceId: string) => [...workspace(workspaceId), 'webhooks'] as const,
+  webhookDeliveries: (workspaceId: string, webhookId: string) => [...workspace(workspaceId), 'webhooks', webhookId, 'deliveries'] as const,
   /** People from Asana, Linear and Trello imports, mapped to members in Settings → Import. */
   importPeople: (workspaceId: string) => [...workspace(workspaceId), 'import-people'] as const,
   /** Full workspace exports (ZIP archives) that have not expired. */
