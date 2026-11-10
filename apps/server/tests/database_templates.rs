@@ -300,7 +300,7 @@ async fn a_template_is_never_a_row() {
         .collect();
     assert_eq!(exported, vec![db.clone(), row.clone()]);
     let all = export
-        .load_workspace(workspace_id, fixture.owner_id, "pages")
+        .load_workspace(workspace_id, fixture.owner_id, "pages", false)
         .await
         .unwrap();
     assert!(all.pages.iter().all(|page| page.id.to_string() != template));
