@@ -371,6 +371,20 @@ impl FilterGroup {
         dropped
     }
 
+    /// An old flat filter holds up to [`MAX_RULES`] children, more than a group may: the overflow
+    /// moves into a nested group with the same operator, which matches the same rows.
+    fn nest_overflow(&mut self) {
+        if !(MAX_GROUP_CHILDREN + 1..=MAX_RULES).contains(&self.children.len()) {
+            return;
+        }
+        let mut overflow = Self {
+            op: self.op,
+            children: self.children.split_off(MAX_GROUP_CHILDREN - 1),
+        };
+        overflow.nest_overflow();
+        self.children.push(FilterNode::Group(overflow));
+    }
+
     fn rules_mut(&mut self, change: &mut impl FnMut(&mut FilterRule)) {
         for child in &mut self.children {
             match child {
@@ -568,6 +582,7 @@ impl ViewConfig {
             .retain(|sort| known.contains(&sort.property_id) && sorts.insert(sort.property_id));
         self.filter
             .retain_rules(&mut |rule| known.contains(&rule.property_id));
+        self.filter.nest_overflow();
     }
 
     /// Checks limits, widths and each rule against its property's type, then drops what names
@@ -616,6 +631,7 @@ impl ViewConfig {
                 return Err(format!("config.calculations.{id}"));
             }
         }
+        self.filter.nest_overflow();
         self.filter.check("config.filter", 1, &types, &mut 0)?;
         self.repair(view_type, properties);
         Ok(())

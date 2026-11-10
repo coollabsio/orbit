@@ -2706,9 +2706,10 @@ async fn filters_nest_and_or_groups_three_levels_deep() {
             json!({"op": "or", "children": [{"op": "and", "children": [{"property_id": name, "operator": ">", "value": 1}]}]}),
             "config.filter.children[0].children[0].operator",
         ),
+        // A root group of 11 to 20 is an old flat filter: repair nests the overflow instead.
         (
-            json!({"op": "and", "children": many(11)}),
-            "config.filter.children",
+            json!({"op": "and", "children": [{"op": "or", "children": many(11)}]}),
+            "config.filter.children[0].children",
         ),
         (
             json!({"op": "and", "children": [

@@ -3,7 +3,7 @@ import { filterTypeOf } from './formula/values'
 import { datable, defaultDateProperty } from './calendar'
 import { galleryFields } from './gallery'
 import { timelineFields } from './timeline'
-import { matchesFilter, retainRules } from './filter'
+import { matchesFilter, nestOverflow, retainRules } from './filter'
 import { sortable } from './meta'
 import { sortRows } from './sort'
 import type { Database, DatabaseView, GroupProperty, LaneProperty, Property, Row, ViewConfig, ViewContext } from './types'
@@ -20,6 +20,8 @@ const TITLE_WIDTH = 280
  * property; a board whose group property is gone groups by the first status, else the first select,
  * and a lane property that is gone or is the group property is dropped. A calendar's date property that is gone
  * or is not a date takes the first `date` property.
+ * A root filter group with more children than a group may hold (an old flat filter) nests the overflow into a group
+ * with the same operator.
  * Then it appends each property missing from `columns` as a visible column, in property order.
  */
 export function repairConfig(view: DatabaseView, properties: readonly Property[]): ViewConfig {
@@ -46,7 +48,7 @@ export function repairConfig(view: DatabaseView, properties: readonly Property[]
     seenSorts.add(sort.property_id)
     return true
   })
-  const filter = config.filter ? retainRules(config.filter, (rule) => known.has(rule.property_id)) : { op: 'and' as const, children: [] }
+  const filter = config.filter ? nestOverflow(retainRules(config.filter, (rule) => known.has(rule.property_id))) : { op: 'and' as const, children: [] }
   const kept = config.group_by != null && groupable(known.get(config.group_by)) ? config.group_by : null
   const group_by = kept ?? (view.type === 'board' ? defaultGroupBy(properties) : null)
   const groupProperty = group_by === null ? undefined : known.get(group_by)

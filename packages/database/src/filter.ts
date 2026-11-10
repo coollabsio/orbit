@@ -60,6 +60,16 @@ export function retainRules(group: DatabaseFilterGroup, keep: (rule: DatabaseFil
 }
 
 /**
+ * As the server's `nest_overflow`: an old flat filter holds up to `MAX_RULES` children, more than a group may, so the
+ * overflow moves into a nested group with the same operator, which matches the same rows.
+ */
+export function nestOverflow(group: DatabaseFilterGroup): DatabaseFilterGroup {
+  if (group.children.length <= MAX_GROUP_CHILDREN || group.children.length > MAX_RULES) return group
+  const overflow = nestOverflow({ op: group.op, children: group.children.slice(MAX_GROUP_CHILDREN - 1) })
+  return { op: group.op, children: [...group.children.slice(0, MAX_GROUP_CHILDREN - 1), overflow] }
+}
+
+/**
  * Whether `row` passes `rule` on `property` (spec 4.3). A rule without a value (`null`, `""`,
  * `[]`) matches every row. Text compares ignore case. Dates compare the viewer's local days: a
  * time counts as its day in `ctx.timeZone`, and a range counts by its start, except `is`, which

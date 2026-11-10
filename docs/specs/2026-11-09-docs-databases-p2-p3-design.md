@@ -389,6 +389,9 @@ The filter shape becomes the task filter shape, with database rules as leaves:
   row.
 - Repair: a rule that names a deleted property goes; a group left empty goes; a group with one
   child stays (the UI shows it as a group).
+  A root group with 11 to 20 children (a flat P1 filter migrated as is) keeps its first 9 and
+  nests the rest into a group with the same operator, again if needed, so it matches the same
+  rows and saves again (server `nest_overflow`, `repairConfig`; fixed 2026-11-10, it was a 422).
 
 ### 5.3 Shared logic
 
