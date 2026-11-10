@@ -29,6 +29,7 @@ import { useDatabaseEnv } from './context'
 import { placeColumn } from './databaseLib'
 import { isComputed } from '@orbit/database/meta'
 import { CREATABLE_TYPES, PROPERTY_TYPES } from './propertyMeta'
+import { ButtonConfigDialog } from './ButtonConfigDialog'
 
 const CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY', 'CHF', 'CAD', 'AUD', 'HUF']
 
@@ -52,6 +53,7 @@ export function ColumnHeaderMenu({ property, config, onConfig, onFilter }: Colum
   const insertingRef = useRef(false)
   const [header, setHeader] = useState<HTMLButtonElement | null>(null)
   const isTitle = property.type === 'title'
+  const [configuringButton, setConfiguringButton] = useState(false)
 
   const rename = () => {
     const next = name.trim()
@@ -213,22 +215,32 @@ export function ColumnHeaderMenu({ property, config, onConfig, onFilter }: Colum
                     </DropdownMenuGroup>
                   </>
                 ) : null}
+                {property.type === 'button' ? (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={() => setConfiguringButton(true)}>Edit button…</DropdownMenuItem>
+                  </>
+                ) : null}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
           ) : null}
           <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={() => sortBy('asc')}>
-            <ArrowUp />
-            Sort ascending
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => sortBy('desc')}>
-            <ArrowDown />
-            Sort descending
-          </DropdownMenuItem>
-          <DropdownMenuItem onClick={() => onFilter(property.id)}>
-            <Filter />
-            Filter
-          </DropdownMenuItem>
+          {property.type === 'button' ? null : (
+            <>
+              <DropdownMenuItem onClick={() => sortBy('asc')}>
+                <ArrowUp />
+                Sort ascending
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => sortBy('desc')}>
+                <ArrowDown />
+                Sort descending
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onFilter(property.id)}>
+                <Filter />
+                Filter
+              </DropdownMenuItem>
+            </>
+          )}
           {isTitle ? null : (
             <DropdownMenuItem
               onClick={() =>
@@ -278,6 +290,7 @@ export function ColumnHeaderMenu({ property, config, onConfig, onFilter }: Colum
           </PopoverContent>
         ) : null}
       </Popover>
+      {configuringButton && property.type === 'button' ? <ButtonConfigDialog property={property} onClose={() => setConfiguringButton(false)} /> : null}
     </>
   )
 }

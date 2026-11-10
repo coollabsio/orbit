@@ -12,6 +12,7 @@ import type {
   DatabaseViewColumn,
   DatabaseViewSort,
 } from '@orbit/api/generated/types.gen'
+import type { ButtonConfig } from './buttons'
 
 export type {
   DatabaseCalculation,
@@ -67,8 +68,9 @@ export type PropertyKind =
   | { type: 'select' | 'multi_select'; config: { options: SelectOption[] } }
   | { type: 'status'; config: { options: StatusOption[] } }
   | { type: 'date'; config: DateConfig }
+  | { type: 'button'; config: ButtonConfig }
   | {
-      type: Exclude<DatabasePropertyType, 'number' | 'select' | 'multi_select' | 'status' | 'date'>
+      type: Exclude<DatabasePropertyType, 'number' | 'select' | 'multi_select' | 'status' | 'date' | 'button'>
       config: Record<string, never>
     }
 

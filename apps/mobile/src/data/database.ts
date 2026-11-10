@@ -24,6 +24,7 @@ export const PROPERTY_ICONS: Record<DatabasePropertyType, IconName> = {
   created_by: 'userCircle',
   last_edited_time: 'clock',
   last_edited_by: 'userCircle',
+  button: 'flash',
 }
 
 export const VIEW_ICONS: Record<DatabaseView['type'], IconName> = { table: 'grid', board: 'kanban', list: 'list', calendar: 'calendar', gallery: 'gallery', timeline: 'rowHorizontal' }
@@ -75,9 +76,9 @@ export function summaryLines(properties: readonly Property[], config: ViewConfig
   })
 }
 
-/** Of `shown`, the properties the row has a value for: an empty one leaves no gap. */
+/** Of `shown`, the properties the row has a value for (and its buttons): an empty one leaves no gap. */
 export function filledProperties(row: Row, shown: readonly Property[]): Property[] {
-  return shown.filter((property) => cellOf(row, property) !== null)
+  return shown.filter((property) => property.type === 'button' || cellOf(row, property) !== null)
 }
 
 /** The web's option pill colors (`cells/Pill.tsx`), one class set per scheme: Uniwind's `dark:` does not override. */

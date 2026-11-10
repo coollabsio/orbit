@@ -101,6 +101,8 @@ export function matches(row: Row, rule: DatabaseFilterRule, property: Property, 
       const target = typeof value === 'string' ? ruleDay(value, ctx) : null
       return target === null ? true : matchDate(cell, rule, target, ctx)
     }
+    case 'button':
+      return true
     default:
       return unreachable(property)
   }

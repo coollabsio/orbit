@@ -18,11 +18,17 @@ export const PROPERTY_TYPE_LABELS: Record<DatabasePropertyType, string> = {
   created_by: 'Created by',
   last_edited_time: 'Last edited time',
   last_edited_by: 'Last edited by',
+  button: 'Button',
 }
 
 /** Types whose value comes from the row page: they cannot be edited, cleared or pasted into. */
 export function isComputed(type: DatabasePropertyType): boolean {
   return type === 'created_time' || type === 'created_by' || type === 'last_edited_time' || type === 'last_edited_by'
+}
+
+/** Whether views can filter and sort by the type (a button has no value). */
+export function sortable(type: DatabasePropertyType): boolean {
+  return type !== 'button'
 }
 
 /** The filter operators of each type (spec 4.3), the first one being the default. */
@@ -49,6 +55,8 @@ export function operatorsOf(type: DatabasePropertyType): DatabaseFilterOperator[
     case 'created_by':
     case 'last_edited_by':
       return ['is', 'is_not']
+    case 'button':
+      return []
   }
 }
 

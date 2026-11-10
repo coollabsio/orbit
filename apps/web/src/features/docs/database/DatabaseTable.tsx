@@ -133,12 +133,13 @@ export function DatabaseTable(props: DatabaseTableProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, editing])
 
-  const editable = (property: Property) => canEditValues && !isComputed(property.type)
+  const editable = (property: Property) => canEditValues && !isComputed(property.type) && property.type !== 'button'
   const commit = (row: Row, property: Property, value: CellValue | null) =>
     updateValues.mutate({ rowId: row.id, values: { [property.id]: apiValue(value) } })
   const commitTitle = (row: Row, title: string) => updateTitle.mutate({ rowId: row.id, title: title.slice(0, 500), version: row.version })
   const saveOptions = (property: Property) => (options: SelectOption[]) =>
     updateProperty.mutateAsync({ propertyId: property.id, body: { config: { ...property.config, options } } }).then(() => undefined)
+  const pressIn = (target: HTMLElement) => target.closest('[data-cell]')?.querySelector<HTMLButtonElement>('[data-button-press]')?.click()
   const toggleCheckbox = (row: Row, property: Property) => commit(row, property, cellOf(row, property) ? null : { kind: 'checked' })
 
   const move = (rowDelta: number, colDelta: number) => {
@@ -196,6 +197,7 @@ export function DatabaseTable(props: DatabaseTableProps) {
       case 'Enter':
         handled()
         if (property.type === 'checkbox') return editable(property) ? toggleCheckbox(row, property) : undefined
+        if (property.type === 'button') return pressIn(event.target as HTMLElement)
         setEditAnchor((event.target as HTMLElement).closest<HTMLElement>('[data-cell]'))
         return setEditing(editable(property))
       case 'Escape':

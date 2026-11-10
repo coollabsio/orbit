@@ -52,7 +52,7 @@ interface WriteSpec<Vars, Result> {
   error: string
 }
 
-function useDatabaseWrite<Vars, Result>(databaseId: string, linkId: string, notify: Notify, spec: WriteSpec<Vars, Result>) {
+export function useDatabaseWrite<Vars, Result>(databaseId: string, linkId: string, notify: Notify, spec: WriteSpec<Vars, Result>) {
   const { workspaceId } = useOrbit()
   const queryClient = useQueryClient()
   const key = keys.database(workspaceId, databaseId, linkId)

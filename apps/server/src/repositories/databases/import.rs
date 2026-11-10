@@ -360,7 +360,8 @@ fn convert_cell(
         | PropertyKind::CreatedTime
         | PropertyKind::CreatedBy
         | PropertyKind::LastEditedTime
-        | PropertyKind::LastEditedBy => None,
+        | PropertyKind::LastEditedBy
+        | PropertyKind::Button(_) => None,
     }
 }
 

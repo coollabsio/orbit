@@ -10,6 +10,7 @@ import { type Notify, useDatabase, useSaveOptions, useUpdateValues, useViewConte
 import { useTheme } from '../../theme'
 import { Icon, Text } from '../../ui'
 import { Sheet } from '../tasks/Sheet'
+import { ButtonPressContext } from './ButtonCell'
 import { CellValue as ValueView } from './cells'
 import { ValueEditor } from './ValueEditor'
 
@@ -44,13 +45,14 @@ export function PropertyList({ databaseId, rowId, notify }: { databaseId: string
   const edited = editing ? byId.get(editing) : undefined
 
   return (
+    <ButtonPressContext.Provider value={{ databaseId, linkId: '', notify }}>
     <View accessibilityLabel="Properties" className="mx-3 mb-4 pb-3 border-b border-border">
       {properties.map((property) => (
         <PropertyLine
           key={property.id}
           property={property}
           row={row}
-          editable={!readOnly && !isComputed(property.type)}
+          editable={!readOnly && !isComputed(property.type) && property.type !== 'button'}
           onEdit={() => {
             setEditing(property.id)
             setVisible(true)
@@ -73,6 +75,7 @@ export function PropertyList({ databaseId, rowId, notify }: { databaseId: string
         ) : null}
       </Sheet>
     </View>
+    </ButtonPressContext.Provider>
   )
 }
 
@@ -104,7 +107,7 @@ function PropertyLine({ property, row, editable, onEdit, onToggle, ctx }: {
       <View className="min-h-[38px] flex-1 justify-center items-start py-1.5 px-1.5">
         {checkbox ? (
           <Icon name={value ? 'checkSquare' : 'square'} size={18} color={value ? colors.primary : colors.mutedForeground} />
-        ) : value === null && !isComputed(property.type) ? (
+        ) : value === null && !isComputed(property.type) && property.type !== 'button' ? (
           <Text className="text-[14px] text-muted-foreground/70">Empty</Text>
         ) : (
           <ValueView property={property} row={row} ctx={ctx} />

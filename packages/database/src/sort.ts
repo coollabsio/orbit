@@ -70,6 +70,8 @@ function sortKey(row: Row, property: Property, ctx: ViewContext): SortKey {
       const start = cell.date.start
       return start.kind === 'moment' ? start.ms : dayStartMs(start.day, ctx.timeZone)
     }
+    case 'button':
+      return null
     default:
       return unreachable(property)
   }

@@ -81,7 +81,8 @@ function PropertyLine({ property, row, today }: { property: Property; row: Row; 
   const [anchor, setAnchor] = useState<HTMLDivElement | null>(null)
   const [editing, setEditing] = useState(false)
   const Icon = PROPERTY_TYPES[property.type].icon
-  const editable = canEditValues && !isComputed(property.type)
+  const button = property.type === 'button'
+  const editable = canEditValues && !isComputed(property.type) && !button
   const value = cellOf(row, property)
   const commit = (next: CellValue | null) => updateValues.mutate({ rowId: row.id, values: { [property.id]: apiValue(next) } })
   const toggleToday = () => updateValues.mutate({ rowId: row.id, values: { [property.id]: today ? null : TODAY } })
@@ -120,7 +121,7 @@ function PropertyLine({ property, row, today }: { property: Property; row: Row; 
           </span>
         ) : today ? (
           <span className="text-muted-foreground">Today (the day the row is added)</span>
-        ) : value === null && !isComputed(property.type) ? (
+        ) : value === null && !isComputed(property.type) && !button ? (
           <span className="text-muted-foreground/70">Empty</span>
         ) : (
           // Wrapped cells show every item, so the width is not measured.

@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { applyView, repairConfig } from '@orbit/database/view'
 import { EMPTY_FILTER, filterRules } from '@orbit/database/filter'
 import { appendChild } from '@orbit/database/filterTree'
-import { newRule, simpleRules } from '@orbit/database/meta'
+import { newRule, simpleRules, sortable } from '@orbit/database/meta'
 import { newRowValues } from '@orbit/database/newRow'
 import { defaultTemplate, templateFill, templatesOf } from '@orbit/database/templates'
 import type { Database, DatabaseView, Property, ViewConfig } from '@orbit/database/types'
@@ -273,7 +273,7 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
         </div>
       ) : null}
       <FilterBar
-        properties={database.properties}
+        properties={database.properties.filter((property) => sortable(property.type))}
         config={config}
         onConfig={changeConfig}
         openRule={openRule}

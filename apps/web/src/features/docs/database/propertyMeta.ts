@@ -2,6 +2,7 @@ import {
   ArrowCircleDown,
   Calendar,
   CheckSquare,
+  Flash,
   Clock,
   Hashtag,
   Link,
@@ -31,6 +32,7 @@ export const PROPERTY_TYPES: Record<DatabasePropertyType, { label: string; icon:
   created_by: { label: PROPERTY_TYPE_LABELS.created_by, icon: UserCircle },
   last_edited_time: { label: PROPERTY_TYPE_LABELS.last_edited_time, icon: Clock },
   last_edited_by: { label: PROPERTY_TYPE_LABELS.last_edited_by, icon: UserCircle },
+  button: { label: PROPERTY_TYPE_LABELS.button, icon: Flash },
 }
 
 /** The types a user can give a property, in menu order (a database has exactly one title). */
@@ -48,4 +50,5 @@ export const CREATABLE_TYPES: DatabasePropertyType[] = [
   'created_by',
   'last_edited_time',
   'last_edited_by',
+  'button',
 ]

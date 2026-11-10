@@ -25,6 +25,7 @@ use crate::collab::CollabHub;
 
 mod agent;
 mod board;
+mod buttons;
 mod calendar;
 mod computed;
 mod export;
@@ -36,6 +37,7 @@ mod query;
 mod search;
 mod templates;
 mod timeline;
+pub use buttons::{ButtonAction, ButtonConfig, ButtonPress, CreatedRow, MAX_ACTIONS};
 pub use calendar::CalendarMode;
 pub use computed::{ComputeScope, RelatedPage, is_computed};
 pub use agent::{AgentDatabase, AgentQuery, AgentRow, AgentRowPage};
@@ -101,6 +103,7 @@ pub enum PropertyType {
     CreatedBy,
     LastEditedTime,
     LastEditedBy,
+    Button,
 }
 
 impl PropertyType {
@@ -120,6 +123,7 @@ impl PropertyType {
             Self::CreatedBy => "created_by",
             Self::LastEditedTime => "last_edited_time",
             Self::LastEditedBy => "last_edited_by",
+            Self::Button => "button",
         }
     }
 
@@ -127,7 +131,8 @@ impl PropertyType {
         serde_json::from_value(Value::String(value.to_owned())).ok()
     }
 
-    /// Read from the row's page, never stored as a value (and never set through values).
+    /// Read from the row's page (or, for a button, nothing at all), never stored as a value (and
+    /// never set through values).
     const fn computed(self) -> bool {
         matches!(
             self,
@@ -136,6 +141,7 @@ impl PropertyType {
                 | Self::CreatedBy
                 | Self::LastEditedTime
                 | Self::LastEditedBy
+                | Self::Button
         )
     }
 }
@@ -246,6 +252,8 @@ pub enum PropertyKind {
     CreatedBy,
     LastEditedTime,
     LastEditedBy,
+    /// Stores no value: a press runs its actions (`buttons`).
+    Button(ButtonConfig),
 }
 
 /// An option as clients send it: a missing id gets a new one.
@@ -288,6 +296,7 @@ impl PropertyKind {
             Self::CreatedBy => PropertyType::CreatedBy,
             Self::LastEditedTime => PropertyType::LastEditedTime,
             Self::LastEditedBy => PropertyType::LastEditedBy,
+            Self::Button(_) => PropertyType::Button,
         }
     }
 
@@ -309,6 +318,7 @@ impl PropertyKind {
             PropertyType::CreatedBy => Self::CreatedBy,
             PropertyType::LastEditedTime => Self::LastEditedTime,
             PropertyType::LastEditedBy => Self::LastEditedBy,
+            PropertyType::Button => Self::Button(ButtonConfig::default()),
         }
     }
 
@@ -332,6 +342,7 @@ impl PropertyKind {
             PropertyType::Date => {
                 Self::Date(serde_json::from_value(config.clone()).map_err(invalid)?)
             }
+            PropertyType::Button => Self::Button(ButtonConfig::parse(config)?),
             PropertyType::Select | PropertyType::MultiSelect | PropertyType::Status => {
                 let input: OptionsInput =
                     serde_json::from_value(config.clone()).map_err(invalid)?;
@@ -365,6 +376,7 @@ impl PropertyKind {
             Self::Date(config) => json!(config),
             Self::Select(list) | Self::MultiSelect(list) => options(list),
             Self::Status(list) => json!({ "options": list }),
+            Self::Button(config) => json!(config),
             _ => json!({}),
         }
     }
@@ -730,7 +742,8 @@ fn parse_value(kind: &PropertyKind, raw: &Value) -> Result<Option<CellValue>, ()
         | PropertyKind::CreatedTime
         | PropertyKind::CreatedBy
         | PropertyKind::LastEditedTime
-        | PropertyKind::LastEditedBy => return Err(()),
+        | PropertyKind::LastEditedBy
+        | PropertyKind::Button(_) => return Err(()),
     };
     Ok(value)
 }
@@ -1093,6 +1106,7 @@ fn rule_value(property_type: PropertyType, operator: FilterOperator) -> Option<R
             Op::Is | Op::IsNot => RuleValue::People,
             _ => return None,
         },
+        Type::Button => return None,
     })
 }
 
@@ -2470,20 +2484,51 @@ impl DatabaseRepository {
         workspace_id: Id,
         database_id: Id,
         actor_id: Id,
-        mut input: NewRow,
+        input: NewRow,
         template: Option<(Id, String)>,
         request_id: &str,
         now: TimestampMillis,
     ) -> Result<DatabaseRow, DatabaseError> {
         let mut tx = self.database.immediate_transaction().await?;
-        let page = open(&mut tx, workspace_id, database_id, actor_id).await?;
-        ensure_row_capacity(&mut tx, database_id, 1).await?;
-        ensure_trial_capacity(&self.database, &mut tx, workspace_id, TrialLimit::Pages, 1).await?;
-        let properties = properties_in_tx(&mut tx, database_id).await?;
+        let row = Self::insert_row_in_tx(
+            &self.database,
+            &mut tx,
+            row_id,
+            workspace_id,
+            database_id,
+            actor_id,
+            input,
+            template,
+            request_id,
+            now,
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(row)
+    }
+
+    /// [`Self::insert_row`] inside the caller's write transaction (a button's `add_row`).
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn insert_row_in_tx(
+        database: &Database,
+        tx: &mut Transaction<'_, Any>,
+        row_id: Id,
+        workspace_id: Id,
+        database_id: Id,
+        actor_id: Id,
+        mut input: NewRow,
+        template: Option<(Id, String)>,
+        request_id: &str,
+        now: TimestampMillis,
+    ) -> Result<DatabaseRow, DatabaseError> {
+        let page = open(tx, workspace_id, database_id, actor_id).await?;
+        ensure_row_capacity(tx, database_id, 1).await?;
+        ensure_trial_capacity(database, tx, workspace_id, TrialLimit::Pages, 1).await?;
+        let properties = properties_in_tx(tx, database_id).await?;
         let fill = match template {
             Some((template_id, today)) => Some(
                 templates::fill(
-                    &mut tx,
+                    tx,
                     workspace_id,
                     database_id,
                     template_id,
@@ -2498,10 +2543,10 @@ impl DatabaseRepository {
         if let Some(fill) = &fill {
             fill.apply(&mut input);
         }
-        let values = parse_values(&mut tx, workspace_id, &properties, &input.values).await?;
+        let values = parse_values(tx, workspace_id, &properties, &input.values).await?;
         let space = page.space(actor_id);
         let mut siblings =
-            templates::row_ids(&mut tx, workspace_id, space, database_id, row_id).await?;
+            templates::row_ids(tx, workspace_id, space, database_id, row_id).await?;
         let index = placement_index(&siblings, input.placement)?;
         siblings.insert(index, row_id);
         let search_values: HashMap<Id, CellValue> = values
@@ -2526,12 +2571,12 @@ impl DatabaseRepository {
         .bind(now.as_millis())
         .bind(now.as_millis())
         .bind(search::search_text(&properties, &search_values))
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
-        renumber(&mut tx, &siblings).await?;
+        renumber(tx, &siblings).await?;
         if let Some(fill) = &fill {
             templates::copy_body(
-                &mut tx,
+                tx,
                 workspace_id,
                 fill.page_id,
                 &fill.content,
@@ -2545,7 +2590,7 @@ impl DatabaseRepository {
         for (property_id, value) in &values {
             if let Some(value) = value {
                 upsert_value(
-                    &mut tx,
+                    tx,
                     workspace_id,
                     &row,
                     *property_id,
@@ -2557,7 +2602,7 @@ impl DatabaseRepository {
             }
         }
         record_with(
-            &mut tx,
+            tx,
             workspace_id,
             actor_id,
             "database.row_created",
@@ -2568,9 +2613,7 @@ impl DatabaseRepository {
         )
         .await?;
         let scope = ComputeScope::utc(workspace_id, actor_id);
-        let row = single_row(&mut tx, &scope, database_id, row_id).await?;
-        tx.commit().await?;
-        Ok(row)
+        single_row(tx, &scope, database_id, row_id).await
     }
 
     /// Sets (or clears, with `null`) values of a row. Last write wins; the row's `updated_*`

@@ -7,6 +7,7 @@ import {
   parseDateText,
   pointText,
 } from './dates'
+import { parseButtonConfig } from './buttons'
 import {
   DATE_FORMATS,
   NUMBER_FORMATS,
@@ -78,6 +79,8 @@ export function parseProperty(property: DatabaseProperty): Property {
     case 'last_edited_time':
     case 'last_edited_by':
       return { ...rest, type: rest.type, config: {} }
+    case 'button':
+      return { ...rest, type: rest.type, config: parseButtonConfig(config) }
     default:
       return unreachable(rest.type)
   }
@@ -134,6 +137,7 @@ export function parseValue(property: Property, raw: unknown): CellValue | null {
     case 'created_by':
     case 'last_edited_time':
     case 'last_edited_by':
+    case 'button':
       return null
     default:
       return unreachable(property)
@@ -171,6 +175,8 @@ export function cellOf(row: Row, property: Property): CellValue | null {
     case 'checkbox':
     case 'url':
       return row.values[property.id] ?? null
+    case 'button':
+      return null
     default:
       return unreachable(property)
   }
@@ -275,6 +281,7 @@ export function valueFromText(property: Property, input: string, ctx: ViewContex
     case 'created_by':
     case 'last_edited_time':
     case 'last_edited_by':
+    case 'button':
       return null
     default:
       return unreachable(property)

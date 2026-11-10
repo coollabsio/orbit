@@ -246,6 +246,17 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
   with that date (plus filter values and the default template). Week start: the locale, or "⋯ → Start week on" (this
   browser, `orbit:calendar-week-start`). Mobile: list views show all visible properties; a calendar is a month grid with
   dots and the tapped day's rows under it (`components/database/Calendar.tsx`), no drag.
+- Database button property (databases P2/P3 spec section 17, server `repositories/databases/buttons.rs`, shared
+  `@orbit/database/buttons`). Config `{label, actions (max 5), confirm}`; actions `set_values` (this row), `add_row` (this
+  or another database the presser can open, appended) and `open_url` (one, client side). Values take `"me"` (person),
+  `"today"`/`"now"` (date), and in `add_row` a title string and `"this_row"`. `POST /databases/{id}/rows/{row}/press/
+  {property}` `{today?}` runs the server actions in one transaction (any failure rolls back all; 422 names
+  `actions[i]`), records `database.button_pressed` (plus `database.row_created` per added row) and returns `{row,
+  created_rows, open_url?}`; 10 presses per user per second per server (429 `database_button_rate_limit`). A button
+  stores no value, cannot be filtered or sorted, and is skipped by search, CSV import and forms. Web: the cell button
+  (confirm dialog, spinner, error toast; Enter presses it in the table), "Edit property → Edit button…" opens
+  `ButtonConfigDialog`. Mobile presses in the row's property list and in list, gallery, timeline and calendar rows
+  (`components/database/ButtonCell.tsx`); its config is edited on the web. Notion buttons stay skipped.
 - Database gallery and timeline views (databases P2/P3 spec section 16). Gallery (`database/DatabaseGallery.tsx`, shared
   `@orbit/database/gallery`): a grid of 180/260/340 px cards (`card_size`) with a 3:2 preview (`card_preview`: `none`,
   `cover`, `content` = the body's first image else its first 300 characters, or `{files: id}` = a files property's

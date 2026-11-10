@@ -73,6 +73,7 @@ function valueFor(rule: DatabaseFilterRule, property: Property, ctx: ViewContext
     case 'created_by':
     case 'last_edited_time':
     case 'last_edited_by':
+    case 'button':
       return null
   }
 }

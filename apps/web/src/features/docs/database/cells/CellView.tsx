@@ -8,6 +8,7 @@ import { cellOf, displayText, options } from '@orbit/database/values'
 import type { Property, Row, StatusOption } from '@orbit/database/types'
 import { useDatabaseEnv } from '../context'
 import { isComputed } from '@orbit/database/meta'
+import { ButtonCell } from './ButtonCell'
 import { Pill } from './Pill'
 
 interface CellViewProps {
@@ -64,6 +65,8 @@ export function CellView({ property, row, width, wrap, onToggle }: CellViewProps
     case 'text':
     case 'date':
       return <Text wrap={wrap}>{displayText(property, value, ctx)}</Text>
+    case 'button':
+      return <ButtonCell property={property} row={row} />
   }
 }
 

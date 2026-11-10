@@ -18,7 +18,8 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::task_routes::ProblemBody,
         crate::workspace_routes::ProblemBody,
         crate::attachment_routes::AttachmentProblem,
-        crate::repositories::task_filter::FilterGroup
+        crate::repositories::task_filter::FilterGroup,
+        crate::repositories::databases::ButtonConfig
     )),
     modifiers(&ProblemDetails),
     paths(
@@ -250,6 +251,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::database_routes::update_database_row_values,
         crate::database_routes::trash_database_rows,
         crate::database_routes::move_database_row,
+        crate::database_routes::buttons::press_database_button,
         crate::database_routes::import::import_database_csv,
         crate::database_routes::import::create_database_from_csv,
         crate::database_routes::templates::create_database_template,

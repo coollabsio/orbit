@@ -23,6 +23,7 @@ import { alpha, useTheme } from '../../theme'
 import { Avatar, Button, ErrorView, Icon, IconButton, LoadingView, PullRefresh, Text } from '../../ui'
 import { TextInput } from '../../ui/scaled'
 import { Sheet, SheetList, SheetNote, SheetRow, useSheet } from '../tasks/Sheet'
+import { ButtonPressContext } from './ButtonCell'
 import { Calendar } from './Calendar'
 import { Gallery } from './Gallery'
 import { TimelineList } from './TimelineList'
@@ -143,7 +144,7 @@ export function DatabaseView({ databaseId, linkId = '', initialView = null, head
   const moving = open?.kind === 'move' ? database.rows.find((row) => row.id === open.rowId) : undefined
 
   return (
-    <>
+    <ButtonPressContext.Provider value={{ databaseId, linkId, notify }}>
       {view.type === 'board' ? (
         <ScrollView contentContainerClassName="pb-8" keyboardShouldPersistTaps="handled" refreshControl={refresh}>
           {header}
@@ -243,7 +244,7 @@ export function DatabaseView({ databaseId, linkId = '', initialView = null, head
           />
         ) : null}
       </Sheet>
-    </>
+    </ButtonPressContext.Provider>
   )
 }
 

@@ -28,6 +28,7 @@ use crate::task_routes::{
     request_id_value, validation,
 };
 
+pub(crate) mod buttons;
 pub(crate) mod import;
 pub(crate) mod templates;
 
@@ -36,6 +37,7 @@ pub struct DatabaseState {
     identity: Arc<IdentityRepository>,
     databases: Arc<DatabaseRepository>,
     cookie_mode: CookieMode,
+    presses: Arc<buttons::PressLimiter>,
 }
 
 impl DatabaseState {
@@ -45,6 +47,7 @@ impl DatabaseState {
             databases: Arc::new(DatabaseRepository::new(identity.database().clone())),
             identity,
             cookie_mode,
+            presses: Arc::default(),
         }
     }
 }
@@ -81,6 +84,10 @@ pub fn database_router(state: DatabaseState) -> Router {
         .route(
             &format!("{BASE}/rows/{{row_id}}/move"),
             post(move_database_row),
+        )
+        .route(
+            &format!("{BASE}/rows/{{row_id}}/press/{{property_id}}"),
+            post(buttons::press_database_button),
         )
         .merge(import::routes())
         .route(

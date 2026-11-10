@@ -1405,6 +1405,30 @@ MCP: not exposed.
 Server: each action; rollback when one action fails; access to an `add_row` target in another
 space; `"me"` and `"today"`; rate limit.
 
+### 17.7 Status
+
+Done (2026-11-10), without tests in this round (17.6 is still to write). Code: server
+`repositories/databases/buttons.rs` and `database_routes/buttons.rs`, shared
+`@orbit/database/buttons`, web `database/ButtonConfigDialog.tsx`, `cells/ButtonCell.tsx` and
+`buttonApi.ts`, mobile `components/database/ButtonCell.tsx`. No migration (a property type is
+checked in Rust only).
+
+Deviations:
+
+- The press body is `{today?: "YYYY-MM-DD"}`, the client's day, as `POST …/rows` takes it for
+  templates, not `?tz`. `"now"` is the server's UTC time.
+- Placeholders also work as a date's `start` or `end`. In `add_row`, a string under the title
+  property is the new row's title, and new rows go last.
+- Values of properties deleted after the config was saved are skipped at the press. The config
+  is checked for shape only when it is saved (limits, URL, at most one `open_url`); the values
+  are checked at the press (422 `actions[i].values.<id>`).
+- `"this_row"` becomes `["<row id>"]` before the target's normal value check, so it works once
+  the relation type accepts that shape (item 9). The web editor does not offer it yet.
+- The rate limit is kept in memory per server (`PressLimiter`), not shared through the database.
+- No "increment a number" action (not in 17.2).
+- A button cannot be filtered or sorted (the filter and sort pickers leave it out). Export writes
+  an empty cell.
+
 ## 18. Item 16: Form view (P3, members-only part M; public part out of scope)
 
 ### 18.1 Recommendation (D-P3-4)
