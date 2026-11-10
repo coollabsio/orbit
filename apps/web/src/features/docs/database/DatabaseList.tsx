@@ -9,7 +9,7 @@ import { CellView } from './cells/CellView'
 import { useDatabaseEnv } from './context'
 import { dropAfterRowId } from './databaseLib'
 
-const PROPERTY_WIDTH = 160
+const PROPERTY_WIDTH = 240
 
 interface DatabaseListProps {
   database: Database
@@ -153,7 +153,7 @@ function ListLine({ row, title, properties, draggable, dragging, drop, onOpen, o
       {filled.length > 0 ? (
         <div className="flex min-w-0 shrink items-center justify-end gap-3 overflow-hidden text-[13px] text-muted-foreground">
           {filled.map((property) => (
-            <div key={property.id} className="flex max-w-40 min-w-0 shrink-0 items-center" title={property.name}>
+            <div key={property.id} className="flex max-w-60 min-w-0 shrink-0 items-center" title={property.name}>
               <CellView property={property} row={row} width={PROPERTY_WIDTH} wrap={false} />
             </div>
           ))}
