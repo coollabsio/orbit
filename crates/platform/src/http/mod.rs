@@ -19,7 +19,7 @@ use tower::{Layer, Service};
 use crate::{Database, Problem, RateLimitConfig};
 use rate_limit::RateLimiter;
 
-pub use limits::HttpLimits;
+pub use limits::{HttpLimits, LargeUpload};
 pub use request_id::RequestId;
 pub use security::{ClientIp, OriginPolicy, RequestTransport, bearer_token};
 use security::{add_security_headers, inspect_request, strip_forwarding_headers};

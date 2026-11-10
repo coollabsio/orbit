@@ -15,17 +15,35 @@ afterEach(() => {
   else Reflect.deleteProperty(navigator, 'clipboard')
 })
 
-function renderPage(role: 'owner' | 'admin' | 'member') {
+function renderPage(role: 'owner' | 'admin' | 'member' | 'guest') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   const workspace = testWorkspace(role)
   return render(<QueryClientProvider client={client}><WorkspaceContext.Provider value={{ workspace, workspaces: [workspace], selectWorkspace: () => {} }}><ApiTokensPage /></WorkspaceContext.Provider></QueryClientProvider>)
 }
 
-test('members cannot manage API tokens', () => {
+test('guests cannot manage API tokens', () => {
   globalThis.fetch = mock(() => Promise.reject(new Error('must not fetch'))) as unknown as typeof fetch
-  const view = renderPage('member')
+  const view = renderPage('guest')
   expect(view.getByText('Only workspace owners and administrators can manage API tokens.')).toBeTruthy()
   expect(globalThis.fetch).not.toHaveBeenCalled()
+})
+
+test('members can create only a personal export token', async () => {
+  const requests: Request[] = []
+  globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const request = new Request(input, init)
+    requests.push(request)
+    if (request.method === 'POST') return Response.json({ id: 'token-1', name: 'Orbit import', project_ids: [], all_projects: false, token_prefix: 'orb_12345678', scopes: ['workspace:export:personal'], created_at: '2026-11-09T10:00:00Z', last_used_at: null, token: 'orb_123456789-secret' }, { status: 201 })
+    return Response.json([])
+  }) as unknown as typeof fetch
+  const view = renderPage('member')
+  expect(view.queryAllByLabelText('Token type')).toHaveLength(0)
+  expect(view.queryAllByText('Use a service account')).toHaveLength(0)
+  await userEvent.type(view.getByLabelText(/Name/), 'Orbit import')
+  fireEvent.click(view.getByRole('button', { name: 'Create token' }))
+  await view.findByText('orb_123456789-secret')
+  const post = requests.find((request) => request.method === 'POST')
+  expect(await post?.json()).toEqual({ name: 'Orbit import', project_ids: [], all_projects: false, scopes: ['workspace:export:personal'], service_account: false, expires_in_days: null })
 })
 
 test('admins can create a token and see its secret once', async () => {

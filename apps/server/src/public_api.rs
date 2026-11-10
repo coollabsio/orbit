@@ -3,13 +3,14 @@
 //! fields of each record and writes problem+json errors. It takes no cookies or sessions.
 use std::sync::Arc;
 
+use axum::body::Body;
 use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::{FromRequestParts, OriginalUri, Path, Query, RawPathParams, Request, State};
 use axum::http::request::Parts;
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use orbit_platform::{Id, Problem, RequestId, TimestampMillis};
 use serde::{Deserialize, Serialize};
@@ -17,6 +18,7 @@ use serde_json::Value;
 use utoipa::{IntoParams, ToSchema};
 
 use crate::billing::guard::READ_ONLY_DETAIL;
+use crate::export::names::{ascii_file_name, rfc5987};
 use crate::repositories::api_tokens::{
     ApiTokenError, ApiTokenPrincipal, ApiTokenRepository, ApiTokenScope,
 };
@@ -30,6 +32,9 @@ use crate::token_api::{
     AssigneeFilter, DOC_TOO_LARGE_DETAIL, DocPatch, DocView, Me, MemberView, Named, NewDoc,
     NewTask, TaskPatch, TaskQuery, TaskView, TokenApi, TokenApiError,
 };
+use crate::workspace_export::{
+    ExportError, ExportMode, WorkspaceExport, WorkspaceExportService, WorkspaceExportStatus,
+};
 
 pub const BASE_PATH: &str = "/api/public/v1";
 
@@ -37,6 +42,7 @@ pub const BASE_PATH: &str = "/api/public/v1";
 pub struct PublicApiState {
     tokens: Arc<ApiTokenRepository>,
     api: TokenApi,
+    exports: Option<WorkspaceExportService>,
 }
 
 impl PublicApiState {
@@ -50,7 +56,14 @@ impl PublicApiState {
         Self {
             tokens,
             api: TokenApi::new(tasks).with_web_origin(web_origin),
+            exports: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_exports(mut self, exports: WorkspaceExportService) -> Self {
+        self.exports = Some(exports);
+        self
     }
 
     #[must_use]
@@ -76,8 +89,12 @@ pub fn router(state: PublicApiState) -> Router {
         .route("/tasks/{task}/comments", get(comments).post(create_comment))
         .route("/docs", get(docs).post(create_doc))
         .route("/docs/{page_id}", get(doc).patch(update_doc));
+    // Exports belong to the token's only workspace, which the token already names.
     let routes = Router::new()
         .route("/me", get(me))
+        .route("/exports", post(create_export))
+        .route("/exports/{export_id}", get(get_export))
+        .route("/exports/{export_id}/download", get(download_export))
         .nest("/workspaces/{workspace_id}", workspace)
         .route_layer(middleware::from_fn_with_state(state.clone(), authenticate))
         .with_state(state);
@@ -1367,4 +1384,211 @@ async fn create_comment(
     }
     .await;
     ctx.reply(StatusCode::CREATED, result)
+}
+
+#[derive(Deserialize, ToSchema)]
+#[schema(as = PublicCreateExportBody)]
+#[serde(deny_unknown_fields)]
+struct CreateExportBody {
+    /// `full` needs a `workspace:export` token, `personal` a `workspace:export:personal` token.
+    mode: ExportMode,
+}
+
+/// The export that the token's scope allows.
+fn export_access<'a>(
+    s: &'a PublicApiState,
+    principal: &ApiTokenPrincipal,
+) -> Result<(&'a WorkspaceExportService, ExportMode), TokenApiError> {
+    let exports = s.exports.as_ref().ok_or(TokenApiError::Internal)?;
+    match ApiTokenScope::export_mode(&principal.scopes) {
+        Some(mode) if principal.service_account.is_none() => Ok((exports, mode)),
+        _ => Err(TokenApiError::MissingScope),
+    }
+}
+
+impl Responder {
+    fn export_error(&self, error: ExportError) -> Response {
+        let problem = match error {
+            ExportError::NotFound => self.not_found(),
+            ExportError::Forbidden => self.problem(
+                StatusCode::FORBIDDEN,
+                "workspace_action_forbidden",
+                "Workspace action forbidden",
+                "The token's creator may no longer run this export: a full export needs a workspace owner or administrator.",
+            ),
+            ExportError::InProgress => self.problem(
+                StatusCode::CONFLICT,
+                "export_in_progress",
+                "Export in progress",
+                "An export that you started is already being prepared.",
+            ),
+            ExportError::Cancelled | ExportError::Storage(_) | ExportError::Unavailable(_) => {
+                tracing::error!(%error, "public workspace export request failed");
+                Problem::internal(&self.request_id, &self.instance)
+            }
+        };
+        problem_response(problem)
+    }
+}
+
+/// `202` while the export is queued or running, `200` once it is ready or failed.
+fn export_reply(ctx: &Ctx, result: Result<WorkspaceExport, ExportError>) -> Response {
+    match result {
+        Ok(export) => {
+            let status = match export.status {
+                WorkspaceExportStatus::Queued | WorkspaceExportStatus::Running => {
+                    StatusCode::ACCEPTED
+                }
+                WorkspaceExportStatus::Ready | WorkspaceExportStatus::Failed => StatusCode::OK,
+            };
+            (status, Json(export)).into_response()
+        }
+        Err(error) => ctx.export_error(error),
+    }
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/public/v1/exports",
+    operation_id = "public_create_export",
+    tag = "public-api",
+    summary = "Start a workspace export, or get the one that runs",
+    request_body = CreateExportBody,
+    responses(
+        (status = 202, description = "The export is queued or running: a new one, or the one that the token's creator already started", body = WorkspaceExport)
+    ),
+    security(("bearerAuth" = []))
+)]
+async fn create_export(
+    State(s): State<PublicApiState>,
+    ctx: Ctx,
+    body: Result<Json<CreateExportBody>, JsonRejection>,
+) -> Response {
+    let (exports, mode) = match export_access(&s, &ctx.principal) {
+        Ok(access) => access,
+        Err(error) => return ctx.error(error),
+    };
+    let Ok(Json(body)) = body else {
+        return ctx
+            .invalid("The JSON body must be {\"mode\": \"full\"} or {\"mode\": \"personal\"}.");
+    };
+    if body.mode != mode {
+        return ctx.error(TokenApiError::MissingScope);
+    }
+    let result = exports
+        .start(
+            ctx.principal.workspace_id,
+            ctx.principal.actor_id,
+            mode,
+            &ctx.request_id,
+        )
+        .await;
+    export_reply(&ctx, result)
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/public/v1/exports/{export_id}",
+    operation_id = "public_get_export",
+    tag = "public-api",
+    summary = "An export's status",
+    params(("export_id" = String, Path)),
+    responses(
+        (status = 200, description = "The export is ready or failed", body = WorkspaceExport),
+        (status = 202, description = "The export is queued or running", body = WorkspaceExport)
+    ),
+    security(("bearerAuth" = []))
+)]
+async fn get_export(
+    State(s): State<PublicApiState>,
+    ctx: Ctx,
+    Path(export_id): Path<String>,
+) -> Response {
+    let (exports, mode) = match export_access(&s, &ctx.principal) {
+        Ok(access) => access,
+        Err(error) => return ctx.error(error),
+    };
+    let export_id = path_id!(ctx, export_id);
+    let result = exports
+        .get(
+            ctx.principal.workspace_id,
+            export_id,
+            ctx.principal.actor_id,
+            mode,
+        )
+        .await;
+    export_reply(&ctx, result)
+}
+
+#[derive(ToSchema)]
+#[schema(as = PublicWorkspaceExportArchive, value_type = String, format = Binary)]
+#[allow(dead_code)]
+struct ExportArchive(Vec<u8>);
+
+#[utoipa::path(
+    get,
+    path = "/api/public/v1/exports/{export_id}/download",
+    operation_id = "public_download_export",
+    tag = "public-api",
+    summary = "The ZIP archive of a ready export",
+    params(("export_id" = String, Path)),
+    responses((status = 200, description = "The archive; its layout is in `README.txt` and `manifest.json`", body = ExportArchive, content_type = "application/zip")),
+    security(("bearerAuth" = []))
+)]
+async fn download_export(
+    State(s): State<PublicApiState>,
+    ctx: Ctx,
+    Path(export_id): Path<String>,
+) -> Response {
+    let (exports, mode) = match export_access(&s, &ctx.principal) {
+        Ok(access) => access,
+        Err(error) => return ctx.error(error),
+    };
+    let export_id = path_id!(ctx, export_id);
+    let (workspace_id, actor_id) = (ctx.principal.workspace_id, ctx.principal.actor_id);
+    match exports.get(workspace_id, export_id, actor_id, mode).await {
+        Ok(export) if export.status == WorkspaceExportStatus::Ready => {}
+        Ok(_) => {
+            return problem_response(ctx.problem(
+                StatusCode::CONFLICT,
+                "export_not_ready",
+                "Export not ready",
+                "The export is queued, running or failed. Poll `GET /exports/{export_id}` until its status is `ready`.",
+            ));
+        }
+        Err(error) => return ctx.export_error(error),
+    }
+    let download = match exports
+        .download(workspace_id, export_id, actor_id, mode, &ctx.request_id)
+        .await
+    {
+        Ok(download) => download,
+        Err(error) => return ctx.export_error(error),
+    };
+    let disposition = format!(
+        "attachment; filename=\"{}\"; filename*={}",
+        ascii_file_name(&download.file_name),
+        rfc5987(&download.file_name)
+    );
+    let mut response = Response::new(Body::from_stream(tokio_util::io::ReaderStream::new(
+        download.reader,
+    )));
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/zip"),
+    );
+    if let Ok(value) = HeaderValue::from_str(&disposition) {
+        headers.insert(header::CONTENT_DISPOSITION, value);
+    }
+    headers.insert(
+        header::CONTENT_LENGTH,
+        HeaderValue::from(download.size_bytes),
+    );
+    headers.insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    headers.insert(
+        "x-content-type-options",
+        HeaderValue::from_static("nosniff"),
+    );
+    response
 }

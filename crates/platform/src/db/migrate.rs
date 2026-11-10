@@ -538,17 +538,35 @@ impl MigrationRunner {
                 ),
                 Migration::new(
                     81,
-                    include_str!("../../../../apps/server/migrations/0081_linear_import_progress.sql"),
+                    include_str!(
+                        "../../../../apps/server/migrations/0081_linear_import_progress.sql"
+                    ),
                     false,
                 ),
                 Migration::new(
                     82,
-                    include_str!("../../../../apps/server/migrations/0082_import_finished_notices.sql"),
+                    include_str!(
+                        "../../../../apps/server/migrations/0082_import_finished_notices.sql"
+                    ),
                     false,
                 ),
                 Migration::new(
                     83,
-                    include_str!("../../../../apps/server/migrations/0083_import_people_assigning.sql"),
+                    include_str!(
+                        "../../../../apps/server/migrations/0083_import_people_assigning.sql"
+                    ),
+                    false,
+                ),
+                Migration::new(
+                    84,
+                    include_str!(
+                        "../../../../apps/server/migrations/0084_workspace_export_modes.sql"
+                    ),
+                    false,
+                ),
+                Migration::new(
+                    85,
+                    include_str!("../../../../apps/server/migrations/0085_orbit_imports.sql"),
                     false,
                 ),
             ],
@@ -759,17 +777,35 @@ impl MigrationRunner {
             ),
             Migration::new(
                 81,
-                include_str!("../../../../apps/server/migrations/postgres/0081_linear_import_progress.sql"),
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0081_linear_import_progress.sql"
+                ),
                 false,
             ),
             Migration::new(
                 82,
-                include_str!("../../../../apps/server/migrations/postgres/0082_import_finished_notices.sql"),
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0082_import_finished_notices.sql"
+                ),
                 false,
             ),
             Migration::new(
                 83,
-                include_str!("../../../../apps/server/migrations/postgres/0083_import_people_assigning.sql"),
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0083_import_people_assigning.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                84,
+                include_str!(
+                    "../../../../apps/server/migrations/postgres/0084_workspace_export_modes.sql"
+                ),
+                false,
+            ),
+            Migration::new(
+                85,
+                include_str!("../../../../apps/server/migrations/postgres/0085_orbit_imports.sql"),
                 false,
             ),
         ];

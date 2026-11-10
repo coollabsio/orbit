@@ -699,20 +699,13 @@ async fn create_api_token(
     if name.is_empty()
         || name.chars().count() > 100
         || (task_scope && !body.all_projects && project_ids.is_empty())
-        || body.scopes.is_empty()
-        || (body.service_account
-            && body.scopes.iter().any(|s| {
-                matches!(
-                    s,
-                    ApiTokenScope::DocsRead | ApiTokenScope::DocsWrite | ApiTokenScope::ChatRead
-                )
-            }))
+        || !ApiTokenScope::valid_combination(&body.scopes, body.service_account)
     {
         return Err(ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "invalid_api_token",
             "Invalid API token",
-            "Token names must contain 1 to 100 characters, at least one scope is required, and a task scope needs at least one project or all projects.",
+            "Token names must contain 1 to 100 characters, at least one scope is required, a task scope needs at least one project or all projects, an export scope must be the only scope of a personal token, and a service account gets task scopes only.",
             instance,
             request_id.as_ref(),
         ));
@@ -3635,7 +3628,7 @@ fn api_token_problem(
             StatusCode::FORBIDDEN,
             "workspace_action_forbidden",
             "Workspace action forbidden",
-            "Only workspace owners and administrators may manage API tokens.",
+            "Only workspace owners and administrators may manage API tokens. Other members may create a personal token whose only scope is `workspace:export:personal`.",
             instance,
             request_id,
         ),

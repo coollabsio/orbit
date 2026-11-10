@@ -9,6 +9,8 @@ pub struct HttpLimits {
     /// The largest `multipart/form-data` body: file uploads. The upload routes check their own
     /// limits too.
     pub max_body_bytes: usize,
+    /// One upload route that may go above `max_body_bytes` (a whole-workspace archive import).
+    pub large_upload: Option<LargeUpload>,
     /// The largest body of any other request (JSON, forms, webhooks). `max_body_bytes` caps it too.
     pub max_other_body_bytes: usize,
     pub max_uri_bytes: usize,
@@ -18,10 +20,18 @@ pub struct HttpLimits {
     pub request_timeout: Option<Duration>,
 }
 
+/// A multipart request whose path ends with `path_suffix` may send up to `max_bytes`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LargeUpload {
+    pub path_suffix: &'static str,
+    pub max_bytes: usize,
+}
+
 impl Default for HttpLimits {
     fn default() -> Self {
         Self {
             max_body_bytes: 1024 * 1024,
+            large_upload: None,
             // Axum's default for its JSON and form extractors.
             max_other_body_bytes: 2 * 1024 * 1024,
             max_uri_bytes: 8 * 1024,
@@ -46,7 +56,12 @@ impl HttpLimits {
                     .starts_with("multipart/form-data")
             });
         if multipart {
-            self.max_body_bytes
+            match self.large_upload {
+                Some(large) if request.uri().path().ends_with(large.path_suffix) => {
+                    large.max_bytes.max(self.max_body_bytes)
+                }
+                _ => self.max_body_bytes,
+            }
         } else {
             self.max_other_body_bytes.min(self.max_body_bytes)
         }
@@ -101,9 +116,13 @@ mod tests {
     use super::*;
 
     fn request(content_type: &str, length: usize) -> Request<()> {
+        request_to("/api/v1/anything", content_type, length)
+    }
+
+    fn request_to(path: &str, content_type: &str, length: usize) -> Request<()> {
         Request::builder()
             .method("POST")
-            .uri("/api/v1/anything")
+            .uri(path)
             .header(CONTENT_TYPE, content_type)
             .header(CONTENT_LENGTH, length)
             .body(())
@@ -169,5 +188,25 @@ mod tests {
             "multipart/form-data; boundary=x",
             101 * 1024 * 1024
         )));
+    }
+
+    #[test]
+    fn only_the_large_upload_route_may_go_above_the_upload_limit() {
+        let mib = 1024 * 1024;
+        let limits = HttpLimits {
+            max_body_bytes: 100 * mib,
+            large_upload: Some(LargeUpload {
+                path_suffix: "/imports/orbit/upload",
+                max_bytes: 5 * 1024 * mib,
+            }),
+            ..HttpLimits::default()
+        };
+        let multipart = "multipart/form-data; boundary=x";
+        let archive = "/api/v1/workspaces/w/imports/orbit/upload";
+        assert!(!limits.request_is_too_large(&request_to(archive, multipart, 200 * mib)));
+        assert!(limits.request_is_too_large(&request_to(archive, multipart, 5 * 1024 * mib + 1)));
+        // Not multipart, or another upload route: the normal limits.
+        assert!(limits.request_is_too_large(&request_to(archive, "application/json", 3 * mib)));
+        assert!(limits.request_is_too_large(&request(multipart, 200 * mib)));
     }
 }

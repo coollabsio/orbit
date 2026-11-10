@@ -148,6 +148,9 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::public_api::doc,
         crate::public_api::create_doc,
         crate::public_api::update_doc,
+        crate::public_api::create_export,
+        crate::public_api::get_export,
+        crate::public_api::download_export,
         crate::integration_routes::create_discord_event,
         crate::integration_routes::github_webhook,
         crate::integration_routes::github_manifest_callback,
@@ -292,6 +295,12 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::obsidian_import_routes::cancel_obsidian_import,
         crate::import_people_routes::list_import_people,
         crate::import_people_routes::update_import_person,
+        crate::orbit_import_routes::create_orbit_import,
+        crate::orbit_import_routes::upload_orbit_import,
+        crate::orbit_import_routes::list_orbit_imports,
+        crate::orbit_import_routes::get_orbit_import,
+        crate::orbit_import_routes::start_orbit_import,
+        crate::orbit_import_routes::cancel_orbit_import,
         crate::chat_routes::conversations::list_chat_conversations,
         crate::chat_routes::conversations::create_chat_channel,
         crate::chat_routes::conversations::update_chat_channel,
@@ -548,8 +557,21 @@ fn public_api_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             | "public_list_tasks"
             | "public_get_task"
             | "public_list_comments"
+            | "public_create_export"
     ) {
         add_code(&mut responses, "400", "invalid_request");
+    }
+    if matches!(
+        operation_id,
+        "public_create_export" | "public_get_export" | "public_download_export"
+    ) {
+        // The token's creator is no longer an owner or admin (a full export).
+        add_code(&mut responses, "403", "workspace_action_forbidden");
+    }
+    match operation_id {
+        "public_create_export" => add_code(&mut responses, "403", "origin_forbidden"),
+        "public_download_export" => add_code(&mut responses, "409", "export_not_ready"),
+        _ => {}
     }
     if matches!(
         operation_id,
@@ -1059,6 +1081,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
                 add_code(&mut responses, "422", "validation_failed");
             }
         }
+        id if orbit_import_operation(id) => orbit_import_errors(id, &mut responses),
         id if task_operation(id) => task_errors(id, &mut responses),
         id if page_comment_operation(id) => page_comment_errors(id, &mut responses),
         id if page_operation(id) => page_errors(id, &mut responses),
@@ -1232,6 +1255,9 @@ fn invalid_request_operation(operation_id: &str) -> bool {
             | "get_obsidian_import"
             | "start_obsidian_import"
             | "update_import_person"
+            | "create_orbit_import"
+            | "get_orbit_import"
+            | "start_orbit_import"
     )
 }
 
@@ -1368,6 +1394,49 @@ fn obsidian_import_errors(
             add_code(responses, "422", "obsidian_import_too_large");
         }
         "cancel_obsidian_import" => add_code(responses, "409", "obsidian_import_state_conflict"),
+        _ => {}
+    }
+}
+
+fn orbit_import_operation(operation_id: &str) -> bool {
+    matches!(
+        operation_id,
+        "create_orbit_import"
+            | "upload_orbit_import"
+            | "list_orbit_imports"
+            | "get_orbit_import"
+            | "start_orbit_import"
+            | "cancel_orbit_import"
+    )
+}
+
+fn orbit_import_errors(
+    operation_id: &str,
+    responses: &mut BTreeMap<&'static str, Vec<&'static str>>,
+) {
+    add_code(responses, "404", "orbit_import_not_found");
+    match operation_id {
+        "create_orbit_import" => {
+            add_code(responses, "403", "forbidden");
+            add_code(responses, "409", "app_key_missing");
+            add_code(responses, "409", "import_in_progress");
+            add_code(responses, "422", "orbit_url_invalid");
+            add_code(responses, "422", "orbit_token_invalid");
+            add_code(responses, "422", "orbit_scope_missing");
+            add_code(responses, "502", "orbit_unreachable");
+        }
+        "upload_orbit_import" => {
+            add_code(responses, "409", "import_in_progress");
+            add_code(responses, "413", "orbit_export_too_large");
+            add_code(responses, "422", "orbit_format_unsupported");
+        }
+        "start_orbit_import" => {
+            add_code(responses, "403", "forbidden");
+            add_code(responses, "409", "import_in_progress");
+            add_code(responses, "409", "orbit_import_state_conflict");
+            add_code(responses, "422", "validation_failed");
+        }
+        "cancel_orbit_import" => add_code(responses, "409", "orbit_import_state_conflict"),
         _ => {}
     }
 }
