@@ -15,13 +15,14 @@ use utoipa::ToSchema;
 
 use super::super::billing::ensure_trial_capacity;
 use super::super::pages::{PageSpace, Remap, content_text};
+use super::computed::{self, ComputeScope, Computed};
+use super::files::{self, FileCopies};
 use super::{
     DatabaseError, DatabaseRepository, DatabaseRow, DatabaseView, DatePoint, NewRow, Property,
     PropertyKind, ViewConfig, Views, block_links, children_in_tx, copy_links, linked_databases,
     open, parse_id, parse_value, properties_in_tx, raw_views, record_with, write_view_config,
 };
-use super::files::{self, FileCopies};
-use super::unique_id;
+use super::{relations, unique_id};
 use crate::billing::TrialLimit;
 use crate::collab::CollabHub;
 
@@ -164,21 +165,20 @@ pub(super) async fn stored_templates(
         .collect()
 }
 
-/// The templates as clients see them (one with `only`).
+/// The templates as clients see them (one with `only`), with their computed values, and the
+/// related pages of their relation cells.
 pub(super) async fn templates_in_tx(
     tx: &mut Transaction<'_, Any>,
+    scope: &ComputeScope,
     database_id: Id,
     properties: &[Property],
     only: Option<Id>,
-) -> Result<Vec<DatabaseTemplate>, DatabaseError> {
+) -> Result<(Vec<DatabaseTemplate>, Computed), DatabaseError> {
     let stored = stored_templates(tx, database_id, only).await?;
-    let mut pages: HashMap<Id, DatabaseRow> =
-        children_in_tx(tx, database_id, Children::Templates, only)
-            .await?
-            .into_iter()
-            .map(|row| (row.id, row))
-            .collect();
-    Ok(stored
+    let mut rows = children_in_tx(tx, database_id, Children::Templates, only).await?;
+    let computed = computed::fill(tx, scope, database_id, properties, &mut rows).await?;
+    let mut pages: HashMap<Id, DatabaseRow> = rows.into_iter().map(|row| (row.id, row)).collect();
+    let templates = stored
         .into_iter()
         .filter_map(|template| {
             let mut row = pages.remove(&template.page_id)?;
@@ -189,17 +189,20 @@ pub(super) async fn templates_in_tx(
                 row,
             })
         })
-        .collect())
+        .collect();
+    Ok((templates, computed))
 }
 
 async fn single_template(
     tx: &mut Transaction<'_, Any>,
+    scope: &ComputeScope,
     database_id: Id,
     template_id: Id,
 ) -> Result<DatabaseTemplate, DatabaseError> {
     let properties = properties_in_tx(tx, database_id).await?;
-    templates_in_tx(tx, database_id, &properties, Some(template_id))
+    templates_in_tx(tx, scope, database_id, &properties, Some(template_id))
         .await?
+        .0
         .pop()
         .ok_or(DatabaseError::TemplateNotFound)
 }
@@ -207,10 +210,13 @@ async fn single_template(
 /// The template page as a row, for the value routes.
 pub(super) async fn template_row(
     tx: &mut Transaction<'_, Any>,
+    scope: &ComputeScope,
     database_id: Id,
     template_id: Id,
 ) -> Result<DatabaseRow, DatabaseError> {
-    Ok(single_template(tx, database_id, template_id).await?.row)
+    Ok(single_template(tx, scope, database_id, template_id)
+        .await?
+        .row)
 }
 
 /// Puts the placeholders into `values` as clients send them.
@@ -452,6 +458,7 @@ pub(super) async fn fill(
         }
         values.insert(property_id, value);
     }
+    values.extend(relations::template_values(tx, actor_id, properties, template_id).await?);
     for (property_id, placeholder) in &template.placeholders {
         let Some(property) = properties
             .iter()
@@ -846,6 +853,8 @@ impl DatabaseRepository {
             .await?;
             files::remap_page(&mut tx, template_id, *from, &copies).await?;
             unique_id::clear(&mut tx, database_id, template_id).await?;
+            let properties = properties_in_tx(&mut tx, database_id).await?;
+            relations::copy_page_links(&mut tx, &properties, *from, template_id, now).await?;
         }
         record_with(
             &mut tx,
@@ -858,7 +867,13 @@ impl DatabaseRepository {
             now,
         )
         .await?;
-        let template = single_template(&mut tx, database_id, template_id).await?;
+        let template = single_template(
+            &mut tx,
+            &ComputeScope::utc(workspace_id, actor_id),
+            database_id,
+            template_id,
+        )
+        .await?;
         tx.commit().await?;
         Ok(template)
     }
@@ -917,7 +932,13 @@ impl DatabaseRepository {
             now,
         )
         .await?;
-        let template = single_template(&mut tx, database_id, template_id).await?;
+        let template = single_template(
+            &mut tx,
+            &ComputeScope::utc(workspace_id, actor_id),
+            database_id,
+            template_id,
+        )
+        .await?;
         tx.commit().await?;
         Ok(template)
     }

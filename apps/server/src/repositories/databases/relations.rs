@@ -14,6 +14,7 @@ use orbit_platform::Row;
 use orbit_platform::{Id, TimestampMillis};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sqlx::any::AnyRow;
 use sqlx::{Any, Transaction};
 
 use super::computed::{ComputeScope, Computed, RelatedPage};
@@ -111,6 +112,107 @@ pub(super) fn parse_ids(config: &RelationConfig, raw: &Value) -> Result<Option<V
     Ok((!ids.is_empty()).then_some(ids))
 }
 
+/// The links of one relation property's cells (`side` from [`RelationConfig::side`]), in cell
+/// order: `row_id`, `page_id`, `title`, `icon` and `readable` (1 when `actor_id` can read the
+/// page). Trashed pages and templates are left out; `only` narrows to one row.
+async fn links(
+    tx: &mut Transaction<'_, Any>,
+    actor_id: Id,
+    config: &RelationConfig,
+    (key, mine, other): (Id, &str, &str),
+    only: Option<&str>,
+) -> Result<Vec<AnyRow>, sqlx::Error> {
+    let order = if config.primary {
+        "page_relations.position, page_relations.created_at, pages.id"
+    } else {
+        "page_relations.created_at, pages.id"
+    };
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "SELECT page_relations.{mine} AS row_id, pages.id AS page_id, pages.title AS title, \
+         pages.icon AS icon, CASE WHEN {readable} THEN 1 ELSE 0 END AS readable \
+         FROM page_relations JOIN pages ON pages.id = page_relations.{other} \
+         WHERE page_relations.property_id = $1 AND pages.parent_id = $3 \
+         AND pages.deleted_at IS NULL AND {NOT_TEMPLATE} \
+         AND ($4 IS NULL OR page_relations.{mine} = $5) \
+         ORDER BY {order}",
+        readable = readable(2),
+    )))
+    .bind(key.to_string())
+    .bind(actor_id.to_string())
+    .bind(config.database_id.to_string())
+    .bind(only)
+    .bind(only)
+    .fetch_all(&mut **tx)
+    .await
+}
+
+/// The relation values a row made from `template_id` starts with: the template's links to pages
+/// `actor_id` can read, as `PATCH …/values` takes them.
+pub(super) async fn template_values(
+    tx: &mut Transaction<'_, Any>,
+    actor_id: Id,
+    properties: &[Property],
+    template_id: Id,
+) -> Result<Vec<(Id, Value)>, DatabaseError> {
+    let template = template_id.to_string();
+    let mut values = Vec::new();
+    for property in properties {
+        let PropertyKind::Relation(config) = &property.kind else {
+            continue;
+        };
+        let Some(side) = config.side(property.id) else {
+            continue;
+        };
+        let ids: Vec<Value> = links(tx, actor_id, config, side, Some(&template))
+            .await?
+            .into_iter()
+            .filter(|link| link.get::<i64, _>("readable") == 1)
+            .map(|link| Value::String(link.get("page_id")))
+            .collect();
+        if !ids.is_empty() {
+            values.push((property.id, Value::Array(ids)));
+        }
+    }
+    Ok(values)
+}
+
+/// Gives the new page `to` (a template made from the row `from`) the links of `from` on both
+/// sides of every relation property of the database.
+pub(super) async fn copy_page_links(
+    tx: &mut Transaction<'_, Any>,
+    properties: &[Property],
+    from: Id,
+    to: Id,
+    now: TimestampMillis,
+) -> Result<(), sqlx::Error> {
+    for property in properties {
+        let PropertyKind::Relation(config) = &property.kind else {
+            continue;
+        };
+        let Some((key, mine, _)) = config.side(property.id) else {
+            continue;
+        };
+        let (page, related) = if mine == "page_id" {
+            ("$3", "related_page_id")
+        } else {
+            ("page_id", "$3")
+        };
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "INSERT INTO page_relations (property_id, page_id, related_page_id, workspace_id, position, created_at) \
+             SELECT property_id, {page}, {related}, workspace_id, position, $4 FROM page_relations \
+             WHERE property_id = $1 AND {mine} = $2 \
+             ON CONFLICT (property_id, page_id, related_page_id) DO NOTHING"
+        )))
+        .bind(key.to_string())
+        .bind(from.to_string())
+        .bind(to.to_string())
+        .bind(now.as_millis())
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
+}
+
 /// Puts the relation values of `rows` into their `values` (visible page ids, in order) and
 /// `hidden_links`, and returns the visible related pages.
 pub(super) async fn fill(
@@ -136,26 +238,13 @@ pub(super) async fn fill(
         let Some((key, mine, other)) = config.side(property.id) else {
             continue;
         };
-        let order = if config.primary {
-            "page_relations.position, page_relations.created_at, pages.id"
-        } else {
-            "page_relations.created_at, pages.id"
-        };
-        let links = sqlx::query(sqlx::AssertSqlSafe(format!(
-            "SELECT page_relations.{mine} AS row_id, pages.id AS page_id, pages.title AS title, \
-             pages.icon AS icon, CASE WHEN {readable} THEN 1 ELSE 0 END AS readable \
-             FROM page_relations JOIN pages ON pages.id = page_relations.{other} \
-             WHERE page_relations.property_id = $1 AND pages.parent_id = $3 \
-             AND pages.deleted_at IS NULL AND ($4 IS NULL OR page_relations.{mine} = $5) \
-             ORDER BY {order}",
-            readable = readable(2),
-        )))
-        .bind(key.to_string())
-        .bind(scope.actor_id.to_string())
-        .bind(config.database_id.to_string())
-        .bind(&only)
-        .bind(&only)
-        .fetch_all(&mut **tx)
+        let links = links(
+            tx,
+            scope.actor_id,
+            config,
+            (key, mine, other),
+            only.as_deref(),
+        )
         .await?;
         let mut cells: HashMap<usize, (Vec<Value>, u64)> = HashMap::new();
         for link in links {

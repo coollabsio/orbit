@@ -2095,9 +2095,12 @@ impl DatabaseRepository {
         let properties = properties_in_tx(&mut tx, database_id).await?;
         let mut views = views_in_tx(&mut tx, database_id, set, &properties).await?;
         let mut rows = rows_in_tx(&mut tx, database_id, None).await?;
-        let computed = computed::fill(&mut tx, scope, database_id, &properties, &mut rows).await?;
+        let mut computed =
+            computed::fill(&mut tx, scope, database_id, &properties, &mut rows).await?;
         gallery::fill(&mut tx, database_id, &views, &mut rows).await?;
-        let templates = templates::templates_in_tx(&mut tx, database_id, &properties, None).await?;
+        let (templates, template_computed) =
+            templates::templates_in_tx(&mut tx, scope, database_id, &properties, None).await?;
+        computed.merge(template_computed);
         templates::repair_defaults(&mut views, &templates);
         tx.rollback().await?;
         Ok(DatabaseDetail {
@@ -2955,7 +2958,9 @@ impl DatabaseRepository {
         let scope = ComputeScope::utc(workspace_id, actor_id);
         let row = match children {
             Children::Rows => single_row(&mut tx, &scope, database_id, row_id).await?,
-            Children::Templates => templates::template_row(&mut tx, database_id, row_id).await?,
+            Children::Templates => {
+                templates::template_row(&mut tx, &scope, database_id, row_id).await?
+            }
         };
         tx.commit().await?;
         Ok(row)
