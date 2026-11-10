@@ -180,6 +180,11 @@ export function parseValue(property: Property, raw: unknown): CellValue | null {
   }
 }
 
+/** Of `shown`, the properties a card or list row shows: those with a value, and buttons (they have none). */
+export function filledProperties(row: Row, shown: readonly Property[]): Property[] {
+  return shown.filter((property) => property.type === 'button' || cellOf(row, property) !== null)
+}
+
 /**
  * The value a row shows for a property: computed types read the row's page, and a status
  * without a value is its first `todo` option.

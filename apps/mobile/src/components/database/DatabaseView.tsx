@@ -10,14 +10,14 @@ import { ruleSummary, simpleRules } from '@orbit/database/meta'
 import { newRowValues } from '@orbit/database/newRow'
 import { defaultTemplate, templateFill, templatesOf } from '@orbit/database/templates'
 import type { Database, DatabaseView as View_, GroupProperty, LaneProperty, Property, Row, ViewConfig, ViewContext } from '@orbit/database/types'
-import { cellOf } from '@orbit/database/values'
+import { filledProperties } from '@orbit/database/values'
 import { applyView, groupable, laneable, repairConfig } from '@orbit/database/view'
 import { withRelatedPages } from '@orbit/database/relations'
 import { router } from 'expo-router'
 import { type ReactElement, useEffect, useState } from 'react'
 import { FlatList, Pressable, ScrollView, useWindowDimensions, View } from 'react-native'
 
-import { advancedFilterLabel, filledProperties, listProperties, pickView, PROPERTY_ICONS, sortedViews, summaryLines, VIEW_ICONS, viewStorageKey } from '../../data/database'
+import { advancedFilterLabel, listProperties, pickView, PROPERTY_ICONS, sortedViews, summaryLines, VIEW_ICONS, viewStorageKey } from '../../data/database'
 import { type Notify, useCreateRow, useDatabase, useUpdateValues, useViewContext, useViewDrafts, useWorkspaceReadOnly } from '../../hooks/database'
 import { storage } from '../../storage'
 import { alpha, useTheme } from '../../theme'
@@ -596,7 +596,7 @@ function Column({ group, property, cardProperties, ctx, width, canEdit, onAdd, o
 
 /** A card: the title, then each card property that has a value. A long press offers "Move to…". */
 function Card({ row, properties, ctx, onMove }: { row: Row; properties: Property[]; ctx: ViewContext; onMove?: () => void }) {
-  const filled = properties.filter((property) => cellOf(row, property) !== null)
+  const filled = filledProperties(row, properties)
   return (
     <Pressable
       accessibilityRole="link"

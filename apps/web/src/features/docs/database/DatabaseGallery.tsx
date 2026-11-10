@@ -13,7 +13,7 @@ import {
 import { coverObjectPosition, parseCoverPos } from '@/features/docs/coverLib'
 import { CARD_SIZES, CARD_WIDTH, cardFace, galleryOf, type CardFace } from '@orbit/database/gallery'
 import type { CardPreview, CardSize, Database, Property, Row, ViewConfig } from '@orbit/database/types'
-import { cellOf } from '@orbit/database/values'
+import { filledProperties } from '@orbit/database/values'
 import { useMoveRow } from './api'
 import { CellView } from './cells/CellView'
 import { useDatabaseEnv } from './context'
@@ -139,7 +139,7 @@ interface GalleryCardProps {
 }
 
 function GalleryCard({ row, title, properties, face, fitImage, width, dragging, dropBefore, draggable, onOpen, onDragStart, onDragEnd, onDragOver, onDrop }: GalleryCardProps) {
-  const filled = properties.filter((property) => cellOf(row, property) !== null)
+  const filled = filledProperties(row, properties)
   const after = (event: DragEvent<HTMLElement>) => {
     const rect = event.currentTarget.getBoundingClientRect()
     return event.clientX > rect.left + rect.width / 2

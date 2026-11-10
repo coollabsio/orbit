@@ -5,12 +5,11 @@
 import { barsOn, calendarWeeks, datable, dayDate, localeWeekStart, monthTitle, placeRows, rowSpan, startTime, undatedRows, weekdayName } from '@orbit/database/calendar'
 import { addMonths, localDay } from '@orbit/database/dates'
 import type { Database, DateProperty, Property, Row, ViewConfig, ViewContext } from '@orbit/database/types'
-import { apiValue } from '@orbit/database/values'
+import { apiValue, filledProperties } from '@orbit/database/values'
 import { router } from 'expo-router'
 import { type ReactElement, useState } from 'react'
 import { Pressable, ScrollView, View } from 'react-native'
 
-import { filledProperties } from '../../data/database'
 import { Button, IconButton, Text } from '../../ui'
 import { CellValue, RowTitle } from './cells'
 

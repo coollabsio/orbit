@@ -9,7 +9,7 @@ import { UserAvatar } from '@/components/common/UserAvatar'
 import { indexAt } from '@/features/views/useGroupDrop'
 import { cardAfter, groupName, groupRows, groupValues, laneRows, moveValues, type BoardGroup } from '@orbit/database/board'
 import type { Database, LaneProperty, Property, Row, ViewConfig } from '@orbit/database/types'
-import { cellOf } from '@orbit/database/values'
+import { filledProperties } from '@orbit/database/values'
 import { groupable, laneable } from '@orbit/database/view'
 import { useCreateProperty, useMoveRow, useUpdateRowTitle, useUpdateValues } from './api'
 import { CellView, OptionPill } from './cells/CellView'
@@ -507,7 +507,7 @@ interface CardProps {
 
 /** A card: the title (an inline field for a new card), then each card property that has a value. */
 function Card({ row, title, properties, dragging, draggable, editing, onEditShown, onOpen, onDragStart, onDragEnd }: CardProps) {
-  const filled = properties.filter((property) => cellOf(row, property) !== null)
+  const filled = filledProperties(row, properties)
   return (
     <article
       data-board-card=""

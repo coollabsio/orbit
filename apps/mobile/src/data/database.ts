@@ -4,7 +4,6 @@
  */
 import { CALCULATION_LABELS, calculate } from '@orbit/database/calculate'
 import type { DatabasePropertyType, DatabaseView, OptionColor, Property, Row, ViewConfig, ViewContext } from '@orbit/database/types'
-import { cellOf } from '@orbit/database/values'
 
 import type { IconName } from '../ui'
 
@@ -81,11 +80,6 @@ export function summaryLines(properties: readonly Property[], config: ViewConfig
     if (!property || column.hidden || !fn) return []
     return [{ id: property.id, text: `${property.name} · ${CALCULATION_LABELS[fn].short} ${calculate(rows, property, fn, ctx).value}` }]
   })
-}
-
-/** Of `shown`, the properties the row has a value for (and its buttons): an empty one leaves no gap. */
-export function filledProperties(row: Row, shown: readonly Property[]): Property[] {
-  return shown.filter((property) => property.type === 'button' || cellOf(row, property) !== null)
 }
 
 /** The web's option pill colors (`cells/Pill.tsx`), one class set per scheme: Uniwind's `dark:` does not override. */

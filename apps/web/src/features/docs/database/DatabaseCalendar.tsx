@@ -22,7 +22,7 @@ import {
 } from '@orbit/database/calendar'
 import { addDays, addMonths, dateText, localDay } from '@orbit/database/dates'
 import type { Database, DateProperty, Property, Row, ViewConfig } from '@orbit/database/types'
-import { apiValue, cellOf } from '@orbit/database/values'
+import { apiValue, cellOf, filledProperties } from '@orbit/database/values'
 import { useCreateProperty, useUpdateValues } from './api'
 import { CellView } from './cells/CellView'
 import { useDatabaseEnv } from './context'
@@ -283,7 +283,7 @@ function CalendarCard({ bar, property, cardProperties, top, height, draggable, d
   const { ctx } = useDatabaseEnv()
   const { row } = bar
   const time = startTime(row, property, ctx)
-  const filled = cardProperties.filter((other) => cellOf(row, other) !== null)
+  const filled = filledProperties(row, cardProperties)
   return (
     <article
       data-dragging={dragging || undefined}

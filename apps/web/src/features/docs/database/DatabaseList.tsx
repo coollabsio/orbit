@@ -3,7 +3,7 @@ import { Add } from 'reicon-react'
 import { cn } from 'cn'
 import { Button } from '@/components/ui/button'
 import type { Database, Property, Row, ViewConfig } from '@orbit/database/types'
-import { cellOf } from '@orbit/database/values'
+import { filledProperties } from '@orbit/database/values'
 import { useMoveRow } from './api'
 import { CellView } from './cells/CellView'
 import { useDatabaseEnv } from './context'
@@ -129,7 +129,7 @@ interface ListLineProps {
 }
 
 function ListLine({ row, title, properties, draggable, dragging, drop, onOpen, onDragStart, onDragEnd, onDragOver, onDrop }: ListLineProps) {
-  const filled = properties.filter((property) => cellOf(row, property) !== null)
+  const filled = filledProperties(row, properties)
   return (
     <li
       data-dragging={dragging || undefined}

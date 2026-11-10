@@ -1,8 +1,9 @@
 import { expect, test } from 'bun:test'
 import { ctx, database, property } from '@orbit/database/testing'
+import { filledProperties } from '@orbit/database/values'
 import { repairConfig } from '@orbit/database/view'
 
-import { advancedFilterLabel, filledProperties, listProperties, parseTime, pickView, summaryLines } from './database'
+import { advancedFilterLabel, listProperties, parseTime, pickView, summaryLines } from './database'
 
 const view = database.views[0]!
 

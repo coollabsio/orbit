@@ -4,11 +4,11 @@
  */
 import { barOf, timelineOf } from '@orbit/database/timeline'
 import type { Database, Row, ViewConfig, ViewContext } from '@orbit/database/types'
+import { filledProperties } from '@orbit/database/values'
 import { router } from 'expo-router'
 import type { ReactElement } from 'react'
 import { Pressable, SectionList, View } from 'react-native'
 
-import { filledProperties } from '../../data/database'
 import { Text } from '../../ui'
 import { CellValue, RowTitle } from './cells'
 
