@@ -19,6 +19,7 @@ const SOURCES = [
   { name: 'Asana', description: 'Import projects and their tasks into Tasks.', to: '/tasks-import' },
   { name: 'Linear', description: 'Import teams and their issues into Tasks.', to: '/tasks-import/linear' },
   { name: 'Trello', description: 'Import boards and their cards into Tasks.', to: '/tasks-import/trello' },
+  { name: 'Orbit', description: 'Import projects, pages and chats from another Orbit instance.', to: '/settings/import/orbit' },
 ]
 
 const SOURCE_NAMES: Record<ImportSource, string> = { asana: 'Asana', linear: 'Linear', trello: 'Trello' }

@@ -31,7 +31,8 @@ export const WORKSPACE_NAV: readonly SettingsNavItem[] = [
   { href: '/settings/file-storage', label: 'File storage', icon: 'cloudConnection' },
   { href: '/settings/github', label: 'GitHub', icon: 'link2' },
   { href: '/settings/workspace-agentic', label: 'Agentic', icon: 'robot' },
-  { href: '/settings/api-tokens', label: 'API tokens', icon: 'key', permission: 'api_tokens.manage' },
+  // every member but a guest may create a personal export token there
+  { href: '/settings/api-tokens', label: 'API tokens', icon: 'key', permission: 'workspace.export_personal' },
   { href: '/settings/import', label: 'Import', icon: 'import' },
   { href: '/settings/export', label: 'Export', icon: 'documentDownload', permission: 'workspace.export' },
   { href: '/settings/danger-zone', label: 'Danger zone', icon: 'danger', permission: 'workspace.delete' },

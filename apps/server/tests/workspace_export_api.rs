@@ -840,3 +840,39 @@ async fn retention_deletes_an_expired_export_and_its_archive() {
     // A new export can start once the old one is gone.
     harness.start_export().await;
 }
+
+#[tokio::test]
+async fn a_new_export_deletes_the_oldest_beyond_three_ready_ones() {
+    let harness = Harness::new(false).await;
+    let mut ids = Vec::new();
+    for _ in 0..4 {
+        let id = harness.start_export().await;
+        harness.run_export(&id).await;
+        ids.push(id);
+    }
+    let archive = |id: &str| {
+        harness
+            .root
+            .path()
+            .join(format!("backups/exports/{}/{id}.zip", harness.workspace_id))
+    };
+    assert!(
+        !archive(&ids[0]).exists(),
+        "the oldest archive is deleted at once"
+    );
+    let list = harness
+        .ok(&harness.owner, "GET", &harness.workspace("/exports"), None)
+        .await;
+    let listed: Vec<&str> = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(listed, [&ids[3], &ids[2], &ids[1]]);
+    for id in &ids[1..] {
+        assert!(archive(id).is_file());
+    }
+    let (status, _, _) = harness.download(&harness.owner, &ids[0]).await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}

@@ -13,6 +13,7 @@ afterEach(() => { globalThis.fetch = originalFetch })
 const READY: WorkspaceExport = {
   id: 'export-1',
   status: 'ready',
+  mode: 'full',
   requested_by_name: 'Owner',
   size_bytes: 2048,
   created_at: '2026-10-30T10:00:00.000Z',

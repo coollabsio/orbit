@@ -11,7 +11,9 @@ scripts.
 
 ## Authentication
 
-1. As a workspace owner or administrator, open **Settings → API tokens**.
+1. As a workspace owner or administrator, open **Settings → API tokens**. Other
+   members (not guests) can create only a personal export token there (see
+   [Exports](#exports)).
 2. Select the projects, the permissions and an expiry. Then create the token.
    `project_ids` is required, with at least one project, when `scopes` includes
    `tasks:read` or `tasks:write`. Alternatively, set `all_projects: true` (the
@@ -63,9 +65,10 @@ service-account token shows the service account as the actor.
 
 ## Scopes
 
-API tokens and MCP OAuth connections use the same five scopes. In
+API tokens and MCP OAuth connections use the same five resource scopes. In
 **Settings → API tokens**, set the access for each resource to **No access**,
-**Read** or **Write**.
+**Read** or **Write**. API tokens also have two export scopes, which MCP does
+not use.
 
 | Scope | Access in **Settings → API tokens** | Public API endpoints |
 | --- | --- | --- |
@@ -74,9 +77,17 @@ API tokens and MCP OAuth connections use the same five scopes. In
 | `docs:read` | Docs: **Read** | `GET /docs`, `GET /docs/{page_id}` |
 | `docs:write` | Docs: **Write** | `POST /docs`, `PATCH /docs/{page_id}` |
 | `chat:read` | Chat: **Read** | None. Chat is available through MCP only. |
+| `workspace:export` | **Workspace export** | `POST /exports` with `mode: "full"`, `GET /exports/{export_id}`, `GET /exports/{export_id}/download` |
+| `workspace:export:personal` | **Personal export** | The same, with `mode: "personal"` |
 
 `tasks:write` includes `tasks:read`, and `docs:write` includes `docs:read`.
 `GET /me` works with each valid token.
+
+An export scope must be the only scope of a personal token: Orbit refuses a
+service-account token with an export scope, or an export scope together with
+another scope (`422 invalid_api_token`). `workspace:export` needs a workspace
+owner or administrator, when you create the token and on each request.
+`workspace:export:personal` is open to each member except guests.
 
 ## Conventions
 
@@ -369,6 +380,45 @@ curl -sS -X PATCH "$ORBIT_WS/docs/$PAGE_ID" -H "Authorization: Bearer $ORBIT_TOK
   -H 'Content-Type: application/json' -d '{"expected_version":4503599627370495,"markdown":"Updated."}'
 ```
 
+### Exports
+
+An export is a ZIP archive that another Orbit instance can import. The export
+paths have no workspace ID: an export always belongs to the token's workspace
+and to the token's creator. The archive's `README.txt` and `manifest.json`
+describe its layout.
+
+| Mode | Scope | The archive holds |
+| --- | --- | --- |
+| `full` | `workspace:export` | The workspace as the token's creator sees it: tasks, projects, teamspaces, docs (also their own private docs), public channels, and the private channels and DMs that they are in. |
+| `personal` | `workspace:export:personal` | Only the creator's private docs (with their files and comments), the private channels and DMs that they are in, and the members who appear in them. |
+
+`POST /exports` starts an export. The `mode` must match the token's scope
+(else `403 insufficient_scope`). If the token's creator already has an export
+of this mode that is queued or running, Orbit returns it and does not start
+another one. Thus you can send the request again after an error. A ready
+export is not reused: each `POST` after it finished starts a fresh one.
+
+```bash
+curl -sS -X POST "$ORBIT_URL/api/public/v1/exports" \
+  -H "Authorization: Bearer $ORBIT_TOKEN" -H 'Content-Type: application/json' \
+  -d '{"mode": "full"}'
+```
+
+```json
+{"id": "…", "status": "queued", "mode": "full", "requested_by_name": "Dev",
+ "size_bytes": null, "created_at": "…", "completed_at": null, "expires_at": "…"}
+```
+
+The status is `202` while the export is `queued` or `running`, and `200` when
+it is `ready` or `failed`. `GET /exports/{export_id}` returns the same record;
+poll it until the status is `ready` or `failed`. A token sees only the exports
+of its creator in its own mode (`404` for others). An export expires seven days
+after it is ready.
+
+`GET /exports/{export_id}/download` streams the ZIP
+(`Content-Type: application/zip`). It returns `409 export_not_ready` until the
+export is `ready`.
+
 ### Discord integration
 
 `POST /integrations/discord/events`. Scope: `tasks:write`. A Discord bot sends a
@@ -421,11 +471,12 @@ Errors are RFC 9457 problem documents (`Content-Type: application/problem+json`)
 | 401 | `unauthorized` | No token, or the token is not correct, expired or revoked. The response has `WWW-Authenticate: Bearer realm="orbit"`. |
 | 402 | `workspace_read_only`, `trial_limit_reached` | Orbit Cloud: the workspace has no active subscription, or the trial limit is reached. |
 | 403 | `insufficient_scope` | The token does not have the scope of the endpoint. |
-| 403 | `workspace_action_forbidden` | The token's member may not do this, for example delete a task forever (`permanent=true`) without being a workspace owner or admin. |
+| 403 | `workspace_action_forbidden` | The token's member may not do this, for example delete a task forever (`permanent=true`) or run a full export without being a workspace owner or admin. |
 | 404 | `not_found` | The resource does not exist, is in the trash, or is not in an approved project. |
 | 405 | `method_not_allowed` | The path does not take this HTTP method, for example `PUT /tasks`. The `Allow` header lists the methods that it takes (`GET,HEAD,POST`). Orbit sends this before it checks the token. |
 | 409 | `conflict` | The resource changed after you read it (for docs and task descriptions, also through live edits). `conflict.current_version` has the current version. |
 | 409 | `task_conflict`, `github_content_read_only`, `github_linked_move` | The change conflicts with the task's current state. |
+| 409 | `export_not_ready` | The export is queued, running or failed, so there is no archive to download yet. |
 | 413 | `doc_too_large` | The doc would have, or already has, more than 4,000 blocks. Nothing changed. |
 | 422 | `validation_failed`, `parent_cycle`, `parent_invalid` | A value is not valid for the workspace or project, for example an unknown assignee or label. `errors` names the field. |
 | 423 | `page_locked` | The doc is locked. Unlock it in Orbit to change its title, icon or content. |

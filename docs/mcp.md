@@ -285,7 +285,9 @@ Existing connections keep read-only task access. Reconnect to approve additional
 OAuth consent offers optional task writes, docs reads, docs writes, and chat reads. API tokens
 use the same scopes: `tasks:read`, `tasks:write` (task create, update and delete; includes
 `tasks:read`), `docs:read`, `docs:write` (doc create and update; includes `docs:read`), and
-`chat:read`.
+`chat:read`. The API token scopes `workspace:export` and `workspace:export:personal` are for
+the public REST API only (`docs/public-api.md`); a token with only an export scope gets no MCP
+tools.
 Docs and chat permissions default to off. They apply to content visible to the connected
 person in the selected workspace, including their private docs, private channels and DMs.
 Service-account tokens support tasks only; docs and chat require a personal identity.

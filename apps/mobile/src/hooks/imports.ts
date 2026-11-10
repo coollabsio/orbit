@@ -18,12 +18,14 @@ export function useReconcileImport<K extends api.ImportKind>(kind: K) {
   }
 }
 
-/** What an import changes once it ends: the page tree, or the projects and tasks. */
+/** What an import changes once it ends: the page tree, the projects and tasks, or (Orbit) both and the channels. */
 function useRefreshImported(kind: api.ImportKind) {
   const { workspaceId } = useOrbit()
   const queryClient = useQueryClient()
   return () => {
-    if (api.docsImport(kind)) {
+    if (kind === 'orbit') {
+      for (const key of [keys.pages(workspaceId), keys.projects(workspaceId), keys.tasks(workspaceId), keys.conversations(workspaceId)]) void queryClient.invalidateQueries({ queryKey: key })
+    } else if (api.docsImport(kind)) {
       void queryClient.invalidateQueries({ queryKey: keys.pages(workspaceId) })
     } else {
       void queryClient.invalidateQueries({ queryKey: keys.projects(workspaceId) })
