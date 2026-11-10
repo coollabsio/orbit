@@ -1185,7 +1185,7 @@ Differences from this section:
 | 10 | The case files share one fixture per file (`ctx`, `properties`, `rows`) and list `cases` of `{name, filter or sorts, expected_ids}`; every case passes in `@orbit/database` (checked with a one-off script). | `packages/database/cases/` | One fixture covers every type, so a case is one line to read. |
 | 11 | Rust text sorts approximate `Intl.Collator(base, numeric)`: case is ignored and digit runs compare as numbers, but accents count. The cases use ASCII. | `query.rs` | The server has no ICU collator. |
 | 12 | The time zone database is `jiff` with the bundled tzdb. An invalid `tz` is 422 (`tz`); a changed query with a cursor is 422 (`cursor`). | `apps/server/Cargo.toml`, `query.rs` | The Alpine image has no zoneinfo. |
-| 13 | Values of computed and later types (relation, rollup, formula, files, email, phone, unique ID) pass through as the read path returns them. Rules on them use the value's JSON shape (text, number or checkbox rules); other rules match every row. | `query.rs`, `agent.rs` | Items 9, 10 and 13 were built at the same time; the shared cases do not cover these types yet. |
+| 13 | Values of computed and later types (relation, rollup, formula, files, email, phone, unique ID) pass through as the read path returns them. Filters and sorts follow `filter.ts` and `sort.ts`: formulas and rollups as their result type (`formulaBase`, `rollupBase`), relation text rules on the related pages' titles, files only by empty rules (sorted by count), unique IDs as numbers. | `query.rs`, `agent.rs` | The shared cases do not cover these types yet. |
 
 ## 15. Item 13: Formula (P3, L)
 

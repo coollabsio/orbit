@@ -2,8 +2,7 @@
 //! tools that query a database. The rules are those of `@orbit/database` (`filter.ts`,
 //! `sort.ts`); both engines answer the shared cases in `packages/database/cases/`.
 //!
-//! Values of a kind this module does not know (a computed type that a later item adds) pass every
-//! rule and sort by their raw JSON (a number or a text).
+//! Formulas and rollups filter and sort as their result type, relations by their pages' titles.
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -15,9 +14,11 @@ use jiff::{Timestamp, ToSpan};
 use orbit_platform::Id;
 use serde_json::Value;
 
+use super::formula::FormulaType;
 use super::{
-    CellValue, DatabaseRow, DatePoint, FilterGroup, FilterNode, FilterOperator, FilterRule,
-    GroupOp, Property, PropertyKind, SortDirection, StatusGroup, ViewSort, parse_value,
+    CellValue, DatabaseRow, DateConfig, DatePoint, FilterGroup, FilterNode, FilterOperator,
+    FilterRule, GroupOp, Property, PropertyKind, RollupFunction, SortDirection, StatusGroup,
+    ViewSort, parse_value,
 };
 
 /// Who reads, and when and where: `"me"` is `user_id`, relative dates count from `now`, and
@@ -28,6 +29,9 @@ pub struct QueryContext {
     pub time_zone: TimeZone,
     /// Workspace members by id: their display names, which person sorts compare.
     pub members: HashMap<Id, String>,
+    /// Titles of the pages that relation values link to, by page id: text rules on a relation
+    /// match them.
+    pub related: HashMap<String, String>,
 }
 
 /// The rows that pass `filter`, ordered by `sorts`.
@@ -89,9 +93,84 @@ impl Point {
     }
 }
 
-/// The non-empty value a row shows for a property, as `cellOf` in `values.ts`.
+/// How a property filters and sorts. Computed types follow their result, as `formulaBase` and
+/// `rollupBase` of `@orbit/database`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Class {
+    Text,
+    Number,
+    Choice,
+    /// Multi-select options or people: `contains` any of the rule's ids.
+    Many,
+    Checkbox,
+    Date,
+    /// Related pages: text rules match their titles; they do not sort.
+    Pages,
+    /// Files and buttons: only the empty rules filter them.
+    Inert,
+}
+
+fn class_of(kind: &PropertyKind) -> Class {
+    match kind {
+        PropertyKind::Title
+        | PropertyKind::Text
+        | PropertyKind::Url
+        | PropertyKind::Email
+        | PropertyKind::Phone => Class::Text,
+        PropertyKind::Number(_) | PropertyKind::UniqueId(_) => Class::Number,
+        PropertyKind::Select(_) | PropertyKind::Status(_) => Class::Choice,
+        PropertyKind::MultiSelect(_)
+        | PropertyKind::Person
+        | PropertyKind::CreatedBy
+        | PropertyKind::LastEditedBy => Class::Many,
+        PropertyKind::Checkbox => Class::Checkbox,
+        PropertyKind::Date(_) | PropertyKind::CreatedTime | PropertyKind::LastEditedTime => {
+            Class::Date
+        }
+        PropertyKind::Relation(_) => Class::Pages,
+        PropertyKind::Files | PropertyKind::Button(_) => Class::Inert,
+        PropertyKind::Formula(config) => formula_class(&config.result_type),
+        PropertyKind::Rollup(config) => match rollup_result(config.function) {
+            RollupResult::List => Class::Text,
+            RollupResult::Date => Class::Date,
+            RollupResult::Number => Class::Number,
+        },
+    }
+}
+
+fn formula_class(result: &FormulaType) -> Class {
+    match result {
+        FormulaType::Number => Class::Number,
+        FormulaType::Boolean => Class::Checkbox,
+        FormulaType::Date => Class::Date,
+        FormulaType::Person => Class::Many,
+        FormulaType::Page => Class::Pages,
+        FormulaType::List(item) if **item == FormulaType::Person => Class::Many,
+        FormulaType::List(item) if **item == FormulaType::Page => Class::Pages,
+        FormulaType::Text | FormulaType::Unknown | FormulaType::List(_) => Class::Text,
+    }
+}
+
+enum RollupResult {
+    List,
+    Date,
+    Number,
+}
+
+/// `rollupResult` of `relations.ts`.
+const fn rollup_result(function: RollupFunction) -> RollupResult {
+    match function {
+        RollupFunction::ShowOriginal | RollupFunction::ShowUnique => RollupResult::List,
+        RollupFunction::EarliestDate | RollupFunction::LatestDate | RollupFunction::DateRange => {
+            RollupResult::Date
+        }
+        _ => RollupResult::Number,
+    }
+}
+
+/// The non-empty value a row shows for a property, as `cellOf` and `parseValue` in `values.ts`.
 enum Cell {
-    /// Title, text and URL.
+    /// Title, text, URL, email, phone, and text results.
     Text(String),
     Number(f64),
     Choice(String),
@@ -99,8 +178,8 @@ enum Cell {
     People(Vec<Id>),
     Date(Point, Option<Point>),
     Checked,
-    /// A value of a kind this module does not know, as the read path returned it.
-    Other(Value),
+    Pages(Vec<String>),
+    Files(usize),
 }
 
 fn cell_of(row: &DatabaseRow, property: &Property) -> Option<Cell> {
@@ -119,6 +198,9 @@ fn cell_of(row: &DatabaseRow, property: &Property) -> Option<Cell> {
                 .find(|option| option.group == StatusGroup::Todo)
                 .map(|option| Cell::Choice(option.id.clone()))
         }),
+        PropertyKind::Button(_) => None,
+        PropertyKind::Formula(config) => raw.and_then(|raw| formula_cell(&config.result_type, raw)),
+        PropertyKind::Rollup(config) => raw.and_then(|raw| rollup_cell(config.function, raw)),
         PropertyKind::Text
         | PropertyKind::Number(_)
         | PropertyKind::Select(_)
@@ -126,9 +208,12 @@ fn cell_of(row: &DatabaseRow, property: &Property) -> Option<Cell> {
         | PropertyKind::Date(_)
         | PropertyKind::Person
         | PropertyKind::Checkbox
-        | PropertyKind::Url => stored().and_then(from_value),
-        #[allow(unreachable_patterns, reason = "computed kinds of later items")]
-        _ => raw.filter(|raw| !empty_json(raw)).cloned().map(Cell::Other),
+        | PropertyKind::Url
+        | PropertyKind::Email
+        | PropertyKind::Phone
+        | PropertyKind::Files
+        | PropertyKind::UniqueId(_)
+        | PropertyKind::Relation(_) => stored().and_then(from_value),
     }
 }
 
@@ -136,6 +221,8 @@ fn from_value(value: CellValue) -> Option<Cell> {
     Some(match value {
         CellValue::Text(text) | CellValue::Url(text) => Cell::Text(text),
         CellValue::Number(number) => Cell::Number(number),
+        #[allow(clippy::cast_precision_loss, reason = "unique IDs stay far below 2^53")]
+        CellValue::UniqueId(number) => Cell::Number(number as f64),
         CellValue::Choice(id) => Cell::Choice(id),
         CellValue::Choices(ids) => Cell::Choices(ids),
         CellValue::People(ids) => Cell::People(ids),
@@ -144,19 +231,97 @@ fn from_value(value: CellValue) -> Option<Cell> {
             Point::parse(&date.start)?,
             date.end.as_ref().and_then(Point::parse),
         ),
-        #[allow(unreachable_patterns, reason = "value kinds of later items")]
-        other => Cell::Other(other.to_json()),
+        CellValue::Pages(ids) => Cell::Pages(ids.iter().map(Id::to_string).collect()),
+        CellValue::Files(files) => Cell::Files(files.len()),
     })
 }
 
-/// `null`, `""`, `[]` and `false`: what a stored value treats as empty.
-fn empty_json(value: &Value) -> bool {
-    match value {
-        Value::Null => true,
-        Value::Bool(flag) => !flag,
-        Value::String(text) => text.is_empty(),
-        Value::Array(items) => items.is_empty(),
-        _ => false,
+/// A formula result as its base type reads it (`formulaRaw` of `formula/values.ts`): one person
+/// or page is a list of one, and other lists read as their items' text. An error is empty.
+fn formula_cell(result: &FormulaType, raw: &Value) -> Option<Cell> {
+    let one_or_many = |raw: &Value| -> Vec<String> {
+        match raw {
+            Value::String(id) => vec![id.clone()],
+            Value::Array(items) => items
+                .iter()
+                .filter_map(|item| item.as_str().map(str::to_owned))
+                .collect(),
+            _ => Vec::new(),
+        }
+    };
+    match formula_class(result) {
+        Class::Number => raw
+            .as_f64()
+            .filter(|number| number.is_finite())
+            .map(Cell::Number),
+        Class::Checkbox => (raw == &Value::Bool(true)).then_some(Cell::Checked),
+        Class::Date => parse_value(&PropertyKind::Date(DateConfig::default()), raw)
+            .ok()
+            .flatten()
+            .and_then(from_value),
+        Class::Many => {
+            let ids: Vec<Id> = one_or_many(raw)
+                .iter()
+                .filter_map(|id| id.parse().ok())
+                .collect();
+            (!ids.is_empty()).then_some(Cell::People(ids))
+        }
+        Class::Pages => {
+            let ids = one_or_many(raw);
+            (!ids.is_empty()).then_some(Cell::Pages(ids))
+        }
+        _ => {
+            let text = match (result, raw) {
+                (FormulaType::Text, Value::String(text)) => text.clone(),
+                (FormulaType::Text, _) => String::new(),
+                _ => item_text(raw),
+            };
+            (!text.is_empty()).then_some(Cell::Text(text))
+        }
+    }
+}
+
+/// `itemText` of `formula/values.ts`.
+fn item_text(raw: &Value) -> String {
+    match raw {
+        Value::Array(items) => items
+            .iter()
+            .map(item_text)
+            .filter(|text| !text.is_empty())
+            .collect::<Vec<_>>()
+            .join(", "),
+        Value::Object(object) => match (object.get("start"), object.get("end")) {
+            (Some(Value::String(start)), Some(Value::String(end))) => format!("{start} → {end}"),
+            (Some(Value::String(start)), _) => start.clone(),
+            _ => String::new(),
+        },
+        Value::String(text) => text.clone(),
+        Value::Number(number) => number.as_f64().map_or_else(String::new, |n| n.to_string()),
+        Value::Bool(flag) => flag.to_string(),
+        Value::Null => String::new(),
+    }
+}
+
+/// A rollup result: a list reads as its texts joined with ", ", the others as a number or date.
+fn rollup_cell(function: RollupFunction, raw: &Value) -> Option<Cell> {
+    match rollup_result(function) {
+        RollupResult::List => {
+            let items: Vec<&str> = raw
+                .as_array()?
+                .iter()
+                .filter_map(Value::as_str)
+                .filter(|item| !item.is_empty())
+                .collect();
+            (!items.is_empty()).then(|| Cell::Text(items.join(", ")))
+        }
+        RollupResult::Date => parse_value(&PropertyKind::Date(DateConfig::default()), raw)
+            .ok()
+            .flatten()
+            .and_then(from_value),
+        RollupResult::Number => raw
+            .as_f64()
+            .filter(|number| number.is_finite())
+            .map(Cell::Number),
     }
 }
 
@@ -206,24 +371,28 @@ fn matches_rule(
     {
         return true;
     }
-    match &property.kind {
-        PropertyKind::Title | PropertyKind::Text | PropertyKind::Url => {
-            value.as_str().is_none_or(|needle| {
-                let text = match &cell {
-                    Some(Cell::Text(text)) => text.as_str(),
-                    _ => "",
-                };
-                match_text(text, rule.operator, needle)
-            })
-        }
-        PropertyKind::Number(_) => value.as_f64().is_none_or(|target| {
+    match class_of(&property.kind) {
+        Class::Text | Class::Pages => value.as_str().is_none_or(|needle| {
+            let text = match &cell {
+                Some(Cell::Text(text)) => text.clone(),
+                Some(Cell::Pages(ids)) => ids
+                    .iter()
+                    .filter_map(|id| ctx.related.get(id))
+                    .map(|title| if title.is_empty() { "Untitled" } else { title })
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                _ => String::new(),
+            };
+            match_text(&text, rule.operator, needle)
+        }),
+        Class::Number => value.as_f64().is_none_or(|target| {
             let number = match cell {
                 Some(Cell::Number(number)) => Some(number),
                 _ => None,
             };
             match_number(number, rule.operator, target)
         }),
-        PropertyKind::Select(_) | PropertyKind::Status(_) => {
+        Class::Choice => {
             let ids = id_list(value, ctx);
             let hit = matches!(&cell, Some(Cell::Choice(id)) if ids.contains(id));
             if rule.operator == Op::IsNot {
@@ -232,10 +401,7 @@ fn matches_rule(
                 hit
             }
         }
-        PropertyKind::MultiSelect(_)
-        | PropertyKind::Person
-        | PropertyKind::CreatedBy
-        | PropertyKind::LastEditedBy => {
+        Class::Many => {
             let ids = id_list(value, ctx);
             let hit = match &cell {
                 Some(Cell::Choices(held)) => held.iter().any(|id| ids.contains(id)),
@@ -248,33 +414,14 @@ fn matches_rule(
                 hit
             }
         }
-        PropertyKind::Checkbox => value
+        Class::Checkbox => value
             .as_bool()
             .is_none_or(|ticked| cell.is_some() == ticked),
-        PropertyKind::Date(_) | PropertyKind::CreatedTime | PropertyKind::LastEditedTime => {
-            match value.as_str().and_then(|text| rule_day(text, ctx)) {
-                None => true,
-                Some(target) => match_date(cell.as_ref(), rule.operator, target, ctx),
-            }
-        }
-        // A kind of a later item: its value's JSON shape picks the rules.
-        #[allow(unreachable_patterns, reason = "computed kinds of later items")]
-        _ => match (&cell, value) {
-            (Some(Cell::Other(Value::String(text))), Value::String(needle)) => {
-                match_text(text, rule.operator, needle)
-            }
-            (None, Value::String(needle)) => match_text("", rule.operator, needle),
-            (Some(Cell::Other(Value::Number(number))), Value::Number(target)) => match_number(
-                number.as_f64(),
-                rule.operator,
-                target.as_f64().unwrap_or(0.0),
-            ),
-            (None, Value::Number(target)) => {
-                match_number(None, rule.operator, target.as_f64().unwrap_or(0.0))
-            }
-            (_, Value::Bool(ticked)) => cell.is_some() == *ticked,
-            _ => true,
+        Class::Date => match value.as_str().and_then(|text| rule_day(text, ctx)) {
+            None => true,
+            Some(target) => match_date(cell.as_ref(), rule.operator, target, ctx),
         },
+        Class::Inert => true,
     }
 }
 
@@ -378,7 +525,8 @@ enum SortKey {
 }
 
 /// `sortRows` of `sort.ts`: empty values last in both directions, options by their order in the
-/// config, people by display name, unticked checkboxes before ticked ones, dates by their start.
+/// config, people by display name, unticked checkboxes before ticked ones, dates by their start,
+/// files by their count; relations do not sort.
 /// Ties fall back to the manual order (`position`, then `id`). Sorts on unknown properties are
 /// skipped.
 fn sort_rows(
@@ -427,11 +575,14 @@ fn sort_rows(
 
 fn sort_key(row: &DatabaseRow, property: &Property, ctx: &QueryContext) -> Option<SortKey> {
     let cell = cell_of(row, property);
-    match (&property.kind, cell) {
-        (PropertyKind::Checkbox, cell) => {
-            Some(SortKey::Number(if cell.is_some() { 1.0 } else { 0.0 }))
+    match (class_of(&property.kind), cell) {
+        (Class::Checkbox, cell) => Some(SortKey::Number(if cell.is_some() { 1.0 } else { 0.0 })),
+        (Class::Pages | Class::Inert, Some(Cell::Files(count))) =>
+        {
+            #[allow(clippy::cast_precision_loss, reason = "at most 20 files")]
+            Some(SortKey::Number(count as f64))
         }
-        (_, None) => None,
+        (Class::Pages | Class::Inert, _) | (_, None) => None,
         (_, Some(Cell::Text(text))) => Some(SortKey::Text(text)),
         (_, Some(Cell::Number(number))) => Some(SortKey::Number(number)),
         (_, Some(Cell::People(ids))) => {
@@ -442,25 +593,20 @@ fn sort_key(row: &DatabaseRow, property: &Property, ctx: &QueryContext) -> Optio
                 .collect();
             (!names.is_empty()).then(|| SortKey::Text(names.join(", ")))
         }
-        (kind, Some(Cell::Choice(id))) => {
-            option_position(kind, &id).map(|at| SortKey::Number(at as f64))
+        (_, Some(Cell::Choice(id))) => {
+            option_position(&property.kind, &id).map(|at| SortKey::Number(at as f64))
         }
-        (kind, Some(Cell::Choices(ids))) => {
+        (_, Some(Cell::Choices(ids))) => {
             let order: Vec<usize> = ids
                 .iter()
-                .filter_map(|id| option_position(kind, id))
+                .filter_map(|id| option_position(&property.kind, id))
                 .collect();
             (!order.is_empty()).then_some(SortKey::Order(order))
         }
         (_, Some(Cell::Date(start, _))) => start
             .millis(&ctx.time_zone)
             .map(|millis| SortKey::Number(millis as f64)),
-        (_, Some(Cell::Checked)) => Some(SortKey::Number(1.0)),
-        (_, Some(Cell::Other(value))) => match value {
-            Value::Number(number) => number.as_f64().map(SortKey::Number),
-            Value::String(text) => Some(SortKey::Text(text)),
-            _ => None,
-        },
+        (_, Some(Cell::Checked | Cell::Pages(_) | Cell::Files(_))) => None,
     }
 }
 

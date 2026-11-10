@@ -294,7 +294,7 @@ impl Names {
         let types: HashMap<Id, PropertyType> = self
             .properties
             .iter()
-            .map(|property| (property.id, property.kind.property_type()))
+            .map(|property| (property.id, property.kind.filter_type()))
             .collect();
         group
             .check("filter", 1, &types, &mut 0)
@@ -673,6 +673,11 @@ impl DatabaseRepository {
                 .iter()
                 .map(|member| (member.id, member.name.clone()))
                 .collect(),
+            related: detail
+                .related_pages
+                .iter()
+                .map(|(id, page)| (id.clone(), page.title.clone()))
+                .collect(),
         };
         let rows = query_rows(detail.rows, &names.properties, &filter, &sorts, &ctx);
         let total = rows.len();
@@ -723,6 +728,25 @@ impl DatabaseRepository {
         self.names(workspace_id, database_id, actor_id)
             .await?
             .input_values(values)
+    }
+
+    /// `error` with a `values.<property id>` field named by the key the agent sent for that
+    /// property, as the errors of [`Self::agent_values`] are.
+    #[must_use]
+    pub fn agent_value_error(
+        error: DatabaseError,
+        raw: &Map<String, Value>,
+        ids: &[Id],
+    ) -> DatabaseError {
+        let DatabaseError::Invalid { field } = &error else {
+            return error;
+        };
+        raw.keys()
+            .zip(ids)
+            .find(|(_, id)| field.strip_prefix("values.") == Some(id.to_string().as_str()))
+            .map_or(error, |(key, _)| {
+                DatabaseError::invalid(format!("values.{key}"))
+            })
     }
 
     /// Trashes the live rows among `row_ids` (see [`Self::trash_rows`]) and returns how many.
