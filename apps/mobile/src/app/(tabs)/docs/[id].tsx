@@ -17,6 +17,7 @@ import PageEditor, { type PageCardInfo, type PageEditorProps, type PageEditorRef
 import { ActionSheet, ConfirmDialog, type ConfirmRequest, PromptDialog, type PromptRequest, type SheetAction } from '../../../components/settings/Dialog'
 import { type DatabaseBlockRef, databaseCard, databaseCardKey, databaseHref } from '../../../data/database-card'
 import * as databaseApi from '../../../data/database-api'
+import { formScreenOf } from '../../../data/form-api'
 import { absoluteUrl, pageTitle, subPagesOf, trashPrompt, validCoverUrl, visibleThreads } from '../../../data/docs'
 import { collabTicket, descendants, fileDataUrl, fileDeleted } from '../../../data/docs-api'
 import { keys } from '../../../data/keys'
@@ -367,7 +368,9 @@ const EditorView = memo(function EditorView({ ref, pageId, epoch, generation, ed
       onDatabases: whileMounted(mounted, async (blocks: DatabaseBlockRef[]) => setDatabaseBlocks(blocks)),
       // the editor already filters links; the app checks again before it hands one to the OS
       openUrl: whileMounted(mounted, async (url: string) => {
-        if (isSafeLinkHref(url)) void Linking.openURL(url).catch(() => {})
+        const form = formScreenOf(url, session.server)
+        if (form) router.push(form)
+        else if (isSafeLinkHref(url)) void Linking.openURL(url).catch(() => {})
       }),
       onProblem: whileMounted(mounted, async (problem: CollabProblem) => latest.current.onProblem(problem)),
       onProbe: whileMounted(mounted, async () => latest.current.onProbe()),

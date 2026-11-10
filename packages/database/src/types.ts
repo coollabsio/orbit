@@ -6,6 +6,7 @@ import type {
   DatabaseTimelineZoom,
   DatabaseDetail,
   DatabaseFilterGroup,
+  DatabaseFormConfig,
   DatabaseProperty,
   DatabasePropertyType,
   DatabaseRow,
@@ -126,6 +127,8 @@ export type ViewConfig = {
   /** AND/OR groups of rules, the root group first (spec P2 5.2). */
   filter: DatabaseFilterGroup
   wrap_cells: boolean
+  /** Form: the questions and texts (spec P3 18); only form views have one (see `formConfig`). */
+  form?: DatabaseFormConfig
   /** Board: the property whose groups are the columns. */
   group_by: string | null
   /** Board: group ids (option or user ids) in column order; `null` is the "No <property>" column. */

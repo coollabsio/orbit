@@ -25,6 +25,7 @@ import { TextInput } from '../../ui/scaled'
 import { Sheet, SheetList, SheetNote, SheetRow, useSheet } from '../tasks/Sheet'
 import { ButtonPressContext } from './ButtonCell'
 import { Calendar } from './Calendar'
+import { FormFill, FormViewPicker } from './FormFill'
 import { Gallery } from './Gallery'
 import { TimelineList } from './TimelineList'
 import { CellValue, ChoiceRow, OptionPill, RowTitle } from './cells'
@@ -145,7 +146,18 @@ export function DatabaseView({ databaseId, linkId = '', initialView = null, head
 
   return (
     <ButtonPressContext.Provider value={{ databaseId, linkId, notify }}>
-      {view.type === 'board' ? (
+      {view.type === 'form' ? (
+        <FormFill
+          key={view.id}
+          database={database}
+          viewId={view.id}
+          config={config}
+          ctx={ctx}
+          header={<>{header}<FormViewPicker view={view} onPress={() => sheet.open({ kind: 'views' })} /></>}
+          canSubmit={!readOnly}
+          editOnWeb={canEditSchema}
+        />
+      ) : view.type === 'board' ? (
         <ScrollView contentContainerClassName="pb-8" keyboardShouldPersistTaps="handled" refreshControl={refresh}>
           {header}
           {toolbar}

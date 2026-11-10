@@ -21,6 +21,8 @@ import { withPinnedRows, type Pin } from './databaseLib'
 import { RowPeek } from './RowPeek'
 import { FilterBar } from './FilterBar'
 import { ViewTabs } from './ViewTabs'
+import { DatabaseFormView } from './DatabaseForm'
+import { formConfig } from '@orbit/database/form'
 import { ViewToolbar } from './ViewToolbar'
 import { downloadViewCsv } from './csvExport'
 
@@ -384,6 +386,28 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
     </>
   )
 
+  // A form view has no filter, sort or rows to show: its tabs, then the builder or the form (spec P3 18.2).
+  const formParts: SurfaceParts | null =
+    view.type === 'form'
+      ? {
+          controls: (
+            <div className="flex items-center gap-2 border-b border-border pb-1">
+              <ViewTabs views={views} activeId={view.id} onSelect={selectView} />
+            </div>
+          ),
+          content: (
+            <DatabaseFormView
+              key={view.id}
+              database={database}
+              viewId={view.id}
+              form={formConfig(config, database.properties)}
+              onForm={canEditViews ? (form) => changeConfig({ ...config, form }) : undefined}
+            />
+          ),
+          board: false,
+        }
+      : null
+
   const peek = peekRowId ? (
     <RowPeek
       workspaceId={workspaceId}
@@ -399,7 +423,7 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
 
   return (
     <DatabaseEnvContext.Provider value={env}>
-      {layout({ controls, content, board })}
+      {layout(formParts ?? { controls, content, board })}
       {block ? block.peekContainer && createPortal(peek, block.peekContainer) : peek}
     </DatabaseEnvContext.Provider>
   )

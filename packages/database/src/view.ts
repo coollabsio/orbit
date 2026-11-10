@@ -70,6 +70,7 @@ export function repairConfig(view: DatabaseView, properties: readonly Property[]
     sorts,
     filter,
     wrap_cells: config.wrap_cells ?? false,
+    ...(view.type === 'form' && config.form ? { form: config.form } : {}),
     group_by,
     group_order: groups(config.group_order),
     hidden_groups: groups(config.hidden_groups),

@@ -32,6 +32,7 @@ mod files;
 mod unique_id;
 mod computed;
 mod export;
+mod forms;
 mod gallery;
 mod import;
 mod links;
@@ -48,6 +49,7 @@ pub(super) use files::FileCopies;
 pub use unique_id::UniqueIdConfig;
 pub(super) use unique_id::renumber_copy;
 pub use agent::{AgentDatabase, AgentQuery, AgentRow, AgentRowPage};
+pub use forms::{FormAccess, FormConfig, FormQuestion, FormSubmission, MAX_SUBMISSIONS_PER_HOUR};
 pub use export::{ExportDatabase, ExportRow, cell_text, is_number};
 pub use gallery::{CardPreview, CardSize, RowPreview};
 pub use import::{
@@ -1036,6 +1038,7 @@ pub enum ViewType {
     Calendar,
     Gallery,
     Timeline,
+    Form,
 }
 
 impl ViewType {
@@ -1047,6 +1050,7 @@ impl ViewType {
             Self::Calendar => "calendar",
             Self::Gallery => "gallery",
             Self::Timeline => "timeline",
+            Self::Form => "form",
         }
     }
 
@@ -1058,6 +1062,7 @@ impl ViewType {
             "calendar" => Some(Self::Calendar),
             "gallery" => Some(Self::Gallery),
             "timeline" => Some(Self::Timeline),
+            "form" => Some(Self::Form),
             _ => None,
         }
     }
@@ -1423,6 +1428,9 @@ pub struct ViewConfig {
     pub filter: FilterGroup,
     #[serde(default)]
     pub wrap_cells: bool,
+    /// Form: the questions and texts (spec P3 18). Only form views have one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub form: Option<FormConfig>,
     /// Board: the `select`, `status`, `multi_select` or `person` property whose groups are the
     /// columns (a card with several values shows in each of their columns). A board without one
     /// falls back to the first status, else the first select property.
@@ -1524,6 +1532,7 @@ impl ViewConfig {
                 .map(|property| &property.kind)
         };
         board::repair(self, view_type, properties);
+        forms::repair(self, view_type, properties);
         calendar::repair(self, view_type, properties);
         gallery::repair(self, properties);
         timeline::repair(self, view_type, properties);
@@ -1568,6 +1577,7 @@ impl ViewConfig {
             return Err("config.card_properties".to_owned());
         }
         board::check(self, properties)?;
+        forms::check(self)?;
         calendar::check(self, properties)?;
         gallery::check(self, properties)?;
         timeline::check(self, properties)?;
@@ -1606,6 +1616,7 @@ impl ViewConfig {
     }
 
     fn remap(&mut self, properties: &HashMap<Id, Id>) {
+        forms::remap(self, properties);
         let map = |id: &mut Id| {
             if let Some(copy) = properties.get(id) {
                 *id = *copy;
@@ -1867,6 +1878,11 @@ pub enum DatabaseError {
     LinkViewLimit,
     #[error("a database keeps at least one view")]
     LastView,
+    /// The form view takes no answers (`access: closed`).
+    #[error("database form is closed")]
+    FormClosed,
+    #[error("too many form submissions")]
+    FormRateLimit,
     /// The title property cannot be deleted or change its type.
     #[error("the title property cannot change")]
     TitleProperty,

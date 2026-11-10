@@ -1482,6 +1482,21 @@ Notion offers three access levels and anonymous answers
 Server: submit with read access only; required questions; closed form is 409; rate limit; row
 cap. Web: required question blocks submit.
 
+### 18.4 Status
+
+Members-only part done on 2026-11-10 (no migration: `0081` already allows `form`). No tests in this round (the
+user's request). Differences from this section:
+
+| # | Item | Where | Why |
+|---|---|---|---|
+| 1 | No new `Permission` or `Actor` method and no `can_submit` flag: a submission needs what reading the database needs (`open`), and a closed form is a state (409 `database_form_closed`). | `repositories/databases/forms.rs` | Docs have no member with read but no edit access today (guests see no docs), so the rule would equal "can read". Clients read `config.form.access`. |
+| 2 | The config lives at `ViewConfig.form` (only form views keep one); `label` and `description` are per question, the other texts optional with defaults ("Submit", the database title, a stock thank-you). | `repositories/databases/forms.rs` | One validated, repaired field instead of top-level keys shared with other view types. |
+| 3 | Files questions are left out (with unique ID, computed, relation and button). | `forms.rs`, `@orbit/database/form` | A files value names files of the row page, which does not exist before the submission. |
+| 4 | The rate limit counts the member's `database.form_submitted` audit events of the last hour in the workspace, inside the write transaction. | `forms.rs` | Holds for every server of a Postgres cluster without a new table; the write lock makes the count exact. |
+| 5 | Answers go in `{answers: {property_id: value}}` in row value shape; the title's answer is its text. Unknown properties and empty required answers are 422 `answers.<property_id>`. The row goes last in manual order. | `database_routes/forms.rs` | Reuses the row value parser and its errors. |
+| 6 | Mobile's form screen is `/docs/form/<database>/<view>`; a web form link of the same server tapped in a page opens it. | `apps/mobile/src/app/(tabs)/docs/form/` | `docs/[id].tsx` already owns `/docs/<id>`. |
+| 7 | A linked view block's form view is filled in place; "Copy form link" is hidden there. | `DatabaseForm.tsx` | The form page reads the database's own views. |
+
 ## 19. Limits (new)
 
 | Item | Limit | Item # |

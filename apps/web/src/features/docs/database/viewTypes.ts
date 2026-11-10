@@ -12,7 +12,7 @@ export const VIEW_KINDS: readonly { label: string; icon: typeof Grid; type: View
   { label: 'Calendar', icon: Calendar, type: 'calendar' },
   { label: 'Timeline', icon: RowHorizontal, type: 'timeline' },
   { label: 'Chart', icon: Chart, type: null },
-  { label: 'Form', icon: ClipboardText, type: null },
+  { label: 'Form', icon: ClipboardText, type: 'form' },
 ]
 
 export function viewIcon(type: ViewType): typeof Grid {

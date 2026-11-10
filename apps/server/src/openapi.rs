@@ -253,6 +253,7 @@ pub const CONTRACT_ID: &str = "orbit-api-v1";
         crate::database_routes::move_database_row,
         crate::database_routes::buttons::press_database_button,
         crate::database_routes::import::import_database_csv,
+        crate::database_routes::forms::submit_database_form,
         crate::database_routes::import::create_database_from_csv,
         crate::database_routes::templates::create_database_template,
         crate::database_routes::templates::update_database_template,
@@ -1104,6 +1105,7 @@ fn problem_responses(operation_id: &str) -> BTreeMap<&'static str, String> {
             | "duplicate_page"
             | "restore_page"
             | "create_database_row"
+            | "submit_database_form"
             | "create_invitation"
     ) {
         add_code(&mut responses, "402", "trial_limit_reached");
@@ -1723,6 +1725,7 @@ fn database_operation(operation_id: &str) -> bool {
             | "move_database_row"
             | "import_database_csv"
             | "create_database_from_csv"
+            | "submit_database_form"
             | "create_database_template"
             | "update_database_template"
             | "delete_database_template"
@@ -1769,6 +1772,12 @@ fn database_errors(operation_id: &str, responses: &mut BTreeMap<&'static str, Ve
             add_code(responses, "423", "page_locked");
         }
         "create_database_from_csv" => add_code(responses, "413", "request_too_large"),
+        "submit_database_form" => {
+            add_code(responses, "404", "database_view_not_found");
+            add_code(responses, "409", "database_form_closed");
+            add_code(responses, "409", "database_row_limit");
+            add_code(responses, "429", "database_form_rate_limited");
+        }
         _ => {}
     }
 }

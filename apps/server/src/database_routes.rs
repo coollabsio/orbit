@@ -29,6 +29,7 @@ use crate::task_routes::{
 };
 
 pub(crate) mod buttons;
+pub(crate) mod forms;
 pub(crate) mod import;
 pub(crate) mod templates;
 
@@ -90,6 +91,7 @@ pub fn database_router(state: DatabaseState) -> Router {
             post(buttons::press_database_button),
         )
         .merge(import::routes())
+        .merge(forms::routes())
         .route(
             &format!("{BASE}/templates"),
             post(templates::create_database_template),
@@ -981,6 +983,18 @@ fn database_problem(
             "database_last_view",
             "Last database view",
             "A database keeps at least one view.",
+        ),
+        DatabaseError::FormClosed => (
+            StatusCode::CONFLICT,
+            "database_form_closed",
+            "Form closed",
+            "This form does not take answers.",
+        ),
+        DatabaseError::FormRateLimit => (
+            StatusCode::TOO_MANY_REQUESTS,
+            "database_form_rate_limited",
+            "Too many form submissions",
+            "You can submit at most 30 forms an hour. Try again later.",
         ),
         DatabaseError::TitleProperty => (
             StatusCode::CONFLICT,

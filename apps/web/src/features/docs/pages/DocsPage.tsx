@@ -35,6 +35,7 @@ import { NotionImportPane } from './NotionImportPane'
 import { ObsidianImportPane } from './ObsidianImportPane'
 import { CsvImportPane } from './CsvImportPane'
 import { PageTrashPane } from './PageTrashPane'
+import { DatabaseFormPage } from '@/features/docs/database/DatabaseFormPage'
 
 /** The docs page's main pane (hidden on phones while the page list shows). */
 function DocsPane({ className, ...props }: ComponentProps<typeof Pane>) {
@@ -46,8 +47,8 @@ function landsOnFirstPage() {
   return typeof window.matchMedia !== 'function' || window.matchMedia('(min-width: 900px)').matches
 }
 
-export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import' | 'obsidian-import' | 'csv-import' }) {
-  const { pageId, importId } = useParams()
+export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import' | 'obsidian-import' | 'csv-import' | 'form' }) {
+  const { pageId, importId, viewId } = useParams()
   const navigate = useNavigate()
   const location = useLocation()
   const queryClient = useQueryClient()
@@ -67,7 +68,7 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
   const duplicatePage = useDuplicatePage(workspace.id)
   const editorControl = useRef<DocEditorControl>(null)
   const pages = tree.data ?? []
-  const activeId = view === 'page' ? (pageId ?? null) : null
+  const activeId = view === 'page' || view === 'form' ? (pageId ?? null) : null
   // The trash request is async: read the open page when it finishes, not when it started.
   const activeIdRef = useRef(activeId)
   const locationKeyRef = useRef(location.key)
@@ -194,6 +195,12 @@ export function DocsPage({ view = 'page' }: { view?: 'page' | 'trash' | 'import'
     content = <ObsidianImportPane key={importId ?? 'new'} workspaceId={workspace.id} importId={importId} />
   } else if (view === 'csv-import') {
     content = <CsvImportPane workspaceId={workspace.id} />
+  } else if (view === 'form' && pageId && viewId) {
+    content = (
+      <DocsPane>
+        <DatabaseFormPage workspaceId={workspace.id} databaseId={pageId} viewId={viewId} />
+      </DocsPane>
+    )
   } else if (!pageId) {
     // The landing order needs the default teamspace; a failed teamspace list falls back to private / any page.
     const spacesKnown = !teamspaces.isPending

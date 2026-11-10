@@ -246,6 +246,17 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
   with that date (plus filter values and the default template). Week start: the locale, or "⋯ → Start week on" (this
   browser, `orbit:calendar-week-start`). Mobile: list views show all visible properties; a calendar is a month grid with
   dots and the tapped day's rows under it (`components/database/Calendar.tsx`), no drag.
+- Database form views, members only (databases P2/P3 spec section 18, `database/DatabaseForm.tsx`, shared logic
+  `@orbit/database/form`). Config `form` `{questions: [{property_id, label?, description?, required}], title?,
+  description?, submit_label?, confirmation?, access: members|closed}`; a form view without one asks for the title.
+  Editors (view edit rules) build it: texts, question cards (drag or arrows to reorder, label, help text, Required),
+  "Add question" (a property not asked yet, or a new property), "Accepting answers"; "Preview" tries it without
+  sending. "Copy form link" copies `/docs/<database>/form/<view>`, a full-page form (`DatabaseFormPage.tsx`) for members
+  who can open the database. `POST /databases/{id}/forms/{view}/submit` `{answers}` adds the row as the submitter in
+  one transaction (row cap, `database.row_created` and `database.form_submitted` audit events); closed is 409, more
+  than 30 submissions per member per hour in a workspace is 429 (counted from the audit events). No computed,
+  unique ID, files, relation or button questions. Mobile fills and submits form views (`components/database/
+  FormFill.tsx`; screen `/docs/form/<database>/<view>`, which a web form link in a page opens); the builder is on the web.
 - Database email, phone, files and unique ID properties (databases P2/P3 spec section 12). Email and phone are checked
   text shown as `mailto:`/`tel:` links. Files hold `[{file_id, name}]` (max 20) of the row page's own files: the web
   popover uploads (button or drop), reorders and removes; mobile uploads from the photo library or files app. Unique ID
