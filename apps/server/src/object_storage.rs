@@ -13,7 +13,7 @@ use orbit_platform::{
 use tokio_util::sync::CancellationToken;
 
 use crate::repositories::instance_settings::{
-    BackupSchedule, InstanceSettingsRepository, S3Settings, StorageSettings,
+    BackupSchedule, BucketLocation, InstanceSettingsRepository, S3Settings, StorageSettings,
 };
 use crate::repositories::workspace_storage::{WorkspaceStorage, WorkspaceStorageRepository};
 use crate::secret_box::decrypt_secret;
@@ -228,12 +228,61 @@ pub async fn run_mover(
         if let Err(error) = forget_drained_buckets(&database, &store, &storage).await {
             tracing::warn!(%error, "removing emptied workspace buckets failed; retrying later");
         }
+        if let Err(error) = track_files_bucket(&database, &storage).await {
+            tracing::warn!(%error, "recording the bucket of the attachment files failed; retrying later");
+        }
         tokio::select! {
             () = shutdown.cancelled() => return Ok(()),
             () = storage.changed() => {}
             () = tokio::time::sleep(MOVE_INTERVAL) => {}
         }
     }
+}
+
+/// Keeps the record of the bucket that holds the attachment files in step with this server: recorded while
+/// attachments go to it, forgotten once they are off and no file is left in it. Then the bucket can change at the
+/// next start ([`EnvironmentSettings::check_bucket`]). Recording again on every pass also repairs a record that
+/// another server cleared just before attachments were turned on.
+///
+/// [`EnvironmentSettings::check_bucket`]: crate::repositories::environment_settings::EnvironmentSettings::check_bucket
+async fn track_files_bucket(database: &Database, storage: &ObjectStorage) -> Result<(), String> {
+    let state = storage.current();
+    let Some(bucket) = state.bucket else {
+        return Ok(());
+    };
+    let current = bucket.config();
+    let location = BucketLocation {
+        endpoint: current.endpoint.clone(),
+        bucket: current.bucket.clone(),
+        prefix: current.prefix.clone(),
+    };
+    let repository = InstanceSettingsRepository::new(database.clone());
+    let recorded = repository
+        .files_bucket()
+        .await
+        .map_err(|error| error.to_string())?;
+    if state.attachments {
+        if recorded.as_ref() != Some(&location) {
+            repository
+                .keep_files_bucket(&location)
+                .await
+                .map_err(|error| error.to_string())?;
+        }
+        return Ok(());
+    }
+    if recorded.as_ref() != Some(&location)
+        || bucket
+            .any("blobs/")
+            .await
+            .map_err(|error| error.to_string())?
+    {
+        return Ok(());
+    }
+    repository
+        .files_bucket_emptied(&location)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 /// Drops the removed workspace buckets that have no files left, on every server of the database.

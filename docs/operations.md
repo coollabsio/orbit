@@ -46,7 +46,55 @@ Orbit reads its configuration only from environment variables that start with `O
 
 Create the app key once with `openssl rand -base64 32` and keep a copy outside the server. Orbit does not start without it. See [Email, registration and the app key](#email-registration-and-the-app-key).
 
-The root user configures outgoing email in **Admin → Settings** and S3 storage in **Admin → Storage**, not with variables.
+## Instance settings from environment variables
+
+The root user saves outgoing email, S3 storage, sign-in providers, open registration and automatic backups in Admin. A declarative deployment (Kubernetes, GitOps, Docker Compose) can set them with the variables below instead. When a variable is set, it replaces the saved value, and Admin shows the setting read-only with the name of the variable. Admin answers a change of it with `409 set_by_environment`. Orbit does not write these values to the database: when you remove a variable, Orbit uses the saved value again after a restart. A setting without a variable keeps the value saved in Admin.
+
+The variables of one group are set together. For example, `ORBIT_SMTP_HOST` needs `ORBIT_SMTP_FROM`. Orbit refuses to start when a group is not complete, and `orbit config check` shows the error. Each secret also has a `_FILE` variable that names a file with the secret, as `ORBIT_APP_KEY_FILE` does. Do not set both. `orbit config show` prints the set variables, with each secret as `[REDACTED]`.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `ORBIT_SMTP_HOST` | none | The mail server. Sets all of **Admin → Email**. Requires `ORBIT_SMTP_FROM`. |
+| `ORBIT_SMTP_SECURITY` | `starttls` | `tls`, `starttls` or `none`. Use `none` only for a relay on the same host or private network. |
+| `ORBIT_SMTP_PORT` | `465` for `tls`, `587` for `starttls`, `25` for `none` | |
+| `ORBIT_SMTP_USERNAME` | none | |
+| `ORBIT_SMTP_PASSWORD`, `ORBIT_SMTP_PASSWORD_FILE` | none | |
+| `ORBIT_SMTP_FROM` | none | The sender address, for example `orbit@example.com`. |
+| `ORBIT_SMTP_FROM_NAME` | none | The sender name, at most 120 characters. |
+| `ORBIT_S3_ENDPOINT` | none | The bucket of **Admin → Storage**, for example `https://s3.eu-central-1.amazonaws.com`. Requires `ORBIT_S3_BUCKET`, `ORBIT_S3_ACCESS_KEY_ID` and `ORBIT_S3_SECRET_ACCESS_KEY`. |
+| `ORBIT_S3_BUCKET` | none | 3 to 63 characters. |
+| `ORBIT_S3_REGION` | `us-east-1` | |
+| `ORBIT_S3_PREFIX` | none (bucket root) | The key prefix, for example `orbit`. |
+| `ORBIT_S3_ACCESS_KEY_ID` | none | |
+| `ORBIT_S3_SECRET_ACCESS_KEY`, `ORBIT_S3_SECRET_ACCESS_KEY_FILE` | none | |
+| `ORBIT_S3_PATH_STYLE` | `false` | `true` for `endpoint/bucket/key` URLs (MinIO and most self-hosted servers). |
+| `ORBIT_S3_ATTACHMENTS` | saved value | `true` or `false`: attachments in S3. `true` requires the `ORBIT_S3_*` bucket. |
+| `ORBIT_S3_BACKUPS` | saved value | `true` or `false`: backups in S3. `true` requires the `ORBIT_S3_*` bucket. |
+| `ORBIT_AUTOMATIC_BACKUPS` | saved value | `off`, `hourly` or `daily`. |
+| `ORBIT_OPEN_REGISTRATION` | saved value | `true` or `false`. `true` requires `ORBIT_SMTP_*` or a provider variable below. On Orbit Cloud, it requires `ORBIT_SMTP_*`. |
+| `ORBIT_GOOGLE_CLIENT_ID`, `ORBIT_GOOGLE_CLIENT_SECRET`, `ORBIT_GOOGLE_CLIENT_SECRET_FILE` | none | The Google OAuth client. Set the ID and the secret together. See [Sign in with Google and GitHub](#sign-in-with-google-and-github). |
+| `ORBIT_GITHUB_CLIENT_ID`, `ORBIT_GITHUB_CLIENT_SECRET`, `ORBIT_GITHUB_CLIENT_SECRET_FILE` | none | The GitHub OAuth client. Set the ID and the secret together. |
+
+Orbit does not test the `ORBIT_S3_*` bucket at startup, as Admin does when it saves one. An unreachable bucket shows up as a move error on **Admin → Storage** and as failed backups. Orbit refuses to start when a workspace's own bucket overlaps the `ORBIT_S3_*` bucket.
+
+### Changing the bucket that holds the attachment files
+
+Orbit records the location (endpoint, bucket and prefix, not the keys) of the bucket that holds the attachment files: when attachments go to S3, from Admin or from `ORBIT_S3_*`. The mover clears the record when attachments are off and no file is left in that bucket. Upgrading to migration 0093 records the bucket saved in Admin, if there is one. An empty one is cleared within 10 minutes.
+
+At startup, Orbit compares the record with the bucket it is about to use (`ORBIT_S3_*`, else Admin → Storage). When they are different, Orbit starts only if it can prove that the recorded bucket has no attachment files:
+
+- When the recorded bucket is the one saved in Admin, Orbit lists `blobs/` in it with the saved keys. An empty bucket is forgotten, and Orbit starts.
+- Otherwise (the recorded bucket came from earlier `ORBIT_S3_*` values, whose keys Orbit never saves), or when the bucket cannot be reached, Orbit refuses to start. The error names the recorded bucket.
+
+To change or remove the `ORBIT_S3_*` bucket while it holds the attachment files, do these steps:
+
+1. Set `ORBIT_S3_ATTACHMENTS=false` and restart Orbit.
+2. Wait until **Admin → Storage** shows no files left to move.
+3. Change or remove the `ORBIT_S3_*` variables, and restart Orbit.
+
+When the files in the recorded bucket are no longer needed (for example, the bucket was deleted), stop Orbit and run `orbit attachments forget-bucket --yes`. Orbit then forgets the bucket and does not read its files again. The audit log records `instance.files_bucket_forgotten`.
+
+All servers that share one Postgres database must have the same variables. Each server reads only its own environment.
 
 ## Upgrade to migration 0066 (API token scopes)
 
@@ -335,7 +383,7 @@ The root user saves an S3-compatible bucket (AWS S3, Cloudflare R2, MinIO, …) 
 
 With attachments in S3, a backup holds the database (and the files still on this server), not the bucket's files. So Orbit does not delete an unused file from the bucket at once: it keeps it 40 days, longer than any kept backup, so a restored older database still finds its files.
 
-The `orbit backup` commands use the bucket saved in Admin → Storage and decrypt its secret with `ORBIT_APP_KEY`. With Postgres, or with SQLite on a server that still has its database, stop the servers and restore:
+The `orbit backup` commands use the `ORBIT_S3_*` bucket, or else the bucket saved in Admin → Storage, and decrypt its secret with `ORBIT_APP_KEY`. With Postgres, or with SQLite on a server that still has its database, stop the servers and restore:
 
 ```sh
 orbit backup list            # the last column says local or s3

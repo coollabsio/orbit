@@ -1,6 +1,6 @@
 import { View } from 'react-native'
 
-import { AdminShell, Note, OptionHint, OptionText, SettingsCard, SettingsRow, Toggle } from '../../../../components/settings/Shell'
+import { AdminShell, Note, OptionHint, OptionText, SetByEnvironment, SettingsCard, SettingsRow, Toggle } from '../../../../components/settings/Shell'
 import { useInstanceSettings, useSetRegistration } from '../../../../hooks/admin'
 import { errorMessage } from '../../../../session-context'
 import { Button } from '../../../../ui'
@@ -20,13 +20,13 @@ export default function AdminGeneralScreen() {
         </SettingsCard>
       ) : null}
       {settings.data ? (
-        <RegistrationCard open={settings.data.registration_open} emailReady={settings.data.smtp != null} />
+        <RegistrationCard open={settings.data.registration_open} emailReady={settings.data.smtp != null} locked={settings.data.environment.registration_open} />
       ) : null}
     </AdminShell>
   )
 }
 
-function RegistrationCard({ open, emailReady }: { open: boolean; emailReady: boolean }) {
+function RegistrationCard({ open, emailReady, locked }: { open: boolean; emailReady: boolean; locked: boolean }) {
   const setRegistration = useSetRegistration()
   return (
     <SettingsCard title="Registration" description="Who can create an account on this Orbit." flush>
@@ -37,9 +37,10 @@ function RegistrationCard({ open, emailReady }: { open: boolean; emailReady: boo
               ? 'On: anyone can create an account with a link sent to their email. Off: people join only by invitation.'
               : 'Set up a mail server in Email first: the sign-up link goes out by email.'}
           </OptionHint>
+          {locked ? <SetByEnvironment variable="ORBIT_OPEN_REGISTRATION" /> : null}
           {setRegistration.isError ? <OptionHint error>{errorMessage(setRegistration.error)}</OptionHint> : null}
         </OptionText>
-        <Toggle label="Open registration" value={open} disabled={(!emailReady && !open) || setRegistration.isPending} onChange={(checked) => setRegistration.mutate(checked)} />
+        <Toggle label="Open registration" value={open} disabled={locked || (!emailReady && !open) || setRegistration.isPending} onChange={(checked) => setRegistration.mutate(checked)} />
       </SettingsRow>
     </SettingsCard>
   )

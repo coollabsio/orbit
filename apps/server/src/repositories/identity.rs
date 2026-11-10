@@ -812,12 +812,9 @@ impl IdentityRepository {
         now: TimestampMillis,
     ) -> Result<RootAccount, RegistrationError> {
         let mut transaction = self.database.immediate_transaction().await?;
-        let open = sqlx::query_scalar::<_, i64>(
-            "SELECT registration_open FROM instance_settings WHERE id = 1",
-        )
-        .fetch_one(&mut *transaction)
-        .await?;
-        if open == 0 {
+        let open = super::environment_settings::registration_open(&self.database, &mut transaction)
+            .await?;
+        if !open {
             return Err(RegistrationError::Closed);
         }
         let email = sqlx::query_scalar::<_, String>(

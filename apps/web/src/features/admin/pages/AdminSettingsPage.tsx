@@ -4,6 +4,7 @@ import { SettingsCard } from '@/components/common/SettingsCard'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
 import { useInstanceSettings, useSetRegistration } from '@/features/admin/api'
+import { SetByEnvironment } from '@/features/admin/components/SetByEnvironment'
 import { SettingsRow } from '@/features/settings/components/SettingsParts'
 import { LoadingText } from '@/components/ui/spinner'
 
@@ -16,10 +17,10 @@ export function AdminSettingsPage() {
   const settings = useInstanceSettings()
   if (settings.isPending) return <SettingsCard title="General"><p><LoadingText>Loading settings…</LoadingText></p></SettingsCard>
   if (settings.isError) return <SettingsCard title="General"><p role="alert">Settings could not be loaded. <Button variant="ghost" onClick={() => void settings.refetch()}>Retry</Button></p></SettingsCard>
-  return <RegistrationCard open={settings.data.registration_open} emailReady={settings.data.smtp != null} />
+  return <RegistrationCard open={settings.data.registration_open} emailReady={settings.data.smtp != null} locked={settings.data.environment.registration_open} />
 }
 
-function RegistrationCard({ open, emailReady }: { open: boolean; emailReady: boolean }) {
+function RegistrationCard({ open, emailReady, locked }: { open: boolean; emailReady: boolean; locked: boolean }) {
   const setRegistration = useSetRegistration()
   return (
     <SettingsCard title="Registration" description="Who can create an account on this Orbit." flush>
@@ -31,11 +32,12 @@ function RegistrationCard({ open, emailReady }: { open: boolean; emailReady: boo
               ? 'On: anyone can create an account with a link sent to their email. Off: people join only by invitation.'
               : 'Set up a mail server in Email first: the sign-up link goes out by email.'}
           </span>
+          {locked ? <SetByEnvironment variable="ORBIT_OPEN_REGISTRATION" /> : null}
         </div>
         <Switch
           aria-label="Open registration"
           checked={open}
-          disabled={(!emailReady && !open) || setRegistration.isPending}
+          disabled={locked || (!emailReady && !open) || setRegistration.isPending}
           onCheckedChange={(checked: boolean) => setRegistration.mutate(checked, {
             onSuccess: () => toast(checked ? 'Registration is open' : 'Registration is closed'),
             onError: (error) => toast.error(problemText(error, 'Registration could not be changed.')),

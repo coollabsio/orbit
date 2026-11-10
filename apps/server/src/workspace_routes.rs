@@ -31,6 +31,7 @@ use crate::object_storage::Owner;
 use crate::repositories::api_tokens::{
     ApiTokenError, ApiTokenRecord, ApiTokenRepository, ApiTokenScope, IssuedApiToken, TokenProjects,
 };
+use crate::repositories::environment_settings::EnvironmentSettings;
 use crate::repositories::identity::{
     AdminAccountError, AdminUser, AuthenticatedSession, IdentityRepository,
 };
@@ -1830,6 +1831,64 @@ struct InstanceSettingsView {
     limits: LimitsView,
     /// The Google and GitHub OAuth clients that are saved. A provider that is not listed is off.
     sign_in_providers: Vec<SignInProviderView>,
+    /// The settings that `ORBIT_*` environment variables set. They replace the saved values, and changing them
+    /// here gives 409 `set_by_environment`.
+    environment: EnvironmentView,
+}
+
+/// `true` for each setting that an environment variable sets.
+#[derive(Serialize, ToSchema)]
+struct EnvironmentView {
+    /// `ORBIT_OPEN_REGISTRATION`.
+    registration_open: bool,
+    /// `ORBIT_SMTP_*`.
+    smtp: bool,
+    /// `ORBIT_S3_*`: the bucket.
+    s3: bool,
+    /// `ORBIT_S3_ATTACHMENTS`.
+    attachments_in_s3: bool,
+    /// `ORBIT_S3_BACKUPS`.
+    backups_in_s3: bool,
+    /// `ORBIT_AUTOMATIC_BACKUPS`.
+    backup_schedule: bool,
+    /// `ORBIT_GOOGLE_*`, `ORBIT_GITHUB_*`.
+    sign_in_providers: Vec<Provider>,
+}
+
+impl From<&EnvironmentSettings> for EnvironmentView {
+    fn from(environment: &EnvironmentSettings) -> Self {
+        Self {
+            registration_open: environment.registration_open.is_some(),
+            smtp: environment.smtp.is_some(),
+            s3: environment.s3.is_some(),
+            attachments_in_s3: environment.attachments_in_s3.is_some(),
+            backups_in_s3: environment.backups_in_s3.is_some(),
+            backup_schedule: environment.backup_schedule.is_some(),
+            sign_in_providers: environment
+                .sign_in_providers
+                .iter()
+                .map(|saved| saved.provider)
+                .collect(),
+        }
+    }
+}
+
+/// 409 `set_by_environment`: `variables` set the setting, so only the server's environment can change it.
+fn set_by_environment(
+    variables: &str,
+    instance: &str,
+    request_id: Option<&Extension<RequestId>>,
+) -> ApiError {
+    ApiError::new(
+        StatusCode::CONFLICT,
+        "set_by_environment",
+        "Set by the environment",
+        format!(
+            "{variables} sets this on the server. Change the environment variable and restart Orbit."
+        ),
+        instance,
+        request_id,
+    )
 }
 
 #[derive(Serialize, ToSchema)]
@@ -1899,6 +1958,7 @@ async fn settings_view(
         .unwrap_or_default();
     Ok(Json(InstanceSettingsView {
         sign_in_providers,
+        environment: EnvironmentView::from(&*EnvironmentSettings::of(state.identity.database())),
         storage: StorageView {
             s3: storage.s3.map(|s3| S3View {
                 endpoint: s3.endpoint,
@@ -2102,6 +2162,16 @@ async fn set_registration(
 ) -> Result<Json<InstanceSettingsView>, ApiError> {
     let instance = "/api/v1/admin/settings/registration";
     let session = require_root(&state, &headers, instance, request_id.as_ref()).await?;
+    if EnvironmentSettings::of(state.identity.database())
+        .registration_open
+        .is_some()
+    {
+        return Err(set_by_environment(
+            "ORBIT_OPEN_REGISTRATION",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
     InstanceSettingsRepository::new(state.identity.database().clone())
         .set_registration_open(
             session.user.id,
@@ -2143,6 +2213,16 @@ async fn save_smtp(
 ) -> Result<Json<InstanceSettingsView>, ApiError> {
     let instance = "/api/v1/admin/settings/smtp";
     let session = require_root(&state, &headers, instance, request_id.as_ref()).await?;
+    if EnvironmentSettings::of(state.identity.database())
+        .smtp
+        .is_some()
+    {
+        return Err(set_by_environment(
+            "ORBIT_SMTP_*",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
     let invalid = |field: &str, detail: &str| {
         ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
@@ -2231,6 +2311,16 @@ async fn remove_smtp(
 ) -> Result<Json<InstanceSettingsView>, ApiError> {
     let instance = "/api/v1/admin/settings/smtp";
     let session = require_root(&state, &headers, instance, request_id.as_ref()).await?;
+    if EnvironmentSettings::of(state.identity.database())
+        .smtp
+        .is_some()
+    {
+        return Err(set_by_environment(
+            "ORBIT_SMTP_*",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
     InstanceSettingsRepository::new(state.identity.database().clone())
         .clear_smtp(
             session.user.id,
@@ -2394,6 +2484,16 @@ async fn save_sign_in_provider(
     let session = require_root(&state, &headers, instance, rid).await?;
     let provider =
         Provider::parse(&provider).ok_or_else(|| sign_in_provider_not_found(instance, rid))?;
+    if EnvironmentSettings::of(state.identity.database())
+        .sign_in_provider(provider)
+        .is_some()
+    {
+        let variables = match provider {
+            Provider::Google => "ORBIT_GOOGLE_CLIENT_ID",
+            Provider::Github => "ORBIT_GITHUB_CLIENT_ID",
+        };
+        return Err(set_by_environment(variables, instance, rid));
+    }
     let client_id = body.client_id.trim();
     if client_id.is_empty() || client_id.len() > 256 {
         return Err(invalid_sign_in_provider(
@@ -2454,6 +2554,16 @@ async fn remove_sign_in_provider(
     let session = require_root(&state, &headers, instance, rid).await?;
     let provider =
         Provider::parse(&provider).ok_or_else(|| sign_in_provider_not_found(instance, rid))?;
+    if EnvironmentSettings::of(state.identity.database())
+        .sign_in_provider(provider)
+        .is_some()
+    {
+        let variables = match provider {
+            Provider::Google => "ORBIT_GOOGLE_CLIENT_ID",
+            Provider::Github => "ORBIT_GITHUB_CLIENT_ID",
+        };
+        return Err(set_by_environment(variables, instance, rid));
+    }
     InstanceSettingsRepository::new(state.identity.database().clone())
         .remove_sign_in_provider(
             session.user.id,
@@ -2599,6 +2709,16 @@ async fn save_s3(
 ) -> Result<Json<InstanceSettingsView>, ApiError> {
     let instance = "/api/v1/admin/settings/s3";
     let session = require_root(&state, &headers, instance, request_id.as_ref()).await?;
+    if EnvironmentSettings::of(state.identity.database())
+        .s3
+        .is_some()
+    {
+        return Err(set_by_environment(
+            "ORBIT_S3_*",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
     let invalid =
         |field: &str, detail: &str| invalid_storage(field, detail, instance, request_id.as_ref());
     let location = validated_s3(&body, instance, request_id.as_ref())?;
@@ -2689,6 +2809,16 @@ async fn remove_s3(
 ) -> Result<Json<InstanceSettingsView>, ApiError> {
     let instance = "/api/v1/admin/settings/s3";
     let session = require_root(&state, &headers, instance, request_id.as_ref()).await?;
+    if EnvironmentSettings::of(state.identity.database())
+        .s3
+        .is_some()
+    {
+        return Err(set_by_environment(
+            "ORBIT_S3_*",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
     let repository = InstanceSettingsRepository::new(state.identity.database().clone());
     let saved = repository
         .storage()
@@ -3013,6 +3143,32 @@ async fn save_storage_options(
     let instance = "/api/v1/admin/settings/storage";
     let session = require_root(&state, &headers, instance, request_id.as_ref()).await?;
     let database = state.identity.database();
+    let environment = EnvironmentSettings::of(database);
+    let changed = |set: Option<bool>, wanted: bool| set.is_some_and(|set| set != wanted);
+    if changed(environment.attachments_in_s3, body.attachments_in_s3) {
+        return Err(set_by_environment(
+            "ORBIT_S3_ATTACHMENTS",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
+    if changed(environment.backups_in_s3, body.backups_in_s3) {
+        return Err(set_by_environment(
+            "ORBIT_S3_BACKUPS",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
+    if environment
+        .backup_schedule
+        .is_some_and(|schedule| schedule != body.backup_schedule)
+    {
+        return Err(set_by_environment(
+            "ORBIT_AUTOMATIC_BACKUPS",
+            instance,
+            request_id.as_ref(),
+        ));
+    }
     if !body.attachments_in_s3 && crate::cluster::Cluster::of(database).others() > 0 {
         let current = InstanceSettingsRepository::new(database.clone())
             .storage()

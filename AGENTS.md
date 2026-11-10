@@ -38,7 +38,7 @@ Every change must work on both.
   start with `if orbit_platform::testing_postgres() { return; }` and a one-line reason.
 - **Postgres setup:** the database must use `LOCALE_PROVIDER builtin BUILTIN_LOCALE 'C.UTF-8' LOCALE 'C.UTF-8'`
   (Orbit refuses other databases), and the server needs `ORBIT_APP_KEY`. S3 for files and backups stays optional
-  and is set in Admin → Storage. Operator details: [`docs/operations.md`](docs/operations.md).
+  and is set in Admin → Storage or with `ORBIT_S3_*`. Operator details: [`docs/operations.md`](docs/operations.md).
 
 ## Development servers: one per worktree
 

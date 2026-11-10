@@ -56223,6 +56223,52 @@
         },
         "additionalProperties": false
       },
+      "EnvironmentView": {
+        "type": "object",
+        "description": "`true` for each setting that an environment variable sets.",
+        "required": [
+          "registration_open",
+          "smtp",
+          "s3",
+          "attachments_in_s3",
+          "backups_in_s3",
+          "backup_schedule",
+          "sign_in_providers"
+        ],
+        "properties": {
+          "attachments_in_s3": {
+            "type": "boolean",
+            "description": "`ORBIT_S3_ATTACHMENTS`."
+          },
+          "backup_schedule": {
+            "type": "boolean",
+            "description": "`ORBIT_AUTOMATIC_BACKUPS`."
+          },
+          "backups_in_s3": {
+            "type": "boolean",
+            "description": "`ORBIT_S3_BACKUPS`."
+          },
+          "registration_open": {
+            "type": "boolean",
+            "description": "`ORBIT_OPEN_REGISTRATION`."
+          },
+          "s3": {
+            "type": "boolean",
+            "description": "`ORBIT_S3_*`: the bucket."
+          },
+          "sign_in_providers": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Provider"
+            },
+            "description": "`ORBIT_GOOGLE_*`, `ORBIT_GITHUB_*`."
+          },
+          "smtp": {
+            "type": "boolean",
+            "description": "`ORBIT_SMTP_*`."
+          }
+        }
+      },
       "ExchangeChallenge": {
         "oneOf": [
           {
@@ -56791,9 +56837,14 @@
           "registration_open",
           "storage",
           "limits",
-          "sign_in_providers"
+          "sign_in_providers",
+          "environment"
         ],
         "properties": {
+          "environment": {
+            "$ref": "#/components/schemas/EnvironmentView",
+            "description": "The settings that `ORBIT_*` environment variables set. They replace the saved values, and changing them\nhere gives 409 `set_by_environment`."
+          },
           "limits": {
             "$ref": "#/components/schemas/LimitsView"
           },

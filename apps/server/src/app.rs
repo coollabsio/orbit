@@ -219,10 +219,38 @@ impl App {
             crate::secret_box::check_old_app_key_file(key, &config.data.database)
                 .map_err(AppError::Config)?;
         }
+        if let Some(key) = &app_key {
+            let environment =
+                crate::repositories::environment_settings::EnvironmentSettings::from_config(
+                    &config.instance,
+                    key,
+                )
+                .map_err(AppError::Config)?;
+            environment
+                .check_bucket(&database, key)
+                .await
+                .map_err(|error| AppError::Config(format!("object storage: {error}")))?;
+            environment.install(&database);
+        }
         let object_storage = ObjectStorage::default();
         let storage_settings = crate::object_storage::load_saved(&database)
             .await
             .map_err(|error| AppError::Database(error.to_string()))?;
+        if let Some(s3) = storage_settings
+            .installation
+            .s3
+            .as_ref()
+            .filter(|_| storage_settings.installation.attachments_in_s3)
+        {
+            crate::repositories::instance_settings::InstanceSettingsRepository::new(
+                database.clone(),
+            )
+            .keep_files_bucket(&crate::repositories::instance_settings::BucketLocation::of(
+                s3,
+            ))
+            .await
+            .map_err(|error| AppError::Database(error.to_string()))?;
+        }
         crate::object_storage::apply_and_keep(
             &database,
             &object_storage,

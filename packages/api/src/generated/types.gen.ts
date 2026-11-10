@@ -2388,6 +2388,40 @@ export type EnableTotpBody = {
 };
 
 /**
+ * `true` for each setting that an environment variable sets.
+ */
+export type EnvironmentView = {
+    /**
+     * `ORBIT_S3_ATTACHMENTS`.
+     */
+    attachments_in_s3: boolean;
+    /**
+     * `ORBIT_AUTOMATIC_BACKUPS`.
+     */
+    backup_schedule: boolean;
+    /**
+     * `ORBIT_S3_BACKUPS`.
+     */
+    backups_in_s3: boolean;
+    /**
+     * `ORBIT_OPEN_REGISTRATION`.
+     */
+    registration_open: boolean;
+    /**
+     * `ORBIT_S3_*`: the bucket.
+     */
+    s3: boolean;
+    /**
+     * `ORBIT_GOOGLE_*`, `ORBIT_GITHUB_*`.
+     */
+    sign_in_providers: Array<Provider>;
+    /**
+     * `ORBIT_SMTP_*`.
+     */
+    smtp: boolean;
+};
+
+/**
  * The 202 answers of the exchange: a second factor, or the password before a first link.
  */
 export type ExchangeChallenge = TwoFactorChallenge | PasswordChallenge;
@@ -2613,6 +2647,11 @@ export type InstanceAdminBody = {
 };
 
 export type InstanceSettingsView = {
+    /**
+     * The settings that `ORBIT_*` environment variables set. They replace the saved values, and changing them
+     * here gives 409 `set_by_environment`.
+     */
+    environment: EnvironmentView;
     limits: LimitsView;
     registration_open: boolean;
     /**

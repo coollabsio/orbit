@@ -10,6 +10,10 @@ use axum::http::Uri;
 use ipnet::IpNet;
 use thiserror::Error;
 
+mod instance;
+
+pub use instance::{BackupSchedule, InstanceConfig, OAuthClientConfig, SmtpConfig, SmtpSecurity};
+
 const MAX_SECRET_FILE_BYTES: u64 = 64 * 1024;
 const HTTP_PORT_ENV: &str = "ORBIT_PORT";
 const HTTP_BIND_ENV: &str = "ORBIT_BIND";
@@ -67,6 +71,9 @@ pub struct Config {
     /// Native iOS pushes through Apple's push service (`ORBIT_APNS_*`); `None` when the key is not
     /// set: browsers still get Web Push.
     pub apns: Option<ApnsConfig>,
+    /// Instance settings from the environment (`ORBIT_SMTP_*`, `ORBIT_S3_*`, …): each one replaces the value
+    /// saved in Admin.
+    pub instance: InstanceConfig,
 }
 
 /// The server's identity towards APNs: a token signing key (`.p8`) of the Apple developer team.
@@ -963,6 +970,8 @@ fn apply_environment(
             apns.team_id = Some(value.trim().to_owned());
         } else if key == APNS_TOPIC_ENV {
             apns.topic = Some(value.trim().to_owned());
+        } else if instance::is_instance_key(key) {
+            // Read below, as a group.
         } else if key.starts_with("ORBIT_")
             && !IGNORED_ENV_PREFIXES
                 .iter()
@@ -973,6 +982,16 @@ fn apply_environment(
     }
     config.billing = billing.into_config()?;
     config.apns = apns.into_config()?;
+    config.instance = InstanceConfig::from_environment(environment)?;
+    if config.billing.is_some()
+        && config.instance.registration_open == Some(true)
+        && config.instance.smtp.is_none()
+    {
+        return Err(ConfigError::InvalidSetting {
+            key: "ORBIT_OPEN_REGISTRATION",
+            detail: "Orbit Cloud needs ORBIT_SMTP_* to open registration".to_owned(),
+        });
+    }
     Ok(())
 }
 
