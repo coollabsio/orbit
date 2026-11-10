@@ -24,6 +24,7 @@ use crate::billing::TrialLimit;
 use crate::collab::CollabHub;
 
 mod board;
+mod calendar;
 mod computed;
 mod export;
 mod import;
@@ -31,6 +32,7 @@ mod links;
 mod moves;
 mod search;
 mod templates;
+pub use calendar::CalendarMode;
 pub use computed::{ComputeScope, RelatedPage, is_computed};
 pub use export::{ExportDatabase, ExportRow, cell_text, is_number};
 pub use import::{
@@ -955,6 +957,8 @@ pub enum ViewType {
     #[default]
     Table,
     Board,
+    List,
+    Calendar,
 }
 
 impl ViewType {
@@ -962,6 +966,8 @@ impl ViewType {
         match self {
             Self::Table => "table",
             Self::Board => "board",
+            Self::List => "list",
+            Self::Calendar => "calendar",
         }
     }
 
@@ -969,6 +975,8 @@ impl ViewType {
         match value {
             "table" => Some(Self::Table),
             "board" => Some(Self::Board),
+            "list" => Some(Self::List),
+            "calendar" => Some(Self::Calendar),
             _ => None,
         }
     }
@@ -1373,6 +1381,14 @@ pub struct ViewConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>)]
     pub default_template_id: Option<Id>,
+    /// Calendar: the `date`, `created_time` or `last_edited_time` property that places the rows.
+    /// A calendar without one takes the first `date` property.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>)]
+    pub date_property_id: Option<Id>,
+    /// Calendar: a month grid (default) or one week.
+    #[serde(default, skip_serializing_if = "CalendarMode::is_month")]
+    pub calendar_mode: CalendarMode,
 }
 
 impl ViewConfig {
@@ -1395,6 +1411,7 @@ impl ViewConfig {
                 .map(|property| &property.kind)
         };
         board::repair(self, view_type, properties);
+        calendar::repair(self, view_type, properties);
         let mut cards = HashSet::new();
         self.card_properties.retain(|id| {
             kind(*id).is_some_and(|kind| *kind != PropertyKind::Title) && cards.insert(*id)
@@ -1436,6 +1453,7 @@ impl ViewConfig {
             return Err("config.card_properties".to_owned());
         }
         board::check(self, properties)?;
+        calendar::check(self, properties)?;
         let types: HashMap<Id, PropertyType> = properties
             .iter()
             .map(|property| (property.id, property.kind.property_type()))
@@ -1486,6 +1504,9 @@ impl ViewConfig {
             .rules_mut(&mut |rule| map(&mut rule.property_id));
         if let Some(group_by) = &mut self.group_by {
             map(group_by);
+        }
+        if let Some(date_property_id) = &mut self.date_property_id {
+            map(date_property_id);
         }
         if let Some(sub_group_by) = &mut self.sub_group_by {
             map(sub_group_by);

@@ -72,7 +72,7 @@ pub(super) fn repair(config: &mut ViewConfig, view_type: ViewType, properties: &
         .filter(|id| kind(*id).is_some_and(groupable));
     let group_by = match view_type {
         ViewType::Board => group_by.or_else(|| default_group_by(properties)),
-        ViewType::Table => group_by,
+        _ => group_by,
     };
     if group_by != config.group_by {
         config.group_order.clear();

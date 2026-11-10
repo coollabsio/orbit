@@ -1,5 +1,5 @@
 import { useRef, useState, type ReactNode } from 'react'
-import { ArrowSwapHorizontal, DocumentDownload, DocumentUpload, Eye, EyeSlash, Filter, Kanban, Link, Lock, MoreH, RowHorizontal, Search, Sort, Unlock, Xmark } from 'reicon-react'
+import { ArrowSwapHorizontal, Calendar, DocumentDownload, DocumentUpload, Eye, EyeSlash, Filter, Kanban, Link, Lock, MoreH, RowHorizontal, Search, Sort, Unlock, Xmark } from 'reicon-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -20,10 +20,13 @@ import {
 import { Popover, PopoverContent } from '@/components/ui/popover'
 import { Tip } from '@/components/common/Tip'
 import type { DatabaseView, Property, ViewConfig } from '@orbit/database/types'
-import { groupable, laneable } from '@orbit/database/view'
+import { groupable, laneable, showsCards } from '@orbit/database/view'
+import { datable, weekdayName, type Weekday } from '@orbit/database/calendar'
+import { addDays } from '@orbit/database/dates'
 import type { Template } from '@orbit/database/templates'
 import { useSetPageLock } from '@/features/docs/api/pageOptions'
 import { useDatabaseEnv } from './context'
+import { setWeekStart, useWeekStart } from './weekStart'
 import { MergeCsvDialog } from './CsvImport'
 import { importSummary } from './csvImportText'
 import { PropertyPicker } from './FilterBar'
@@ -150,9 +153,10 @@ export function ViewToolbar({ properties, config, onConfig, onAddFilter, onAdvan
         </Tip>
         <DropdownMenuContent align="end" className="w-52">
           {viewType === 'board' ? <GroupMenus properties={properties} config={config} onConfig={onConfig} /> : null}
+          {viewType === 'calendar' ? <CalendarMenus properties={properties} config={config} onConfig={onConfig} /> : null}
           <DropdownMenuItem onClick={() => setPropertiesOpen(true)}>
             <Eye />
-            {viewType === 'board' ? 'Card properties' : 'Properties'}
+            {showsCards(viewType) ? 'Card properties' : 'Properties'}
           </DropdownMenuItem>
           {viewType === 'board' ? (
             <DropdownMenuCheckboxItem checked={config.hide_empty_groups} onCheckedChange={(checked) => onConfig({ ...config, hide_empty_groups: checked })}>
@@ -205,7 +209,7 @@ export function ViewToolbar({ properties, config, onConfig, onAddFilter, onAdvan
       ) : null}
       <Popover open={propertiesOpen} onOpenChange={setPropertiesOpen}>
         <PopoverContent anchor={moreRef} align="end" className="w-64 gap-0 p-1">
-          {viewType === 'board' ? (
+          {showsCards(viewType) ? (
             <CardPropertiesList properties={properties} config={config} onConfig={onConfig} />
           ) : (
             <PropertiesList properties={properties} config={config} onConfig={onConfig} />
@@ -309,6 +313,44 @@ function GroupMenus({ properties, config, onConfig }: { properties: Property[]; 
   )
 }
 
+/** The days a week starts on somewhere: Sunday, Monday and Saturday. */
+const WEEK_STARTS: readonly Weekday[] = [0, 1, 6]
+/** A Sunday: the day of weekday `n` is `n` days later. */
+const SUNDAY = '2026-11-01'
+
+/** A calendar's "Calendar by" (its date property) and "Start week on" (this browser only, for every calendar). */
+function CalendarMenus({ properties, config, onConfig }: { properties: Property[]; config: ViewConfig; onConfig: (config: ViewConfig) => void }) {
+  const { ctx } = useDatabaseEnv()
+  const weekStart = useWeekStart(ctx.locale)
+  return (
+    <>
+      <GroupMenu
+        label="Calendar by"
+        icon={<Calendar />}
+        choices={properties.filter(datable)}
+        value={config.date_property_id ?? null}
+        onChange={(id) => onConfig({ ...config, ...(id ? { date_property_id: id } : {}) })}
+      />
+      <DropdownMenuSub>
+        <DropdownMenuSubTrigger>
+          <Calendar />
+          Start week on
+          <span className="ml-auto text-xs text-muted-foreground">{weekdayName(addDays(SUNDAY, weekStart), ctx.locale)}</span>
+        </DropdownMenuSubTrigger>
+        <DropdownMenuSubContent className="w-40">
+          <DropdownMenuRadioGroup value={String(weekStart)} onValueChange={(day: string) => setWeekStart(Number(day) as Weekday)}>
+            {WEEK_STARTS.map((day) => (
+              <DropdownMenuRadioItem key={day} value={String(day)}>
+                {weekdayName(addDays(SUNDAY, day), ctx.locale, 'long')}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </DropdownMenuSubContent>
+      </DropdownMenuSub>
+    </>
+  )
+}
+
 function GroupMenu({ label, icon, choices, value, onChange, none = false }: { label: string; icon: ReactNode; choices: Property[]; value: string | null; onChange: (id: string | null) => void; none?: boolean }) {
   return (
     <DropdownMenuSub>
@@ -341,7 +383,7 @@ function GroupMenu({ label, icon, choices, value, onChange, none = false }: { la
   )
 }
 
-/** Show or hide the properties of a board's cards, after the title (which always shows). */
+/** Show or hide the properties of a board's or a calendar's cards, after the title (which always shows). */
 function CardPropertiesList({ properties, config, onConfig }: { properties: Property[]; config: ViewConfig; onConfig: (config: ViewConfig) => void }) {
   const shown = new Set(config.card_properties)
   return (

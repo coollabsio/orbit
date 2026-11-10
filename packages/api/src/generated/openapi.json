@@ -50434,6 +50434,13 @@
           "percent_unchecked"
         ]
       },
+      "DatabaseCalendarMode": {
+        "type": "string",
+        "enum": [
+          "month",
+          "week"
+        ]
+      },
       "DatabaseCsvCreated": {
         "type": "object",
         "required": [
@@ -51026,6 +51033,10 @@
               "type": "string"
             }
           },
+          "calendar_mode": {
+            "$ref": "#/components/schemas/DatabaseCalendarMode",
+            "description": "Calendar: a month grid (default) or one week."
+          },
           "card_properties": {
             "type": "array",
             "items": {
@@ -51039,6 +51050,13 @@
               "$ref": "#/components/schemas/DatabaseViewColumn"
             },
             "description": "The order of the properties; properties missing here show at the end."
+          },
+          "date_property_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Calendar: the `date`, `created_time` or `last_edited_time` property that places the rows.\nA calendar without one takes the first `date` property."
           },
           "default_template_id": {
             "type": [
@@ -51141,7 +51159,9 @@
         "type": "string",
         "enum": [
           "table",
-          "board"
+          "board",
+          "list",
+          "calendar"
         ]
       },
       "DeleteAccountBody": {

@@ -37,7 +37,8 @@ pub struct ExportRow {
 
 impl ExportDatabase {
     /// The properties a view shows, in order: a table's visible columns (properties the config
-    /// does not name yet come last, as clients show them), a board's title and card properties.
+    /// does not name yet come last, as clients show them), a board's or a calendar's title and card
+    /// properties.
     #[must_use]
     pub fn view_properties(&self, view: &DatabaseView) -> Vec<&Property> {
         let by_id: HashMap<Id, &Property> = self
@@ -45,7 +46,7 @@ impl ExportDatabase {
             .iter()
             .map(|property| (property.id, property))
             .collect();
-        if view.view_type == ViewType::Board {
+        if matches!(view.view_type, ViewType::Board | ViewType::Calendar) {
             let title = self
                 .properties
                 .iter()

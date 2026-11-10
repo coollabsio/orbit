@@ -1,4 +1,5 @@
 import { calculationsFor } from './calculate'
+import { datable, defaultDateProperty } from './calendar'
 import { matchesFilter, retainRules } from './filter'
 import { sortRows } from './sort'
 import type { Database, DatabaseView, GroupProperty, LaneProperty, Property, Row, ViewConfig, ViewContext } from './types'
@@ -13,7 +14,8 @@ const TITLE_WIDTH = 280
  * empty), repeats,
  * calculations that do not fit their property's type, and board groups that are not groups of their
  * property; a board whose group property is gone groups by the first status, else the first select,
- * and a lane property that is gone or is the group property is dropped.
+ * and a lane property that is gone or is the group property is dropped. A calendar's date property that is gone
+ * or is not a date takes the first `date` property.
  * Then it appends each property missing from `columns` as a visible column, in property order.
  */
 export function repairConfig(view: DatabaseView, properties: readonly Property[]): ViewConfig {
@@ -53,6 +55,8 @@ export function repairConfig(view: DatabaseView, properties: readonly Property[]
     const property = known.get(id)
     return property !== undefined && property.type !== 'title'
   })
+  const dateProperty = config.date_property_id == null ? undefined : known.get(config.date_property_id)
+  const date_property_id = datable(dateProperty) ? dateProperty.id : view.type === 'calendar' ? defaultDateProperty(properties) : null
   const calculations = Object.fromEntries(
     Object.entries(config.calculations ?? {}).filter(([id, fn]) => {
       const property = known.get(id)
@@ -74,7 +78,14 @@ export function repairConfig(view: DatabaseView, properties: readonly Property[]
     card_properties,
     calculations,
     ...(config.default_template_id ? { default_template_id: config.default_template_id } : {}),
+    ...(date_property_id ? { date_property_id } : {}),
+    ...(config.calendar_mode === 'week' ? { calendar_mode: 'week' as const } : {}),
   }
+}
+
+/** A board and a calendar show the title and `card_properties`; the other views their visible columns. */
+export function showsCards(type: DatabaseView['type']): boolean {
+  return type === 'board' || type === 'calendar'
 }
 
 /** A board's columns can group by a `select`, `status`, `multi_select` or `person` property. */
@@ -117,7 +128,7 @@ export function applyView(database: Database, view: DatabaseView, search: string
   const term = search.trim().toLowerCase()
   if (term !== '') {
     const shown = (property: Property) =>
-      view.type === 'board'
+      showsCards(view.type)
         ? config.card_properties.includes(property.id)
         : config.columns.some((column) => column.property_id === property.id && !column.hidden)
     const searched = database.properties.filter((property) => property.type === 'title' || shown(property))

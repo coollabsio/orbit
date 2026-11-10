@@ -1,5 +1,6 @@
 import type {
   DatabaseCalculation,
+  DatabaseCalendarMode,
   DatabaseDetail,
   DatabaseFilterGroup,
   DatabaseProperty,
@@ -126,7 +127,16 @@ export type ViewConfig = {
   calculations: Readonly<Record<string, DatabaseCalculation>>
   /** The template "New" and "+" fill new rows from (absent: an empty row). The server drops a deleted one. */
   default_template_id?: string
+  /** Calendar: the `date`, `created_time` or `last_edited_time` property that places the rows (absent: none yet). */
+  date_property_id?: string
+  /** Calendar: absent is `month`. */
+  calendar_mode?: 'week'
 }
+
+export type CalendarMode = DatabaseCalendarMode
+
+/** A property whose value can place a row on a calendar. */
+export type DateProperty = Property & { type: 'date' | 'created_time' | 'last_edited_time' }
 
 export type ViewContext = {
   /** The viewer, for `"me"`. */

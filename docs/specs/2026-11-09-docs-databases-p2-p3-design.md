@@ -1041,6 +1041,24 @@ A calendar keeps its date property when it imported as a date.
 in the viewer's zone; `moveDate` keeps time and length. Server: a calendar without a date property
 repairs to none and the client shows "Choose a date property".
 
+### 13.6 Status
+
+Done on 2026-11-10 (no migration: 0081 already allows `list` and `calendar`). No tests in this round (the user
+asked for none). Differences from this section:
+
+| # | Item | Where | Why |
+|---|---|---|---|
+| 1 | `date_property_id` is absent (not `null`) when there is none, and `calendar_mode` is absent for `month`. | `repositories/databases/calendar.rs`, `packages/database/src/view.ts` | Same as `default_template_id`; old configs and literals stay valid. |
+| 2 | `calendarWeeks(day, weekStart)` takes no zone; `placeRows(rows, property, week, timeZone)` places one week; `moveDate(value, days, timeZone)` needs the zone; `withEndDay` sets a range's end. | `packages/database/src/calendar.ts` | Grid days are plain calendar days; a time keeps its local hour across DST only with the zone. |
+| 3 | A drag moves the date by the days between the grabbed day and the drop day (not "start on the drop day"). | `database/DatabaseCalendar.tsx` | A long range grabbed at its end lands where the pointer is. |
+| 4 | Month cards show the start time and the title; week cards also show the first 3 card properties. | `database/DatabaseCalendar.tsx` | A month cell is one line per card. |
+| 5 | "Start week on" (Sunday, Monday, Saturday) is in "⋯", per browser, for every calendar (`orbit:calendar-week-start`). | `database/weekStart.ts`, `ViewToolbar.tsx` | The spec names the storage, not the place. |
+| 6 | "+" on a day and dragging exist only for a `date` property. | web and mobile calendars | Created and edited times cannot be set. |
+| 7 | The list's "New" opens the new row in the peek (no inline title). A list in a database block shows "Load more" as a table; a calendar shows all rows. | `DatabaseList.tsx`, `DatabaseSurface.tsx` | A list has no title cell; a month needs every row of the month. |
+| 8 | Mobile shows a month grid for both modes, with the locale's week start (no override). | `apps/mobile/src/components/database/Calendar.tsx` | Week mode and the override are web settings. |
+| 9 | Notion import: `view_range: "week"` gives `week`; `show_weekends` is dropped without a lossy reason; a calendar's visible `properties` become its card properties. | `notion/database.rs` | Orbit always shows weekends. |
+| 10 | Export (CSV, Markdown) of a calendar writes the title and card properties, as a board. | `repositories/databases/export.rs`, `packages/database/src/csv.ts` | A calendar shows cards, not columns. |
+
 ## 14. Item 12: MCP and token API for databases (P3, L)
 
 Needs: item 3 (the filter shape the API takes).

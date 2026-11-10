@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 use super::convert::{ConvertReport, page_icon, page_title};
 use super::model::{NotionDataSource, NotionPage, NotionView, normalize_id, plain_text};
 use crate::repositories::databases::{
-    FilterGroup, FilterNode, FilterOperator, FilterRule, GroupOp, MAX_CELL_ITEMS,
+    CalendarMode, FilterGroup, FilterNode, FilterOperator, FilterRule, GroupOp, MAX_CELL_ITEMS,
     MAX_FILTER_LEVELS, MAX_GROUP_CHILDREN, MAX_NAME_CHARS, MAX_OPTIONS, MAX_PROPERTIES, MAX_RULES,
     MAX_SORTS, MAX_TEXT_CHARS, MAX_VIEWS, Property, PropertyType, SchemaProperty, SchemaView,
     SortDirection, ViewColumn, ViewConfig, ViewSort, ViewType, accepts_value,
@@ -558,10 +558,11 @@ fn view_columns(view: &NotionView) -> Option<Vec<(&str, &Value)>> {
     )
 }
 
-/// One Notion view as an Orbit table or board view: name, columns, sorts and the flat AND part of
-/// the filter; a board also keeps its group and lane properties (when they became a type that
-/// can group), "hide empty groups" and its visible card properties. Other layouts (calendar,
-/// gallery, …) become tables.
+/// One Notion view as an Orbit table, board, list or calendar view: name, columns, sorts and the
+/// flat AND part of the filter; a board also keeps its group and lane properties (when they
+/// became a type that can group) and "hide empty groups"; a board and a calendar keep their
+/// visible card properties, and a calendar its date property (when it became a date) and range.
+/// Other layouts (gallery, …) become tables.
 fn plan_view(
     view: &NotionView,
     planned: &[Planned],
@@ -572,6 +573,8 @@ fn plan_view(
     let view_type = match kind {
         "board" => ViewType::Board,
         "table" => ViewType::Table,
+        "list" => ViewType::List,
+        "calendar" => ViewType::Calendar,
         _ => {
             lossy(report, &format!("view_type:{kind}"));
             ViewType::Table
@@ -586,7 +589,7 @@ fn plan_view(
                 continue;
             };
             if seen.insert(property.id) {
-                if view_type == ViewType::Board
+                if matches!(view_type, ViewType::Board | ViewType::Calendar)
                     && property.property_type != PropertyType::Title
                     && entry.get("visible").and_then(Value::as_bool) != Some(false)
                 {
@@ -730,6 +733,25 @@ fn plan_view(
         .and_then(|group| group.get("hide_empty_groups"))
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    let calendar = |field: &str| {
+        (view_type == ViewType::Calendar)
+            .then(|| view.configuration.as_ref()?.get(field))
+            .flatten()
+    };
+    let date_property_id = calendar("date_property_id")
+        .and_then(Value::as_str)
+        .and_then(|key| lookup(planned, key))
+        .filter(|property| {
+            matches!(
+                property.property_type,
+                PropertyType::Date | PropertyType::CreatedTime | PropertyType::LastEditedTime
+            )
+        })
+        .map(|property| property.id);
+    let calendar_mode = match calendar("view_range").and_then(Value::as_str) {
+        Some("week") => CalendarMode::Week,
+        _ => CalendarMode::Month,
+    };
     SchemaView {
         name: clean_name(view.name.as_deref().unwrap_or_default(), "Table"),
         view_type,
@@ -738,6 +760,8 @@ fn plan_view(
             sub_group_by,
             hide_empty_groups,
             card_properties,
+            date_property_id,
+            calendar_mode,
             columns,
             sorts,
             filter: root,

@@ -1,6 +1,7 @@
 /**
  * A database page at phone size (spec 8): the page header, the view picker, search, Filter and Sort, then the rows of
- * a table view as a list (title and the first 3 visible properties) or the columns of a board view, one screen wide
+ * a table view as a list (title and the first 3 visible properties), a list view (all its visible properties), a
+ * calendar view as a month grid with a day list, or the columns of a board view, one screen wide
  * each (with sub-groups, a lane picker shows one lane at a time). View changes save for everyone after 500 ms, or stay on this device for viewers who cannot change views (D1).
  */
 import { groupName, groupRows, groupValues, laneRows, moveValues, type BoardGroup, type BoardLane } from '@orbit/database/board'
@@ -22,6 +23,7 @@ import { alpha, useTheme } from '../../theme'
 import { Avatar, Button, ErrorView, Icon, IconButton, LoadingView, PullRefresh, Text } from '../../ui'
 import { TextInput } from '../../ui/scaled'
 import { Sheet, SheetList, SheetNote, SheetRow, useSheet } from '../tasks/Sheet'
+import { Calendar } from './Calendar'
 import { CellValue, ChoiceRow, OptionPill, RowTitle } from './cells'
 import { shareViewCsv } from './csvShare'
 import { FilterContent, SortContent } from './ViewSheets'
@@ -165,8 +167,10 @@ export function DatabaseView({ databaseId, linkId = '', initialView = null, head
           )}
           {rows.length === 0 && filtered ? empty : null}
         </ScrollView>
+      ) : view.type === 'calendar' ? (
+        <Calendar key={view.id} database={database} config={config} rows={rows} ctx={ctx} header={<>{header}{toolbar}</>} refresh={refresh} canAdd={!readOnly} onAdd={(values) => addRow(values)} />
       ) : (
-        <RowList database={database} config={config} rows={rows} ctx={ctx} header={<>{header}{toolbar}</>} empty={empty} refresh={refresh} />
+        <RowList database={database} config={config} rows={rows} ctx={ctx} header={<>{header}{toolbar}</>} empty={empty} refresh={refresh} allProperties={view.type === 'list'} />
       )}
       <Sheet visible={sheet.visible} title={sheetTitle(sheet.sheet, moving)} onClose={sheet.close}>
         {sheet.sheet?.kind === 'views' ? (
@@ -372,8 +376,8 @@ function EmptyRows({ filtered, onClear }: { filtered: boolean; onClear: () => vo
   )
 }
 
-/** A table view as a list: each row is its title and the first 3 visible properties that have a value. */
-function RowList({ database, config, rows, ctx, header, empty, refresh }: {
+/** A table or list view as a list: each row is its title and the visible properties that have a value (a table: the first 3). */
+function RowList({ database, config, rows, ctx, header, empty, refresh, allProperties }: {
   database: Database
   config: ViewConfig
   rows: Row[]
@@ -381,8 +385,9 @@ function RowList({ database, config, rows, ctx, header, empty, refresh }: {
   header: ReactElement
   empty: ReactElement
   refresh: ReactElement
+  allProperties: boolean
 }) {
-  const shown = listProperties(database.properties, config)
+  const shown = listProperties(database.properties, config, allProperties ? Infinity : undefined)
   const summary = summaryLines(database.properties, config, rows, ctx)
   return (
     <FlatList

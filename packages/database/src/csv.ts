@@ -1,7 +1,7 @@
 import { dateText, parseDateText } from './dates'
 import type { Database, DatabaseView, Property, Row, ViewContext } from './types'
 import { cellOf, optionName, unreachable } from './values'
-import { repairConfig } from './view'
+import { repairConfig, showsCards } from './view'
 
 /** Spec P2 9.3 limits of an import. */
 export const MAX_CSV_BYTES = 5 * 1024 * 1024
@@ -161,11 +161,12 @@ export function toCsv(records: readonly (readonly string[])[]): string {
   return `﻿${records.map((record) => record.map(field).join(',')).join('\r\n')}\r\n`
 }
 
-/** The properties a view shows, in order: a table's visible columns, a board's title and card properties. */
+/** The properties a view shows, in order: a table's visible columns, a board's or a calendar's title and
+ * card properties. */
 export function viewProperties(database: Database, view: DatabaseView): Property[] {
   const config = repairConfig(view, database.properties)
   const byId = new Map(database.properties.map((property) => [property.id, property]))
-  if (view.type === 'board') {
+  if (showsCards(view.type)) {
     const title = database.properties.find((property) => property.type === 'title')
     const cards = config.card_properties.flatMap((id) => byId.get(id) ?? [])
     return title ? [title, ...cards.filter((property) => property !== title)] : cards

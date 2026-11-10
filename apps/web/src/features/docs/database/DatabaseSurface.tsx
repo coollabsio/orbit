@@ -12,6 +12,8 @@ import type { Database, DatabaseView, Property, ViewConfig } from '@orbit/databa
 import { useCreateRow, useTrashRows, useUpdateView } from './api'
 import { DatabaseEnvContext, type DatabaseEnv } from './context'
 import { DatabaseBoard, type NewCard } from './DatabaseBoard'
+import { DatabaseCalendar } from './DatabaseCalendar'
+import { DatabaseList } from './DatabaseList'
 import { DatabaseTable } from './DatabaseTable'
 import { withPinnedRows, type Pin } from './databaseLib'
 import { RowPeek } from './RowPeek'
@@ -135,10 +137,11 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
   const shown = applyView(database, { ...view, config }, search, ctx)
   const templates = templatesOf(database)
   const board = view.type === 'board'
-  // A block's table shows its first rows; a board limits each column itself.
-  const rows = withPinnedRows(board ? shown : shown.slice(0, rowLimit), pins, database.rows)
-  const hiddenRows = board ? 0 : Math.max(0, shown.length - rowLimit)
-  const selectedRows = board ? [] : rows.filter((row) => selected.has(row.id))
+  // A block's table or list shows its first rows; a board limits each column itself and a calendar shows a month.
+  const limited = view.type === 'table' || view.type === 'list'
+  const rows = withPinnedRows(limited ? shown.slice(0, rowLimit) : shown, pins, database.rows)
+  const hiddenRows = limited ? Math.max(0, shown.length - rowLimit) : 0
+  const selectedRows = view.type === 'table' ? rows.filter((row) => selected.has(row.id)) : []
 
   const selectView = (viewId: string) => {
     try {
@@ -278,7 +281,37 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
       />
     </>
   )
-  const content = board ? (
+  const loadMore =
+    block && hiddenRows > 0 ? (
+      <Button type="button" variant="ghost" size="sm" className="mt-1 text-muted-foreground" onClick={() => setRowLimit((limit) => limit + block.rowLimit)}>
+        Load more
+      </Button>
+    ) : null
+  const content = view.type === 'list' ? (
+    <>
+      <DatabaseList
+        key={view.id}
+        database={database}
+        config={config}
+        rows={rows}
+        onAddRow={() => addRow('bottom', undefined, 'peek')}
+        onOpenRow={(rowId) => setPeekRow(rowId)}
+        filtered={filtered}
+        onClearFilters={clearFilters}
+      />
+      {loadMore}
+    </>
+  ) : view.type === 'calendar' ? (
+    <DatabaseCalendar
+      key={view.id}
+      database={database}
+      config={config}
+      rows={shown}
+      onConfig={changeConfig}
+      onAddRow={(values) => addRow('bottom', { values }, 'peek')}
+      onOpenRow={(rowId) => setPeekRow(rowId)}
+    />
+  ) : board ? (
     <DatabaseBoard
       key={view.id}
       database={database}
@@ -318,11 +351,7 @@ export function DatabaseSurface({ database, views: unsorted, env, locked, viewKe
         selected={selected}
         onSelect={setSelected}
       />
-      {block && hiddenRows > 0 ? (
-        <Button type="button" variant="ghost" size="sm" className="mt-1 text-muted-foreground" onClick={() => setRowLimit((limit) => limit + block.rowLimit)}>
-          Load more
-        </Button>
-      ) : null}
+      {loadMore}
     </>
   )
 

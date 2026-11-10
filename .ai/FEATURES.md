@@ -236,6 +236,16 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
   access to this database" (404), "Database in trash", "View not found" (offers the database's own views). Mobile shows a
   card (icon, title, rows, first view) that opens the database screen with `link` and `view`; Markdown writes the block as
   a link to its database; task text drops it; duplicates copy links and their views.
+- Database list and calendar views (databases P2/P3 spec section 13). List (`database/DatabaseList.tsx`): one 36 px line
+  per row (icon, title, then the visible columns that have a value, right-aligned); drag to reorder without sorts; click
+  opens the peek. Calendar (`database/DatabaseCalendar.tsx`, shared logic `@orbit/database/calendar`): config
+  `date_property_id` (a date, created time or last edited time; repair takes the first date property) and
+  `calendar_mode` (`month` 6-week grid, or `week`); a range is a bar across its days, a month cell shows 3 cards then
+  "+N more", "No date (N)" lists undated rows. Cards of a date property drag to another day (start and end move by the
+  same days, times kept in the viewer's zone) and a range's right edge drags to change the end; "+" on a day adds a row
+  with that date (plus filter values and the default template). Week start: the locale, or "⋯ → Start week on" (this
+  browser, `orbit:calendar-week-start`). Mobile: list views show all visible properties; a calendar is a month grid with
+  dots and the tapped day's rows under it (`components/database/Calendar.tsx`), no drag.
   Custom `callout` block (`editor/CalloutBlock.tsx`; slash "Callout" in Basic blocks after Quote, aliases callout/note/tip/
   warning/info): inline rich text, props `emoji` (default 💡; click it to pick another in the app's emoji picker),
   `backgroundColor` (BlockNote color names, default `gray`; `default` = border only) and `textColor`, both editable in the
@@ -343,8 +353,8 @@ favorites through `/pages/favorites` (list), `/pages/{page_id}/favorite` (PUT/DE
   the import is `ready`. Notion callouts become `callout` blocks (emoji icon, color, nested children; a non-emoji icon
   becomes 💡 and counts as `callout_icon` in the report).
   A Notion data source becomes an Orbit database (`notion/database.rs`, mapping in the databases spec section 14):
-  typed properties (computed Notion types as static values), option colors, row values, one table or board view for each
-  Notion view (AND filters and sorts kept), rows as row pages in Notion order (max 5,000). A database with several
+  typed properties (computed Notion types as static values), option colors, row values, one table, board, list or calendar view for
+  each Notion view (AND filters and sorts kept), rows as row pages in Notion order (max 5,000). A database with several
   data sources is one tree node and one database for each data source. An inline database is a database sub-page,
   and its block becomes a `database` block of the database's own views. Pass 1 fetches each data source before writing and creates databases and
   rows through the databases repository; property and option ids derive from the Notion ids, so a resumed import

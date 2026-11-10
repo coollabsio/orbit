@@ -26,7 +26,7 @@ export const PROPERTY_ICONS: Record<DatabasePropertyType, IconName> = {
   last_edited_by: 'userCircle',
 }
 
-export const VIEW_ICONS: Record<DatabaseView['type'], IconName> = { table: 'grid', board: 'kanban' }
+export const VIEW_ICONS: Record<DatabaseView['type'], IconName> = { table: 'grid', board: 'kanban', list: 'list', calendar: 'calendar' }
 
 /** Where the open view of a database, or of one linked view, is kept (a secure-store key: letters, digits, `.`, `-` and `_` only). */
 export const viewStorageKey = (databaseId: string, linkId = '') => `orbit.database-view.${databaseId}${linkId ? `.${linkId}` : ''}`
@@ -45,15 +45,15 @@ export function pickView(views: readonly DatabaseView[], chosen: string | null):
 /** How many properties a row of the phone list shows after its title (spec 8). */
 export const LIST_PROPERTIES = 3
 
-/** The first visible properties of a table view after the title, in column order: the list shows them as chips. */
-export function listProperties(properties: readonly Property[], config: ViewConfig): Property[] {
+/** The first `limit` visible properties of a view after the title, in column order: the list shows them as chips. */
+export function listProperties(properties: readonly Property[], config: ViewConfig, limit = LIST_PROPERTIES): Property[] {
   const byId = new Map(properties.map((property) => [property.id, property]))
   return config.columns
     .flatMap((column) => {
       const property = byId.get(column.property_id)
       return property && !column.hidden && property.type !== 'title' ? [property] : []
     })
-    .slice(0, LIST_PROPERTIES)
+    .slice(0, limit)
 }
 
 /** "Advanced filter (3 rules)": a filter with groups, which the web edits (spec P2 5.5). */

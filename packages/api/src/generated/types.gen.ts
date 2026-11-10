@@ -1703,6 +1703,8 @@ export type CustomStickerRecord = {
  */
 export type DatabaseCalculation = 'count_all' | 'count_values' | 'count_unique' | 'count_empty' | 'count_not_empty' | 'percent_empty' | 'percent_not_empty' | 'sum' | 'average' | 'median' | 'min' | 'max' | 'range' | 'earliest_date' | 'latest_date' | 'date_range' | 'checked' | 'unchecked' | 'percent_checked' | 'percent_unchecked';
 
+export type DatabaseCalendarMode = 'month' | 'week';
+
 export type DatabaseCsvCreated = {
     database: null | Page;
     result: DatabaseImportResult;
@@ -1945,6 +1947,10 @@ export type DatabaseViewConfig = {
         [key: string]: DatabaseCalculation;
     };
     /**
+     * Calendar: a month grid (default) or one week.
+     */
+    calendar_mode?: DatabaseCalendarMode;
+    /**
      * Board: the properties shown on each card, in order. The title always shows.
      */
     card_properties?: Array<string>;
@@ -1952,6 +1958,11 @@ export type DatabaseViewConfig = {
      * The order of the properties; properties missing here show at the end.
      */
     columns?: Array<DatabaseViewColumn>;
+    /**
+     * Calendar: the `date`, `created_time` or `last_edited_time` property that places the rows.
+     * A calendar without one takes the first `date` property.
+     */
+    date_property_id?: string | null;
     /**
      * The template that "New" and "+" use in this view (`null`: an empty row). A deleted
      * template reads as `null`.
@@ -2003,7 +2014,7 @@ export type DatabaseViewSort = {
     property_id: string;
 };
 
-export type DatabaseViewType = 'table' | 'board';
+export type DatabaseViewType = 'table' | 'board' | 'list' | 'calendar';
 
 export type DeleteAccountBody = {
     /**
