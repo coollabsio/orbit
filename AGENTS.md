@@ -74,3 +74,8 @@ docker start orbit-mailpit 2>/dev/null || docker run -d --name orbit-mailpit --r
 Without Mailpit, sending fails. A mail server set in **Admin → Email** stays: the seed does not change it. If the
 container runs but `docker port orbit-mailpit` prints nothing, it lost its network (seen on 2026-11-04): run
 `docker network connect bridge orbit-mailpit && docker restart orbit-mailpit`.
+
+## Release video
+
+To make the product update video or release-note screenshots of a release, follow
+[`marketing/release-video/GUIDE.md`](marketing/release-video/GUIDE.md).

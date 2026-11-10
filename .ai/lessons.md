@@ -167,7 +167,7 @@
 - Do not show a "Loading…" boundary between a list and a detail view, and do not let detail sections arrive one by one (a late query that toggles read-only/editable remounts the fields). Put the detail queries in shared `queryOptions` factories, prefetch them all on open and navigate when they resolve (short cap, e.g. 300ms); on a direct URL load render a blank canvas until every detail query settles (`features/tasks/api/tasks.ts` `prefetchTaskDetail`, 2026-09-26).
 
 ## Brand mark
-- The logo is the pink pixel "O" in `apps/web/public/logo.svg` (11x11 grid, pink `#f2458f`, shadow `#742f4d` 1 unit down-right). `favicon.svg`, the PNG app icons and the launch-video `OrbitMark` copy it; change them together. The UI `--primary`/`--sidebar-primary` tokens (both themes) use the same pink, `oklch(0.659 0.216 358.989)`, with white foreground. Show it at multiples of 11px (22, 44…) so pixels stay crisp.
+- The logo is the pink pixel "O" in `apps/web/public/logo.svg` (11x11 grid, pink `#f2458f`, shadow `#742f4d` 1 unit down-right). `favicon.svg`, the PNG app icons and the logos in `marketing/brand/` copy it; change them together. The UI `--primary`/`--sidebar-primary` tokens (both themes) use the same pink, `oklch(0.659 0.216 358.989)`, with white foreground. Show it at multiples of 11px (22, 44…) so pixels stay crisp.
 
 ## Permissions
 - Every authorization rule lives in `crates/orbit/src/policy.rs`: `Policy::can(role, Permission)` for role rules, methods on `Actor` for rules that depend on a record (author, owner, target member). Repositories get the `Actor` from `repositories/membership.rs` inside their own transaction; they never compare role names or write their own role SQL.

@@ -1,0 +1,121 @@
+{
+  "version": "v0.3.0",
+  "notes": "Shots made with marketing/release-video (build-tag.sh v0.3.0, seed-demo.sh, shoot.mjs) on 2026-11-10. `shot` is a scene name in release-video/scenes.mjs. `box` is in screenshot CSS px (1440x900).",
+  "slides": [
+    {
+      "type": "title",
+      "subtitle": "Databases in Docs, imports from another Orbit, chat guests and more."
+    },
+    {
+      "tag": "Docs",
+      "title": "Databases in Docs",
+      "shot": "db-table",
+      "box": [
+        300,
+        295,
+        1135,
+        430
+      ]
+    },
+    {
+      "tag": "Databases",
+      "title": "Board view",
+      "shot": "db-board",
+      "box": [
+        305,
+        340,
+        815,
+        480
+      ],
+      "shiftDown": -15
+    },
+    {
+      "tag": "Databases",
+      "title": "Calendar view",
+      "shot": "db-calendar",
+      "box": [
+        310,
+        255,
+        1125,
+        560
+      ]
+    },
+    {
+      "tag": "Databases",
+      "title": "Timeline view",
+      "shot": "db-timeline",
+      "box": [
+        305,
+        300,
+        1130,
+        470
+      ],
+      "shiftDown": 30
+    },
+    {
+      "tag": "Databases",
+      "title": "Open a row in a side peek",
+      "shot": "db-peek",
+      "box": [
+        850,
+        70,
+        585,
+        560
+      ]
+    },
+    {
+      "tag": "Import",
+      "title": "Import from another Orbit",
+      "shot": "import-orbit",
+      "box": [
+        265,
+        95,
+        1135,
+        340
+      ],
+      "hideLeft": 224
+    },
+    {
+      "tag": "Chat",
+      "title": "Chat-only guests",
+      "shot": "members-guest",
+      "box": [
+        835,
+        440,
+        560,
+        105
+      ],
+      "hideLeft": 224
+    },
+    {
+      "tag": "Trash",
+      "title": "Delete forever and empty the trash",
+      "shot": "docs-trash",
+      "box": [
+        265,
+        30,
+        1160,
+        230
+      ]
+    },
+    {
+      "type": "list",
+      "tag": "Also in v0.3.0",
+      "items": [
+        "<b>Notion database import</b>, and CSV and Markdown import and export",
+        "<b>Push notifications</b> in the iOS app (Orbit Cloud)",
+        "A virtualized task board that stays fast in large projects",
+        "Live progress for Linear imports, and an email when they finish",
+        "MCP tools for comments, assignees, labels and new projects",
+        "GitHub sync moves closed issues and merged PRs to Done"
+      ]
+    },
+    {
+      "type": "outro",
+      "title": "Update to v0.3.0 today",
+      "lines": [
+        "Read the full changelog in the release notes."
+      ]
+    }
+  ]
+}
