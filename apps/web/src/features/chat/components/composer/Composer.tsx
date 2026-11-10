@@ -21,6 +21,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { useCustomStickers } from '@/features/workspaces/customStickers'
 import { clipboardFiles } from '@/lib/attachmentLib'
 import { useMentionAutocomplete } from '@/lib/useMentionAutocomplete'
+import { useChatHost } from '../../chatHost'
 import { useChatContext } from '../../api/chatContext'
 import { useSendMessage, useSendTyping } from '../../api/mutations'
 import { MESSAGE_MAX_LENGTH, type Conversation, type Message } from '../../api/types'
@@ -31,6 +32,7 @@ import { quoteOf } from '../../lib/quote'
 import { useCoarsePointer } from '../messages/environment'
 import { authorName, conversationTitle, useChatPeople } from '../messages/people'
 import { ComposerInput } from './ComposerInput'
+import { ComposerReferencePreview } from './ComposerReferencePreview'
 import { completeCodeFence, inOpenCodeBlock } from './composerSegments'
 import { ComposerUploads } from './ComposerUploads'
 import { EmojiSuggestions } from './EmojiSuggestions'
@@ -110,7 +112,8 @@ export function Composer({ ref, conversation, threadRootId = null, replyTo = nul
         { id: '!channel', name: 'channel', handle: 'everyone here' },
         { id: '!here', name: 'here', handle: 'everyone online' },
       ]
-  const mention = useMentionAutocomplete([...candidates, ...everyone], text, setText, input, undefined, undefined, people.channels)
+  const { taskKeys } = useChatHost()
+  const mention = useMentionAutocomplete([...candidates, ...everyone], text, setText, input, undefined, undefined, people.channels, workspaceId)
   const emoji = useEmojiAutocomplete(text, setText, input)
   const emojiListId = useId()
 
@@ -260,7 +263,13 @@ export function Composer({ ref, conversation, threadRootId = null, replyTo = nul
     >
       <div className="relative">
         {mention.open ? (
-          <MentionPopover suggestions={mention.suggestions} activeIndex={mention.activeIndex} onSelect={mention.insert} onHover={mention.setActiveIndex} />
+          <MentionPopover
+            suggestions={mention.suggestions}
+            activeIndex={mention.activeIndex}
+            onSelect={mention.insert}
+            onHover={mention.setActiveIndex}
+            hint={mention.emptyTaskQuery ? 'Type a task title or ID, like ENG-12' : undefined}
+          />
         ) : emoji.open ? (
           <EmojiSuggestions id={emojiListId} query={emoji.query} suggestions={emoji.suggestions} activeIndex={emoji.activeIndex} onSelect={emoji.insert} onHover={emoji.setActiveIndex} />
         ) : null}
@@ -297,6 +306,9 @@ export function Composer({ ref, conversation, threadRootId = null, replyTo = nul
             value={text}
             people={people.members}
             conversations={people.channels}
+            taskKeys={taskKeys}
+            renderPreview={(reference) => <ComposerReferencePreview reference={reference} conversation={conversation} />}
+            previewHidden={mention.open || emoji.open}
             rows={1}
             aria-label={inThread ? 'Reply in Thread' : `Message ${title}`}
             aria-controls={emoji.open ? emojiListId : undefined}

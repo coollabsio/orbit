@@ -1,5 +1,6 @@
 import { splitEmoji } from '@/lib/twemoji'
 import { findMentions, type MentionTarget } from '../../lib/mentionTokens'
+import { findTaskIds } from '../messages/taskIds'
 
 /**
  * How the box draws a piece of formatted text. `marker` is the syntax itself (`**`, `> `, a fence line), which stays in
@@ -10,8 +11,11 @@ export type ComposerMark = 'strong' | 'em' | 'underline' | 'strike' | 'code' | '
 /** A piece of the text in the message box, as the box shows it. The pieces join back to the exact text. */
 export type ComposerSegment = (
   | { kind: 'text' }
-  /** `@Name`, `#name`, `@channel`, `@here`: the same matches that are sent as mentions. */
-  | { kind: 'mention' }
+  /**
+   * `@Name`, `#name`, `@channel`, `@here` (the same matches that are sent as mentions) and task IDs (`ENG-12`, shown as
+   * the task once sent). `ref` says what it names: `user:<id>`, `channel:<id>`, `global:channel`, `task:ENG-12`.
+   */
+  | { kind: 'mention'; ref: string }
   | { kind: 'emoji'; url: string }
 ) & {
   text: string
@@ -210,10 +214,27 @@ export function completeCodeFence(text: string, caret: number): { text: string; 
   return text.startsWith('\n```', caret) ? { text: text.slice(0, caret) + text.slice(caret + 4), cursor: caret } : null
 }
 
-export function composerSegments(text: string, people: readonly MentionTarget[], conversations: readonly MentionTarget[]): ComposerSegment[] {
+/** What a stored mention token names: `<@id>` → `user:id`, `<#id>` → `channel:id`, `<!here>` → `global:here`. */
+function tokenRef(token: string): string {
+  const match = /^<([@#!])([^>]+)>$/.exec(token)
+  if (!match) return 'unknown:'
+  return `${match[1] === '@' ? 'user' : match[1] === '#' ? 'channel' : 'global'}:${match[2]}`
+}
+
+export function composerSegments(
+  text: string,
+  people: readonly MentionTarget[],
+  conversations: readonly MentionTarget[],
+  taskKeys: readonly string[] = [],
+): ComposerSegment[] {
   const segments: ComposerSegment[] = []
-  // Mentions are found in the whole text, not per run, so the box tints exactly what is sent as a mention.
-  const mentions = findMentions(text, people, conversations)
+  // Mentions are found in the whole text, not per run, so the box tints exactly what is sent as a mention. Task IDs
+  // join them where no mention is.
+  const named = findMentions(text, people, conversations).map((mention) => ({ start: mention.start, end: mention.end, ref: tokenRef(mention.token) }))
+  const tasks = findTaskIds(text, taskKeys)
+    .filter((id) => !named.some((mention) => mention.start < id.end && id.start < mention.end))
+    .map((id) => ({ start: id.start, end: id.end, ref: `task:${id.identifier}` }))
+  const mentions = [...named, ...tasks].sort((a, b) => a.start - b.start)
   const runs = markdownRuns(text, new Map(mentions.map((mention) => [mention.start, mention.end])))
   for (const run of runs) {
     const marks = run.marks.length ? { marks: run.marks } : {}
@@ -225,7 +246,7 @@ export function composerSegments(text: string, people: readonly MentionTarget[],
       if (mention.end <= cursor || mention.start >= run.end) continue
       plain(text.slice(cursor, mention.start))
       const end = Math.min(mention.end, run.end)
-      segments.push({ kind: 'mention', text: text.slice(Math.max(cursor, mention.start), end), ...marks })
+      segments.push({ kind: 'mention', ref: mention.ref, text: text.slice(Math.max(cursor, mention.start), end), ...marks })
       cursor = end
     }
     plain(text.slice(cursor, run.end))

@@ -21,7 +21,7 @@ export function CommentsSheet({ pageId, visible, onClose }: { pageId: string; vi
   const threads = usePageThreads(pageId)
   const add = useAddComment(pageId)
   const [text, setText] = useState('')
-  const mention = useMentionField({ text, setText, people: useMentionPeople() })
+  const mention = useMentionField({ text, setText, people: useMentionPeople(), tasks: true })
   const list = visibleThreads(threads.data ?? [])
   const submit = () => {
     if (!text.trim()) return
@@ -79,7 +79,7 @@ function ThreadCard({ pageId, thread }: { pageId: string; thread: PageThread }) 
   const people = usePeople()
   const reply = useAddComment(pageId)
   const [text, setText] = useState('')
-  const mention = useMentionField({ text, setText, people: useMentionPeople() })
+  const mention = useMentionField({ text, setText, people: useMentionPeople(), tasks: true })
   const nameOf = (id: string) => people.find((person) => person.id === id)?.name ?? 'Someone'
   const comments = thread.comments.filter((comment) => !comment.deleted_at)
   return (
